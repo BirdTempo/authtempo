@@ -13,7 +13,10 @@ import { resolveSession } from "../src/engine/sessions.js";
 import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { tiktokEntry } from "../src/social/entries/index.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
+import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
+import tiktokUserText from "./fixtures/providers/tiktok/user.json?raw";
 import {
   APP_ORIGIN,
   BASE_URL,
@@ -24,7 +27,7 @@ import {
   tokenFromMail,
 } from "./helpers.js";
 import { signUpAndVerify } from "./password-helpers.js";
-import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
+import { type FakeIdToken, fakeFetch, fakeJwt, GOOGLE } from "./social-helpers.js";
 import { codeNow, EMAIL, enrolled, PASSWORD, totpAuth } from "./totp-helpers.js";
 
 // The last method (plan 12i Task 12, spec 32 item 11). A readable cookie
@@ -41,10 +44,21 @@ const MAX_AGE = 30 * 86_400;
 
 function world(extra: Partial<AuthConfig> = {}) {
   const tokens: Record<string, FakeIdToken> = {};
-  const { fetchFn } = tokenEndpoint("idtok-default");
+  // The TikTok answers by their URL; every other call gets Google's token answer.
+  const { fetchFn } = fakeFetch((call) => {
+    if (call.url.startsWith("https://open.tiktokapis.com/v2/oauth/token/"))
+      return new Response(tiktokTokenText);
+    if (call.url.startsWith("https://open.tiktokapis.com/v2/user/info/"))
+      return new Response(tiktokUserText);
+    return Response.json({ id_token: "idtok-default", access_token: "at", token_type: "Bearer" });
+  });
   const auth = totpAuth({
     username: {},
-    social: { google: GOOGLE, fetch: fetchFn },
+    social: {
+      google: GOOGLE,
+      oauth2: [tiktokEntry({ clientKey: "tiktok-key", clientSecret: "tiktok-secret" })],
+      fetch: fetchFn,
+    },
     jwt: fakeJwt(tokens),
     passkey: RP,
     lastMethod: {},
@@ -210,6 +224,24 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
       const res = await w.handle(post("/auth/password/verify", { token }));
       // The answer is { verified: true }: a confirm, not a sign-in answer, so no `via`.
       expect(await res.clone().json()).toEqual({ verified: true });
+      return { res, json: false };
+    },
+  ],
+  [
+    // Plan 12i Task 22: an addressless list entry with a tokenRequest hook.
+    "the TikTok entry",
+    "social:tiktok",
+    async (w) => {
+      const start = await w.handle(get("/auth/social/tiktok/start?next=/home"));
+      const url = new URL(start.headers.get("location") ?? "");
+      const bind = /^([^=]+=[^;]+)/.exec(start.headers.get("set-cookie") ?? "")?.[1] ?? "";
+      const state = url.searchParams.get("state") ?? "";
+      const res = await w.handle(
+        get(`/auth/social/tiktok/callback?code=c&state=${encodeURIComponent(state)}`, {
+          cookie: bind,
+        }),
+      );
+      expect(res.status).toBe(302);
       return { res, json: false };
     },
   ],

@@ -42,11 +42,11 @@ export interface OptionCheck {
 
 type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 
-/** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
+/** Plan 9c maps google, apple, github, and linkedin, and plan 12i Task 22 maps tiktok and wechat. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
 /**
  * Better Auth provider ids that a core preset serves, from core's preset
- * list. The socialProviders rule maps google, apple, github, and linkedin
+ * list. The socialProviders rule maps google, apple, github, linkedin, tiktok, and wechat
  * first, so only the other presets reach this map. Better Auth 1.7.x names
  * its Entra ID provider `microsoft`, as core does.
  */
@@ -750,20 +750,28 @@ const PROVIDER_SIGN_UP: Record<string, Rule> = {
   disableSignUp: boolean,
   disableImplicitSignUp: refused("core's signUp rule covers every method; see disableSignUp"),
 };
-/** google, github, and linkedin: core's presets take the id and the secret only. */
-const idAndSecretShape = object({ clientId: string, clientSecret: string, ...PROVIDER_SIGN_UP });
-/** Core refuses a missing or empty id or secret at createAuth; refuse it here with the option's path. */
-const idAndSecret: Rule = (v, p, out) => {
-  idAndSecretShape(v, p, out);
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return;
-  const o = v as Record<string, unknown>;
-  for (const key of ["clientId", "clientSecret"]) {
-    // Trim for this check only: a whitespace-only value is as empty as "".
-    const value = o[key];
-    if (value === undefined || (typeof value === "string" && value.trim() === ""))
-      refuse(out, `${p}.${key}`, "required");
-  }
-};
+/** google, github, linkedin, wechat, and tiktok: core takes the id and the secret only. */
+/**
+ * The rule of a provider with an id key and a secret. Core refuses a missing
+ * or empty id or secret at createAuth; refuse it here with the option's path.
+ * TikTok names its id `clientKey` (plan 12i Task 22).
+ */
+function keyAndSecret(idKey: "clientId" | "clientKey"): Rule {
+  const shape = object({ [idKey]: string, clientSecret: string, ...PROVIDER_SIGN_UP });
+  return (v, p, out) => {
+    shape(v, p, out);
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return;
+    const o = v as Record<string, unknown>;
+    for (const key of [idKey, "clientSecret"]) {
+      // Trim for this check only: a whitespace-only value is as empty as "".
+      const value = o[key];
+      if (value === undefined || (typeof value === "string" && value.trim() === ""))
+        refuse(out, `${p}.${key}`, "required");
+    }
+  };
+}
+const idAndSecret = keyAndSecret("clientId");
+const tiktokKeys = keyAndSecret("clientKey");
 const apple = object({
   clientId: string,
   teamId: string,
@@ -881,8 +889,10 @@ const TOP: Record<string, Rule> = {
     }
     for (const [name, config] of Object.entries(v)) {
       if (config === undefined) continue;
-      if (name === "google" || name === "github" || name === "linkedin")
+      // WeChat maps to core's wechatEntry, and TikTok to tiktokEntry (plan 12i Task 22).
+      if (name === "google" || name === "github" || name === "linkedin" || name === "wechat")
         idAndSecret(config, `${p}.${name}`, out);
+      else if (name === "tiktok") tiktokKeys(config, `${p}.tiktok`, out);
       else if (name === "apple") {
         apple(config, `${p}.apple`, out);
         // A null or non-object entry is refused above: read its keys only on an object.
@@ -1391,6 +1401,8 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     options.socialProviders?.apple !== undefined ||
     options.socialProviders?.github !== undefined ||
     options.socialProviders?.linkedin !== undefined ||
+    options.socialProviders?.tiktok !== undefined ||
+    options.socialProviders?.wechat !== undefined ||
     pluginOf(options, "passkey") !== null;
   if (pluginOf(options, "expo") && !pageHasMethod) {
     refuse(

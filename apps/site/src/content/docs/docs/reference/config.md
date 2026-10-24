@@ -160,7 +160,12 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oauth2[].clientSecret` | string | required | The client secret at the provider. |
 | `social.oauth2[].scope` | string | required | Not empty. No control character. |
 | `social.oauth2[].authorizeParams` | string map | none | Extra authorize parameters. A key that core sets is refused: `client_id`, `redirect_uri`, `response_type`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`. |
-| `social.oauth2[].userinfo` | function of the access token and a fetch | required | Answers a `SocialProfile`. It stops at 10 seconds. |
+| `social.oauth2[].authorizeClientIdParam` | string | `client_id` | The authorize parameter that carries `clientId`, such as `client_key`. A key that core sets or that `authorizeParams` holds is refused. |
+| `social.oauth2[].authorizeSuffix` | string | none | A fixed fragment after the authorize query, such as `#wechat_redirect`: `#` and 1 to 64 URL-safe characters. |
+| `social.oauth2[].pkce` | boolean | `true` | `false` sends no `code_challenge` and no `code_verifier`. Only for a provider whose docs name no PKCE. The state and the binding cookie still bind the callback. |
+| `social.oauth2[].addressless` | `true` | none | The provider proves no address. Core drops any address of the profile and finds or makes the user by the identity alone. Under `signUp: "invited"` it makes no user. |
+| `social.oauth2[].tokenRequest` | function of the code, the redirect URI, the client id and secret, the verifier, and a fetch | none | Runs in place of the standard token exchange, after the state and binding checks. Answers `{ accessToken, extra }`. Its fetch calls only the origin and path of `tokenUrl`, and stops at 10 seconds. A throw or a bad answer is `oauth_failed`. |
+| `social.oauth2[].userinfo` | function of the access token, a fetch, and the `extra` of `tokenRequest` | required | Answers a `SocialProfile`. It stops at 10 seconds. The third argument is `{}` with no `tokenRequest`. |
 | `social.oauth2[].redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 
 ## Passkeys

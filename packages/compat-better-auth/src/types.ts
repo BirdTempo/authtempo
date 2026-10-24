@@ -779,6 +779,10 @@ export interface BetterAuthOptions {
     github?: { clientId: string; clientSecret: string } & ProviderSignUp;
     /** Core's LinkedIn preset (plan 9c). */
     linkedin?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /** Core's `tiktokEntry` (plan 12i Task 22): a list entry with no address. */
+    tiktok?: { clientKey: string; clientSecret: string } & ProviderSignUp;
+    /** Core's `wechatEntry` (plan 12i Task 22): the AppID and the AppSecret, with no address. */
+    wechat?: { clientId: string; clientSecret: string } & ProviderSignUp;
   };
   session?: {
     expiresIn?: number;

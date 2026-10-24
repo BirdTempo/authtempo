@@ -166,13 +166,73 @@ export interface OidcProvider extends ProviderBase {
 }
 
 /**
+ * The input of a `tokenRequest` hook (plan 12i Task 22). `fetch` is the
+ * engine's fetch: it carries the timeout, follows no redirect, and calls
+ * only the origin and path of the entry's `tokenUrl`. `codeVerifier` is
+ * null when the entry sets `pkce: false`.
+ */
+export interface TokenRequestInput {
+  code: string;
+  redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+  codeVerifier: string | null;
+  fetch: typeof globalThis.fetch;
+}
+
+/**
+ * The answer of a `tokenRequest` hook. The engine checks its shape and
+ * gives `extra` to `userinfo` as its third argument. `extra` holds at most
+ * `TOKEN_EXTRA_MAX` string values, such as WeChat's `openid`.
+ */
+export interface TokenRequestAnswer {
+  accessToken: string;
+  extra: Record<string, string>;
+}
+
+/** The longest access token of a `tokenRequest` answer. */
+export const TOKEN_REQUEST_ACCESS_MAX = 4096;
+/** The most keys of `extra`, and the longest value of one key. */
+export const TOKEN_EXTRA_MAX = 16;
+export const TOKEN_EXTRA_VALUE_MAX = 1024;
+/** The rule of an `extra` key. */
+export const TOKEN_EXTRA_KEY_RE = /^[A-Za-z0-9_]{1,64}$/;
+
+/**
  * The provider issues no ID token (plan 9c). After the code exchange the
  * engine calls `userinfo` with the access token and a fetch that carries
- * the timeout. The engine reads the answer as untrusted.
+ * the timeout. The engine reads the answer as untrusted. The third
+ * argument is the `extra` of `tokenRequest`, else `{}` (plan 12i Task 22).
  */
 export interface OAuth2Provider extends ProviderBase {
   kind: "oauth2";
-  userinfo(accessToken: string, fetch: typeof globalThis.fetch): Promise<SocialProfile>;
+  userinfo(
+    accessToken: string,
+    fetch: typeof globalThis.fetch,
+    extra: Record<string, string>,
+  ): Promise<SocialProfile>;
+  /**
+   * App code that runs in place of the standard token exchange (plan 12i
+   * Task 22). It runs only after the engine has spent the state row and
+   * checked the binding cookie. It answers a token or throws, and a throw
+   * is `oauth_failed`. It cannot open a session or pick a user.
+   */
+  tokenRequest?(input: TokenRequestInput): Promise<TokenRequestAnswer>;
+  /** The authorize parameter that carries `clientId`. Absent: `client_id`. */
+  authorizeClientIdParam?: string;
+  /** A fixed fragment after the authorize query, such as `#wechat_redirect`. */
+  authorizeSuffix?: string;
+  /**
+   * False: no `code_challenge` at the start and no `code_verifier` at the
+   * exchange. The state row and the binding cookie still bind the callback
+   * (spec 8.3). Absent: PKCE with S256.
+   */
+  pkce?: boolean;
+  /**
+   * The provider proves no address. The engine drops any address of the
+   * profile, and finds or makes the user by the identity alone.
+   */
+  addressless?: true;
 }
 
 export type Provider = OidcProvider | OAuth2Provider;

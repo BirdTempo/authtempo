@@ -91,6 +91,30 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     }
   });
 
+  it("maps tiktok by clientKey and wechat by clientId, and refuses a missing key or an unknown option (plan 12i Task 22)", () => {
+    const refusals = (socialProviders: unknown) =>
+      checkOptions({ socialProviders } as unknown as BetterAuthOptions).refusals.filter((r) =>
+        r.startsWith("socialProviders"),
+      );
+    expect(
+      refusals({
+        tiktok: { clientKey: "k", clientSecret: "s", disableSignUp: true },
+        wechat: { clientId: "i", clientSecret: "s" },
+      }),
+    ).toEqual([]);
+    expect(refusals({ tiktok: { clientId: "k", clientSecret: "s" } })).toEqual([
+      "socialProviders.tiktok.clientId: authtempo has no such option",
+      "socialProviders.tiktok.clientKey: required",
+    ]);
+    expect(refusals({ tiktok: { clientKey: " ", clientSecret: "s" } })).toEqual([
+      "socialProviders.tiktok.clientKey: required",
+    ]);
+    expect(refusals({ wechat: { clientId: "i", clientSecret: "", lang: "en" } })).toEqual([
+      "socialProviders.wechat.clientSecret: required",
+      "socialProviders.wechat.lang: authtempo has no such option",
+    ]);
+  });
+
   it("refuses exactly these consumer-i options", () => {
     const c = checkOptions(consumeri);
     expect(paths(c.refusals)).toEqual([

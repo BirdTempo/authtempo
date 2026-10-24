@@ -1,0 +1,58 @@
+---
+title: Sign in with WeChat
+description: Add WeChat sign-in for a website app as a social.oauth2 entry that finds the user by the unionid or the openid, with no address.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A `tokenRequest` hook on `oauth2` entries, with TikTok and WeChat"
+  - packages/core/src/social/entries/wechat.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/wechat.ts?raw";
+import test from "../../../../../../samples/guides/wechat.test.ts?raw";
+
+**For:** an app developer whose users sign in with WeChat on a desktop browser.
+
+**What it does:** `wechatEntry` adds a "Continue with WeChat" button. The person scans a QR code, and core finds or makes the user by the WeChat identity, with no address.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- A website app on the WeChat Open Platform with WeChat sign-in, for [the WeChat entry](/docs/reference/api/#the-social-entries-entry). Set the domain of your API host as its callback domain.
+
+## Steps
+
+1. Copy the AppID and the AppSecret to your secret store.
+2. Add `wechatEntry` from `@authtempo/core/social-entries` to `social.oauth2`.
+
+<Code code={config} lang="ts" title="The WeChat entry in the config" />
+
+3. Link to `/auth/social/wechat/start?next=/home` from the sign-in page.
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- The authorize URL takes `appid` and ends with `#wechat_redirect`, as the WeChat docs give it.
+- The WeChat docs name no PKCE and no nonce, so the entry sets `pkce: false`. The state and the binding cookie still tie the callback to the browser that started it.
+- The token call is a GET with the AppSecret and the code in the query. Core logs only the error class of a failure, never the URL.
+- WeChat answers an error with status 200 and an `errcode`. Each such answer is `oauth_failed`, and no user or session is made.
+- The subject is the `unionid`, else the `openid`, the key that Better Auth keeps. A `unionid` names one person across the apps of one Open Platform account. An `openid` names the person in this app only.
+- A website app with no Open Platform account gets no `unionid`. When the app gets an account later, a person who signed in by `openid` gets a new subject. That person then gets a second user. Bind the app before you go live.
+- No WeChat answer holds an address. So the user has no address, no magic link, and no mail notice. Core never links a WeChat sign-in to another user by address.
+- Under `signUp: "invited"`, a WeChat sign-in makes no user, because an invitation names an address.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the user info call failed or answered an `errcode`. The two answers can also name other people. Check the AppID, the AppSecret, and the callback domain.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at WeChat.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+- [`email_required`](/docs/reference/errors/#email_required): a signed-in user tried to link a WeChat account.
+
+## Next
+
+- [Sign in with TikTok](/docs/guides/providers/tiktok/)
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Social](/docs/reference/config/#social)

@@ -65,7 +65,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth_failed"><code>oauth_failed</code> 400</h3>
 
-- **Meaning:** The code exchange, the ID token, the user info call, or the discovery read failed, or took more than 10 seconds.
+- **Meaning:** The code exchange, the `tokenRequest` hook, the ID token, the user info call, or the discovery read failed or took over 10 seconds.
 - **Do:** Check the client id, the secret, and the redirect URI at the provider. Then retry.
 
 | Routes |

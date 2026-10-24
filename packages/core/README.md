@@ -399,6 +399,16 @@ Check each endpoint and claim in the provider's documentation on the day you
 configure it. Microsoft Entra ID sends no `email_verified` claim by default,
 so an Entra sign-in never links to an existing account by its address.
 
+An `oauth2` entry with a token exchange of its own sets `tokenRequest`.
+Core runs it after the state and binding checks, with a fetch that calls
+only `tokenUrl`, and checks its `{ accessToken, extra }` answer. `userinfo`
+gets `extra` as its third argument. `authorizeClientIdParam`,
+`authorizeSuffix`, and `pkce: false` shape the authorize URL. An entry
+with `addressless: true` gets no address from its profile: core finds or
+makes the user by the identity alone. `@authtempo/core/social-entries`
+gives two such entries, `tiktokEntry({ clientKey, clientSecret })` and
+`wechatEntry({ appId, appSecret })`.
+
 `userinfo` gets the access token and a fetch. Call the provider with that
 fetch: core puts a 10 s limit on it, and the whole step stops at 10 s.
 Answer `emailVerified: true` only when the provider says that this person

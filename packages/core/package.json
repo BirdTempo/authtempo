@@ -75,6 +75,10 @@
     "./observe": {
       "types": "./dist/observe/index.d.ts",
       "default": "./dist/observe/index.js"
+    },
+    "./social-entries": {
+      "types": "./dist/social/entries/index.d.ts",
+      "default": "./dist/social/entries/index.js"
     }
   },
   "files": [

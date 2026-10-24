@@ -375,6 +375,8 @@ export {
   PROVIDER_NAME_RE,
   type SocialProfile,
   type SocialProviderName,
+  type TokenRequestAnswer,
+  type TokenRequestInput,
 } from "./social/provider.js";
 export type { SlackConfig } from "./social/slack.js";
 export type { TwitterConfig } from "./social/twitter.js";

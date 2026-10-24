@@ -151,7 +151,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Area | Types |
 | --- | --- |
 | The auth object | `Auth`, `AuthApi`, `SessionApi`, `UserApi`, `IdentitiesApi`, `PublicUser`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
-| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `SlackConfig`, `TwitterConfig`, `FacebookConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `PhoneConfig`, `PhoneMessageInput`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `PasskeyExtensions`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig`, `LastMethodConfig`, `LastMethod` |
+| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `SlackConfig`, `TwitterConfig`, `FacebookConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `TokenRequestInput`, `TokenRequestAnswer`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `PhoneConfig`, `PhoneMessageInput`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `PasskeyExtensions`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig`, `LastMethodConfig`, `LastMethod` |
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `SmsPort`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow`, `OAuthDeviceRow`, `OAuthSubjectRow`, `OAuthSessionClientRow`, `OAuthLogoutRow`, `ClientAuthMethod`, `DeviceStatus`, `OperatorAuditRow`, `OperatorAction`, `OrganizationRoleRow`, `TeamRow`, `TeamMemberRow`, `OrganizationTokenRow`, `MovedTokenRow` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |
@@ -186,8 +186,9 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
 | `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
 | `@authtempo/core/access` | The pure permission checks, for a browser bundle. The access part lists them. |
-| `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The part before the last lists it. |
-| `@authtempo/core/secrets` | The rules of the app secret, for the CLI, not for an app. The last part of this page lists it. |
+| `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The operator secret part lists it. |
+| `@authtempo/core/secrets` | The rules of the app secret, for the CLI, not for an app. The secrets part lists it. |
+| `@authtempo/core/social-entries` | The TikTok and WeChat entries of `social.oauth2`. The last part of this page lists them. |
 
 ## The route entry
 
@@ -286,6 +287,15 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `REWRAP_LIMIT` | The row limit of one rewrap call: 100 by default, at most 1000. |
 | `REWRAP_CALL_BUDGET` | The default `callBudget` of one rewrap call, and its least value: 50 storage calls, the limit of D1 Free. |
 | `REWRAP_CALL_BUDGET_MAX` | The largest `callBudget` of one rewrap call: 1000 storage calls, the limit of D1 Paid. |
+
+## The social entries entry
+
+`@authtempo/core/social-entries` holds `social.oauth2` entries for providers that need a `tokenRequest` hook. Each entry has no address, so core finds or makes the user by the provider identity alone.
+
+| Export | What it is |
+| --- | --- |
+| `tiktokEntry`, `TiktokEntryConfig` | The TikTok entry, from `clientKey`, `clientSecret`, and an optional `redirectURI`. The subject is `open_id`. [Sign in with TikTok](/docs/guides/providers/tiktok/) tells how. |
+| `wechatEntry`, `WechatEntryConfig` | The WeChat website app entry, from `appId`, `appSecret`, and an optional `redirectURI`. The subject is `unionid`, else `openid`. [Sign in with WeChat](/docs/guides/providers/wechat/) tells how. |
 
 ## Next
 

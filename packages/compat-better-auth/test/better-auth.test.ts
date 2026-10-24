@@ -263,6 +263,28 @@ describe("betterAuth", () => {
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
     expect(m.config.cookieName).toBe("__Host-tempo_session");
+    // Plan 12i Task 22: TikTok and WeChat map to core's list entries, with Better Auth's provider ids.
+    const lists = mapOptions({
+      baseURL: BASE,
+      secret: TEST_SECRET,
+      database: memoryDatabase(),
+      socialProviders: {
+        tiktok: { clientKey: "tk", clientSecret: "tks" },
+        wechat: { clientId: "wx", clientSecret: "wxs" },
+      },
+    }).config.social?.oauth2;
+    expect(
+      lists?.map((e) => [
+        e.name,
+        e.clientId,
+        e.clientSecret,
+        e.authorizeClientIdParam,
+        e.addressless,
+      ]),
+    ).toEqual([
+      ["tiktok", "tk", "tks", "client_key", true],
+      ["wechat", "wx", "wxs", "appid", true],
+    ]);
     const lax = mapOptions({
       baseURL: BASE,
       secret: TEST_SECRET,

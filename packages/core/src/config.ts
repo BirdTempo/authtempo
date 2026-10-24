@@ -1924,6 +1924,10 @@ function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & 
 }
 
 const LABEL_MAX = 80;
+/** The rule of an oauth2 entry's `authorizeClientIdParam` (plan 12i Task 22). */
+const AUTHORIZE_PARAM_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+/** The rule of `authorizeSuffix`: a fragment of URL-safe characters, such as `#wechat_redirect`. */
+const AUTHORIZE_SUFFIX_RE = /^#[A-Za-z0-9_.~-]{1,64}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -3579,6 +3583,32 @@ function socialProviders(
           `${path}.authorizeParams.${key} must be a string with no control character`,
         );
     }
+    // The keys of plan 12i Task 22. The client id parameter must not take a
+    // key that core writes or that authorizeParams sets: either one would
+    // replace it, or it would replace the state or the PKCE challenge.
+    if (e.authorizeClientIdParam !== undefined) {
+      const key = e.authorizeClientIdParam;
+      if (
+        typeof key !== "string" ||
+        !AUTHORIZE_PARAM_RE.test(key) ||
+        CORE_AUTHORIZE_PARAMS.has(key) ||
+        Object.hasOwn(e.authorizeParams ?? {}, key)
+      )
+        throw new ConfigError(
+          `${path}.authorizeClientIdParam must match ${AUTHORIZE_PARAM_RE.source}, and be neither a key that core sets nor a key of authorizeParams`,
+        );
+    }
+    if (
+      e.authorizeSuffix !== undefined &&
+      (typeof e.authorizeSuffix !== "string" || !AUTHORIZE_SUFFIX_RE.test(e.authorizeSuffix))
+    )
+      throw new ConfigError(`${path}.authorizeSuffix must match ${AUTHORIZE_SUFFIX_RE.source}`);
+    if (e.pkce !== undefined && typeof e.pkce !== "boolean")
+      throw new ConfigError(`${path}.pkce must be a boolean`);
+    if (e.addressless !== undefined && e.addressless !== true)
+      throw new ConfigError(`${path}.addressless must be true or absent`);
+    if (e.tokenRequest !== undefined && typeof e.tokenRequest !== "function")
+      throw new ConfigError(`${path}.tokenRequest must be a function`);
     push(path, e, oauth2Provider(e));
   }
   return providers;

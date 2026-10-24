@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 267 keys, the nested ones by their path", () => {
+  it("lists 272 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -34,8 +34,11 @@ describe("checkConfig", () => {
     // presets and the two lists.
     // Plan 12i Task 14 adds social.slack, social.twitter, social.facebook, and their nine keys.
     // Plan 12i Task 21 adds passkey.extensions and its three keys.
-    expect(keys.length).toBe(255 + 12 + 4);
+    // Plan 12i Task 22 adds five keys of social.oauth2[]: authorizeClientIdParam,
+    // authorizeSuffix, pkce, addressless, and tokenRequest.
+    expect(keys.length).toBe(255 + 12 + 4 + 5);
     expect(keys).toContain("passkey.extensions.largeBlob");
+    expect(keys).toContain("social.oauth2[].tokenRequest");
     expect(keys).toContain("social.twitter.redirectURI");
     expect(keys).toContain("lastMethod.days");
     expect(keys).toContain("social.oauth2[].redirectURI");

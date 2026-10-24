@@ -26,6 +26,10 @@ import {
   type Provider,
   type SocialProfile,
   stringClaim,
+  TOKEN_EXTRA_KEY_RE,
+  TOKEN_EXTRA_MAX,
+  TOKEN_EXTRA_VALUE_MAX,
+  TOKEN_REQUEST_ACCESS_MAX,
   type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
@@ -261,19 +265,30 @@ async function beginSocial(
     updatedAt: now,
     secretVersion: config.keyring.current,
   });
+  // An oauth2 entry may name its client id parameter, turn PKCE off, and add a fragment (plan 12i Task 22).
+  const oauth2 = provider.kind === "oauth2" ? provider : null;
   const query = buildQuery({
-    client_id: provider.clientId,
+    [oauth2?.authorizeClientIdParam ?? "client_id"]: provider.clientId,
     redirect_uri: callbackUrl(config, entry),
     response_type: "code",
     scope: provider.scope,
     state,
     // An oauth2 provider issues no ID token, so a nonce has nothing to bind (plan 9c).
     ...(provider.kind === "oidc" ? { nonce } : {}),
-    code_challenge: await sha256Base64Url(verifier),
-    code_challenge_method: "S256",
+    ...(usesPkce(provider)
+      ? { code_challenge: await sha256Base64Url(verifier), code_challenge_method: "S256" }
+      : {}),
     ...provider.authorizeParams,
   });
-  return ok({ location: `${provider.authorizeUrl}?${query}`, bindToken });
+  return ok({
+    location: `${provider.authorizeUrl}?${query}${oauth2?.authorizeSuffix ?? ""}`,
+    bindToken,
+  });
+}
+
+/** False only for an oauth2 entry with `pkce: false` (plan 12i Task 22). */
+function usesPkce(provider: Provider): boolean {
+  return provider.kind !== "oauth2" || provider.pkce !== false;
 }
 
 /** The start of a social sign-in. */
@@ -378,21 +393,39 @@ export async function completeSocial(
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
-  const token = await exchangeProviderCode(
-    config,
-    provider,
-    input.code,
-    data.verifier,
-    now,
-    callbackUrl(config, entry),
-  );
-  if (token === null) return fail("oauth_failed");
+  // The hook runs here, after the state row and the binding cookie (plan 12i Task 22).
+  const verifier = usesPkce(provider) ? data.verifier : null;
+  const exchanged =
+    provider.kind === "oauth2" && provider.tokenRequest
+      ? await requestedToken(
+          config,
+          provider,
+          input.code,
+          verifier,
+          now,
+          callbackUrl(config, entry),
+        )
+      : await exchangeProviderCode(
+          config,
+          provider,
+          input.code,
+          verifier,
+          now,
+          callbackUrl(config, entry),
+        ).then((token) => (token === null ? null : { token, extra: {} }));
+  if (exchanged === null) return fail("oauth_failed");
+  const { token } = exchanged;
   const profile =
     provider.kind === "oidc"
       ? await idTokenProfile(config, provider, token, data.nonceHash, input.user ?? undefined, now)
-      : await userinfoProfile(config, provider, token);
-  const bounded = profile ? boundProfile(config.observe, profile, provider.name) : null;
-  if (!bounded) return fail("oauth_failed");
+      : await userinfoProfile(config, provider, token, exchanged.extra);
+  // An addressless entry proves no address, so core drops any address of its profile (plan 12i Task 22).
+  const addressless = provider.kind === "oauth2" && provider.addressless === true;
+  const checked = profile ? boundProfile(config.observe, profile, provider.name) : null;
+  if (!checked) return fail("oauth_failed");
+  const bounded: SocialProfile = addressless
+    ? { ...checked, email: null, emailVerified: false }
+    : checked;
   // Only SSO signs in an address of an enforced domain (plan 12d), by the profile address, before the resolution.
   const address = bounded.email === null ? null : normalizeEmail(bounded.email);
   const enforced = link || address === null ? null : await enforcedAnswer(config, address);
@@ -458,6 +491,7 @@ export async function completeSocial(
         await steps.before(tx, user);
       },
       made,
+      addressless,
     ),
   );
   if (!resolved.ok) return resolved;
@@ -614,13 +648,14 @@ async function completeLink(
  * else `client_secret_post` (plan 12i Task 14). An SSO connection names its
  * own (12d fix wave item 18).
  * With `client_secret_basic` the body holds no client id and no secret:
- * RFC 6749 section 2.3 allows one method per request.
+ * RFC 6749 section 2.3 allows one method per request. A null `verifier`
+ * sends no `code_verifier` (plan 12i Task 22, `pkce: false`).
  */
 export async function exchangeProviderCode(
   config: ResolvedConfig,
   provider: Provider,
   code: string,
-  verifier: string,
+  verifier: string | null,
   now: Date,
   redirectUri: string,
   fetchFn: typeof fetch = config.social.fetch,
@@ -654,7 +689,8 @@ export async function exchangeProviderCode(
         code,
         redirect_uri: redirectUri,
         ...(basic ? {} : { client_id: provider.clientId, client_secret: clientSecret }),
-        code_verifier: verifier,
+        // Null for an oauth2 entry with pkce false (plan 12i Task 22).
+        ...(verifier === null ? {} : { code_verifier: verifier }),
       }),
     });
   } catch (e) {
@@ -691,6 +727,131 @@ export async function exchangeProviderCode(
   // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
   config.observe.emit({ name: "social.token_missing", provider: provider.name });
   return null;
+}
+
+/**
+ * A call of the hook's fetch to another URL than the entry's `tokenUrl`
+ * (plan 12i Task 22). Its message names no URL: a WeChat URL holds the
+ * secret and the code.
+ */
+class TokenHostError extends Error {
+  constructor() {
+    super("authtempo: tokenRequest called another URL than tokenUrl");
+    this.name = "TokenHostError";
+  }
+}
+
+/** The origin and path of a fetch input, or null when it is not a URL. */
+function originAndPath(input: Parameters<typeof fetch>[0]): string | null {
+  try {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    return url.origin + url.pathname;
+  } catch {
+    return null;
+  }
+}
+
+/** True for a string of 1 to `max` characters with no control character. */
+function plainText(value: unknown, max: number): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && value.length <= max && !hasControlChar(value)
+  );
+}
+
+/**
+ * The token of an oauth2 entry's `tokenRequest` hook, or null on any
+ * failure (plan 12i Task 22). The engine calls it after the state row and
+ * the binding cookie, so the hook never sees a callback that core refused.
+ * The hook gets the engine's fetch: one deadline, no redirect follow, and
+ * only the origin and path of `tokenUrl`. So the hook cannot send the code
+ * to another host. The answer is app output: the engine checks its shape,
+ * and a failure logs the error class, never a message, the code, or the
+ * secret.
+ */
+async function requestedToken(
+  config: ResolvedConfig,
+  provider: OAuth2Provider,
+  code: string,
+  verifier: string | null,
+  now: Date,
+  redirectUri: string,
+): Promise<{ token: string; extra: Record<string, string> } | null> {
+  const hook = provider.tokenRequest;
+  if (!hook) return null;
+  let clientSecret: string;
+  try {
+    clientSecret = await provider.clientSecret({ jwt: config.jwt, now });
+  } catch (e) {
+    config.observe.emit({
+      name: "social.client_secret_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
+    return null;
+  }
+  const pinned = originAndPath(provider.tokenUrl);
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  const boundFetch: typeof fetch = async (input, init) => {
+    if (pinned === null || originAndPath(input) !== pinned) throw new TokenHostError();
+    return config.social.fetch(input, { ...init, signal });
+  };
+  // Promise.race keeps a handler on this promise, so its late rejection is handled.
+  const deadline = new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  let answer: unknown;
+  try {
+    answer = await Promise.race([
+      hook({
+        code,
+        redirectUri,
+        clientId: provider.clientId,
+        clientSecret,
+        codeVerifier: verifier,
+        fetch: boundFetch,
+      }),
+      deadline,
+    ]);
+  } catch (e) {
+    config.observe.emit({
+      name: "social.token_request_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
+    return null;
+  }
+  const checked = tokenAnswer(answer);
+  if (checked === null) {
+    config.observe.emit({ name: "social.token_missing", provider: provider.name });
+    return null;
+  }
+  return checked;
+}
+
+/**
+ * The answer of a `tokenRequest` hook in its own plain object, or null when
+ * it breaks the shape. Each field is read once, inside the try, so a getter
+ * that throws or that answers twice changes nothing.
+ */
+function tokenAnswer(answer: unknown): { token: string; extra: Record<string, string> } | null {
+  try {
+    if (typeof answer !== "object" || answer === null) return null;
+    const a = answer as Record<string, unknown>;
+    const token = a.accessToken;
+    const extra = a.extra;
+    if (!plainText(token, TOKEN_REQUEST_ACCESS_MAX)) return null;
+    if (typeof extra !== "object" || extra === null || Array.isArray(extra)) return null;
+    const entries = Object.entries(extra);
+    if (entries.length > TOKEN_EXTRA_MAX) return null;
+    const out: Record<string, string> = {};
+    for (const [key, value] of entries) {
+      if (!TOKEN_EXTRA_KEY_RE.test(key) || !plainText(value, TOKEN_EXTRA_VALUE_MAX)) return null;
+      out[key] = value;
+    }
+    return { token, extra: out };
+  } catch {
+    return null;
+  }
 }
 
 /** The profile from a verified ID token whose nonce matches the row, or null. */
@@ -748,6 +909,7 @@ async function userinfoProfile(
   config: ResolvedConfig,
   provider: OAuth2Provider,
   accessToken: string,
+  extra: Record<string, string>,
 ): Promise<SocialProfile | null> {
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
   const timedFetch: typeof fetch = (input, init) => config.social.fetch(input, { ...init, signal });
@@ -757,7 +919,8 @@ async function userinfoProfile(
   });
   try {
     const answer: unknown = await Promise.race([
-      provider.userinfo(accessToken, timedFetch),
+      // A copy: the function gets the extra of the hook, never the engine's own object.
+      provider.userinfo(accessToken, timedFetch, { ...extra }),
       deadline,
     ]);
     // The function is app code. Only a boolean true is a verified address, so
@@ -839,6 +1002,7 @@ export function resolveSocialUser<T extends AfterWrite>(
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
+  addressless?: boolean,
 ): Promise<Result<{ user: UserRow; after: T }>>;
 export async function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
@@ -850,6 +1014,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
+  addressless = false,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -869,6 +1034,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
             ended,
             before ? (user, created) => before(tx, user, created) : undefined,
             steps,
+            addressless,
           );
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
@@ -940,6 +1106,7 @@ async function linkInTransaction(
   ended: SessionRow[] | undefined,
   before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
   steps: CreateSteps | undefined,
+  addressless: boolean,
 ): Promise<Result<Linked>> {
   // Each branch calls `before` with the user it answers, after its checks and
   // before its first write: the D1 undo (see `insertSignUp` in password.ts).
@@ -981,6 +1148,10 @@ async function linkInTransaction(
     await writeFill(tx, user, filled);
     return ok({ user: filled, trustedIdentityId: proved ? null : identity.id, created: false });
   }
+  // An addressless entry makes a user with no address and never reads a
+  // user by address (plan 12i Task 22). The sign-up rule of `steps.user`
+  // runs `mayCreateUser(null)`: "open" passes, and "invited" refuses.
+  if (addressless) return createdByIdentity(tx, provider, profile, now, before, steps);
   const email = profile.email ? normalizeEmail(profile.email) : null;
   if (!email) return fail("email_required");
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
@@ -1025,6 +1196,31 @@ async function linkInTransaction(
     trustedIdentityId: profile.emailVerified ? null : identityId,
     created: true,
   });
+}
+
+/**
+ * The new user of an addressless entry: no address, no email identity, and
+ * only the provider identity (plan 12i Task 22). The profile's address is
+ * never read here, so no address of such an entry reaches a row.
+ */
+async function createdByIdentity(
+  tx: StorageAdapter,
+  provider: string,
+  profile: SocialProfile,
+  now: Date,
+  before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
+  steps: CreateSteps | undefined,
+): Promise<Result<Linked>> {
+  const drafted = draftUserRow(
+    { email: null, emailVerified: false, name: profile.name, image: profile.image },
+    now,
+  );
+  const minted = steps ? await steps.user(tx, drafted) : drafted;
+  if (steps) await steps.identity(minted, { provider, subject: profile.subject });
+  if (before) await before(minted, true);
+  const user = await tx.create("user", minted);
+  await tx.create("identity", identityRow(user.id, provider, profile.subject, now));
+  return ok({ user, trustedIdentityId: null, created: true });
 }
 
 function identityRow(userId: string, provider: string, subject: string, now: Date) {

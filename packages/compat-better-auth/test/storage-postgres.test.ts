@@ -1352,3 +1352,108 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
     }
   });
 });
+
+describe("Better Auth-era TikTok and WeChat accounts on postgres (plan 12i Task 22)", () => {
+  // Better Auth 1.7.2 keeps accountId = profile.data.user.open_id for tiktok and
+  // profile.unionid || profile.openid for wechat, and a placeholder address
+  // `<id>@<provider>.placeholder.invalid` that it never verifies
+  // (social-providers/tiktok.ts, wechat.ts, utils/email.ts, read 2026-10-24).
+  const BA_ROWS = `
+INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES
+  ('ba-tt-u','Tia','-000tt@tiktok.placeholder.invalid',false,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z'),
+  ('ba-wx-u','Wen','owxunion@wechat.placeholder.invalid',false,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z');
+INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdAt","updatedAt") VALUES
+  ('ba-tt','local:oauth:tiktok','-000tt','tiktok','ba-tt-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z'),
+  ('ba-wx','local:oauth:wechat','owxunion','wechat','ba-wx-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z');
+`;
+  // Each answer by its URL with no query: the WeChat calls carry their values in the query.
+  const PROVIDER_ROUTES: Record<string, unknown> = {
+    "https://open.tiktokapis.com/v2/oauth/token/": {
+      access_token: "act.compat",
+      open_id: "-000tt",
+      token_type: "Bearer",
+    },
+    "https://open.tiktokapis.com/v2/user/info/": {
+      data: { user: { open_id: "-000tt", display_name: "Tia T" } },
+      error: { code: "ok", message: "", log_id: "1" },
+    },
+    "https://api.weixin.qq.com/sns/oauth2/access_token": {
+      access_token: "wx-compat",
+      openid: "owxopen",
+      unionid: "owxunion",
+      scope: "snsapi_login",
+    },
+    "https://api.weixin.qq.com/sns/userinfo": {
+      openid: "owxopen",
+      unionid: "owxunion",
+      nickname: "Wen W",
+    },
+  };
+  const fetchByPath: typeof fetch = async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = url.split("?")[0] ?? "";
+    return Object.hasOwn(PROVIDER_ROUTES, path)
+      ? Response.json(PROVIDER_ROUTES[path])
+      : new Response("not found", { status: 404 });
+  };
+
+  it("links each row through betterAuth() and its handler, with no second user or account", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    // Core binds globalThis.fetch when it builds the config: stub it first.
+    vi.stubGlobal("fetch", fetchByPath);
+    try {
+      await pg.sql.unsafe(BA_ROWS);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await migrateWithoutLock(pg.sql, s.names);
+      const auth = betterAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        database: s,
+        socialProviders: {
+          tiktok: { clientKey: "tt-key", clientSecret: "tt-secret" },
+          wechat: { clientId: "wx-app", clientSecret: "wx-secret" },
+        },
+      });
+      for (const provider of ["tiktok", "wechat"]) {
+        const start = await auth.handler(
+          new Request(`https://api.example.com/api/auth/social/${provider}/start`),
+        );
+        expect(start.status).toBe(302);
+        const state = new URL(start.headers.get("location") ?? "").searchParams.get("state");
+        const bind = (
+          start.headers.getSetCookie().find((c) => c.startsWith("__Secure-tempo_session_oauth=")) ??
+          ""
+        ).split(";")[0] as string;
+        expect(bind).not.toBe("");
+        const done = await auth.handler(
+          new Request(
+            `https://api.example.com/api/auth/social/${provider}/callback?code=c1&state=${state}`,
+            { headers: { cookie: bind } },
+          ),
+        );
+        expect(
+          done.headers
+            .getSetCookie()
+            .some(
+              (c) =>
+                c.startsWith("__Host-tempo_session=") && !c.startsWith("__Host-tempo_session=;"),
+            ),
+          provider,
+        ).toBe(true);
+      }
+      const sessions = await pg.sql.unsafe<{ userId: string }[]>(
+        'SELECT "userId" FROM "session" ORDER BY "userId"',
+      );
+      expect(sessions.map((r) => r.userId)).toEqual(["ba-tt-u", "ba-wx-u"]);
+      const users = await pg.sql.unsafe<{ id: string }[]>('SELECT "id" FROM "user" ORDER BY "id"');
+      expect(users.map((u) => u.id)).toEqual(["ba-tt-u", "ba-wx-u"]);
+      const accounts = await pg.sql.unsafe<{ id: string }[]>(
+        `SELECT "id" FROM "account" WHERE "providerId" IN ('tiktok', 'wechat') ORDER BY "id"`,
+      );
+      expect(accounts.map((a) => a.id)).toEqual(["ba-tt", "ba-wx"]);
+    } finally {
+      vi.unstubAllGlobals();
+      await pg.close();
+    }
+  });
+});

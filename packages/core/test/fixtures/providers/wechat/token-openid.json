@@ -1,0 +1,7 @@
+{
+  "access_token": "wx-access-token-0001",
+  "expires_in": 7200,
+  "refresh_token": "wx-refresh-token-0001",
+  "openid": "o6_bmjrPTlm6_2sgVt7hMZOPfL2M",
+  "scope": "snsapi_login"
+}

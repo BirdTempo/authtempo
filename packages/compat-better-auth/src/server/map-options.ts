@@ -8,6 +8,7 @@ import {
   type SignInPageInput,
 } from "@authtempo/core";
 import { type DomainRecordOf, withDomainRecord } from "@authtempo/core/compat";
+import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
 import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
@@ -455,6 +456,8 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const apple = options.socialProviders?.apple;
   const github = options.socialProviders?.github;
   const linkedin = options.socialProviders?.linkedin;
+  const tiktok = options.socialProviders?.tiktok;
+  const wechat = options.socialProviders?.wechat;
   const ep = options.emailAndPassword;
   const deleteUser = options.user?.deleteUser;
   const config: AuthConfig = {
@@ -571,7 +574,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           gate: { magicLink: false, emailOtp: false, social: false },
         }
       : false,
-    ...(google || apple || github || linkedin
+    ...(google || apple || github || linkedin || tiktok || wechat
       ? {
           social: {
             ...(google
@@ -592,6 +595,26 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
               : {}),
             ...(linkedin
               ? { linkedin: { clientId: linkedin.clientId, clientSecret: linkedin.clientSecret } }
+              : {}),
+            // Plan 12i Task 22: core's list entries with Better Auth's provider
+            // ids and subjects (open_id; unionid, else openid), so a Better
+            // Auth-era account row links on the first sign-in.
+            ...(tiktok || wechat
+              ? {
+                  oauth2: [
+                    ...(tiktok
+                      ? [
+                          tiktokEntry({
+                            clientKey: tiktok.clientKey,
+                            clientSecret: tiktok.clientSecret,
+                          }),
+                        ]
+                      : []),
+                    ...(wechat
+                      ? [wechatEntry({ appId: wechat.clientId, appSecret: wechat.clientSecret })]
+                      : []),
+                  ],
+                }
               : {}),
             // No social.stateData (plan 12i ruling 5): no shim hook can read
             // the payload, so the shim refuses additionalData (STATE_DATA_REFUSAL).
