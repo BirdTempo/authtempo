@@ -11,6 +11,7 @@ import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../../src/
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { setUsername } from "../../src/engine/username.js";
+import type { PasswordHashSeam } from "../../src/seams/password-hash.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
@@ -285,6 +286,52 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "sso_required", detail: start });
     } else expect(await answerOf(res)).toEqual({ status: 302, code: "sso_required" });
+    expect(await newSessions(w, before)).toBe(0);
+  });
+
+  it("checks the password before the domain in a sign-in by username", async () => {
+    // Plan 12i Task 3: a username is public. A wrong password must not tell
+    // that its account is in an enforced domain.
+    const verified: string[] = [];
+    const hash: PasswordHashSeam = {
+      dummy: () => FAST.dummy(),
+      hash: (p) => FAST.hash(p),
+      verify: (p, stored) => {
+        verified.push(stored);
+        return FAST.verify(p, stored);
+      },
+    };
+    const w = world({ password: { hash, uniformSignUp: false } });
+    const { connectionId, domainId } = await acmeWithSso(w);
+    await signUpAndVerify(w, ADA, PASSWORD);
+    const byName = DOORS.find((d) => d.name === "the password sign-in by username") as Door;
+    const right = await byName.prepare(w);
+    must(
+      await updateDomain(w.config, SSO_APP, {
+        id: domainId,
+        connectionId,
+        enforce: true,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    const before = await sessionIds(w);
+    verified.length = 0;
+    const wrong = await w.handle(
+      post("/auth/password/sign-in", { username: "ada", password: "a wrong horse battery" }),
+    );
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual({ error: "invalid_credentials" });
+    // One verify against the stored hash, as any wrong password costs.
+    expect(verified).toHaveLength(1);
+    expect(verified[0]).not.toBe(await FAST.dummy());
+    // The right password gets the SSO answer.
+    const res = await right();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "sso_required",
+      detail: `${BASE_URL}/auth/sso/${connectionId}/start`,
+    });
     expect(await newSessions(w, before)).toBe(0);
   });
 

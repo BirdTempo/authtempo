@@ -113,6 +113,8 @@ For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives it
 
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
+`password:email`, `password:username`, and `password:phone` count apart, one key for each kind of identifier. So from many IPs, one account with an address, a username, and a phone takes up to 30 guesses per 15 minutes. This is a known residual. A count per account would close it, but its 429 would tell that a phone and an address name one account. `password:ip` bounds each IP at 20 guesses.
+
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
 
 ## The device code

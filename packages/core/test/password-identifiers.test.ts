@@ -121,6 +121,9 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
       { username: "alice", phone: PHONE, password: PASSWORD },
       { password: PASSWORD },
       { username: "alice" },
+      // An empty string is a value, so it counts as a second identifier.
+      { email: EMAIL, username: "", password: PASSWORD },
+      { email: "", username: "alice", password: PASSWORD },
     ];
     for (const body of bodies)
       expect(
@@ -128,7 +131,12 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
         JSON.stringify(body),
       ).toEqual({ status: 400, body: { error: "invalid_body" } });
     // The engine holds the rule too, for a plain JavaScript caller.
-    for (const input of [{ email: EMAIL, username: "alice" }, {}])
+    for (const input of [
+      { email: EMAIL, username: "alice" },
+      { email: EMAIL, username: "" },
+      { email: "", username: "alice" },
+      {},
+    ])
       expect(await signIn(auth, input), JSON.stringify(input)).toMatchObject({
         ok: false,
         code: "invalid_body",
@@ -208,6 +216,10 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
       });
     expect(await signIn(auth, { phone: PHONE }, "192.0.2.200")).toMatchObject({
       code: "rate_limited",
+    });
+    // Each phone has its own count: another number is not limited.
+    expect(await signIn(auth, { phone: "+14155550101" }, "192.0.2.201")).toMatchObject({
+      code: "invalid_credentials",
     });
     // Another name and the address still sign in.
     expect(await signIn(auth, { email: EMAIL }, "198.51.100.201")).toMatchObject({ ok: true });

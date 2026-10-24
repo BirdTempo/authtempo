@@ -72,8 +72,11 @@ const SIGN_UP_PER_EMAIL = { seconds: 3600, max: 5 };
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
 const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
-// Plan 12i: the same count for a username and for a phone, so that no
-// identifier gives more guesses at one account than the address does.
+// Plan 12i: the same count for a username and for a phone. Each kind has its
+// own key, so the counts add up: one account takes up to 20 guesses per 15
+// minutes by address and username, and 30 with a phone (a residual of
+// ruling 17). A key per user id would close the sum, but its 429 would tell
+// that a phone and an address name one account.
 const SIGN_IN_PER_USERNAME = { seconds: 900, max: 10 };
 const SIGN_IN_PER_PHONE = { seconds: 900, max: 10 };
 // Per 15 minutes, as the magic link request.
