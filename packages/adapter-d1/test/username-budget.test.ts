@@ -170,8 +170,7 @@ describe("the username on D1 (plan 12i Task 2)", () => {
       TAKEN_QUERIES,
       UNIFORM_REFUSED_QUERIES,
     ]);
-    for (const q of [set, check, up, taken, uniform])
-      expect(q.queries).toBeLessThanOrEqual(BUDGET);
+    for (const q of [set, check, up, taken, uniform]) expect(q.queries).toBeLessThanOrEqual(BUDGET);
   });
 
   it("keeps each sign-in by username within the D1 Free budget", async () => {
