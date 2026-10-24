@@ -84,6 +84,24 @@ const SITES: Site[] = [
     kind: "endSessions",
     reason: "the account delete; the outbox rows stay and are due now",
   },
+  // Plan 12i Task 6: the anonymous delete of the route, and the page of the sweep.
+  {
+    file: "engine/anonymous.ts",
+    fn: "endSessionsOf",
+    call: "endSessions",
+    count: 1,
+    kind: "endSessions",
+    reason: "the anonymous delete of the route; the outbox rows stay and are due now",
+  },
+  {
+    file: "engine/anonymous.ts",
+    fn: "deleteSessionsOf",
+    call: 'delete("session"',
+    count: 1,
+    kind: "expired",
+    reason:
+      "the anonymous users of a sweep page, each with no live session; the link step makes each link with no session a logout",
+  },
   {
     file: "engine/password.ts",
     fn: "applyReset",

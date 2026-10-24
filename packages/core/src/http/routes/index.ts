@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import { healthRoutes } from "../health.js";
 import type { Route } from "../router.js";
+import { anonymousRoutes } from "./anonymous.js";
 import { emailOtpRoutes } from "./email-otp.js";
 import { handoffRoutes } from "./handoff.js";
 import { identityRoutes } from "./identities.js";
@@ -44,6 +45,7 @@ export type RouteModule =
   | "second-factor"
   | "email-otp"
   | "phone"
+  | "anonymous"
   | "handoff"
   | "organizations"
   | "roles"
@@ -78,6 +80,7 @@ export function coreRouteModules(
     { module: "second-factor", routes: secondFactorRoutes(config) },
     { module: "email-otp", routes: emailOtpRoutes(config) },
     { module: "phone", routes: phoneRoutes(config) },
+    { module: "anonymous", routes: anonymousRoutes(config) },
     { module: "handoff", routes: handoffRoutes(config) },
     { module: "organizations", routes: organizationRoutes(config) },
     { module: "roles", routes: roleRoutes(config) },

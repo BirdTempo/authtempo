@@ -67,6 +67,8 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     username: {},
     // The phone routes of plan 12i Task 5, on the memory limiter.
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: {},
   };
 }
 

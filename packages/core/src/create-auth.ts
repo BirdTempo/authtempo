@@ -14,6 +14,13 @@ import {
   startAccountDelete,
 } from "./engine/account-delete.js";
 import {
+  type AnonymousDelete,
+  type AnonymousSession,
+  type AnonymousSignIn,
+  deleteAnonymous,
+  signInAnonymous,
+} from "./engine/anonymous.js";
+import {
   confirmEmailChange,
   type EmailChangeRequest,
   requestEmailChange,
@@ -698,6 +705,14 @@ export interface PhoneApi {
   remove(input: PhoneRemove): Promise<Result<{ ok: true }>>;
 }
 
+/** Present on `api` while `anonymous` is on (plan 12i Task 6, spec 32 item 8). */
+export interface AnonymousApi {
+  /** A new anonymous user and session. A live anonymous session answers itself; another session answers `conflict`. */
+  signIn(input: AnonymousSignIn): Promise<Result<AnonymousSession>>;
+  /** Deletes the anonymous user of the session. Another session answers `anonymous_refused`. */
+  delete(input: AnonymousDelete): Promise<Result<{ ok: true }>>;
+}
+
 /**
  * The fresh rule and the session operations of a settings page (plan 12a).
  * Present in every deployment. An app's own sensitive change calls
@@ -1012,6 +1027,7 @@ export interface AuthApi {
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   phone?: PhoneApi;
+  anonymous?: AnonymousApi;
   totp?: TotpApi;
   jwt?: JwtApi;
   oauth?: OAuthApi;
@@ -1445,6 +1461,14 @@ export function createAuth(input: AuthConfig): Auth {
               verify: (i) => verifyEmailOtp(config, i),
               requestReset: (i) => requestResetOtp(config, i),
               reset: (i) => resetPasswordWithOtp(config, i),
+            },
+          }
+        : {}),
+      ...(config.anonymous
+        ? {
+            anonymous: {
+              signIn: (i) => signInAnonymous(config, i),
+              delete: refusesImpersonation((i) => deleteAnonymous(config, i)),
             },
           }
         : {}),

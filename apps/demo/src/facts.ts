@@ -43,6 +43,7 @@ export const DEMO_EXEMPT = {
   username: "The demo signs in by a mailed link and a passkey, so it has no name to sign in with.",
   phone:
     "The demo sends no SMS: a supplier costs money per text, and the demo has no number to prove.",
+  anonymous: "A guest has no way back in, and the demo shows the ways in.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

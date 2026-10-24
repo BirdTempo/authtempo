@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
+import { signInAnonymous } from "../src/engine/anonymous.js";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -314,6 +315,14 @@ const SIGN_INS: Record<
     const next = await code();
     return {
       act: () => verifyPhone(w.auth.config, { phone, code: next, ip: null, userAgent: null }),
+      events: w.events,
+    };
+  },
+  // The anonymous sign-in of plan 12i Task 6: a new user and session, with no gate.
+  anonymous: async () => {
+    const w = world({}, { anonymous: {} });
+    return {
+      act: () => signInAnonymous(w.auth.config, { current: null, ip: null, userAgent: null }),
       events: w.events,
     };
   },

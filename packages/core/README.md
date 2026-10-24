@@ -1303,6 +1303,7 @@ const auth = createAuth({
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
+| Anonymous delete | `user.beforeDelete` | the user's row |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 
@@ -1559,6 +1560,7 @@ It answers one count for each kind of row:
 - `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
 - `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
 - `organizationRows`: organizations that an account delete took, whose other rows went now. The account delete takes an organization where the user is the only member: its row, its SSO connections and domains, its SCIM tokens, and its member rows. Its SCIM Users and Groups, teams, invitations, tokens, and roles wait for the sweep. So the delete fits the 50 queries of D1 Free. No flow reaches them in the meantime. The step runs before the pending sessions. A row of it with more than 50 SCIM Groups loses 50 of them in each sweep.
+- `anonymousUsers`: anonymous users past `anonymous.ttlDays` with no live session, at most 100 per sweep, oldest first. 0 while `anonymous` is off. The step runs last, in a share of the call budget that the steps before it leave free.
 
 ```ts
 export default {

@@ -83,12 +83,18 @@ async function withPasskey(auth: Auth, user: UserRow): Promise<void> {
 
 describe("the account with no address (plan 12i Task 1)", () => {
   it("two users with no address coexist", async () => {
-    const auth = makeAuth();
+    // Two users of the anonymous sign-in of plan 12i Task 6, the first route with no address.
+    const auth = makeAuth({ anonymous: {} });
     const now = auth.clock.now();
-    const a = await addressless(auth.storage, now);
-    const b = await addressless(auth.storage, now);
-    expect(a.id).not.toBe(b.id);
-    for (const id of [a.id, b.id])
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const ids: string[] = [];
+    for (const ip of ["198.51.100.1", "198.51.100.2"]) {
+      const res = await handle(post("/auth/anonymous/sign-in", {}, { "x-forwarded-for": ip }));
+      expect(res.status).toBe(200);
+      ids.push(((await res.json()) as { user: { id: string } }).user.id);
+    }
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids)
       expect(
         await auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]),
       ).toMatchObject({
@@ -96,7 +102,7 @@ describe("the account with no address (plan 12i Task 1)", () => {
         username: null,
         displayUsername: null,
         phone: null,
-        isAnonymous: false,
+        isAnonymous: true,
       });
     await auth.storage.create(
       "user",

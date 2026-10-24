@@ -101,6 +101,9 @@ export const LIMIT_FAMILIES = Object.freeze([
   // Plan 12i Task 3: the password sign-in by username and by phone.
   "password:username",
   "password:phone",
+  // Plan 12i Task 6: the anonymous sign-in, and its own delete.
+  "anonymous:ip",
+  "anonymous-delete:user",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

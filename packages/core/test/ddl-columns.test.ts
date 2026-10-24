@@ -241,7 +241,9 @@ describe("the column map (plan 12g)", () => {
     // Task 4 adds 6: the three request keys, the daily cap, and the two
     // verify keys of the phone code. Plan 12i Task 5 adds 1: the phone add
     // per user. Its fix round adds 1: the phone add per number (ruling 23).
-    expect(sites.length).toBe(97);
+    // Plan 12i Task 6 adds 2: the anonymous sign-in per IP and its delete
+    // per user.
+    expect(sites.length).toBe(99);
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
     expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');

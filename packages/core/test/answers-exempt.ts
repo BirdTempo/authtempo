@@ -81,6 +81,9 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /totp/challenge",
   "GET /user/delete/confirm",
   "POST /identities/unlink",
+  // Plan 12i Task 6: the anonymous routes with anonymous off.
+  "POST /anonymous/sign-in",
+  "POST /anonymous/delete",
   "POST /oauth/device",
   "POST /oauth/device_authorization",
   "POST /oauth/grants/revoke",
@@ -292,6 +295,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /phone/add",
   "POST /phone/add/verify",
   "POST /phone/remove",
+  // Plan 12i Task 6: the anonymous routes.
+  "POST /anonymous/sign-in",
+  "POST /anonymous/delete",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",
@@ -540,30 +546,6 @@ function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExemp
 /** The optional keys of a request options answer that the seam always writes. */
 const REQUEST_OPTION_KEYS = ["timeout", "rpId", "allowCredentials", "userVerification"] as const;
 
-/**
- * Plan 12i Task 1 (ruling 15): the rows that the anonymous sign-in of Task 6
- * removes. An anonymous user has a session and shows in the operator list.
- * Task 6 answers each null form, and then this list is empty.
- */
-export const UNTIL_ANONYMOUS_SIGN_IN: readonly AnswerShapeExempt[] = (
-  [
-    ["GET /session", "user.email"],
-    ["POST /session/refresh", "user.email"],
-    ["POST /handoff/redeem", "user.email"],
-    ["GET /operator/users", "users[].email"],
-    ["GET /operator/users/search", "users[].email"],
-    ["GET /operator/users/get", "user.email"],
-  ] as const
-).map(
-  ([key, field]): AnswerShapeExempt => ({
-    key,
-    field,
-    form: "null",
-    reason:
-      "no route makes a user with no address before the anonymous sign-in of plan 12i Task 6; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
-  }),
-);
-
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
     "timeout",
@@ -669,7 +651,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
     }),
   ),
-  ...UNTIL_ANONYMOUS_SIGN_IN,
   // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
   // has a verified address. The organization create, the member add, and the
   // invitation accept each need one (`verified` in organizations.ts), and no

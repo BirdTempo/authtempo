@@ -192,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the seventeen flows", () => {
+  it("names the eighteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -209,6 +209,7 @@ describe("the table of locks over a before hook", () => {
       "Identity unlink",
       "Phone remove",
       "Account delete",
+      "Anonymous delete",
       "Platform role revoke",
       "Impersonation start",
     ]);
@@ -253,6 +254,8 @@ describe("the table of locks over a before hook", () => {
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
+      // Plan 12i Task 6: the anonymous delete of the route holds the user row first.
+      ["Anonymous delete", "deleteAnonymousUsers user.beforeDelete: holdUsers"],
       ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
       // A SCIM group delete holds the users of a mapped group first (ruling 59 M2 of plan 12d).
       [

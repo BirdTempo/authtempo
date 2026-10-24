@@ -126,6 +126,8 @@ export const ERRORS = {
   host_not_allowed: 421,
   // plan 12i Task 5: the unique key of the phone refused the number (spec 32 item 5)
   phone_taken: 409,
+  // plan 12i Task 6: a route of ANONYMOUS_REFUSED and an anonymous session (spec 32 item 8)
+  anonymous_refused: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

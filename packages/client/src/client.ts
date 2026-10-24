@@ -795,6 +795,23 @@ export interface Client {
     /** Needs a fresh session. `last_credential` when the phone is the last way in. */
     remove(): Promise<ClientResult<{ ok: true }>>;
   };
+  /**
+   * The anonymous sign-in (plan 12i). Every operation answers `not_found`
+   * when the server runs without the `anonymous` config. An anonymous user
+   * has no way back in: its session is its only key.
+   */
+  anonymous: {
+    /**
+     * A new anonymous user and session, or the live anonymous session again.
+     * `conflict` when a session of another kind is live. `captchaToken`: the
+     * captcha widget's token (plan 12b), sent in the header `x-captcha-response`.
+     */
+    signIn(input?: {
+      captchaToken?: string | undefined;
+    }): Promise<ClientResult<{ token: string } & PublicSessionJSON>>;
+    /** Deletes the anonymous user of the session. `anonymous_refused` for another session. */
+    delete(): Promise<ClientResult<{ ok: true }>>;
+  };
   /** The linked identities of the signed-in person (plan 12a). */
   identities: {
     list(): Promise<ClientResult<IdentityListJSON>>;
@@ -1388,6 +1405,19 @@ export function createClient(options: ClientOptions): Client {
     verifyAdd: ({ code }) => send<{ phone: string }>("phone.verifyAdd", { code }),
     remove: () => shaped(send<unknown>("phone.remove", {}), isOkTrue),
   };
+  // A sign-in opens a session, and a delete ends it: the store reads again after each.
+  const anonymous: Client["anonymous"] = {
+    signIn: ({ captchaToken } = {}) =>
+      changes(
+        send<{ token: string } & PublicSessionJSON>(
+          "anonymous.signIn",
+          {},
+          undefined,
+          captchaHeader(captchaToken),
+        ),
+      ),
+    delete: () => changes(shaped(send<unknown>("anonymous.delete", {}), isOkTrue)),
+  };
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),
     unlink: ({ id }) => shaped(send<unknown>("identities.unlink", { id }), isOkTrue),
@@ -1812,6 +1842,7 @@ export function createClient(options: ClientOptions): Client {
     user,
     username,
     phone,
+    anonymous,
     identities,
     sso: {
       // JSON leaves out a key whose value is undefined, so the body names only the set fields.

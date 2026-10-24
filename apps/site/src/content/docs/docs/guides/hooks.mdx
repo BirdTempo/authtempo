@@ -131,6 +131,7 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
+| Anonymous delete | `user.beforeDelete` | the user's row |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 

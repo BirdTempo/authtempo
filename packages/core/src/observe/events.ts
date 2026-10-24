@@ -172,6 +172,8 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /otp/verify": "email_otp",
   // The phone code of plan 12i Task 5.
   "POST /phone/verify": "phone",
+  // The anonymous sign-in of plan 12i Task 6.
+  "POST /anonymous/sign-in": "anonymous",
   "POST /passkey/authenticate/verify": "passkey",
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
@@ -701,6 +703,12 @@ export const EVENTS = {
   "sweep.organization_rest_stopped": fault(
     "error",
     "authtempo: the sweep organization rest step stopped",
+    SWEEP_STOP,
+  ),
+  // The anonymous step of plan 12i Task 6.
+  "sweep.anonymous_stopped": fault(
+    "error",
+    "authtempo: the sweep anonymous step stopped",
     SWEEP_STOP,
   ),
   // The lines of plan 12d (SSO and SCIM). The raw IP of a refused sign-in is

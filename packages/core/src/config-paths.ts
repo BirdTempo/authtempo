@@ -48,6 +48,7 @@ export const AUTH_CONFIG_KEYS = {
   observe: true,
   username: true,
   lastMethod: true,
+  anonymous: true,
 } as const satisfies Record<keyof Required<AuthConfig>, true>;
 
 export type AuthConfigKey = keyof typeof AUTH_CONFIG_KEYS;
@@ -82,6 +83,7 @@ export const CONFIG_BLOCKS: ReadonlySet<AuthConfigKey> = new Set<AuthConfigKey>(
   "observe",
   "username",
   "lastMethod",
+  "anonymous",
 ]);
 
 /** An object literal or a null-prototype object. A class instance, an array, or a port is none. */

@@ -137,6 +137,8 @@ function world(secretHash = "0".repeat(64)) {
     username: {},
     // The phone routes of plan 12i Task 5, on the memory limiter.
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -526,6 +528,10 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /phone/remove", body: {}, session: true, refused: INVALID_BODY },
+    // Plan 12i Task 6: the anonymous routes. The session of the world is no
+    // anonymous session, so the valid delete body answers anonymous_refused.
+    { key: "POST /anonymous/sign-in", body: {}, refused: INVALID_BODY },
+    { key: "POST /anonymous/delete", body: {}, session: true, refused: INVALID_BODY },
     {
       key: "POST /otp/reset",
       body: { email: "ada@example.com", code: "000000", password: "another horse battery" },
@@ -818,8 +824,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
-    // Plan 12i Task 5 adds the five phone routes.
-    expect(keys.length).toBe(194);
+    // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
+    expect(keys.length).toBe(196);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -834,7 +840,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
     // module scim, so 22 became 23. Plan 12i Task 2 adds the module
     // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
-    expect(modules.length).toBe(25);
+    // Plan 12i Task 6 adds the module anonymous: 26.
+    expect(modules.length).toBe(26);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1381,8 +1388,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 9b adds the two SCIM token writes.
     // Plan 12i Task 9 adds the bodies of the two passkey options routes.
     // Plan 12i Task 2 adds the body of POST /user/username.
-    // Plan 12i Task 5 adds the bodies of the five phone routes.
-    expect(withBody.length).toBe(99);
+    // Plan 12i Task 5 adds the bodies of the five phone routes, and Task 6 the two anonymous bodies.
+    expect(withBody.length).toBe(101);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1408,7 +1415,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(97);
+    expect(refusals).toBe(99);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1430,8 +1437,8 @@ describe("the route contract (plan 11g)", () => {
     // Task 8: the SAML ACS reads a form.
     // Plan 12i Task 9 adds the two passkey options bodies to json.
     // Plan 12i Task 2 adds the body of POST /user/username to json.
-    // Plan 12i Task 5 adds the five phone bodies to json.
-    expect(counts).toEqual({ json: 90, both: 10, form: 8 });
+    // Plan 12i Task 5 adds the five phone bodies to json, and Task 6 the two anonymous bodies.
+    expect(counts).toEqual({ json: 92, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

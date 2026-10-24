@@ -2151,6 +2151,20 @@ describe("the SSO lines (plan 12d)", () => {
     expect(log.mock.calls).toEqual([["authtempo: the sweep sso recheck step stopped", "Error"]]);
   });
 
+  it("sweep.anonymous_stopped", async () => {
+    const auth = makeAuth({ anonymous: {} });
+    const findMany = auth.storage.findMany.bind(auth.storage);
+    // The anonymous step reads the user rows first (plan 12i Task 6); no step before it does.
+    auth.storage.findMany = ((m, where, opts) =>
+      m === "user"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(m, where, opts)) as StorageAdapter["findMany"];
+    const log = errors();
+    const result = await sweepExpired(auth.config);
+    expect(result.anonymousUsers).toBe(0);
+    expect(log.mock.calls).toEqual([["authtempo: the sweep anonymous step stopped", "Error"]]);
+  });
+
   it("sweep.organization_rest_stopped", async () => {
     const auth = makeAuth({ organizations: {}, password: { hash: FAST } });
     const ada = await verifiedSession(auth, "ada@example.com");

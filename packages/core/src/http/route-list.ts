@@ -11,7 +11,7 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
  * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
- * `username`, and `phone`.
+ * `username`, `phone`, and `anonymous`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -45,6 +45,7 @@ export const ROUTE_FEATURES = [
   "readiness",
   "username",
   "phone",
+  "anonymous",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -88,6 +89,7 @@ export interface RouteEntry {
    * (plan 12d) needs `organizations` and `scim`.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
    * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
+   * `anonymous` (plan 12i Task 6) needs `anonymous`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -149,6 +151,7 @@ export const ROUTES = Object.freeze([
       "passkey_failed",
       "totp_not_enabled",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -157,7 +160,7 @@ export const ROUTES = Object.freeze([
     path: "/reauth/passkey/options",
     feature: "passkey",
     auth: ["session"],
-    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session", "anonymous_refused"],
     oauthCodes: [],
   },
   {
@@ -165,7 +168,7 @@ export const ROUTES = Object.freeze([
     path: "/reauth/email",
     feature: "emailOtp",
     auth: ["session"],
-    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session", "anonymous_refused"],
     oauthCodes: [],
   },
   {
@@ -205,6 +208,7 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "conflict",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -220,6 +224,7 @@ export const ROUTES = Object.freeze([
       "rate_limited",
       "session_not_fresh",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -263,6 +268,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -282,6 +288,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -308,6 +315,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -337,6 +345,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -426,6 +435,7 @@ export const ROUTES = Object.freeze([
       "oauth_failed",
       "rate_limited",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -487,6 +497,7 @@ export const ROUTES = Object.freeze([
       "invalid_body",
       "email_unverified",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -503,6 +514,7 @@ export const ROUTES = Object.freeze([
       "token_expired",
       "passkey_failed",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -706,6 +718,7 @@ export const ROUTES = Object.freeze([
       "conflict",
       "impersonation_session",
       "sso_required",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -723,6 +736,7 @@ export const ROUTES = Object.freeze([
       "totp_enabled",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -742,6 +756,7 @@ export const ROUTES = Object.freeze([
       "invalid_code",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -860,6 +875,7 @@ export const ROUTES = Object.freeze([
       "passkey_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -868,7 +884,13 @@ export const ROUTES = Object.freeze([
     path: "/second-factor/passkey/options",
     feature: "totp",
     auth: ["none"],
-    codes: ["invalid_body", "invalid_token", "rate_limited", "impersonation_session"],
+    codes: [
+      "invalid_body",
+      "invalid_token",
+      "rate_limited",
+      "impersonation_session",
+      "anonymous_refused",
+    ],
     oauthCodes: [],
   },
   {
@@ -902,6 +924,7 @@ export const ROUTES = Object.freeze([
       "invalid_credentials",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1032,6 +1055,7 @@ export const ROUTES = Object.freeze([
       "phone_region",
       "sms_unavailable",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1053,6 +1077,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1069,6 +1094,41 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 6: the anonymous sign-in and its own delete (spec 32 item 8).
+  {
+    method: "POST",
+    path: "/anonymous/sign-in",
+    feature: "anonymous",
+    auth: ["none", "session"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "conflict",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/anonymous/delete",
+    feature: "anonymous",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "anonymous_refused",
+      "rate_limited",
+      "hook_refused",
+      "hook_failed",
       "impersonation_session",
     ],
     oauthCodes: [],
@@ -1130,6 +1190,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "rate_limited",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1295,6 +1356,7 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "conflict",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1591,6 +1653,7 @@ export const ROUTES = Object.freeze([
       "token_limit",
       "impersonation_session",
       "forbidden_rank",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1962,7 +2025,7 @@ export const ROUTES = Object.freeze([
     path: "/oauth/authorize",
     feature: "oauth",
     auth: ["session"],
-    codes: ["unauthorized", "impersonation_session"],
+    codes: ["unauthorized", "impersonation_session", "anonymous_refused"],
     oauthCodes: [
       "invalid_request",
       "rate_limited",
@@ -2050,7 +2113,7 @@ export const ROUTES = Object.freeze([
     path: "/oauth/device",
     feature: "oauthDevice",
     auth: ["session"],
-    codes: ["unauthorized", "impersonation_session"],
+    codes: ["unauthorized", "impersonation_session", "anonymous_refused"],
     oauthCodes: ["invalid_request", "rate_limited"],
   },
   {

@@ -2,6 +2,7 @@ import type {
   AccountConfig,
   AccountDeleteConfirmConfig,
   AccountNoticesConfig,
+  AnonymousConfig,
   AppleConfig,
   AuthConfig,
   CaptchaConfig,
@@ -98,6 +99,7 @@ export const CONFIG_KEYS = {
     observe: true,
     username: true,
     lastMethod: true,
+    anonymous: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -401,6 +403,7 @@ export const CONFIG_KEYS = {
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
   username: { minLength: true, maxLength: true, reserved: true } satisfies Keys<UsernameConfig>,
   lastMethod: { cookieName: true, days: true } satisfies Keys<LastMethodConfig>,
+  anonymous: { ttlDays: true } satisfies Keys<AnonymousConfig>,
   observe: {
     sink: true,
     include: true,

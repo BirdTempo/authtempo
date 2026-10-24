@@ -184,6 +184,12 @@ export const BETTER_AUTH_CODES = {
   // Plan 12i Task 5: the phone-number plugin's name for a number that another
   // user holds (plugins/phone-number/error-codes.mjs, read 2026-10-24).
   phone_taken: "PHONE_NUMBER_EXIST",
+  // Plan 12i Task 6: an anonymous session at a route of ANONYMOUS_REFUSED, or
+  // another session at the anonymous delete. Better Auth 1.7.2 refuses no
+  // route to an anonymous user, and its USER_IS_NOT_ANONYMOUS names only the
+  // delete case (dist/plugins/anonymous/error-codes.mjs, read 2026-10-24).
+  // So the name is core's own. Task 16 maps the anonymous plugin.
+  anonymous_refused: "ANONYMOUS_REFUSED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

@@ -32,6 +32,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   user: ["account", "emailOtp", "accountDelete"],
   username: ["username"],
   phone: ["phone"],
+  anonymous: ["anonymous"],
   identities: ["account"],
   "magic-link": ["magicLink"],
   social: ["social"],
@@ -76,8 +77,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
-    // Plan 12i Task 5 adds the five phone routes.
-    expect(listed.length).toBe(194);
+    // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
+    expect(listed.length).toBe(196);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

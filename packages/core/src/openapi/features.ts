@@ -38,6 +38,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   readiness: { configKey: "observe.readiness", default: "off" },
   username: { configKey: "username", default: "off" },
   phone: { configKey: "phone", default: "off" },
+  anonymous: { configKey: "anonymous", default: "off" },
 };
 
 const FEATURE_OF: ReadonlyMap<string, RouteFeature> = new Map(

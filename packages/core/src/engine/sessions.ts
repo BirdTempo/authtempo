@@ -642,6 +642,7 @@ export async function resolveSession(
   token: string,
   mode: SessionReadMode = "write",
   peeked: SessionRow | null = null,
+  peekedUser: UserRow | null = null,
 ): Promise<ResolvedSession | null> {
   const write = mode === "write";
   if (!TOKEN_RE.test(token)) return null;
@@ -666,9 +667,11 @@ export async function resolveSession(
     if (n === 1) await sessionsEnded(config, [session], "expired", null, n);
     return null;
   }
-  const user = await config.storage.findOne("user", [
-    { field: "id", op: "eq", value: session.userId },
-  ]);
+  // The user that the anonymous step of the router read for this request (plan 12i Task 6), else a read.
+  const user =
+    peekedUser?.id === session.userId
+      ? peekedUser
+      : await config.storage.findOne("user", [{ field: "id", op: "eq", value: session.userId }]);
   if (!user) return null;
   if (bannedFor(user, session.createdAt)) {
     if (!write) return null;
@@ -778,17 +781,43 @@ export async function peekSession(
  * query of the 50 of one invocation. The map holds no row after the request.
  */
 const peekedRows = new WeakMap<Request, SessionRow>();
+/** The user row of the peeked session, read by the anonymous step of the router (plan 12i Task 6). */
+const peekedUsers = new WeakMap<Request, UserRow>();
 
-/** `peekSession` for the token of `request`, kept for the handler's session read. */
+/**
+ * `peekSession` for the token of `request`, kept for the handler's session
+ * read. A second call for the request answers the kept row with no read.
+ */
 export async function peekRequestSession(
   config: ResolvedConfig,
   request: Request,
 ): Promise<SessionRow | null> {
+  const kept = peekedRows.get(request);
+  if (kept) return kept;
   const token = readSessionToken(config, request);
   if (token === null) return null;
   const row = await peekSession(config, token);
   if (row) peekedRows.set(request, row);
   return row;
+}
+
+/**
+ * The user of the live session of `request`, kept for the handler's session
+ * read (plan 12i Task 6). The anonymous step of the router reads it, and
+ * `resolveSession` takes it in place of a second read of the same row. So a
+ * refused route pays no query more on D1. It writes nothing.
+ */
+export async function peekRequestUser(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<UserRow | null> {
+  const row = await peekRequestSession(config, request);
+  if (row === null) return null;
+  const kept = peekedUsers.get(request);
+  if (kept?.id === row.userId) return kept;
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
+  if (user) peekedUsers.set(request, user);
+  return user;
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */
@@ -800,8 +829,12 @@ export async function sessionFromRequest(
   const token = readSessionToken(config, request);
   // The row of the router serves one read: a later read of the request reads again.
   const peeked = peekedRows.get(request) ?? null;
+  const peekedUser = peekedUsers.get(request) ?? null;
   peekedRows.delete(request);
-  return token ? resolveSession(config, token, readModeOf(config, request, options), peeked) : null;
+  peekedUsers.delete(request);
+  return token
+    ? resolveSession(config, token, readModeOf(config, request, options), peeked, peekedUser)
+    : null;
 }
 
 /**

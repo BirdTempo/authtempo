@@ -211,7 +211,8 @@ function tokenOf(r: Answer): string {
 }
 
 interface Door {
-  via: Exclude<SessionVia, "impersonation">;
+  // An anonymous sign-in opens a session only for a new user, so no ban stands before it (plan 12i Task 6).
+  via: Exclude<SessionVia, "impersonation" | "anonymous">;
   /** Signs the user up and in once through the flow, and answers the next try. */
   setup(w: World): Promise<() => Promise<Answer>>;
 }
@@ -345,10 +346,10 @@ const DOORS: Door[] = [
 const BANNED = { ok: false, code: "account_banned", status: 403 };
 
 describe("the ban at the session doors (plan 12f Task 6)", () => {
-  it("has one row per value of SessionVia but impersonation", () => {
+  it("has one row per value of SessionVia but impersonation and anonymous", () => {
     expect(DOORS.map((d) => d.via).sort()).toEqual(
       Object.keys(SESSION_VIA)
-        .filter((v) => v !== "impersonation")
+        .filter((v) => v !== "impersonation" && v !== "anonymous")
         .sort(),
     );
   });

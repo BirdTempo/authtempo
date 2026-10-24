@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
-import { peekRequestSession } from "../engine/sessions.js";
+import { ANONYMOUS_REFUSED } from "../engine/anonymous.js";
+import { peekRequestSession, peekRequestUser } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { json } from "./json.js";
 import type { RouteKey } from "./route-list.js";
@@ -77,6 +78,8 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /phone/add",
   "POST /phone/add/verify",
   "POST /phone/remove",
+  // The anonymous delete is an account delete (plan 12i Task 6).
+  "POST /anonymous/delete",
   "POST /identities/unlink",
   "POST /social/:provider/link",
   "POST /passkey/register/options",
@@ -159,6 +162,8 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /username/available": NO_SESSION,
   "POST /phone/request": NO_SESSION,
   "POST /phone/verify": NO_SESSION,
+  "POST /anonymous/sign-in":
+    "It answers a live session that is not anonymous with conflict, and an anonymous one with itself; it writes no row for either.",
   "GET /identities": READ,
   "POST /magic-link/request": NO_SESSION,
   "GET /magic-link/verify": NO_SESSION,
@@ -291,4 +296,24 @@ export async function impersonationRefusal(
   const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
+}
+
+/**
+ * The anonymous step of the router (plan 12i Task 6, spec 32 item 8), after
+ * the impersonation step and in its form. A route of `ANONYMOUS_REFUSED`
+ * answers 403 `anonymous_refused` when the request's session is live and
+ * its user is anonymous. Other routes pay no read. The handler's session
+ * read takes the session row and the user row of this step, so a refused
+ * route sends no query more. The read writes nothing.
+ */
+export async function anonymousRefusal(
+  config: ResolvedConfig,
+  request: Request,
+  key: RouteKey,
+): Promise<Response | null> {
+  // With `anonymous` off too: an anonymous user of an earlier config keeps its live sessions.
+  if (!ANONYMOUS_REFUSED.has(key)) return null;
+  const user = await peekRequestUser(config, request);
+  if (user === null || !user.isAnonymous) return null;
+  return json({ error: "anonymous_refused" }, ERRORS.anonymous_refused);
 }

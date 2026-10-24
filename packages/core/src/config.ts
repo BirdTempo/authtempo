@@ -526,6 +526,12 @@ export interface AuthConfig {
    * answer carries it as `via`. Core never stores the method on the user.
    */
   lastMethod?: LastMethodConfig | false;
+  /**
+   * Anonymous sign-in (plan 12i Task 6, spec 32 item 8). Off when absent or
+   * `false`. `{}` turns it on with the defaults. An anonymous user has no
+   * way in, and `ANONYMOUS_REFUSED` keeps it out of each route that needs one.
+   */
+  anonymous?: AnonymousConfig | false;
 }
 
 /** The last method cookie (plan 12i). It is a hint for the sign-in page only. */
@@ -534,6 +540,15 @@ export interface LastMethodConfig {
   cookieName?: string;
   /** The lifetime in days, 1 to 400 (the cap of RFC 6265bis). Default 30. */
   days?: number;
+}
+
+/** The anonymous sign-in config (plan 12i Task 6). */
+export interface AnonymousConfig {
+  /**
+   * The days that an anonymous user with no live session stays, 1 to 365.
+   * Default 30. After them the sweep deletes the user.
+   */
+  ttlDays?: number;
 }
 
 /**
@@ -1342,6 +1357,8 @@ export interface ResolvedConfig {
   username: ResolvedUsername | null;
   /** Null: no last method cookie and no `via` in a sign-in answer (plan 12i). */
   lastMethod: ResolvedLastMethod | null;
+  /** Null: anonymous sign-in is off, and no anonymous route is mounted (plan 12i Task 6). */
+  anonymous: ResolvedAnonymous | null;
   captcha: ResolvedCaptcha | null;
   /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
   observe: Observer;
@@ -1900,6 +1917,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     account: resolveAccount(input.account),
     username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
     lastMethod: resolveLastMethod(input.lastMethod, cookieName, totpTrustName(input.totp)),
+    anonymous: resolveAnonymous(input.anonymous),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1919,6 +1937,31 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     instance: Object.freeze({}),
     configKeys: configKeyPaths(input),
   };
+}
+
+/** The resolved `anonymous` (plan 12i Task 6). */
+export interface ResolvedAnonymous {
+  ttlDays: number;
+}
+
+/** The keys of `anonymous`. A Record, so a key added to `AnonymousConfig` and not listed here fails the compile. */
+const ANONYMOUS_KEYS: Readonly<Record<keyof AnonymousConfig, true>> = { ttlDays: true };
+
+/** `anonymous` (plan 12i Task 6). Absent or `false`: off. */
+function resolveAnonymous(input: AnonymousConfig | false | undefined): ResolvedAnonymous | null {
+  if (input === undefined || input === false) return null;
+  // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("anonymous must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(ANONYMOUS_KEYS, key))
+      throw new ConfigError(
+        `anonymous.${key} is not an option; core has ${Object.keys(ANONYMOUS_KEYS).join(", ")}`,
+      );
+  const ttlDays = input.ttlDays ?? 30;
+  if (!Number.isInteger(ttlDays) || ttlDays < 1 || ttlDays > 365)
+    throw new ConfigError("anonymous.ttlDays must be an integer from 1 to 365");
+  return { ttlDays };
 }
 
 /** The resolved `username` (plan 12i). Each bound counts the characters of the typed name after NFKC. */

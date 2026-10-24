@@ -37,7 +37,8 @@ describe("checkConfig", () => {
     // Plan 12i Task 22 adds five keys of social.oauth2[]: authorizeClientIdParam,
     // authorizeSuffix, pkce, addressless, and tokenRequest.
     // Plan 12i Task 5 adds totp.gate.phone.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1);
+    // Plan 12i Task 6 adds anonymous and anonymous.ttlDays.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 2);
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");
     expect(keys).toContain("social.twitter.redirectURI");

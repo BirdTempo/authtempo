@@ -91,6 +91,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `readiness` | `observe.readiness` | off |
 | `username` | `username` | off |
 | `phone` | `phone` | off |
+| `anonymous` | `anonymous` | off |
 
 ## The error shape
 

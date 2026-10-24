@@ -70,6 +70,9 @@ export const CLIENT_CALLS = [
   { operation: "phone.add", method: "POST", path: "/phone/add" },
   { operation: "phone.verifyAdd", method: "POST", path: "/phone/add/verify" },
   { operation: "phone.remove", method: "POST", path: "/phone/remove" },
+  // Plan 12i Task 6: the anonymous sign-in and its own delete.
+  { operation: "anonymous.signIn", method: "POST", path: "/anonymous/sign-in" },
+  { operation: "anonymous.delete", method: "POST", path: "/anonymous/delete" },
   { operation: "organizations.create", method: "POST", path: "/organizations/create" },
   {
     operation: "organizations.list",

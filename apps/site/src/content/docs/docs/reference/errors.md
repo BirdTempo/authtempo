@@ -495,6 +495,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | Every route, and `auth.wellKnown`, while `baseURL` is a list. See [the base URL list](/docs/guides/base-url-list/). |
 
+<h3 id="anonymous_refused"><code>anonymous_refused</code> 403</h3>
+
+- **Meaning:** An anonymous session called a route that needs a way in, or that would change the anonymous user in place. At `POST /anonymous/delete`, a session that is not anonymous called it. The route did nothing.
+- **Do:** Ask the person to sign in or to create an account first. The sign-in replaces the anonymous user. To delete an anonymous user, call `POST /anonymous/delete`.
+
+| Routes |
+| --- |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth), [`POST /reauth/passkey/options`](/docs/reference/routes/#post-reauth-passkey-options), [`POST /reauth/email`](/docs/reference/routes/#post-reauth-email), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), [`POST /user/username`](/docs/reference/routes/#post-user-username), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkey/register/verify`](/docs/reference/routes/#post-passkey-register-verify), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /second-factor/passkey/enable`](/docs/reference/routes/#post-second-factor-passkey-enable), [`POST /second-factor/passkey/options`](/docs/reference/routes/#post-second-factor-passkey-options), [`POST /second-factor/email/enable`](/docs/reference/routes/#post-second-factor-email-enable), [`POST /phone/add`](/docs/reference/routes/#post-phone-add), [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify), [`POST /anonymous/delete`](/docs/reference/routes/#post-anonymous-delete), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /tokens`](/docs/reference/routes/#post-tokens), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
+
 <h3 id="session_not_fresh"><code>session_not_fresh</code> 403</h3>
 
 - **Meaning:** The change needs a session that a sign-in or a re-authentication proved within `session.freshMinutes`.

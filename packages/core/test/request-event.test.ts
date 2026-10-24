@@ -90,6 +90,12 @@ const FAILING: Readonly<
     over: { phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" } },
     make: async () => post("/auth/phone/verify", { phone: "+14155550100", code: "000000" }),
   },
+  // Plan 12i Task 6: a sign-in over the limit of one IP.
+  "POST /anonymous/sign-in": {
+    via: "anonymous",
+    over: { anonymous: {}, limiter: { allow: async () => false } },
+    make: async () => post("/auth/anonymous/sign-in", {}),
+  },
   "POST /passkey/authenticate/verify": {
     via: "passkey",
     make: async () => post("/auth/passkey/authenticate/verify", {}),

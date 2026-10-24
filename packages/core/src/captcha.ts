@@ -13,7 +13,9 @@ export type CaptchaFlow =
   | "email-otp-request"
   | "password-reset-request"
   /** The phone code request (plan 12i). Not a default: the app names it. */
-  | "phone-request";
+  | "phone-request"
+  /** The anonymous sign-in (plan 12i Task 6). Not a default: the app names it. */
+  | "anonymous-sign-in";
 
 export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "password-sign-up",
@@ -22,6 +24,7 @@ export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "email-otp-request",
   "password-reset-request",
   "phone-request",
+  "anonymous-sign-in",
 ]);
 
 /** The flows that send mail or write rows, so a bot costs the app money. The sign-in is opt-in. */

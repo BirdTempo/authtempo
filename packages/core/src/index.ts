@@ -14,6 +14,7 @@ export type {
   AccountConfig,
   AccountDeleteConfirmConfig,
   AccountNoticesConfig,
+  AnonymousConfig,
   AuthConfig,
   DynamicRolesConfig,
   EmailOtpConfig,
@@ -50,6 +51,7 @@ export {
   isAppScheme,
 } from "./config.js";
 export {
+  type AnonymousApi,
   type Auth,
   type AuthApi,
   createAuth,
@@ -73,6 +75,12 @@ export {
 } from "./create-auth.js";
 export type { AccountDelete } from "./engine/account-delete.js";
 export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
+export {
+  ANONYMOUS_REFUSED,
+  type AnonymousDelete,
+  type AnonymousSession,
+  type AnonymousSignIn,
+} from "./engine/anonymous.js";
 export type { EmailChangeRequest } from "./engine/email-change.js";
 export type {
   EmailOtpRequest,

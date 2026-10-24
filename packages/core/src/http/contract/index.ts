@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { RouteKey } from "../route-list.js";
+import { ANONYMOUS_CONTRACT } from "./anonymous.js";
 import { EMAIL_OTP_CONTRACT } from "./email-otp.js";
 import { HANDOFF_CONTRACT } from "./handoff.js";
 import { HEALTH_CONTRACT } from "./health.js";
@@ -48,6 +49,7 @@ export const ROUTE_CONTRACT = {
   ...SECOND_FACTOR_CONTRACT,
   ...EMAIL_OTP_CONTRACT,
   ...PHONE_CONTRACT,
+  ...ANONYMOUS_CONTRACT,
   ...HANDOFF_CONTRACT,
   ...ORGANIZATIONS_CONTRACT,
   ...ROLES_CONTRACT,

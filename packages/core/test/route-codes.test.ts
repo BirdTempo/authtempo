@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CAPTCHA_FLOWS, CAPTCHA_HEADER } from "../src/captcha.js";
 import type { AuthConfig } from "../src/config.js";
 import { requestAccountDelete } from "../src/engine/account-delete.js";
+import { signInAnonymous } from "../src/engine/anonymous.js";
 import { requestEmailChange } from "../src/engine/email-change.js";
 import { requestEmailOtp, requestResetOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -138,6 +139,9 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /phone/add": { phone: "+14155550101" },
   "POST /phone/add/verify": { code: "$phoneCode" },
   "POST /phone/remove": {},
+  // Plan 12i Task 6: the anonymous routes take an empty body.
+  "POST /anonymous/sign-in": {},
+  "POST /anonymous/delete": {},
   "POST /handoff/continue": { h: `hs_${BODY43}` },
   "POST /handoff/redeem": { code: BODY43, verifier: BODY43 },
   "POST /organizations/create": { slug: "acme", name: "Acme" },
@@ -371,6 +375,8 @@ function world(extra: Partial<AuthConfig> = {}) {
     username: {},
     // The phone routes of plan 12i Task 5, on the memory limiter.
     phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: {},
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -519,25 +525,35 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // platform operator: operator-impersonation.test.ts answers its 429.
     const routes = declaring("rate_limited").filter((key) => key !== "POST /operator/impersonate");
     expect(routes.length).toBeGreaterThan(0);
+    // The anonymous delete counts for an anonymous session only (plan 12i Task 6).
+    const anonymous = must(
+      await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
+    );
     w.limiter.refuse = true;
     const results = await probe(
       w,
       routes,
       (key) =>
-        key === "POST /token/live"
-          ? { authorization: `Bearer ${jwt.token}` }
-          : key === "GET /tokens/current"
-            ? { authorization: `Bearer ${windowed.token}` }
-            : key === "GET /organizations/tokens/current"
-              ? { authorization: `Bearer ${orgWindowed.token}` }
-              : // The device page counts a request with no session only.
-                key === "GET /oauth/device"
-                ? {}
-                : // The operator user tools count a secret call before the compare
-                  // (plan 12f), and so does the override of plan 12d.
-                  entryOf(key).feature === "operatorUsers" || entryOf(key).feature === "operatorSso"
-                  ? { authorization: `Operator ${"x".repeat(32)}` }
-                  : w.cookie(me.token),
+        key === "POST /anonymous/delete"
+          ? w.cookie(anonymous.token)
+          : // The anonymous sign-in counts a request with no session only.
+            key === "POST /anonymous/sign-in"
+            ? {}
+            : key === "POST /token/live"
+              ? { authorization: `Bearer ${jwt.token}` }
+              : key === "GET /tokens/current"
+                ? { authorization: `Bearer ${windowed.token}` }
+                : key === "GET /organizations/tokens/current"
+                  ? { authorization: `Bearer ${orgWindowed.token}` }
+                  : // The device page counts a request with no session only.
+                    key === "GET /oauth/device"
+                    ? {}
+                    : // The operator user tools count a secret call before the compare
+                      // (plan 12f), and so does the override of plan 12d.
+                      entryOf(key).feature === "operatorUsers" ||
+                        entryOf(key).feature === "operatorSso"
+                      ? { authorization: `Operator ${"x".repeat(32)}` }
+                      : w.cookie(me.token),
       fills,
     );
     // The four routes that carry the code in a redirect to the app.
@@ -1284,7 +1300,13 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const addCode = w.lastSms();
   must(await requestPhone(config, { phone, ip: null }));
   const signInCode = w.lastSms();
+  // Plan 12i Task 6: an anonymous session for the delete; the sign-in takes no session.
+  const anonymous = must(
+    await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
+  );
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /anonymous/sign-in": {},
+    "POST /anonymous/delete": {},
     "POST /phone/verify": { phone, code: signInCode },
     "POST /phone/add/verify": { code: addCode },
     "POST /phone/remove": {},
@@ -1320,6 +1342,8 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const headersOf = (key: RouteKey): Record<string, string> => {
     if (key === "POST /organizations/invitations/accept") return w.cookie(dan.token);
     if (key === "POST /user/delete/confirm") return w.cookie(bob.token);
+    if (key === "POST /anonymous/delete") return w.cookie(anonymous.token);
+    if (key === "POST /anonymous/sign-in") return {};
     return takes(key, "session") ? w.cookie(ada.token) : {};
   };
   return { bodies, headersOf };

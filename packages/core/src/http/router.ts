@@ -6,7 +6,7 @@ import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.j
 import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
-import { impersonationRefusal } from "./impersonation-rules.js";
+import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
@@ -570,6 +570,9 @@ export function createRouter(
     const impersonated =
       match.route.key && (await impersonationRefusal(scoped, request, match.route.key));
     if (impersonated) return impersonated;
+    // The anonymous step (plan 12i Task 6): beside the impersonation step, in its form.
+    const anonymous = match.route.key && (await anonymousRefusal(scoped, request, match.route.key));
+    if (anonymous) return anonymous;
     return match.route.handler({
       request,
       url,

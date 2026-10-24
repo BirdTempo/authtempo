@@ -96,6 +96,8 @@ export function everyFeature(): ResolvedConfig {
     username: {},
     // Plan 12i Task 5: the five phone routes, on the memory limiter.
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    // Plan 12i Task 6: the two anonymous routes.
+    anonymous: {},
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },
   });

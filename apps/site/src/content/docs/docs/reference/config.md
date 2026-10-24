@@ -428,6 +428,13 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `lastMethod.cookieName` | string | `"__Host-tempo_last_method"` | 1 to 64 token characters. Not the name of another cookie of core. |
 | `lastMethod.days` | number | 30 | An integer from 1 to 400. |
 
+## Anonymous
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `anonymous` | `AnonymousConfig` or `false` | `false` | Turns on `POST /anonymous/sign-in` and `POST /anonymous/delete`. An anonymous user has no address and no way in. The routes of `ANONYMOUS_REFUSED` refuse its session. `{}` turns it on with the defaults. |
+| `anonymous.ttlDays` | number | 30 | An integer from 1 to 365. The sweep deletes an anonymous user made more than this many days ago with no live session, at most 100 per sweep. |
+
 ## Observability
 
 With no `observe`, core writes its log lines with `console` and sends nothing anywhere. With a sink, core buffers each event, and a flush sends the batch after the answer. Pass `{ waitUntil }` to `handle`, or call `auth.observe.flush()`.

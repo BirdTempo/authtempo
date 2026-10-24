@@ -76,7 +76,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | JSON `{ password?, emailCode?, passkey?, code? }`. One first proof: `{ password, code? }`, `{ emailCode, code? }`, or `{ passkey }`. `code` is an authenticator code or a backup code, required after a password or an email code while the second factor is on. A passkey proves two factors and takes no `code`. With the email method only, `code` is a backup code: the email method as a re-authentication code is a later input. A user whose password row holds the legacy marker proves by an email code or a passkey. With `emailOtp` off or no `passkey` config, that proof answers `not_found` and the limit counts no try |
 | Answer | `{ freshUntil }`, an ISO date. The session token and the expiry stay the same |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-reauth-email"><code>POST /reauth/email</code></h3>
 
@@ -85,7 +85,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. `emailOtp` is on |
 | Input | None. The route reads no body |
 | Answer | `{ sent: true }`. A code goes to the user's address. Send it to `POST /reauth` as `emailCode` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-reauth-passkey-options"><code>POST /reauth/passkey/options</code></h3>
 
@@ -94,7 +94,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The `passkey` config is set |
 | Input | None. The route reads no body |
 | Answer | The request options for `navigator.credentials.get`, with the user's passkeys. Send the assertion to `POST /reauth` as `passkey` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-sessions"><code>GET /sessions</code></h3>
 
@@ -130,7 +130,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The user is verified. No fresh rule |
 | Input | JSON `{ name?, image? }`. `name`: 1 to 200 characters with no control character, no line or paragraph separator, no format character, and no lone surrogate, or null. A bidi control and a zero-width space are format characters. The zero-width non-joiner and joiner pass. `image`: an `https://` URL with a host, of at most 2048 characters, or null. The image has no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. Any other field is refused, the address too |
 | Answer | `{ user }`: the `id`, `email`, `emailVerified`, `name`, and `image` of the stored row. Only the given fields change |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-user-change-email"><code>POST /user/change-email</code></h3>
 
@@ -139,7 +139,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user is verified |
 | Input | JSON `{ newEmail, method?, next? }`. `method` is `link` (the default) or `code`, which needs `emailOtp`. Any other field is refused |
 | Answer | `{ sent: true }`. A proof goes to the new address. When any user holds that address, a note goes there in place of the proof, with the same answer. A new request spends the earlier proof |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-user-change-email-confirm"><code>GET /user/change-email/confirm</code></h3>
 
@@ -166,7 +166,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is of the same user, and `emailOtp` is on |
 | Input | JSON `{ code }` |
 | Answer | `{ user }`, the same move as the link confirm. The caller's session stays |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`email_taken`](/docs/reference/errors/#email_taken), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`email_taken`](/docs/reference/errors/#email_taken), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-identities"><code>GET /identities</code></h3>
 
@@ -193,7 +193,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
 | Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
 
@@ -211,7 +211,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is of the user who asked for the link. It need not be fresh |
 | Input | JSON or form `{ token }` |
 | Answer | A form: 302 to the app, or to `?auth_error=<code>` on a failure. JSON: `{ ok: true }`. Both clear the session cookie. The delete of `POST /user/delete` runs |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 ## Magic link
 
@@ -265,7 +265,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user is verified. The callback needs the binding cookie and the session cookie of that session. Apple's form post needs no session cookie while it is `Lax` |
 | Input | JSON or form `{ next?, data? }`. `data` is the state payload, as at the start |
 | Answer | JSON: `{ url }` and the binding cookie; the client navigates to `url`. A form: 303 to the provider. The callback links the identity to the session's user and redirects to `next`. It sets no session cookie. A failure at the callback redirects to `/?auth_error=<code>` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed). The callback answers the codes of [`GET /social/:provider/callback`](#get-social-provider-callback), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed). The callback answers the codes of [`GET /social/:provider/callback`](#get-social-provider-callback), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-social-provider-callback"><code>GET /social/:provider/callback</code></h3>
 
@@ -296,7 +296,7 @@ These routes exist when the config sets `passkey`.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
 | Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.register` for this ceremony |
 | Answer | The creation options JSON for `navigator.credentials.create`, with `hints`, and with `extensions` when `passkey.extensions` asks for one |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-passkey-register-verify"><code>POST /passkey/register/verify</code></h3>
 
@@ -305,7 +305,7 @@ These routes exist when the config sets `passkey`.
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
 | Input | JSON `{ response, name? }`. A `name` that is blank after the trim, or that breaks the rule of [`POST /passkeys/rename`](#post-passkeys-rename), is stored as no name. The registration never refuses a credential for its name |
 | Answer | `{ passkey }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-passkey-authenticate-options"><code>POST /passkey/authenticate/options</code></h3>
 
@@ -438,7 +438,7 @@ These routes exist when the config sets `password`.
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified. A first password, and a change while the second factor is on, need a fresh session |
 | Input | JSON `{ currentPassword?, newPassword }` |
 | Answer | `{ ok: true }`; every other session ends |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`sso_required`](/docs/reference/errors/#sso_required) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`sso_required`](/docs/reference/errors/#sso_required), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 ## Second factor
 
@@ -451,7 +451,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
 | Input | JSON `{ password }` |
 | Answer | `{ secret, uri, backupCodes }`, each answered once. `backupCodes` is empty when another method is on, because the factor keeps its list |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-totp-enable"><code>POST /totp/enable</code></h3>
 
@@ -460,7 +460,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
 | Input | JSON `{ code }` |
 | Answer | `{ enabled, enabledAt, backupCodesLeft, trustedDevices, methods, backupCodesVersion }`, as `GET /totp`. As the first method, it ends every other session. `totp_not_enabled` means no setup, a setup older than 15 minutes, or a setup whose codes another method made stale: set up again |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`totp_enabled`](/docs/reference/errors/#totp_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-totp-disable"><code>POST /totp/disable</code></h3>
 
@@ -532,7 +532,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, the address is verified, and the `passkey` config is set |
 | Input | JSON `{ password, response }`. `response` is an assertion over the options of [`POST /passkey/authenticate/options`](/docs/reference/routes/#post-passkey-authenticate-options) by a passkey of the user |
 | Answer | `{ methods, backupCodes }`. The codes come once, with the first method; else the list is empty. The first method ends every other session. |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-second-factor-passkey-options"><code>POST /second-factor/passkey/options</code></h3>
 
@@ -541,7 +541,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing. A live challenge that offers `passkey`, and the `passkey` config |
 | Input | JSON `{ challenge }` |
 | Answer | WebAuthn request options with the user's passkeys in `allowCredentials`, bound to this challenge |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-second-factor-disable"><code>POST /second-factor/disable</code></h3>
 
@@ -559,7 +559,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
 | Input | JSON `{ password }` |
 | Answer | `{ methods, backupCodes }`. The codes come once, with the first method; else the list is empty. The first method ends every other session. |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-second-factor-email-send"><code>POST /second-factor/email/send</code></h3>
 
@@ -657,7 +657,7 @@ Some residuals stay:
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user has a proved handle |
 | Input | JSON `{ phone }` |
 | Answer | `{ sent: true }`. A free number gets a code. A number that another account holds gets a note with no code, and the same answer. Both write a code row: the row of a held number is a decoy that no code opens. The add counts on its own key per number, so it spends no sign-in count of the number |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region), [`sms_unavailable`](/docs/reference/errors/#sms_unavailable), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region), [`sms_unavailable`](/docs/reference/errors/#sms_unavailable), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-phone-add-verify"><code>POST /phone/add/verify</code></h3>
 
@@ -666,7 +666,7 @@ Some residuals stay:
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh |
 | Input | JSON `{ code }` |
 | Answer | `{ phone }`. The number replaces the earlier phone of the user. A notice goes to the user's address |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`phone_taken`](/docs/reference/errors/#phone_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`phone_taken`](/docs/reference/errors/#phone_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-phone-remove"><code>POST /phone/remove</code></h3>
 
@@ -676,6 +676,31 @@ Some residuals stay:
 | Input | JSON `{}` |
 | Answer | `{ ok: true }`. A notice goes to the user's address |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`last_credential`](/docs/reference/errors/#last_credential), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+## Anonymous
+
+These routes exist when the config sets `anonymous`. An anonymous user has no address, no phone, no passkey, and no password: its session is its only key. A sign-in of another kind replaces the anonymous user.
+
+Some routes answer 403 `anonymous_refused` to an anonymous session, before the handler. Each needs a way in, or would change the anonymous user in place. They are the re-authentication, the profile, the address, the username, and the account delete. They are also each way in, the second factor, and the organization create and the invitation accept. The API token create, the OAuth consent, and the device approve close the list. The list holds with `anonymous` off too, so an anonymous session of an earlier config stays out.
+
+<h3 id="post-anonymous-sign-in"><code>POST /anonymous/sign-in</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing; or a session cookie, or a `ts_` bearer token. A live anonymous session answers itself and makes nothing. A live session of another kind answers `conflict` |
+| Input | JSON `{}` |
+| Answer | `{ token, user, session }` with the cookie. The user has no address and `isAnonymous: true`. No second factor gates it |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Captcha | With `captcha` and the flow `anonymous-sign-in`: the header `x-captcha-response`, after the per-IP limit |
+
+<h3 id="post-anonymous-delete"><code>POST /anonymous/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The user is anonymous. The session need not be fresh: it is the only key of the user |
+| Input | JSON `{}` |
+| Answer | `{ ok: true }` with the cleared cookie. The user and its sessions go, with `user.beforeDelete` and `user.afterDelete` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## Handoff
 
@@ -728,7 +753,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
 | Input | JSON `{ slug, name, metadata? }` |
 | Answer | `{ organization, member }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`organization_limit`](/docs/reference/errors/#organization_limit), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`organization_limit`](/docs/reference/errors/#organization_limit), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-organizations"><code>GET /organizations</code></h3>
 
@@ -827,7 +852,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The address is the invited address, and it is verified |
 | Input | JSON `{ token }` |
 | Answer | `{ organization, member }`. The accept adds the person to each team of the invitation that still exists. A full team answers `team_member_limit`, and the invitation stays pending |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-organizations-invitations-decline"><code>POST /organizations/invitations/decline</code></h3>
 
@@ -1067,7 +1092,7 @@ These routes exist in every deployment.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A token of another form answers 401 |
 | Input | JSON `{ name, expiresInDays?, organizationId?, permissions?, metadata? }`. `permissions` narrows the token and needs `organizations`; a token bound to an organization holds a subset of the user's set there. `metadata` holds at most 4096 bytes as JSON. The route takes no window and no quota |
 | Answer | `{ token, apiToken }`; the clear token appears once |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`token_limit`](/docs/reference/errors/#token_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`token_limit`](/docs/reference/errors/#token_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-tokens"><code>GET /tokens</code></h3>
 
@@ -1340,7 +1365,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Needs | A session cookie, or a `ts_` bearer token. The session is of the user that the held request names. For `prompt=login` or `max_age`, the session signed in at or after the request. `Origin` equals `baseURL` |
 | Input | Form `{ request_id, decision }`. `decision` is `allow` or `deny` |
 | Answer | 302 to the client with `code`, or with `error=access_denied`. 302 to the sign-in step for an older session of the same user, with nothing spent |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`access_denied`](/docs/reference/errors/#oauth-access_denied), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`unsupported_response_type`](/docs/reference/errors/#oauth-unsupported_response_type), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`access_denied`](/docs/reference/errors/#oauth-access_denied), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`unsupported_response_type`](/docs/reference/errors/#oauth-unsupported_response_type), [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-oauth-sign-in"><code>GET /oauth/sign-in</code></h3>
 
@@ -1403,7 +1428,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Needs | A session cookie, or a `ts_` bearer token. `oauth.device` is on. `Origin` equals `baseURL` |
 | Input | Form `{ user_code, decision? }`. Without `decision` the page shows the client of the code, its scopes, and the line "Approve only a device that is in front of you." `decision` is `allow` or `deny` |
 | Answer | 200, the device page: the form again with its error, the consent, or the end of the decision. Each post counts 5 per session and 20 per IP per 15 minutes. A found code counts 10 per 15 minutes |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-oauth-userinfo"><code>GET /oauth/userinfo</code></h3>
 
@@ -1921,7 +1946,7 @@ These routes exist when the config sets `username`. A username is public by desi
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user has a proved handle |
 | Input | JSON `{ username }` |
 | Answer | `{ username, displayUsername }`. The old name is free at once. A notice goes to the user's address |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 ## OpenAPI document
 

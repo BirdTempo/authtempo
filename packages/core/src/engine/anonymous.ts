@@ -1,0 +1,384 @@
+import { checkCaptcha } from "../captcha.js";
+import type { ResolvedConfig } from "../config.js";
+import type { RouteKey } from "../http/route-list.js";
+import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
+import { fail, ok, type Result } from "../result.js";
+import type { SessionRow, UserRow } from "../schema.js";
+import type { Meter } from "../storage/meter.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
+import { createSteps } from "./create-steps.js";
+import { hookGuard, runAfter, runBefore } from "./hooks.js";
+import {
+  endedList,
+  endSessions,
+  prepareSession,
+  type ResolvedSession,
+  sessionIsLive,
+  sessionOpened,
+  sessionsEnded,
+  writeSession,
+} from "./sessions.js";
+import { holdUsers } from "./user-hold.js";
+import { draftUserRow } from "./users.js";
+
+/**
+ * Anonymous sign-in (plan 12i Task 6, spec 32 item 8). An anonymous user
+ * has no address, no phone, no passkey, and no password: zero ways in. Its
+ * session is the only key to its data. A sign-in of Task 7 replaces it.
+ */
+
+/**
+ * The routes that answer 403 `anonymous_refused` to an anonymous session,
+ * before the handler. An anonymous user has zero ways in (12a). Each entry
+ * is a privilege or a credential change that needs one. A change of address
+ * or phone on an anonymous user would keep its id. That is the in-place
+ * upgrade that owner decision 2 refuses (plan 12i). The account delete has
+ * its own route for an anonymous user, `POST /anonymous/delete`. Each entry
+ * declares the code in `ROUTES`, and anonymous.test.ts holds both ways.
+ */
+export const ANONYMOUS_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
+  // The re-authentication: an anonymous user has no proof to give.
+  "POST /reauth",
+  "POST /reauth/passkey/options",
+  "POST /reauth/email",
+  // The profile, the address, and the username: each keeps the id (owner decision 2).
+  "POST /user/update",
+  "POST /user/change-email",
+  "POST /user/change-email/verify",
+  "POST /user/username",
+  // The account delete of a user with a way in; the anonymous user has its own.
+  "POST /user/delete",
+  "POST /user/delete/confirm",
+  // The ways in: a social link, a passkey, a password, and a phone.
+  "POST /social/:provider/link",
+  "POST /passkey/register/options",
+  "POST /passkey/register/verify",
+  "POST /password/change",
+  "POST /phone/add",
+  "POST /phone/add/verify",
+  // The second factor: a factor needs a first way in.
+  "POST /totp/setup",
+  "POST /totp/enable",
+  "POST /second-factor/passkey/options",
+  "POST /second-factor/passkey/enable",
+  "POST /second-factor/email/enable",
+  // The privileges: an organization, an API token, and an OAuth grant.
+  "POST /organizations/create",
+  "POST /organizations/invitations/accept",
+  "POST /tokens",
+  "POST /oauth/authorize",
+  "POST /oauth/device",
+]);
+
+/**
+ * Each model with a `userId` field (`USER_CHILD_MODELS`), and what the
+ * anonymous delete does with it. `delete` names the rows that it deletes.
+ * Each other entry states the guard that keeps the rows from an anonymous
+ * user, in the route list and in the engine. anonymous.test.ts holds the
+ * keys to `USER_CHILD_MODELS`, so a new model fails until it gets an entry.
+ */
+export const ANONYMOUS_ROWS: Readonly<Record<string, string>> = {
+  session: "delete",
+  identity:
+    "The social link is refused, and linkSocial needs a verified address; a sign-in finds or makes another user.",
+  passkey: "The passkey register is refused, and provedAccount refuses it in process.",
+  member:
+    "The organization create and the invitation accept are refused; each needs a verified address in process, as a member add does.",
+  password:
+    "The password change is refused, and provedAccount refuses a first password in process.",
+  apiToken: "The token create is refused, and handleProved refuses it in process.",
+  totp: "The TOTP setup is refused, and provedAccount refuses it in process.",
+  trustedDevice: "A trusted device comes from a challenge, and an anonymous user has no factor.",
+  oauthConsent: "The OAuth authorize is refused, and provedAccount refuses a grant in process.",
+  oauthToken: "The OAuth authorize is refused, and provedAccount refuses a grant in process.",
+  oauthSubject: "The OAuth authorize is refused, and provedAccount refuses a grant in process.",
+  oauthSessionClient:
+    "The OAuth authorize is refused, and provedAccount refuses a grant in process.",
+  oauthDevice: "The device approve is refused, and provedAccount refuses it in process.",
+  oauthLogout: "An outbox row comes from a client link, and an anonymous session has none.",
+  secondFactor: "Each method enable is refused, and provedAccount refuses it in process.",
+  teamMember: "A team member is a member of the organization first.",
+  scimUser: "A SCIM user links by address, and an anonymous user has none.",
+};
+
+// Per hour, per IP (spec 32 item 8): each sign-in writes a user row.
+export const ANONYMOUS_PER_IP = { seconds: 3600, max: 10 };
+// Per hour, per user, as the account delete (plan 12a): a delete succeeds once.
+export const ANONYMOUS_DELETE_PER_USER = { seconds: 3600, max: 5 };
+
+/**
+ * The users of one page of the anonymous delete. A query with 50 ids stays
+ * under the 100 bound parameters of D1. The source is the D1 limits page,
+ * updated 21 April 2026, read 2026-10-24.
+ */
+export const ANONYMOUS_PAGE = 50;
+/** The most anonymous users of one sweep (spec 32 item 8). */
+export const ANONYMOUS_SWEEP_MAX = 100;
+/**
+ * The calls of one page of the sweep step: the read of the users, the read
+ * of their sessions, and in one transaction the read of the users again,
+ * the user delete, and the session delete. The lock reads of Postgres do
+ * not count: the budget is the D1 budget, and D1 has no lock read.
+ */
+export const ANONYMOUS_PAGE_CALLS = 5;
+
+export interface AnonymousSignIn {
+  /** The caller's live session and its token, or null. */
+  current: { session: ResolvedSession; token: string } | null;
+  ip: string | null;
+  userAgent: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
+}
+
+export interface AnonymousSession {
+  token: string;
+  user: UserRow;
+  session: SessionRow;
+}
+
+/**
+ * `POST /anonymous/sign-in` (spec 32 item 8). A live anonymous session
+ * answers itself and writes nothing. A live session of another kind answers
+ * `conflict`. Else the per-IP limit and the captcha run. Then one
+ * transaction runs the sign-up rule and `user.beforeCreate` on the draft
+ * (`createSteps`), and the session hook. Then it writes the user row and the
+ * session row. There is no gate: an anonymous user can hold no factor
+ * (Review Focus 1).
+ */
+export async function signInAnonymous(
+  config: ResolvedConfig,
+  input: AnonymousSignIn,
+): Promise<Result<AnonymousSession>> {
+  if (!config.anonymous) return fail("not_found");
+  if (input.current) {
+    const { session, token } = input.current;
+    if (!session.user.isAnonymous) return fail("conflict");
+    return ok({ token, user: session.user, session: session.session });
+  }
+  if (!(await limit(config, "anonymous:ip", ipKey(input.ip), ANONYMOUS_PER_IP)))
+    return fail("rate_limited");
+  const captcha = await checkCaptcha(config, "anonymous-sign-in", input.captchaToken, input.ip);
+  if (captcha) return captcha;
+  const now = config.clock.now();
+  const made = createSteps(config, "anonymous", { signUpRule: true });
+  const opened = await hookGuard(async () =>
+    ok(
+      await config.storage.transaction(async (tx) => {
+        made.begin();
+        const user = await made.user(
+          tx,
+          draftUserRow({ email: null, emailVerified: false, name: null, isAnonymous: true }, now),
+        );
+        // Every hook runs before the first write: the D1 undo (`BeforeResolveWrite` in users.ts).
+        const prepared = await prepareSession(
+          config,
+          { user, ip: input.ip, userAgent: input.userAgent, via: "anonymous" },
+          tx,
+        );
+        await tx.create("user", user);
+        return { user, ...(await writeSession(config, prepared, tx)) };
+      }),
+    ),
+  );
+  if (!opened.ok) return opened;
+  const { user, token, session } = opened.value;
+  await made.after(user);
+  await sessionOpened(config, session, user, "anonymous");
+  return ok({ token, user, session });
+}
+
+export interface AnonymousDelete {
+  session: ResolvedSession;
+}
+
+/**
+ * `POST /anonymous/delete` (spec 32 item 8). Only an anonymous session may
+ * call it: another session answers `anonymous_refused`. It needs no fresh
+ * session: the session is the only key of an anonymous user. It deletes
+ * through `deleteAnonymousUsers`, with `user.beforeDelete` in the
+ * transaction and `user.afterDelete` after the commit.
+ */
+export async function deleteAnonymous(
+  config: ResolvedConfig,
+  input: AnonymousDelete,
+): Promise<Result<{ ok: true }>> {
+  if (!config.anonymous) return fail("not_found");
+  const { user, session } = input.session;
+  if (!user.isAnonymous) return fail("anonymous_refused");
+  if (!(await limit(config, "anonymous-delete:user", user.id, ANONYMOUS_DELETE_PER_USER)))
+    return fail("rate_limited");
+  const ended = endedList(config);
+  const done = await hookGuard(async () =>
+    ok(
+      await deleteAnonymousUsers(config, [user.id], config.clock.now(), {
+        proof: session.id,
+        ended: ended ?? null,
+      }),
+    ),
+  );
+  if (!done.ok) return done;
+  if (done.value.users.length === 0) return fail("unauthorized");
+  await anonymousDeleted(config, done.value, ended);
+  return ok({ ok: true });
+}
+
+/** What one call of `deleteAnonymousUsers` deleted. */
+export interface AnonymousDeleted {
+  users: UserRow[];
+  sessions: number;
+}
+
+/**
+ * The one delete of anonymous users (plan 12i Task 6, the lane ruling). The
+ * account delete of plan 12a costs about 40 queries for one user. So it
+ * fits neither a page of the sweep nor its share of the D1 budget. This
+ * delete costs 3 calls for a page of up to `ANONYMOUS_PAGE` users, plus
+ * the session reads of a route call. It deletes the rows of
+ * `ANONYMOUS_ROWS`: the user rows and their sessions.
+ *
+ * It runs in one transaction. First the hold of the user rows (a lock on
+ * Postgres), and the read of the rows that are still anonymous. Then the
+ * user delete, and then the session delete, in the order of user-hold.ts. A
+ * parallel delete of the same user then finds no row. So each
+ * `user.afterDelete` fires once.
+ *
+ * With `route`, the call is the route's, for one user. The session of the
+ * proof must still be live, and `user.beforeDelete` runs before the first
+ * write. `endSessions` ends the sessions with the outbox and the `afterEnd`
+ * list. Without `route`, the call is the sweep's. No user of it has a live
+ * session, so no client link and no hook of a session end applies.
+ */
+export async function deleteAnonymousUsers(
+  config: ResolvedConfig,
+  ids: readonly string[],
+  now: Date,
+  route?: { proof: string; ended: SessionRow[] | null },
+): Promise<AnonymousDeleted> {
+  if (ids.length === 0 || ids.length > ANONYMOUS_PAGE)
+    throw new RangeError(`authtempo: an anonymous delete takes 1 to ${ANONYMOUS_PAGE} users`);
+  const byIds: Where<"user">[] = [
+    { field: "id", op: "in", value: [...ids].sort() },
+    { field: "isAnonymous", op: "eq", value: true },
+  ];
+  return config.storage.transaction(async (tx) => {
+    if (route?.ended) route.ended.length = 0;
+    // The user hold of user-hold.ts: the lock of the rows by id on Postgres.
+    await holdUsers(tx, ids);
+    const users = await tx.findMany("user", byIds, { sort: { field: "id", dir: "asc" } });
+    if (users.length === 0) return { users, sessions: 0 };
+    if (route) {
+      const proof = await tx.findOne("session", [{ field: "id", op: "eq", value: route.proof }]);
+      if (!proof || !sessionIsLive(config, proof, now)) return { users: [], sessions: 0 };
+      for (const user of users)
+        await runBefore(config.observe, "user.beforeDelete", config.hooks.user.beforeDelete, {
+          user,
+          organizations: [],
+        });
+    }
+    const userIds = users.map((u) => u.id);
+    await tx.delete("user", [{ field: "id", op: "in", value: userIds }]);
+    const sessions = route
+      ? await endSessionsOf(tx, userIds, route.ended, now)
+      : await deleteSessionsOf(tx, userIds);
+    return { users, sessions };
+  });
+}
+
+/** The route's end of the sessions of one user, with the outbox and the `afterEnd` list. */
+function endSessionsOf(
+  tx: StorageAdapter,
+  userIds: string[],
+  ended: SessionRow[] | null,
+  now: Date,
+): Promise<number> {
+  const [userId] = userIds;
+  if (userId === undefined || userIds.length !== 1)
+    throw new RangeError("authtempo: the route deletes one anonymous user");
+  return endSessions(tx, [{ field: "userId", op: "eq", value: userId }], ended, now, null);
+}
+
+/**
+ * The sweep's delete of the sessions of a page: none is live, so the rows
+ * go in one statement, after the lock of Postgres. A client link of such a
+ * session becomes an outbox row at the link step of the sweep.
+ */
+async function deleteSessionsOf(tx: StorageAdapter, userIds: string[]): Promise<number> {
+  const where: Where<"session">[] = [{ field: "userId", op: "in", value: userIds }];
+  await tx.lockInOrder?.("session", where);
+  return tx.delete("session", where);
+}
+
+/** After the commit: the end of the sessions, then `user.afterDelete` once per user. */
+async function anonymousDeleted(
+  config: ResolvedConfig,
+  deleted: AnonymousDeleted,
+  ended: SessionRow[] | undefined,
+): Promise<void> {
+  await sessionsEnded(config, ended, "account_deleted", null, deleted.sessions);
+  for (const user of deleted.users)
+    await runAfter(
+      config.observe,
+      "user.afterDelete",
+      config.hooks.user.afterDelete,
+      { user },
+      user.id,
+    );
+}
+
+/**
+ * The anonymous step of the sweep (spec 32 item 8): anonymous users made
+ * more than `ttlDays` ago with no live session, at most
+ * `ANONYMOUS_SWEEP_MAX` per run, oldest first. Each page costs
+ * `ANONYMOUS_PAGE_CALLS` calls, and a page that does not fit inside `cap`
+ * waits for the next sweep. A user with a live session stays, and the next
+ * page of the run starts after it. It runs no `user.beforeDelete`: an
+ * expiry is no act of the user, and a refusal would hold the page.
+ */
+export async function sweepAnonymous(
+  config: ResolvedConfig,
+  now: Date,
+  meter: Meter,
+  cap: number,
+): Promise<number> {
+  const ttl = config.anonymous?.ttlDays;
+  if (ttl === undefined) return 0;
+  const before = new Date(now.getTime() - ttl * 24 * 60 * 60 * 1000);
+  let n = 0;
+  // The id of the last user of the page before: an id grows with its time (newId).
+  let after: string | null = null;
+  while (n < ANONYMOUS_SWEEP_MAX && meter.used + ANONYMOUS_PAGE_CALLS <= cap) {
+    const take = Math.min(ANONYMOUS_PAGE, ANONYMOUS_SWEEP_MAX - n);
+    const where: Where<"user">[] = [
+      { field: "isAnonymous", op: "eq", value: true },
+      { field: "createdAt", op: "lt", value: before },
+    ];
+    // A user with a live session stays, and must not hold the next page of the run.
+    if (after !== null) where.push({ field: "id", op: "gt", value: after });
+    const page = await config.storage.findMany("user", where, {
+      sort: { field: "id", dir: "asc" },
+      limit: take,
+    });
+    meter.step(1);
+    if (page.length === 0) break;
+    const sessions = await config.storage.findMany("session", [
+      { field: "userId", op: "in", value: page.map((u) => u.id) },
+    ]);
+    meter.step(1);
+    const live = new Set(
+      sessions.filter((s) => sessionIsLive(config, s, now)).map((s) => s.userId),
+    );
+    const going = page.filter((u) => !live.has(u.id)).map((u) => u.id);
+    if (going.length > 0) {
+      const deleted = await deleteAnonymousUsers(config, going, now);
+      meter.step(ANONYMOUS_PAGE_CALLS - 2);
+      await anonymousDeleted(config, deleted, undefined);
+      n += deleted.users.length;
+    }
+    const last = page.at(-1);
+    if (page.length < take || !last) break;
+    after = last.id;
+  }
+  return n;
+}

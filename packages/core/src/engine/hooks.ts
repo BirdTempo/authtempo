@@ -51,7 +51,8 @@ export type SessionVia =
   | "email_otp"
   | "impersonation"
   | "sso"
-  | "phone";
+  | "phone"
+  | "anonymous";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -66,6 +67,7 @@ export const SESSION_VIA = {
   impersonation: true,
   sso: true,
   phone: true,
+  anonymous: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -384,6 +386,7 @@ export const USER_CREATE_VIA = {
   email_otp: true,
   sso: true,
   phone: true,
+  anonymous: true,
   password_reset: true,
   operator: true,
   scim: true,

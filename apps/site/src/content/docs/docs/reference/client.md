@@ -105,6 +105,8 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.phone.add({ phone })` | `POST /phone/add` | `{ sent: true }`. It needs a fresh session |
 | `client.phone.verifyAdd({ code })` | `POST /phone/add/verify` | `{ phone }`. It needs a fresh session |
 | `client.phone.remove()` | `POST /phone/remove` | `{ ok: true }`. It needs a fresh session |
+| `client.anonymous.signIn({ captchaToken? })` | `POST /anonymous/sign-in` | `{ token }` and `PublicSession` of a new anonymous user, or of the live anonymous session |
+| `client.anonymous.delete()` | `POST /anonymous/delete` | `{ ok: true }`. Only an anonymous session may call it |
 | `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
 | `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
