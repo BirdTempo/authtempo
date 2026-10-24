@@ -4,7 +4,7 @@ import { organizationChange } from "../observe/events.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRow, TeamMemberRow, TeamRow, UserRow } from "../schema.js";
-import { findManyIn, IN_CHUNK } from "../storage/batch.js";
+import { findManyIn, findManyList, insertRows, listChunks } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
@@ -608,10 +608,11 @@ export async function addTeamMember(
  * again. The answer is the new rows. The caller runs `afterAddTeamMember`
  * after its commit.
  *
- * Cost: one statement of the hold per 50 persons on Postgres and none on
- * D1, the team lock, one read per 50 persons of the member rows and of the
- * team rows, the count, one create per chunk of `rowsPerInsert` new rows
- * (ruling 57 of plan 12d), and one read per 50 of the users. A SCIM write reads no user with the hold of `holdUser`: on D1 that
+ * Cost: one statement of the hold per list of `listChunks` (up to 1000
+ * persons) on Postgres and none on D1, the team lock, one read per list
+ * of the member rows and of the team rows, the count, one create per chunk
+ * of `rowChunks` new rows (rulings 57 and 84 of plan 12d), and one read
+ * per list of the users. A SCIM write reads no user with the hold of `holdUser`: on D1 that
  * hold costs three statements per person.
  */
 export async function addTeamMembersIn(
@@ -642,7 +643,7 @@ export async function addTeamMembersIn(
   // So the removal commits before this read, or it waits for this commit.
   const members = new Set(
     (
-      await findManyIn(tx, "member", "userId", ids, [
+      await findManyList(tx, "member", "userId", ids, [
         { field: "organizationId", op: "eq", value: team.organizationId },
       ])
     ).map((m) => m.userId),
@@ -651,7 +652,7 @@ export async function addTeamMembersIn(
   // A no-op add runs no hook. The unique key stays the guard for a race.
   const inTeam = new Set(
     (
-      await findManyIn(tx, "teamMember", "userId", ids, [
+      await findManyList(tx, "teamMember", "userId", ids, [
         { field: "teamId", op: "eq", value: team.id },
       ])
     ).map((r) => r.userId),
@@ -695,8 +696,8 @@ export async function addTeamMembersIn(
         },
       );
     }
-  // One statement per chunk of rows (ruling 57 of plan 12d).
-  await tx.createMany("teamMember", rows);
+  // One statement per chunk of rows (rulings 57 and 84 of plan 12d).
+  await insertRows(tx, "teamMember", rows);
   await usersStay(
     tx,
     rows.map((r) => r.userId),
@@ -805,8 +806,9 @@ export interface TeamMemberEvent {
  * `createTeamIn` says. `teamLocked` is the flag of `addTeamMembersIn`. The
  * caller runs `afterRemoveTeamMember` after its commit.
  *
- * Cost: per 50 persons, one session lock statement on Postgres (none on
- * D1), one delete, and one session update. Then the team lock once.
+ * Cost: per list of `listChunks` (up to 1000 persons, ruling 84 of plan
+ * 12d), one session lock statement on Postgres (none on D1), one delete,
+ * and one session update. Then the team lock once.
  */
 export async function removeTeamMembersIn(
   config: ResolvedConfig,
@@ -822,8 +824,8 @@ export async function removeTeamMembersIn(
   const { team } = input;
   const ids = [...new Set(input.userIds)].sort();
   if (ids.length === 0) return ok(true);
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += IN_CHUNK) chunks.push(ids.slice(i, i + IN_CHUNK));
+  // One statement per list of up to 1000 persons (ruling 84 of plan 12d).
+  const chunks = listChunks(ids);
   // The session locks come before the team row, in the order of user-hold.ts (ruling 48).
   for (const chunk of chunks)
     await tx.lockInOrder?.("session", [{ field: "userId", op: "in", value: chunk }]);

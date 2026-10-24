@@ -23,12 +23,14 @@ import type {
   MemberRow,
   OperatorAuditRow,
   OrganizationRow,
+  ScimGroupMemberRow,
   ScimGroupRow,
   ScimUserRow,
+  TeamMemberRow,
   TeamRow,
   UserRow,
 } from "../../schema.js";
-import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
+import { findManyList, IN_CHUNK, listCalls, listChunks, rowChunks } from "../../storage/batch.js";
 import type { Meter } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
@@ -400,19 +402,19 @@ async function planRoles(
   const userIds = [...byScimUser.keys()];
   if (userIds.length === 0) return none;
   const org = { field: "organizationId" as const, op: "eq" as const, value: organization.id };
-  const members = await findManyIn(tx, "member", "userId", userIds, [org]);
+  const members = await findManyList(tx, "member", "userId", userIds, [org]);
   const groups = await mappedGroups(tx, organization.id, r.facts);
   const names = new Map(groups.map((g) => [g.id, g.displayName]));
   const read =
     groups.length === 0
       ? []
-      : await findManyIn(
+      : await findManyList(
           tx,
           "scimGroupMember",
           "scimUserId",
           r.rows.map((x) => x.id),
         );
-  meter.step(3 * Math.ceil(userIds.length / IN_CHUNK) + 1);
+  meter.step(2 * listCalls(userIds) + listCalls(r.rows.map((x) => x.id)) + 1);
   // The rows as the write leaves them: the rows of this group are its new member set.
   const of = [
     ...read.filter((m) => m.groupId !== group.id),
@@ -435,23 +437,23 @@ async function planRoles(
     changes.push({ member, role, user: null });
   }
   if (changes.length === 0) return none;
-  // One update per role change and chunk of 50 members: two statements each on D1.
+  // One update per role change and list of up to 1000 members: two statements each on D1.
   const byPair = new Map<string, RoleChange[]>();
   for (const c of changes) {
     const key = `${c.member.role}\u0000${c.role}`;
     byPair.set(key, [...(byPair.get(key) ?? []), c]);
   }
   const pairs = [...byPair.values()];
-  const updates = pairs.reduce((n, l) => n + Math.ceil(l.length / IN_CHUNK), 0);
+  const updates = pairs.reduce((n, l) => n + listCalls(l.map((c) => c.member.id)), 0);
   const hooks = config.hooks.organization;
   const hooked =
     hooks.beforeUpdateMemberRole !== undefined || hooks.afterUpdateMemberRole !== undefined;
-  const reads = hooked ? Math.ceil(changes.length / IN_CHUNK) : 0;
+  const reads = hooked ? listCalls(changes.map((c) => c.member.userId)) : 0;
   if (meter.used + reads + 2 * updates + tail > OPERATOR_CALL_BUDGET) throw new TooLarge();
   if (hooked) {
     const users = new Map(
       (
-        await findManyIn(
+        await findManyList(
           tx,
           "user",
           "id",
@@ -481,9 +483,10 @@ async function planRoles(
 }
 
 /**
- * The role updates of a plan, per role change, in chunks of 50 members,
- * each with the role it read. Fewer rows: a role changed after the read,
- * and the write stops.
+ * The role updates of a plan, per role change, in the lists of
+ * `listChunks` (up to 1000 members, ruling 84 of plan 12d), each with the
+ * role it read. Fewer rows: a role changed after the read, and the write
+ * stops.
  */
 async function applyRoles(
   tx: StorageAdapter,
@@ -492,23 +495,24 @@ async function applyRoles(
   now: Date,
 ): Promise<RoleChange[]> {
   let updates = 0;
-  for (const list of plan.pairs)
-    for (let i = 0; i < list.length; i += IN_CHUNK) {
-      const chunk = list.slice(i, i + IN_CHUNK);
-      const first = chunk[0];
-      if (!first) continue;
+  for (const list of plan.pairs) {
+    // Each change of the list has the same role pair.
+    const first = list[0];
+    if (!first) continue;
+    for (const ids of listChunks(list.map((c) => c.member.id))) {
       const n = await tx.update(
         "member",
         [
-          { field: "id", op: "in", value: chunk.map((c) => c.member.id) },
+          { field: "id", op: "in", value: ids },
           { field: "role", op: "eq", value: first.member.role },
         ],
         { role: first.role, updatedAt: now },
       );
       updates++;
       // Fewer rows: a role changed after the read. The throw undoes each write.
-      if (n < chunk.length) stopWith("conflict");
+      if (n < ids.length) stopWith("conflict");
     }
+  }
   meter.step(2 * updates);
   return plan.changes;
 }
@@ -574,6 +578,8 @@ interface MemberStep {
   /** The member set that the write leaves: empty for a delete. */
   after: ReadonlySet<string>;
   added: readonly string[];
+  /** The scimGroupMember rows of `added`, in the chunks of `rowChunks`. */
+  rows: readonly (readonly ScimGroupMemberRow[])[];
   removed: readonly string[];
   recompute: Recompute | null;
   now: Date;
@@ -599,12 +605,8 @@ async function writeMembers(
   const org = { field: "organizationId" as const, op: "eq" as const, value: m.organization.id };
   const r = m.recompute;
   if (r !== null) {
-    const ids = [...new Set(r.rows.map((x) => x.userId))].sort();
-    for (let i = 0; i < ids.length; i += IN_CHUNK)
-      await t.lockInOrder?.("member", [
-        org,
-        { field: "userId", op: "in", value: ids.slice(i, i + IN_CHUNK) },
-      ]);
+    for (const ids of listChunks([...new Set(r.rows.map((x) => x.userId))].sort()))
+      await t.lockInOrder?.("member", [org, { field: "userId", op: "in", value: ids }]);
   }
   const plan =
     r === null
@@ -620,27 +622,18 @@ async function writeMembers(
         );
   if (all) await t.delete("scimGroupMember", [{ field: "groupId", op: "eq", value: m.groupId }]);
   else {
-    for (let i = 0; i < m.removed.length; i += IN_CHUNK)
+    for (const ids of listChunks(m.removed))
       await t.delete("scimGroupMember", [
         { field: "groupId", op: "eq", value: m.groupId },
-        { field: "scimUserId", op: "in", value: m.removed.slice(i, i + IN_CHUNK) },
+        { field: "scimUserId", op: "in", value: ids },
       ]);
-    // One statement per chunk of rows (ruling 57 of plan 12d).
-    await t.createMany(
-      "scimGroupMember",
-      m.added.map((scimUserId) => ({
-        id: newId(m.now),
-        groupId: m.groupId,
-        scimUserId,
-        createdAt: m.now,
-        updatedAt: m.now,
-      })),
-    );
+    // One statement per chunk of rows (rulings 57 and 84 of plan 12d).
+    for (const chunk of m.rows) await t.createMany("scimGroupMember", chunk);
     // The read after the inserts: a SCIM delete or an account delete of a User that
     // ended before the hold took its row. Then the write stops, and no row stays.
     if (
       m.added.length > 0 &&
-      (await findManyIn(t, "scimUser", "id", m.added, [org])).length < m.added.length
+      (await findManyList(t, "scimUser", "id", m.added, [org])).length < m.added.length
     )
       stopWith("conflict");
   }
@@ -649,33 +642,32 @@ async function writeMembers(
 
 /**
  * The calls of the transaction that the meter does not see, at the worst
- * (Behavior 2). Where the storage has row locks (`locks`): one hold per 50
- * users of `holds`. The scimGroupMember rows: `rows` calls (`rowCalls`).
- * Per 50 persons who leave the team: the session lock
- * on Postgres or the undo read on D1, the team member delete, and the
- * session update. Per 50 persons who join it: the hold where the storage
- * has row locks, the reads of the member rows and the team rows, and the
- * read after the inserts; then the count and one create per chunk of
- * `rowsPerInsert` rows (ruling 57 of plan 12d). A team delete: the team
- * member delete and the session update with its undo read on D1. Then the
- * audit row.
+ * (Behavior 2). Each list call sends one statement per list of
+ * `listChunks`: up to 1000 ids (ruling 84 of plan 12d). Where the storage
+ * has row locks (`locks`): the hold of `holds`. The scimGroupMember rows:
+ * `rows` calls (`rowCalls`). For the persons who leave the team: the
+ * session lock on Postgres or the undo read on D1, the team member delete,
+ * and the session update. For the persons who join it: the hold where the
+ * storage has row locks, the reads of the member rows and the team rows,
+ * and the read after the inserts; then the count and one create per chunk
+ * of `rowChunks` (`inserts`). A team delete: the team member delete and
+ * the session update with its undo read on D1. Then the audit row.
  */
 function tailOf(
   storage: StorageAdapter,
-  adds: number,
-  removes: number,
+  joins: readonly string[],
+  leaves: readonly string[],
+  inserts: number,
   teamDelete: boolean,
-  holds: number,
+  holds: readonly string[],
   rows: number,
 ): number {
-  const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
   const locks = storage.lockInOrder !== undefined;
-  const inserts = Math.ceil(adds / storage.rowsPerInsert("teamMember"));
   return (
-    (locks ? chunks(holds) : 0) +
+    (locks ? listCalls(holds) : 0) +
     rows +
-    (removes > 0 ? 3 * chunks(removes) : 0) +
-    (adds > 0 ? (locks ? 4 : 3) * chunks(adds) + 1 + inserts : 0) +
+    3 * listCalls(leaves) +
+    (joins.length > 0 ? (locks ? 4 : 3) * listCalls(joins) + 1 + inserts : 0) +
     (teamDelete ? 3 : 0) +
     1
   );
@@ -683,21 +675,20 @@ function tailOf(
 
 /**
  * The calls of the scimGroupMember rows of a write: one delete for a group
- * delete. Else one delete per 50 removed members, one create per chunk of
- * `rowsPerInsert` added members (ruling 57 of plan 12d), and one read after
- * the creates per 50 of them. A D1 run of ruling 59 of plan 12d found these
- * calls outside the meter: a write of 51 queries passed the budget check.
+ * delete. Else one delete per list of removed members, one create per
+ * chunk of rows (rulings 57 and 84 of plan 12d), and one read after the
+ * creates per list of added members. A D1 run of ruling 59 of plan 12d
+ * found these calls outside the meter: a write of 51 queries passed the
+ * budget check.
  */
 function rowCalls(
-  storage: StorageAdapter,
   kind: Write["kind"],
-  added: number,
-  removed: number,
+  added: readonly string[],
+  removed: readonly string[],
+  chunks: number,
 ): number {
-  const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
   if (kind === "delete") return 1;
-  const inserts = Math.ceil(added / storage.rowsPerInsert("scimGroupMember"));
-  return chunks(removed) + inserts + chunks(added);
+  return listCalls(removed) + chunks + listCalls(added);
 }
 
 /**
@@ -761,9 +752,9 @@ async function writeGroup(
   // delete, so it reads no User of a removed member.
   const wanted = new Set([...added, ...(write.kind === "delete" ? [] : removed), ...again]);
   const users = new Map(
-    (await findManyIn(storage, "scimUser", "id", [...wanted], [org])).map((x) => [x.id, x]),
+    (await findManyList(storage, "scimUser", "id", [...wanted], [org])).map((x) => [x.id, x]),
   );
-  meter.step(Math.ceil(wanted.size / IN_CHUNK));
+  meter.step(listCalls([...wanted]));
   // Behavior 1: each added member is a User of this organization. A group id, an id of
   // another organization, or an unknown id reads as no row.
   if (added.some((id) => !users.has(id)))
@@ -806,13 +797,42 @@ async function writeGroup(
   // its user. A reactivate holds its user before it reads the groups, so the two run one
   // at a time (ruling 59 M2 of plan 12d). A delete reads no User of a removed member.
   const holds = [...new Set(rowsOf([...added, ...removed, ...again]).map((x) => x.userId))];
+  // The rows of the write, in the chunks of the inserts (ruling 84 of plan 12d).
+  const memberRows = rowChunks(
+    added.map(
+      (scimUserId): ScimGroupMemberRow => ({
+        id: newId(now),
+        groupId,
+        scimUserId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ),
+  );
+  // The team member rows at the worst: each person who joins. addTeamMembersIn writes
+  // the same rows, or fewer, in the same chunks.
+  const teamRows = teamOf
+    ? rowChunks(
+        joins.map(
+          (userId): TeamMemberRow => ({
+            id: newId(now),
+            teamId: teamOf.id,
+            organizationId: orgId,
+            userId,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        ),
+      ).length
+    : 0;
   const tail = tailOf(
     storage,
-    teamOf ? joins.length : 0,
-    teamOf && write.kind !== "delete" ? leaves.length : 0,
+    teamOf ? joins : [],
+    teamOf && write.kind !== "delete" ? leaves : [],
+    teamRows,
     write.kind === "delete" && team !== null,
-    holds.length,
-    rowCalls(storage, write.kind, added.length, removed.length),
+    holds,
+    rowCalls(write.kind, added, removed, memberRows.length),
   );
   const changedList = changedNames(write, added.length, removed.length);
   const action =
@@ -883,6 +903,7 @@ async function writeGroup(
           organization,
           after,
           added,
+          rows: memberRows,
           removed,
           recompute: r,
           now,
@@ -906,10 +927,8 @@ async function writeGroup(
         } else {
           // The sessions of those who leave the team.
           if (team && leaves.length > 0)
-            for (let i = 0; i < leaves.length; i += IN_CHUNK)
-              await tx.lockInOrder?.("session", [
-                { field: "userId", op: "in", value: [...leaves].sort().slice(i, i + IN_CHUNK) },
-              ]);
+            for (const ids of listChunks([...leaves].sort()))
+              await tx.lockInOrder?.("session", [{ field: "userId", op: "in", value: ids }]);
           let live: TeamRow | null = null;
           if (newTeam) {
             const made = await createTeamIn(config, tx, {

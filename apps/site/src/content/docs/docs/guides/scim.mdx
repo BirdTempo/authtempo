@@ -92,7 +92,7 @@ A person can move the account to an address of their own. When no verified domai
 | A `schemas` URN that core does not serve, such as a custom extension | 400 `invalidSyntax` |
 | A remove of `userName` or of a group `displayName`, or a replace of it with null | 400 `mutability` |
 | A body over 1 MB | 413 |
-| A request that changes more than 61 members of a group | 400 `invalidValue` |
+| A request that changes more than 1000 members of a group | 400 `invalidValue` |
 
 To fix a custom extension URN, remove the custom mapping in the directory, or ask for the extension.
 
@@ -106,11 +106,12 @@ To fix a custom extension URN, remove the custom mapping in the directory, or as
 - The manager of Entra ID as a list of one object.
 - The email match of Entra ID: the filter `emails[type eq "work"].value eq "<address>"`.
 - A remove of a person who is not a member: 204, and nothing changes. A directory sends a removal again after a time-out.
+- One request changes at most 1000 members of a group, inside the D1 Free budget of 50 queries. The cap is the same on D1, SQLite, Postgres, and MySQL. Okta sends up to 1000 members in one group PATCH, so its batch fits.
 - After a write of a value with `primary: true`, each other value of that attribute gets `primary: false`.
 
 ### The known gaps
 
-- One request changes at most 61 members of a group, from the D1 Free budget of 50 queries. The cap is the same on D1, SQLite, Postgres, and MySQL. Okta sends up to 1000 members in one group PATCH, and a PUT with every member. A request past the cap answers 400. Push smaller groups, or ask Okta support for a smaller batch.
+- A PUT with every member of a group that changes more than 1000 members answers 400. An Okta app of the App Integration Wizard sends such a PUT. Push the group again in smaller steps.
 - A list with no filter reads every User of the organization for `totalResults`. On Postgres with 10 000 Users, it took 29.7 ms at the median and 40.6 ms at the most (10 runs, load 14, measured 2026-10-24).
 
 ## If it fails

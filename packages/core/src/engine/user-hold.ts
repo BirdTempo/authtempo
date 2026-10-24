@@ -1,6 +1,6 @@
 import type { Observer } from "../observe/observer.js";
 import type { UserRow } from "../schema.js";
-import { findManyIn, IN_CHUNK } from "../storage/batch.js";
+import { findManyList, listChunks } from "../storage/batch.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { stopWith } from "./hooks.js";
 import { ROUNDS } from "./rounds.js";
@@ -164,7 +164,7 @@ export async function userStays(storage: StorageAdapter, userId: string): Promis
  * N3 of plan 12d). A team member add of a SCIM group holds each added
  * user, and one hold per user would cost three statements each on D1. On
  * Postgres `lockInOrder` takes the row locks by `id` ascending, one
- * statement per 50 users. So two flows that hold some of the same users
+ * statement per 1000 users (ruling 84). So two flows that hold some of the same users
  * wait on each other in one order. D1 and memory have no row lock and leave
  * it out: the read after the inserts (`usersStay`) is the one check there,
  * as it is for `holdUser`.
@@ -173,11 +173,9 @@ export async function holdUsers(
   storage: StorageAdapter,
   userIds: readonly string[],
 ): Promise<void> {
-  const ids = [...new Set(userIds)].sort();
-  for (let i = 0; i < ids.length; i += IN_CHUNK)
-    await storage.lockInOrder?.("user", [
-      { field: "id", op: "in", value: ids.slice(i, i + IN_CHUNK) },
-    ]);
+  // One statement per list of `listChunks`: up to 1000 users (ruling 84 of plan 12d).
+  for (const ids of listChunks([...new Set(userIds)].sort()))
+    await storage.lockInOrder?.("user", [{ field: "id", op: "in", value: ids }]);
 }
 
 /** The read after the inserts of `holdUsers`: `conflict` when an account delete took one of the users. */
@@ -187,5 +185,5 @@ export async function usersStay(
 ): Promise<void> {
   const ids = new Set(userIds);
   if (ids.size === 0) return;
-  if ((await findManyIn(storage, "user", "id", [...ids])).length < ids.size) stopWith("conflict");
+  if ((await findManyList(storage, "user", "id", [...ids])).length < ids.size) stopWith("conflict");
 }

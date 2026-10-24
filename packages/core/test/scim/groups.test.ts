@@ -392,10 +392,10 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     const w = await world();
     await setMap(w, { Admins: "admin" });
     const ids: string[] = [];
-    for (let i = 0; i < 62; i++) ids.push(await userOf(w, `u${i}`));
+    for (let i = 0; i < 1001; i++) ids.push(await userOf(w, `u${i}`));
     const group = await groupOf(w, "Admins");
     const before = await counts(w);
-    // 62 values: one past PATCH_MEMBERS_MAX (61, from the D1 budget, ruling 57 of plan 12d).
+    // 1001 values: one past PATCH_MEMBERS_MAX (1000, the Okta batch, ruling 84 of plan 12d).
     const over = await read(
       await scim(
         w,
@@ -406,7 +406,7 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
       ),
     );
     expect([over.status, over.body.scimType]).toEqual([400, "invalidValue"]);
-    expect(over.body.detail).toBe("one request changes at most 61 members of a group");
+    expect(over.body.detail).toBe("one request changes at most 1000 members of a group");
     // A valid add and a failed operation in one PATCH: nothing changes.
     const half = await read(
       await scim(
@@ -422,17 +422,17 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     );
     expect([half.status, half.body.scimType]).toEqual([400, "invalidValue"]);
     expect(await counts(w)).toEqual(before);
-    // 61 values fit.
+    // 1000 values fit.
     const fit = await scim(
       w,
       w.token,
       "PATCH",
       `/Groups/${group}`,
-      patch({ op: "add", path: "members", value: ids.slice(0, 61).map((value) => ({ value })) }),
+      patch({ op: "add", path: "members", value: ids.slice(0, 1000).map((value) => ({ value })) }),
     );
     expect(fit.status).toBe(204);
-    expect(await roleOf(w, ids[60] ?? "")).toBe("admin");
-  });
+    expect(await roleOf(w, ids[999] ?? "")).toBe("admin");
+  }, 60_000);
 
   it("refuses a second group with the same displayName", async () => {
     const w = await world();
@@ -810,12 +810,12 @@ describe("the review fixes of the SCIM Groups (ruling 59 of plan 12d)", () => {
     expect(await counts(w)).toEqual(before);
   });
 
-  it("answers 400 invalidValue to the delete of a mapped group past 250 members (l1)", async () => {
+  it("answers 400 invalidValue to the delete of a mapped group past 1000 members (l1)", async () => {
     const w = await world();
     const ids: string[] = [];
-    for (let i = 0; i < 251; i++) ids.push(await userOf(w, `u${i}`));
+    for (let i = 0; i < 1001; i++) ids.push(await userOf(w, `u${i}`));
     const group = await groupOf(w, "Admins");
-    for (let i = 0; i < ids.length; i += 9) {
+    for (let i = 0; i < ids.length; i += 1000) {
       const r = await scim(
         w,
         w.token,
@@ -824,12 +824,12 @@ describe("the review fixes of the SCIM Groups (ruling 59 of plan 12d)", () => {
         patch({
           op: "add",
           path: "members",
-          value: ids.slice(i, i + 9).map((value) => ({ value })),
+          value: ids.slice(i, i + 1000).map((value) => ({ value })),
         }),
       );
       expect(r.status).toBe(204);
     }
-    // The map comes last: a rename or a delete now computes 251 roles.
+    // The map comes last: a rename or a delete now computes 1001 roles (ruling 84 of plan 12d).
     await setMap(w, { Admins: "admin" });
     const before = await counts(w);
     const r = await read(await scim(w, w.token, "DELETE", `/Groups/${group}`));

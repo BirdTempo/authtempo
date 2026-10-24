@@ -23,8 +23,8 @@ const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
 const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
 /** PATCH_MEMBERS_MAX and GROUP_ROLE_USERS_MAX of groups.ts, typed here. */
-const PATCH_CAP = 61;
-const ROLE_CAP = 250;
+const PATCH_CAP = 1000;
+const ROLE_CAP = 1000;
 
 /** A view of `db` that counts each statement, and each statement of a batch. */
 function counting(db: D1Database) {
@@ -55,6 +55,8 @@ function counting(db: D1Database) {
 }
 
 const sent: MailMessage[] = [];
+/** `membersPerTeam` of the engine: one group by default, and less in the refusal scene. */
+let membersPerTeam = 10_000;
 const txt: Record<string, string[]> = {};
 const roleHooks: string[] = [];
 
@@ -70,7 +72,8 @@ function make(db: D1Database, limited: boolean, extra: Partial<AuthConfig> = {})
     organizations: {
       teams: {},
       dynamicRoles: { maxPerOrganization: 5 },
-      limits: { membersPerTeam: 1000 },
+      // The count of membersPerTeam runs; the bound is one group (GROUP_MEMBERS_MAX).
+      limits: { membersPerTeam },
     },
     sso: {
       oidc: true,
@@ -93,6 +96,7 @@ beforeEach(async () => {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   sent.length = 0;
   roleHooks.length = 0;
+  membersPerTeam = 10_000;
 });
 
 /** A magic link sign-in of `email` on `auth`: the user. */
@@ -152,7 +156,7 @@ async function acme(auth: ReturnType<typeof make>) {
   if (!map.ok) throw new Error(map.code);
   const token = await scim.tokens.create({ actor: APP, organizationId, name: "directory" });
   if (!token.ok) throw new Error(token.code);
-  return { organizationId, token: token.value.token };
+  return { organizationId, owner, token: token.value.token };
 }
 
 /**
@@ -160,11 +164,18 @@ async function acme(auth: ReturnType<typeof make>) {
  * was last used two minutes before, as after a pause of the directory. Then
  * the route also writes `lastUsedAt`, the worst case of its steps.
  */
-async function call(token: string, method: string, path: string, body?: unknown, worst = false) {
+async function call(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  worst = false,
+  limited = true,
+) {
   if (worst)
     await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
   const { db: view, c } = counting(env.DB);
-  const res = await make(view, true).handle(
+  const res = await make(view, limited).handle(
     new Request(`${API}/auth/scim/v2${path}`, {
       method,
       headers: {
@@ -186,10 +197,15 @@ async function call(token: string, method: string, path: string, body?: unknown,
 async function users(token: string, n: number, from = 0) {
   const ids: string[] = [];
   for (let i = from; i < from + n; i++) {
-    const r = await call(token, "POST", "/Users", {
-      schemas: [USER_URN],
-      userName: `u${i}@acme.example`,
-    });
+    // With no limiter: the setup sends more Users than the SCIM limit of one token allows.
+    const r = await call(
+      token,
+      "POST",
+      "/Users",
+      { schemas: [USER_URN], userName: `u${i}@acme.example` },
+      false,
+      false,
+    );
     if (r.status !== 201) throw new Error(`user ${i}: ${r.status} ${JSON.stringify(r.body)}`);
     ids.push(String(r.body.id));
   }
@@ -357,18 +373,38 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
 
   it("refuses a role change past the budget with a small undo, inside 50 queries", async () => {
     const setup = make(env.DB, false);
-    const { token } = await acme(setup);
-    // A write at the member cap: 9 adds hold the role web, and 51 the default role. The 51
-    // role changes of member to admin take two updates of 50 rows.
+    const { organizationId, owner, token } = await acme(setup);
+    // More role pairs than the worst PATCH: the dynamic roles r1 to r4 beside web, and each
+    // pair of them, each with its own group. Since ruling 84 an update of up to 1000 members
+    // is one statement, so the role pairs, not the members, fill the budget.
+    for (const name of ["r1", "r2", "r3", "r4"]) {
+      const role = await setup.api.createRole({
+        user: owner,
+        organizationId,
+        name,
+        permissions: { member: ["read"] },
+      });
+      if (!role.ok) throw new Error(role.code);
+    }
+    const single = ["web", "r1", "r2", "r3", "r4"];
+    const roles = [
+      ...single,
+      ...single.flatMap((x, i) => single.slice(i + 1).map((y) => `${x},${y}`)),
+    ];
+    const names = roles.map((_, i) => `G${i}`);
+    const map = await setup.api.scim?.setRoleMap({
+      actor: APP,
+      organizationId,
+      map: { Admins: "admin", ...Object.fromEntries(names.map((n, i) => [n, roles[i] ?? ""])) },
+    });
+    if (!map?.ok) throw new Error(`no role map: ${JSON.stringify(map)}`);
     const ids = await users(token, PATCH_CAP);
     const gone = ids[0] ?? "";
-    const web = ids.slice(1, 10);
-    const plain = ids.slice(10, PATCH_CAP);
+    // 999 members in 15 groups of 66 or 67 members.
+    const per = Math.ceil((PATCH_CAP - 1) / names.length);
     const made: string[] = [];
-    for (const [name, list] of [
-      ["Admins", [gone]],
-      ["Web", web],
-    ] as const) {
+    for (const [i, name] of ["Admins", ...names].entries()) {
+      const list = i === 0 ? [gone] : ids.slice(1 + (i - 1) * per, 1 + i * per);
       const r = await call(token, "POST", "/Groups", {
         schemas: [GROUP_URN],
         displayName: name,
@@ -383,30 +419,71 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
       teams: await count("SELECT count(*) AS n FROM ta_team_member"),
       versions: await count("SELECT sum(version) AS n FROM ta_scim_group"),
       admins: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'"),
-      web: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'web'"),
+      roles: await count("SELECT count(DISTINCT role) AS n FROM ta_member"),
       audit: await count("SELECT count(*) AS n FROM ta_operator_audit"),
     });
     const before = await state();
-    // Three role changes in one write: member to admin, web to admin, and admin to member.
+    // Sixteen role changes in one write: each of the 15 roles to admin, and admin to member.
     // Their updates and the team writes do not fit the budget, so the write stops.
     const refused = await call(
       token,
       "PATCH",
       `/Groups/${admins}`,
       patch(
-        { op: "add", path: "members", value: members([...web, ...plain]) },
+        { op: "add", path: "members", value: members(ids.slice(1, PATCH_CAP)) },
         { op: "remove", path: `members[value eq "${gone}"]` },
       ),
       true,
     );
-    expect([refused.status, refused.body.scimType]).toEqual([400, "invalidValue"]);
+    expect([refused.status, refused.body?.scimType]).toEqual([400, "invalidValue"]);
     expect(refused.body.detail).toBe(
       "the role change of this request does not fit one request; change fewer members in each request",
     );
     expect(await state()).toEqual(before);
     expect({ refused: refused.queries }).toEqual(MEASURED_TOO_LARGE);
     expect(refused.queries).toBeLessThanOrEqual(50);
-  }, 120_000);
+  }, 300_000);
+
+  it("refuses a team member add past membersPerTeam at the member cap and undoes every write, inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const ids = await users(token, 2 * PATCH_CAP);
+    const first = ids.slice(0, PATCH_CAP);
+    const second = ids.slice(PATCH_CAP);
+    const made = await call(token, "POST", "/Groups", {
+      schemas: [GROUP_URN],
+      displayName: "Admins",
+      members: members(first),
+    });
+    expect(made.status).toBe(201);
+    const id = String(made.body.id);
+    const state = async () => ({
+      groups: await count("SELECT count(*) AS n FROM ta_scim_group_member"),
+      teams: await count("SELECT count(*) AS n FROM ta_team_member"),
+      versions: await count("SELECT sum(version) AS n FROM ta_scim_group"),
+      admins: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'"),
+      sessions: await count("SELECT count(*) AS n FROM ta_session"),
+      audit: await count("SELECT count(*) AS n FROM ta_operator_audit"),
+    });
+    const before = await state();
+    // The team holds 1000 members. The team member add comes after the scimGroupMember
+    // writes, the role updates, and the team member delete, so the undo restores each.
+    membersPerTeam = PATCH_CAP;
+    const refused = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch(
+        { op: "add", path: "members", value: members(second.slice(0, PATCH_CAP - 1)) },
+        { op: "remove", path: `members[value eq "${first[0]}"]` },
+      ),
+      true,
+    );
+    expect([refused.status, refused.body?.detail]).toEqual([409, "team_member_limit"]);
+    expect(await state()).toEqual(before);
+    expect({ refused: refused.queries }).toEqual(MEASURED_TEAM_LIMIT);
+    expect(refused.queries).toBeLessThanOrEqual(50);
+  }, 300_000);
 
   it("ends a list page with members at 10000 member rows, inside 50 queries", async () => {
     const setup = make(env.DB, false);
@@ -490,17 +567,27 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
  * 50 queries. The 62nd value (`over`) answers 400 after 6 queries. The
  * other counts are the same numbers as at 9 members: the inserts of 61
  * rows cost as few queries as the creates of 9 rows did.
+ *
+ * Measured again on 2026-10-24 for ruling 84 of plan 12d, with the list
+ * forms and PATCH_MEMBERS_MAX 1000: `mixed` is 999 adds and 1 removal, 41
+ * queries. A read, a delete, and an update of up to 1000 ids is one
+ * statement, and an insert of 1000 rows is one per chunk of
+ * `rowChunks`. The 1001st value
+ * (`over`) answers 400 after 6 queries. The rename and the delete of a
+ * mapped group of 1000 members (GROUP_ROLE_USERS_MAX) send 21, 22, and 24.
+ * The scratch measure of the same day at 1, 61, 500, and 1000 values:
+ * create 26, 26, 28, 32; mixed 26, 35, 37, 41.
  */
 const MEASURED_CAP = {
-  create: 42,
+  create: 32,
   over: 6,
-  mixed: 50,
-  adds: 45,
+  mixed: 41,
+  adds: 35,
   get: 6,
   list: 5,
   check: 6,
 };
-const MEASURED_ROLES = { rename: 41, back: 46, delete: 44 };
+const MEASURED_ROLES = { rename: 21, back: 22, delete: 24 };
 /**
  * Measured again on 2026-10-22 for ruling 59 of plan 12d, one test file
  * alone, at a load of 6 to 12. The reactivate reads the role of its
@@ -517,8 +604,19 @@ const MEASURED_REACTIVATE = { reactivate: 33 };
  * 51 queries. Since ruling 57 the write of 9 values fits, so the scene
  * sends 61 values with two updates of the role member to admin: 23 queries
  * on 2026-10-24.
+ *
+ * Since ruling 84 of plan 12d one update takes up to 1000 members. So the
+ * scene sends 1000 values with 16 role pairs: 20 queries on 2026-10-24.
  */
-const MEASURED_TOO_LARGE = { refused: 23 };
+const MEASURED_TOO_LARGE = { refused: 20 };
+/**
+ * The refusal of a team member add past `membersPerTeam`, at the member
+ * cap (ruling 84 of plan 12d). It comes after the scimGroupMember writes,
+ * the role updates, and the team member delete. The D1 undo restores the
+ * rows of each write with one statement per list: 45 queries in all on
+ * 2026-10-24.
+ */
+const MEASURED_TEAM_LIMIT = { refused: 45 };
 /** Two list pages with members, each of whole groups, at most 10000 member rows. */
 const MEASURED_LIST = { first: 6, next: 6 };
 
