@@ -10,10 +10,19 @@ import {
   verifyPasswordEmail,
 } from "../src/engine/password.js";
 import { later } from "../src/engine/second-factor.js";
+import { resolveSocialUser } from "../src/engine/social.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
-import { BASE_URL, get, post, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
+import {
+  BASE_URL,
+  get,
+  noVerifyHooks,
+  post,
+  recordAddress,
+  recordCredential,
+  tokenFromMail,
+} from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
@@ -289,8 +298,29 @@ describe("the username (plan 12i Task 2)", () => {
       ip: null,
       userAgent: null,
     });
-    expect(done.ok).toBe(true);
+    if (!done.ok || !("user" in done.value)) throw new Error("no reset session");
+    // The answer of the claim holds no name, as the row does (ruling 19 L-1).
+    expect([done.value.user.username, done.value.user.displayUsername]).toEqual([null, null]);
     expect((await rowOf(auth, "reset@example.com")).username).toBeNull();
+    // A provider that proves the owner's address claims too (social.ts, the
+    // claim of an address with no identity of this provider).
+    await signUp("google@example.com", "Google_Name");
+    const social = await resolveSocialUser(
+      auth.storage,
+      "google",
+      {
+        subject: "g-owner",
+        email: "google@example.com",
+        emailVerified: true,
+        name: null,
+        image: null,
+      },
+      auth.clock.now(),
+      noVerifyHooks("social"),
+    );
+    if (!social.ok) throw new Error(social.code);
+    expect([social.value.username, social.value.displayUsername]).toEqual([null, null]);
+    expect((await rowOf(auth, "google@example.com")).username).toBeNull();
   });
 
   it("sets the username with a fresh session and mails a notice", async () => {

@@ -321,7 +321,10 @@ export interface Client {
       email: string;
       password: string;
       name?: string | undefined;
-      /** The username (plan 12i), with the server's `username` config on. */
+      /**
+       * The username (plan 12i). It needs the server's `username` config on and
+       * `password.uniformSignUp: false`; else the server answers `invalid_body`.
+       */
       username?: string | undefined;
       /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
       captchaToken?: string | undefined;
