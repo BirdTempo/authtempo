@@ -50,8 +50,9 @@ import { draftUserRow } from "./users.js";
  * Not listed: each sign-in route (the phone code, every social preset, and
  * the passkey-first sign-up too), because a sign-in leaves the anonymous
  * user and changes nothing of it. The sign-up makes a new user and replaces
- * the anonymous user through the upgrade (plan 12i Task 8). Also not listed: the remove of a passkey or a phone, because an
- * anonymous user can hold neither, so the route finds nothing to remove.
+ * the anonymous user through the upgrade (plan 12i Task 8). Also not
+ * listed: the remove of a passkey or a phone, because an anonymous user can
+ * hold neither, so the route finds nothing to remove.
  * Also not listed: the three multi-session routes. They change no account
  * and grant no privilege. A switch leaves the anonymous user as a sign-in
  * does, and its token never enters the bag. The sign-out of one ends a
