@@ -464,6 +464,7 @@ export const EVENTS = {
   "profile.update_gave_up": fault("error", "authtempo: profile update gave up", {
     userId: ROW_ID,
   }),
+  "username.set_gave_up": fault("error", "authtempo: username set gave up", { userId: ROW_ID }),
   "notice.mail_failed": fault("error", "authtempo: notice mail failed", {
     event: { kind: "identifier" },
     errorName: ERROR_NAME,

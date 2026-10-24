@@ -207,6 +207,7 @@ describe("the impersonation lists (plan 12f Task 11)", () => {
       unlink: await api.identities.unlink({ session, id: "x", ...net }),
       startLink: await api.startLink({ provider: "google", session, ip: null }),
       passwordChange: await api.password.change({ session, newPassword: "a new password 1" }),
+      setUsername: await api.user.setUsername({ session, username: "ada", ...net }),
       impersonate: await api.operator.impersonate({
         operator: session,
         userId: w.operator.user.id,

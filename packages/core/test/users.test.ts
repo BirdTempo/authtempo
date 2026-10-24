@@ -478,7 +478,8 @@ describe("claimEmail and the password row (plan 8)", () => {
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
-    expect(order[0]).toBe(`update:user:["emailVerified","updatedAt"]`);
+    // The claim clears the username in the same statement (ruling 16 M2).
+    expect(order[0]).toBe(`update:user:["emailVerified","username","displayUsername","updatedAt"]`);
     expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
     const password = order.indexOf("delete:password");
     expect(password).toBeGreaterThan(0);

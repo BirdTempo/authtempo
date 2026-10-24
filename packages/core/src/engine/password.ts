@@ -46,6 +46,7 @@ import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
   ClaimLostError,
   claimEmail,
+  claimedUser,
   draftUserRow,
   ensureEmailIdentity,
   mayCreateUser,
@@ -211,6 +212,9 @@ interface SignUpRow {
   username: Username | null;
 }
 
+/** The uniform sign-up holds no username (ruling 16 M1). */
+type UniformRow = Omit<SignUpRow, "username">;
+
 interface Created {
   answer: PasswordSession | PasswordSignUpPending;
   passwordId: string;
@@ -250,6 +254,10 @@ export async function passwordSignUp(
   let username: Username | null = null;
   if (input.username !== undefined) {
     if (!config.username) return fail("invalid_body");
+    // With the uniform answer, a name at sign-up tells a known address from
+    // a new one: only a new address holds it. So the person sets the name
+    // after the confirm (ruling 16 M1, plan 12b).
+    if (pw.uniformSignUp) return fail("invalid_body");
     username = normalizeUsername(config, input.username);
     if (username === null) return fail("username_invalid");
   }
@@ -265,7 +273,7 @@ export async function passwordSignUp(
   // The user hooks of the new user (plan 12a). The transaction runs the sign-up rule itself.
   const made = createSteps(config, "password", { signUpRule: false });
   if (pw.uniformSignUp)
-    return uniformSignUp(config, pw, { email, name: name ?? null, hash, username }, now, made);
+    return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now, made);
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
@@ -438,7 +446,7 @@ type UniformOutcome =
 async function uniformSignUp(
   config: ResolvedConfig,
   pw: Resolved,
-  row: SignUpRow,
+  row: UniformRow,
   now: Date,
   made: CreateSteps,
 ): Promise<Result<{ sent: true }>> {
@@ -483,7 +491,7 @@ async function uniformSignUp(
  */
 function insertUniform(
   config: ResolvedConfig,
-  row: SignUpRow,
+  row: UniformRow,
   now: Date,
   made: CreateSteps,
 ): Promise<Result<UniformOutcome>> {
@@ -493,8 +501,7 @@ function insertUniform(
     // "invited": before the existence read, as in `insertSignUp` (plan 12b
     // Task 8). A known and a new address with no invitation then do the
     // same reads and get no mail, so the time of the answer tells nothing.
-    // The username comes first, as in `insertSignUp` (spec 32 item 7).
-    if (await usernameTaken(tx, row.username)) return fail("username_taken");
+    // It holds no username: `passwordSignUp` refuses one here.
     if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
     if (existing) return ok({ outcome: "existing" });
@@ -503,10 +510,7 @@ function insertUniform(
     // returned above, so only a new address meets the hook.
     const minted = await made.user(
       tx,
-      draftUserRow(
-        { email: row.email, emailVerified: false, name: row.name, ...(row.username ?? {}) },
-        now,
-      ),
+      draftUserRow({ email: row.email, emailVerified: false, name: row.name }, now),
     );
     const user = await tx.create("user", minted);
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
@@ -958,7 +962,7 @@ export async function verifyPasswordEmail(
         );
         if (kept === 0) return fail("invalid_token");
         if (prepared === null) return ok({ user, signedIn: null });
-        await claimEmail(tx, user.id, { passwordId }, now, verify, ended);
+        await claimEmail(tx, user.id, { passwordId, username: true }, now, verify, ended);
         await ensureEmailIdentity(tx, user.id, row.identifier, now);
         const s = await writeSession(config, prepared, tx);
         return ok({ user: claimed, signedIn: s });
@@ -1346,7 +1350,7 @@ function applyReset(
       // Its stop undoes the consume too, so the link stays usable.
       minted = await made.user(tx, draftUserRow({ email, emailVerified: true, name: null }, now));
       user = minted;
-    } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
+    } else user = found.emailVerified ? found : claimedUser(found, now);
     // The second factor (plan 12c, owner decision 1 of 2026-10-14): a reset
     // must not bypass a factor that is on (ASVS 5.0 6.4.3). These are reads,
     // so they come before the session hook below. A minted user and a

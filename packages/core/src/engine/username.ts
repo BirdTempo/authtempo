@@ -121,6 +121,7 @@ export async function setUsername(
             if (n === 1) return ok({ previous, user: { ...previous, ...patch, updatedAt } });
             previous = await tx.findOne("user", byId);
           }
+          config.observe.emit({ name: "username.set_gave_up", userId: user.id });
           return fail("conflict");
         },
       ),

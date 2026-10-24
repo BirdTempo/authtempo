@@ -57,6 +57,7 @@ import {
   ClaimLostError,
   ClaimRacedError,
   claimEmail,
+  claimedUser,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
@@ -938,7 +939,7 @@ async function linkInTransaction(
       normalizeEmail(profile.email) === user.email;
     // `proved` holds an address; `hasAddress` narrows the type for the identity write.
     if (!user.emailVerified && proved && hasAddress(user)) {
-      const claimed = { ...user, emailVerified: true, updatedAt: now };
+      const claimed = claimedUser(user, now);
       const filled = filledUser(claimed, profile, now);
       // `user.beforeVerify`, then the session hook, before the first write (plan 12a).
       await verified.before(user);
@@ -967,9 +968,7 @@ async function linkInTransaction(
     if (!profile.emailVerified) return fail("email_taken_unverified");
     // An unverified account is a claim. The proof revokes earlier claimants
     // before the new identity is linked.
-    const current = existing.emailVerified
-      ? existing
-      : { ...existing, emailVerified: true, updatedAt: now };
+    const current = existing.emailVerified ? existing : claimedUser(existing, now);
     const filled = filledUser(current, profile, now);
     const linking: IdentitySummary = { provider, subject: profile.subject };
     // `user.beforeVerify`, `identity.beforeLink`, then the session hook,

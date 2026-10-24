@@ -132,6 +132,19 @@ export interface ClaimKeep {
   identityId?: string;
   /** The password row that the proof confirms (the sign-up verify link). */
   passwordId?: string;
+  /**
+   * Keep the username. Only the sign-up's own confirm sets it: its proof is
+   * of the address that the sign-up named with that username.
+   */
+  username?: true;
+}
+
+/**
+ * The user row as `claimEmail` with no `keep.username` leaves it: verified,
+ * with no username.
+ */
+export function claimedUser(user: UserRow, now: Date): UserRow {
+  return { ...user, emailVerified: true, username: null, displayUsername: null, updatedAt: now };
 }
 
 /**
@@ -141,6 +154,7 @@ export interface ClaimKeep {
  * session, every password row (except the one `keep.passwordId` names),
  * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
+ * The username is cleared, except where `keep.username` says so.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -164,7 +178,11 @@ export async function claimEmail(
       { field: "id", op: "eq", value: userId },
       { field: "emailVerified", op: "eq", value: false },
     ],
-    { emailVerified: true, updatedAt: now },
+    // A claimant chose the username, and the owner must not inherit it: a
+    // username is a way in and the name of each passkey (ruling 16 M2).
+    keep?.username
+      ? { emailVerified: true, updatedAt: now }
+      : { emailVerified: true, username: null, displayUsername: null, updatedAt: now },
   );
   if (flipped === 0) {
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
@@ -423,9 +441,7 @@ async function resolveInTransaction(
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
-    const resolved = existing.emailVerified
-      ? existing
-      : { ...existing, emailVerified: true, updatedAt: now };
+    const resolved = existing.emailVerified ? existing : claimedUser(existing, now);
     // `user.beforeVerify`, then the session hook, before the identity repair
     // and the claim: the D1 undo (`BeforeResolveWrite`).
     if (!existing.emailVerified) await verified.before(existing);

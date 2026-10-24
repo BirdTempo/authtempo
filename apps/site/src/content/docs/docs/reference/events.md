@@ -107,6 +107,7 @@ Each event has these fields too:
 | `email_change.gave_up` | error | `userId: id` | `authtempo: email change gave up` |
 | `credential.removal_gave_up` | error | `userId: id` | `authtempo: credential removal gave up` |
 | `profile.update_gave_up` | error | `userId: id` | `authtempo: profile update gave up` |
+| `username.set_gave_up` | error | `userId: id` | `authtempo: username set gave up` |
 | `notice.mail_failed` | error | `event: identifier`, `errorName: errorName` | `authtempo: notice mail failed` |
 | `email_code.count_gave_up` | error | `rowId: id` | `authtempo: email code count gave up` |
 | `second_factor.count_gave_up` | error | `rowId: id` | `authtempo: second-factor challenge count gave up` |

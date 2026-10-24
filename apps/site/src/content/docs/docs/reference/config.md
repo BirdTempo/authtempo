@@ -367,7 +367,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `username` | `UsernameConfig` or `false` | `false` | Turns on the username: `GET /username/available`, `POST /user/username`, and `username` at the password sign-up. `{}` turns it on with the defaults. |
+| `username` | `UsernameConfig` or `false` | `false` | Turns on the username: `GET /username/available`, `POST /user/username`, and `username` at the password sign-up while `password.uniformSignUp` is false. With the uniform answer, the name of a sign-up would tell a known address from a new one. `{}` turns it on with the defaults. |
 | `username.minLength` | number | 3 | An integer from 3 to 30. The fewest characters of the name after NFKC. |
 | `username.maxLength` | number | 30 | An integer from `minLength` to 30. |
 | `username.reserved` | string array | none | More names in the stored form that no account may take. Core always reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while organizations are on, `root`, `support`, `security`, and `admin`. |

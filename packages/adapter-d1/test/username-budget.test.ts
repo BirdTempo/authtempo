@@ -14,11 +14,13 @@ const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
 const BUDGET = 50;
 const RAW = Symbol("raw");
-// The counts of the run of 2026-10-24, with the D1 limiter. A sign-up with
-// a taken name stops at the username read, before any read by address.
+// The counts of the run of 2026-10-24, with the D1 limiter. The sign-up
+// counts are of the detailed answer (uniformSignUp false), which opens a
+// session. A sign-up with a taken name stops at the username read, before
+// any read by address. The uniform sign-up takes no name (ruling 16 M1).
 const SET_QUERIES = 6;
 const CHECK_QUERIES = 2;
-const SIGN_UP_QUERIES = 11;
+const SIGN_UP_QUERIES = 14;
 const TAKEN_QUERIES = 3;
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
@@ -120,18 +122,22 @@ describe("the username on D1 (plan 12i Task 2)", () => {
       }),
     );
     expect(check.body).toEqual({ available: false });
-    // The uniform sign-up (the default) with a free name, and with a taken one.
+    // The detailed sign-up with a free name, and with a taken one. The
+    // uniform sign-up (the default) refuses a name (ruling 16 M1).
+    const detailed = make({
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
+    });
     const up = await measure(
-      w,
+      detailed,
       post("/password/sign-up", {
         email: "bob@example.com",
         password: "correct horse battery",
         username: "bob",
       }),
     );
-    expect(up.body).toEqual({ sent: true });
+    expect(up.status).toBe(200);
     const taken = await measure(
-      w,
+      detailed,
       post("/password/sign-up", {
         email: "carol@example.com",
         password: "correct horse battery",
@@ -139,6 +145,15 @@ describe("the username on D1 (plan 12i Task 2)", () => {
       }),
     );
     expect(taken.body).toEqual({ error: "username_taken" });
+    const uniform = await measure(
+      w,
+      post("/password/sign-up", {
+        email: "dan@example.com",
+        password: "correct horse battery",
+        username: "dan",
+      }),
+    );
+    expect(uniform.body).toEqual({ error: "invalid_body" });
     // Each is far inside 50.
     expect([set.queries, check.queries, up.queries, taken.queries]).toEqual([
       SET_QUERIES,

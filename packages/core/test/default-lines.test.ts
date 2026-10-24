@@ -35,6 +35,7 @@ import { addDomain, verifyDomain } from "../src/engine/sso/domains.js";
 import { requireSsoManager } from "../src/engine/sso/guard.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { disableTotpWithCode, regenerateBackupCodes, verifyTwoFactor } from "../src/engine/totp.js";
+import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { EVENTS, type EventSpec } from "../src/observe/events.js";
@@ -905,6 +906,30 @@ describe("the gave-up lines (plans 12a and 12f)", () => {
       status: 409,
     });
     expect(log.mock.calls).toEqual([["authtempo: profile update gave up", me.user.id]]);
+  });
+
+  it("username.set_gave_up", async () => {
+    let auth: ReturnType<typeof totpAuth> | null = null;
+    auth = totpAuth({
+      username: {},
+      hooks: {
+        user: {
+          beforeUpdate: async (e) => {
+            if (!auth) return;
+            await auth.storage.update("user", [{ field: "id", op: "eq", value: e.user.id }], {
+              name: "Other",
+              updatedAt: new Date(e.user.updatedAt.getTime() + 1),
+            });
+          },
+        },
+      },
+    });
+    const me = await verifiedSession(auth);
+    const log = errors();
+    expect(
+      await setUsername(auth.config, { session: me, username: "ada", ip: null, userAgent: null }),
+    ).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(log.mock.calls).toEqual([["authtempo: username set gave up", me.user.id]]);
   });
 
   it("operator.ban_write_gave_up", async () => {

@@ -1,18 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type AuthConfig, ConfigError, DEFAULT_RESERVED_SLUGS } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import type { UserHooks } from "../src/engine/hooks.js";
+import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
+import {
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { later } from "../src/engine/second-factor.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
-import { BASE_URL, get, post, recordAddress } from "./helpers.js";
+import { BASE_URL, get, post, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 const DAY = 86_400_000;
 const OTHER = "bob@example.com";
 const NOTICE = "Security notice for your api.example.com account";
+const CLAIMANT = recordCredential("claimant horse battery");
 
 /** The engine with the username on, the router, and a fresh session of a verified user. */
 async function world(extra: Partial<AuthConfig> = {}) {
@@ -155,18 +163,15 @@ describe("the username (plan 12i Task 2)", () => {
   });
 
   it("checks the username before the address on sign-up", async () => {
-    // The uniform answer of plan 12b is on.
-    const auth = totpAuth({ username: {}, password: { hash: FAST } });
-    const handle = createRouter(auth.config, coreRoutes(auth.config));
-    const me = await verifiedSession(auth);
-    const bearer = { authorization: `Bearer ${me.token}` };
+    // The detailed answer (uniformSignUp false), the setting of the compat shim.
+    const { auth, handle, bearer } = await world();
     expect((await call(handle, setName(bearer, "ada"))).status).toBe(200);
     const mails = auth.mail.length;
     const taken = { email: EMAIL, password: PASSWORD };
+    // A taken name answers username_taken for a taken and a new address.
     expect(
       await call(handle, post("/auth/password/sign-up", { ...taken, username: "ada" })),
     ).toEqual({ status: 409, body: { error: "username_taken" } });
-    // A taken name with a new address answers the same: the answer tells nothing of the address.
     expect(
       await call(
         handle,
@@ -178,15 +183,114 @@ describe("the username (plan 12i Task 2)", () => {
       ),
     ).toEqual({ status: 409, body: { error: "username_taken" } });
     expect(auth.mail.length).toBe(mails);
-    // A free name with a taken address: the uniform answer, and the name stays free.
+    // A free name with a taken address: email_taken, and the name stays free.
     expect(
       await call(handle, post("/auth/password/sign-up", { ...taken, username: "other" })),
-    ).toEqual({ status: 200, body: { sent: true } });
+    ).toEqual({ status: 409, body: { error: "email_taken" } });
     expect((await rowOf(auth, EMAIL)).username).toBe("ada");
     expect(await call(handle, available("other"))).toEqual({
       status: 200,
       body: { available: true },
     });
+  });
+
+  it("refuses a username at a uniform sign-up the same for a known and a new address", async () => {
+    // The uniform answer of plan 12b (the default). A name held only by a
+    // new address would tell which address has an account (ruling 16 M1).
+    const auth = totpAuth({ username: {}, password: { hash: FAST } });
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    await verifiedSession(auth);
+    recordAddress("new@example.com");
+    const mails = auth.mail.length;
+    const up = (email: string, username: string) =>
+      call(handle, post("/auth/password/sign-up", { email, password: PASSWORD, username }));
+    expect(await up(EMAIL, "probe_k")).toEqual({ status: 400, body: { error: "invalid_body" } });
+    expect(await up("new@example.com", "probe_f")).toEqual({
+      status: 400,
+      body: { error: "invalid_body" },
+    });
+    expect(auth.mail.length).toBe(mails);
+    for (const name of ["probe_k", "probe_f"])
+      expect(await call(handle, available(name)), name).toEqual({
+        status: 200,
+        body: { available: true },
+      });
+    expect(
+      await auth.storage.findOne("user", [{ field: "email", op: "eq", value: "new@example.com" }]),
+    ).toBeNull();
+    // With no name, the uniform sign-up answers as before.
+    expect(
+      await call(
+        handle,
+        post("/auth/password/sign-up", { email: "new@example.com", password: PASSWORD }),
+      ),
+    ).toEqual({ status: 200, body: { sent: true } });
+  });
+
+  it("keeps the name of a sign-up at its own confirm, and clears it at every other claim", async () => {
+    const auth = totpAuth({ username: {} });
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const signUp = async (email: string, username: string) => {
+      recordAddress(email);
+      const r = await passwordSignUp(auth.config, {
+        email,
+        password: CLAIMANT,
+        username,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    };
+    // The sign-up's own verify link proves the address that named the name.
+    await signUp("own@example.com", "Own_Name");
+    const confirm = auth.mail.findLast((m) => m.to === "own@example.com");
+    const v = await verifyPasswordEmail(auth.config, {
+      token: tokenFromMail(confirm?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    expect(v.ok).toBe(true);
+    const own = await rowOf(auth, "own@example.com");
+    expect([own.emailVerified, own.username, own.displayUsername]).toEqual([
+      true,
+      "own_name",
+      "Own_Name",
+    ]);
+    // A claimant names the owner's address. The owner's magic link claims it.
+    await signUp("victim@example.com", "Victim_Official");
+    await requestMagicLink(auth.config, { email: "victim@example.com", ip: null });
+    const link = auth.mail.findLast((m) => m.to === "victim@example.com");
+    const claimed = await verifyMagicLink(auth.config, {
+      token: tokenFromMail(link?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    if (!claimed.ok || !("user" in claimed.value)) throw new Error("no claim");
+    expect(claimed.value.user.username).toBeNull();
+    const victim = await rowOf(auth, "victim@example.com");
+    expect([victim.emailVerified, victim.username, victim.displayUsername]).toEqual([
+      true,
+      null,
+      null,
+    ]);
+    expect(await call(handle, available("victim_official"))).toEqual({
+      status: 200,
+      body: { available: true },
+    });
+    // The reset of the owner claims too.
+    await signUp("reset@example.com", "Reset_Name");
+    expect(
+      (await requestPasswordReset(auth.config, { email: "reset@example.com", ip: null })).ok,
+    ).toBe(true);
+    const reset = auth.mail.findLast((m) => m.to === "reset@example.com");
+    const done = await resetPassword(auth.config, {
+      token: tokenFromMail(reset?.text ?? ""),
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    expect(done.ok).toBe(true);
+    expect((await rowOf(auth, "reset@example.com")).username).toBeNull();
   });
 
   it("sets the username with a fresh session and mails a notice", async () => {
@@ -222,6 +326,27 @@ describe("the username (plan 12i Task 2)", () => {
     });
     // Another IP has its own count.
     expect((await call(handle, available("name30", "198.51.100.8"))).status).toBe(200);
+  });
+
+  it("refuses the sixth set in one hour", async () => {
+    const { auth, handle, bearer } = await world();
+    for (const name of ["ada1", "ada2", "ada3", "ada4", "ada5"])
+      expect((await call(handle, setName(bearer, name))).status, name).toBe(200);
+    expect(await call(handle, setName(bearer, "ada6"))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    expect((await rowOf(auth, EMAIL)).username).toBe("ada5");
+  });
+
+  it("counts a bad name against the availability limit", async () => {
+    const { handle } = await world();
+    for (let i = 0; i < 30; i++)
+      expect((await call(handle, available(`bad@${i}`))).status).toBe(400);
+    expect(await call(handle, available("good"))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
   });
 
   it("frees a name at once", async () => {
@@ -293,11 +418,15 @@ describe("the username (plan 12i Task 2)", () => {
       { via: "username" },
     ]);
     const mails = w.auth.mail.length;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await call(w.handle, setName(w.bearer, "lost"))).toEqual({
       status: 409,
       body: { error: "conflict" },
     });
     expect(other).toBe(5);
+    // The default line of `username.set_gave_up` (ruling 16 m3).
+    expect(log.mock.calls).toEqual([["authtempo: username set gave up", w.me.user.id]]);
+    log.mockRestore();
     const row = await rowOf(w.auth, EMAIL);
     expect({ username: row.username, name: row.name }).toEqual({
       username: "ada",

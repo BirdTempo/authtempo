@@ -360,7 +360,7 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email, password, name?, username? }`. `username` needs the `username` config. The sign-up checks it before any read by address |
+| Input | JSON `{ email, password, name?, username? }`. `username` needs the `username` config and `password.uniformSignUp: false`. With the uniform answer, a name at sign-up would tell a known address from a new one. So the sign-up refuses it with `invalid_body`, and the person sets the name with `POST /user/username` after the confirm. The sign-up checks the name before any read by address |
 | Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sso_required`](/docs/reference/errors/#sso_required), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
@@ -1837,7 +1837,7 @@ This route exists when the config sets `passkey` with `relatedOrigins: true`.
 
 ## Username
 
-These routes exist when the config sets `username`. A username is public by design. The stored form is NFKC in lower case and matches `^[a-z0-9_.]+$`; `displayUsername` keeps the case that the person typed.
+These routes exist when the config sets `username`. A username is public by design. The stored form is NFKC in lower case and matches `^[a-z0-9_.]+$`; `displayUsername` keeps the case that the person typed. A proof of the address on an unverified account clears the username that the claimant chose. A magic link, a social sign-in, and a reset each prove the address. Only the verify link of the sign-up that named the name keeps it.
 
 <h3 id="get-username-available"><code>GET /username/available</code></h3>
 
