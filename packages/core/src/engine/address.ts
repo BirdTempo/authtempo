@@ -35,11 +35,14 @@ export async function verifiedHandle(
 }
 
 /**
- * True when the user may change what the owner of the account keeps: a
- * verified address, or, for a user with no address, a verified handle
- * (ruling 15 of plan 12i). A claimant of an unverified address has
+ * True when the user may change what the owner of the account keeps
+ * (ruling 15 of plan 12i). That is a verified address, or a verified handle
+ * for a user with no address. A claimant of an unverified address has
  * neither, so a claim never inherits what the claimant set. The profile
- * update, the API tokens, the username, and the phone add read it.
+ * update, the API tokens, the username, and the phone add read it. The
+ * factor reads `provedAccount`. The two differ for a user with no address
+ * whose handle does not sign in now, such as a phone outside the regions.
+ * That user is not anonymous, but has no verified handle here.
  */
 export async function handleProved(
   config: ResolvedConfig,

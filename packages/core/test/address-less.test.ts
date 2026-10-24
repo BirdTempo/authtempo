@@ -320,21 +320,43 @@ describe("the account with no address (plan 12i Task 1)", () => {
   });
 
   it("counts no stored phone as a way in or a handle with no phone config (ruling 15)", async () => {
-    // A Better Auth store holds a phone that its own code verify proved. With
-    // no `phone` config no phone code exists, so the phone signs in nowhere.
-    const auth = makeAuth({ passkey: RP });
-    const phoned = await auth.storage.create(
-      "user",
-      draftUserRow(
-        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
-        auth.clock.now(),
-      ),
-    );
-    expect(await verifiedHandle(auth.config, auth.storage, phoned)).toBe(false);
-    expect(await waysIn(auth.config, auth.storage, phoned)).toBe(0);
+    // A phone that a real code proved (ruling 23 L3): a user with no address
+    // and a passkey adds it with `phone` on, then drops the passkey.
+    const sms = createRecordingSms();
+    const on = makeAuth({
+      passkey: RP,
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+    });
+    const lone = await addressless(on.storage, on.clock.now());
+    await withPasskey(on, lone);
+    const session = await sessionOf(on, lone);
+    expect(await addPhone(on.config, { session, phone: "+14155550100", ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    expect(await verifyAddPhone(on.config, { session, code, ip: null, userAgent: null })).toEqual({
+      ok: true,
+      value: { phone: "+14155550100" },
+    });
+    const [first] = await on.storage.findMany("passkey", [
+      { field: "userId", op: "eq", value: lone.id },
+    ]);
+    if (!first) throw new Error("no passkey");
+    expect(
+      await deletePasskey(on.config, { user: { ...lone, phone: "+14155550100" }, id: first.id }),
+    ).toEqual({ ok: true, value: { ok: true } });
+    // The app turns `phone` off on the same store. With no `phone` config no
+    // phone code exists, so the phone signs in nowhere.
+    const auth = makeAuth({ storage: on.storage, clock: on.clock, passkey: RP });
+    const phoned = await on.storage.findOne("user", [{ field: "id", op: "eq", value: lone.id }]);
+    if (!phoned) throw new Error("no user");
+    expect(phoned.phone).toBe("+14155550100");
+    expect(await verifiedHandle(auth.config, on.storage, phoned)).toBe(false);
+    expect(await waysIn(auth.config, on.storage, phoned)).toBe(0);
     await withPasskey(auth, phoned);
-    expect(await waysIn(auth.config, auth.storage, phoned)).toBe(1);
-    const [passkey] = await auth.storage.findMany("passkey", [
+    expect(await waysIn(auth.config, on.storage, phoned)).toBe(1);
+    const [passkey] = await on.storage.findMany("passkey", [
       { field: "userId", op: "eq", value: phoned.id },
     ]);
     if (!passkey) throw new Error("no passkey");

@@ -111,6 +111,9 @@ An email code of 8 digits divides each figure of its row by 100.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a deployed Worker proves a higher count.
 - A call to `auth.api` with no `captchaToken` skips the captcha. A server route that proxies a browser and drops the token turns the captcha off for that flow.
 - The timing of the verify-mail resend shows an unverified account.
+- Number recycling and SIM swap. A new holder of a phone number signs in with the phone code to the account that holds the number. Core sends no mail to the address of that account at a phone sign-in. The session is fresh, so the routes with the fresh rule open to the new holder. The second factor with `totp.gate.phone` on stops a holder of the number alone.
+- A user with no address who moves the phone to a new number gets no notice on any channel. The old number gets no text.
+- `api.phone.request` in process sends before it answers, so its time tells whether a number has an account. `POST /phone/request` sends after the answer and does not.
 - An API token survives a password reset and a sign-out.
 - There is no lockout per account. The limits bound the guesses instead.
 - The sink of an app is app code. It can write what it wants, and core cannot see it. A sink that copies events with `include.ip: "raw"` to a third party sends the addresses there. The app owns its sink and its log inventory (ASVS 5.0.0 16.2.3).

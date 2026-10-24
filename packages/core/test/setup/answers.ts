@@ -331,8 +331,9 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       const handle = m.createRouter(...a);
       const [config, routes] = a;
       const matchRoute = m.createRouteMatcher(config, routes);
-      return async (request: Request) => {
-        const res = await handle(request);
+      // The options carry the `waitUntil` of the work after the answer (ruling 23 of plan 12i).
+      return async (request: Request, options?: Parameters<typeof handle>[1]) => {
+        const res = await handle(request, options);
         const key = keyOf(config, matchRoute, request.method, new URL(request.url).pathname);
         // The mark of `errorRedirect` is on res, not on its clone.
         const record = await judge(request, res.clone(), key, m.redirectCode(res));

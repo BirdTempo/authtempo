@@ -254,7 +254,7 @@ Another key of `emailOtp` is refused.
 
 ## Phone codes
 
-Another key of `phone` is refused. Core makes each code, keys its hash, counts each guess, and counts every send against `dailyCap`. The SMS port only sends text.
+Another key of `phone` is refused. Core makes each code, keys its hash, counts each guess, and counts every send against `dailyCap`. The SMS port only sends text. `POST /phone/request` sends its code after the answer, so on Workers pass `{ waitUntil: (p) => ctx.waitUntil(p) }` to `handle`.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |

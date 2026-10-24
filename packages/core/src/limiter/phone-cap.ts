@@ -75,10 +75,14 @@ export function runPhoneCapConformance(name: string, factory: () => Promise<Phon
     it("the daily cap holds under 40 parallel requests through POST /phone/request", async () => {
       // Plan 12i Task 5: the same race through the route, with `signUp` on, so
       // each new number takes the branch that sends. Each request has its own
-      // IP, so the per-IP key never decides.
+      // IP, so the per-IP key never decides. The send runs after the answer
+      // (ruling 23 of plan 12i): every answer is 200, and the race is in the
+      // work that `waitUntil` keeps.
       const target = await factory();
       try {
         const sms = createRecordingSms();
+        // The sink keeps each event, so the test counts the refused sends.
+        const events: { name: string; reason?: unknown }[] = [];
         const auth = createAuth({
           baseURL: "https://auth.example.com",
           secret: "0123456789abcdef0123456789abcdef",
@@ -87,7 +91,10 @@ export function runPhoneCapConformance(name: string, factory: () => Promise<Phon
           mail: { send: async () => {} },
           limiter: target.limiter,
           phone: { sms, regions: ["+1"], dailyCap: 5, signUp: true },
+          observe: { sink: { write: (batch) => void events.push(...batch) } },
         });
+        const after: Promise<unknown>[] = [];
+        const waitUntil = (p: Promise<unknown>) => void after.push(p);
         const answers = await Promise.all(
           Array.from({ length: 40 }, (_, i) =>
             auth.handle(
@@ -100,13 +107,16 @@ export function runPhoneCapConformance(name: string, factory: () => Promise<Phon
                 },
                 body: JSON.stringify({ phone: `+1415555${String(200 + i).padStart(4, "0")}` }),
               }),
+              { waitUntil },
             ),
           ),
         );
-        const statuses = answers.map((r) => r.status);
-        expect(statuses.filter((st) => st === 200)).toHaveLength(5);
-        expect(statuses.filter((st) => st === 429)).toHaveLength(35);
+        expect(answers.map((r) => r.status)).toEqual(Array.from({ length: 40 }, () => 200));
+        await Promise.all(after);
         expect(sms.sent).toHaveLength(5);
+        // The flush of each request waits for its send, so every line is in the sink.
+        const capped = events.filter((e) => e.name === "sms.not_sent" && e.reason === "capped");
+        expect(capped).toHaveLength(35);
       } finally {
         await target.close();
       }

@@ -31,12 +31,17 @@ export function phoneRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
+        // The send runs after the answer, so the time tells no account (ruling 23 of plan 12i).
         return respond(
-          await requestPhone(ctx.config, {
-            phone: body.value.phone,
-            ip: ctx.ip,
-            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
-          }),
+          await requestPhone(
+            ctx.config,
+            {
+              phone: body.value.phone,
+              ip: ctx.ip,
+              captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            },
+            ctx.waitUntil,
+          ),
         );
       },
     },

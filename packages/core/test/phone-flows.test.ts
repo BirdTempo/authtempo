@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig, PhoneConfig } from "../src/config.js";
+import { codeHash } from "../src/engine/email-otp.js";
+import { passwordSignIn } from "../src/engine/password.js";
+import { requestPhone } from "../src/engine/phone.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { currentSecret } from "../src/primitives/keyring.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, makeAuth, post, settled } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
-import { enrolled } from "./totp-helpers.js";
+import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
 // The phone flows (plan 12i Task 5, spec 32 item 5). Every phone user here
 // comes from a real code: a sign-up by `/phone/verify`, or an add by
@@ -25,11 +30,13 @@ function world(phone: Partial<PhoneConfig> = {}, extra: Partial<AuthConfig> = {}
     phone: { sms, regions: ["+1"], isolateLimiter: "allow", ...phone },
     ...extra,
   });
-  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  // `route` answers before the work after the answer; `handle` waits for that work too.
+  const route = createRouter(auth.config, coreRoutes(auth.config));
+  const handle = settled(route);
   // A new client IP for each call that needs none in particular, so the per-IP keys never decide.
   let n = 0;
   const ip = () => `198.51.100.${++n}`;
-  return { ...auth, sms, handle, ip };
+  return { ...auth, sms, route, handle, ip };
 }
 type World = ReturnType<typeof world>;
 
@@ -179,7 +186,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
   it("gates a phone sign-in", async () => {
     const extra = { password: { hash: FAST, uniformSignUp: false }, passkey: RP };
     const w = world({}, extra);
-    const { user } = await enrolled(w);
+    const { user, secret: enrolledSecret } = await enrolled(w);
     const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
     const cookie = `${w.config.cookieName}=${token}`;
     await add(w, cookie, A);
@@ -190,6 +197,33 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     // The code proves the phone, not the mailbox: no email method (12c decision 4).
     expect(gated.body).toMatchObject({ twoFactor: { methods: ["totp", "backup"] } });
     expect(gated.res.headers.getSetCookie()).toEqual([]);
+    // A trusted device of the user passes the gate (plan 12c): the token from a verify with trustDevice.
+    const s = await passwordSignIn(w.config, {
+      email: "ada@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!s.ok || !("twoFactor" in s.value)) throw new Error("no challenge");
+    const trusted = await verifyTwoFactor(w.config, {
+      challenge: s.value.twoFactor.challenge,
+      code: await codeNow(w, enrolledSecret),
+      trustDevice: true,
+      ip: null,
+    });
+    if (!trusted.ok || !trusted.value.trustDevice) throw new Error("no trust token");
+    await request(w, A);
+    const passed = await call(
+      w,
+      post(
+        "/auth/phone/verify",
+        { phone: A, code: codeTo(w, A), trustDevice: trusted.value.trustDevice.token },
+        { "cf-connecting-ip": w.ip() },
+      ),
+    );
+    expect(passed.status).toBe(200);
+    expect(passed.body).toHaveProperty("token");
+    expect(passed.body).not.toHaveProperty("twoFactor");
     // `totp.gate.phone: false` opens a session.
     const open = world({}, { ...extra, totp: { gate: { phone: false } } });
     const other = await enrolled(open);
@@ -209,7 +243,11 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
 
   it("adds a phone with a fresh session, and a taken number gets a note", async () => {
     const w = world();
-    await withPhone(w, "ada@example.com", A);
+    const ada = await withPhone(w, "ada@example.com", A);
+    // The add of one's own number again gets a code, not the note.
+    expect((await add(w, ada.cookie, A)).body).toEqual({ sent: true });
+    expect(w.sms.sent.at(-1)?.text).toMatch(/^\d{6} is your /);
+    expect((await addVerify(w, ada.cookie, codeTo(w, A))).body).toEqual({ phone: A });
     const bob = await addressUser(w, "bob@example.com");
     const taken = await add(w, bob.cookie, A);
     const free = await add(w, bob.cookie, B);
@@ -222,12 +260,16 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       text: "This number is already in use with api.example.com.",
     });
     expect(w.sms.sent.at(-1)?.to).toBe(B);
-    // The note holds no code and writes no row: only the free number has a code of bob.
+    // The note holds no code, and the taken number gets a decoy row: both paths write a row (plan 12a).
     const rows = await w.storage.findMany("verification", [
       { field: "purpose", op: "eq", value: "phone-add-otp" },
       { field: "identifier", op: "eq", value: bob.user.id },
     ]);
-    expect(rows.map((r) => (r.data as { phone: string }).phone)).toEqual([B]);
+    const added = rows.map((r) => r.data as { phone: string; taken?: boolean });
+    expect(added.map((d) => [d.phone, d.taken === true]).sort()).toEqual([
+      [A, true],
+      [B, false],
+    ]);
     // A stale session.
     w.clock.advance(w.config.session.freshMinutes * 60_000);
     const stale = await add(w, bob.cookie, B);
@@ -300,16 +342,147 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     expect((await remove(lone.cookie)).body).toEqual({ error: "not_found" });
   });
 
-  it("answers 503 sms_unavailable alike for a known number and an unknown number with signUp", async () => {
-    const w = world({ signUp: true });
+  it("answers a known and an unknown number before the SMS port returns (ruling 23)", async () => {
+    // A port that waits up to 1 s, or until the test lets it go (probe P1 of
+    // the Task 5 review waited 150 ms). A send before the answer waits the whole 1 s.
+    const PORT_MS = 1000;
+    const inner = createRecordingSms();
+    let returned = 0;
+    let release = () => {};
+    let held = new Promise<void>((r) => {
+      release = r;
+    });
+    const sms = {
+      async send(input: { to: string; text: string }) {
+        await Promise.race([held, new Promise((r) => setTimeout(r, PORT_MS))]);
+        returned++;
+        return inner.send(input);
+      },
+    };
+    const w = world({ sms, signUp: false });
+    const ada = await addressUser(w, "ada@example.com");
+    // The add sends before its answer: let the port go at once.
+    release();
+    expect((await add(w, ada.cookie, A)).body).toEqual({ sent: true });
+    const addCode = /^(\d+) /.exec(inner.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    expect((await addVerify(w, ada.cookie, addCode)).body).toEqual({ phone: A });
+    held = new Promise<void>((r) => {
+      release = r;
+    });
+    const before = returned;
+    const after: Promise<unknown>[] = [];
+    const timed = async (phone: string) => {
+      const t0 = performance.now();
+      const res = await w.route(
+        post("/auth/phone/request", { phone }, { "cf-connecting-ip": w.ip() }),
+        { waitUntil: (p) => void after.push(p) },
+      );
+      // The answer came before the port returned.
+      return { ms: performance.now() - t0, portReturned: returned - before, res };
+    };
+    const known = await timed(A);
+    const unknown = await timed(B);
+    release();
+    await Promise.all(after);
+    expect([known.portReturned, unknown.portReturned]).toEqual([0, 0]);
+    expect(unknown.res.status).toBe(known.res.status);
+    expect(await unknown.res.json()).toEqual(await known.res.json());
+    expect(known.ms).toBeLessThan(PORT_MS);
+    expect(Math.abs(known.ms - unknown.ms)).toBeLessThan(PORT_MS / 2);
+    // The work after the answer sent the code to the known number only.
+    expect(returned - before).toBe(1);
+    expect(inner.sent.at(-1)?.to).toBe(A);
+  });
+
+  it("turns a cap refusal and an outage after the answer into lines, not a 429 or a 503", async () => {
+    const lines = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const w = world({ signUp: true, dailyCap: 1 });
+      expect((await request(w, A)).body).toEqual({ sent: true });
+      // The cap is spent: the next send stops after the answer.
+      expect(await request(w, B)).toMatchObject({ status: 200, body: { sent: true } });
+      expect(w.sms.sent.map((s) => s.to)).toEqual([A]);
+      const down = world({ signUp: true });
+      down.sms.down(true);
+      expect(await request(down, A)).toMatchObject({ status: 200, body: { sent: true } });
+      expect(lines.mock.calls).toEqual([
+        ["authtempo: an SMS after the answer was not sent", "capped"],
+        ["authtempo: an SMS after the answer was not sent", "unavailable"],
+      ]);
+      // In process, with no work after the answer, the outage answers 503 alike for both numbers.
+      const known = await requestPhone(down.config, { phone: A, ip: null });
+      const unknown = await requestPhone(down.config, { phone: B, ip: null });
+      expect(known).toMatchObject({ ok: false, code: "sms_unavailable" });
+      expect(unknown).toEqual(known);
+    } finally {
+      lines.mockRestore();
+    }
+  });
+
+  it("refuses a code sent with signUp on at a verify with signUp off", async () => {
+    const on = world({ signUp: true });
+    expect((await request(on, A)).body).toEqual({ sent: true });
+    const code = codeTo(on, A);
+    // The same store and clock, and a config that turned signUp off since the send.
+    const off = world({ signUp: false }, { storage: on.storage, clock: on.clock });
+    const r = await verify(off, A, code);
+    expect(r.status).toBe(400);
+    expect(r.body).toEqual({ error: "invalid_code" });
+    expect(await on.storage.findMany("user", [])).toEqual([]);
+  });
+
+  it("spends no sign-in key of a number at an add by another account (ruling 23, m1)", async () => {
+    const w = world(
+      {},
+      { captcha: { port: { verify: async () => "pass" }, flows: ["phone-request"] } },
+    );
     await withPhone(w, "ada@example.com", A);
-    w.sms.down(true);
-    const known = await request(w, A);
-    const unknown = await request(w, B);
-    expect(known.status).toBe(503);
-    expect(known.body).toEqual({ error: "sms_unavailable" });
-    expect(unknown.status).toBe(known.status);
-    expect(unknown.body).toEqual(known.body);
+    // Mallory has her own account, a fresh session, and no captcha token.
+    for (const email of ["mallory@example.com", "mal@example.com", "m@example.com"]) {
+      const mallory = await addressUser(w, email);
+      expect((await add(w, mallory.cookie, A)).body).toEqual({ sent: true });
+    }
+    // Ada passes the captcha, and her sign-in requests get the full per-number count.
+    const signIn = () =>
+      call(
+        w,
+        post(
+          "/auth/phone/request",
+          { phone: A },
+          { "cf-connecting-ip": w.ip(), "x-captcha-response": "ok" },
+        ),
+      );
+    for (let i = 0; i < 3; i++) expect((await signIn()).status).toBe(200);
+    // The add has its own key per number: 10 per 24 hours over every user.
+    const adds = world();
+    for (let i = 0; i < 10; i++) {
+      const u = await addressUser(adds, `u${i}@example.com`);
+      expect((await add(adds, u.cookie, B)).status).toBe(200);
+    }
+    const last = await addressUser(adds, "u10@example.com");
+    expect((await add(adds, last.cookie, B)).body).toEqual({ error: "rate_limited" });
+  });
+
+  it("answers a guess of a decoy row as a wrong code", async () => {
+    const w = world();
+    const ada = await withPhone(w, "ada@example.com", A);
+    const bob = await addressUser(w, "bob@example.com");
+    expect((await add(w, bob.cookie, A)).body).toEqual({ sent: true });
+    // The decoy code went to no one. A guess that hits it is the same draw as any code.
+    const [decoy] = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "phone-add-otp" },
+      { field: "identifier", op: "eq", value: bob.user.id },
+    ]);
+    if (!decoy) throw new Error("no decoy row");
+    const hit = "123456";
+    await w.storage.update("verification", [{ field: "id", op: "eq", value: decoy.id }], {
+      valueHash: await codeHash(currentSecret(w.config.keyring), decoy.id, hit),
+    });
+    const r = await addVerify(w, bob.cookie, hit);
+    expect(r.status).toBe(400);
+    expect(r.body).toEqual({ error: "invalid_code" });
+    expect((await userOf(w, ada.user.id))?.phone).toBe(A);
+    expect((await userOf(w, bob.user.id))?.phone).toBeNull();
   });
 
   it("applies each limit of spec 32 item 5", async () => {

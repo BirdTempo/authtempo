@@ -988,6 +988,7 @@ export const ROUTES = Object.freeze([
     path: "/phone/request",
     feature: "phone",
     auth: ["none"],
+    // No sms_unavailable: the send runs after the answer (ruling 23 of plan 12i).
     codes: [
       "invalid_body",
       "rate_limited",
@@ -996,7 +997,6 @@ export const ROUTES = Object.freeze([
       "captcha_unavailable",
       "phone_invalid",
       "phone_region",
-      "sms_unavailable",
     ],
     oauthCodes: [],
   },

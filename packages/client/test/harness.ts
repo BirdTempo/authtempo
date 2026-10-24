@@ -49,7 +49,13 @@ export function inProcessFetch(auth: ReturnType<typeof createAuth>, origin = APP
     if (req.credentials !== "omit" && jar.size > 0) {
       headers.set("cookie", [...jar].map(([k, v]) => `${k}=${v}`).join("; "));
     }
-    const res = await auth.handle(new Request(req, { headers }));
+    // A host that keeps the work after the answer (ruling 23 of plan 12i):
+    // the fetch returns when that work is done, so a test reads what it sent.
+    const after: Promise<unknown>[] = [];
+    const res = await auth.handle(new Request(req, { headers }), {
+      waitUntil: (p) => void after.push(p),
+    });
+    await Promise.all(after);
     for (const line of res.headers.getSetCookie()) {
       const [pair, ...attrs] = line.split(";");
       const [name, value] = (pair ?? "").split("=");

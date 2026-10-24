@@ -1035,7 +1035,10 @@ export interface Auth {
   /**
    * Serves the auth routes under `basePath`. Mount it for any request whose
    * path starts with `basePath`. With `observe`, pass `{ waitUntil }`: the
-   * flush of the events then runs after the answer (plan 12h).
+   * flush of the events then runs after the answer (plan 12h). The work that
+   * a route does after its answer, such as the SMS of a phone code, runs
+   * under it too (ruling 23 of plan 12i). With no `waitUntil`, that work
+   * runs detached, and on Workers the runtime can stop it.
    */
   handle(request: Request, options?: HandleOptions): Promise<Response>;
   /**
@@ -1270,15 +1273,25 @@ export function createAuth(input: AuthConfig): Auth {
     // The flush starts only after waitUntil takes the promise. A hook that
     // throws starts no flush, so no batch floats with no hook. The batch stays
     // in the buffer for the next flush (fix wave of plan 12h, Low 4).
+    // The work after the answer of a route (ruling 23 of plan 12i) runs
+    // under the same waitUntil. The flush waits for it, so its lines go out
+    // in the batch of the request. With no waitUntil, the work runs detached.
     async handle(request, options) {
-      const res = await route(request);
+      const after: Promise<unknown>[] = [];
+      const res = await route(
+        request,
+        options?.waitUntil ? { waitUntil: (work) => void after.push(work) } : undefined,
+      );
       if (options?.waitUntil) {
         let start = () => {};
         const started = new Promise<void>((resolve) => {
           start = resolve;
         });
         try {
-          options.waitUntil(started.then(() => config.observe.flush()));
+          // The router catches each rejection of the work, so `all` waits for every one.
+          // With no work, the flush starts as before, with no extra wait.
+          const ready = after.length === 0 ? started : started.then(() => Promise.all(after));
+          options.waitUntil(ready.then(() => config.observe.flush()));
           start();
         } catch (e) {
           config.observe.emit({ name: "observe.wait_until_threw", errorName: e });

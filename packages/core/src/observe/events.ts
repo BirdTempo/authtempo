@@ -427,6 +427,10 @@ export const EVENTS = {
   }),
   // Plan 12i: never the number or the text, which holds the code.
   "sms.port_threw": fault("error", "authtempo: the SMS port threw", { errorName: ERROR_NAME }),
+  // Ruling 23 of plan 12i: a send after the answer that the cap refused or the port did not make.
+  "sms.not_sent": fault("error", "authtempo: an SMS after the answer was not sent", {
+    reason: enumOf(["capped", "unavailable"]),
+  }),
   "hook.copy_failed": fault("error", "authtempo: hook event copy failed", {
     hook: enumOf(HOOK_NAMES),
     errorName: ERROR_NAME,

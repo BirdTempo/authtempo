@@ -189,8 +189,8 @@ export async function enableMethod(
 
 /**
  * Turns the passkey method on (plan 12c). Needs a proved account (a verified
- * address, or no address and not anonymous: `provedAccount`), the
- * password, and a sign-in assertion of one of the user's passkeys: the
+ * address, or no address and not anonymous: `provedAccount`). Needs the
+ * password and a sign-in assertion of one of the user's passkeys. The
  * assertion proves that the person holds a passkey now.
  */
 export async function enablePasskeyMethod(

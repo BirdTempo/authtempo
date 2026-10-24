@@ -54,12 +54,13 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `phone-otp:ip:<ip>` | 15 minutes | 10 | Phone code request and phone add, before the read of the number |
-| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request and phone add, after the form and region checks |
-| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request and phone add, after the form and region checks |
-| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every SMS of the deployment, each code and each note to a taken number, before the row and the send. It needs a shared limiter |
+| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request, after the form and region checks |
+| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request, after the form and region checks |
+| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every SMS of the deployment, each code and each note to a taken number, before the row and the send. It needs a shared limiter. For a phone code request, it counts after the answer |
 | `phone-verify:ip:<ip>` | 15 minutes | 30 | Every phone code check |
 | `phone-verify:phone:<phone>` | 15 minutes | 10 | Phone sign-in code check |
 | `phone-add:user:<userId>` | 15 minutes | 3 | Phone add, after the fresh rule and before the request limits. The note to a taken number counts too |
+| `phone-add:phone:<phone>` | 24 hours | 10 | Phone add, over every user, after the form and region checks. The note to a taken number counts too |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
@@ -122,6 +123,10 @@ For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives it
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
 `password:email`, `password:username`, and `password:phone` count apart, one key for each kind of identifier. So from many IPs, one account with an address, a username, and a phone takes up to 30 guesses per 15 minutes. This is a known residual. A count per account would close it, but its 429 would tell that a phone and an address name one account. `password:ip` bounds each IP at 20 guesses.
+
+A phone code request sends its code after the answer. So a refusal of `phone-otp:all-day:deployment` at a request gives no 429. The answer stays `{ sent: true }`, and core writes one `sms.not_sent` line with the reason `capped`. A 429 there would come only on the branch that sends, so its time and status would tell whether a number has an account. Watch the line: it is the only sign that the cap stops codes.
+
+The phone add counts on `phone-add:phone`, not on the two `phone-otp` keys of a number. So an add by another account spends no sign-in count of the person who holds the number.
 
 `phone-otp:all-day:deployment` counts in a fixed window that opens at the first send. The count starts again when the window ends. So up to 2 × `dailyCap` sends can go out in a short span across the end of a window. The stored key holds the maximum, so a new `dailyCap` starts a new count.
 

@@ -25,7 +25,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { changePassword, passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { effectiveIn } from "../src/engine/permissions.js";
-import { addPhone, sendPhoneCode, verifyAddPhone } from "../src/engine/phone.js";
+import { addPhone, requestPhone, sendPhoneCode, verifyAddPhone } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { createRole, listRoles } from "../src/engine/roles.js";
 import { rewrapSecrets } from "../src/engine/secrets.js";
@@ -618,6 +618,29 @@ describe("the SMS lines (plan 12i)", () => {
       await sendPhoneCode(config, { purpose: "phone-otp", identifier: to, to, data: {} }),
     ).toBe("unavailable");
     expect(log.mock.calls).toEqual([["authtempo: the SMS port threw", "Error"]]);
+  });
+
+  it("sms.not_sent", async () => {
+    const log = errors();
+    const sms = { send: async () => "unavailable" as const };
+    const config = resolveConfig(
+      input({
+        phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true, dailyCap: 1 },
+      }),
+    );
+    // The route hands the send to `after`: the answer is sent, and the line tells what failed.
+    const ask = async (phone: string) => {
+      const after: Promise<unknown>[] = [];
+      const answer = await requestPhone(config, { phone, ip: null }, (w) => void after.push(w));
+      await Promise.all(after);
+      return answer;
+    };
+    expect(await ask("+14155550100")).toEqual({ ok: true, value: { sent: true } });
+    expect(await ask("+14155550101")).toEqual({ ok: true, value: { sent: true } });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: an SMS after the answer was not sent", "unavailable"],
+      ["authtempo: an SMS after the answer was not sent", "capped"],
+    ]);
   });
 });
 

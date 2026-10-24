@@ -470,12 +470,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="sms_unavailable"><code>sms_unavailable</code> 503</h3>
 
-- **Meaning:** The SMS port of the app answered `"unavailable"` or threw. The code counted against `phone.dailyCap`.
+- **Meaning:** The SMS port of the app answered `"unavailable"` or threw. The code counted against `phone.dailyCap`. `POST /phone/request` does not answer it: its code goes out after the answer, and an outage gives an `sms.not_sent` line.
 - **Do:** Try again later, or offer another method.
 
 | Routes |
 | --- |
-| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
+| [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
 
 <h3 id="phone_taken"><code>phone_taken</code> 409</h3>
 

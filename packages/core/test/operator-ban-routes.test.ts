@@ -7,7 +7,7 @@ import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
-import { BASE_URL, tokenFromMail } from "./helpers.js";
+import { BASE_URL, settled, tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { signUpAndVerify } from "./password-helpers.js";
 import { enrolled, PASSWORD } from "./totp-helpers.js";
@@ -60,7 +60,7 @@ async function world() {
   // The phone code of plan 12i Task 5 reads its codes from this port.
   const sms = createRecordingSms();
   const auth = await operatorAuth({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
-  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  const handle = settled(createRouter(auth.config, coreRoutes(auth.config)));
   const post = (path: string, body: unknown) =>
     handle(
       new Request(`${BASE_URL}/auth${path}`, {

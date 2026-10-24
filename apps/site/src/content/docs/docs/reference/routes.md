@@ -475,7 +475,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. The session is fresh |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user has a proved handle |
 | Input | JSON `{ code }` |
 | Answer | `{ backupCodes }`, a new list; the old codes stop |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
@@ -616,7 +616,16 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 
 These routes exist when the config sets `phone`. A phone code is one factor over the phone network: a passkey is the stronger method. Core makes, keys, binds, and counts every code, and counts every SMS against `phone.dailyCap`. The SMS port only sends text.
 
-The limits and the number checks run before the read of the number. So a 429 and a refusal tell nothing about an account. Three residuals stay. With `phone.signUp` off, an unknown number answers `{ sent: true }` when the cap or the SMS port would refuse a known number. The send to the supplier takes time that a request for an unknown number with `phone.signUp` off does not take. A region of one digit, such as `+1`, admits every country of that zone, with its numbers of a high cost: list narrow prefixes.
+The limits and the number checks run before the read of the number. So a 429 and a refusal tell nothing about an account.
+
+`POST /phone/request` sends its code after the answer. The daily cap, the code row, and the SMS run under the `waitUntil` that the host passes to `handle`. With no `waitUntil`, that work runs detached. So the answer time does not tell whether a number has an account: the supplier time is not in the answer. For the same reason, a cap refusal or an outage of the SMS port no longer shows in the answer. Core writes one `sms.not_sent` line with the reason, `capped` or `unavailable`. Watch that line, because the person who asked gets `{ sent: true }` and no code. On Workers, pass `(p) => ctx.waitUntil(p)`. With no `waitUntil`, the runtime can stop the send after the answer.
+
+Some residuals stay:
+
+- `api.phone.request` in process sends before it answers. Its time tells an account, and it answers 429 for the cap and 503 for an outage on a branch that sends. An app route that calls it carries that residual.
+- A region of one digit, such as `+1`, admits every country of that zone, with its numbers of a high cost: list narrow prefixes.
+- Number recycling and SIM swap. A carrier gives a number to a new person, or an attacker moves the number to a new SIM. The new holder of the number then signs in to the account with the phone code. For an account with an address, core sends no mail at a phone sign-in. The session is fresh, so the routes with the fresh rule open to the new holder. Turn on the second factor and keep `totp.gate.phone` on to stop a holder of the number alone.
+- A user with no address who moves the phone to a new number gets no notice on any channel. The old number gets no text.
 
 <h3 id="post-phone-request"><code>POST /phone/request</code></h3>
 
@@ -624,8 +633,8 @@ The limits and the number checks run before the read of the number. So a 429 and
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ phone }` |
-| Answer | `{ sent: true }` for a known and an unknown number. A known number gets a code. An unknown number gets a code only with `phone.signUp` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region), [`sms_unavailable`](/docs/reference/errors/#sms_unavailable) |
+| Answer | `{ sent: true }` for a known and an unknown number. A known number gets a code. An unknown number gets a code only with `phone.signUp`. The code goes out after the answer, so a cap refusal or an outage gives an `sms.not_sent` line and no error |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region) |
 | Captcha | With `captcha` and the flow `phone-request`: the header `x-captcha-response`, after the per-IP limit and before the per-number limits |
 
 <h3 id="post-phone-verify"><code>POST /phone/verify</code></h3>
@@ -643,7 +652,7 @@ The limits and the number checks run before the read of the number. So a 429 and
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user has a proved handle |
 | Input | JSON `{ phone }` |
-| Answer | `{ sent: true }`. A free number gets a code. A number that another account holds gets a note with no code, and the same answer |
+| Answer | `{ sent: true }`. A free number gets a code. A number that another account holds gets a note with no code, and the same answer. Both write a code row: the row of a held number is a decoy that no code opens. The add counts on its own key per number, so it spends no sign-in count of the number |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region), [`sms_unavailable`](/docs/reference/errors/#sms_unavailable), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-phone-add-verify"><code>POST /phone/add/verify</code></h3>

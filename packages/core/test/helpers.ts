@@ -47,6 +47,25 @@ function recordRequest(headers: Record<string, string>, body?: unknown): void {
 export const APP_ORIGIN = "https://app.example.com";
 
 /**
+ * A router call that waits for the work after the answer (ruling 23 of plan
+ * 12i), so a test reads the SMS that a route sent. The router catches each
+ * rejection of that work, so the wait never throws.
+ */
+export function settled(
+  route: (
+    request: Request,
+    options?: { waitUntil?: (p: Promise<unknown>) => void },
+  ) => Promise<Response>,
+): (request: Request) => Promise<Response> {
+  return async (request) => {
+    const after: Promise<unknown>[] = [];
+    const res = await route(request, { waitUntil: (p) => void after.push(p) });
+    await Promise.all(after);
+    return res;
+  };
+}
+
+/**
  * The time limit of a core test that makes hundreds of rows or calls (review
  * m3 of plan 12d Task 4b). The default of 5 s is too short under load. The
  * test "keeps at most 500 discovery entries" took 288 ms alone. It timed out

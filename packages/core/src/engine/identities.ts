@@ -114,8 +114,8 @@ export async function guardedRemove(
   config: ResolvedConfig,
   userId: string,
   remove: (tx: StorageAdapter, user: UserRow) => Promise<number>,
-  // The fields of the user row that `remove` wrote, so the recount reads the
-  // row as `remove` left it: the phone remove of plan 12i writes `phone: null`.
+  // The fields of the user row that `remove` wrote. The recount reads the
+  // row as `remove` left it. The phone remove of plan 12i writes `phone: null`.
   wrote: Partial<UserRow> = {},
 ): Promise<Result<UserRow>> {
   const now = config.clock.now();

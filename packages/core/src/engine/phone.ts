@@ -49,6 +49,11 @@ const VERIFY_PER_IP = { seconds: 900, max: 30 };
 const VERIFY_PER_PHONE = { seconds: 900, max: 10 };
 // Per 15 minutes, per user: the codes and notes of `/phone/add` (spec 32 item 5).
 const ADD_PER_USER = { seconds: 900, max: 3 };
+// Per 24 hours, per number, over every user: the codes and notes of
+// `/phone/add` (ruling 23 of plan 12i). The add has its own key, so an add
+// by another account spends no sign-in key of the holder. The maximum is
+// the day key of a request, so a number gets no more texts a day than before.
+const ADD_PER_PHONE = { seconds: 86_400, max: 10 };
 /** The window of the daily cap. The max is `phone.dailyCap`. */
 const CAP_WINDOW_SECONDS = 86_400;
 /** The subject of the daily cap: one count for the deployment. */
@@ -87,13 +92,15 @@ export function phoneSignsIn(config: ResolvedConfig, user: UserRow): boolean {
 /**
  * The gate of a code request (spec 32 item 5), before the branch on a known
  * or an unknown number: the per-IP limit, the captcha, the form and region
- * checks, and the two per-number limits. The order follows `checkCaptcha`:
- * a request with no token spends no per-number key of a victim. Answers
- * the number that the config accepts.
+ * checks, and the per-number limits. The order follows `checkCaptcha`: a
+ * request with no token spends no per-number key of a victim. With `add`,
+ * the per-number key is `phone-add:phone`, and the two sign-in keys stay
+ * unspent (ruling 23 of plan 12i). Answers the number that the config accepts.
  */
 export async function phoneRequestGate(
   config: ResolvedConfig,
   input: { phone: string; ip: string | null; captchaToken?: string | null | undefined },
+  keys: "request" | "add" = "request",
 ): Promise<Result<string>> {
   if (!config.phone) return fail("not_found");
   if (!(await limit(config, "phone-otp:ip", ipKey(input.ip), REQUEST_PER_IP)))
@@ -103,6 +110,10 @@ export async function phoneRequestGate(
   // Before the per-number keys: a key trusts a number that the config accepts.
   const refused = phoneRefusal(config, input.phone);
   if (refused) return fail(refused);
+  if (keys === "add")
+    return (await limit(config, "phone-add:phone", input.phone, ADD_PER_PHONE))
+      ? ok(input.phone)
+      : fail("rate_limited");
   if (!(await limit(config, "phone-otp:phone", input.phone, REQUEST_PER_PHONE)))
     return fail("rate_limited");
   if (!(await limit(config, "phone-otp:phone-day", input.phone, REQUEST_PER_PHONE_DAY)))
@@ -239,13 +250,19 @@ export interface PhoneRequest {
  * the captcha, and the form and region checks. So a 429 and a refusal tell
  * nothing about an account. Then one read by number. A known number gets a
  * code. An unknown number gets a code only with `phone.signUp`; else it
- * gets no SMS and the same `{ sent: true }`. A cap or an outage answers 429
- * or 503 only on a branch that sends: with `signUp` off, an unknown number
- * answers `{ sent: true }` in both cases (the residual of spec 32 item 5).
+ * gets no SMS and the same `{ sent: true }`.
+ *
+ * With `after` (the route), the send runs after the answer: the cap, the
+ * row, and the SMS (ruling 23 of plan 12i). So the answer time does not
+ * tell whether a number has an account. A cap refusal or an outage then
+ * becomes an `sms.not_sent` line, not a 429 or a 503. With no `after` (a
+ * call in process), the send runs before the answer. A cap or an outage
+ * then answers 429 or 503 only on a branch that sends.
  */
 export async function requestPhone(
   config: ResolvedConfig,
   input: PhoneRequest,
+  after?: (work: Promise<unknown>) => void,
 ): Promise<Result<{ sent: true }>> {
   const phone = config.phone;
   if (!phone) return fail("not_found");
@@ -254,14 +271,24 @@ export async function requestPhone(
   const number = gate.value;
   const known = await config.storage.findOne("user", byPhone(number));
   if (!known && !phone.signUp) return ok({ sent: true });
-  return sentAnswer(
-    await sendPhoneCode(config, {
-      purpose: "phone-otp",
-      identifier: number,
-      to: number,
-      data: {},
-    }),
-  );
+  const send = { purpose: "phone-otp", identifier: number, to: number, data: {} } as const;
+  if (!after) return sentAnswer(await sendPhoneCode(config, send));
+  after(sendLater(config, send));
+  return ok({ sent: true });
+}
+
+/**
+ * A send after the answer (ruling 23 of plan 12i). No caller reads its
+ * result, so a send that did not go out writes one `sms.not_sent` line
+ * with the reason. A throw of the port has its `sms.port_threw` line too.
+ */
+async function sendLater(
+  config: ResolvedConfig,
+  input: Parameters<typeof sendPhoneCode>[1],
+): Promise<void> {
+  const answer = await sendPhoneCode(config, input);
+  if (answer === "capped" || answer === "unavailable")
+    config.observe.emit({ name: "sms.not_sent", reason: answer });
 }
 
 export interface PhoneVerify {
@@ -335,7 +362,7 @@ export async function verifyPhone(
 /**
  * The transaction of `verifyPhone`. Every hook runs before the first write
  * (the D1 undo, `BeforeResolveWrite` in users.ts). Two parallel sign-ups of
- * one number race on the unique key of `phone`: the loser runs once more,
+ * one number race on the unique key of `phone`. The loser runs once more,
  * outside its failed transaction, and finds the winner.
  */
 async function resolvePhoneUser(
@@ -404,13 +431,19 @@ export async function addPhone(
   if (!fresh.ok) return fresh;
   if (!(await limit(config, "phone-add:user", user.id, ADD_PER_USER))) return fail("rate_limited");
   // No captcha: the fresh session and the per-user limit bound the sends.
-  const gate = await phoneRequestGate(config, { phone: input.phone, ip: input.ip });
+  // The add keys of the number spend no sign-in key of the number's holder.
+  const gate = await phoneRequestGate(config, { phone: input.phone, ip: input.ip }, "add");
   if (!gate.ok) return gate;
   const number = gate.value;
   const holder = await config.storage.findOne("user", byPhone(number));
+  // A taken number gets a decoy row and a note with no code. The writes are
+  // the writes of a free number, so the time does not tell a held number (plan 12a).
   if (holder && holder.id !== user.id)
     return sentAnswer(
-      await countedSend(config, phone, number, async () => () => takenNote(config)),
+      await countedSend(config, phone, number, async () => {
+        await issueCode(config, phone, "phone-add-otp", user.id, { phone: number, taken: true });
+        return () => takenNote(config);
+      }),
     );
   return sentAnswer(
     await sendPhoneCode(config, {
@@ -430,12 +463,13 @@ export interface PhoneAddVerify {
 }
 
 /**
- * `POST /phone/add/verify` (spec 32 item 5). The check of the code that
- * `addPhone` sent, then one transaction: the compare-and-set of the user
- * row with the number first, then the spend of the code. The unique key of
- * `phone` decides a race of two users: the loser answers `phone_taken`, and
- * its code stays live, because its transaction spent nothing. The notice
- * goes after the commit, to the address when the user has one.
+ * `POST /phone/add/verify` (spec 32 item 5). It needs a proved handle and
+ * a fresh session. The check of the code that `addPhone` sent comes next.
+ * Then one transaction: the compare-and-set of the user row with the
+ * number, then the spend of the code. The unique key of `phone` decides a
+ * race of two users. The loser answers `phone_taken`. Its transaction spent
+ * nothing, so its code stays live. The notice goes after the commit, to the
+ * address when the user has one.
  */
 export async function verifyAddPhone(
   config: ResolvedConfig,
@@ -454,9 +488,12 @@ export async function verifyAddPhone(
   });
   if (!checked.ok) return checked;
   const row = checked.value;
-  const number = (row.data as { phone?: unknown } | null)?.phone;
+  const data = row.data as { phone?: unknown; taken?: unknown } | null;
+  const number = data?.phone;
   // Only `addPhone` writes the row, so a row with no number is damaged.
   if (typeof number !== "string" || !PHONE_RE.test(number)) return fail("invalid_code");
+  // A decoy row answers as a wrong code. Its code went to no one.
+  if (data?.taken === true) return fail("invalid_code");
   const written = await writePhone(config, user.id, number, row);
   if (!written.ok) return written;
   await runAfter(

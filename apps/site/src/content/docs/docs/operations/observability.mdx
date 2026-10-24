@@ -146,6 +146,7 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: the captcha port threw` | `captcha.port_threw` | Act. The captcha port of the app threw. Core reads it as no answer. |
 | `authtempo: the captcha did not answer` | `captcha.no_answer` | Act. The captcha gave no answer, and `captcha.onUnavailable` let the flow go on. |
 | `authtempo: the SMS port threw` | `sms.port_threw` | Act. The SMS port of the app threw, or `phone.message` threw. Core reads it as `"unavailable"`, and the send counted against `phone.dailyCap`. The line holds no number and no code. |
+| `authtempo: an SMS after the answer was not sent` | `sms.not_sent` | Act. A phone code request answered `{ sent: true }`, and its code did not go out after the answer. The reason `capped` means that `phone.dailyCap` is spent. The reason `unavailable` means that the SMS port did not send. The person gets no code and no error. The line holds no number and no code. |
 | `authtempo: hook event copy failed` | `hook.copy_failed` | Act. Core could not copy the event of a hook. Keep the hook data plain. |
 | `authtempo: before hook failed` | `hook.before_failed` | Act. A `before` hook threw, and the flow answered `hook_failed`. Fix the hook. |
 | `authtempo: after hook failed` | `hook.after_failed` | Act. An `after` hook threw after the commit. The app's own row for that id is missing. |

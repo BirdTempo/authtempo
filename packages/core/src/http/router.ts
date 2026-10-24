@@ -3,6 +3,7 @@ import { atBase, pickBase, type ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
+import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
@@ -27,6 +28,14 @@ export interface RouteContext {
    * empty object for a route with none.
    */
   params: Readonly<Record<string, string>>;
+  /**
+   * Keeps `work` alive after the answer (ruling 23 of plan 12i). A route
+   * whose slow work differs by whether an account exists starts it here and
+   * answers at once, so the answer time tells nothing. The router hands the
+   * work to the `waitUntil` of the call. With none, the work runs detached.
+   * A rejection never reaches the answer: it becomes one `error.internal` line.
+   */
+  waitUntil(work: Promise<unknown>): void;
 }
 
 /** What a route's preflight hook reads (plan 11d). */
@@ -372,14 +381,14 @@ export function createRouter(
   config: ResolvedConfig,
   routes: Route[],
   gate: (request: Request) => Response | null = createPostGate(config, routes),
-): (request: Request) => Promise<Response> {
+): (request: Request, options?: HandleOptions) => Promise<Response> {
   const matchRoute = createRouteMatcher(config, routes);
   // The routes that answer a foreign origin's preflight themselves (plan 11d).
   const preflights = new Map(
     routes.filter((r) => r.preflight).map((r) => [`${config.basePath}${r.path}`, r]),
   );
   const trustTraceparent = config.observeConfig?.trustTraceparent === true;
-  return async (request) => {
+  return async (request, options) => {
     const started = config.clock.now().getTime();
     const url = new URL(request.url);
     // An OPTIONS request names the route at its path: the POST, else the GET.
@@ -411,10 +420,23 @@ export function createRouter(
         userAgent: request.headers.get("user-agent"),
       }),
     };
+    // The work after the answer (ruling 23 of plan 12i). Its rejection is caught
+    // here, so a detached promise never rejects with no handler.
+    const waitUntil = (work: Promise<unknown>): void => {
+      const kept = work.catch((e: unknown) => {
+        scoped.observe.emit({
+          name: "error.internal",
+          method: request.method,
+          route: routeKey,
+          errorName: e,
+        });
+      });
+      options?.waitUntil?.(kept);
+    };
     const res =
       host === null
         ? withTrace(routerError(HOST_CODE), traceId)
-        : await answer(scoped, request, url, match, traceId);
+        : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
@@ -450,6 +472,7 @@ export function createRouter(
     url: URL,
     match: RouteMatch | null,
     traceId: string,
+    waitUntil: RouteContext["waitUntil"],
   ): Promise<Response> {
     const origin = request.headers.get("origin");
     const trusted = origin !== null && originTrusted(scoped, origin);
@@ -482,7 +505,7 @@ export function createRouter(
       const res = await moveLegacyCookie(
         scoped,
         request,
-        await dispatch(scoped, request, url, match),
+        await dispatch(scoped, request, url, match, waitUntil),
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
@@ -538,6 +561,7 @@ export function createRouter(
     request: Request,
     url: URL,
     match: RouteMatch | null,
+    waitUntil: RouteContext["waitUntil"],
   ): Promise<Response> {
     if (!match) return routerError("not_found");
     const refusal = gate(request);
@@ -553,6 +577,7 @@ export function createRouter(
       ip: config.clientIp(request),
       now: config.clock.now(),
       params: match.params,
+      waitUntil,
     });
   }
 }

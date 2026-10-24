@@ -98,6 +98,7 @@ Each event has these fields too:
 | `captcha.port_threw` | error | `flow: enum`, `errorName: errorName` | `authtempo: the captcha port threw` |
 | `captcha.no_answer` | error | `flow: enum` | `authtempo: the captcha did not answer` |
 | `sms.port_threw` | error | `errorName: errorName` | `authtempo: the SMS port threw` |
+| `sms.not_sent` | error | `reason: enum` | `authtempo: an SMS after the answer was not sent` |
 | `hook.copy_failed` | error | `hook: enum`, `errorName: errorName` | `authtempo: hook event copy failed` |
 | `hook.before_failed` | error | `hook: enum`, `errorName: errorName` | `authtempo: before hook failed` |
 | `hook.after_failed` | error | `hook: enum`, `rowId: id`, `errorName: errorName` | `authtempo: after hook failed` |
@@ -202,6 +203,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `reauth.outcome` | `success`, `failure` |
 | `captcha.port_threw.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request` |
 | `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request` |
+| `sms.not_sent.reason` | `capped`, `unavailable` |
 | `hook.copy_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.before_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.after_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
@@ -231,7 +233,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 87 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 88 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |
