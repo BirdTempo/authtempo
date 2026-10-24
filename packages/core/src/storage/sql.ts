@@ -441,22 +441,97 @@ export function insertStatement<M extends ModelName>(
   model: M,
   data: Models[M],
 ): Statement {
+  return insertManyStatement(d, model, [data]);
+}
+
+/** One INSERT of every row of `rows`, a VALUES tuple per row (ruling 57 of plan 12d). */
+export function insertManyStatement<M extends ModelName>(
+  d: Dialect,
+  model: M,
+  rows: readonly Models[M][],
+): Statement {
   assertModel(model);
-  assertFields(model, Object.keys(data));
+  if (rows.length === 0) throw invalid(model, "rows", "an insert needs at least one row");
   const p = new Params(d);
   const fields = fieldsOf(model);
-  const values = fields.map((f) => {
-    const type = fieldType(model, f);
-    const ph = p.add(
-      encodeValue(d, type, (data as unknown as Record<string, unknown>)[f], model, f),
-    );
-    return type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
+  const tuples = rows.map((data) => {
+    assertFields(model, Object.keys(data));
+    const values = fields.map((f) => {
+      const type = fieldType(model, f);
+      const ph = p.add(
+        encodeValue(d, type, (data as unknown as Record<string, unknown>)[f], model, f),
+      );
+      return type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
+    });
+    return `(${values.join(", ")})`;
   });
   return {
-    sql: `INSERT INTO ${d.quote(TABLES[model])} (${fields.map((f) => d.quote(columnName(f))).join(", ")}) VALUES (${values.join(", ")})`,
+    sql: `INSERT INTO ${d.quote(TABLES[model])} (${fields.map((f) => d.quote(columnName(f))).join(", ")}) VALUES ${tuples.join(", ")}`,
     params: p.values,
   };
 }
+
+/**
+ * The bound parameters of one D1 query: 100 (D1 limits page, last updated
+ * 21 April 2026, read 2026-10-24). The page applies each limit of a query
+ * to each statement of a batch. So one INSERT of many rows is one query,
+ * and its rows share the 100 parameters. The memory adapter uses the same
+ * bound, so the core tests count the chunks of D1.
+ */
+export const D1_BOUND_PARAMS = 100;
+
+/**
+ * The most rows of one `createMany` statement on every store: 1000. The
+ * bound parameters allow more on SQLite, Postgres, and MySQL. But on
+ * 2026-10-24 the MySQL 8.4 server of a test slot (768 MB) ended with exit
+ * 137, out of memory, in a transaction of 13108 rows in two statements of
+ * 65535 parameters. A smaller statement bounds the memory of the server.
+ * The SCIM writes send at most 61 rows (PATCH_MEMBERS_MAX).
+ */
+export const INSERT_ROWS_MAX = 1000;
+
+/** The rows of one `createMany` statement under `bound` parameters: from 1 to `INSERT_ROWS_MAX`. */
+export function rowsPerInsertOf(st: SqlStatements, model: ModelName, bound: number): number {
+  assertModel(model);
+  return Math.max(1, Math.min(INSERT_ROWS_MAX, Math.floor(bound / st.insertParams(model))));
+}
+
+/** The statements of one `createMany`: one INSERT per chunk of `rowsPerInsertOf` rows. */
+export function insertChunks<M extends ModelName>(
+  st: SqlStatements,
+  model: M,
+  rows: readonly Models[M][],
+  bound: number,
+): Statement[] {
+  const size = rowsPerInsertOf(st, model, bound);
+  const out: Statement[] = [];
+  for (let i = 0; i < rows.length; i += size)
+    out.push(st.insertMany(model, rows.slice(i, i + size)));
+  return out;
+}
+
+/**
+ * The D1 undo of one `createMany`: a delete by `id` per 50 rows, so the
+ * undo of a large insert stays small. A user row keeps the rule of
+ * `undoCreate` with one statement per row.
+ */
+export function undoCreateMany<M extends ModelName>(
+  st: SqlStatements,
+  model: M,
+  rows: readonly Models[M][],
+): Statement[] {
+  if (model === "user") return rows.map((r) => st.undoCreate(model, r));
+  const out: Statement[] = [];
+  for (let i = 0; i < rows.length; i += UNDO_CHUNK) {
+    const ids = rows.slice(i, i + UNDO_CHUNK).map((r) => (r as { id: string }).id);
+    const s = st.delete(model, [{ field: "id", op: "in", value: ids } as Where<M>]);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+/** The ids of one undo delete: 50, half the D1 bound, as `IN_CHUNK` of batch.ts. */
+const UNDO_CHUNK = 50;
 
 export function selectStatement<M extends ModelName>(
   d: Dialect,
@@ -632,6 +707,10 @@ export function whileNoChildRow(
  */
 export interface SqlStatements {
   insert<M extends ModelName>(model: M, data: Models[M]): Statement;
+  /** One INSERT of each row of `rows`, which holds at least one row (ruling 57 of plan 12d). */
+  insertMany<M extends ModelName>(model: M, rows: readonly Models[M][]): Statement;
+  /** The bound parameters of one row of `insertMany`. */
+  insertParams(model: ModelName): number;
   select<M extends ModelName>(
     model: M,
     where: Where<M>[],
@@ -687,6 +766,13 @@ export function coreStatements(d: Dialect): SqlStatements {
   return {
     insert(model, data) {
       return insertStatement(d, model, data);
+    },
+    insertMany(model, rows) {
+      return insertManyStatement(d, model, rows);
+    },
+    insertParams(model) {
+      assertModel(model);
+      return fieldsOf(model).length;
     },
     select(model, where, opts) {
       return selectStatement(d, model, where, opts);

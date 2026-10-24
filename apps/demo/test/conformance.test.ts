@@ -3,6 +3,7 @@ import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
 import type { LimiterPort, StorageAdapter } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
 import { type ManualClock, runLimiterConformance } from "@authtempo/core/limiter-conformance";
+import { coreStatements, D1_BOUND_PARAMS, rowsPerInsertOf, SQLITE } from "@authtempo/core/sql";
 import type { Sandbox } from "../src/sandbox.js";
 import { sqliteD1 } from "../src/sqlite-d1.js";
 
@@ -51,6 +52,9 @@ function forwardedAdapter(name: string): StorageAdapter {
   const on = (db: D1Database) => createD1Adapter(db);
   return {
     create: (model, data) => inside(name, (db) => on(db).create(model, data)),
+    createMany: (model, rows) => inside(name, (db) => on(db).createMany(model, rows)),
+    // The chunk of the D1 adapter, with no call into the object.
+    rowsPerInsert: (model) => rowsPerInsertOf(coreStatements(SQLITE), model, D1_BOUND_PARAMS),
     findOne: (model, where) => inside(name, (db) => on(db).findOne(model, where)),
     findMany: (model, where, opts) => inside(name, (db) => on(db).findMany(model, where, opts)),
     update: (model, where, data) => inside(name, (db) => on(db).update(model, where, data)),

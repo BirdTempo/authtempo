@@ -1893,6 +1893,183 @@ export function runAdapterConformance(
       });
     });
 
+    describe("createMany (ruling 57 of plan 12d)", () => {
+      const at = new Date("2026-10-24T00:00:00.000Z");
+      /** `n` member rows of group `g`, ids `<g>-<i>` in order. */
+      const members = (g: string, n: number, from = 0): ScimGroupMemberRow[] =>
+        Array.from({ length: n }, (_, k) => {
+          const i = String(from + k).padStart(6, "0");
+          return {
+            id: `${g}-${i}`,
+            groupId: g,
+            scimUserId: `su-${i}`,
+            createdAt: at,
+            updatedAt: at,
+          };
+        });
+      const ofGroup = (g: string) =>
+        db.findMany("scimGroupMember", [{ field: "groupId", op: "eq", value: g }], {
+          sort: { field: "id", dir: "asc" },
+        });
+      /** The growth of `statementsSent` across `step`, or null with no counter. */
+      const growth = async (step: () => Promise<unknown>) => {
+        const before = db.statementsSent?.();
+        await step();
+        const after = db.statementsSent?.();
+        return before === undefined || after === undefined ? null : after - before;
+      };
+      const counted = (n: number) => (db.statementsSent ? n : null);
+
+      it("answers an empty list with no row and no statement", async () => {
+        // The ready check first, so the count below holds the call alone.
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        let out: unknown;
+        expect(
+          await growth(async () => {
+            out = await db.createMany("scimGroupMember", []);
+          }),
+        ).toBe(counted(0));
+        expect(out).toEqual([]);
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+      });
+
+      it("writes one row in one statement and answers it", async () => {
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        const [row] = members("g1", 1);
+        let out: unknown;
+        expect(
+          await growth(async () => {
+            out = await db.createMany("scimGroupMember", members("g1", 1));
+          }),
+        ).toBe(counted(1));
+        expect(out).toEqual([row]);
+        expect(await ofGroup("g1")).toEqual([row]);
+      });
+
+      it("writes a full chunk in one statement and one row more in two", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        // From 1 to 1000 rows: a larger statement ran a MySQL test server out of memory.
+        expect(Number.isSafeInteger(size) && size >= 1 && size <= 1000).toBe(true);
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        expect(await growth(() => db.createMany("scimGroupMember", members("g1", size)))).toBe(
+          counted(1),
+        );
+        expect(await growth(() => db.createMany("scimGroupMember", members("g2", size + 1)))).toBe(
+          counted(2),
+        );
+        expect(await ofGroup("g1")).toEqual(members("g1", size));
+        expect(await ofGroup("g2")).toEqual(members("g2", size + 1));
+      });
+
+      it("writes a full chunk of team member rows in one statement, with the columns that a storage adds", async () => {
+        if (options.unmapped?.some((m) => m === "team" || m === "teamMember")) return;
+        // The Better Auth tables add a key column to a team member row, so its chunk is smaller.
+        const size = db.rowsPerInsert("teamMember");
+        const ids = Array.from({ length: size }, (_, i) => `u-${String(i).padStart(6, "0")}`);
+        // The parents first: a storage with foreign keys (the Better Auth tables) needs them.
+        await db.createMany(
+          "user",
+          ids.map((id) => user(id, `${id}@example.com`, at)),
+        );
+        await db.create("organization", {
+          id: "o1",
+          slug: "o1",
+          name: "O",
+          metadata: null,
+          createdAt: at,
+          updatedAt: at,
+        });
+        await db.create("team", {
+          id: "t1",
+          organizationId: "o1",
+          name: "Ops",
+          createdAt: at,
+          updatedAt: at,
+        });
+        const rows: TeamMemberRow[] = ids.map((userId, i) => ({
+          id: `tm-${String(i).padStart(6, "0")}`,
+          teamId: "t1",
+          organizationId: "o1",
+          userId,
+          createdAt: at,
+          updatedAt: at,
+        }));
+        expect(await growth(() => db.createMany("teamMember", rows))).toBe(counted(1));
+        expect(
+          await db.findMany("teamMember", [{ field: "teamId", op: "eq", value: "t1" }], {
+            sort: { field: "id", dir: "asc" },
+          }),
+        ).toEqual(rows);
+      });
+
+      it("writes no row of the call when the last row of the second chunk breaks a unique key", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        const [stored] = members("g1", 1, size);
+        if (!stored) throw new Error("no row");
+        await db.create("scimGroupMember", { ...stored, id: "kept" });
+        // The last row holds the pair (groupId, scimUserId) of the stored row.
+        await expect(
+          db.createMany("scimGroupMember", members("g1", size + 1)),
+        ).rejects.toMatchObject({
+          name: "StorageError",
+          code: "unique_violation",
+          model: "scimGroupMember",
+        });
+        expect((await ofGroup("g1")).map((r) => r.id)).toEqual(["kept"]);
+      });
+
+      it("writes no row when two rows of the list share an id", async () => {
+        const [a, b] = members("g1", 2);
+        if (!a || !b) throw new Error("no row");
+        await expect(
+          db.createMany("scimGroupMember", [a, { ...b, id: a.id }]),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unique_violation" });
+        expect(await ofGroup("g1")).toEqual([]);
+      });
+
+      it("rolls back its rows with the transaction, and an earlier write with them", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        await expect(
+          db.transaction(async (tx) => {
+            await tx.create("user", user("u1", "a@example.com", at));
+            const out = await tx.createMany("scimGroupMember", members("g1", size + 1));
+            expect(out).toHaveLength(size + 1);
+            expect(await tx.findMany("scimGroupMember", [])).toHaveLength(size + 1);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).toBeNull();
+      });
+
+      it("fails a transaction with a unique clash of a later chunk and keeps no row of it", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        const [stored] = members("g1", 1, size);
+        if (!stored) throw new Error("no row");
+        await db.create("scimGroupMember", { ...stored, id: "kept" });
+        await expect(
+          db.transaction(async (tx) => {
+            await tx.create("user", user("u1", "a@example.com", at));
+            await tx.createMany("scimGroupMember", members("g1", size + 1));
+          }),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unique_violation" });
+        expect((await ofGroup("g1")).map((r) => r.id)).toEqual(["kept"]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).toBeNull();
+      });
+
+      it("rejects an unknown model and an unknown field, and writes nothing", async () => {
+        const [row] = members("g1", 1);
+        await expect(db.createMany("nope" as ModelName, [row] as never[])).rejects.toMatchObject({
+          name: "StorageError",
+          code: "unknown_model",
+        });
+        await expect(
+          db.createMany("scimGroupMember", [{ ...row, nope: 1 } as unknown as ScimGroupMemberRow]),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
+        expect(await ofGroup("g1")).toEqual([]);
+      });
+    });
+
     describe("schema version 13 (plan 12k)", () => {
       const at = new Date("2026-10-20T00:00:00.000Z");
       const later = new Date(at.getTime() + 3_600_000);

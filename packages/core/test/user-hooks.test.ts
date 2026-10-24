@@ -364,6 +364,8 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
     // A parallel sign-in creates the same address first, through another connection.
     let armed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && armed) {
@@ -701,6 +703,8 @@ describe("hooks.identity (plan 12a, spec 8.9)", () => {
     // A parallel sign-in of the same Google account links it first, through another connection.
     let armed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: async (m, d) => {
         const row = d as unknown as IdentityRow;
         if (m === "identity" && armed && row.provider === "google") {

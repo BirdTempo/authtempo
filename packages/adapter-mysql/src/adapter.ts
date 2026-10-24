@@ -1,5 +1,10 @@
 import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
-import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import {
+  assertModel,
+  rowsPerInsertOf,
+  type SqlStatements,
+  type Statement,
+} from "@authtempo/core/sql";
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { guardData, guardWhere } from "./ascii-guard.js";
 import type { Sent } from "./start-checks.js";
@@ -43,6 +48,17 @@ interface Ctx extends Omit<MysqlAdapterOptions, "sent"> {
   depth: number;
   sent: Sent;
 }
+
+/**
+ * The bound parameters of one statement: 65535. The COM_STMT_PREPARE_OK
+ * answer carries `num_params` as int<2> (MySQL source docs, read
+ * 2026-10-24), and more placeholders fail with error 1390
+ * ER_PS_MANY_PARAM. The conformance row at the chunk edge passed with
+ * 13107 rows, 65535 parameters, on MySQL 8.4 and 9.7 on 2026-10-24. A
+ * statement now holds at most `INSERT_ROWS_MAX` (1000) rows, so this bound
+ * acts only on a model of more than 65 columns.
+ */
+export const MYSQL_BOUND_PARAMS = 65_535;
 
 /** MySQL error 1213: InnoDB ended the statement to break a deadlock. */
 const LOCK_DEADLOCK = 1213;
@@ -114,6 +130,32 @@ function adapterOn(ctx: Ctx): StorageAdapter {
         throw ctx.toStorageError(model, e) ?? e;
       }
       return structuredClone(data);
+    },
+    async createMany(model, rows) {
+      await ctx.ready();
+      assertModel(model);
+      if (rows.length === 0) return [];
+      for (const data of rows) guardData(model, data as unknown as Row);
+      // InnoDB undoes a failed statement whole. More than one chunk runs in a
+      // transaction (a savepoint inside one), one call per chunk, so the call
+      // is all or nothing.
+      const size = self.rowsPerInsert(model);
+      if (rows.length > size) {
+        await self.transaction(async (tx) => {
+          for (let i = 0; i < rows.length; i += size)
+            await tx.createMany(model, rows.slice(i, i + size));
+        });
+        return structuredClone([...rows]);
+      }
+      try {
+        await query(ctx, ctx.statements.insertMany(model, rows));
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+      return structuredClone([...rows]);
+    },
+    rowsPerInsert(model) {
+      return rowsPerInsertOf(ctx.statements, model, MYSQL_BOUND_PARAMS);
     },
     async findOne(model, where) {
       await ctx.ready();

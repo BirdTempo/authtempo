@@ -97,6 +97,8 @@ const auditRows = (storage: StorageAdapter) => storage.findMany("operatorAudit",
  */
 function auditCreateFails(inner: StorageAdapter): StorageAdapter {
   const wrap = (s: StorageAdapter): StorageAdapter => ({
+    createMany: (m, r) => s.createMany(m, r),
+    rowsPerInsert: (m) => s.rowsPerInsert(m),
     create: (model, data) => {
       if (model === "operatorAudit") throw new Error("the audit insert failed");
       return s.create(model, data);
@@ -218,6 +220,8 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     // endFamilies reads each noted scope again on the store, after the
     // commit. The reads inside the transaction go through its own tx.
     const recording: StorageAdapter = {
+      createMany: (m, r) => inner.createMany(m, r),
+      rowsPerInsert: (m) => inner.rowsPerInsert(m),
       create: (model, data) => inner.create(model, data),
       findOne: (model, where) => inner.findOne(model, where),
       findMany: (model, where, opts) => {
@@ -261,6 +265,8 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     const { user } = await verifiedSession(auth, TARGET);
     const inner = auth.storage;
     const recording: StorageAdapter = {
+      createMany: (m, r) => inner.createMany(m, r),
+      rowsPerInsert: (m) => inner.rowsPerInsert(m),
       create: (model, data) => inner.create(model, data),
       findOne: (model, where) => inner.findOne(model, where),
       findMany: (model, where, opts) => {

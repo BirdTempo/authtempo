@@ -173,6 +173,8 @@ function gated(base: StorageAdapter) {
       if (armed && model === "oauthToken") await Promise.race([deleteRan.done, timeout()]);
       return base.create(model, data);
     },
+    createMany: (model, rows) => base.createMany(model, rows),
+    rowsPerInsert: (model) => base.rowsPerInsert(model),
     findOne: (model, where) => base.findOne(model, where),
     findMany: (model, where, opts) => base.findMany(model, where, opts),
     update: async (model, where, data) => {
@@ -219,6 +221,8 @@ function revokeGated(base: StorageAdapter) {
   let commitAfter: Promise<unknown> = Promise.resolve();
   const inTx = (tx: StorageAdapter): StorageAdapter => ({
     create: (model, data) => tx.create(model, data),
+    createMany: (model, rows) => tx.createMany(model, rows),
+    rowsPerInsert: (model) => tx.rowsPerInsert(model),
     findOne: (model, where) => tx.findOne(model, where),
     findMany: (model, where, opts) => tx.findMany(model, where, opts),
     update: (model, where, data) => tx.update(model, where, data),
@@ -237,6 +241,8 @@ function revokeGated(base: StorageAdapter) {
       if (armed && model === "oauthToken") await Promise.race([deleted.done, timeout()]);
       return base.create(model, data);
     },
+    createMany: (model, rows) => base.createMany(model, rows),
+    rowsPerInsert: (model) => base.rowsPerInsert(model),
     findOne: (model, where) => base.findOne(model, where),
     findMany: (model, where, opts) => base.findMany(model, where, opts),
     update: async (model, where, data) => {

@@ -1,5 +1,10 @@
 import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
-import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import {
+  assertModel,
+  rowsPerInsertOf,
+  type SqlStatements,
+  type Statement,
+} from "@authtempo/core/sql";
 import type { Sql, TransactionSql } from "postgres";
 
 type Row = Record<string, unknown>;
@@ -17,6 +22,18 @@ export interface PostgresAdapterOptions {
    */
   ping?(): Promise<void>;
 }
+
+/**
+ * The bound parameters of one statement: 65533. The Bind message carries
+ * the count as an Int16 (PostgreSQL docs, Message Formats, read
+ * 2026-10-24), so the server takes at most 65535. postgres.js 3.4.9 is
+ * lower: it throws MAX_PARAMETERS_EXCEEDED at 65534 or more
+ * (src/connection.js, read 2026-10-24). The conformance row at the chunk
+ * edge found that limit with a chunk of 13107 rows. Since then a statement
+ * holds at most `INSERT_ROWS_MAX` (1000) rows, so this bound acts only on a
+ * model of more than 65 columns.
+ */
+export const POSTGRES_BOUND_PARAMS = 65_533;
 
 interface Ctx extends PostgresAdapterOptions {
   conn: Conn;
@@ -45,6 +62,30 @@ function adapterOn(ctx: Ctx): StorageAdapter {
         throw ctx.toStorageError(model, e) ?? e;
       }
       return structuredClone(data);
+    },
+    async createMany(model, rows) {
+      await ctx.ready();
+      assertModel(model);
+      if (rows.length === 0) return [];
+      // More than one chunk runs in a transaction (a savepoint inside one), one
+      // call per chunk, so the call is all or nothing.
+      const size = self.rowsPerInsert(model);
+      if (rows.length > size) {
+        await self.transaction(async (tx) => {
+          for (let i = 0; i < rows.length; i += size)
+            await tx.createMany(model, rows.slice(i, i + size));
+        });
+        return structuredClone([...rows]);
+      }
+      try {
+        await query(ctx, ctx.statements.insertMany(model, rows));
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+      return structuredClone([...rows]);
+    },
+    rowsPerInsert(model) {
+      return rowsPerInsertOf(ctx.statements, model, POSTGRES_BOUND_PARAMS);
     },
     async findOne(model, where) {
       await ctx.ready();

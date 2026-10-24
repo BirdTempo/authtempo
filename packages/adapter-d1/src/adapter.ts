@@ -1,6 +1,14 @@
 import type { ModelName, StorageAdapter } from "@authtempo/core";
 import { StorageError } from "@authtempo/core";
-import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import {
+  assertModel,
+  D1_BOUND_PARAMS,
+  insertChunks,
+  rowsPerInsertOf,
+  type SqlStatements,
+  type Statement,
+  undoCreateMany,
+} from "@authtempo/core/sql";
 import type { D1Subset, D1SubsetResult } from "./seam.js";
 
 type Row = Record<string, unknown>;
@@ -39,6 +47,12 @@ export interface D1AdapterOptions {
    * new count with no `ready`.
    */
   sent?: { statements: number; ready?: number };
+  /**
+   * The bound parameters of one statement, for the chunks of `createMany`
+   * (ruling 57 of plan 12d). Default: `D1_BOUND_PARAMS`, 100. A SQLite
+   * driver passes the limit of its own build.
+   */
+  boundParams?: number;
 }
 
 interface Ctx extends D1AdapterOptions {
@@ -116,6 +130,31 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         ctx.undo.push({ model, op: "create", ...st.undoCreate(model, data) });
       }
       return structuredClone(data);
+    },
+    async createMany(model, rows) {
+      await ctx.ready();
+      assertModel(model);
+      if (rows.length === 0) return [];
+      const chunks = insertChunks(st, model, rows, ctx.boundParams ?? D1_BOUND_PARAMS);
+      try {
+        const [only] = chunks;
+        if (chunks.length === 1 && only) await run(db, only, ctx.sent);
+        else {
+          // One batch is one unit on D1 and on each SQLite driver: a failed chunk
+          // applies no chunk. A batch sends each of its statements.
+          ctx.sent.statements += chunks.length;
+          await db.batch(chunks.map((c) => db.prepare(c.sql).bind(...c.params)));
+        }
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+      if (ctx.undo)
+        for (const u of undoCreateMany(st, model, rows))
+          ctx.undo.push({ model, op: "create", ...u });
+      return structuredClone([...rows]);
+    },
+    rowsPerInsert(model) {
+      return rowsPerInsertOf(st, model, ctx.boundParams ?? D1_BOUND_PARAMS);
     },
     async findOne(model, where) {
       await ctx.ready();

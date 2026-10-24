@@ -890,6 +890,8 @@ describe("the bounds and the guards of the email method (plan 12c, Task 7 review
     const inner = auth.config.storage;
     // A parallel send or a counted guess writes the row between the read and the write.
     const racing: StorageAdapter = {
+      createMany: (m, r) => inner.createMany(m, r),
+      rowsPerInsert: (m) => inner.rowsPerInsert(m),
       create: (m, d) => inner.create(m, d),
       findOne: (m, w) => inner.findOne(m, w),
       findMany: (m, w, o) => inner.findMany(m, w, o),

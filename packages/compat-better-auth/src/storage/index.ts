@@ -4,7 +4,7 @@ import {
   createD1Limiter as createD1LimiterOnSeam,
 } from "@authtempo/adapter-d1/seam";
 import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
-import { integerProbe, type SqliteDriver } from "@authtempo/adapter-sqlite";
+import { integerProbe, SQLITE_BOUND_PARAMS, type SqliteDriver } from "@authtempo/adapter-sqlite";
 import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
@@ -115,6 +115,7 @@ export function betterAuthSchemaStorage(
           await compatPing();
         },
         sent,
+        boundParams: SQLITE_BOUND_PARAMS,
       }),
       limiter: createD1LimiterOnSeam(driver.db),
       migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),

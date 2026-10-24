@@ -36,6 +36,28 @@ describe("d1 undo log", () => {
     expect(row).toMatchObject({ id: "u1", name: "Ada", email: "a@example.com" });
   });
 
+  it("undoes a createMany of 120 rows with one delete per 50 rows (ruling 57 of plan 12d)", async () => {
+    const db = createD1Adapter(env.DB);
+    const rows = Array.from({ length: 120 }, (_, i) => ({
+      id: `m-${String(i).padStart(3, "0")}`,
+      groupId: "g1",
+      scimUserId: `su-${i}`,
+      createdAt: t0,
+      updatedAt: t0,
+    }));
+    let afterWrite = 0;
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.createMany("scimGroupMember", rows);
+        afterWrite = db.statementsSent?.() ?? 0;
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    // 120 rows of 5 columns: 6 inserts of 20 rows, then 3 undo deletes, not 120.
+    expect((db.statementsSent?.() ?? 0) - afterWrite).toBe(3);
+    expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+  });
+
   it("removes a row created and then updated in a failing transaction", async () => {
     const db = createD1Adapter(env.DB);
     await expect(

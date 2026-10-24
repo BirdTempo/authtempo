@@ -1,6 +1,6 @@
 import { type ModelName, type Models, schema } from "../schema.js";
 import { type FindManyOptions, type StorageAdapter, StorageError, type Where } from "./port.js";
-import { assertWhereText } from "./sql.js";
+import { assertWhereText, D1_BOUND_PARAMS } from "./sql.js";
 
 type Store = Map<ModelName, Map<string, Record<string, unknown>>>;
 
@@ -150,6 +150,9 @@ function adapterOn(
     return [...t.values()].filter((r) => matches(r, where));
   };
 
+  const perInsert = (model: ModelName) =>
+    Math.floor(D1_BOUND_PARAMS / Object.keys(schema[model].fields).length);
+
   return {
     async create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]> {
       sent.statements++;
@@ -161,6 +164,34 @@ function adapterOn(
       t.set(row.id as string, row);
       log?.push(() => t.delete(row.id as string));
       return clone(row) as unknown as Models[M];
+    },
+    async createMany<M extends ModelName>(
+      model: M,
+      rows: readonly Models[M][],
+    ): Promise<Models[M][]> {
+      const t = table(model);
+      if (rows.length === 0) return [];
+      // The chunks of D1, so the call counts as a D1 call does (ruling 57 of plan 12d).
+      sent.statements += Math.ceil(rows.length / perInsert(model));
+      // All or nothing: check each row against the table and the rows before it, then write.
+      const added: Record<string, unknown>[] = [];
+      for (const data of rows) {
+        assertFields(model, Object.keys(data));
+        const row = clone(data as unknown as Record<string, unknown>);
+        if (t.has(row.id as string) || added.some((r) => r.id === row.id))
+          throw new StorageError("unique_violation", model, ["id"]);
+        checkUnique(model, [...t.values(), ...added], row);
+        added.push(row);
+      }
+      for (const row of added) {
+        t.set(row.id as string, row);
+        log?.push(() => t.delete(row.id as string));
+      }
+      return added.map((r) => clone(r) as unknown as Models[M]);
+    },
+    rowsPerInsert(model: ModelName): number {
+      table(model);
+      return perInsert(model);
     },
     async findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null> {
       sent.statements++;

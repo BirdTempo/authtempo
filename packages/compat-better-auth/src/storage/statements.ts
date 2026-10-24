@@ -107,6 +107,12 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     insert(model, data) {
       return none(model) ? refuse(model) : st.insert(model, data);
     },
+    insertMany(model, rows) {
+      return none(model) ? refuse(model) : st.insertMany(model, rows);
+    },
+    insertParams(model) {
+      return none(model) ? refuse(model) : st.insertParams(model);
+    },
     select(model, where, opts) {
       return none(model) ? null : st.select(model, where, opts);
     },
@@ -191,6 +197,12 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
   return {
     insert(model, data) {
       return own(model) ? core.insert(model, data) : st.insert(model, data);
+    },
+    insertMany(model, rows) {
+      return own(model) ? core.insertMany(model, rows) : st.insertMany(model, rows);
+    },
+    insertParams(model) {
+      return own(model) ? core.insertParams(model) : st.insertParams(model);
     },
     select(model, where, opts) {
       return own(model) ? core.select(model, where, opts) : st.select(model, where, opts);
@@ -470,28 +482,48 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       .filter((f): f is string => f !== undefined);
   }
 
-  const st: CompatStatements = {
-    insert(model, data) {
-      assertModel(model);
+  /** One INSERT of each row: the columns of the first row, a VALUES tuple per row. */
+  function insertRows(model: ModelName, rows: readonly Row[]): { sql: string; params: unknown[] } {
+    assertModel(model);
+    const map = MAP[model];
+    const p = new Params();
+    let cols: string[] = [];
+    const tuples = rows.map((data) => {
       assertFields(model, Object.keys(data));
-      const map = MAP[model];
-      const p = new Params();
-      const cols: string[] = [];
+      const own: string[] = [];
       const vals: string[] = [];
       for (const field of Object.keys(map.fields)) {
-        cols.push(column(model, field));
-        vals.push(
-          p.add(encode(model, field, (data as unknown as Row)[field]), def(model, field).type),
-        );
+        own.push(column(model, field));
+        vals.push(p.add(encode(model, field, data[field]), def(model, field).type));
       }
-      for (const [c, v] of Object.entries(map.insertExtras?.(data as unknown as Row) ?? {})) {
-        cols.push(names.column(map.table, c));
+      for (const [c, v] of Object.entries(map.insertExtras?.(data) ?? {})) {
+        own.push(names.column(map.table, c));
         vals.push(p.add(v));
       }
-      return {
-        sql: `INSERT INTO ${table(model)} (${cols.join(", ")}) VALUES (${vals.join(", ")})`,
-        params: p.values,
-      };
+      // insertExtras names the same columns for every row of a model.
+      if (cols.length === 0) cols = own;
+      return `(${vals.join(", ")})`;
+    });
+    if (tuples.length === 0) throw invalid(model, "rows", "an insert needs at least one row");
+    return {
+      sql: `INSERT INTO ${table(model)} (${cols.join(", ")}) VALUES ${tuples.join(", ")}`,
+      params: p.values,
+    };
+  }
+
+  const st: CompatStatements = {
+    insert(model, data) {
+      return insertRows(model, [data as unknown as Row]);
+    },
+    insertMany(model, rows) {
+      return insertRows(model, rows as unknown as readonly Row[]);
+    },
+    insertParams(model) {
+      assertModel(model);
+      const map = MAP[model];
+      // The extras of a row of empty text: the keys are the same for every row.
+      const blank = Object.fromEntries(Object.keys(map.fields).map((f) => [f, ""]));
+      return Object.keys(map.fields).length + Object.keys(map.insertExtras?.(blank) ?? {}).length;
     },
     select(model, where, opts = {}) {
       assertModel(model);

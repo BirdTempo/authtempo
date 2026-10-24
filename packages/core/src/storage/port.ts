@@ -82,6 +82,14 @@ export class StorageError extends Error {
  * schema version older than `SCHEMA_VERSION`, or no version at all. Run the
  * adapter's migrations.
  *
+ * Many-row rule (ruling 57 of plan 12d). `createMany` writes its rows in
+ * chunks of `rowsPerInsert(model)`, one INSERT statement per chunk, so
+ * `statementsSent` grows by ceil(n / chunk). An empty list sends nothing
+ * and answers []. It is all or nothing, inside a transaction and outside
+ * one: when a row breaks a unique key, with a stored row or with another
+ * row of the list, the call fails with `unique_violation` and writes no
+ * row. Each row meets the rules of `create` data.
+ *
  * Transaction rules. Reads inside a transaction see its own writes; the
  * engine relies on this. If the function throws, only the transaction's own
  * writes are reversed. Rows that other callers wrote in the meantime stay.
@@ -90,6 +98,15 @@ export class StorageError extends Error {
  */
 export interface StorageAdapter {
   create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]>;
+  /** Inserts `rows` of one model by the many-row rule above. */
+  createMany<M extends ModelName>(model: M, rows: readonly Models[M][]): Promise<Models[M][]>;
+  /**
+   * The most rows of `model` that one statement of `createMany` writes: the
+   * bound-parameter limit of the database over the parameters of one row,
+   * and at most 1000 (`INSERT_ROWS_MAX` of sql.ts).
+   * The engine reads it for the worst case of its call budget.
+   */
+  rowsPerInsert(model: ModelName): number;
   findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null>;
   findMany<M extends ModelName>(
     model: M,

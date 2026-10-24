@@ -632,6 +632,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     // fails with unique_violation.
     let missed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && !missed) {
@@ -961,6 +963,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     let winner: Awaited<ReturnType<typeof passwordSignUp>> | null = null;
     let missed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && !missed) {
@@ -1005,6 +1009,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     // the winner's rows and answers by the sign-up's own rules.
     let missed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && !missed) {
@@ -1121,6 +1127,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     let winner: Awaited<ReturnType<typeof resetPassword>> | null = null;
     let missed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && !missed) {
