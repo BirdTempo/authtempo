@@ -55,6 +55,17 @@ async function seedUser(storage: StorageAdapter, email: string, verified: boolea
 
 async function seedInvitation(storage: StorageAdapter, email: string) {
   const at = new Date();
+  // The invitation of an organization that exists: an invited sign-up reads it (ruling 78 of
+  // plan 12d).
+  if (!(await storage.findOne("organization", [{ field: "id", op: "eq", value: "o1" }])))
+    await storage.create("organization", {
+      id: "o1",
+      slug: "o1",
+      name: "O1",
+      metadata: null,
+      createdAt: at,
+      updatedAt: at,
+    });
   await storage.create("invitation", {
     id: `i-${email}`,
     organizationId: "o1",

@@ -477,17 +477,24 @@ export const PENDING_PAGE_RESERVE = 5;
 /**
  * The read of the sweep step of the pending-end rows (ruling 44 of plan
  * 12f): the oldest rows, in 1 call of `meter`. It reads nothing when the
- * read and one page do not fit `limit`.
+ * read and one page do not fit `limit`. `also` names more purposes of
+ * pending rows that the same read takes (ruling 78 of plan 12d), so the
+ * sweep spends no call more for them.
  */
 export async function readPendingEnds(
   storage: StorageAdapter,
   meter: Meter,
   limit: number,
+  also: readonly string[] = [],
 ): Promise<VerificationRow[]> {
   if (meter.used + 1 + PENDING_PAGE_RESERVE > limit) return [];
   const pending = await storage.findMany(
     "verification",
-    [{ field: "purpose", op: "eq", value: "session-end" }],
+    [
+      also.length === 0
+        ? { field: "purpose", op: "eq", value: "session-end" }
+        : { field: "purpose", op: "in", value: ["session-end", ...also] },
+    ],
     { sort: { field: "id", dir: "asc" }, limit: PENDING_END_PAGE },
   );
   meter.step(1);

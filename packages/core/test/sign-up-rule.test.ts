@@ -38,6 +38,17 @@ async function invite(
   accepted = false,
 ) {
   const now = auth.clock.now();
+  // The invitation of an organization that exists: an invited sign-up reads it (ruling 78 of
+  // plan 12d).
+  if (!(await auth.storage.findOne("organization", [{ field: "id", op: "eq", value: "o1" }])))
+    await auth.storage.create("organization", {
+      id: "o1",
+      slug: "o1",
+      name: "O1",
+      metadata: null,
+      createdAt: now,
+      updatedAt: now,
+    });
   await auth.storage.create("invitation", {
     id: `i-${email}-${expiresIn}`,
     organizationId: "o1",

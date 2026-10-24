@@ -314,7 +314,8 @@ describe("a role loss beside a team write on Postgres (ruling 48 of plan 12k)", 
   it("ends an account delete and a setActiveTeam of the same user with no deadlock", async () => {
     const w = world();
     const { bob } = await supportTeam(w);
-    // Bob is the sole owner of Bob Co, so the account delete takes its team rows too.
+    // Bob is the sole owner of Bob Co, so the account delete takes its team rows too, at the
+    // sweep.
     const own = await w.auth.api.createOrganization({
       user: bob.user,
       slug: "bob-co",
@@ -347,6 +348,9 @@ describe("a role loss beside a team write on Postgres (ruling 48 of plan 12k)", 
     expect(deleted).toMatchObject({ ok: true });
     expect(set).toMatchObject({ ok: false, code: "forbidden_rank" });
     expect(await db.sql`SELECT 1 FROM ta_user WHERE id = ${bob.user.id}`).toHaveLength(0);
+    // The team of Bob Co waits for the sweep (ruling 78 of plan 12d).
+    expect(await db.sql`SELECT 1 FROM ta_team`).toHaveLength(2);
+    expect(await w.auth.api.sweepExpired()).toMatchObject({ organizationRows: 1 });
     expect(await db.sql`SELECT 1 FROM ta_team`).toHaveLength(1);
   }, 60_000);
 });

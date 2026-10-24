@@ -7,6 +7,11 @@ import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
 import { endPendingRows, PENDING_PAGE_RESERVE, readPendingEnds } from "./operator/access-end.js";
+import {
+  ORGANIZATION_REST,
+  ORGANIZATION_REST_CALLS,
+  sweepOrganizationRest,
+} from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
@@ -51,6 +56,11 @@ export interface SweepResult {
   ssoPendingDomains: number;
   /** SCIM tokens past `expiresAt` (plan 12d). A token with no expiry is never swept. 0 while `scim` is off. */
   scimTokens: number;
+  /**
+   * Organizations that an account delete took, whose teams, invitations,
+   * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
+   */
+  organizationRows: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -396,12 +406,18 @@ export async function sweepExpired(
   // idle clients. So the read takes its 1 call from the clients and the
   // links, not from the outbox. While a row waits, the outbox leaves the calls of
   // one page for it (ruling 50 of plan 12f), so a backlog cannot hold it.
+  // The pending rows of the solo organizations of an account delete come in the same read
+  // (ruling 78 of plan 12d).
   const pending: VerificationRow[] = [];
   await softStep(
     config.observe,
     "pending end",
-    readPendingEnds(storage, meter, budget).then((rows) => pending.push(...rows)),
+    readPendingEnds(storage, meter, budget, [ORGANIZATION_REST]).then((rows) =>
+      pending.push(...rows),
+    ),
   );
+  const rests = pending.filter((row) => row.purpose === ORGANIZATION_REST);
+  const ends = pending.filter((row) => row.purpose !== ORGANIZATION_REST);
   // After the refresh tokens, so a client whose last token just expired can go.
   // After the four single-statement steps too: the client step may use the
   // calls up to its limit, and the link step must still get `LINK_SHARE`.
@@ -422,7 +438,9 @@ export async function sweepExpired(
     : 0;
   if (config.scim) meter.step(1);
   const recheckShare = config.sso ? RECHECK_SHARE : 0;
-  const pendingReserve = pending.length > 0 ? PENDING_PAGE_RESERVE : 0;
+  // While a row waits, the outbox and the recheck leave the calls of one row for its step.
+  const pendingReserve =
+    (ends.length > 0 ? PENDING_PAGE_RESERVE : 0) + (rests.length > 0 ? ORGANIZATION_REST_CALLS : 0);
   const oauthClients = await sweepClients(
     storage,
     now,
@@ -453,13 +471,24 @@ export async function sweepExpired(
         recheckDomains(config, now, { meter, limit: budget - pendingReserve }),
       )
     : 0;
+  // The rows of the solo organizations of an account delete. No flow reaches them: each read
+  // needs the organization row or a member row, which the act deleted.
+  const organizationRows = await softStep(
+    "organization rest",
+    sweepOrganizationRest(
+      config,
+      rests,
+      meter,
+      budget - (ends.length > 0 ? PENDING_PAGE_RESERVE : 0),
+    ),
+  );
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
   // check for a revoke. So a logout, which reaches another party, comes first.
   const pendingSessions = await softStep(
     config.observe,
     "pending end",
-    endPendingRows(config, pending, meter, budget),
+    endPendingRows(config, ends, meter, budget),
   );
   const result: SweepResult = {
     verificationExpired,
@@ -482,6 +511,7 @@ export async function sweepExpired(
     ssoDomains,
     ssoPendingDomains,
     scimTokens,
+    organizationRows,
   };
   // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
   config.observe.emit({

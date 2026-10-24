@@ -52,8 +52,10 @@ describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
     // session-cap read of a due refresh with sso.saml on. A chunk of the page costs 2
     // calls (the link read and the delete), so the page ends one chunk of 50 fewer:
     // 47 queries and 101 sessions left (run of 2026-10-22).
+    // Ruling 78 of plan 12d: the handler takes the session row of the router, 1 query
+    // fewer; the reserve keeps the call, so the page stays (run of 2026-10-24).
     expect(count.queries).toBeLessThanOrEqual(50);
-    expect(count.queries).toBe(47);
+    expect(count.queries).toBe(46);
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`)
       .bind(ann.id)
       .first<{ n: number }>();

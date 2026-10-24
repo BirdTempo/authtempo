@@ -220,12 +220,16 @@ async function invoke(
   };
 }
 
-/** Sweeps, one invocation each, until no pending-end row stays: the queries of each sweep. */
+/**
+ * Sweeps, one invocation each, until no pending-end row stays: the queries
+ * of each sweep. The pending rows of the solo organizations of an account
+ * delete count too (ruling 78 of plan 12d).
+ */
 async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
   const queries: number[] = [];
   for (;;) {
     const left = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM ta_verification WHERE purpose = 'session-end'",
+      "SELECT COUNT(*) AS n FROM ta_verification WHERE purpose IN ('session-end', 'organization-rest')",
     ).first<{ n: number }>();
     if (!left?.n) return queries;
     if (queries.length >= 20) throw new Error("the sweep makes no progress");
@@ -265,9 +269,14 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * from 10 to 12 for the due refresh and its session-cap read. The run of
  * 2026-10-22 gives the removal 48 queries, 10 sessions, and sweeps of 47, 47,
  * and 28. `DELETE_CALLS_BEFORE` goes from 7 to 8; the delete counts stay.
+ * Ruling 78 of plan 12d (run of 2026-10-24): the handler's session read
+ * takes the row of the router, so each act sends 1 query fewer. The delete
+ * sends 3 more fewer: the lock starts from the user of the session, and the
+ * outbox update goes. `DELETE_CALLS_BEFORE` goes from 8 to 7, and the
+ * client link delete goes. So the page of the delete ends 1 session more.
  */
-const DELETE_COUNTS: [number, number, number[]] = [47, 1, [47, 47, 48]];
-const REMOVE_COUNTS: [number, number, number[]] = [48, 10, [47, 47, 28]];
+const DELETE_COUNTS: [number, number, number[]] = [45, 2, [47, 47, 46]];
+const REMOVE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 28]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
@@ -408,10 +417,11 @@ async function auditorPart(setup: Auth, byToken: string, email: string) {
  * it and sends 50 queries, and the role change keeps 1 more call and ends 1
  * session fewer. `MEMBER_WRITE_CALLS_BEFORE` at 12 (the rebase of plan 12d
  * Task 10 onto Task 8, run of 2026-10-22) keeps 2 more calls, so each page
- * ends 1 session fewer.
+ * ends 1 session fewer. Since ruling 78 of plan 12d (run of 2026-10-24),
+ * the handler takes the session row of the router: 1 query fewer each.
  */
-const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [48, 9, [47, 47, 32]];
-const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 30]];
+const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [47, 9, [47, 47, 32]];
+const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [46, 10, [47, 47, 30]];
 
 describe("the losses of an operator outside the operator acts on D1 (ruling 63 of plan 12f)", () => {
   beforeEach(async () => {
@@ -502,7 +512,10 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * sends 50 and its page ends 10. The delete sends 49 with
    * `DELETE_CALLS_BEFORE` at 7 or 8. It ends the own session only: the
    * budget left for the page is below the 3 calls of its least page, so
-   * the sweep ends the 40.
+   * the sweep ends the 40. Ruling 78 of plan 12d (run of 2026-10-24) takes
+   * 2 calls from the session read and the lock, 2 from the outbox update,
+   * and 1 from the client link delete. So the delete sends 47 and ends 1
+   * impersonation session, and the removal sends 49.
    */
   const dueWithSaml = async () =>
     ({
@@ -510,8 +523,8 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       session: { slidingRefreshDays: 0.05 },
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [49, 1, [48, 48, 48, 25]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [50, 10, [48, 48, 31]];
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [47, 2, [48, 48, 49]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 31]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
@@ -536,8 +549,10 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * plan 12d). With the spend as an update, the confirm sent 51 queries:
    * the spend cost 2 on D1, so no page fit, and the fixed part alone passed
    * 50. The spend is a delete now, 1 statement. Measured on 2026-10-24.
+   * Ruling 78 of plan 12d (same day): 48 queries, and the page ends 1
+   * impersonation session.
    */
-  const DUE_CONFIRM_COUNTS: [number, number] = [50, 1];
+  const DUE_CONFIRM_COUNTS: [number, number] = [48, 2];
 
   it("confirms a mailed delete of an operator with a due refresh and sso.saml on in 50 queries", async () => {
     const sent: MailMessage[] = [];
@@ -776,5 +791,137 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
     expect(retry.queries).toBeLessThanOrEqual(50);
     expect(await ownCount()).toBeLessThan(before);
     expect(endings.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The queries of `POST /user/delete` by the owner of one solo organization,
+ * through the route, on the binding (ruling 78 of plan 12d, measured
+ * 2026-10-24). The worst caller has a `session.afterEnd` hook and the
+ * impersonation tool on. Before ruling 78 the scenes sent 55 (no refresh,
+ * the tool off), 59 (a due refresh with `sso.saml` on), 60 (the confirm of
+ * that scene), and 64 (an operator with 40 impersonation sessions in that
+ * scene). The act now takes the rows of the organization
+ * that give access, and its member rows, and the sweep takes the rest
+ * (organization-rest.ts in core). The list of each scene is in the comment
+ * above `LAST_MODELS` in account-delete.ts. The pins are the queries of the
+ * act and of each sweep, until no pending row stays.
+ */
+const SOLO_COUNTS = {
+  plain: [43, [30]],
+  due: [45, [31]],
+  confirm: [46, [31]],
+  operator: [50, [48, 48, 48, 35]],
+} as const satisfies Record<string, readonly [number, readonly number[]]>;
+
+/**
+ * A plain user who owns one solo organization, on the engine of `extra`.
+ * The organization holds one team, the row that a team create writes with
+ * teams on: the sweep takes it.
+ */
+async function soloOwner(sent: MailMessage[], extra: Partial<AuthConfig>) {
+  const { auth: setup } = await engine(env.DB, sent, undefined, extra);
+  const { token, userId } = await signIns(setup, sent, "solo@example.com", 1);
+  const s = await setup.api.getSession(token);
+  if (!s) throw new Error("no session");
+  const made = await setup.api.createOrganization({ user: s.user, slug: "solo-0", name: "Solo" });
+  if (!made.ok) throw new Error(made.code);
+  const organizationId = made.value.organization.id;
+  await env.DB.prepare(
+    "INSERT INTO ta_team (id, created_at, updated_at, organization_id, name) VALUES ('team-solo', 0, 0, ?, 'Core')",
+  )
+    .bind(organizationId)
+    .run();
+  expect(await restOf(organizationId)).toBe(1);
+  return { token, userId, organizationId };
+}
+
+/** The rows of `organizationId` that the sweep takes after an account delete. */
+async function restOf(organizationId: string): Promise<number> {
+  let n = 0;
+  for (const table of ["ta_team", "ta_invitation", "ta_scim_user", "ta_organization_role"]) {
+    const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE organization_id = ?`)
+      .bind(organizationId)
+      .first<{ n: number }>();
+    n += row?.n ?? 0;
+  }
+  return n;
+}
+
+describe("the account delete of a solo organization's owner through the route on D1 (ruling 78 of plan 12d)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  const dueWithSaml = async () =>
+    ({
+      ...(await on()),
+      session: { slidingRefreshDays: 0.05 },
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    }) satisfies Partial<AuthConfig>;
+
+  for (const scene of ["plain", "due", "confirm"] as const)
+    it(`deletes the owner of a solo organization in 50 queries: ${scene}`, async () => {
+      const sent: MailMessage[] = [];
+      const extra =
+        scene === "plain"
+          ? await on()
+          : scene === "due"
+            ? await dueWithSaml()
+            : { ...(await dueWithSaml()), account: { deleteConfirm: { ttlMinutes: 1440 } } };
+      const { token, userId, organizationId } = await soloOwner(sent, extra);
+      let path = "/user/delete";
+      let body: Record<string, string> = {};
+      if (scene === "confirm") {
+        const asked = await invoke(sent, "/user/delete", asUser(token), {}, extra);
+        expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+        const text = sent.filter((m) => m.text.includes("/user/delete/confirm")).at(-1)?.text;
+        path = "/user/delete/confirm";
+        body = { token: decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text ?? "")?.[1] ?? "") };
+      }
+      if (scene !== "plain") current = new Date(current.getTime() + 80 * 60_000);
+      const r = await invoke(sent, path, asUser(token), body, extra);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(userId).first()).toBe(
+        null,
+      );
+      // No access stays: the organization row and its member rows went in the act.
+      const left = await env.DB.prepare(
+        "SELECT (SELECT COUNT(*) FROM ta_organization WHERE id = ?1) + (SELECT COUNT(*) FROM ta_member WHERE organization_id = ?1) AS n",
+      )
+        .bind(organizationId)
+        .first<{ n: number }>();
+      expect(left?.n).toBe(0);
+      const sweeps = await sweepAll(sent, extra);
+      expect(await restOf(organizationId)).toBe(0);
+      expect([r.queries, sweeps]).toEqual(SOLO_COUNTS[scene]);
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
+
+  it("deletes an operator with 40 impersonation sessions who owns a solo organization in 50 queries", async () => {
+    const sent: MailMessage[] = [];
+    const extra = await dueWithSaml();
+    const { setup, bobToken, bobId } = await fortyImpersonations(sent, extra);
+    const bob = await setup.api.getSession(bobToken);
+    if (!bob) throw new Error("no session");
+    const made = await setup.api.createOrganization({
+      user: bob.user,
+      slug: "bob-solo",
+      name: "Bob",
+    });
+    if (!made.ok) throw new Error(made.code);
+    current = new Date(current.getTime() + 80 * 60_000);
+    const r = await invoke(sent, "/user/delete", asUser(bobToken), {}, extra);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(bobId).first()).toBe(
+      null,
+    );
+    const sweeps = await sweepAll(sent, extra);
+    expect(await impersonations()).toBe(0);
+    expect(await stopCauses()).toEqual(Array(40).fill("account_delete"));
+    expect(await restOf(made.value.organization.id)).toBe(0);
+    expect([r.queries, sweeps]).toEqual(SOLO_COUNTS.operator);
+    expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 });

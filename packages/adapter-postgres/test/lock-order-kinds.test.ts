@@ -695,12 +695,12 @@ const TOUCHED: Record<string, string[]> = {
     "team member",
   ],
   "an admin create": ["user", "member"],
+  // Ruling 78 of plan 12d: the sweep takes the team rows of a solo organization.
   "an account delete with a solo and a shared organization": [
     "user",
     "session",
     "SCIM user",
     "organization",
-    "team",
     "invitation",
     "member",
     "team member",
@@ -715,6 +715,7 @@ const TOUCHED: Record<string, string[]> = {
     "team member",
   ],
   // Plan 12d ruling 30: the create of a second solo organization, then the set-based delete.
+  // The team kind comes from the create: its default team (ruling 78 of plan 12d).
   "an account delete with two solo organizations": [
     "user",
     "session",
@@ -1245,6 +1246,10 @@ const SITES: Record<string, readonly string[] | string> = {
   "social resolveSocialUser": ["an SSO sign-in that claims a user"],
   "sweep sweepLinks": "no kind: oauth logout rows only",
   "sweep sweepExpired": "one kind: ended session rows",
+  // Ruling 78 of plan 12d: the rows of the solo organizations of an account delete. The test
+  // "the sweep of the rest of a solo organization" below checks its kinds.
+  "organization-rest sweepOrganizationRest":
+    "the sweep of the rest of a solo organization: its test",
   "teams createTeam": ["a team create"],
   "teams updateTeam": "one kind: the team row",
   "teams deleteTeam": ["a team delete"],
@@ -1343,7 +1348,8 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
     // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
-    expect(found.length).toBe(76);
+    // Ruling 78 adds the one of organization-rest.ts.
+    expect(found.length).toBe(77);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
@@ -1382,6 +1388,32 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
       "team member",
     ]);
     expect(w.sitesOf(name)).toEqual(["teams deleteTeam"]);
+    expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
+  }, 60_000);
+
+  it("the sweep of the rest of a solo organization takes the kinds in the order of user-hold.ts", async () => {
+    const w = world();
+    const s = await scene(w);
+    // Oli's account delete leaves the rest of the solo organization to the sweep (ruling 78
+    // of plan 12d).
+    const gone = await w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
+    expect(gone).toMatchObject({ ok: true });
+    const name = "the sweep of the rest of a solo organization";
+    const swept = await w.flow(name, () => w.auth.api.sweepExpired());
+    expect(swept).toMatchObject({ organizationRows: 1 });
+    expect(w.sitesOf(name)).toEqual([
+      "organization-rest sweepOrganizationRest",
+      "sweep sweepExpired",
+    ]);
+    expect(w.kindsOf(name)).toEqual([
+      "SCIM group",
+      "session",
+      "SCIM user",
+      "team",
+      "invitation",
+      "member",
+      "team member",
+    ]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 

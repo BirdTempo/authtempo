@@ -111,7 +111,11 @@ describe("the account delete of solo organizations on D1 (rulings 29 and 30 of p
     // scimGroupMember delete runs.
     // Ruling 74 of plan 12d adds the read of the SCIM Groups of the solo
     // organizations: 31, 48, 48, 48 on 2026-10-24.
-    expect(runs.map((r) => r.queries)).toEqual([31, 48, 48, 48]);
+    // Ruling 78 of plan 12d (2026-10-24): the lock starts from the user of the
+    // session (1), the outbox update goes (2), and the client link delete
+    // goes (1). The solo organizations keep 6 calls of 15 in the act, and one
+    // pending row leaves the rest to the sweep: 27, 35, 35, 35.
+    expect(runs.map((r) => r.queries)).toEqual([27, 35, 35, 35]);
     for (const r of runs) expect([r.queries <= 50, r.left]).toEqual([true, 0]);
   }, 120_000);
 

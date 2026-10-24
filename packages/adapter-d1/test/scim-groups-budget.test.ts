@@ -556,11 +556,11 @@ describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d
     expect(c.n).toBeLessThanOrEqual(50);
   }, 300_000);
 
-  it("refuses the account delete of the sole member of an organization with a group inside 50 queries", async () => {
+  it("deletes the sole member of an organization with groups inside 50 queries, and the sweep takes the groups", async () => {
     const setup = make(env.DB, false);
     const { token } = await acme(setup);
     const [ada] = await users(token, 1);
-    for (let i = 0; i < 1; i++) {
+    for (let i = 0; i < ACCOUNT_DELETE_GROUPS; i++) {
       const r = await call(token, "POST", "/Groups", {
         schemas: [GROUP_URN],
         displayName: `Group ${i}`,
@@ -585,12 +585,23 @@ describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d
     if (!session) throw new Error("no session");
     const { db: view, c } = counting(env.DB);
     const done = await make(view, true).api.user.delete({ session, ip: null, userAgent: null });
-    expect(done).toMatchObject({ ok: false, code: "delete_too_large" });
-    for (const table of ["ta_organization", "ta_scim_group", "ta_scim_group_member"])
-      expect(await count(`SELECT count(*) AS n FROM ${table}`), table).toBe(1);
-    expect(await count("SELECT count(*) AS n FROM ta_user")).toBe(2);
-    expect({ accountDelete: c.n }).toEqual(MEASURED_ACCOUNT_DELETE);
-    expect(c.n).toBeLessThanOrEqual(50);
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    expect(await count("SELECT count(*) AS n FROM ta_organization")).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM ta_user")).toBe(1);
+    // The groups wait for the sweep, one chunk of 50 in each sweep.
+    const sweeps: number[] = [];
+    while (
+      await count("SELECT count(*) AS n FROM ta_verification WHERE purpose = 'organization-rest'")
+    ) {
+      if (sweeps.length >= 10) throw new Error("the sweep makes no progress");
+      const { db: next, c: d } = counting(env.DB);
+      await make(next, true).api.sweepExpired();
+      sweeps.push(d.n);
+    }
+    for (const table of ["ta_scim_group", "ta_scim_group_member", "ta_scim_user"])
+      expect(await count(`SELECT count(*) AS n FROM ${table}`), table).toBe(0);
+    expect({ accountDelete: c.n, sweeps }).toEqual(MEASURED_ACCOUNT_DELETE);
+    expect(Math.max(c.n, ...sweeps)).toBeLessThanOrEqual(50);
   }, 300_000);
 });
 
@@ -600,11 +611,15 @@ describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d
  * 3 queries to the delete. The count does not grow with the groups: one
  * delete binds the 100 ids.
  */
-const MEASURED_ORGANIZATION_DELETE = { delete: 32 };
+// The route reads the session once since ruling 78 of plan 12d (2026-10-24): 31, was 32.
+const MEASURED_ORGANIZATION_DELETE = { delete: 31 };
 /**
- * The refusal of an account delete whose solo organization has a SCIM
- * Group (ruling 74 of plan 12d). The group read comes after the first
- * deletes, so the undo of the transaction counts too.
+ * The account delete of the sole member of an organization with SCIM
+ * Groups (ruling 78 of plan 12d, 2026-10-24). Before, it answered
+ * delete_too_large in 14 queries. The act takes the organization, its
+ * SCIM token, and its member rows, and leaves the groups to the sweep. A
+ * sweep takes 50 groups at a time, so 120 groups take three sweeps.
  */
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 14 };
+const ACCOUNT_DELETE_GROUPS = 120;
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 36, sweeps: [24, 24, 34] };
 const GROUPS = 500;

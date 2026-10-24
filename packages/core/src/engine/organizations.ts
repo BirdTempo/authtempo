@@ -666,8 +666,9 @@ export async function deleteOrganization(
 }
 
 /**
- * The rows of one organization, in the caller's transaction. One copy for
- * the organization delete and the account delete (plan 12a).
+ * The rows of one organization, in the caller's transaction. One copy of
+ * the order for the organization delete, the account delete, and the sweep
+ * (plan 12a, ruling 78 of plan 12d).
  *
  * The order closes the gaps of the flows in flight. The organization row
  * goes first (ruling 43 of plan 12k). A token create, a team create, and a
@@ -689,16 +690,11 @@ export async function deleteOrganization(
  * and the member read below sees that member. An accept that starts later
  * finds no invitation. The organization row goes before the members: D1 has
  * no lock, and an accept reads the organization after its member insert.
- * With `alone`, the organization goes with that user's account, so any
- * other member answers `conflict`: the organization is no longer one the
- * user alone holds.
+ * The account delete takes the member rows in its act and checks that no
+ * other member joined (`deleteAccountRows` in account-delete.ts).
  */
-export async function deleteOrganizationRows(
-  tx: StorageAdapter,
-  id: string,
-  alone: string | null = null,
-): Promise<void> {
-  await deleteOrganizationsRows(tx, [id], alone, ORGANIZATION_DELETE_GROUPS);
+export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Promise<void> {
+  await deleteOrganizationsRows(tx, [id], ORGANIZATION_DELETE_GROUPS);
 }
 
 /**
@@ -713,32 +709,57 @@ export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
  * `deleteOrganizationRows` for many organizations at once (ruling 30 of
  * plan 12d). Each model is one statement with `in` over the ids, so the
  * cost does not grow with the count of organizations. The order of the
- * statements is the order above. The organization rows lock first, in id
- * order (`lockInOrder`), in the step of the organization row. The ids fit
- * one chunk of `IN_CHUNK`: D1 binds at most 100 parameters. A longer list
- * throws, so a caller refuses it first (`delete_too_large`).
+ * statements is the order above: `deleteOrganizationsHead`, then
+ * `deleteOrganizationsRest`.
  */
 export async function deleteOrganizationsRows(
   tx: StorageAdapter,
   ids: readonly string[],
-  alone: string | null,
   groupsMax: number,
 ): Promise<void> {
   if (ids.length === 0) return;
-  if (ids.length > IN_CHUNK) throw new StorageError("invalid_argument", "organization", ["id"]);
-  const list = [...ids].sort();
-  const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "in", value: list }];
+  const list = organizationList(ids);
   // Ruling 74 of plan 12d (P9 of ruling 53): the SCIM Groups go with their organizations. A
   // scimGroupMember row names its group, not the organization, so one read takes the group
   // ids, before any write. One delete binds at most IN_CHUNK ids on D1, and the caller gives
   // the count of groups that its call budget holds (`groupsMax`). More groups answer
   // delete_too_large. The caller locked the scimGroup rows first, in the order of user-hold.ts.
-  const groups = (
-    await tx.findMany("scimGroup", [{ field: "organizationId", op: "in", value: list }], {
-      limit: groupsMax + 1,
-    })
-  ).map((g) => g.id);
+  const groups = await organizationGroups(tx, list, groupsMax + 1);
   if (groups.length > groupsMax) stopWith("delete_too_large");
+  await deleteOrganizationsHead(tx, list);
+  await deleteOrganizationsRest(tx, list, groups);
+}
+
+/**
+ * The ids of one set-based delete, in id order. They fit one chunk of
+ * `IN_CHUNK`: D1 binds at most 100 parameters. A longer list throws, so a
+ * caller refuses it first (`delete_too_large`).
+ */
+export function organizationList(ids: readonly string[]): string[] {
+  if (ids.length > IN_CHUNK) throw new StorageError("invalid_argument", "organization", ["id"]);
+  return [...ids].sort();
+}
+
+/** The ids of at most `limit` SCIM Groups of the organizations of `list`. */
+export async function organizationGroups(
+  tx: StorageAdapter,
+  list: string[],
+  limit: number,
+): Promise<string[]> {
+  return (
+    await tx.findMany("scimGroup", [{ field: "organizationId", op: "in", value: list }], { limit })
+  ).map((g) => g.id);
+}
+
+/**
+ * The rows of the organizations of `list` that give access or hold a claim
+ * (ruling 78 of plan 12d): the organization rows, then the connection, the
+ * domain, and the SCIM token rows. The organization rows lock first, in id
+ * order (`lockInOrder`), in the step of the organization row. The account
+ * delete takes these rows and the member rows in its act. A flow that comes
+ * later finds no organization, no domain claim, and no SCIM token.
+ */
+export async function deleteOrganizationsHead(tx: StorageAdapter, list: string[]): Promise<void> {
   // The scimUser rows come before the organization row (ruling 74 M3): a SCIM deactivate holds
   // its scimUser row and then takes the organization lock. On Postgres this lock costs one
   // statement; D1 has no row lock.
@@ -754,6 +775,22 @@ export async function deleteOrganizationsRows(
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
+}
+
+/**
+ * The rows of the organizations of `list` that only their organization
+ * reaches (ruling 78 of plan 12d), after `deleteOrganizationsHead`. The
+ * organization delete runs it in its act. The account delete leaves it to
+ * the sweep (organization-rest.ts): each read of these rows needs its
+ * organization row, or a member row of the organization, which the act
+ * deleted. `groups` names the SCIM Groups that go, at most `IN_CHUNK` in
+ * each delete of their member rows.
+ */
+export async function deleteOrganizationsRest(
+  tx: StorageAdapter,
+  list: string[],
+  groups: readonly string[],
+): Promise<void> {
   // Plan 12d Task 10: the SCIM view of the staff is personal data of the organization.
   await tx.delete("scimUser", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
@@ -762,13 +799,8 @@ export async function deleteOrganizationsRows(
   // The tokens and the role rows of the organization have no use without it (plan 12k).
   await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
-  if (
-    alone !== null &&
-    (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
-  )
-    stopWith("conflict");
   // The members go before their team rows, in the order of a member removal (ruling 44).
-  await tx.delete("member", byOrganization);
+  await tx.delete("member", [{ field: "organizationId", op: "in", value: list }]);
   // The scimGroupMember rows come after the member rows, as in a group write (ruling 59 M1).
   for (let i = 0; i < groups.length; i += IN_CHUNK)
     await tx.delete("scimGroupMember", [

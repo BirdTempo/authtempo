@@ -52,11 +52,10 @@ import { ROUNDS } from "./rounds.js";
  * scimUser rows before the organization row: the other order formed a
  * deadlock on Postgres. A group write and a SCIM User delete take the member
  * rows before the scimGroupMember rows (ruling 59 M1 of plan 12d): the other
- * order formed a deadlock on Postgres. One known gap of kinds: the account
- * delete deletes the scimGroupMember rows of its user after the team member
- * rows of its solo organizations. Those team member rows name the user
- * alone, and a group write that adds, removes, or computes the role of the
- * user holds the user row first, as the account delete does.
+ * order formed a deadlock on Postgres. The account delete leaves the team
+ * member rows of its solo organizations to the sweep (ruling 78 of plan
+ * 12d), so it deletes the scimGroupMember rows of its user before every
+ * team member row that it deletes.
  *
  * A flow can write a kind again after a later kind: it holds those rows
  * from the first time. No flow writes a kind first after a later kind. The
@@ -75,9 +74,11 @@ import { ROUNDS } from "./rounds.js";
  * team row, so the two run one at a time (rulings 48 and 49).
  *
  * The account delete takes the rows of each organization that goes, its
- * team rows among them. So the team member add and the invitation accept
- * hold the user before the team lock. With the team lock first, an add of
- * the sole member beside the account delete formed a deadlock. A member
+ * team rows among them: the act takes the organization and member rows,
+ * and the sweep the rest (ruling 78 of plan 12d). So the team member add
+ * and the invitation accept hold the user before the team lock. With the
+ * team lock first, an add of the sole member beside the account delete
+ * formed a deadlock. A member
  * removal holds the person's user row before the organization lock of
  * `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
  * an accept of that person run one at a time.

@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
-import { peekSession, readSessionToken } from "../engine/sessions.js";
+import { peekRequestSession } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { json } from "./json.js";
 import type { RouteKey } from "./route-list.js";
@@ -277,9 +277,8 @@ export async function impersonationRefusal(
   key: RouteKey,
 ): Promise<Response | null> {
   if (!IMPERSONATION_REFUSED.has(key)) return null;
-  const token = readSessionToken(config, request);
-  if (token === null) return null;
-  const row = await peekSession(config, token);
+  // The handler's session read takes this row, so the route reads it once (ruling 78 of plan 12d).
+  const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
 }

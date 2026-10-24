@@ -191,7 +191,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Such an organization with a SCIM Group answers `delete_too_large`: delete the organization first. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>

@@ -1511,6 +1511,7 @@ It answers one count for each kind of row:
 - `ssoDomains`: verified SSO domains checked again by DNS, 30 days after their last check (plan 12d). Each row asks every resolver of `sso.dns`, and each resolver call counts as one call of the sweep. The idle clients leave 7 calls for this step and the pending delete below: one row with two resolvers. With more calls left, the step takes up to 20 rows. A failed check tries again one day later. Three failures that span 72 hours lose the domain: its claim and `enforce` go, with one audit row `sso_domain_lost`. 0 while `sso` is off.
 - `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
 - `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
+- `organizationRows`: organizations that an account delete took, whose other rows went now. The account delete takes an organization where the user is the only member: its row, its SSO connections and domains, its SCIM tokens, and its member rows. Its SCIM Users and Groups, teams, invitations, tokens, and roles wait for the sweep. So the delete fits the 50 queries of D1 Free. No flow reaches them in the meantime. The step runs before the pending sessions. A row of it with more than 50 SCIM Groups loses 50 of them in each sweep.
 
 ```ts
 export default {

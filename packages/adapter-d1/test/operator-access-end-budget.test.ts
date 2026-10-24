@@ -261,20 +261,25 @@ async function auditOf(userId: string): Promise<string[]> {
 // more call for the pending-end read of `revokedFor`, so its act ends 1 session fewer.
 // Since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22), it keeps 1 more call
 // for the session-cap read of a due refresh with sso.saml on, so its act ends 1 session fewer.
+// Since ruling 78 of plan 12d (run of 2026-10-24), the session read of the handler takes the row
+// of the router, so a user actor sends 1 query fewer. Its reserve keeps the call, so the page
+// ends the same sessions.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
-  "user 45": [48, 20, [47]],
+  "user 45": [47, 20, [47]],
   "secret 60": [50, 31, [48, 24]],
-  "user 60": [48, 20, [48, 35]],
+  "user 60": [47, 20, [48, 35]],
 };
 // The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
 // rows of the member row it deletes, and so the sweep and a retry end more. The retry of a
 // user ends 1 session fewer since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22).
+// The retry of a user sends 1 query fewer since ruling 78 of plan 12d (run of 2026-10-24): the
+// handler takes the session row of the router.
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
   "secret 45": [50, 46, 21, 24, [21]],
-  "user 45": [50, 48, 21, 17, [31]],
+  "user 45": [50, 47, 21, 17, [31]],
   "secret 60": [50, 50, 21, 28, [35]],
-  "user 60": [50, 48, 21, 17, [46]],
+  "user 60": [50, 47, 21, 17, [46]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };

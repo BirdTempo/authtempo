@@ -621,14 +621,19 @@ export async function resolveSession(
   config: ResolvedConfig,
   token: string,
   mode: SessionReadMode = "write",
+  peeked: SessionRow | null = null,
 ): Promise<ResolvedSession | null> {
   const write = mode === "write";
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
-  const session = await config.storage.findOne("session", [
-    { field: "tokenHash", op: "eq", value: tokenHash },
-  ]);
+  // The row that the impersonation step of the router read for this request, else a read.
+  const session =
+    peeked?.tokenHash === tokenHash
+      ? peeked
+      : await config.storage.findOne("session", [
+          { field: "tokenHash", op: "eq", value: tokenHash },
+        ]);
   if (!session) return null;
   // The absolute cap ends a session whose expiresAt is later: a row written
   // before `absoluteDays` was set (plan 12b).
@@ -746,6 +751,26 @@ export async function peekSession(
   return sessionIsLive(config, row, config.clock.now()) ? row : null;
 }
 
+/**
+ * The live session row that the impersonation step of the router read for a
+ * request (ruling 78 of plan 12d). The first session read of the handler
+ * takes it in place of a second read of the same row. On D1 each read is a
+ * query of the 50 of one invocation. The map holds no row after the request.
+ */
+const peekedRows = new WeakMap<Request, SessionRow>();
+
+/** `peekSession` for the token of `request`, kept for the handler's session read. */
+export async function peekRequestSession(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<SessionRow | null> {
+  const token = readSessionToken(config, request);
+  if (token === null) return null;
+  const row = await peekSession(config, token);
+  if (row) peekedRows.set(request, row);
+  return row;
+}
+
 /** The caller's session from the cookie or the bearer header, or null. */
 export async function sessionFromRequest(
   config: ResolvedConfig,
@@ -753,7 +778,10 @@ export async function sessionFromRequest(
   options: SessionReadOptions = {},
 ): Promise<ResolvedSession | null> {
   const token = readSessionToken(config, request);
-  return token ? resolveSession(config, token, readModeOf(config, request, options)) : null;
+  // The row of the router serves one read: a later read of the request reads again.
+  const peeked = peekedRows.get(request) ?? null;
+  peekedRows.delete(request);
+  return token ? resolveSession(config, token, readModeOf(config, request, options), peeked) : null;
 }
 
 /**

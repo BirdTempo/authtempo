@@ -155,6 +155,16 @@ export type VerificationPurpose =
    */
   | "session-end-record"
   /**
+   * The rows of the solo organizations of an account delete that wait for
+   * the sweep (ruling 78 of plan 12d). The act deleted the organization,
+   * connection, domain, SCIM token, and member rows. The identifier is the
+   * first organization id, and the valueHash is the SHA-256 hex of
+   * `organization-rest:<id>`. The data is { organizations }, the ids. The
+   * row lives 3650 days. The sweep deletes the rest of the rows of those
+   * organizations, and then the row.
+   */
+  | "organization-rest"
+  /**
    * One SAML AuthnRequest that core sent (plan 12d). The ACS spends it
    * once, so one Response opens at most one session.
    */
