@@ -49,12 +49,16 @@ export function appleProvider(c: AppleConfig): OidcProvider {
         },
       });
     },
-    // Apple's nonce claim holds the value that the app passed to the sheet
-    // (plan 12i Task 10, open point 3). Apple names no form, so an app may
-    // pass the raw nonce or its SHA-256 hex, as Better Auth's
-    // `exact-or-sha256` takes. The id_token page says the claim is "present
-    // only if you pass it in the authorization request" (read 2026-10-25).
-    idToken: { audiences: c.audiences ?? [], nonceForm: "raw-or-sha256" },
+    // Apple's nonce claim holds the value that the app passed to the sheet.
+    // The app passes `providerNonce`, the SHA-256 hex of core's nonce
+    // (ruling 37 I1). The id_token page says of `nonce_supported`: "If this
+    // claim returns true, treat nonce as mandatory and fail the
+    // transaction" (read 2026-10-25). It is a boolean or a string.
+    idToken: {
+      audiences: c.audiences ?? [],
+      nonceMandatory: (claims) =>
+        claims.nonce_supported === true || claims.nonce_supported === "true",
+    },
     profile(claims, extra) {
       const verified = claims.email_verified;
       return {

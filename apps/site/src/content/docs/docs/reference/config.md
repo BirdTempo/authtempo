@@ -108,7 +108,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.stateData` | object or `false` | `false` | The app payload through the social flow. The start and the link start take `data`, and the hooks get `stateData`. [Carry app data through a social sign-in](/docs/guides/social-state-data/). |
 | `social.stateData.maxBytes` | number | `1024` | 1 to 1024. The most UTF-8 bytes of the JSON of `data`. |
 | `social.idToken` | object or `false` | on with `social.google` or `social.apple` | The ID-token route of Google One Tap and Apple's native sheet: `POST /social/<provider>/id-token/nonce` and `POST /social/<provider>/id-token`. `false` removes both routes. |
-| `social.idToken.requireNonce` | boolean | `true` | A sign-in needs a nonce of the nonce route, and the token must carry it. Google's nonce is compared raw. Apple's nonce is compared raw or as its SHA-256 hex. |
+| `social.idToken.requireNonce` | boolean | `true` | A sign-in needs a nonce of the nonce route. The token's `nonce` claim must be the SHA-256 hex of that nonce, for Google and Apple. With `false`, an Apple token with `nonce_supported` true still needs the nonce. |
 | `social.google.clientId` | string | required | The client id of the Google OAuth client. |
 | `social.google.clientSecret` | string | required | Core sends it in the token request body. |
 | `social.google.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |

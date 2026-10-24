@@ -211,7 +211,11 @@ function idTokenRoutes(config: ResolvedConfig, name: string, serves: boolean): R
         if (!body.ok) return respond(body);
         const r = await idTokenNonce(ctx.config, { provider: name, ip: ctx.ip });
         if (!r.ok) return respond(r);
-        return json({ nonce: r.value.nonce, expiresAt: r.value.expiresAt.toISOString() });
+        return json({
+          nonce: r.value.nonce,
+          providerNonce: r.value.providerNonce,
+          expiresAt: r.value.expiresAt.toISOString(),
+        });
       },
     },
     {

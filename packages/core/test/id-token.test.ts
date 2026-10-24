@@ -1,4 +1,4 @@
-import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
+import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
 import type { AnonymousLinkEvent } from "../src/engine/hooks.js";
@@ -117,7 +117,8 @@ function world(
   async function nonce(provider = "google", headers = ip()): Promise<string> {
     const res = await handle(post(`/auth/social/${provider}/id-token/nonce`, {}, headers));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { nonce: string; expiresAt: string };
+    const body = (await res.json()) as { nonce: string; providerNonce: string; expiresAt: string };
+    expect(body.providerNonce).toBe(await sha256Hex(body.nonce));
     return recordCredential(body.nonce);
   }
   function signIn(provider: string, body: Claims, headers: Record<string, string> = ip()) {
@@ -131,20 +132,32 @@ async function code(res: Response): Promise<string | undefined> {
   return ((await res.clone().json()) as { error?: string }).error;
 }
 
+/** The value that the app gives the provider: the SHA-256 hex of the raw nonce (ruling 37 I1). */
+const hashOf = (nonce: string) => sha256Hex(nonce);
+
 /** A Google sign-in with a fresh nonce: the answer. */
 async function googleIn(w: World, claims: Claims = {}) {
   const nonce = await w.nonce("google");
-  return w.signIn("google", { idToken: await w.google({ nonce, ...claims }), nonce });
+  return w.signIn("google", {
+    idToken: await w.google({ nonce: await hashOf(nonce), ...claims }),
+    nonce,
+  });
 }
 
 describe("the ID-token route (plan 12i Task 10)", () => {
   it("spends the nonce once", async () => {
     const w = world();
     const nonce = await w.nonce("google");
-    const first = await w.signIn("google", { idToken: await w.google({ nonce }), nonce });
+    const first = await w.signIn("google", {
+      idToken: await w.google({ nonce: await hashOf(nonce) }),
+      nonce,
+    });
     expect(first.status).toBe(200);
     // A second token that carries the same nonce: a new jti, so no used-token row decides it.
-    const second = await w.signIn("google", { idToken: await w.google({ nonce }), nonce });
+    const second = await w.signIn("google", {
+      idToken: await w.google({ nonce: await hashOf(nonce) }),
+      nonce,
+    });
     expect(second.status).toBe(400);
     expect(await code(second)).toBe("invalid_token");
     // The nonce row holds the hash, never the nonce.
@@ -163,21 +176,21 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const old = await w.nonce("google");
     w.clock.advance(5 * 60_000 + 1000);
     const expired = await w.signIn("google", {
-      idToken: await w.google({ nonce: old }),
+      idToken: await w.google({ nonce: await hashOf(old) }),
       nonce: old,
     });
     expect(await code(expired)).toBe("invalid_token");
     // A nonce that core never made.
     const unknown = "A".repeat(43);
     const res = await w.signIn("google", {
-      idToken: await w.google({ nonce: unknown }),
+      idToken: await w.google({ nonce: await hashOf(unknown) }),
       nonce: unknown,
     });
     expect(await code(res)).toBe("invalid_token");
     // A nonce of the other provider.
     const appleNonce = await w.nonce("apple");
     const other = await w.signIn("google", {
-      idToken: await w.google({ nonce: appleNonce }),
+      idToken: await w.google({ nonce: await hashOf(appleNonce) }),
       nonce: appleNonce,
     });
     expect(await code(other)).toBe("invalid_token");
@@ -231,35 +244,106 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     // An Apple token for the web Services ID and for the app pass; Google's client id does not.
     for (const aud of [APPLE_WEB, APPLE_APP]) {
       const nonce = await w.nonce("apple");
-      const res = await w.signIn("apple", { idToken: await w.apple({ aud, nonce }), nonce });
+      const res = await w.signIn("apple", {
+        idToken: await w.apple({ aud, nonce: await hashOf(nonce) }),
+        nonce,
+      });
       expect(res.status, aud).toBe(200);
     }
     const nonce = await w.nonce("apple");
-    const res = await w.signIn("apple", { idToken: await w.apple({ aud: WEB, nonce }), nonce });
+    const res = await w.signIn("apple", {
+      idToken: await w.apple({ aud: WEB, nonce: await hashOf(nonce) }),
+      nonce,
+    });
     expect(await code(res)).toBe("invalid_token");
   });
 
-  it("compares Apple's nonce raw or as its SHA-256 hex, and Google's raw only", async () => {
+  it("takes the nonce claim as the SHA-256 hex of the posted nonce only", async () => {
     const w = world();
-    const raw = await w.nonce("apple");
-    const a1 = await w.signIn("apple", { idToken: await w.apple({ nonce: raw }), nonce: raw });
-    expect(a1.status).toBe(200);
-    const hashed = await w.nonce("apple");
-    const a2 = await w.signIn("apple", {
-      idToken: await w.apple({ nonce: await sha256Hex(hashed) }),
-      nonce: hashed,
+    for (const provider of ["google", "apple"] as const) {
+      const make = provider === "google" ? w.google : w.apple;
+      const hashed = await w.nonce(provider);
+      const res = await w.signIn(provider, {
+        idToken: await make({ nonce: await hashOf(hashed) }),
+        nonce: hashed,
+      });
+      expect(res.status, provider).toBe(200);
+      // A claim that holds the raw nonce is refused, and the nonce stays live.
+      const raw = await w.nonce(provider);
+      const rawRes = await w.signIn(provider, { idToken: await make({ nonce: raw }), nonce: raw });
+      expect(await code(rawRes), provider).toBe("invalid_token");
+      // Another value is no match.
+      const bad = await w.nonce(provider);
+      const badRes = await w.signIn(provider, { idToken: await make({ nonce: "x" }), nonce: bad });
+      expect(await code(badRes), provider).toBe("invalid_token");
+    }
+  });
+
+  it("refuses a party that holds the token text alone (probe P1)", async () => {
+    const w = world();
+    // The victim's app asks for a nonce, and gives providerNonce to Google.
+    const nr = await w.handle(post("/auth/social/google/id-token/nonce", {}, ip()));
+    const { nonce, providerNonce } = (await nr.json()) as { nonce: string; providerNonce: string };
+    recordCredential(nonce);
+    const token = await w.google({ nonce: providerNonce });
+    // The thief reads the claim from the payload and posts it from another IP.
+    const claim = decodeJwt(token).nonce;
+    const stolen = await w.signIn("google", { idToken: token, nonce: claim });
+    expect(await code(stolen)).toBe("invalid_token");
+    // A token whose claim is the raw nonce gives the nonce away, so it is refused.
+    const rawToken = await w.google({ nonce, sub: "g-raw" });
+    const raw = await w.signIn("google", { idToken: rawToken, nonce });
+    expect(await code(raw)).toBe("invalid_token");
+    expect(await w.storage.findMany("session", [])).toEqual([]);
+    // The app that holds the raw nonce signs in: the refusals spent nothing.
+    const own = await w.signIn("google", { idToken: token, nonce });
+    expect(own.status).toBe(200);
+  });
+
+  it("checks the token before it spends the nonce", async () => {
+    const w = world();
+    const nonce = await w.nonce("google");
+    const live = [
+      { field: "purpose", op: "eq", value: "id-token-nonce" },
+      { field: "consumedAt", op: "eq", value: null },
+    ] as const;
+    // A party that saw the nonce posts a bad token, and a good token of another audience.
+    const garbage = await w.signIn("google", { idToken: "a.b.c", nonce });
+    expect(await code(garbage)).toBe("invalid_token");
+    const otherAud = await w.signIn("google", {
+      idToken: await w.google({ nonce: await hashOf(nonce), aud: "someone-else" }),
+      nonce,
     });
-    expect(a2.status).toBe(200);
-    // Another value is no match.
-    const bad = await w.nonce("apple");
-    const a3 = await w.signIn("apple", { idToken: await w.apple({ nonce: "x" }), nonce: bad });
-    expect(await code(a3)).toBe("invalid_token");
-    const g1 = await w.nonce("google");
-    const g = await w.signIn("google", {
-      idToken: await w.google({ nonce: await sha256Hex(g1) }),
-      nonce: g1,
+    expect(await code(otherAud)).toBe("invalid_token");
+    expect(await w.storage.findMany("verification", [...live])).toHaveLength(1);
+    // The real sign-in with the same nonce still passes, and it spends the nonce.
+    const res = await w.signIn("google", {
+      idToken: await w.google({ nonce: await hashOf(nonce) }),
+      nonce,
     });
-    expect(await code(g)).toBe("invalid_token");
+    expect(res.status).toBe(200);
+    expect(await w.storage.findMany("verification", [...live])).toEqual([]);
+  });
+
+  it("refuses an Apple token that marks the nonce mandatory and has none", async () => {
+    // requireNonce off: only Apple's nonce_supported claim asks for the nonce.
+    const w = world({}, { idToken: { requireNonce: false } });
+    for (const supported of [true, "true"]) {
+      const res = await w.signIn("apple", {
+        idToken: await w.apple({ nonce_supported: supported }),
+      });
+      expect(await code(res), String(supported)).toBe("invalid_token");
+    }
+    expect(await w.storage.findMany("session", [])).toEqual([]);
+    // With the nonce, the same claim passes; with nonce_supported false, no nonce passes.
+    const nonce = await w.nonce("apple");
+    const withNonce = await w.signIn("apple", {
+      idToken: await w.apple({ nonce_supported: true, nonce: await hashOf(nonce) }),
+      nonce,
+    });
+    expect(withNonce.status).toBe(200);
+    const off = await w.signIn("apple", { idToken: await w.apple({ nonce_supported: false }) });
+    expect(off.status).toBe(200);
   });
 
   it("refuses an expired token, another issuer, and an alg outside RS256 and ES256", async () => {
@@ -270,7 +354,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     expect(
       (
         await w.signIn("google", {
-          idToken: await w.google({ nonce: es, sub: "g-2" }, "ES256"),
+          idToken: await w.google({ nonce: await hashOf(es), sub: "g-2" }, "ES256"),
           nonce: es,
         })
       ).status,
@@ -293,7 +377,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     }
     const ps = await w.nonce("google");
     const res = await w.signIn("google", {
-      idToken: await w.google({ nonce: ps }, "PS256"),
+      idToken: await w.google({ nonce: await hashOf(ps) }, "PS256"),
       nonce: ps,
     });
     expect(await code(res)).toBe("invalid_token");
@@ -303,7 +387,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const w = world();
     const n1 = await w.nonce("apple");
     const made = await w.signIn("apple", {
-      idToken: await w.apple({ nonce: n1, sub: "a-new" }),
+      idToken: await w.apple({ nonce: await hashOf(n1), sub: "a-new" }),
       nonce: n1,
       name: "Ada Lovelace",
     });
@@ -313,7 +397,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const n2 = await w.nonce("apple");
     const first = await w.signIn("apple", {
       idToken: await w.apple({
-        nonce: n2,
+        nonce: await hashOf(n2),
         sub: "a-2",
         email: "b@icloud.com",
         email_verified: "true",
@@ -324,7 +408,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const n3 = await w.nonce("apple");
     const later = await w.signIn("apple", {
       idToken: await w.apple({
-        nonce: n3,
+        nonce: await hashOf(n3),
         sub: "a-2",
         email: "b@icloud.com",
         email_verified: "true",
@@ -340,7 +424,12 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     // Google's name is its claim: a body name changes nothing.
     const g = await w.nonce("google");
     const res = await w.signIn("google", {
-      idToken: await w.google({ nonce: g, sub: "g-9", email: "c@example.com", name: "Cy" }),
+      idToken: await w.google({
+        nonce: await hashOf(g),
+        sub: "g-9",
+        email: "c@example.com",
+        name: "Cy",
+      }),
       nonce: g,
       name: "Mallory",
     });
@@ -469,7 +558,11 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const nr = await handle(post("/auth/social/google/id-token/nonce", {}, ip()));
     const { nonce } = (await nr.json()) as { nonce: string };
     const res = await handle(
-      post("/auth/social/google/id-token", { idToken: await signed({ nonce }), nonce }, ip()),
+      post(
+        "/auth/social/google/id-token",
+        { idToken: await signed({ nonce: await hashOf(nonce) }), nonce },
+        ip(),
+      ),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { twoFactor?: { methods: string[] }; token?: string };
@@ -481,6 +574,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const s = await startSocial(auth.config, { provider: "google", next: "/", ip: "1.1.1.1" });
     if (!s.ok) throw new Error(s.code);
     const url = new URL(s.value.location);
+    // The redirect flow sends the raw nonce: its row holds the hash (plan 3).
     callbackToken = await signed({ nonce: url.searchParams.get("nonce") });
     const cb = await completeSocial(auth.config, {
       provider: "google",
@@ -552,7 +646,7 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     const nonce = await w.nonce("google");
     const res = await w.signIn(
       "google",
-      { idToken: await w.google({ nonce }), nonce },
+      { idToken: await w.google({ nonce: await hashOf(nonce) }), nonce },
       { ...ip(), cookie: `${w.config.cookieName}=${token}` },
     );
     expect(res.status).toBe(200);

@@ -94,13 +94,13 @@ export interface SocialProfile {
 /**
  * The ID-token route of a provider (plan 12i Task 10, spec 32 item 10).
  * `audiences` are the client ids beside `clientId` that a token may name,
- * such as an iOS bundle id or an Android client id. `nonceForm` is the
- * form of the `nonce` claim: the raw nonce, or the raw nonce or the
- * lowercase SHA-256 hex of it.
+ * such as an iOS bundle id or an Android client id. The `nonce` claim is
+ * always the SHA-256 hex of core's nonce (ruling 37 I1). `nonceMandatory`
+ * is true when the token itself says that a nonce must be present.
  */
 export interface IdTokenRoute {
   audiences: readonly string[];
-  nonceForm: "raw" | "raw-or-sha256";
+  nonceMandatory?(claims: Record<string, unknown>): boolean;
 }
 
 export interface CallbackExtra {

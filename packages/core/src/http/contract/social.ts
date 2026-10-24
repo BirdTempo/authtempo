@@ -74,7 +74,12 @@ export const SOCIAL_CONTRACT = {
     body: { schema: idTokenNonceBody, media: ["json"], parsedBy: "zod" },
     answer: {
       kind: "json",
-      schema: z.strictObject({ nonce: z.string(), expiresAt: z.iso.datetime() }),
+      // `providerNonce` is the SHA-256 hex of `nonce`: the value for the provider (ruling 37 I1).
+      schema: z.strictObject({
+        nonce: z.string(),
+        providerNonce: z.string(),
+        expiresAt: z.iso.datetime(),
+      }),
     },
   },
   "POST /social/:provider/id-token": {

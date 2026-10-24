@@ -27,10 +27,10 @@ export function googleProvider(c: GoogleConfig): OidcProvider {
     authorizeParams: {},
     callbackMethod: "GET",
     clientSecret: async () => c.clientSecret,
-    // The nonce of `google.accounts.id.initialize` comes back as it went in
-    // (plan 12i Task 10, open point 4). Google's reference does not name a
-    // hashed form (js-reference, "Last updated 2026-09-01 UTC", read 2026-10-25).
-    idToken: { audiences: c.audiences ?? [], nonceForm: "raw" },
+    // The app gives `providerNonce` to `google.accounts.id.initialize`
+    // (ruling 37 I1). Google's reference calls the nonce an opaque string
+    // (js-reference, "Last updated 2026-09-01 UTC", read 2026-10-25).
+    idToken: { audiences: c.audiences ?? [] },
     profile(claims) {
       return {
         subject: stringClaim(claims, "sub") ?? "",

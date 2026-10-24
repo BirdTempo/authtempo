@@ -134,7 +134,7 @@ const tokenText = () => `h.${btoa(JSON.stringify({ n: ++n })).replace(/=+$/, "")
 /** A nonce, a Google token for `email`, and the sign-in: the measured answer. */
 async function signIn(w: World, email: string, cookie: string | null = null) {
   const nr = await call(w, post("/social/google/id-token/nonce", {}));
-  const { nonce } = (await nr.json()) as { nonce: string };
+  const { nonce, providerNonce } = (await nr.json()) as { nonce: string; providerNonce: string };
   const iat = Math.floor(Date.now() / 1000);
   w.claims.current = {
     iss: "https://accounts.google.com",
@@ -142,7 +142,8 @@ async function signIn(w: World, email: string, cookie: string | null = null) {
     sub: `g-${email}`,
     email,
     email_verified: true,
-    nonce,
+    // The provider gets the SHA-256 hex of the nonce (ruling 37 I1).
+    nonce: providerNonce,
     iat,
     exp: iat + 3600,
   };
@@ -198,8 +199,8 @@ describe("the ID-token route on D1 (plan 12i Task 10)", () => {
 
     // The same token again, with a new nonce: the used-token row refuses it.
     const nr = await call(w, post("/social/google/id-token/nonce", {}));
-    const { nonce } = (await nr.json()) as { nonce: string };
-    w.claims.current = { ...w.claims.current, nonce };
+    const { nonce, providerNonce } = (await nr.json()) as { nonce: string; providerNonce: string };
+    w.claims.current = { ...w.claims.current, nonce: providerNonce };
     const replay = await measure(
       w,
       post("/social/google/id-token", { idToken: gated.idToken, nonce }),

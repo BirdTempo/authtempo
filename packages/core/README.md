@@ -31,7 +31,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; for a user with the second factor on, 302 to the challenge page with no cookie (plan 12c); 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
-| POST | `/social/google/id-token/nonce`, `/social/apple/id-token/nonce` | JSON `{}` | `{ nonce, expiresAt }`: a nonce of one use that lives 5 minutes (plan 12i). 429 `rate_limited` after 60 per IP per 15 minutes |
+| POST | `/social/google/id-token/nonce`, `/social/apple/id-token/nonce` | JSON `{}` | `{ nonce, providerNonce, expiresAt }`: a nonce of one use that lives 5 minutes (plan 12i), and its SHA-256 hex for the provider. 429 `rate_limited` after 60 per IP per 15 minutes |
 | POST | `/social/google/id-token`, `/social/apple/id-token` | JSON `{ idToken, nonce?, name?, next?, trustDevice? }` | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }`. The ID token of Google One Tap or of the native Apple sheet, with the nonce of the route. 400 `invalid_token` for a bad, used, or replayed token or nonce; 429 after 30 per IP per 15 minutes; the codes of the callback |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401. With `session.deferRefresh` on, also `needsRefresh`, and no renewed cookie |
 | POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
@@ -449,9 +449,12 @@ The browser sent it, so never trust it.
 The ID-token route (plan 12i) serves Google One Tap and the native Apple
 sheet. It is on while `google` or `apple` is set; `social.idToken: false`
 turns it off. The app asks `POST /social/<provider>/id-token/nonce` for a
-nonce and gives it to the provider. Then it posts the ID token with the
-nonce to `POST /social/<provider>/id-token`. Core spends the nonce once and
-verifies the token against the provider's key set. The `aud` must be
+nonce. It gives `providerNonce`, the SHA-256 hex of the nonce, to the
+provider, and keeps the raw `nonce`. Then it posts the ID token with the raw
+nonce to `POST /social/<provider>/id-token`. The token's `nonce` claim must
+be the hash of the posted nonce. A party that holds only the token sees the
+hash, so it cannot post the nonce. Core verifies the token against the
+provider's key set, and then spends the nonce once. The `aud` must be
 `clientId` or an entry of `audiences`, the list of the app's native client
 ids. A row for each token bars a second use on every instance. The account
 rules, the gate, and the anonymous upgrade are those of the callback.

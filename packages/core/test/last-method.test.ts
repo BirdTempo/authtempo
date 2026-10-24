@@ -289,11 +289,13 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
   ],
   [
     // Plan 12i Task 10: Google One Tap posts its ID token with a nonce of core.
+    // Google gets providerNonce, the hash of the nonce (ruling 37 I1).
     "the ID-token route",
     "social:google",
     async (w) => {
       const n = await w.handle(post("/auth/social/google/id-token/nonce", {}));
-      const { nonce } = (await n.json()) as { nonce: string };
+      const { nonce, providerNonce } = (await n.json()) as { nonce: string; providerNonce: string };
+      recordCredential(nonce);
       const iat = Math.floor(w.auth.clock.now().getTime() / 1000);
       // The fake seam knows the token by its text; the payload part keys the used-token row.
       const idToken = recordCredential("h.eyJ0IjoiaWQtdG9rZW4ifQ.s");
@@ -305,7 +307,7 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
           aud: GOOGLE.clientId,
           email: EMAIL,
           email_verified: true,
-          nonce: recordCredential(nonce),
+          nonce: providerNonce,
           iat,
           exp: iat + 3600,
         },
