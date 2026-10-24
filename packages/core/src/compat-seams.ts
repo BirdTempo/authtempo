@@ -2,8 +2,8 @@ import type { ScimCaller } from "./engine/scim/tokens.js";
 
 /**
  * The seams of a compat package (plan 12d Task 14, ruling 61 P3). Each one
- * holds a value for one object: an AuthConfig, or a Request that the compat
- * package built. Only core's own functions of `compat.ts` set a value. A
+ * holds a value for one object: an AuthConfig, a resolved config and its
+ * copies, or a Request that the compat package built. Only core's own functions of `compat.ts` set a value. A
  * core route or the sweep reads the value in place of its own input. Every
  * other step stays core's: the session, the limiter, the manager guard, the
  * scopes, and the audit row.
@@ -23,7 +23,12 @@ export type DomainRecordOf = (
 ) => { name: string; values: readonly string[] } | null;
 
 const configRecords = new WeakMap<object, DomainRecordOf>();
-const resolvedRecords = new WeakMap<object, DomainRecordOf>();
+/**
+ * The key of the record on a resolved config. A property, not a WeakMap
+ * entry: plan 12h gives each route a spread copy of the config (the scope
+ * of its request), and a spread copy keeps an enumerable symbol property.
+ */
+const RECORD = Symbol("authtempo.compat.domainRecord");
 const recordVerifies = new WeakSet<Request>();
 const scimCallers = new WeakMap<Request, ScimCaller>();
 
@@ -34,12 +39,12 @@ export function setConfigDomainRecord(input: object, record: DomainRecordOf): vo
 /** Carries the record of an AuthConfig onto its resolved config, at `createAuth`. */
 export function carryDomainRecord(input: object, resolved: object): void {
   const record = configRecords.get(input);
-  if (record) resolvedRecords.set(resolved, record);
+  if (record) Object.defineProperty(resolved, RECORD, { value: record, enumerable: true });
 }
 
-/** The record function of the compat package of this resolved config, else null. */
+/** The record function of the compat package of this resolved config or of a copy of it, else null. */
 export function domainRecordFor(resolved: object): DomainRecordOf | null {
-  return resolvedRecords.get(resolved) ?? null;
+  return (resolved as { [RECORD]?: DomainRecordOf })[RECORD] ?? null;
 }
 
 export function markRecordVerify(request: Request): void {

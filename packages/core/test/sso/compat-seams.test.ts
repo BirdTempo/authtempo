@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { scimRequestAs, verifyDomainByRecord, withDomainRecord } from "../../src/compat.js";
-import { carryDomainRecord, type DomainRecordOf } from "../../src/compat-seams.js";
+import { carryDomainRecord, type DomainRecordOf, domainRecordFor } from "../../src/compat-seams.js";
 import { createAuth } from "../../src/create-auth.js";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
+import { createRouter, type Route } from "../../src/http/router.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
-import { BASE_URL } from "../helpers.js";
+import { BASE_URL, get } from "../helpers.js";
 import { fakeDns, SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
 // The seams of the compat entry (plan 12d Task 14, ruling 61 P3 and F4).
@@ -195,6 +196,20 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     }
     const lost = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
     expect(lost).toMatchObject({ claimedDomain: null, verifiedAt: null });
+  });
+
+  it("keeps the record on the config copy that the router gives each route (plan 12h)", async () => {
+    const { w } = await recordWorld();
+    // The router hands each handler a copy of the config with the observer of its request.
+    const probe: Route = {
+      method: "GET",
+      path: "/probe",
+      handler: async (ctx) =>
+        new Response(domainRecordFor(ctx.config) === BA_RECORD ? "yes" : "no"),
+    };
+    const res = await createRouter(w.config, [probe])(get("/auth/probe"));
+    expect(await res.text()).toBe("yes");
+    expect(domainRecordFor({ ...w.config })).toBe(BA_RECORD);
   });
 
   it("refuses each call outside the seams with a TypeError", async () => {
