@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createSession,
   destroySession,
+  peekRequestSession,
   readSessionToken,
   resolveSession,
+  sessionFromRequest,
 } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { sessionRoutes } from "../src/http/routes/sessions.js";
@@ -280,5 +282,30 @@ describe("session.freshAt (plan 12a, schema version 10)", () => {
       { field: "id", op: "eq", value: session.id },
     ]);
     expect(stored?.freshAt).toEqual(auth.clock.now());
+  });
+});
+
+describe("the session row of the router (rulings 78 and 79 of plan 12d)", () => {
+  it("serves the first session read of the request, and a second read of the request reads again", async () => {
+    const { config, storage, seedUser } = makeAuth();
+    const user = await seedUser("a@example.com");
+    const { token, session } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const request = get("/auth/session", { cookie: `${config.cookieName}=${token}` });
+    const findOne = vi.spyOn(storage, "findOne");
+    const sessionReads = () => findOne.mock.calls.filter(([model]) => model === "session").length;
+    expect((await peekRequestSession(config, request))?.id).toBe(session.id);
+    expect(sessionReads()).toBe(1);
+    // The first read of the handler takes the row of the router: no second read of it.
+    expect((await sessionFromRequest(config, request))?.session.id).toBe(session.id);
+    expect(sessionReads()).toBe(1);
+    // A later read of the same request reads again, so it sees a session that ended since.
+    await storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+    expect(await sessionFromRequest(config, request)).toBeNull();
+    expect(sessionReads()).toBe(2);
+    findOne.mockRestore();
   });
 });
