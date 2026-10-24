@@ -1,0 +1,13 @@
+{
+  "id": "10158240347162345",
+  "name": "Mia Example",
+  "email": "mia@example.com",
+  "picture": {
+    "data": {
+      "height": 50,
+      "is_silhouette": false,
+      "url": "https://platform-lookaside.fbsbx.com/platform/profilepic/?asid=10158240347162345&height=50&width=50",
+      "width": 50
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "source": "me.json has the fields id, name, email, and picture of the Graph API User reference (https://developers.facebook.com/docs/graph-api/reference/user/), read 2026-10-24. The subject is Better Auth 1.7.2's accountSubject of facebook for a /me profile: profile.id (@better-auth/core 1.7.2 dist/social-providers/facebook.mjs). The Graph API has no verified flag, so the address is not verified.",
+  "subject": "10158240347162345",
+  "email": "mia@example.com",
+  "emailVerified": false,
+  "name": "Mia Example",
+  "image": "https://platform-lookaside.fbsbx.com/platform/profilepic/?asid=10158240347162345&height=50&width=50"
+}

@@ -79,7 +79,7 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
   },
   social: {
     title: "Social sign-in",
-    line: "Sign in with Google, Apple, GitHub, LinkedIn, or an OIDC provider.",
+    line: "Sign in with ten presets, from Google to Facebook, or any OIDC or OAuth 2 provider.",
     icon: "social",
     guide: "/docs/guides/social/",
   },

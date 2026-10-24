@@ -129,6 +129,7 @@ Each event has these fields too:
 | `social.token_request_failed` | error | `provider: name`, `errorClass: errorClass` | `authtempo: social token request failed` |
 | `social.token_status` | error | `provider: name`, `status: status` | `authtempo: social token endpoint answered` |
 | `social.token_missing` | error | `provider: name` | `authtempo: social token answer has no token` |
+| `social.token_refused` | error | `provider: name` | `authtempo: social token answer refused` |
 | `social.id_token_rejected` | error | `provider: name`, `errorClass: errorClass` | `authtempo: social id token rejected` |
 | `social.nonce_mismatch` | error | `provider: name` | `authtempo: social nonce mismatch` |
 | `social.claims_refused` | error | `provider: name` | `authtempo: social id token claims refused` |

@@ -150,6 +150,9 @@ describe("social config", () => {
         microsoft: { clientId: "m", clientSecret: "s", tenant: "common" },
         discord: { clientId: "d", clientSecret: "s" },
         gitlab: { clientId: "gl", clientSecret: "s" },
+        slack: { clientId: "sl", clientSecret: "s" },
+        twitter: { clientId: "x", clientSecret: "s" },
+        facebook: { clientId: "f", clientSecret: "s" },
       },
     });
     expect(c.social.providers.map((p) => p.name)).toEqual(PRESET_PROVIDER_NAMES);

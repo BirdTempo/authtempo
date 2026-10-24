@@ -610,8 +610,9 @@ async function completeLink(
  * `redirectUri` is the callback of the start: a social provider's, or an
  * SSO connection's (plan 12d deviation 6). One exchange serves both.
  * `fetchFn` is `social.fetch` for a social provider and `sso.fetch` for a
- * connection (plan 12d Task 4). `method` is `client_secret_post` for a
- * social provider. An SSO connection names its own (12d fix wave item 18).
+ * connection (plan 12d Task 4). `method` is the provider's `tokenAuth`,
+ * else `client_secret_post` (plan 12i Task 14). An SSO connection names its
+ * own (12d fix wave item 18).
  * With `client_secret_basic` the body holds no client id and no secret:
  * RFC 6749 section 2.3 allows one method per request.
  */
@@ -623,7 +624,7 @@ export async function exchangeProviderCode(
   now: Date,
   redirectUri: string,
   fetchFn: typeof fetch = config.social.fetch,
-  method: TokenEndpointAuthMethod = "client_secret_post",
+  method: TokenEndpointAuthMethod = provider.tokenAuth ?? "client_secret_post",
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -678,8 +679,14 @@ export async function exchangeProviderCode(
   } catch {
     return null;
   }
+  const answer = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  // Slack answers an error with status 200 and ok false (plan 12i Task 14).
+  if (provider.tokenAnswerOk && !provider.tokenAnswerOk(answer)) {
+    config.observe.emit({ name: "social.token_refused", provider: provider.name });
+    return null;
+  }
   const field = provider.kind === "oidc" ? "id_token" : "access_token";
-  const token = (body as Record<string, unknown> | null)?.[field];
+  const token = answer[field];
   if (typeof token === "string" && token.length > 0) return token;
   // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
   config.observe.emit({ name: "social.token_missing", provider: provider.name });

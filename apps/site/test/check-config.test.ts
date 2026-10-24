@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 255 keys, the nested ones by their path", () => {
+  it("lists 267 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -32,7 +32,9 @@ describe("checkConfig", () => {
     // Plan 12i Task 4 adds phone and its nine keys.
     // Plan 12i Task 12 adds lastMethod, its two keys, and redirectURI on the seven
     // presets and the two lists.
-    expect(keys.length).toBe(255);
+    // Plan 12i Task 14 adds social.slack, social.twitter, social.facebook, and their nine keys.
+    expect(keys.length).toBe(255 + 12);
+    expect(keys).toContain("social.twitter.redirectURI");
     expect(keys).toContain("lastMethod.days");
     expect(keys).toContain("social.oauth2[].redirectURI");
     expect(keys).toContain("username.reserved");

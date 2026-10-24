@@ -282,8 +282,8 @@ describe("the presets of plan 12i Task 13", () => {
           },
         }),
       ).toThrow(
-        // The text names only the presets that exist, and the reserved names apart.
-        `social.oauth2[0].name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, and gitlab are presets; slack, twitter, and facebook are kept for coming presets; email and credential are identity kinds`,
+        // The text names the presets that exist. Plan 12i Task 14 left no name kept for a coming preset.
+        `social.oauth2[0].name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, gitlab, slack, twitter, and facebook are presets; email and credential are identity kinds`,
       );
   });
 

@@ -1,0 +1,8 @@
+{
+  "source": "userinfo.json is the example answer of https://docs.slack.dev/reference/methods/openid.connect.userInfo, read 2026-10-24, with a full gravatar URL and without the image size keys. The subject is Better Auth 1.7.2's accountSubject of slack: profile[\"https://slack.com/user_id\"] (@better-auth/core 1.7.2 dist/social-providers/slack.mjs).",
+  "subject": "U0R7JM",
+  "email": "krane@slack-corp.com",
+  "emailVerified": true,
+  "name": "krane",
+  "image": "https://secure.gravatar.com/avatar/krane.png"
+}

@@ -53,7 +53,11 @@ const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.
 const CORE_PRESETS: Readonly<Record<string, string>> = Object.fromEntries(
   PRESET_PROVIDER_NAMES.map((name) => [name, `social.${name}`]),
 );
-/** Names that core reserves for coming presets. Core moves a name to its preset list. */
+/**
+ * Names that core reserves for coming presets. Core moves a name to its
+ * preset list. The list is empty after plan 12i Task 14. The rule stays, so
+ * a name that core reserves later gets the right refusal with no edit here.
+ */
 const COMING_PRESETS: ReadonlySet<string> = new Set(COMING_PRESET_NAMES);
 const presetProvider = (preset: string) =>
   `not mapped; use core's preset ${preset} through core's createAuth`;

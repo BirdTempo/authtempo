@@ -8,6 +8,7 @@ import type {
   DiscordConfig,
   DynamicRolesConfig,
   EmailOtpConfig,
+  FacebookConfig,
   GitHubConfig,
   GitLabConfig,
   GoogleConfig,
@@ -30,11 +31,13 @@ import type {
   PhoneConfig,
   ScimConfig,
   SecretVersion,
+  SlackConfig,
   SsoConfig,
   TeamsConfig,
   TokensConfig,
   TotpConfig,
   TotpGateConfig,
+  TwitterConfig,
   UsernameConfig,
 } from "@authtempo/core";
 
@@ -118,6 +121,9 @@ export const CONFIG_KEYS = {
     microsoft: true,
     discord: true,
     gitlab: true,
+    slack: true,
+    twitter: true,
+    facebook: true,
     oidc: true,
     oauth2: true,
     fetch: true,
@@ -165,6 +171,21 @@ export const CONFIG_KEYS = {
     issuer: true,
     redirectURI: true,
   } satisfies Keys<GitLabConfig>,
+  "social.slack": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<SlackConfig>,
+  "social.twitter": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<TwitterConfig>,
+  "social.facebook": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<FacebookConfig>,
   "social.oidc[]": {
     name: true,
     label: true,

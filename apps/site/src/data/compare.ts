@@ -515,7 +515,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "b2",
     "better-auth",
     "Social presets",
-    "Presets for Google, Apple, GitHub, LinkedIn, Microsoft Entra ID, Discord, and GitLab. Any other provider comes through the OIDC or the OAuth 2 setting.",
+    "Presets for Google, Apple, GitHub, LinkedIn, Microsoft Entra ID, Discord, GitLab, Slack, X, and Facebook. Any other provider comes through the OIDC or the OAuth 2 setting.",
     "Built-in providers from Apple to Zoom, and Cloudflare since 1.7.3.",
     [P12I],
   ),

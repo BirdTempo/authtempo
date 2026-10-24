@@ -99,6 +99,9 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.microsoft` | `MicrosoftConfig` | none | The Microsoft Entra ID preset, with the scope `openid profile email`. The subject is `oid`. |
 | `social.discord` | `DiscordConfig` | none | The Discord preset, with the scope `identify email`. |
 | `social.gitlab` | `GitLabConfig` | none | The GitLab preset, with the scope `read_user`. A GitLab address is never verified. |
+| `social.slack` | `SlackConfig` | none | The Slack preset, on the user info endpoint, with the scope `openid profile email`. The subject is the Slack user id. A token answer without `ok: true` answers `oauth_failed`. |
+| `social.twitter` | `TwitterConfig` | none | The X preset, with the scope `users.read tweet.read users.email`. Core sends the client secret to the token endpoint as HTTP Basic. Only `confirmed_email` gives an address, and it counts as verified. |
+| `social.facebook` | `FacebookConfig` | none | The Facebook preset on Graph API `v26.0`, with the scope `email public_profile`. A Facebook address is never verified. |
 | `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |
 | `social.oauth2` | `OAuth2Entry` list | empty | OAuth 2.0 providers that issue no ID token. |
 | `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
@@ -129,7 +132,16 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.gitlab.clientSecret` | string | required | The secret of the GitLab app. |
 | `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, and not the host of `baseURL`. |
 | `social.gitlab.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
-| `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. `slack`, `twitter`, and `facebook` are reserved for presets too. |
+| `social.slack.clientId` | string | required | The client id of the Slack app. |
+| `social.slack.clientSecret` | string | required | The client secret of the Slack app. |
+| `social.slack.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.twitter.clientId` | string | required | The OAuth 2.0 client id of the X app. |
+| `social.twitter.clientSecret` | string | required | The OAuth 2.0 client secret of the X app, a confidential client. |
+| `social.twitter.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.facebook.clientId` | string | required | The app id of the Meta app. |
+| `social.facebook.clientSecret` | string | required | The app secret of the Meta app. |
+| `social.facebook.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. |
 | `social.oidc[].label` | string | required | The button text: 1 to 80 characters with no control character. |
 | `social.oidc[].issuer` | string | required | An `https:` URL with no query, fragment, or credentials. A path is allowed. |
 | `social.oidc[].clientId` | string | required | The client id at the provider. |

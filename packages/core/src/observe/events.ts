@@ -553,6 +553,9 @@ export const EVENTS = {
   "social.token_missing": fault("error", "authtempo: social token answer has no token", {
     provider: PROVIDER,
   }),
+  "social.token_refused": fault("error", "authtempo: social token answer refused", {
+    provider: PROVIDER,
+  }),
   "social.id_token_rejected": fault("error", "authtempo: social id token rejected", {
     provider: PROVIDER,
     errorClass: ERROR_CLASS,

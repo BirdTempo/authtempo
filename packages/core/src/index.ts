@@ -359,6 +359,7 @@ export {
 } from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
 export type { DiscordConfig } from "./social/discord.js";
+export type { FacebookConfig } from "./social/facebook.js";
 export { type GitHubConfig, isGithubSubject } from "./social/github.js";
 export type { GitLabConfig } from "./social/gitlab.js";
 export type { GoogleConfig } from "./social/google.js";
@@ -373,6 +374,8 @@ export {
   type SocialProfile,
   type SocialProviderName,
 } from "./social/provider.js";
+export type { SlackConfig } from "./social/slack.js";
+export type { TwitterConfig } from "./social/twitter.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,

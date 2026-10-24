@@ -109,6 +109,7 @@ import type { SmsPort } from "./seams/sms.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type DiscordConfig, discordProvider } from "./social/discord.js";
+import { type FacebookConfig, facebookProvider } from "./social/facebook.js";
 import { type GitHubConfig, githubProvider } from "./social/github.js";
 import { type GitLabConfig, gitlabProvider, isGitlabIssuer } from "./social/gitlab.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
@@ -132,6 +133,8 @@ import {
   type RedirectOverride,
 } from "./social/provider.js";
 import { providerFetch } from "./social/provider-fetch.js";
+import { type SlackConfig, slackProvider } from "./social/slack.js";
+import { type TwitterConfig, twitterProvider } from "./social/twitter.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -329,6 +332,23 @@ export interface AuthConfig {
      * A GitLab address is never verified.
      */
     gitlab?: GitLabConfig;
+    // The presets of plan 12i Task 14, in one block.
+    /**
+     * Slack, an oauth2 preset with scope `openid profile email` on the user
+     * info endpoint (plan 12i). An address is verified with `email_verified`.
+     */
+    slack?: SlackConfig;
+    /**
+     * X, an oauth2 preset with scope `users.read tweet.read users.email`
+     * (plan 12i). The token exchange sends HTTP Basic client auth. An
+     * address is verified only as `confirmed_email`.
+     */
+    twitter?: TwitterConfig;
+    /**
+     * Facebook, an oauth2 preset with scope `email public_profile` (plan
+     * 12i). A Facebook address is never verified.
+     */
+    facebook?: FacebookConfig;
     /**
      * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
      * `<issuer>/.well-known/openid-configuration` on its first start and
@@ -1908,6 +1928,9 @@ export function secretValues(keyring: Keyring, social: AuthConfig["social"]): Re
     social?.microsoft?.clientSecret,
     social?.discord?.clientSecret,
     social?.gitlab?.clientSecret,
+    social?.slack?.clientSecret,
+    social?.twitter?.clientSecret,
+    social?.facebook?.clientSecret,
     ...(social?.oidc ?? []).map((e) => e.clientSecret),
     ...(social?.oauth2 ?? []).map((e) => e.clientSecret),
   ];
@@ -3437,6 +3460,19 @@ function socialProviders(
         "social.gitlab.issuer must be an https origin with no path or trailing slash, on a public host that is not the host of baseURL",
       );
     push("social.gitlab", social.gitlab, gitlabProvider(social.gitlab));
+  }
+  // The presets of plan 12i Task 14, in one block.
+  if (social?.slack) {
+    requireFields("social.slack", social.slack, ["clientId", "clientSecret"]);
+    push("social.slack", social.slack, slackProvider(social.slack));
+  }
+  if (social?.twitter) {
+    requireFields("social.twitter", social.twitter, ["clientId", "clientSecret"]);
+    push("social.twitter", social.twitter, twitterProvider(social.twitter));
+  }
+  if (social?.facebook) {
+    requireFields("social.facebook", social.facebook, ["clientId", "clientSecret"]);
+    push("social.facebook", social.facebook, facebookProvider(social.facebook));
   }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {

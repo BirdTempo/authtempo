@@ -24,14 +24,17 @@ export const PRESET_PROVIDER_NAMES: readonly string[] = [
   "microsoft",
   "discord",
   "gitlab",
+  "slack",
+  "twitter",
+  "facebook",
 ];
 
 /**
- * The names of the presets of plan 12i Task 14. They are reserved now, so no
- * list entry takes a name of a later preset. Task 14 moves each name to
- * `PRESET_PROVIDER_NAMES`.
+ * The names kept for presets that do not exist yet, so no list entry takes
+ * one. Plan 12i Task 13 kept `slack`, `twitter`, and `facebook`. Task 14
+ * moved them to `PRESET_PROVIDER_NAMES`, so the list is empty now.
  */
-export const COMING_PRESET_NAMES: readonly string[] = ["slack", "twitter", "facebook"];
+export const COMING_PRESET_NAMES: readonly string[] = [];
 
 /**
  * Names a list entry must not take: each preset, each coming preset, `email`,
@@ -108,6 +111,17 @@ export interface ProviderBase {
   authorizeParams: Record<string, string>;
   callbackMethod: "GET" | "POST";
   clientSecret(ctx: ProviderContext): Promise<string>;
+  /**
+   * How the token exchange proves the client secret (plan 12i Task 14).
+   * Absent: `client_secret_post`, the method of every preset before X.
+   */
+  tokenAuth?: TokenEndpointAuthMethod;
+  /**
+   * A check of the token answer before the engine reads its token (plan
+   * 12i Task 14). False refuses the sign-in with `oauth_failed`. Slack
+   * answers an error with status 200 and `ok: false`.
+   */
+  tokenAnswerOk?(body: Record<string, unknown>): boolean;
   /**
    * The callback URL that this provider has registered, in place of
    * `<baseURL><basePath>/social/<name>/callback` (plan 12i Task 12).

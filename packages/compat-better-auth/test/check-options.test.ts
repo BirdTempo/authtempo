@@ -41,30 +41,24 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     ]);
   });
 
-  it("names core's preset for microsoft, discord, and gitlab, and the reserved name for slack, twitter, and facebook (plan 12i Task 13)", () => {
+  it("names core's preset for microsoft, discord, gitlab, slack, twitter, and facebook (plan 12i Tasks 13 and 14)", () => {
     const refusalOf = (name: string) =>
       checkOptions({
         socialProviders: { [name]: { clientId: "i", clientSecret: "s" } },
       } as unknown as BetterAuthOptions).refusals.filter((r) => r.startsWith("socialProviders"));
-    for (const name of ["microsoft", "discord", "gitlab"])
+    for (const name of ["microsoft", "discord", "gitlab", "slack", "twitter", "facebook"])
       expect(refusalOf(name)).toEqual([
         `socialProviders.${name}: not mapped; use core's preset social.${name} through core's createAuth`,
-      ]);
-    for (const name of ["slack", "twitter", "facebook"])
-      expect(refusalOf(name)).toEqual([
-        `socialProviders.${name}: not mapped; core reserves the name for a coming preset, so a core social.oidc or social.oauth2 entry needs another name`,
       ]);
     // An inherited key of a plain object is not a preset name.
     expect(refusalOf("toString")).toEqual([
       "socialProviders.toString: not mapped; add it through core's social.oidc or social.oauth2",
     ]);
-    // The README states each of the three reasons.
+    // The README states each reason that a provider id can reach. Core keeps no name for a coming preset.
     expect(readme).toContain(
       "`not mapped; use core's preset social.microsoft through core's createAuth`",
     );
-    expect(readme).toContain(
-      "`not mapped; core reserves the name for a coming preset, so a core social.oidc or social.oauth2 entry needs another name`",
-    );
+    expect(readme).not.toContain("coming preset");
     expect(readme).toContain("`not mapped; add it through core's social.oidc or social.oauth2`");
   });
 

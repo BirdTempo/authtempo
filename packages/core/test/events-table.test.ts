@@ -9,8 +9,8 @@ import { FIELD_KINDS } from "../src/redact.js";
  * 2 texts of the 12k merge, read again at 91c26417. These are the waitUntil line
  * of 12h Task 2 and the role row line of 12k. Plan 12i Task 13 adds the
  * claims line of the social flow. Plan 12i Task 2 adds the username set
- * line, and Task 4 the line of the SMS port. A call that builds a text for
- * each value gives one text for each value. These are the email code and second-factor
+ * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the token answer refusal line. A call that builds a text for each value gives one text for each
+ * value. These are the email code and second-factor
  * counts, and the three sweep steps. A part that a field fills is written `<field>`.
  */
 const START_LIST: readonly string[] = [
@@ -63,6 +63,7 @@ const START_LIST: readonly string[] = [
   "authtempo: social user info failed",
   "authtempo: social user info has a bad subject",
   "authtempo: social id token claims refused",
+  "authtempo: social token answer refused",
   "authtempo: the sweep link step stopped",
   "authtempo: the sweep outbox step stopped",
   "authtempo: the sweep pending end step stopped",
@@ -118,9 +119,9 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 of plan 12i.
-    expect(START_LIST).toHaveLength(77);
-    expect(texts).toHaveLength(77);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 of plan 12i (Task 14: 1).
+    expect(START_LIST).toHaveLength(77 + 1);
+    expect(texts).toHaveLength(77 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

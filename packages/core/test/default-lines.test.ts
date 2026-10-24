@@ -441,6 +441,21 @@ describe("the scrub sources (plan 12h)", () => {
       { social: { gitlab: { clientId: "gl", clientSecret: "gl-row-gitlab-0123456789abcde" } } },
     ],
     [
+      "the slack client secret",
+      "sl-row-slack-0123456789abcdef",
+      { social: { slack: { clientId: "sl", clientSecret: "sl-row-slack-0123456789abcdef" } } },
+    ],
+    [
+      "the twitter client secret",
+      "x-row-twitter-0123456789abcde",
+      { social: { twitter: { clientId: "x", clientSecret: "x-row-twitter-0123456789abcde" } } },
+    ],
+    [
+      "the facebook client secret",
+      "fb-row-facebook-0123456789abc",
+      { social: { facebook: { clientId: "f", clientSecret: "fb-row-facebook-0123456789abc" } } },
+    ],
+    [
       "the apple private key",
       "apple-row-key-0123456789abcdef",
       {
@@ -510,6 +525,9 @@ describe("the scrub sources (plan 12h)", () => {
       microsoft: { clientId: "m", clientSecret: "list-microsoft-secret", tenant: "common" },
       discord: { clientId: "d", clientSecret: "list-discord-secret" },
       gitlab: { clientId: "gl", clientSecret: "list-gitlab-secret" },
+      slack: { clientId: "sl", clientSecret: "list-slack-secret" },
+      twitter: { clientId: "x", clientSecret: "list-twitter-secret" },
+      facebook: { clientId: "f", clientSecret: "list-facebook-secret" },
       apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "list-apple-key" },
       oidc: [oidcEntry("one", "list-oidc-one"), oidcEntry("two", "list-oidc-two")],
       oauth2: [oauth2Entry("three", "list-oauth2-one"), oauth2Entry("four", "list-oauth2-two")],
@@ -524,6 +542,7 @@ describe("the scrub sources (plan 12h)", () => {
       "fedcba9876543210fedcba9876543210",
       "list-apple-key",
       "list-discord-secret",
+      "list-facebook-secret",
       "list-github-secret",
       "list-gitlab-secret",
       "list-google-secret",
@@ -533,6 +552,8 @@ describe("the scrub sources (plan 12h)", () => {
       "list-oauth2-two",
       "list-oidc-one",
       "list-oidc-two",
+      "list-slack-secret",
+      "list-twitter-secret",
     ]);
   });
 });
