@@ -1,6 +1,6 @@
-import { type OidcProvider, stringClaim } from "./provider.js";
+import { type OidcProvider, type RedirectOverride, stringClaim } from "./provider.js";
 
-export interface GoogleConfig {
+export interface GoogleConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
 }

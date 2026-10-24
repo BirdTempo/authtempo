@@ -40,6 +40,7 @@ import {
   runBefore,
   stopWith,
 } from "./hooks.js";
+import { socialMethod } from "./last-method.js";
 import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import {
@@ -195,8 +196,19 @@ async function resolveProvider(
     : entry;
 }
 
-function callbackUrl(config: ResolvedConfig, provider: { name: string }): string {
-  return `${config.baseURL}${config.basePath}/social/${provider.name}/callback`;
+/**
+ * The `redirect_uri` of a provider, at the start and at the token exchange:
+ * its `redirectURI` override, else the default callback (plan 12i Task 12).
+ * Pass the configured entry: a discovery entry keeps the override, and the
+ * provider that it resolves does not.
+ */
+export function callbackUrl(
+  config: ResolvedConfig,
+  provider: { name: string; redirectURI?: string },
+): string {
+  return (
+    provider.redirectURI ?? `${config.baseURL}${config.basePath}/social/${provider.name}/callback`
+  );
 }
 
 /**
@@ -251,7 +263,7 @@ async function beginSocial(
   });
   const query = buildQuery({
     client_id: provider.clientId,
-    redirect_uri: callbackUrl(config, provider),
+    redirect_uri: callbackUrl(config, entry),
     response_type: "code",
     scope: provider.scope,
     state,
@@ -372,7 +384,7 @@ export async function completeSocial(
     input.code,
     data.verifier,
     now,
-    callbackUrl(config, provider),
+    callbackUrl(config, entry),
   );
   if (token === null) return fail("oauth_failed");
   const profile =
@@ -413,6 +425,7 @@ export async function completeSocial(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "social",
+      method: socialMethod(entry.name),
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.social ?? false,

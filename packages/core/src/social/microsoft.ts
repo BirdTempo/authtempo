@@ -1,7 +1,7 @@
 import { fromBase64Url } from "../primitives/crypto.js";
-import { type OidcProvider, stringClaim } from "./provider.js";
+import { type OidcProvider, type RedirectOverride, stringClaim } from "./provider.js";
 
-export interface MicrosoftConfig {
+export interface MicrosoftConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
   /**

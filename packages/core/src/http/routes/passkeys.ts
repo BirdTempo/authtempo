@@ -26,6 +26,7 @@ import {
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, readOptionalJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
+import { viaField, withLastMethod } from "../session-answer.js";
 import { relatedOriginsAnswer, WEBAUTHN_PATH } from "../well-known.js";
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
@@ -113,8 +114,11 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         });
         if (!r.ok) return respond(r);
         const maxAge = sessionMaxAgeSeconds(ctx.config);
-        return json(
-          publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
+        const res = json(
+          {
+            ...publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
+            ...viaField(ctx.config, "passkey"),
+          },
           200,
           {
             "set-cookie": sessionCookie(
@@ -125,6 +129,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
             ),
           },
         );
+        return withLastMethod(ctx.config, ctx.request, res, "passkey");
       },
     },
     {

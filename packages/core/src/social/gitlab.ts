@@ -1,7 +1,12 @@
 import { isIpLiteral, isLocalHost } from "../primitives/host.js";
-import { type OAuth2Provider, type SocialProfile, stringClaim } from "./provider.js";
+import {
+  type OAuth2Provider,
+  type RedirectOverride,
+  type SocialProfile,
+  stringClaim,
+} from "./provider.js";
 
-export interface GitLabConfig {
+export interface GitLabConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
   /** The https origin of the GitLab instance. Default `https://gitlab.com`. */

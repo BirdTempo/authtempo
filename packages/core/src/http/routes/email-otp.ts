@@ -7,10 +7,16 @@ import {
   resetPasswordWithOtp,
   verifyEmailOtp,
 } from "../../engine/email-otp.js";
+import type { LastMethod } from "../../engine/last-method.js";
 import { requestBody, resetBody, verifyBody } from "../contract/email-otp.js";
 import { readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
-import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer.js";
+import {
+  signedInResponse,
+  trustTokenOf,
+  twoFactorJson,
+  withLastMethod,
+} from "../session-answer.js";
 
 /**
  * The email code routes (plan 9e). None with `emailOtp: false`, and no reset
@@ -20,7 +26,8 @@ import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer
  */
 export function emailOtpRoutes(config: ResolvedConfig): Route[] {
   if (!config.emailOtp) return [];
-  const signedIn = (v: EmailOtpSession): Response => signedInResponse(config, v);
+  const signedIn = (v: EmailOtpSession, via?: LastMethod): Response =>
+    signedInResponse(config, v, via);
   const routes: Route[] = [
     {
       method: "POST",
@@ -54,7 +61,8 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
         });
         if (!r.ok) return respond(r);
         // A user with the second factor on: the challenge, and no cookie (plan 12c).
-        return "twoFactor" in r.value ? twoFactorJson(r.value) : signedIn(r.value);
+        if ("twoFactor" in r.value) return twoFactorJson(r.value);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, "email_otp"), "email_otp");
       },
     },
   ];

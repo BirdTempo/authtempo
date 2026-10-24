@@ -18,6 +18,7 @@ export type {
   DynamicRolesConfig,
   EmailOtpConfig,
   JwtMintConfig,
+  LastMethodConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
@@ -117,6 +118,7 @@ export {
 export type { IdentityEntry, IdentityList, IdentityUnlink } from "./engine/identities.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
+export { LAST_METHODS, type LastMethod } from "./engine/last-method.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./engine/notices.js";
 export { CLIENT_SECRET_PREFIX } from "./engine/oauth-client-secret.js";

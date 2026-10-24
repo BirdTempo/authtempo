@@ -16,14 +16,29 @@ export const LEGACY_SESSION_COOKIE = "tempo_session";
 
 /**
  * The binding cookie of a social sign-in. Its path is `<basePath>/social`,
- * and a browser drops a `__Host-` cookie whose path is not `/`, so the name
- * drops that prefix and takes `__Secure-` (plan 12b).
+ * or the path of the provider's `redirectURI` (plan 12i). A browser drops a
+ * `__Host-` cookie whose path is not `/`, so the name drops that prefix and
+ * takes `__Secure-` (plan 12b).
  */
 export function bindingCookieName(cookieName: string): string {
   return `__Secure-${cookieName.replace(/^__(Host|Secure)-/, "")}_oauth`;
 }
 
 export type SameSite = "Lax" | "None";
+
+/** The default name of the last method cookie (plan 12i Task 12). */
+export const DEFAULT_LAST_METHOD_COOKIE = "__Host-tempo_last_method";
+
+/**
+ * The last method cookie (plan 12i Task 12, spec 32 item 11). It is not
+ * HttpOnly: the sign-in page reads it to show the method first. So it holds
+ * one value of the closed set `LastMethod` and nothing else. It signs no
+ * one in and names no account. Lax: a top-level visit of the sign-in page
+ * sends it.
+ */
+export function lastMethodCookie(name: string, value: string, maxAgeSeconds: number): string {
+  return `${name}=${value}; Path=/; Max-Age=${maxAgeSeconds}; Secure; SameSite=Lax`;
+}
 
 export function sessionCookie(
   name: string,

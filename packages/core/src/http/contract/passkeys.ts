@@ -6,7 +6,7 @@ import {
   OkAnswer,
   PasskeySummary,
   RequestOptionsJson,
-  SessionAnswer,
+  SessionSignInAnswer,
 } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
@@ -57,7 +57,7 @@ export const PASSKEYS_CONTRACT = {
   },
   "POST /passkey/authenticate/verify": {
     body: { schema: authenticateVerifyBody, media: ["json"], parsedBy: "zod" },
-    answer: { kind: "json", schema: SessionAnswer },
+    answer: { kind: "json", schema: SessionSignInAnswer },
   },
   // `rpId` and `userHandle` are the inputs of signalAllAcceptedCredentials (plan 12i).
   "GET /passkeys": {

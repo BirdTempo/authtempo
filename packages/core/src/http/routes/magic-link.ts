@@ -15,7 +15,13 @@ import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
-import { challengePageUrl, trustTokenOf, twoFactorJson } from "../session-answer.js";
+import {
+  challengePageUrl,
+  trustTokenOf,
+  twoFactorJson,
+  viaField,
+  withLastMethod,
+} from "../session-answer.js";
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
@@ -98,11 +104,18 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
             readModeOf(ctx.config, ctx.request),
           );
           if (!resolved) return respond(fail("invalid_token"));
-          return json(publicSession(resolved), 200, { "set-cookie": cookie });
+          return withLastMethod(
+            ctx.config,
+            ctx.request,
+            json({ ...publicSession(resolved), ...viaField(ctx.config, "magic_link") }, 200, {
+              "set-cookie": cookie,
+            }),
+            "magic_link",
+          );
         }
         const res = redirect(resolveNext(ctx.config, result.value.next));
         res.headers.set("set-cookie", cookie);
-        return res;
+        return withLastMethod(ctx.config, ctx.request, res, "magic_link");
       },
     },
   ];

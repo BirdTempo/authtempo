@@ -9,6 +9,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import { stopWith } from "./hooks.js";
+import type { LastMethod } from "./last-method.js";
 import type { ImpersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
@@ -446,6 +447,8 @@ export interface ChallengeInput extends ChallengeOrigin {
   notAfter?: Date | undefined;
   /** The app payload of a social sign-in (plan 12i Task 19), sealed into the row for the verify. */
   stateData?: OpenedStateData;
+  /** The last method of the sign-in (plan 12i Task 12): the verify sets its cookie. A reset has none. */
+  method?: LastMethod;
 }
 
 /**
@@ -488,6 +491,7 @@ export async function writeChallenge(
       attempts: 0,
       ...(input.notAfter ? { notAfter: input.notAfter.toISOString() } : {}),
       ...(payload ? { sealedData: payload.sealed, sealedDataVersion: payload.version } : {}),
+      ...(input.method ? { method: input.method } : {}),
     },
     createdAt: now,
     updatedAt: now,
@@ -592,6 +596,8 @@ export function gatedSteps(
     /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
     sameAddress?: boolean;
     stateData?: OpenedStateData;
+    /** The last method of the sign-in (plan 12i Task 12), kept in a challenge for its verify. */
+    method?: LastMethod;
   },
   now: Date,
 ): {
@@ -645,6 +651,7 @@ export function gatedSteps(
             next: open.next,
             notAfter: open.notAfter,
             ...(open.stateData ? { stateData: open.stateData } : {}),
+            ...(open.method ? { method: open.method } : {}),
           },
           now,
         );

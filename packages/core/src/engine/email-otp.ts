@@ -364,6 +364,7 @@ export async function verifyEmailOtp(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "email_otp",
+      method: "email_otp",
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.emailOtp ?? false,

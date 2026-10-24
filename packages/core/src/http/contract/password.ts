@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { PASSWORD_RESET_TOKEN_RE, PASSWORD_VERIFY_TOKEN_RE } from "../../engine/password.js";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SentAnswer, SignedInAnswer, TwoFactorChallenge, UserJson } from "./shapes.js";
+import {
+  OkAnswer,
+  SentAnswer,
+  SignedInAnswer,
+  SignInAnswer,
+  TwoFactorChallenge,
+  UserJson,
+} from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const signUpBody = z.object({
@@ -73,10 +80,12 @@ export const resetQuery = z.object({
 const signUpAnswer = z.union([
   SentAnswer,
   z.strictObject({ user: UserJson, verifyRequired: z.literal(true) }),
-  SignedInAnswer,
+  SignInAnswer,
 ]);
 
-const signInAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
+/** The sign-in carries `via` (plan 12i); the reset does not: it is no sign-in method. */
+const signInAnswer = z.union([SignInAnswer, TwoFactorChallenge]);
+const resetAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
 
 /** The contract of `routes/password.ts` (plan 11g). */
 export const PASSWORD_CONTRACT = {
@@ -113,7 +122,7 @@ export const PASSWORD_CONTRACT = {
   },
   "POST /password/reset": {
     body: { schema: resetBody, media: ["json", "form"], parsedBy: "zod" },
-    answer: { kind: "json", schema: signInAnswer },
+    answer: { kind: "json", schema: resetAnswer },
     alt: { kind: "redirect", param: "auth_error" },
   },
   "POST /password/change": {

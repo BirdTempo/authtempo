@@ -142,6 +142,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `CAPTCHA_TOKEN_MAX` | 2048. A longer token answers `captcha_failed` with no call. |
 | `PROVIDER_NAME_RE`, `ROLE_RE`, `TWO_FACTOR_TOKEN_RE` | The patterns of a provider name, a role, and a second factor challenge. |
 | `PRESET_PROVIDER_NAMES`, `COMING_PRESET_NAMES` | The names of the social presets, and the names kept for coming presets. A list entry takes neither. |
+| `LAST_METHODS` | The values of the last method cookie and of the `via` of a sign-in answer. `social:<provider>` is the other form. |
 
 ## Types
 
@@ -150,7 +151,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Area | Types |
 | --- | --- |
 | The auth object | `Auth`, `AuthApi`, `SessionApi`, `UserApi`, `IdentitiesApi`, `PublicUser`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
-| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `PhoneConfig`, `PhoneMessageInput`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig` |
+| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `PhoneConfig`, `PhoneMessageInput`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig`, `LastMethodConfig`, `LastMethod` |
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `SmsPort`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow`, `OAuthDeviceRow`, `OAuthSubjectRow`, `OAuthSessionClientRow`, `OAuthLogoutRow`, `ClientAuthMethod`, `DeviceStatus`, `OperatorAuditRow`, `OperatorAction`, `OrganizationRoleRow`, `TeamRow`, `TeamMemberRow`, `OrganizationTokenRow`, `MovedTokenRow` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |

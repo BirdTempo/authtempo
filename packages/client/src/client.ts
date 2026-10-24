@@ -3,6 +3,7 @@ import type {
   ConnectionFields,
   IdentityEntry,
   InvitationSummary,
+  LastMethod,
   MemberSummary,
   OAuthGrantSummary,
   OrganizationSummary,
@@ -48,6 +49,14 @@ export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt
  * session. None carries `needsRefresh`; only the read does.
  */
 type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
+/**
+ * The method of a sign-in (plan 12i Task 12): `via` of each sign-in answer
+ * while the server has `lastMethod` on. A browser also gets it in a cookie;
+ * a bearer app keeps it itself. A reset and the handoff carry none.
+ */
+type Via = { via?: LastMethod };
+/** The answer of a sign-in that opens a session and answers its bearer token. */
+type SignInJSON = { token: string } & PublicSessionJSON & Via;
 
 export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { createdAt: string };
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
@@ -143,7 +152,7 @@ export type TwoFactorSessionJSON = { token: string } & PublicSessionJSON & {
     backupCodesLeft: number;
     /** Set when the verify asked for it. A native app sends `token` as `trustDevice` at the next sign-in. */
     trustDevice: { token: string; expiresAt: string } | null;
-  };
+  } & Via;
 
 /** One live session of the signed-in person (plan 12a). It holds no token. */
 export type SessionSummaryJSON = Omit<
@@ -278,7 +287,7 @@ export interface Client {
     verify(input: {
       token: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<PublicSessionJSON | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<(PublicSessionJSON & Via) | TwoFactorChallengeJSON>>;
   };
   handoff: {
     redeem(input: {
@@ -296,7 +305,9 @@ export interface Client {
      * webauthn"`; where the browser has no conditional mediation it answers
      * `cancelled` with no request (plan 11d).
      */
-    signIn(input?: { autofill?: boolean | undefined }): Promise<ClientResult<PublicSessionJSON>>;
+    signIn(input?: {
+      autofill?: boolean | undefined;
+    }): Promise<ClientResult<PublicSessionJSON & Via>>;
     /** Ends a waiting passkey ceremony, the autofill or another. It answers `cancelled`. */
     abort(): void;
   };
@@ -332,9 +343,7 @@ export interface Client {
       ClientResult<
         // The third shape is the default (plan 12b). The second: uniformSignUp off and
         // requireVerified on. Neither opens a session.
-        | ({ token: string } & PublicSessionJSON)
-        | { user: PublicSession["user"]; verifyRequired: true }
-        | { sent: true }
+        SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }
       >
     >;
     /**
@@ -349,7 +358,7 @@ export interface Client {
       next?: string | undefined;
       /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
       captchaToken?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
     /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
@@ -387,7 +396,7 @@ export interface Client {
       email: string;
       code: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
     /** `captchaToken`: as in `request`. */
     requestReset(input: {
       email: string;
@@ -1170,11 +1179,7 @@ export function createClient(options: ClientOptions): Client {
   const password: Client["password"] = {
     signUp: ({ name, username, captchaToken, ...rest }) =>
       changes(
-        send<
-          | ({ token: string } & PublicSessionJSON)
-          | { user: PublicSession["user"]; verifyRequired: true }
-          | { sent: true }
-        >(
+        send<SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }>(
           "password.signUp",
           {
             ...rest,
@@ -1187,7 +1192,7 @@ export function createClient(options: ClientOptions): Client {
       ),
     signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
       changes(
-        send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>(
+        send<SignInJSON | TwoFactorChallengeJSON>(
           "password.signIn",
           {
             ...rest,
@@ -1415,7 +1420,7 @@ export function createClient(options: ClientOptions): Client {
         send<{ sent: true }>("magicLink.request", rest, undefined, captchaHeader(captchaToken)),
       verify: ({ token, trustDevice }) =>
         changes(
-          send<PublicSessionJSON | TwoFactorChallengeJSON>("magicLink.verify", {
+          send<(PublicSessionJSON & Via) | TwoFactorChallengeJSON>("magicLink.verify", {
             token,
             ...(trustDevice !== undefined ? { trustDevice } : {}),
           }),
@@ -1456,7 +1461,7 @@ export function createClient(options: ClientOptions): Client {
         );
         if (!response.ok) return response;
         return changes(
-          send<PublicSessionJSON>("passkey.signIn.verify", { response: response.value }),
+          send<PublicSessionJSON & Via>("passkey.signIn.verify", { response: response.value }),
         );
       },
       abort() {
@@ -1475,14 +1480,11 @@ export function createClient(options: ClientOptions): Client {
         send<{ sent: true }>("emailOtp.request", { email }, undefined, captchaHeader(captchaToken)),
       verify: ({ email, code, trustDevice }) =>
         changes(
-          send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>(
-            "emailOtp.verify",
-            {
-              email,
-              code,
-              ...(trustDevice !== undefined ? { trustDevice } : {}),
-            },
-          ),
+          send<SignInJSON | TwoFactorChallengeJSON>("emailOtp.verify", {
+            email,
+            code,
+            ...(trustDevice !== undefined ? { trustDevice } : {}),
+          }),
         ),
       requestReset: ({ email, captchaToken }) =>
         send<{ sent: true }>(

@@ -54,6 +54,13 @@ export interface Route {
    */
   key?: RouteKey;
   /**
+   * The path of the route that this one serves again (plan 12i Task 12):
+   * the callback of a provider with a `redirectURI`. Its `key` is that
+   * route's key. An alias is no entry of ROUTES, and the route list test
+   * holds each alias to the config.
+   */
+  aliasOf?: string;
+  /**
    * Skip the Origin check on this POST. Only for a form that another site
    * posts: Apple's `response_mode=form_post`, and the end-session request of
    * a relying party (plan 12e). The route must bind the request to the
@@ -404,8 +411,10 @@ export function createRouter(
       scoped.observe.emit({
         name: "sign_in",
         method: via,
-        // The provider is the third part of the path of a social route.
-        ...(via === "social" && route ? { provider: route.path.split("/")[2] } : {}),
+        // The provider is the third part of the path of a social route, or of the route an alias serves.
+        ...(via === "social" && route
+          ? { provider: (route.aliasOf ?? route.path).split("/")[2] }
+          : {}),
         outcome: "failure",
         ...eventCode(code),
       });

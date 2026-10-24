@@ -1,6 +1,11 @@
-import { type OAuth2Provider, type SocialProfile, stringClaim } from "./provider.js";
+import {
+  type OAuth2Provider,
+  type RedirectOverride,
+  type SocialProfile,
+  stringClaim,
+} from "./provider.js";
 
-export interface LinkedInConfig {
+export interface LinkedInConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
 }

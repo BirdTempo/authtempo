@@ -4,6 +4,7 @@ import {
   type OidcDiscovery,
   type OidcProvider,
   PROVIDER_TIMEOUT_MS,
+  type RedirectOverride,
   type SocialProfile,
   stringClaim,
 } from "./provider.js";
@@ -15,7 +16,7 @@ export interface OidcEndpoints {
 }
 
 /** An entry of `social.oidc`: an OpenID Connect provider (plan 9c). */
-export interface OidcEntry {
+export interface OidcEntry extends RedirectOverride {
   /** The route segment and the identity provider name. `^[a-z][a-z0-9-]{0,31}$`. */
   name: string;
   /** The sign-in page button text. 1 to 80 characters, no control character. */

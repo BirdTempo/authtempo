@@ -115,6 +115,7 @@ export async function verifyMagicLink(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "magic_link",
+      method: "magic_link",
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.magicLink ?? false,

@@ -13,6 +13,7 @@ import type {
   GoogleConfig,
   HooksConfig,
   JwtMintConfig,
+  LastMethodConfig,
   LegacyVerifyConfig,
   LinkedInConfig,
   MicrosoftConfig,
@@ -93,6 +94,7 @@ export const CONFIG_KEYS = {
     captcha: true,
     observe: true,
     username: true,
+    lastMethod: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -124,25 +126,44 @@ export const CONFIG_KEYS = {
   "social.stateData": { maxBytes: true } satisfies Keys<
     NonNullable<Exclude<Part<"social">["stateData"], false>>
   >,
-  "social.google": { clientId: true, clientSecret: true } satisfies Keys<GoogleConfig>,
+  "social.google": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<GoogleConfig>,
   "social.apple": {
     clientId: true,
     teamId: true,
     keyId: true,
     privateKey: true,
+    redirectURI: true,
   } satisfies Keys<AppleConfig>,
-  "social.github": { clientId: true, clientSecret: true } satisfies Keys<GitHubConfig>,
-  "social.linkedin": { clientId: true, clientSecret: true } satisfies Keys<LinkedInConfig>,
+  "social.github": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<GitHubConfig>,
+  "social.linkedin": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<LinkedInConfig>,
   "social.microsoft": {
     clientId: true,
     clientSecret: true,
     tenant: true,
+    redirectURI: true,
   } satisfies Keys<MicrosoftConfig>,
-  "social.discord": { clientId: true, clientSecret: true } satisfies Keys<DiscordConfig>,
+  "social.discord": {
+    clientId: true,
+    clientSecret: true,
+    redirectURI: true,
+  } satisfies Keys<DiscordConfig>,
   "social.gitlab": {
     clientId: true,
     clientSecret: true,
     issuer: true,
+    redirectURI: true,
   } satisfies Keys<GitLabConfig>,
   "social.oidc[]": {
     name: true,
@@ -152,6 +173,7 @@ export const CONFIG_KEYS = {
     clientSecret: true,
     scope: true,
     endpoints: true,
+    redirectURI: true,
   } satisfies Keys<OidcEntry>,
   "social.oidc[].endpoints": {
     authorizeUrl: true,
@@ -168,6 +190,7 @@ export const CONFIG_KEYS = {
     scope: true,
     authorizeParams: true,
     userinfo: true,
+    redirectURI: true,
   } satisfies Keys<OAuth2Entry>,
   passkey: {
     rpID: true,
@@ -346,6 +369,7 @@ export const CONFIG_KEYS = {
   "account.deleteConfirm": { ttlMinutes: true } satisfies Keys<AccountDeleteConfirmConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
   username: { minLength: true, maxLength: true, reserved: true } satisfies Keys<UsernameConfig>,
+  lastMethod: { cookieName: true, days: true } satisfies Keys<LastMethodConfig>,
   observe: {
     sink: true,
     include: true,

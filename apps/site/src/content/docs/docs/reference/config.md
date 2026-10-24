@@ -106,22 +106,29 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.stateData.maxBytes` | number | `1024` | 1 to 1024. The most UTF-8 bytes of the JSON of `data`. |
 | `social.google.clientId` | string | required | The client id of the Google OAuth client. |
 | `social.google.clientSecret` | string | required | Core sends it in the token request body. |
+| `social.google.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.apple.clientId` | string | required | The Services ID, such as `com.example.web`. |
 | `social.apple.teamId` | string | required | The team id of the Apple developer account. |
 | `social.apple.keyId` | string | required | The id of the Sign in with Apple key. |
 | `social.apple.privateKey` | string | required | The PKCS#8 PEM of the key. Core signs a client secret of five minutes for each exchange. |
+| `social.apple.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.github.clientId` | string | required | The client id of the GitHub OAuth app. |
 | `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
+| `social.github.redirectURI` | string | `<baseURL><basePath>/social/github/callback` | The callback URL that the provider has registered, for an app that cannot register the default. An `https:` URL in the normal form, on the origin of `baseURL`, with a path under `basePath`, and no query or fragment. Not the path of a route of core, nor of another provider. Core sends it as `redirect_uri` and serves its path as the callback. Each preset and list entry takes this key. |
 | `social.linkedin.clientId` | string | required | The client id of the LinkedIn app. |
 | `social.linkedin.clientSecret` | string | required | The client secret of the LinkedIn app. |
+| `social.linkedin.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.microsoft.clientId` | string | required | The application (client) id of the Entra ID app registration. |
 | `social.microsoft.clientSecret` | string | required | The client secret of the app registration. |
 | `social.microsoft.tenant` | string | required | `common`, `organizations`, `consumers`, or a tenant GUID. A token must name its own tenant in `iss`. `organizations` refuses a personal account, and `consumers` takes only a personal account. An address is verified only with the optional claim `xms_edov: true`. |
+| `social.microsoft.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.discord.clientId` | string | required | The client id of the Discord app. |
 | `social.discord.clientSecret` | string | required | The client secret of the Discord app. |
+| `social.discord.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.gitlab.clientId` | string | required | The application id of the GitLab app. |
 | `social.gitlab.clientSecret` | string | required | The secret of the GitLab app. |
 | `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, and not the host of `baseURL`. |
+| `social.gitlab.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. `slack`, `twitter`, and `facebook` are reserved for presets too. |
 | `social.oidc[].label` | string | required | The button text: 1 to 80 characters with no control character. |
 | `social.oidc[].issuer` | string | required | An `https:` URL with no query, fragment, or credentials. A path is allowed. |
@@ -132,6 +139,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oidc[].endpoints.authorizeUrl` | string | required in `endpoints` | An `https:` URL. |
 | `social.oidc[].endpoints.tokenUrl` | string | required in `endpoints` | An `https:` URL. |
 | `social.oidc[].endpoints.jwksUrl` | string | required in `endpoints` | An `https:` URL. |
+| `social.oidc[].redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.oauth2[].name` | string | required | The rule of `social.oidc[].name`. |
 | `social.oauth2[].label` | string | required | The rule of `social.oidc[].label`. |
 | `social.oauth2[].authorizeUrl` | string | required | An `https:` URL. |
@@ -141,6 +149,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oauth2[].scope` | string | required | Not empty. No control character. |
 | `social.oauth2[].authorizeParams` | string map | none | Extra authorize parameters. A key that core sets is refused: `client_id`, `redirect_uri`, `response_type`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`. |
 | `social.oauth2[].userinfo` | function of the access token and a fetch | required | Answers a `SocialProfile`. It stops at 10 seconds. |
+| `social.oauth2[].redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 
 ## Passkeys
 
@@ -388,6 +397,14 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `username.minLength` | number | 3 | An integer from 3 to 30. The fewest characters of the name after NFKC. |
 | `username.maxLength` | number | 30 | An integer from `minLength` to 30. |
 | `username.reserved` | string array | none | More names in the stored form that no account may take. Core always reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while organizations are on, `root`, `support`, `security`, and `admin`. |
+
+## Last method
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `lastMethod` | `LastMethodConfig` or `false` | `false` | Each browser sign-in sets a cookie that a script can read, with the method: `password`, `username`, `phone`, `magic_link`, `email_otp`, `passkey`, or `social:<provider>`. Each JSON sign-in answer carries the same value as `via`. A request with an `Authorization` header gets no cookie. The cookie is a hint for the sign-in page only. Core never stores the method. `{}` turns it on. |
+| `lastMethod.cookieName` | string | `"__Host-tempo_last_method"` | 1 to 64 token characters. Not the name of another cookie of core. |
+| `lastMethod.days` | number | 30 | An integer from 1 to 400. |
 
 ## Observability
 

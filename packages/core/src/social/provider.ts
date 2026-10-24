@@ -108,6 +108,24 @@ export interface ProviderBase {
   authorizeParams: Record<string, string>;
   callbackMethod: "GET" | "POST";
   clientSecret(ctx: ProviderContext): Promise<string>;
+  /**
+   * The callback URL that this provider has registered, in place of
+   * `<baseURL><basePath>/social/<name>/callback` (plan 12i Task 12).
+   * Construction checks it, and the router serves its path as an alias of
+   * the callback. Absent: the default callback.
+   */
+  redirectURI?: string;
+}
+
+/**
+ * The per-provider redirect override of each preset and list entry (plan
+ * 12i Task 12, spec 32 item 11). An `https:` URL on the origin of `baseURL`,
+ * with a path under `basePath`, no query, and no fragment. It must not be
+ * the path of a route of core, nor of another provider. The provider must
+ * have this exact URL registered.
+ */
+export interface RedirectOverride {
+  redirectURI?: string;
 }
 
 /** The provider issues an ID token. The engine verifies it through the jwt seam and maps its claims. */

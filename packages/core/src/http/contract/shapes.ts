@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { LAST_METHODS } from "../../engine/last-method.js";
 import { PASSKEY_HINTS } from "../../primitives/passkey-hints.js";
+import { PROVIDER_NAME_RE } from "../../social/provider.js";
 
 /**
  * The answer shapes that two or more routes share (plan 11g). Each one is
@@ -48,11 +50,36 @@ export const SessionReadAnswer = z.strictObject({
   needsRefresh: z.boolean().optional(),
 });
 
-/** The JSON of `signedInResponse`: the session with its bearer token. */
+/**
+ * The last method of a sign-in (plan 12i Task 12): one value of the closed
+ * set, or `social:<provider>`. A sign-in answer carries it as `via` while
+ * `lastMethod` is on.
+ */
+export const LastMethodJson = z.union([
+  z.enum(LAST_METHODS),
+  z.templateLiteral(["social:", z.string().regex(PROVIDER_NAME_RE)]),
+]);
+
+/** The JSON of `signedInResponse`: the session with its bearer token. A reset and the handoff answer it. */
 export const SignedInAnswer = z.strictObject({
   token: z.string(),
   user: UserJson,
   session: SessionJson,
+});
+
+/** The JSON of `signedInResponse` at a sign-in: `via` too, while `lastMethod` is on (plan 12i). */
+export const SignInAnswer = z.strictObject({
+  token: z.string(),
+  user: UserJson,
+  session: SessionJson,
+  via: LastMethodJson.optional(),
+});
+
+/** The session of a sign-in with no token in the body: the passkey and the magic link (plan 12i: `via`). */
+export const SessionSignInAnswer = z.strictObject({
+  user: UserJson,
+  session: SessionJson,
+  via: LastMethodJson.optional(),
 });
 
 /**

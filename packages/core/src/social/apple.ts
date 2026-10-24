@@ -1,6 +1,6 @@
-import { type OidcProvider, stringClaim } from "./provider.js";
+import { type OidcProvider, type RedirectOverride, stringClaim } from "./provider.js";
 
-export interface AppleConfig {
+export interface AppleConfig extends RedirectOverride {
   /** The Services ID for web sign-in, for example `com.example.web`. */
   clientId: string;
   teamId: string;

@@ -60,7 +60,11 @@ import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/toke
 import { USERNAME_LENGTH, USERNAME_RE } from "./engine/username.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
-import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+import {
+  bindingCookieName,
+  DEFAULT_LAST_METHOD_COOKIE,
+  LEGACY_SESSION_COOKIE,
+} from "./http/cookies.js";
 import { type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 import { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 import {
@@ -68,6 +72,8 @@ import {
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
 import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
+import { PARAM_SEGMENT_RE } from "./http/route-key.js";
+import { ROUTES } from "./http/route-list.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
@@ -123,6 +129,7 @@ import {
   PRESET_PROVIDER_NAMES,
   PROVIDER_NAME_RE,
   RESERVED_PROVIDER_NAMES,
+  type RedirectOverride,
 } from "./social/provider.js";
 import { providerFetch } from "./social/provider-fetch.js";
 import type { StorageAdapter } from "./storage/port.js";
@@ -483,6 +490,21 @@ export interface AuthConfig {
    * design: `GET /username/available` answers for any name.
    */
   username?: UsernameConfig | false;
+  /**
+   * The last method cookie (plan 12i Task 12, spec 32 item 11). Off when
+   * absent or `false`. `{}` turns it on with the defaults. Each browser
+   * sign-in sets a readable cookie with the method, and each JSON sign-in
+   * answer carries it as `via`. Core never stores the method on the user.
+   */
+  lastMethod?: LastMethodConfig | false;
+}
+
+/** The last method cookie (plan 12i). It is a hint for the sign-in page only. */
+export interface LastMethodConfig {
+  /** The cookie name. Default `__Host-tempo_last_method`. Not the name of another cookie of core. */
+  cookieName?: string;
+  /** The lifetime in days, 1 to 400 (the cap of RFC 6265bis). Default 30. */
+  days?: number;
 }
 
 /**
@@ -1245,6 +1267,8 @@ export interface ResolvedConfig {
   account: ResolvedAccount;
   /** Null: the username is off, and no username route is mounted (plan 12i). */
   username: ResolvedUsername | null;
+  /** Null: no last method cookie and no `via` in a sign-in answer (plan 12i). */
+  lastMethod: ResolvedLastMethod | null;
   captcha: ResolvedCaptcha | null;
   /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
   observe: Observer;
@@ -1502,7 +1526,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must not hold a segment that starts with :");
   }
   const clock = input.clock ?? systemClock;
-  const providers = socialProviders(input.social, input.baseURL);
+  const providers = socialProviders(input.social, input.baseURL, basePath);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   // Every provider call goes through providerFetch: no redirect is followed
   // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
@@ -1666,6 +1690,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     ),
     account: resolveAccount(input.account),
     username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
+    lastMethod: resolveLastMethod(input.lastMethod, cookieName, totpTrustName(input.totp)),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1752,6 +1777,69 @@ function resolveUsername(
     }
   }
   return { minLength, maxLength, reserved };
+}
+
+/** The resolved `lastMethod` (plan 12i). */
+export interface ResolvedLastMethod {
+  cookieName: string;
+  days: number;
+}
+
+/** The keys of `lastMethod`. A Record, so a key added to `LastMethodConfig` and not listed here fails the compile. */
+const LAST_METHOD_KEYS: Readonly<Record<keyof LastMethodConfig, true>> = {
+  cookieName: true,
+  days: true,
+};
+
+/**
+ * A cookie name of RFC 6265 section 4.1.1: a token, with the `__Host-` or
+ * `__Secure-` prefix allowed. 1 to 64 characters, as the trust cookie.
+ */
+const LAST_METHOD_COOKIE_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/;
+
+/** The trust cookie's name when `totp` sets one, for the clash check of `lastMethod`. */
+function totpTrustName(input: AuthConfig["totp"]): string | null {
+  return typeof input === "object" ? (input.trustCookieName ?? null) : null;
+}
+
+/**
+ * `lastMethod` (plan 12i Task 12). Absent or `false`: off. The days stop at
+ * 400, the cap of RFC 6265bis section 5.6.2 on a cookie's lifetime. The name
+ * must not be a name of another cookie of core: a clash would let this
+ * readable cookie overwrite an HttpOnly one.
+ */
+function resolveLastMethod(
+  input: LastMethodConfig | false | undefined,
+  sessionCookie: string,
+  trustCookie: string | null,
+): ResolvedLastMethod | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("lastMethod must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(LAST_METHOD_KEYS, key))
+      throw new ConfigError(
+        `lastMethod.${key} is not an option; core has ${Object.keys(LAST_METHOD_KEYS).join(", ")}`,
+      );
+  const days = integerIn("lastMethod.days", input.days ?? 30, 1, 400);
+  const cookieName = input.cookieName ?? DEFAULT_LAST_METHOD_COOKIE;
+  const taken = new Set([
+    sessionCookie,
+    LEGACY_SESSION_COOKIE,
+    bindingCookieName(sessionCookie),
+    // The actor cookie of an impersonation (`actorCookieName`, plan 12f).
+    `${sessionCookie}_actor`,
+    trustCookie ?? "tempo_totp_trust",
+  ]);
+  if (
+    typeof cookieName !== "string" ||
+    !LAST_METHOD_COOKIE_RE.test(cookieName) ||
+    taken.has(cookieName)
+  )
+    throw new ConfigError(
+      "lastMethod.cookieName must be a cookie name of 1 to 64 token characters, and not the name of another cookie of core",
+    );
+  return { cookieName, days };
 }
 
 function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"] {
@@ -3220,6 +3308,52 @@ const RESERVED_REASON = [
 /** The bound of `social.stateData.maxBytes` (plan 12i Task 19): the state payload of the Better Auth docs audit is 1 KB at most. */
 export const STATE_DATA_MAX_BYTES = 1024;
 
+/**
+ * The path of a provider's `redirectURI` (plan 12i Task 12), after the
+ * checks of spec 32 item 11. The router serves the path by exact match, so
+ * the value must be in the normal form of the URL parser. A path of a route
+ * of core is refused, a parameter segment too: an alias there would shadow
+ * the route.
+ */
+function redirectOverridePath(
+  at: string,
+  value: unknown,
+  baseURL: string,
+  basePath: string,
+): string {
+  let url: URL;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new ConfigError(`${at} must be an absolute https URL`);
+  }
+  if (typeof value !== "string" || url.protocol !== "https:")
+    throw new ConfigError(`${at} must be an https URL`);
+  if (url.origin !== new URL(baseURL).origin || url.username !== "" || url.password !== "")
+    throw new ConfigError(`${at} must have the origin of baseURL and no credentials`);
+  if (value.includes("?") || value.includes("#"))
+    throw new ConfigError(`${at} must have no query and no fragment`);
+  if (url.href !== value)
+    throw new ConfigError(`${at} must be in the normal form of a URL: ${url.href}`);
+  if (!url.pathname.startsWith(`${basePath}/`))
+    throw new ConfigError(`${at} must have a path under basePath ${basePath}`);
+  const segments = url.pathname.slice(basePath.length).split("/");
+  for (const route of ROUTES) {
+    if (routePathMatches(route.path.split("/"), segments))
+      throw new ConfigError(`${at} is the path of the route ${route.method} ${route.path}`);
+  }
+  return url.pathname;
+}
+
+/** A path fits a ROUTES path: each literal is equal, and each `:<name>` segment takes the path's segment. */
+function routePathMatches(template: readonly string[], segments: readonly string[]): boolean {
+  if (template.length !== segments.length) return false;
+  return template.every((want, i) => {
+    const got = segments[i] ?? "";
+    return want.startsWith(":") ? PARAM_SEGMENT_RE.test(got) : want === got;
+  });
+}
+
 function resolveStateData(
   input: NonNullable<AuthConfig["social"]>["stateData"],
 ): ResolvedConfig["social"]["stateData"] {
@@ -3237,23 +3371,41 @@ function resolveStateData(
   return { maxBytes };
 }
 
-function socialProviders(social: AuthConfig["social"], baseURL: string): ConfiguredProvider[] {
+function socialProviders(
+  social: AuthConfig["social"],
+  baseURL: string,
+  basePath: string,
+): ConfiguredProvider[] {
   const providers: ConfiguredProvider[] = [];
+  // The override paths so far, each with the config path that set it.
+  const overrides = new Map<string, string>();
+  const push = (path: string, input: RedirectOverride, provider: ConfiguredProvider) => {
+    if (input.redirectURI !== undefined) {
+      const at = `${path}.redirectURI`;
+      const pathname = redirectOverridePath(at, input.redirectURI, baseURL, basePath);
+      const other = overrides.get(pathname);
+      if (other !== undefined)
+        throw new ConfigError(`${at} has the path of ${other}.redirectURI: one path, one provider`);
+      overrides.set(pathname, path);
+      provider.redirectURI = input.redirectURI;
+    }
+    providers.push(provider);
+  };
   if (social?.google) {
     requireFields("social.google", social.google, ["clientId", "clientSecret"]);
-    providers.push(googleProvider(social.google));
+    push("social.google", social.google, googleProvider(social.google));
   }
   if (social?.apple) {
     requireFields("social.apple", social.apple, ["clientId", "teamId", "keyId", "privateKey"]);
-    providers.push(appleProvider(social.apple));
+    push("social.apple", social.apple, appleProvider(social.apple));
   }
   if (social?.github) {
     requireFields("social.github", social.github, ["clientId", "clientSecret"]);
-    providers.push(githubProvider(social.github));
+    push("social.github", social.github, githubProvider(social.github));
   }
   if (social?.linkedin) {
     requireFields("social.linkedin", social.linkedin, ["clientId", "clientSecret"]);
-    providers.push(linkedinProvider(social.linkedin));
+    push("social.linkedin", social.linkedin, linkedinProvider(social.linkedin));
   }
   // The presets of plan 12i Task 13, in one block.
   if (social?.microsoft) {
@@ -3263,11 +3415,11 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
       throw new ConfigError(
         "social.microsoft.tenant must be common, organizations, consumers, or a tenant GUID",
       );
-    providers.push(microsoftProvider(social.microsoft));
+    push("social.microsoft", social.microsoft, microsoftProvider(social.microsoft));
   }
   if (social?.discord) {
     requireFields("social.discord", social.discord, ["clientId", "clientSecret"]);
-    providers.push(discordProvider(social.discord));
+    push("social.discord", social.discord, discordProvider(social.discord));
   }
   if (social?.gitlab) {
     requireFields("social.gitlab", social.gitlab, ["clientId", "clientSecret"]);
@@ -3275,7 +3427,7 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
       throw new ConfigError(
         "social.gitlab.issuer must be an https origin with no path or trailing slash, on a public host that is not the host of baseURL",
       );
-    providers.push(gitlabProvider(social.gitlab));
+    push("social.gitlab", social.gitlab, gitlabProvider(social.gitlab));
   }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {
@@ -3324,7 +3476,7 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
       https(`${path}.endpoints.tokenUrl`, e.endpoints.tokenUrl);
       https(`${path}.endpoints.jwksUrl`, e.endpoints.jwksUrl);
     }
-    providers.push(oidcProvider(e));
+    push(path, e, oidcProvider(e));
   }
   for (const [i, e] of listOf("social.oauth2", social?.oauth2).entries()) {
     const path = `social.oauth2[${i}]`;
@@ -3347,7 +3499,7 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
           `${path}.authorizeParams.${key} must be a string with no control character`,
         );
     }
-    providers.push(oauth2Provider(e));
+    push(path, e, oauth2Provider(e));
   }
   return providers;
 }

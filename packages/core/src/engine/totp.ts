@@ -20,6 +20,7 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { passkeyUserName } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
+import { isLastMethod, type LastMethod } from "./last-method.js";
 import { sendNotice } from "./notices.js";
 import { impersonationStops } from "./operator/audit.js";
 import { checkUserPassword } from "./password.js";
@@ -777,6 +778,8 @@ export interface TwoFactorSession {
   next: string;
   trustDevice: { token: string; expiresAt: Date } | null;
   backupCodesLeft: number;
+  /** The last method of the first factor (plan 12i Task 12), or null: a reset, or a row from before. */
+  method: LastMethod | null;
 }
 
 /**
@@ -799,6 +802,8 @@ export async function twoFactorGate(
     userAgent: string | null;
     next: string | undefined;
     trustDevice: string | undefined;
+    /** The last method of this sign-in (plan 12i Task 12). */
+    method: LastMethod;
   },
   now: Date,
 ): Promise<{ challenge: Result<TwoFactorPending> } | { trustId: string | null }> {
@@ -823,6 +828,7 @@ export async function twoFactorGate(
           ip: input.ip,
           userAgent: input.userAgent,
           next: input.next,
+          method: input.method,
         },
         now,
       );
@@ -981,6 +987,7 @@ async function answerChallenge(
     userAgent?: unknown;
     next?: unknown;
     notAfter?: unknown;
+    method?: unknown;
   } | null;
   // The first factor of the challenge: the session keeps its `via` (plan 12c).
   // A row of plan 9f holds `password`.
@@ -988,6 +995,8 @@ async function answerChallenge(
   const ip = typeof data?.ip === "string" ? data.ip : null;
   const userAgent = typeof data?.userAgent === "string" ? data.userAgent : null;
   const next = safeNext(data?.next);
+  // A value outside the closed set sets no cookie (plan 12i Task 12).
+  const method = isLastMethod(data?.method) ? data.method : null;
   // The IdP's cap of an SSO sign-in (plan 12d): the session keeps it through the challenge.
   const notAfter = typeof data?.notAfter === "string" ? new Date(data.notAfter) : null;
   const trust = input.trustDevice
@@ -1036,6 +1045,7 @@ async function answerChallenge(
         next,
         trustDevice: trust ? { token: trust.token, expiresAt: trust.expiresAt } : null,
         backupCodesLeft,
+        method,
       });
     }),
   );

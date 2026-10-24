@@ -13,6 +13,7 @@ import { hasAddress, provedAccount } from "./address.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard, stopWith } from "./hooks.js";
+import { passwordMethod } from "./last-method.js";
 import { sendNotice } from "./notices.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
@@ -73,8 +74,8 @@ const SIGN_UP_PER_EMAIL = { seconds: 3600, max: 5 };
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
 const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
 // Plan 12i: the same count for a username and for a phone. Each kind has its
-// own key, so the counts add up: one account takes up to 20 guesses per 15
-// minutes by address and username, and 30 with a phone (a residual of
+// own key, so the counts add up. One account takes up to 20 guesses per 15
+// minutes by address and username. With a phone, it takes 30 (a residual of
 // ruling 17). A key per user id would close the sum, but its 429 would tell
 // that a phone and an address name one account.
 const SIGN_IN_PER_USERNAME = { seconds: 900, max: 10 };
@@ -816,6 +817,7 @@ export async function passwordSignIn(
       userAgent: input.userAgent,
       next: input.next,
       trustDevice: input.trustDevice,
+      method: passwordMethod(input),
     },
     now,
   );

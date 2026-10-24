@@ -1,5 +1,6 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { type LastMethod, passwordMethod } from "../../engine/last-method.js";
 import {
   changePassword,
   PASSWORD_RESET_TOKEN_RE,
@@ -38,6 +39,7 @@ import {
   signedInResponse,
   trustTokenOf,
   twoFactorJson,
+  withLastMethod,
 } from "../session-answer.js";
 
 type PageError = NonNullable<ResetPageInput["error"]>;
@@ -60,7 +62,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
   const cookieFor = (token: string) => sessionCookieFor(config, token);
-  const signedIn = (v: PasswordSession): Response => signedInResponse(config, v);
+  const signedIn = (v: PasswordSession, via?: LastMethod): Response =>
+    signedInResponse(config, v, via);
   return [
     {
       method: "POST",
@@ -84,7 +87,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no cookie.
         if ("verifyRequired" in r.value)
           return json({ user: publicUser(r.value.user), verifyRequired: true });
-        return signedIn(r.value);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, "password"), "password");
       },
     },
     {
@@ -109,7 +112,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
         if ("twoFactor" in r.value) return twoFactorJson(r.value);
-        return signedIn(r.value);
+        const method = passwordMethod(by);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, method), method);
       },
     },
     {
@@ -142,8 +146,10 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         });
         if (!r.ok) return jsonCaller ? respond(r) : failed(r.code);
         const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(ctx.config, "/"));
-        if (r.value.signedIn) res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
-        return res;
+        if (!r.value.signedIn) return res;
+        // The confirm of a password sign-up opens its session (plan 12b).
+        res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
+        return withLastMethod(ctx.config, ctx.request, res, "password");
       },
     },
     {

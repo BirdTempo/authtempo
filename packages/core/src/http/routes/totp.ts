@@ -32,7 +32,7 @@ import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
-import { sessionCookieFor } from "../session-answer.js";
+import { sessionCookieFor, viaField, withLastMethod } from "../session-answer.js";
 
 /**
  * The TOTP routes (plan 9f, spec 8.11). Every route but the verify and the
@@ -62,8 +62,10 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     res.headers.append("set-cookie", clearTrustCookie(totp.trustCookieName, trustPath, sameSite));
     return res;
   };
-  const withCookies = (res: Response, v: TwoFactorSession) => {
+  const withCookies = (ctx: RouteContext, res: Response, v: TwoFactorSession) => {
     res.headers.append("set-cookie", sessionCookieFor(config, v.token));
+    // The method of the first factor (plan 12i Task 12). A reset has none.
+    if (v.method) withLastMethod(ctx.config, ctx.request, res, v.method);
     if (v.trustDevice)
       res.headers.append(
         "set-cookie",
@@ -186,6 +188,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) return respond(r);
         const v = r.value;
         return withCookies(
+          ctx,
           json({
             token: v.token,
             ...publicSession({ user: v.user, session: v.session, refreshed: false }),
@@ -194,6 +197,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
             trustDevice: v.trustDevice
               ? { token: v.trustDevice.token, expiresAt: v.trustDevice.expiresAt.toISOString() }
               : null,
+            ...viaField(ctx.config, v.method ?? undefined),
           }),
           v,
         );
@@ -273,7 +277,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
           trustDevice: body.value.trustDevice === "1",
           ip: ctx.ip,
         });
-        if (r.ok) return withCookies(redirect(resolveNext(ctx.config, r.value.next)), r.value);
+        if (r.ok) return withCookies(ctx, redirect(resolveNext(ctx.config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
         if (r.code === CHALLENGE_PAGE_ERROR)
           return errorRedirect(
