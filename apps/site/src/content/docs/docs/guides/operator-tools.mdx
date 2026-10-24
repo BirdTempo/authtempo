@@ -132,6 +132,7 @@ An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. 
 
 - each operator route but the stop;
 - the sign-out: the operator stops the session instead;
+- each multi-session route: the bag of the browser holds the operator's other sessions, not the user's;
 - the re-authentication, which would make the session fresh;
 - each change of a way in: the password, a passkey, the address, the username, the phone, an unlink, a social link, a new API token;
 - the account delete, and the delete of an anonymous user;

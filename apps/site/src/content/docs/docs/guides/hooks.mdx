@@ -51,7 +51,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username`, `phone` |
 | `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced` |
 
 ## How it behaves
 
@@ -108,6 +108,7 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
   - the stop of an impersonation;
   - the loss of the platform role at a removal, a leave, or a role change of a platform operator's member row;
   - the door of a request: the operator of the impersonation session is banned, deleted, or without the platform role.
+- `displaced`: with `multiSession` on, a sign-in in a browser whose bag is full ends the oldest session of the bag. A sign-in of a user who has a session in the browser ends that session with `sign_out`.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 
 ## Locks over a before hook

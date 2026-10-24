@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 272 keys, the nested ones by their path", () => {
+  it("lists 278 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -40,7 +40,9 @@ describe("checkConfig", () => {
     // Plan 12i Task 6 adds anonymous and anonymous.ttlDays. Ruling 25 adds
     // anonymous.sweepBatch and anonymous.dailyCap. Ruling 27 adds
     // anonymous.isolateLimiter.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5);
+    // Plan 12i Task 11 adds multiSession and multiSession.max.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2);
+    expect(keys).toContain("multiSession.max");
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");
     expect(keys).toContain("social.twitter.redirectURI");

@@ -23,7 +23,8 @@ export interface Feature {
  * `operatorSso`, and `scim`. Plan 12d Task 13 points `sso` to the SSO guide,
  * `operatorSso` to the override section of that guide, and `scim` to the
  * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th,
- * `username`, the 30th, `phone`, the 31st, and `anonymous`, the 32nd. A Record over
+ * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd, and
+ * `multiSession`, the 33rd. A Record over
  * the union fails the site's typecheck when core adds a member, so a new
  * feature cannot
  * ship without its row. Each line restates the description of its guide.
@@ -244,6 +245,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "A session for a guest with no address, kept out of each route that needs a way in.",
     icon: "routes",
     guide: "/docs/reference/routes/#anonymous",
+  },
+  multiSession: {
+    title: "Multi-session",
+    line: "The sessions of several users in one browser, with a switch and a sign-out of one.",
+    icon: "session",
+    guide: "/docs/reference/routes/#multi-session",
   },
 };
 

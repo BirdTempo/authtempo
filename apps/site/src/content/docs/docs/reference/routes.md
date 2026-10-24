@@ -11,6 +11,7 @@ sources:
   - packages/core/src/http/impersonation-rules.ts
   - docs/superpowers/plans/2026-10-14-12h-observability.md
   - packages/core/src/http/health.ts
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -62,7 +63,7 @@ These routes exist in every deployment.
 | --- | --- |
 | Needs | Nothing; or a session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ ok: true }`, and the cookie is cleared |
+| Answer | `{ ok: true }`, and the cookie is cleared. With `multiSession` on, every session of the bag cookie ends too, and the bag cookie is cleared: the sign-out ends every session of the browser |
 | Errors | [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## Account
@@ -1947,6 +1948,37 @@ These routes exist when the config sets `username`. A username is public by desi
 | Input | JSON `{ username }` |
 | Answer | `{ username, displayUsername }`. The old name is free at once. A notice goes to the user's address |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
+
+## Multi-session
+
+These routes exist when the config sets `multiSession`. One browser keeps the sessions of several users. The session cookie holds the active token, and the HttpOnly bag cookie `__Host-tempo_sessions` holds the others. A browser sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. Each route resolves each token of the bag, so a revoked, expired, or banned session leaves the bag cookie in the same answer. A token of the bag signs no request in. A request with an `Authorization` header answers 401: a bearer client has no bag. No answer holds a token.
+
+<h3 id="get-multi-session"><code>GET /multi-session</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Input | None |
+| Answer | `{ sessions }`: the active session first, then each live session of the bag. Each has `sessionId`, `active`, and `user` with `id`, `name`, `email`, `username`, and `image` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-multi-session-switch"><code>POST /multi-session/switch</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Input | JSON `{ sessionId }`. The id of a session of the bag |
+| Answer | `{ user, session }` of the new active session. The session cookie takes its token, and the old active session moves into the bag. A switch makes no session fresh. An id of no live session of this browser answers `not_found` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-multi-session-sign-out"><code>POST /multi-session/sign-out</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Input | JSON `{ sessionId }`. The id of the active session or of a session of the bag |
+| Answer | `{ ok: true }`. Only that session ends. When it is the active one, the first live session of the bag becomes active, or the session cookie is cleared. An id of no live session of this browser answers `not_found` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## OpenAPI document
 

@@ -242,9 +242,11 @@ describe("the column map (plan 12g)", () => {
     // verify keys of the phone code. Plan 12i Task 5 adds 1: the phone add
     // per user. Its fix round adds 1: the phone add per number (ruling 23).
     // Plan 12i Task 6 adds 3: the anonymous sign-in per IP, its daily cap
-    // (ruling 25 M4), and its delete per user.
-    expect(sites.length).toBe(100);
+    // (ruling 25 M4), and its delete per user. Plan 12i Task 11 adds 1: the
+    // per-IP key of the multi-session routes.
+    expect(sites.length).toBe(101);
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
+    expect(sites).toContain('http/routes/multi-session.ts "multi-session:ip" ipKey(ctx.ip)');
     expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/anonymous.ts "anonymous:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');

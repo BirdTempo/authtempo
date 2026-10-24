@@ -98,6 +98,8 @@ export function everyFeature(): ResolvedConfig {
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow", signUp: true },
     // Plan 12i Task 6: the two anonymous routes.
     anonymous: { isolateLimiter: "allow" },
+    // Plan 12i Task 11: the three multi-session routes.
+    multiSession: {},
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },
   });

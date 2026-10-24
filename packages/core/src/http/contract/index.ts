@@ -7,6 +7,7 @@ import { HEALTH_CONTRACT } from "./health.js";
 import { IDENTITIES_CONTRACT } from "./identities.js";
 import { JWT_CONTRACT } from "./jwt.js";
 import { MAGIC_LINK_CONTRACT } from "./magic-link.js";
+import { MULTI_SESSION_CONTRACT } from "./multi-session.js";
 import { OAUTH_CONTRACT } from "./oauth.js";
 import { OPENAPI_CONTRACT } from "./openapi.js";
 import { OPERATOR_CONTRACT } from "./operator.js";
@@ -40,6 +41,7 @@ export const ROUTE_CONTRACT = {
   ...REAUTH_CONTRACT,
   ...USER_CONTRACT,
   ...USERNAME_CONTRACT,
+  ...MULTI_SESSION_CONTRACT,
   ...IDENTITIES_CONTRACT,
   ...MAGIC_LINK_CONTRACT,
   ...SOCIAL_CONTRACT,

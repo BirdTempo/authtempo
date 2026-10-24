@@ -53,6 +53,25 @@ export function clearSessionCookie(name: string, sameSite: SameSite): string {
   return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
+/**
+ * The bag cookie of multi-session (plan 12i Task 11): the other session
+ * tokens of the browser, joined by `.`. It has the attributes of the
+ * session cookie, so the rules of the session cookie hold for it: with the
+ * default name it is a `__Host-` cookie. No page script reads it.
+ */
+export function bagCookie(
+  name: string,
+  tokens: readonly string[],
+  maxAgeSeconds: number,
+  sameSite: SameSite,
+): string {
+  return sessionCookie(name, tokens.join("."), maxAgeSeconds, sameSite);
+}
+
+export function clearBagCookie(name: string, sameSite: SameSite): string {
+  return clearSessionCookie(name, sameSite);
+}
+
 /** Only the headers are read, so a caller with a `Headers` and no `Request` can pass `{ headers }`. */
 export function readCookie(request: Pick<Request, "headers">, name: string): string | null {
   const header = request.headers.get("cookie");

@@ -11,7 +11,7 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
  * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
- * `username`, `phone`, and `anonymous`.
+ * `username`, `phone`, `anonymous`, and `multiSession`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -46,6 +46,7 @@ export const ROUTE_FEATURES = [
   "username",
   "phone",
   "anonymous",
+  "multiSession",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -90,6 +91,7 @@ export interface RouteEntry {
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
    * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
    * `anonymous` (plan 12i Task 6) needs `anonymous`.
+   * `multiSession` (plan 12i) needs `multiSession`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -317,6 +319,31 @@ export const ROUTES = Object.freeze([
       "impersonation_session",
       "anonymous_refused",
     ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 11: multi-session (spec 32 item 11). The browser's cookies only: a bearer gets 401.
+  {
+    method: "GET",
+    path: "/multi-session",
+    feature: "multiSession",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/multi-session/switch",
+    feature: "multiSession",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/multi-session/sign-out",
+    feature: "multiSession",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
     oauthCodes: [],
   },
   // Plan 12i Task 2: the username (spec 32 item 7).

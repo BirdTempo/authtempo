@@ -97,7 +97,10 @@ export type SessionEndReason =
   // The operator stops it. A removal, a leave, or a role change takes the
   // platform role from its operator. Or a session read finds its operator
   // banned, deleted, or without the platform role.
-  | "impersonation_end";
+  | "impersonation_end"
+  // plan 12i: a sign-in in a browser whose bag of sessions is full ends the
+  // oldest session of the bag (multi-session).
+  | "displaced";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event
  * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
@@ -117,6 +120,7 @@ export const SESSION_END_REASONS = {
   banned: true,
   operator: true,
   impersonation_end: true,
+  displaced: true,
 } as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */

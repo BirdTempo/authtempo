@@ -62,6 +62,12 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
+  // Multi-session (plan 12i Task 11): the bag holds the operator's other
+  // sessions, not the user's. A switch or a list would act outside the
+  // impersonation, and a bag sign-out would end the operator's sessions.
+  "GET /multi-session",
+  "POST /multi-session/switch",
+  "POST /multi-session/sign-out",
   // The re-authentication and its helpers: the session never becomes fresh,
   // so every change behind the fresh rule of plan 12a refuses.
   "POST /reauth",

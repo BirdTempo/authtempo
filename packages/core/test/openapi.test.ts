@@ -96,7 +96,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
-    expect(keys.length).toBe(196);
+    // Plan 12i Task 11 adds the three multi-session routes.
+    expect(keys.length).toBe(199);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -198,8 +199,9 @@ describe("openApiDocument (plan 11g)", () => {
     // adds the form of the SAML ACS: 100. Plan 12i Task 9 adds the two passkey
     // options bodies: 102. Plan 12i Task 2 adds the body of POST
     // /user/username: 103. Plan 12i Task 5 adds the five phone bodies: 108.
-    // Plan 12i Task 6 adds the two anonymous bodies: 110.
-    expect(bodies.length).toBe(110);
+    // Plan 12i Task 6 adds the two anonymous bodies: 110. Plan 12i Task 11
+    // adds the bodies of the multi-session switch and sign-out: 112.
+    expect(bodies.length).toBe(112);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -434,8 +436,9 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 2 adds the 2 answers of the username routes, the body
     // of the set, and the query of the check. Plan 12i Task 5 adds the 5
     // answers and the 5 bodies of the phone routes. Plan 12i Task 6 adds the
-    // 2 answers and the 2 bodies of the anonymous routes.
-    expect([answers, bodies, queries]).toEqual([146, 110, 32]);
+    // 2 answers and the 2 bodies of the anonymous routes. Plan 12i Task 11
+    // adds the 3 answers and the 2 bodies of the multi-session routes.
+    expect([answers, bodies, queries]).toEqual([149, 112, 32]);
   });
 
   it("takes the request_id form of the authorize query", () => {

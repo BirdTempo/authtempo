@@ -126,6 +126,11 @@ export function sessionMaxAgeSeconds(config: ResolvedConfig): number {
 // Built from the prefix, so the pattern and the prefix cannot drift (the prefix has no regex character).
 const TOKEN_RE = new RegExp(`^${SESSION_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 
+/** True when `token` has the form of a session token (plan 12i: the bag of multi-session reads it). */
+export function isSessionTokenForm(token: string): boolean {
+  return TOKEN_RE.test(token);
+}
+
 export interface SessionInput {
   userId: string;
   ip: string | null;

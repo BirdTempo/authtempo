@@ -139,6 +139,8 @@ function world(secretHash = "0".repeat(64)) {
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
     // The anonymous routes of plan 12i Task 6.
     anonymous: { isolateLimiter: "allow" },
+    // The multi-session routes of plan 12i Task 11.
+    multiSession: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -367,6 +369,19 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
     },
     // Plan 12i Task 2: the set of a username.
     { key: "POST /user/username", body: { username: "Ada" }, session: true, refused: INVALID_BODY },
+    // Plan 12i Task 11: an id of no session of the browser answers not_found.
+    {
+      key: "POST /multi-session/switch",
+      body: { sessionId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /multi-session/sign-out",
+      body: { sessionId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /user/change-email",
       body: { newEmail: "ada.other@example.com", method: "link", next: "/inbox" },
@@ -825,7 +840,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
-    expect(keys.length).toBe(196);
+    // Plan 12i Task 11 adds the three multi-session routes.
+    expect(keys.length).toBe(199);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -840,8 +856,9 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
     // module scim, so 22 became 23. Plan 12i Task 2 adds the module
     // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
-    // Plan 12i Task 6 adds the module anonymous: 26.
-    expect(modules.length).toBe(26);
+    // Plan 12i Task 6 adds the module anonymous: 26. Plan 12i Task 11 adds
+    // the module multi-session: 27.
+    expect(modules.length).toBe(27);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1389,7 +1406,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 9 adds the bodies of the two passkey options routes.
     // Plan 12i Task 2 adds the body of POST /user/username.
     // Plan 12i Task 5 adds the bodies of the five phone routes, and Task 6 the two anonymous bodies.
-    expect(withBody.length).toBe(101);
+    // Plan 12i Task 11 adds the bodies of the multi-session switch and sign-out.
+    expect(withBody.length).toBe(103);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1415,7 +1433,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(99);
+    expect(refusals).toBe(101);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1438,7 +1456,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 9 adds the two passkey options bodies to json.
     // Plan 12i Task 2 adds the body of POST /user/username to json.
     // Plan 12i Task 5 adds the five phone bodies to json, and Task 6 the two anonymous bodies.
-    expect(counts).toEqual({ json: 92, both: 10, form: 8 });
+    // Plan 12i Task 11 adds the two multi-session bodies to json.
+    expect(counts).toEqual({ json: 94, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1493,6 +1512,21 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 2: the username routes.
     await check("POST /user/username", post("/auth/user/username", { username: "Ada" }, cookie));
     await check("GET /username/available", get("/auth/username/available?username=ada"));
+    // Plan 12i Task 11: the multi-session routes. A switch to the active session changes nothing.
+    await check("GET /multi-session", get("/auth/multi-session", cookie));
+    await check(
+      "POST /multi-session/switch",
+      post("/auth/multi-session/switch", { sessionId: me.session.id }, cookie),
+    );
+    const other = await verifiedSession(w.auth, "mia@example.com");
+    await check(
+      "POST /multi-session/sign-out",
+      post(
+        "/auth/multi-session/sign-out",
+        { sessionId: other.session.id },
+        w.cookieOf(other.token),
+      ),
+    );
     await check(
       "POST /user/change-email",
       post("/auth/user/change-email", { newEmail: "ada.new@example.com" }, cookie),

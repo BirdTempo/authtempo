@@ -69,6 +69,8 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
     // The anonymous routes of plan 12i Task 6.
     anonymous: { isolateLimiter: "allow" },
+    // The multi-session routes of plan 12i Task 11.
+    multiSession: {},
   };
 }
 

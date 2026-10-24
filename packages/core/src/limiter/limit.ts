@@ -105,6 +105,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "anonymous:ip",
   "anonymous:all-day",
   "anonymous-delete:user",
+  // Plan 12i Task 11: the multi-session routes.
+  "multi-session:ip",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

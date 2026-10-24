@@ -92,6 +92,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `username` | `username` | off |
 | `phone` | `phone` | off |
 | `anonymous` | `anonymous` | off |
+| `multiSession` | `multiSession` | off |
 
 ## The error shape
 

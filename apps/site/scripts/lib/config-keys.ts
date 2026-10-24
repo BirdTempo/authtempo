@@ -19,6 +19,7 @@ import type {
   LegacyVerifyConfig,
   LinkedInConfig,
   MicrosoftConfig,
+  MultiSessionConfig,
   OAuth2Entry,
   OAuthConfig,
   ObserveConfig,
@@ -100,6 +101,7 @@ export const CONFIG_KEYS = {
     username: true,
     lastMethod: true,
     anonymous: true,
+    multiSession: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -409,6 +411,7 @@ export const CONFIG_KEYS = {
     dailyCap: true,
     isolateLimiter: true,
   } satisfies Keys<AnonymousConfig>,
+  multiSession: { max: true } satisfies Keys<MultiSessionConfig>,
   observe: {
     sink: true,
     include: true,

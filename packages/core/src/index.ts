@@ -23,6 +23,7 @@ export type {
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
+  MultiSessionConfig,
   OAuthConfig,
   OperatorConfig,
   OperatorScope,

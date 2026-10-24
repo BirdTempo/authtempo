@@ -438,6 +438,13 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `anonymous.dailyCap` | number | 1000 | An integer from 1 to 100000. The anonymous users that the deployment makes per 24 hours. A sign-in over the cap answers 429 `rate_limited`, and `limit.hit` names the family `anonymous:all-day`. The cap is per deployment, so `anonymous` needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. Turn on the captcha flow `anonymous-sign-in` on a public site, so that a script cannot spend the cap. |
 | `anonymous.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
 
+## Multi-session
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A bearer client has no bag. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
+| `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the oldest session of the bag. |
+
 ## Observability
 
 With no `observe`, core writes its log lines with `console` and sends nothing anywhere. With a sink, core buffers each event, and a flush sends the batch after the answer. Pass `{ waitUntil }` to `handle`, or call `auth.observe.flush()`.

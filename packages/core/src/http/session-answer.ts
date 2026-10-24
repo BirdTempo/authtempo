@@ -1,9 +1,17 @@
 import type { ResolvedConfig } from "../config.js";
 import type { LastMethod } from "../engine/last-method.js";
+import { bagAtSignIn, bagTokens } from "../engine/multi-session.js";
 import type { TwoFactorPending } from "../engine/second-factor.js";
-import { publicSession, sessionMaxAgeSeconds } from "../engine/sessions.js";
+import { publicSession, sessionCookieToken, sessionMaxAgeSeconds } from "../engine/sessions.js";
 import type { SessionRow, UserRow } from "../schema.js";
-import { lastMethodCookie, readCookie, sessionCookie } from "./cookies.js";
+import {
+  bagCookie,
+  clearBagCookie,
+  lastMethodCookie,
+  readCookie,
+  sessionCookie,
+} from "./cookies.js";
+import { actorCookieName } from "./impersonation-rules.js";
 import { json } from "./json.js";
 
 /** The session cookie for `token`, with the config's name, lifetime, and SameSite. */
@@ -102,4 +110,64 @@ export function trustTokenOf(
     fromBody ||
     (config.totp ? (readCookie(request, config.totp.trustCookieName) ?? undefined) : undefined)
   );
+}
+
+/** The token that a Set-Cookie of `res` writes to `name`, or null. A clear writes none. */
+function cookieSet(res: Response, name: string): string | null {
+  const set = res.headers.getSetCookie().findLast((c) => c.startsWith(`${name}=`));
+  const value = set?.slice(name.length + 1).split(";")[0] ?? "";
+  return value === "" ? null : value;
+}
+
+/**
+ * Appends the bag cookie to `res` when the bag changed (plan 12i Task 11):
+ * the tokens of `after`, or a clear when `after` is empty. `before` is the
+ * value of the request's bag cookie, so a value that the read cut short or
+ * cleaned is written again too.
+ */
+export function withBag(
+  config: ResolvedConfig,
+  res: Response,
+  before: string | null,
+  after: readonly string[],
+): Response {
+  const ms = config.multiSession;
+  if (!ms) return res;
+  if (after.length === 0 ? before === null : before === after.join(".")) return res;
+  res.headers.append(
+    "set-cookie",
+    after.length === 0
+      ? clearBagCookie(ms.cookieName, config.cookie.sameSite)
+      : bagCookie(ms.cookieName, after, sessionMaxAgeSeconds(config), config.cookie.sameSite),
+  );
+  return res;
+}
+
+/**
+ * The bag write at each browser sign-in (plan 12i Task 11). The router
+ * calls it after every handler, so each route that sets a new session
+ * cookie writes the bag through this one step: a new sign-in route cannot
+ * skip it. It does nothing with multi-session off, for a request with an
+ * `Authorization` header (a bearer client has no bag), during an
+ * impersonation (the actor cookie holds the operator's token), and for an
+ * answer that writes the bag cookie itself (the multi-session routes). A
+ * renewal sets the same token, so it changes nothing.
+ */
+export async function withSessionBag(
+  config: ResolvedConfig,
+  request: Request,
+  res: Response,
+): Promise<Response> {
+  const ms = config.multiSession;
+  if (!ms || request.headers.has("authorization")) return res;
+  if (readCookie(request, actorCookieName(config)) !== null) return res;
+  if (res.headers.getSetCookie().some((c) => c.startsWith(`${ms.cookieName}=`))) return res;
+  const token = cookieSet(res, config.cookieName);
+  const previous = sessionCookieToken(config, request);
+  if (token === null || token === previous) return res;
+  const raw = readCookie(request, ms.cookieName);
+  // A first sign-in in the browser: no session to move and no bag, so no read.
+  if (previous === null && raw === null) return res;
+  const after = await bagAtSignIn(config, { previous, token, bag: bagTokens(config, raw) });
+  return after === null ? res : withBag(config, res, raw, after);
 }

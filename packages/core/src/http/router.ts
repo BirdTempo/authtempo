@@ -11,6 +11,7 @@ import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
 import { HOST_CODE, type RouteKey, type RouterCode } from "./route-list.js";
+import { withSessionBag } from "./session-answer.js";
 
 export interface RouteContext {
   request: Request;
@@ -499,13 +500,15 @@ export function createRouter(
       return withTrace(preflight, traceId);
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
-    // of the cookie move, of the CORS write, or of the trace header answers
-    // `internal` with one log line.
+    // of the bag write, of the cookie move, of the CORS write, or of the
+    // trace header answers `internal` with one log line. The bag write of
+    // multi-session (plan 12i Task 11) runs after every handler, so no
+    // sign-in route can skip it.
     try {
       const res = await moveLegacyCookie(
         scoped,
         request,
-        await dispatch(scoped, request, url, match, waitUntil),
+        await withSessionBag(scoped, request, await dispatch(scoped, request, url, match, waitUntil)),
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {

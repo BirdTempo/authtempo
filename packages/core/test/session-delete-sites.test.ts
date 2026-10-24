@@ -53,6 +53,14 @@ interface Site {
 
 const SITES: Site[] = [
   {
+    file: "engine/multi-session.ts",
+    fn: "endOne",
+    call: "destroySession",
+    count: 1,
+    kind: "sign-out",
+    reason: "the sign-out of one session of the browser (plan 12i Task 11); it delivers after it",
+  },
+  {
     file: "create-auth.ts",
     fn: "createAuth",
     call: "destroySession",

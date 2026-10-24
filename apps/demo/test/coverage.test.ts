@@ -87,8 +87,9 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12i Task 9 adds GET /.well-known/webauthn of passkeyRelatedOrigins,
       // so 98 became 99. Plan 12i Task 2 adds the two routes of username: 101.
       // Plan 12i Task 5 adds the five routes of phone: 106. Task 6 adds the
-      // two routes of anonymous: 108.
-      expect(checked).toBe(108);
+      // two routes of anonymous: 108. Task 11 adds the three routes of
+      // multiSession: 111.
+      expect(checked).toBe(111);
     },
     LONG_TEST_MS,
   );

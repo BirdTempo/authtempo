@@ -33,6 +33,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   username: ["username"],
   phone: ["phone"],
   anonymous: ["anonymous"],
+  "multi-session": ["multiSession"],
   identities: ["account"],
   "magic-link": ["magicLink"],
   social: ["social"],
@@ -78,7 +79,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
-    expect(listed.length).toBe(196);
+    // Plan 12i Task 11 adds the three multi-session routes.
+    expect(listed.length).toBe(199);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -299,6 +301,8 @@ describe("ROUTES (plan 11a)", () => {
       delta: { phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" } },
       features: ["phone"],
     },
+    // Plan 12i Task 11: multi-session needs its own key, and no other feature.
+    { name: "multi-session", delta: { multiSession: {} }, features: ["multiSession"] },
     // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.
     {
       name: "observe with a sink",

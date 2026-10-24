@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { bagTokens, signOutBrowser } from "../../engine/multi-session.js";
 import { deliverLogouts } from "../../engine/oauth-logout.js";
 import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/session-list.js";
 import {
@@ -10,7 +11,7 @@ import {
   resolveSession,
 } from "../../engine/sessions.js";
 import { revokeBody } from "../contract/sessions.js";
-import { clearSessionCookie, readCookie } from "../cookies.js";
+import { clearBagCookie, clearSessionCookie, readCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
@@ -107,7 +108,17 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
         // After the commit: the back-channel logouts of the session (plan 12e Task 16).
         const ended = token ? await destroySession(ctx.config, token) : null;
         if (ended) await deliverLogouts(ctx.config, ended.userId);
-        return signedOut(ctx.config, ctx.request, token);
+        const res = await signedOut(ctx.config, ctx.request, token);
+        // Multi-session (plan 12i, owner decision 4): the sign-out ends every
+        // session of the browser, so the sessions of the bag end too.
+        const ms = ctx.config.multiSession;
+        if (!ms) return res;
+        await signOutBrowser(
+          ctx.config,
+          bagTokens(ctx.config, readCookie(ctx.request, ms.cookieName)),
+        );
+        res.headers.append("set-cookie", clearBagCookie(ms.cookieName, ctx.config.cookie.sameSite));
+        return res;
       },
     },
     {

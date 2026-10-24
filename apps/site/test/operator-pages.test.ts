@@ -79,6 +79,7 @@ function secretCodesOf(pick: (route: RouteEntry) => boolean): Set<string> {
 const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/operator\/(?!impersonate\/stop$)/, "each operator route but the stop"],
   [/^\/sign-out$/, "the sign-out"],
+  [/^\/multi-session(\/|$)/, "each multi-session route"],
   [/^\/reauth(\/|$)/, "the re-authentication"],
   [/^\/password\/change$/, "the password"],
   [/^\/passkey\/register\/|^\/passkeys\/delete$/, "a passkey"],

@@ -33,7 +33,10 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401. With `session.deferRefresh` on, also `needsRefresh`, and no renewed cookie |
 | POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
-| POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
+| POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie. With `multiSession` on, every session of the bag cookie ends too, and the bag cookie is cleared (plan 12i) |
+| GET | `/multi-session` | session cookie, no `Authorization` header | `{ sessions }`: the active session and each live session of the bag, each with `sessionId`, `active`, and `user`. No token. 401 to a bearer (plan 12i) |
+| POST | `/multi-session/switch` | session cookie, `{ sessionId }` | `{ user, session }` of the new active session; the old one moves into the bag. 404 `not_found` for an id outside the browser (plan 12i) |
+| POST | `/multi-session/sign-out` | session cookie, `{ sessionId }` | `{ ok: true }`; only that session ends. 404 `not_found` for an id outside the browser (plan 12i) |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
 | POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed`. A `name` that is blank after the trim, or that breaks the passkey name rule, is stored as no name (see "Passkeys") |
 | POST | `/passkey/authenticate/options` | `{ hints?, extensions? }` | the request options JSON for `navigator.credentials.get`; 400 `invalid_body` (a PRF salt that is not 32 bytes, or an extension that `passkey.extensions` does not turn on); 429 `rate_limited` |

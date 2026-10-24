@@ -532,6 +532,22 @@ export interface AuthConfig {
    * way in, and `ANONYMOUS_REFUSED` keeps it out of each route that needs one.
    */
   anonymous?: AnonymousConfig | false;
+  /**
+   * Multi-session (plan 12i Task 11, spec 32 item 11). Off when absent or
+   * `false`. `{}` turns it on with the defaults. One browser keeps the
+   * sessions of several users: the other tokens live in one HttpOnly bag
+   * cookie, and `POST /sign-out` ends every session of the browser.
+   */
+  multiSession?: MultiSessionConfig | false;
+}
+
+/** Multi-session (plan 12i). A bearer client has no bag. */
+export interface MultiSessionConfig {
+  /**
+   * The most sessions of one browser, the active one included: 2 to 10.
+   * Default 5. A sign-in past it ends the oldest session of the bag.
+   */
+  max?: number;
 }
 
 /** The last method cookie (plan 12i). It is a hint for the sign-in page only. */
@@ -1373,6 +1389,8 @@ export interface ResolvedConfig {
   lastMethod: ResolvedLastMethod | null;
   /** Null: anonymous sign-in is off, and no anonymous route is mounted (plan 12i Task 6). */
   anonymous: ResolvedAnonymous | null;
+  /** Null: no bag cookie and no multi-session route (plan 12i). */
+  multiSession: ResolvedMultiSession | null;
   captcha: ResolvedCaptcha | null;
   /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
   observe: Observer;
@@ -1932,6 +1950,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
     lastMethod: resolveLastMethod(input.lastMethod, cookieName, totpTrustName(input.totp)),
     anonymous: resolveAnonymous(input.anonymous, input.limiter),
+    multiSession: resolveMultiSession(input.multiSession, cookieName, [
+      totpTrustName(input.totp) ?? "tempo_totp_trust",
+      lastMethodName(input.lastMethod),
+    ]),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -2132,6 +2154,57 @@ function resolveLastMethod(
       "lastMethod.cookieName must be a cookie name of 1 to 64 token characters, and not the name of another cookie of core",
     );
   return { cookieName, days };
+}
+
+/** The resolved `multiSession` (plan 12i). */
+export interface ResolvedMultiSession {
+  /** The most sessions of one browser, the active one included. The bag holds one fewer. */
+  max: number;
+  /** The bag cookie: the session cookie name with `s` at the end. */
+  cookieName: string;
+}
+
+/** The keys of `multiSession`. A Record, so a key added to `MultiSessionConfig` and not listed here fails the compile. */
+const MULTI_SESSION_KEYS: Readonly<Record<keyof MultiSessionConfig, true>> = {
+  max: true,
+};
+
+/** The name of the last method cookie when `lastMethod` is on, else null. */
+function lastMethodName(input: AuthConfig["lastMethod"]): string | null {
+  if (input === undefined || input === false) return null;
+  return (
+    (isPlainObject(input as unknown) ? input.cookieName : undefined) ?? DEFAULT_LAST_METHOD_COOKIE
+  );
+}
+
+/**
+ * `multiSession` (plan 12i Task 11). Absent or `false`: off. The bag cookie
+ * takes the session cookie's name with `s` at the end, so `cookieName`
+ * renames both, and a `__Host-` session cookie gives a `__Host-` bag. Its
+ * name must not be the name of another cookie of core: a clash would let one
+ * cookie overwrite the other. Ten sessions keep the bag cookie under 600
+ * bytes.
+ */
+function resolveMultiSession(
+  input: MultiSessionConfig | false | undefined,
+  sessionCookie: string,
+  others: readonly (string | null)[],
+): ResolvedMultiSession | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("multiSession must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(MULTI_SESSION_KEYS, key))
+      throw new ConfigError(
+        `multiSession.${key} is not an option; core has ${Object.keys(MULTI_SESSION_KEYS).join(", ")}`,
+      );
+  const max = integerIn("multiSession.max", input.max ?? 5, 2, 10);
+  const cookieName = `${sessionCookie}s`;
+  if (cookieName === LEGACY_SESSION_COOKIE || others.includes(cookieName))
+    throw new ConfigError(
+      `multiSession needs the cookie name ${cookieName} for its bag, and another cookie of core has it`,
+    );
+  return { max, cookieName };
 }
 
 function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"] {

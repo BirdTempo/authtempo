@@ -7,6 +7,7 @@ import { handoffRoutes } from "./handoff.js";
 import { identityRoutes } from "./identities.js";
 import { jwtRoutes } from "./jwt.js";
 import { magicLinkRoutes } from "./magic-link.js";
+import { multiSessionRoutes } from "./multi-session.js";
 import { oauthRoutes } from "./oauth.js";
 import { openApiRoutes } from "./openapi.js";
 import { operatorRoutes } from "./operator.js";
@@ -36,6 +37,7 @@ export type RouteModule =
   | "reauth"
   | "user"
   | "username"
+  | "multi-session"
   | "identities"
   | "magic-link"
   | "social"
@@ -71,6 +73,7 @@ export function coreRouteModules(
     { module: "reauth", routes: reauthRoutes(config) },
     { module: "user", routes: userRoutes(config) },
     { module: "username", routes: usernameRoutes(config) },
+    { module: "multi-session", routes: multiSessionRoutes(config) },
     { module: "identities", routes: identityRoutes(config) },
     { module: "magic-link", routes: magicLinkRoutes(config) },
     { module: "social", routes: socialRoutes(config) },

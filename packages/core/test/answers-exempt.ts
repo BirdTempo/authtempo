@@ -176,6 +176,10 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /scim/v2/Users/.search",
   // A check of a name on a deployment with the username off (plan 12i Task 2).
   "GET /username/available",
+  // Plan 12i Task 11: the routes with multiSession off, and an id of no session of the browser.
+  "GET /multi-session",
+  "POST /multi-session/sign-out",
+  "POST /multi-session/switch",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -298,6 +302,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   // Plan 12i Task 6: the anonymous routes.
   "POST /anonymous/sign-in",
   "POST /anonymous/delete",
+  // Plan 12i Task 11: the cross-site switch, and the Fetch Metadata test of every POST.
+  "POST /multi-session/sign-out",
+  "POST /multi-session/switch",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",
@@ -546,6 +553,26 @@ function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExemp
 /** The optional keys of a request options answer that the seam always writes. */
 const REQUEST_OPTION_KEYS = ["timeout", "rpId", "allowCredentials", "userVerification"] as const;
 
+/**
+ * Plan 12i Task 11: the rows of a phone user of Task 5 with no address, in
+ * the bag or active at a switch. The Task 11 join answers each null form,
+ * and then this list is empty.
+ */
+export const UNTIL_VERIFIED_HANDLE: readonly AnswerShapeExempt[] = (
+  [
+    ["GET /multi-session", "sessions[].user.email"],
+    ["POST /multi-session/switch", "user.email"],
+  ] as const
+).map(
+  ([key, field]): AnswerShapeExempt => ({
+    key,
+    field,
+    form: "null",
+    reason:
+      "a phone user of plan 12i Task 5 has no address; the join of Task 11 answers the null form and drops the row; address-less.test.ts proves the engine reads",
+  }),
+);
+
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
     "timeout",
@@ -651,6 +678,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
     }),
   ),
+  ...UNTIL_VERIFIED_HANDLE,
   // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
   // has a verified address. The organization create, the member add, and the
   // invitation accept each need one (`verified` in organizations.ts), and no

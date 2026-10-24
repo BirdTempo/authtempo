@@ -44,6 +44,8 @@ export const DEMO_EXEMPT = {
   phone:
     "The demo sends no SMS: a supplier costs money per text, and the demo has no number to prove.",
   anonymous: "A guest has no way back in, and the demo shows the ways in.",
+  multiSession:
+    "The demo shows one visitor's own account, so it keeps one session in each browser.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

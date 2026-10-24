@@ -72,6 +72,25 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason:
       "the browser reads the related origins document at the RP ID host (WebAuthn Level 3); no SDK call needs it (plan 12i)",
   },
+  // Plan 12i Task 11: Task 15 adds the client calls of multi-session and removes these three rows.
+  {
+    method: "GET",
+    path: "/multi-session",
+    reason:
+      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
+  },
+  {
+    method: "POST",
+    path: "/multi-session/switch",
+    reason:
+      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
+  },
+  {
+    method: "POST",
+    path: "/multi-session/sign-out",
+    reason:
+      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
+  },
   {
     method: "POST",
     path: "/operator/keys/rotate",
