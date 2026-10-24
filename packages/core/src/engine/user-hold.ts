@@ -1,4 +1,5 @@
 import type { Observer } from "../observe/observer.js";
+import type { UserRow } from "../schema.js";
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { stopWith } from "./hooks.js";
@@ -113,24 +114,26 @@ import { ROUNDS } from "./rounds.js";
  * and before its team locks. The invite takes it before its count of
  * `pendingInvitationsPerOrganization`, and no user hold.
  *
- * No row returns: a sign-up writes its user later, and a deleted user is
- * found by `userStays`, the read after the insert. A stop here would answer
- * the same `conflict` on both stores, so the one check is that read.
+ * No row returns null: a sign-up writes its user later, and a deleted user
+ * is found by `userStays`, the read after the insert. A stop here would
+ * answer the same `conflict` on both stores, so the one check is that read.
+ * The answer is the row that the hold matched, so its fields are those
+ * under the lock (ruling 78 of plan 12d).
  */
 export async function holdUser(
   observe: Observer,
   storage: StorageAdapter,
   userId: string,
-): Promise<void> {
+): Promise<UserRow | null> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
   let row = await storage.findOne("user", byId);
   for (let round = 0; round < ROUNDS; round++) {
-    if (!row) return;
+    if (!row) return null;
     const where: Where<"user">[] = [
       ...byId,
       { field: "updatedAt", op: "eq", value: row.updatedAt },
     ];
-    if ((await storage.update("user", where, { updatedAt: row.updatedAt })) === 1) return;
+    if ((await storage.update("user", where, { updatedAt: row.updatedAt })) === 1) return row;
     // A parallel write moved the row first. Read it again.
     row = await storage.findOne("user", byId);
   }

@@ -441,10 +441,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "the ACS needs a signed SAML Response; it shares resolveSsoUser with the OIDC callback, where sso/resolve.test.ts proves the refusal (plan 12d Task 10)",
     ["POST /sso/:connectionId/acs"],
   ),
+  // sso/resolve.test.ts answers it at the OIDC callback: an address change before the hold
+  // (ruling 78 of plan 12d).
   ...rows(
     "conflict",
-    "five lost rounds of the user hold, or an account delete inside the sign-in; no request can cause either on its own",
-    ["GET /sso/:connectionId/callback", "POST /sso/:connectionId/acs"],
+    "the ACS needs a signed SAML Response; it shares resolveSsoUser with the OIDC callback, where sso/resolve.test.ts answers it",
+    ["POST /sso/:connectionId/acs"],
   ),
   ...rows(
     "account_banned",

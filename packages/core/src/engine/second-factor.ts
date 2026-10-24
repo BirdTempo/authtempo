@@ -582,6 +582,8 @@ export function gatedSteps(
     gate: boolean;
     /** The latest expiry of the session (plan 12d): a SAML `SessionNotOnOrAfter`. */
     notAfter?: Date | undefined;
+    /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
+    sameAddress?: boolean;
   },
   now: Date,
 ): {
@@ -613,6 +615,7 @@ export function gatedSteps(
           userAgent: open.userAgent,
           via: open.via,
           ...(open.notAfter ? { notAfter: open.notAfter } : {}),
+          ...(open.sameAddress ? { sameAddress: true } : {}),
         },
         tx,
       );

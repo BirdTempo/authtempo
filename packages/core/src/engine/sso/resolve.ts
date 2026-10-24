@@ -242,6 +242,9 @@ export async function resolveSsoUser(
       trustDevice: input.trustDevice,
       gate: gateOn && !idpPassedMfa(connection.mfa, profile),
       notAfter: profile.sessionNotOnOrAfter ?? undefined,
+      // The domain rule of a known identity read the user's address before the hold. The
+      // session write reads the row again after it (ruling 78 of plan 12d).
+      sameAddress: true,
     },
     now,
   );

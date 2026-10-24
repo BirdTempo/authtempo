@@ -1404,7 +1404,12 @@ async function writeChange(
           join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
         // The lock order of user-hold.ts: the user row, the sessions, the organization row, the
         // member rows, the scimGroupMember rows.
-        await holdUser(tx, user.id);
+        const held = await holdUser(tx, user.id);
+        // The claim of a move or a reactivate read the address before the hold. A change of
+        // address in between answers 409, and the directory sends the request again (ruling 78
+        // of plan 12d).
+        if ((move || reactivate) && held !== null && held.email !== user.email)
+          stopWith("conflict");
         // The role of a reactivate comes from the groups again, after the hold (ruling 59 M2 of
         // plan 12d). A group write holds each user whose role it computes, so it committed
         // before this read, or it waits for this commit and then reads the new member row.

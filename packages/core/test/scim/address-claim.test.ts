@@ -112,6 +112,58 @@ describe("a SCIM write of a user whose address left the domain (ruling 74 M2)", 
     expect(row?.active).toBe(false);
   });
 
+  it("answers 409 at a reactivate when the address leaves between the claim and the hold (ruling 78)", async () => {
+    const w = await scimAuth();
+    const { token } = await scimToken(w);
+    const made = await scim(w, token, "POST", "/Users", { schemas: [USER_URN], userName: ADA });
+    const id = String(((await made.json()) as { id: string }).id);
+    const off = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    const ada = await w.storage.findOne("user", [{ field: "email", op: "eq", value: ADA }]);
+    if (!ada) throw new Error("no user");
+    // An email change commits after the claim read of the reactivate, and before its hold:
+    // the first read of the user row in the transaction sees the new address.
+    const transaction = w.storage.transaction.bind(w.storage);
+    let moved = false;
+    w.storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          findOne: async (model, where) => {
+            if (model === "user" && !moved) {
+              moved = true;
+              await tx.update("user", [{ field: "id", op: "eq", value: ada.id }], {
+                email: PERSONAL,
+                updatedAt: new Date(ada.updatedAt.getTime() + 1000),
+              });
+            }
+            return tx.findOne(model, where);
+          },
+        }),
+      );
+    const on = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: true }),
+    );
+    w.storage.transaction = transaction;
+    expect(moved).toBe(true);
+    expect(on.status).toBe(409);
+    const member = [{ field: "userId" as const, op: "eq" as const, value: ada.id }];
+    expect(await w.storage.findMany("member", member)).toEqual([]);
+    expect((await userOf(w, ada.id))?.email).toBe(ADA);
+    const row = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect(row?.active).toBe(false);
+  });
+
   it("still moves and reactivates a user whose address the organization claims", async () => {
     const w = await scimAuth();
     const { token } = await scimToken(w);

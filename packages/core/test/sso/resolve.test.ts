@@ -164,6 +164,39 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect((await resolveSession(w.config, back.token ?? ""))?.user.id).toBe(me.user.id);
   });
 
+  it("refuses a known identity whose address leaves the domain before the hold (ruling 78)", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const first = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    const me = await resolveSession(w.config, first.token ?? "");
+    if (!me) throw new Error("no session");
+    // An email change commits after the domain rule read the address, and before the hold:
+    // the first write of the user row in the sign-in sees the new address.
+    const transaction = w.storage.transaction.bind(w.storage);
+    let moved = false;
+    w.storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          update: async (model, where, data) => {
+            if (model !== "user" || moved) return tx.update(model, where, data);
+            moved = true;
+            return tx.update(model, where, { ...data, email: "ada@personal.example" } as never);
+          },
+        }),
+      );
+    const before = await counts(w);
+    const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    w.storage.transaction = transaction;
+    expect(moved).toBe(true);
+    expect(r.error).toBe("conflict");
+    expect(r.token).toBeNull();
+    expect(await counts(w)).toEqual(before);
+    // With no change in between, the identity signs in.
+    const again = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect((await resolveSession(w.config, again.token ?? ""))?.user.id).toBe(me.user.id);
+  });
+
   it("links a verified user at the address", async () => {
     const w = ssoSignInWorld();
     const { connectionId } = await acmeWithSso(w);

@@ -166,6 +166,12 @@ export interface SessionOpen {
   impersonation?: SessionImpersonation;
   /** The latest expiry that the sign-in allows: a SAML `SessionNotOnOrAfter` (plan 12d). */
   notAfter?: Date;
+  /**
+   * The flow checked the address of `user` before the hold of the user row
+   * (ruling 78 of plan 12d): the SSO domain rule. The read after the insert
+   * answers `conflict` when the row holds another address by then.
+   */
+  sameAddress?: boolean;
 }
 
 export interface ResolvedSession {
@@ -308,6 +314,8 @@ async function patchedInput(
 /** The session fields after `session.beforeCreate` and its patch check, not yet written (plan 9d). */
 export interface PreparedSession {
   readonly input: SessionInput;
+  /** The address that `writeSession` compares again, with `sameAddress`. */
+  readonly address?: string;
 }
 
 /**
@@ -349,6 +357,7 @@ export async function prepareSession(
   const capped = input.notAfter ? { ...signedIn, notAfter: input.notAfter } : signedIn;
   const prepared = {
     input: input.impersonation ? { ...capped, impersonation: input.impersonation } : capped,
+    ...(input.sameAddress ? { address: input.user.email } : {}),
   };
   // After the hook: the hold is a write, and a before hook runs before the
   // first write (the D1 undo). Before the flow's other writes: the lock order.
@@ -382,6 +391,8 @@ export async function writeSession(
   ]);
   if (!user) stopWith("conflict");
   if (activeBan(user, config.clock.now())) stopWith("account_banned");
+  // This read follows the hold, so a change of address since the flow's check shows here.
+  if (prepared.address !== undefined && user.email !== prepared.address) stopWith("conflict");
   return written;
 }
 
