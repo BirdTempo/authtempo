@@ -39,6 +39,12 @@ const CLIENT_ID =
   "a cl_ id or the URL of a metadata document, at most 2048 characters (URI_MAX, engine/oauth-clients.ts); a parsed URL's href is ASCII";
 const EMAIL =
   "normalizeEmail refuses more than 254 code units (EMAIL_MAX, engine/users.ts); an address can hold a non-ASCII character";
+const DOMAIN =
+  "normalizeDomain gives the A-label form, ASCII, of at most 253 characters (DOMAIN_MAX, engine/sso/domains.ts)";
+const SCIM_TEXT =
+  "an externalId of a SCIM resource: 1 to 256 characters (ID_TEXT_MAX, engine/scim/users.ts and groups.ts)";
+const SCIM_KEY =
+  "scimKey (NFKC, then lower case) of a userName of at most 256 or a displayName of at most 255 characters; NFKC can lengthen a text, and 752 is the most that the unique key with organizationId holds in 3072 bytes";
 
 const ascii = (length: number, why: string): MysqlString => ({ length, charset: "ascii", why });
 const utf8 = (length: number, why: string): MysqlString => ({ length, charset: "utf8mb4", why });
@@ -167,6 +173,29 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
     255,
     "the id of a row of another system, such as a Better Auth apikey id; no bound is stated",
   ),
+  // Schema version 14 (plan 12d): SSO and SCIM.
+  "ssoConnection.id": ascii(64, ROW_ID),
+  "ssoConnection.organizationId": ascii(64, ROW_ID),
+  "ssoDomain.id": ascii(64, ROW_ID),
+  "ssoDomain.organizationId": ascii(64, ROW_ID),
+  "ssoDomain.domain": ascii(253, DOMAIN),
+  "ssoDomain.claimedDomain": ascii(253, DOMAIN),
+  "ssoDomain.connectionId": ascii(64, ROW_ID),
+  "scimToken.id": ascii(64, ROW_ID),
+  "scimToken.organizationId": ascii(64, ROW_ID),
+  "scimToken.tokenHash": ascii(64, HASH),
+  "scimUser.id": ascii(64, ROW_ID),
+  "scimUser.organizationId": ascii(64, ROW_ID),
+  "scimUser.userId": ascii(64, ROW_ID),
+  "scimUser.userNameKey": utf8(752, SCIM_KEY),
+  "scimUser.externalId": utf8(256, SCIM_TEXT),
+  "scimGroup.id": ascii(64, ROW_ID),
+  "scimGroup.organizationId": ascii(64, ROW_ID),
+  "scimGroup.displayNameKey": utf8(752, SCIM_KEY),
+  "scimGroup.externalId": utf8(256, SCIM_TEXT),
+  "scimGroupMember.id": ascii(64, ROW_ID),
+  "scimGroupMember.groupId": ascii(64, ROW_ID),
+  "scimGroupMember.scimUserId": ascii(64, ROW_ID),
 };
 
 function fieldType(model: ModelName, field: string): FieldType {

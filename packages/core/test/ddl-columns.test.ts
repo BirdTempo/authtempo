@@ -55,7 +55,10 @@ function longestPart(expr: string): string {
   // creates holds credentials scopes; a metadata document client holds none.
   if (expr === "client.id") return `cl_${"c".repeat(43)}`;
   // A row id or a session id: 64 characters (the MySQL width of an id).
-  if (/(^|\.)(id|userId|sid)$/.test(expr)) return "i".repeat(64);
+  if (/(^|\.)(id|userId|organizationId|sid)$/.test(expr)) return "i".repeat(64);
+  // The credential id of a SCIM caller that a compat package checked: 1 to
+  // 128 characters (scimRequestAs, create-auth.ts; plan 12d Task 14).
+  if (expr === "checked.tokenId") return "t".repeat(128);
   // normalizeEmail keeps at most 254 UTF-16 code units: 3 bytes each at most.
   if (/(^|\.)(email|newEmail)$/.test(expr)) return "語".repeat(254);
   // A hash in hex.
@@ -145,7 +148,8 @@ describe("the column map (plan 12g)", () => {
     for (const k of keyed) expect(MYSQL_STRINGS[k], k).toBeDefined();
     // Every row names a string field that a key or an index holds.
     for (const k of Object.keys(MYSQL_STRINGS)) expect(keyed.has(k), k).toBe(true);
-    expect(keyed.size).toBe(81);
+    // 81 of version 13, and 22 of the six models of version 14 (plan 12d).
+    expect(keyed.size).toBe(103);
   });
 
   it("keeps each MySQL key under the InnoDB limit", () => {
@@ -219,7 +223,9 @@ describe("the column map (plan 12g)", () => {
     // Each call has a key form that this test reads: a call it cannot read fails here.
     expect(sites.length).toBe(calls);
     // The count of the call sites at the 12k merge, the same after plan 12h.
-    expect(sites.length).toBe(76);
+    // Plan 12d adds 8: the SSO manager, the domain verify, the discovery, the
+    // start, the ACS, and the three of the SCIM token check.
+    expect(sites.length).toBe(84);
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(
       'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',
