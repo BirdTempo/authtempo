@@ -5,9 +5,11 @@ import { validCimdUrl } from "../src/engine/oauth-clients.js";
 import { createSession } from "../src/engine/sessions.js";
 import { json } from "../src/http/json.js";
 import { createRouter, type Route } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { newId } from "../src/primitives/ids.js";
 import { tiktokEntry } from "../src/social/entries/index.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
 import tiktokUserText from "./fixtures/providers/tiktok/user.json?raw";
 import { makeAuth, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
@@ -548,6 +550,55 @@ describe("the base URL list (plan 12i Task 18)", () => {
   });
 });
 
+describe("the phone and anonymous routes on a base URL list (plan 12i Tasks 5, 6, and 18)", () => {
+  const PHONE = "+14155550100";
+  const C = "https://c.example";
+  const fromIp = (n: number) => ({ "cf-connecting-ip": `198.51.100.${n}` });
+
+  /** The list [A, B] with phone and anonymous on, and the router with no wait of its own. */
+  function joinWorld() {
+    const sms = createRecordingSms();
+    const w = world({
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+      anonymous: { isolateLimiter: "allow" },
+    });
+    return { ...w, sms, route: createRouter(w.config, coreRoutes(w.config)) };
+  }
+
+  it("answers 421 to each phone and anonymous route on another host, and runs no work", async () => {
+    const w = joinWorld();
+    const work: Promise<unknown>[] = [];
+    const options = { waitUntil: (p: Promise<unknown>) => void work.push(p) };
+    const calls: [string, unknown][] = [
+      ["/auth/phone/request", { phone: PHONE }],
+      ["/auth/phone/verify", { phone: PHONE, code: "000000" }],
+      ["/auth/phone/add", { phone: PHONE }],
+      ["/auth/phone/add/verify", { code: "000000" }],
+      ["/auth/phone/remove", {}],
+      ["/auth/anonymous/sign-in", {}],
+      ["/auth/anonymous/delete", {}],
+    ];
+    for (const [path, body] of calls) {
+      const res = await w.route(postOn(C, path, body, fromIp(1)), options);
+      expect({ path, status: res.status }).toEqual({ path, status: 421 });
+      expect(await res.json()).toEqual({ error: "host_not_allowed" });
+    }
+    // The router checks the host before any route: no send after the answer, and no row.
+    expect(work).toEqual([]);
+    expect(w.sms.sent).toEqual([]);
+    expect(await w.storage.findMany("user", [])).toEqual([]);
+    // On B the request sends the code after the answer, under the waitUntil of the request.
+    const res = await w.route(
+      postOn(B, "/auth/phone/request", { phone: PHONE }, fromIp(2)),
+      options,
+    );
+    expect(await res.json()).toEqual({ sent: true });
+    expect(work).toHaveLength(1);
+    await Promise.all(work);
+    expect(w.sms.sent.map((m) => m.to)).toEqual([PHONE]);
+  });
+});
+
 describe("the back-channel logout on a base URL list (plan 12i Task 18)", () => {
   const BC = "https://client.example.com/backchannel";
   const AFTER = "https://client.example.com/signed-out";
@@ -652,6 +703,24 @@ describe("the back-channel logout on a base URL list (plan 12i Task 18)", () => 
     w.clock.advance(400 * 24 * 60 * 60_000);
     await w.auth.api.sweepExpired();
     expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
+  });
+
+  it("names B's issuer and deletes an old anonymous user of B in one sweep (plan 12i Task 6)", async () => {
+    const w = logoutWorld({ anonymous: { isolateLimiter: "allow" } });
+    const s = await signedIn(w);
+    await idTokenOn(w, B, s.cookie);
+    const anon = await w.auth.handle(
+      postOn(B, "/auth/anonymous/sign-in", {}, { "cf-connecting-ip": "198.51.100.9" }),
+    );
+    expect(anon.status).toBe(200);
+    w.clock.advance(400 * 24 * 60 * 60_000);
+    const r = await w.auth.api.sweepExpired();
+    // The link step and the anonymous step share the budget of one run.
+    expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
+    expect(r.anonymousUsers).toBe(1);
+    expect(
+      await w.storage.findMany("user", [{ field: "isAnonymous", op: "eq", value: true }]),
+    ).toEqual([]);
   });
 
   it("names the issuer of the link on B when the sign-out is on A", async () => {
