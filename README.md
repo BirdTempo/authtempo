@@ -31,6 +31,8 @@ The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the sa
 
 Organizations are in core behind `organizations: {}`. Passwords are in core behind `password: {}`; one hash needs Workers Paid.
 
+Enterprise SSO per organization (OIDC and SAML 2.0) with DNS domain proofs, and a SCIM 2.0 server for Users and Groups. Core holds them behind `sso` and `scim`. Both need `organizations`, and `sso.dns` must list one DNS resolver or more.
+
 The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The memory limiter is for tests. `auth.api.sweepExpired()` deletes expired rows, including limit windows, and runs from a scheduled handler.
 
 ## Commands
@@ -176,6 +178,11 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
   writes only the fault lines it wrote before plan 12h, plus one line when
   the waitUntil of the app throws. No event holds a secret, a credential,
   free text, or a raw email.
+- The SAML signature check is core's own code on Web Crypto, for one narrow
+  profile, with a differential test against a second canonicalizer. No
+  package decides who signs in.
+- A DNS proof that every configured resolver agrees on is the only proof of
+  an enterprise address. An IdP's `email_verified` is never read.
 
 ## Owner-run items of the site and the demo
 
