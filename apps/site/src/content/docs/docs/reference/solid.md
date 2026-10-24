@@ -35,6 +35,7 @@ On the server of Solid Start:
 4. Read the session in an API route with `getSession(event)`.
 5. Read the session in server code of a page with `getSession(getRequestEvent())`, not with `useSession`.
 6. Protect paths: `authOnRequest({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+7. On Workers, keep `authRouteHandlers(getAuth)`. The handlers pass the `waitUntil` of the request of srvx to `handle` themselves.
 
 ## Exports
 
@@ -60,6 +61,8 @@ On the server of Solid Start:
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
 | `StartEventLike` | The fields of the event that the entry reads. |
+| `StartApiEventLike` | The fields of the API event that the handlers read: `request`, and `nativeEvent.req` for the hook of the runtime. |
+| `StartRouteOptions` | The options of `authRouteHandlers`: `waitUntil`, the hook that keeps work alive after the answer. Default: the `waitUntil` of the request of srvx. |
 | `SolidStartAuthOptions` | The options of `authOnRequest`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## In the browser
@@ -93,6 +96,7 @@ On the server of Solid Start:
 - A server function runs at `/_server`, so a `protect` rule for a page does not cover the server functions that the page calls.
 - Read `getSession(getRequestEvent())` in each server function that needs a session.
 - The middleware writes the renewed cookie to the response headers of the event.
+- The handlers of core give `handle` the `waitUntil` of `event.nativeEvent.req`, the request of srvx. srvx sets it on Workers. The SMS of a phone code and the flush of the events run under it after the answer (ruling 29 of plan 12i).
 - Solid Start 2.0.6 (h3 2.0.2) puts those headers on the answer of a page, and on the answer of an API route below status 400.
 - The origin of the redirect comes from the Host header, else from the origin of `auth.baseURL`. A request line in absolute form never sets it.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.

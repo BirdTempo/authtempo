@@ -25,6 +25,7 @@ sidebar:
 2. Read the session: `app/root.tsx` holds `export const middleware = [authMiddleware({ auth: getAuth })];`.
 3. Read the session in a loader: `getSession(context)`.
 4. Protect paths: `authMiddleware({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+5. On Workers, pass the hook of the runtime: `authRouteModule(getAuth, { waitUntil })`, with `import { waitUntil } from "cloudflare:workers"`. The option also gets the loader arguments, so `(p, { context }) => context.get(cloudflare).ctx.waitUntil(p)` works with your own context key.
 
 ## Exports
 
@@ -35,6 +36,7 @@ sidebar:
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `sessionContext` | The router context of the session. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
+| `RouteModuleOptions` | The options of `authRouteModule`: `waitUntil`, the hook that keeps work alive after the answer. It has no default. |
 | `RouterAuthOptions` | The options of `authMiddleware`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## The paths that protect gets
@@ -57,6 +59,7 @@ sidebar:
 
 ## How it behaves
 
+- React Router 8 gives a loader a context with the keys of the app only. So the binding cannot read the ExecutionContext of Workers. With no `waitUntil` option, the work after the answer runs detached. On Workers core then waits for the work before it answers (ruling 29 of plan 12i).
 - The package takes `react-router` 8.4.0 or a later 8 release as a peer dependency.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.

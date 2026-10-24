@@ -347,3 +347,101 @@ describe("@authtempo/hono (plan 11d2)", () => {
     expect(res.headers.get("location")).toBe(`${BASE}/sign-in?next=%2Faccount`);
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options. `Ctx` throws on an unbound call, as the ExecutionContext of Workers does.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+class Ctx {
+  held: Promise<unknown>[] = [];
+  props = {};
+  waitUntil(promise: Promise<unknown>): void {
+    if (!(this instanceof Ctx)) throw new TypeError("Illegal invocation");
+    this.held.push(promise);
+  }
+  passThroughOnException(): void {}
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  it("passes the executionCtx of Workers, the option in its place, or none", async () => {
+    const s = waitSpy();
+    const app = new Hono();
+    app.all("/auth/*", authHandler(s.auth));
+    const ctx = new Ctx();
+    await app.request(`${BASE}/auth/x`, {}, {}, ctx);
+    expect(ctx.held).toEqual([s.work]);
+    // On Node, Hono has no executionCtx: handle gets no options.
+    await app.request(`${BASE}/auth/x`);
+    expect(s.got).toEqual(["options", "none"]);
+    const seen: [Promise<unknown>, string][] = [];
+    const own = new Hono();
+    own.all(
+      "/auth/*",
+      authHandler(s.auth, { waitUntil: (p, c) => void seen.push([p, c.req.path]) }),
+    );
+    const unused = new Ctx();
+    await own.request(`${BASE}/auth/x`, {}, {}, unused);
+    expect(seen).toEqual([[s.work, "/auth/x"]]);
+    expect(unused.held).toEqual([]);
+  });
+
+  it("answers a phone request before the SMS port returns, and sends under executionCtx", async () => {
+    let release = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const sent: string[] = [];
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [BASE],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      phone: {
+        sms: {
+          async send({ to }) {
+            await held;
+            sent.push(to);
+            return "sent";
+          },
+        },
+        regions: ["+1"],
+        isolateLimiter: "allow",
+        signUp: true,
+      },
+    });
+    const app = new Hono();
+    app.all("/auth/*", authHandler(auth));
+    const ctx = new Ctx();
+    const res = await app.request(
+      `${BASE}/auth/phone/request`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ phone: "+14155550100" }),
+      },
+      {},
+      ctx,
+    );
+    expect(await res.json()).toEqual({ sent: true });
+    expect(sent).toEqual([]);
+    expect(ctx.held).toHaveLength(1);
+    release();
+    await Promise.all(ctx.held);
+    expect(sent).toEqual(["+14155550100"]);
+  });
+});

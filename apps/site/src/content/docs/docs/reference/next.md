@@ -27,11 +27,13 @@ sidebar:
 | `authRouteHandlers` | Answers `{ GET, POST, OPTIONS }` for `app/auth/[...path]/route.ts`. |
 | `authSession` | Answers the session of a server component from its headers, or `null`. It renews no cookie. |
 | `authProxy` | Answers the `proxy` of `proxy.ts`. A request on a protected path with no session goes to the sign-in page with `next`. |
+| `RouteHandlerOptions` | The options of `authRouteHandlers`: `waitUntil`, the hook that keeps work alive after the answer. It has no default. |
 | `AuthProxyOptions` | The options of `authProxy`: `protect`, `signInPath`, `auth`, and `cookieName`. |
 | `AuthSource` | An auth instance, or a function that makes it at the first request. |
 
 ## How it behaves
 
+- A route handler of Next gets the Request only, so the binding reads no platform. Pass the hook of the host: `authRouteHandlers(getAuth, { waitUntil: (p) => after(p) })`, with `after` of `next/server`. On Workers pass `waitUntil` of `cloudflare:workers`. With no option, the work after the answer runs detached (ruling 29 of plan 12i).
 - The package imports nothing of Next at run time. It takes a web request and answers a web response.
 - Next 16 renamed middleware to proxy. The file is `proxy.ts`, and its export is `proxy`. For a file named `middleware.ts`, `next build` warns that the "middleware" file convention is deprecated.
 - Without `auth`, the proxy checks only that a session cookie is present, or a bearer that starts with `ts_` (`SESSION_TOKEN_PREFIX`). It does not check that the session is live. Never trust the proxy alone.

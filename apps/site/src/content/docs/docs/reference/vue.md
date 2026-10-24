@@ -29,7 +29,7 @@ In the browser:
 
 On the server of Nuxt:
 
-1. Mount core: `server/routes/auth/[...path].ts` holds `export default authEventHandler(getAuth);`.
+1. Mount core: `server/routes/auth/[...path].ts` holds `export default authEventHandler(getAuth);`. On Workers it passes the `waitUntil` of the Nitro preset to `handle` itself.
 2. Read the session: `server/middleware/session.ts` holds `export default authSessionHandler({ auth: getAuth });`.
 3. Read the session in a handler with `getSession(event)`. A page reads `useRequestEvent()?.context.session`.
 4. Protect paths: `authSessionHandler({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
@@ -57,6 +57,7 @@ On the server of Nuxt:
 | `authSessionHandler` | Answers the server middleware that sets `event.context.session`, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request, so `nuxt build` reads no secret. |
+| `NuxtRouteOptions` | The options of `authEventHandler`: `waitUntil`, the hook that keeps work alive after the answer. Default: `event.context.waitUntil`, else `event.context.cloudflare.context.waitUntil`. |
 | `NuxtAuthOptions` | The options of `authSessionHandler`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## In the browser
@@ -89,6 +90,7 @@ On the server of Nuxt:
 
 ## On the server of Nuxt
 
+- The handler of core gives `handle` the hook of the platform that Nitro puts in the event context. The Cloudflare presets of Nitro 2 set it. The SMS of a phone code and the flush of the events run under it after the answer. On Node, the work runs detached (ruling 29 of plan 12i).
 - `protect` guards a page load from the server only. A `<NuxtLink>` navigation renders the page in the browser, and never reaches the server middleware.
 - So read private data only in a server route that calls `getSession(event)`. Else read the session in the browser with `useSession`.
 - Or link with plain `<a>` tags, so that each page load reaches the server.

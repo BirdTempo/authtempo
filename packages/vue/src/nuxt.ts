@@ -1,7 +1,10 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
 import {
+  type BindingWaitUntil,
+  boundWaitUntil,
   checkGateOptions,
   type GateAuth,
+  handleOptions,
   type RoutedPath,
   readGate,
 } from "@authtempo/core/bindings";
@@ -33,9 +36,42 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+export interface NuxtRouteOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Default: the hook of the platform that Nitro puts in the
+   * event context. Not `event.waitUntil`: Nitro sets that one on every
+   * host, so it does not tell a Worker with no hook.
+   */
+  waitUntil?: BindingWaitUntil<H3Event> | undefined;
+}
+
+/**
+ * The hook of the platform. Nitro 2.13.4 copies the `waitUntil` of its
+ * Cloudflare presets to `event.context.waitUntil`, and the ExecutionContext
+ * to `event.context.cloudflare.context` (runtime/internal/app.mjs:48-59 and
+ * presets/cloudflare/runtime/_module-handler.mjs:94-99, read 2026-10-25).
+ */
+function platformWaitUntil(event: H3Event): ((promise: Promise<unknown>) => void) | undefined {
+  const context = event.context as {
+    waitUntil?: unknown;
+    cloudflare?: { context?: unknown };
+  };
+  if (typeof context.waitUntil === "function") return boundWaitUntil(context);
+  return boundWaitUntil(context.cloudflare?.context);
+}
+
 /** The handler of `server/routes/auth/[...path].ts`: `export default authEventHandler(getAuth);`. */
-export function authEventHandler(auth: AuthSource<Pick<Auth, "handle">>): EventHandler {
-  return defineEventHandler((event) => resolve(auth).handle(toWebRequest(event)));
+export function authEventHandler(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: NuxtRouteOptions = {},
+): EventHandler {
+  return defineEventHandler((event) =>
+    resolve(auth).handle(
+      toWebRequest(event),
+      handleOptions(options.waitUntil, event, () => platformWaitUntil(event)),
+    ),
+  );
 }
 
 export interface NuxtAuthOptions {

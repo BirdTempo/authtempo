@@ -1,5 +1,13 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  boundWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+  withSetCookie,
+} from "@authtempo/core/bindings";
 import type { Context, MiddlewareHandler } from "hono";
 
 /**
@@ -17,11 +25,38 @@ function resolve<A extends object>(source: HonoAuthSource<A>, c: Context): A {
   return typeof source === "function" ? (source as (c: Context) => A)(c) : source;
 }
 
+export interface HonoHandlerOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Default on Workers: `c.executionCtx.waitUntil`. Set it on a
+   * host whose runtime stops work at the answer and that Hono does not see.
+   */
+  waitUntil?: BindingWaitUntil<Context> | undefined;
+}
+
+/**
+ * The ExecutionContext of Workers, or undefined. The getter `c.executionCtx`
+ * of Hono 4.13.13 throws when the runtime gives none, as on Node
+ * (dist/types/context.d.ts:247, read 2026-10-25).
+ */
+function executionContext(c: Context): unknown {
+  try {
+    return c.executionCtx;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The handler of the routes of core, for every method: `app.all("/auth/*", authHandler(auth))`. */
 export function authHandler(
   auth: HonoAuthSource<Pick<Auth, "handle">>,
+  options: HonoHandlerOptions = {},
 ): (c: Context) => Promise<Response> {
-  return (c) => resolve(auth, c).handle(c.req.raw);
+  return (c) =>
+    resolve(auth, c).handle(
+      c.req.raw,
+      handleOptions(options.waitUntil, c, () => boundWaitUntil(executionContext(c))),
+    );
 }
 
 /**

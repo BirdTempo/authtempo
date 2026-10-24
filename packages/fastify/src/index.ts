@@ -1,8 +1,10 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
 import {
+  type BindingWaitUntil,
   checkGateOptions,
   DEFAULT_BASE_PATH,
   type GateAuth,
+  handleOptions,
   readGate,
 } from "@authtempo/core/bindings";
 import type {
@@ -155,6 +157,12 @@ export interface FastifyRoutesOptions {
    * in `auth`, the default is "/auth", so set `basePath` for another one.
    */
   basePath?: string | undefined;
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Node keeps a detached promise alive, so a plain server needs
+   * none. Set it on a host that stops the function after the answer.
+   */
+  waitUntil?: BindingWaitUntil<FastifyRequest> | undefined;
 }
 
 /**
@@ -177,7 +185,8 @@ export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
       url: `${basePath}/*`,
       handler: async (request, reply) => {
         const auth = resolve(options.auth);
-        return sendWebResponse(reply, await auth.handle(toWebRequest(request, auth.baseURL)));
+        const wait = handleOptions(options.waitUntil, request, () => undefined);
+        return sendWebResponse(reply, await auth.handle(toWebRequest(request, auth.baseURL), wait));
       },
     });
   };

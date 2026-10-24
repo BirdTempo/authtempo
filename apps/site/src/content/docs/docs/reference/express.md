@@ -34,6 +34,7 @@ sidebar:
 | `toWebRequest` | Answers the web request of an Express request: the full URL, every header, and the body. |
 | `sendWebResponse` | Writes a web response to Express, with each `Set-Cookie` line. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
+| `ExpressHandlerOptions` | The options of `authHandler`: `waitUntil`, the hook that keeps work alive after the answer. It has no default. |
 | `ExpressSessionOptions` | The options of `authSession`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## The paths that protect gets
@@ -51,6 +52,7 @@ sidebar:
 
 ## How it behaves
 
+- Node keeps a detached promise alive, so a plain server needs no `waitUntil`. On a host that stops the function after the answer, pass `waitUntil` in the options of `authHandler`. The SMS of a phone code and the flush of the events run under it (ruling 29 of plan 12i).
 - The package takes `express` 5.2.1 or a later 5 release as a peer dependency.
 - The Express adapter of NestJS 12 pins Express 5.2.1, so the binding runs there too.
 - A body parser such as `express.json()` may run before the routes of core. The binding writes the parsed body again in its content type.

@@ -23,6 +23,7 @@ sidebar:
 1. Mount core for every method: `app.all("/auth/*", authHandler(auth))`.
 2. Read the session: `app.use("*", authSession({ auth }))`, then `getSession(c)` in a route.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+4. On Workers, mount core with a function of the context: `app.all("/auth/*", authHandler((c) => getAuth(c.env)))`. The handler passes `c.executionCtx.waitUntil` to `handle` itself.
 
 ## Exports
 
@@ -32,6 +33,7 @@ sidebar:
 | `authSession` | Answers the middleware that sets the session, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthEnv` | The type of the app's variables: `session`. |
+| `HonoHandlerOptions` | The options of `authHandler`: `waitUntil`, the hook that keeps work alive after the answer. Default: `c.executionCtx.waitUntil` when the runtime gives one. |
 | `HonoAuthSource` | The auth instance, or a function of the context that makes it. On Workers the bindings come in `c.env`. |
 | `HonoSessionOptions` | The options of `authSession`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
@@ -47,6 +49,7 @@ sidebar:
 
 - The package takes `hono` 4.13.13 or a later 4 release as a peer dependency.
 - On Workers, pass a function of the context: `authHandler((c) => getAuth(c.env))`.
+- On Workers, `authHandler` gives `handle` the `waitUntil` of `c.executionCtx`. The SMS of a phone code and the flush of the events run under it after the answer. On Node, Bun, and Deno, Hono has no `executionCtx`, and the work runs detached. Pass `authHandler(auth, { waitUntil })` to use another hook (ruling 29 of plan 12i).
 - A function given to both `authSession` and `authHandler` runs twice for a request to core. Make it return one instance per environment.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.

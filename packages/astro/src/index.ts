@@ -1,5 +1,13 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  boundWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+  withSetCookie,
+} from "@authtempo/core/bindings";
 import type { APIContext, APIRoute, MiddlewareHandler } from "astro";
 
 /**
@@ -23,12 +31,36 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+export interface AstroRouteOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Default on Workers: `locals.cfContext.waitUntil`.
+   */
+  waitUntil?: BindingWaitUntil<APIContext> | undefined;
+}
+
+/**
+ * The ExecutionContext of Workers. @astrojs/cloudflare 14.4.2 puts it in
+ * `locals.cfContext` (dist/utils/cf-helpers.d.ts, read 2026-10-25). Its
+ * `locals.runtime.ctx` throws since Astro 6, so the binding never reads it.
+ */
+function cfContext(context: APIContext): unknown {
+  return (context.locals as { cfContext?: unknown }).cfContext;
+}
+
 /**
  * The endpoint of the routes of core, in `src/pages/auth/[...path].ts`:
  * `export const ALL = authRoute(getAuth); export const prerender = false;`.
  */
-export function authRoute(auth: AuthSource<Pick<Auth, "handle">>): APIRoute {
-  return ({ request }) => resolve(auth).handle(request);
+export function authRoute(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: AstroRouteOptions = {},
+): APIRoute {
+  return (context) =>
+    resolve(auth).handle(
+      context.request,
+      handleOptions(options.waitUntil, context, () => boundWaitUntil(cfContext(context))),
+    );
 }
 
 export interface AstroAuthOptions {
