@@ -16,9 +16,9 @@ const X_ID_RE = /^[1-9][0-9]{0,19}$/;
 
 /**
  * X (the provider name `twitter`, as in Better Auth 1.7.2) as an `oauth2`
- * provider (plan 12i Task 14). From X's OAuth 2.0 pages, read 2026-10-24:
- * the authorize URL takes a PKCE challenge, and a confidential client sends
- * an `Authorization: Basic` header of its id and secret to the token URL.
+ * provider (plan 12i Task 14). It follows X's OAuth 2.0 pages, read 2026-10-24.
+ * The authorize URL takes a PKCE challenge. A confidential client sends an
+ * `Authorization: Basic` header of its id and secret to the token URL.
  */
 export function twitterProvider(c: TwitterConfig): OAuth2Provider {
   return {
