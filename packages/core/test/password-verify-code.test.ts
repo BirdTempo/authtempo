@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AuthConfig, MailMessage, PasswordConfig } from "../src/config.js";
+import type { AuthConfig, MailMessage, PasswordConfig, VerifyCodeConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { type AnonymousLinkEvent, hookRefusal } from "../src/engine/hooks.js";
 import { createRouter } from "../src/http/router.js";
@@ -476,17 +476,14 @@ describe("the sign-up code (plan 12i Task 20)", () => {
   });
 
   it("refuses a password.verifyCode value outside its range at createAuth", () => {
-    const bad: [PasswordConfig["verifyCode"], string][] = [
+    const bad: [VerifyCodeConfig, string][] = [
       [{ length: 5 }, "password.verifyCode.length must be an integer from 6 to 10"],
       [{ length: 11 }, "password.verifyCode.length must be an integer from 6 to 10"],
       [{ ttlMinutes: 0 }, "password.verifyCode.ttlMinutes must be an integer from 1 to 30"],
       [{ ttlMinutes: 31 }, "password.verifyCode.ttlMinutes must be an integer from 1 to 30"],
       [{ maxAttempts: 0 }, "password.verifyCode.maxAttempts must be an integer from 1 to 10"],
       [{ maxAttempts: 2.5 }, "password.verifyCode.maxAttempts must be an integer from 1 to 10"],
-      [
-        { tries: 3 } as unknown as PasswordConfig["verifyCode"],
-        "password.verifyCode.tries is not an option",
-      ],
+      [{ tries: 3 } as unknown as VerifyCodeConfig, "password.verifyCode.tries is not an option"],
     ];
     for (const [verifyCode, message] of bad) expect(() => world({ verifyCode })).toThrow(message);
     for (const verifyCode of [{ length: 10, ttlMinutes: 30, maxAttempts: 10 }, { maxAttempts: 1 }])
