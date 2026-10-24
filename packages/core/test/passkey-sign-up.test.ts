@@ -410,6 +410,21 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     expect(row?.freshAt).not.toBeNull();
   });
 
+  it("takes no address code step under password.verifyBy code (Task 20 join)", async () => {
+    // The sign-up code of plan 12i Task 20 proves an address. This sign-up has none.
+    const w = world({ password: { hash: FAST, uniformSignUp: true, verifyBy: "code" } });
+    const { res } = await signUp(w);
+    const body = (await res.json()) as { user: { id: string; email: string | null } };
+    expect(body.user.email).toBeNull();
+    const sessions = await w.storage.findMany("session", []);
+    expect(sessions.map((s) => s.userId)).toEqual([body.user.id]);
+    expect(w.created.map((c) => c.via)).toEqual(["passkey"]);
+    // No code mail and no code row: the code path keys on an address.
+    expect(w.mail).toEqual([]);
+    const rows = await w.storage.findMany("verification", []);
+    expect(rows.map((r) => [r.purpose, r.identifier])).toEqual([["passkey-challenge", "sign-up"]]);
+  });
+
   it("limits the options by IP", async () => {
     const w = world();
     const one = ip();
