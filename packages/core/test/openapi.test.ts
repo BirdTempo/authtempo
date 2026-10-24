@@ -255,6 +255,7 @@ describe("openApiDocument (plan 11g)", () => {
     const schemes: Record<string, string[]> = {
       none: [],
       session: ["sessionCookie", "sessionBearer"],
+      sessionCookie: ["sessionCookie"],
       apiToken: ["apiToken"],
       organizationToken: ["organizationToken"],
       sessionJwt: ["sessionJwt"],
@@ -276,6 +277,13 @@ describe("openApiDocument (plan 11g)", () => {
       );
       expect(op.security, key).toEqual(expected);
     }
+    // Plan 12i Task 11 (ruling 34 L4): the multi-session routes take the cookie only, no bearer.
+    for (const [path, method] of [
+      ["/multi-session", "get"],
+      ["/multi-session/switch", "post"],
+      ["/multi-session/sign-out", "post"],
+    ] as const)
+      expect(reference().paths[path]?.[method]?.security, path).toEqual([{ sessionCookie: [] }]);
     // Plan 12e: the token and revoke routes take no credential, or the client's Basic auth.
     const token = reference().paths["/oauth/token"]?.post;
     expect(token?.security).toEqual([{}, { clientSecretBasic: [] }]);

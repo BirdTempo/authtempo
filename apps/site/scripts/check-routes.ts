@@ -20,6 +20,7 @@ export interface RouteCells {
 export const AUTH_WORDS: Record<AuthForm, string> = {
   none: "Nothing",
   session: "A session cookie, or a ts_ bearer token",
+  sessionCookie: "The session cookie of a browser only",
   apiToken: "A tk_ bearer token",
   organizationToken: "A to_ bearer token",
   sessionJwt: "A session JWT as the bearer",

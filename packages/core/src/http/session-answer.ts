@@ -3,6 +3,7 @@ import type { LastMethod } from "../engine/last-method.js";
 import { bagAtSignIn, bagTokens } from "../engine/multi-session.js";
 import type { TwoFactorPending } from "../engine/second-factor.js";
 import { publicSession, sessionCookieToken, sessionMaxAgeSeconds } from "../engine/sessions.js";
+import { isBearerRequest } from "../primitives/credentials.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import {
   bagCookie,
@@ -60,8 +61,8 @@ export function viaField(
 /**
  * Appends the last method cookie to the answer of a browser sign-in (plan
  * 12i Task 12, spec 32 item 11). Nothing with `lastMethod` off. A request
- * with an `Authorization` header is a bearer client: it keeps the token and
- * reads `via`, so it gets no cookie. The cookie is a hint for the sign-in
+ * with the Bearer scheme is a bearer client (`isBearerRequest`): it keeps
+ * the token and reads `via`, so it gets no cookie. The cookie is a hint for the sign-in
  * page only: no read of core trusts it.
  */
 export function withLastMethod(
@@ -71,7 +72,7 @@ export function withLastMethod(
   method: LastMethod,
 ): Response {
   const last = config.lastMethod;
-  if (!last || request.headers.has("authorization")) return res;
+  if (!last || isBearerRequest(request)) return res;
   res.headers.append("set-cookie", lastMethodCookie(last.cookieName, method, last.days * 86_400));
   return res;
 }
@@ -147,8 +148,8 @@ export function withBag(
  * The bag write at each browser sign-in (plan 12i Task 11). The router
  * calls it after every handler, so each route that sets a new session
  * cookie writes the bag through this one step: a new sign-in route cannot
- * skip it. It does nothing with multi-session off, for a request with an
- * `Authorization` header (a bearer client has no bag), during an
+ * skip it. It does nothing with multi-session off, for a request with the
+ * Bearer scheme (`isBearerRequest`: a bearer client has no bag), during an
  * impersonation (the actor cookie holds the operator's token), and for an
  * answer that writes the bag cookie itself (the multi-session routes). A
  * renewal sets the same token, so it changes nothing.
@@ -159,7 +160,7 @@ export async function withSessionBag(
   res: Response,
 ): Promise<Response> {
   const ms = config.multiSession;
-  if (!ms || request.headers.has("authorization")) return res;
+  if (!ms || isBearerRequest(request)) return res;
   if (readCookie(request, actorCookieName(config)) !== null) return res;
   if (res.headers.getSetCookie().some((c) => c.startsWith(`${ms.cookieName}=`))) return res;
   const token = cookieSet(res, config.cookieName);

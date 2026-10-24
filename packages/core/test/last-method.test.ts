@@ -377,6 +377,14 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(bearer.status).toBe(200);
     expect(lastCookie(bearer)).toBeNull();
     expect((await bodyOf(bearer)).via).toBe("password");
+    // HTTP Basic in front of the site is a browser: it keeps the cookie (ruling 34 L2).
+    const basic = await passwordSignIn(
+      w,
+      { email: EMAIL },
+      { authorization: "Basic dXNlcjpwYXNz" },
+    );
+    expect(basic.status).toBe(200);
+    expect(lastCookie(basic)).toBe(expected("password"));
     // Off by default: no cookie and no `via`.
     const off = world({ lastMethod: false });
     await signUpAndVerify(off.auth, EMAIL, PASSWORD);

@@ -204,7 +204,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `RouteEntry` | One row of `ROUTES`: `method`, `path`, `feature`, `auth`, `codes`, `oauthCodes`, and `crossSiteForm` on the one cross-site form post. |
 | `RouteFeature` | The config part that turns a route on. |
 | `ROUTE_FEATURES` | Every feature once, as a tuple. `RouteFeature` is one of its members. |
-| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `organizationToken`, `sessionJwt`, `accessToken`, `dpopAccessToken`, `operator`, `initialAccessToken`, `clientSecretBasic`, or `scimToken`. |
+| `AuthForm` | A credential form that a route takes: `none`, `session`, `sessionCookie` (the cookie only), `apiToken`, `organizationToken`, `sessionJwt`, `accessToken`, `dpopAccessToken`, `operator`, `initialAccessToken`, `clientSecretBasic`, or `scimToken`. |
 | `RouteMethod` | `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`. Only the SCIM routes use the last three. |
 | `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |

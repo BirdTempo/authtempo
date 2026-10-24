@@ -28,7 +28,14 @@ import {
  * The rules: one session per user, so a second sign-in of a user ends the
  * first with `sign_out`. An impersonation session never enters the bag:
  * the actor cookie keeps the operator's token. An anonymous user's session
- * never enters the bag. A full bag ends its oldest session with `displaced`.
+ * never enters the bag. A full bag ends its least recently used session
+ * with `displaced`.
+ *
+ * The bag order is the order of use: a session that leaves the active place
+ * goes to the end of the bag, at a sign-in and at a switch. So the first
+ * bag token is the session that the browser used least recently (ruling 34
+ * of plan 12i). Core stores no use time of a session: `lastSeenAt` moves
+ * only at a sliding refresh.
  */
 
 /** The limit of the three multi-session routes, per IP. */
@@ -64,8 +71,9 @@ export function bagTokens(config: ResolvedConfig, value: string | null): string[
  * the token of the new session cookie. One read finds every row by its
  * token hash. The previous session moves into the bag when it is live and
  * of another user, and when that user is not anonymous. A session of the
- * signed-in user ends with `sign_out`. A bag past `max - 1` ends its oldest
- * session with `displaced`. An impersonation start keeps the bag as it is.
+ * signed-in user ends with `sign_out`. A bag past `max - 1` ends its first
+ * session, the least recently used, with `displaced`. Never the active one:
+ * the previous session goes last. An impersonation start keeps the bag as it is.
  */
 export async function bagAtSignIn(
   config: ResolvedConfig,
@@ -116,15 +124,8 @@ export async function bagAtSignIn(
         : await config.storage.findOne("user", [{ field: "id", op: "eq", value: before.userId }]);
     if (before.userId === current.userId || (user && !user.isAnonymous)) keep(previous, before);
   }
-  const displaced: SessionRow[] = [];
-  while (kept.length > ms.max - 1) {
-    let oldest = 0;
-    kept.forEach((k, i) => {
-      if (k.row.createdAt.getTime() < (kept[oldest]?.row.createdAt.getTime() ?? 0)) oldest = i;
-    });
-    const [gone] = kept.splice(oldest, 1);
-    if (gone) displaced.push(gone.row);
-  }
+  // The bag entries come first in bag order, then the previous session: the order of use.
+  const displaced = kept.splice(0, Math.max(0, kept.length - (ms.max - 1))).map((k) => k.row);
   await endRows(config, replaced, "sign_out");
   await endRows(config, displaced, "displaced");
   return kept.map((k) => k.token);
@@ -153,6 +154,11 @@ async function endRows(
  * A token that resolves to nothing, to an impersonation session, to an
  * anonymous user, or to a user that the active session or an earlier entry
  * holds leaves the bag. The caller writes the bag again from the answer.
+ *
+ * A bag session is idle, so its read never slides the expiry (ruling 34 of
+ * plan 12i): a list must not keep alive a session that nobody uses. Every
+ * end rule holds. A request mode of `"read-only"` stays read-only. On D1 the
+ * slide of nine due sessions costs up to 18 queries, past the budget of 50.
  */
 export async function listBrowserSessions(
   config: ResolvedConfig,
@@ -161,7 +167,7 @@ export async function listBrowserSessions(
   const users = new Set([input.active.user.id]);
   const entries: BagEntry[] = [];
   for (const token of input.bag) {
-    const resolved = await resolveSession(config, token, input.mode);
+    const resolved = await resolveSession(config, token, bagMode(input.mode));
     if (!resolved || resolved.session.actorId !== null || resolved.user.isAnonymous) continue;
     if (users.has(resolved.user.id)) continue;
     users.add(resolved.user.id);
@@ -170,11 +176,18 @@ export async function listBrowserSessions(
   return entries;
 }
 
+/** The read mode of a bag token: no slide, or no write at all. */
+function bagMode(mode: SessionReadMode): SessionReadMode {
+  return mode === "read-only" ? "read-only" : "no-slide";
+}
+
 /**
  * Makes the bag session `sessionId` the active one (plan 12i). Every bag
  * token resolves first. The old active session moves into the bag, unless
  * its user is anonymous. A switch writes no `freshAt`: each session keeps
- * its own. `not_found` when no live bag session has the id.
+ * its own. The new active session then gets the normal read of a request,
+ * in `mode`, so a due refresh slides it (ruling 34 of plan 12i). `not_found`
+ * when no live bag session has the id.
  */
 export async function switchSession(
   config: ResolvedConfig,
@@ -190,8 +203,12 @@ export async function switchSession(
   const tokens = entries.map((e) => e.token);
   if (input.sessionId === input.active.session.id)
     return ok({ active: { token: input.activeToken, resolved: input.active }, bag: tokens });
-  const target = entries.find((e) => e.resolved.session.id === input.sessionId);
-  if (!target) return fail("not_found");
+  const found = entries.find((e) => e.resolved.session.id === input.sessionId);
+  if (!found) return fail("not_found");
+  const resolved = await resolveSession(config, found.token, input.mode);
+  // The session ended between the two reads: the switch finds no live session.
+  if (!resolved) return fail("not_found");
+  const target = { token: found.token, resolved };
   const rest = tokens.filter((t) => t !== target.token);
   return ok({
     active: target,

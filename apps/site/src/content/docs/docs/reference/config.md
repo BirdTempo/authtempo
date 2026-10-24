@@ -424,7 +424,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `lastMethod` | `LastMethodConfig` or `false` | `false` | Each browser sign-in sets a cookie that a script can read, with the method: `password`, `username`, `phone`, `magic_link`, `email_otp`, `passkey`, or `social:<provider>`. Each JSON sign-in answer carries the same value as `via`. A request with an `Authorization` header gets no cookie. The cookie is a hint for the sign-in page only. Core never stores the method. `{}` turns it on. |
+| `lastMethod` | `LastMethodConfig` or `false` | `false` | Each browser sign-in sets a cookie that a script can read, with the method: `password`, `username`, `phone`, `magic_link`, `email_otp`, `passkey`, or `social:<provider>`. Each JSON sign-in answer carries the same value as `via`. A request with the Bearer scheme gets no cookie; HTTP Basic does not count. The cookie is a hint for the sign-in page only. Core never stores the method. `{}` turns it on. |
 | `lastMethod.cookieName` | string | `"__Host-tempo_last_method"` | 1 to 64 token characters. Not the name of another cookie of core. |
 | `lastMethod.days` | number | 30 | An integer from 1 to 400. |
 
@@ -442,8 +442,8 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A bearer client has no bag. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
-| `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the oldest session of the bag. |
+| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A request with the Bearer scheme has no bag; HTTP Basic does not count. A bag session never slides its expiry, so an idle one ends at its ttl. When the active session ends elsewhere, the bag stays out of reach until a new sign-in. A SCIM-revoked session holds its bag place until the next list or switch. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
+| `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the session of the bag that the browser used least recently, never the active one. |
 
 ## Observability
 

@@ -608,8 +608,11 @@ export interface SessionReadOptions {
 /**
  * How `resolveSession` runs. `"write"` slides the expiry and deletes an
  * ended row. `"read-only"` writes nothing (plan 12a). `readModeOf` decides it.
+ * `"no-slide"` deletes an ended row as `"write"` does, but never slides the
+ * expiry (ruling 34 of plan 12i). A bag session of multi-session reads with
+ * it: the session is idle, so a list must not extend its life.
  */
-export type SessionReadMode = "write" | "read-only";
+export type SessionReadMode = "write" | "read-only" | "no-slide";
 
 /**
  * The one place that decides the read mode of a request (plan 12a, plan
@@ -631,7 +634,8 @@ export function readModeOf(
  * deleted on the way out. After `slidingRefreshDays` the expiry moves
  * forward by a full ttl. In `"read-only"` mode the call writes nothing: an
  * ended row answers null and stays for the sweep, and a due refresh sets
- * `needsRefresh`. No mode changes `freshAt`. An impersonation session (with
+ * `needsRefresh`. In `"no-slide"` mode the call ends an ended row and
+ * never slides. No mode changes `freshAt`. An impersonation session (with
  * `actorId`) is never due: its expiry is fixed at the start (plan 12f).
  *
  * A session from before the end of the user's last ban answers null (plan
@@ -649,7 +653,7 @@ export async function resolveSession(
   peeked: SessionRow | null = null,
   peekedUser: UserRow | null = null,
 ): Promise<ResolvedSession | null> {
-  const write = mode === "write";
+  const write = mode !== "read-only";
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
@@ -706,7 +710,7 @@ export async function resolveSession(
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
   const due = session.actorId === null && sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };
-  if (due) {
+  if (due && mode === "write") {
     const slid = sessionExpiry(config, session.createdAt, now);
     // A SAML cap holds through every refresh (ruling 38 Q1 of plan 12d). The
     // row goes with the cap, and the session ends at the cap too, so a

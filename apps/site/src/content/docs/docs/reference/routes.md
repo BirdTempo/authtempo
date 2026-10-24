@@ -1951,13 +1951,15 @@ These routes exist when the config sets `username`. A username is public by desi
 
 ## Multi-session
 
-These routes exist when the config sets `multiSession`. One browser keeps the sessions of several users. The session cookie holds the active token, and the HttpOnly bag cookie `__Host-tempo_sessions` holds the others. A browser sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. Each route resolves each token of the bag, so a revoked, expired, or banned session leaves the bag cookie in the same answer. A token of the bag signs no request in. A request with an `Authorization` header answers 401: a bearer client has no bag. No answer holds a token.
+These routes exist when the config sets `multiSession`. One browser keeps the sessions of several users. The session cookie holds the active token, and the HttpOnly bag cookie `__Host-tempo_sessions` holds the others. A browser sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. Each route resolves each token of the bag, so a revoked, expired, or banned session leaves the bag cookie in the same answer. The read of a bag token never slides its expiry: a list does not keep an idle session alive. A switch reads the new active session as any request does. A token of the bag signs no request in. A request with the Bearer scheme answers 401: a bearer client has no bag. Another scheme, such as HTTP Basic in front of the site, does not refuse a browser. No answer holds a token.
+
+Two limits remain. When the active session ends elsewhere, these routes answer 401, and the browser reaches its bag only after a new sign-in. A session that a SCIM deactivate revoked keeps its place in the bag until the next list or switch. Until then, a sign-in can displace a live session in its place.
 
 <h3 id="get-multi-session"><code>GET /multi-session</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Needs | The session cookie of a browser only. A request with the Bearer scheme answers 401 |
 | Input | None |
 | Answer | `{ sessions }`: the active session first, then each live session of the bag. Each has `sessionId`, `active`, and `user` with `id`, `name`, `email`, `username`, and `image` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
@@ -1966,7 +1968,7 @@ These routes exist when the config sets `multiSession`. One browser keeps the se
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Needs | The session cookie of a browser only. A request with the Bearer scheme answers 401 |
 | Input | JSON `{ sessionId }`. The id of a session of the bag |
 | Answer | `{ user, session }` of the new active session. The session cookie takes its token, and the old active session moves into the bag. A switch makes no session fresh. An id of no live session of this browser answers `not_found` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
@@ -1975,7 +1977,7 @@ These routes exist when the config sets `multiSession`. One browser keeps the se
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Only the cookie form serves: a request with an `Authorization` header answers 401 |
+| Needs | The session cookie of a browser only. A request with the Bearer scheme answers 401 |
 | Input | JSON `{ sessionId }`. The id of the active session or of a session of the bag |
 | Answer | `{ ok: true }`. Only that session ends. When it is the active one, the first live session of the bag becomes active, or the session cookie is cleared. An id of no live session of this browser answers `not_found` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |

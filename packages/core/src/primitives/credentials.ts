@@ -116,6 +116,16 @@ export function readBearer(request: Pick<Request, "headers">): string | null {
 }
 
 /**
+ * True when the `Authorization` header names the Bearer scheme, in any case
+ * (ruling 34 of plan 12i). The one rule of a bearer client: it keeps its
+ * token, so it gets no multi-session bag and no last-method cookie. Another
+ * scheme, such as HTTP Basic in front of a staging site, leaves a browser.
+ */
+export function isBearerRequest(request: Pick<Request, "headers">): boolean {
+  return /^Bearer(\s|$)/i.test(request.headers.get("authorization") ?? "");
+}
+
+/**
  * The value of `Authorization: DPoP <token>`, or null (RFC 9449 section 7.1).
  * The one copy of the DPoP scheme rule: core and the verifier read it here.
  */

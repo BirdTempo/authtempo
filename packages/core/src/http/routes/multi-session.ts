@@ -15,6 +15,7 @@ import {
 } from "../../engine/sessions.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
+import { isBearerRequest } from "../../primitives/credentials.js";
 import { fail } from "../../result.js";
 import { sessionIdBody } from "../contract/multi-session.js";
 import { readCookie, sessionCookie } from "../cookies.js";
@@ -36,12 +37,12 @@ interface Browser {
 
 /**
  * The browser of the request, or the answer that refuses it. A request
- * with an `Authorization` header answers 401: a bearer client has no bag
- * (spec 32 item 17). Then the per-IP limit, then the active session of the
+ * with the Bearer scheme answers 401: a bearer client has no bag (spec 32
+ * item 17). Another scheme, such as HTTP Basic, leaves a browser. Then the per-IP limit, then the active session of the
  * cookie. A bag token alone signs no request in.
  */
 async function browserOf(ctx: RouteContext, bagName: string): Promise<Browser | Response> {
-  if (ctx.request.headers.has("authorization")) return unauthorized();
+  if (isBearerRequest(ctx.request)) return unauthorized();
   if (!(await limit(ctx.config, "multi-session:ip", ipKey(ctx.ip), MULTI_SESSION_PER_IP)))
     return respond(fail("rate_limited"));
   const token = sessionCookieToken(ctx.config, ctx.request);

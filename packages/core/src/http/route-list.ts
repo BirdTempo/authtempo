@@ -57,6 +57,7 @@ export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 export type AuthForm =
   | "none" // no credential
   | "session" // the session cookie or a ts_ bearer
+  | "sessionCookie" // the session cookie only: a Bearer request answers 401 (plan 12i Task 11)
   | "apiToken" // a tk_ bearer
   | "organizationToken" // a `to_` bearer (plan 12k)
   | "sessionJwt" // a session JWT as the bearer (POST /token/live, plan 11d)
@@ -321,12 +322,12 @@ export const ROUTES = Object.freeze([
     ],
     oauthCodes: [],
   },
-  // Plan 12i Task 11: multi-session (spec 32 item 11). The browser's cookies only: a bearer gets 401.
+  // Plan 12i Task 11: multi-session (spec 32 item 11). The browser's cookies only: a bearer gets 401 (ruling 34 L4).
   {
     method: "GET",
     path: "/multi-session",
     feature: "multiSession",
-    auth: ["session"],
+    auth: ["sessionCookie"],
     codes: ["unauthorized", "rate_limited", "impersonation_session"],
     oauthCodes: [],
   },
@@ -334,7 +335,7 @@ export const ROUTES = Object.freeze([
     method: "POST",
     path: "/multi-session/switch",
     feature: "multiSession",
-    auth: ["session"],
+    auth: ["sessionCookie"],
     codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
     oauthCodes: [],
   },
@@ -342,7 +343,7 @@ export const ROUTES = Object.freeze([
     method: "POST",
     path: "/multi-session/sign-out",
     feature: "multiSession",
-    auth: ["session"],
+    auth: ["sessionCookie"],
     codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
     oauthCodes: [],
   },

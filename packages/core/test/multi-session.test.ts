@@ -403,14 +403,137 @@ describe("multi-session (plan 12i Task 11)", () => {
     const a = await signIn(w, b, "ada@example.com");
     await signIn(w, b, "bob@example.com");
     const bearer = { authorization: `Bearer ${a}` };
+    // The scheme name in any case (ruling 34 L2).
+    const lower = { authorization: `bearer ${a}` };
     // A bearer with the cookies too: the header alone refuses.
-    for (const headers of [bearer, { ...b.header(), ...bearer }]) {
+    for (const headers of [bearer, { ...b.header(), ...bearer }, { ...b.header(), ...lower }]) {
       expect((await w.handle(get("/auth/multi-session", headers))).status).toBe(401);
       const id = await idOf(w, a);
       for (const path of ["/auth/multi-session/switch", "/auth/multi-session/sign-out"])
         expect((await w.handle(post(path, { sessionId: id }, headers))).status).toBe(401);
     }
     expect(await rowOf(w, a)).not.toBeNull();
+  });
+
+  it("slides no bag session at a list, so an idle bag session ends at its ttl", async () => {
+    // Ruling 34 H1 (probe P1 of the Task 11 review): a list once slid each due bag session.
+    const w = world();
+    const b = browser();
+    const a = await signIn(w, b, "ada@example.com");
+    const bob = await signIn(w, b, "bob@example.com");
+    const before = { a: (await rowOf(w, a))?.expiresAt, bob: (await rowOf(w, bob))?.expiresAt };
+    const slideMs = w.auth.config.session.slidingRefreshDays * DAY_MS;
+    w.auth.clock.advance(slideMs + DAY_MS);
+    expect((await list(w, b)).body.sessions).toHaveLength(2);
+    // The idle bag session keeps its expiry; the active session of the request slides.
+    expect((await rowOf(w, a))?.expiresAt).toEqual(before.a);
+    expect((await rowOf(w, bob))?.expiresAt.getTime()).toBeGreaterThan(before.bob?.getTime() ?? 0);
+    // A list every slide period: A ends at its ttl, and the list drops it.
+    while (w.auth.clock.now().getTime() <= (before.a?.getTime() ?? 0)) {
+      w.auth.clock.advance(slideMs + DAY_MS);
+      await list(w, b);
+    }
+    const { body } = await list(w, b);
+    expect(body.sessions.map((s) => s.user.email)).toEqual(["bob@example.com"]);
+    expect(await rowOf(w, a)).toBeNull();
+    expect(b.cookies.has(BAG)).toBe(false);
+    expect(w.ends.list.map((e) => e.reason)).toEqual(["expired"]);
+  });
+
+  it("slides the session that a switch makes active, and no other bag session", async () => {
+    const w = world();
+    const b = browser();
+    const a = await signIn(w, b, "ada@example.com");
+    const bob = await signIn(w, b, "bob@example.com");
+    const carol = await signIn(w, b, "carol@example.com");
+    const before = { a: (await rowOf(w, a))?.expiresAt, bob: (await rowOf(w, bob))?.expiresAt };
+    w.auth.clock.advance((w.auth.config.session.slidingRefreshDays + 1) * DAY_MS);
+    const res = b.take(
+      await w.handle(
+        post("/auth/multi-session/switch", { sessionId: await idOf(w, a) }, b.header()),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(b.cookies.get(SESSION)).toBe(a);
+    expect(b.bag()).toEqual([bob, carol]);
+    // The new active session gets the normal read of a request: its due refresh slides it.
+    const slid = (await rowOf(w, a))?.expiresAt;
+    expect(slid?.getTime()).toBeGreaterThan(before.a?.getTime() ?? 0);
+    expect((await res.json()) as { session: { expiresAt: string } }).toMatchObject({
+      session: { expiresAt: slid?.toISOString() },
+    });
+    // Bob stays idle in the bag: the switch does not move his expiry.
+    expect((await rowOf(w, bob))?.expiresAt).toEqual(before.bob);
+  });
+
+  it("leaves the bag as it is at a sign-in with the Bearer scheme", async () => {
+    // Ruling 34 L1: break R1 of the Task 11 review removed this rule, and no test failed.
+    const w = world();
+    const b = browser();
+    const a = await signIn(w, b, "ada@example.com");
+    const bob = await signIn(w, b, "bob@example.com");
+    await user(w, "carol@example.com");
+    const res = await w.handle(
+      post(
+        "/auth/password/sign-in",
+        { email: "carol@example.com", password: PASSWORD },
+        { ...b.header(), authorization: `Bearer ${bob}` },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie().filter((c) => c.startsWith(`${BAG}=`))).toEqual([]);
+    expect(b.bag()).toEqual([a]);
+    // Bob's session neither moved into the bag nor ended.
+    expect(await rowOf(w, bob)).not.toBeNull();
+    expect(w.ends.list).toEqual([]);
+  });
+
+  it("treats HTTP Basic as a browser: the bag moves and the routes serve", async () => {
+    // Ruling 34 L2 (probe P2): only the Bearer scheme marks a bearer client.
+    const w = world();
+    const b = browser();
+    const basic = { authorization: "Basic dXNlcjpwYXNz" };
+    const a = await signIn(w, b, "ada@example.com");
+    await user(w, "bob@example.com");
+    const res = b.take(
+      await w.handle(
+        post(
+          "/auth/password/sign-in",
+          { email: "bob@example.com", password: PASSWORD },
+          { ...b.header(), ...basic },
+        ),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(b.bag()).toEqual([a]);
+    const listed = await w.handle(get("/auth/multi-session", { ...b.header(), ...basic }));
+    expect(listed.status).toBe(200);
+    expect(
+      ((await listed.json()) as { sessions: Listed[] }).sessions.map((s) => s.user.email),
+    ).toEqual(["bob@example.com", "ada@example.com"]);
+  });
+
+  it("displaces the bag session used least recently, not the oldest one", async () => {
+    // Ruling 34 L3 (probe P3): A, then B; a switch back to A; then C signs in.
+    const w = world({ multiSession: { max: 2 } });
+    const b = browser();
+    const a = await signIn(w, b, "ada@example.com");
+    w.auth.clock.advance(1000);
+    const bob = await signIn(w, b, "bob@example.com");
+    w.auth.clock.advance(1000);
+    const switched = await w.handle(
+      post("/auth/multi-session/switch", { sessionId: await idOf(w, a) }, b.header()),
+    );
+    expect(b.take(switched).status).toBe(200);
+    w.auth.clock.advance(1000);
+    const bobId = await idOf(w, bob);
+    const carol = await signIn(w, b, "carol@example.com");
+    // A was in use one second ago, so idle Bob ends.
+    expect(await rowOf(w, bob)).toBeNull();
+    expect(await rowOf(w, a)).not.toBeNull();
+    expect(w.ends.list.map((e) => [e.session.id, e.reason])).toEqual([[bobId, "displaced"]]);
+    expect(b.cookies.get(SESSION)).toBe(carol);
+    expect(b.bag()).toEqual([a]);
   });
 
   it("signs no request in with a bag token alone", async () => {

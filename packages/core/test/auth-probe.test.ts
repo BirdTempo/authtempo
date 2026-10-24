@@ -175,7 +175,8 @@ describe("the auth probe (plan 11g)", () => {
     expect(token.startsWith("tk_")).toBe(true);
     const sessionOnly = keys.filter((key) => {
       const auth = authOf(key);
-      return auth.includes("session") && !auth.includes("none") && !auth.includes("apiToken");
+      const session = auth.includes("session") || auth.includes("sessionCookie");
+      return session && !auth.includes("none") && !auth.includes("apiToken");
     });
     expect(sessionOnly.length).toBeGreaterThan(0);
     const expected: Record<string, Answer> = {};
@@ -199,6 +200,7 @@ describe("the auth probe (plan 11g)", () => {
     };
     const formsOf: Record<string, string[]> = {
       session: ["wrong cookie", "wrong ts_ bearer"],
+      sessionCookie: ["wrong cookie", "wrong ts_ bearer"],
       apiToken: ["wrong tk_ bearer"],
       sessionJwt: ["garbage JWT"],
       accessToken: ["garbage access token"],
