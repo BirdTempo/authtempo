@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RouteKey } from "../route-list.js";
 import { id } from "./organizations.js";
 import { OkAnswer } from "./shapes.js";
-import { callbackQuery, startQuery } from "./social.js";
+import { callbackQuery } from "./social.js";
 import type { RouteContract } from "./types.js";
 
 /**
@@ -11,6 +11,13 @@ import type { RouteContract } from "./types.js";
  * the `rs_` token of the start.
  */
 export const acsBody = z.object({ SAMLResponse: z.string(), RelayState: z.string() });
+
+/**
+ * The query of the SSO start: the landing path only. The route reads `next`
+ * by hand. The app payload `data` of the social start (plan 12i Task 19)
+ * does not ride an SSO sign-in, so this query does not offer it.
+ */
+export const ssoStartQuery = z.object({ next: z.string().max(2048).optional() });
 
 // Strict: a key that core does not read answers invalid_body.
 export const domainListQuery = z.strictObject({ organizationId: id });
@@ -206,7 +213,7 @@ export const SSO_CONTRACT = {
     alt: [{ kind: "html" }, { kind: "redirect", param: "auth_error" }],
   },
   "GET /sso/:connectionId/start": {
-    query: { schema: startQuery, parsedBy: "hand" },
+    query: { schema: ssoStartQuery, parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
   },
   "GET /sso/:connectionId/callback": {

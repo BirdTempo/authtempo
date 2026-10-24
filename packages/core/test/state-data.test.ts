@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { z } from "zod";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
 import type { HooksConfig } from "../src/engine/hooks.js";
 import { enableEmailMethod, sendSecondFactorEmail } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
+import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import { bindingCookieName } from "../src/http/cookies.js";
 import { createRouter } from "../src/http/router.js";
 import { socialRoutes } from "../src/http/routes/social.js";
@@ -238,6 +240,15 @@ afterEach(() => {
 });
 
 describe("the sealed state payload (plan 12i Task 19)", () => {
+  it("takes data in the query of the social start only, not of the SSO start", () => {
+    // The SSO start reads next only (routes/sso.ts). Its contract and its
+    // OpenAPI parameters must not offer an app payload that it drops.
+    const keys = (key: "GET /social/:provider/start" | "GET /sso/:connectionId/start") =>
+      Object.keys((ROUTE_CONTRACT[key].query.schema as z.ZodObject<z.ZodRawShape>).shape);
+    expect(keys("GET /social/:provider/start")).toEqual(["next", "data"]);
+    expect(keys("GET /sso/:connectionId/start")).toEqual(["next"]);
+  });
+
   it("passes the payload to the session hook at the callback", async () => {
     const w = world();
     const config = w.config();
