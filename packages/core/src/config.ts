@@ -800,6 +800,8 @@ export interface TotpGateConfig {
    * passes the gate when the IdP asserts one of its values.
    */
   sso?: boolean;
+  /** The phone code sign-in (plan 12i). Default true. */
+  phone?: boolean;
 }
 
 export interface TotpConfig {
@@ -842,7 +844,7 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
-  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean };
+  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean; phone: boolean };
   emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
@@ -2536,19 +2538,20 @@ const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
   emailOtp: true,
   social: true,
   sso: true,
+  phone: true,
 };
 
 /** `totp.gate` (plan 12c): each method on unless the app sets it false. */
 function resolveGate(input: unknown): ResolvedTotp["gate"] {
-  const gate = { magicLink: true, emailOtp: true, social: true, sso: true };
+  const gate = { magicLink: true, emailOtp: true, social: true, sso: true, phone: true };
   if (input === undefined) return gate;
   if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
       throw new ConfigError(
-        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate`,
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, sso, and phone. The handoff has no key: it continues a browser session that passed the gate`,
       );
-  for (const key of ["magicLink", "emailOtp", "social", "sso"] as const) {
+  for (const key of ["magicLink", "emailOtp", "social", "sso", "phone"] as const) {
     const value = (input as TotpGateConfig)[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);

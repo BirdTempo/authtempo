@@ -1,5 +1,6 @@
 import { type AuthConfig, type ResolvedConfig, resolveConfig } from "../src/config.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 
 export const BASE = "https://api.example.com";
 export const base = {
@@ -93,6 +94,8 @@ export function everyFeature(): ResolvedConfig {
     openapi: true,
     // Plan 12i Task 2: the two username routes.
     username: {},
+    // Plan 12i Task 5: the five phone routes, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow", signUp: true },
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },
   });

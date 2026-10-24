@@ -192,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the sixteen flows", () => {
+  it("names the seventeen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -207,6 +207,7 @@ describe("the table of locks over a before hook", () => {
       "Team member removal",
       "SCIM group write",
       "Identity unlink",
+      "Phone remove",
       "Account delete",
       "Platform role revoke",
       "Impersonation start",
@@ -272,6 +273,8 @@ describe("the table of locks over a before hook", () => {
         "Member removal or leave",
         "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
+      // Plan 12i Task 5: the phone remove runs the update hook under the guard of the user row.
+      ["Phone remove", "removePhone user.beforeUpdate: guardedRemove"],
       [
         "Team member removal",
         "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",

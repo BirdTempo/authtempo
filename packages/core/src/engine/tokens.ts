@@ -9,6 +9,7 @@ import { JWS_RE } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
+import { handleProved } from "./address.js";
 import { hookGuard } from "./hooks.js";
 import type { OAuthClientAccess } from "./oauth-credentials.js";
 import { readDpopToken, resourceProofHolds } from "./oauth-dpop.js";
@@ -265,7 +266,8 @@ export async function createApiToken(
   input: ApiTokenCreate,
 ): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>> {
   const { user } = input;
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address needs a verified handle (ruling 15 of plan 12i).
+  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
   if (!validTokenName(input.name)) return fail("invalid_body");
   const days = tokenDays(input.expiresInDays);
   if (!days.ok) return days;
@@ -440,7 +442,7 @@ export async function listApiTokens(
   config: ResolvedConfig,
   input: { user: UserRow },
 ): Promise<Result<ApiTokenSummary[]>> {
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
   const rows = await config.storage.findMany(
     "apiToken",
     [{ field: "userId", op: "eq", value: input.user.id }],
@@ -459,7 +461,7 @@ export async function revokeApiToken(
   config: ResolvedConfig,
   input: { user: UserRow; id: string },
 ): Promise<Result<{ ok: true }>> {
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
   const n = await config.storage.delete("apiToken", [
     { field: "id", op: "eq", value: input.id },
     { field: "userId", op: "eq", value: input.user.id },
@@ -575,7 +577,7 @@ export async function updateApiToken(
   config: ResolvedConfig,
   input: ApiTokenUpdate,
 ): Promise<Result<ApiTokenSummary>> {
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
   if (!narrowFormed(config, input)) return fail("invalid_body");
   const row = await config.storage.findOne("apiToken", [
     { field: "id", op: "eq", value: input.id },

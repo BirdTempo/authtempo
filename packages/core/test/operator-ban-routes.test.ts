@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { passwordSignUp } from "../src/engine/password.js";
+import { addPhone, verifyAddPhone } from "../src/engine/phone.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE_URL, tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { signUpAndVerify } from "./password-helpers.js";
@@ -46,13 +49,17 @@ const BAN_ROUTES = [
   "GET /sso/:connectionId/callback",
   // Plan 12d Task 8: the SAML ACS opens a session through the same resolution.
   "POST /sso/:connectionId/acs",
+  // Plan 12i Task 5: the phone code opens a session through prepareSession.
+  "POST /phone/verify",
 ] as const;
 
 /** The routes of the operator tools that refuse a banned target (plan 12f Task 10). */
 const OPERATOR_ROUTES = ["POST /operator/users/platform-role", "POST /operator/users/create-admin"];
 
 async function world() {
-  const auth = await operatorAuth();
+  // The phone code of plan 12i Task 5 reads its codes from this port.
+  const sms = createRecordingSms();
+  const auth = await operatorAuth({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const post = (path: string, body: unknown) =>
     handle(
@@ -76,7 +83,8 @@ async function world() {
   };
   const lastToken = () => tokenFromMail(auth.mail.at(-1)?.text ?? "");
   const lastCode = () => /\b(\d{6})\b/.exec(auth.mail.at(-1)?.text ?? "")?.[1] ?? "";
-  return { auth, post, ban, lastToken, lastCode };
+  const lastSms = () => /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+  return { auth, post, ban, lastToken, lastCode, lastSms };
 }
 
 async function answerOf(res: Response): Promise<{ status: number; code: string | null }> {
@@ -132,6 +140,35 @@ describe("account_banned at the sign-in routes (plan 12f Task 10, lead item 3)",
     ).toEqual(BANNED);
     // No session stays.
     expect(await w.auth.storage.findMany("session", [])).toEqual([]);
+  });
+
+  it("answers 403 account_banned to a banned user at the phone code verify (plan 12i Task 5)", async () => {
+    const w = await world();
+    await signUpAndVerify(w.auth, EMAIL, PASSWORD);
+    // The phone of the user, set by a real code with a session of the user.
+    const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
+    if (!user) throw new Error("no user");
+    const { token } = await createSession(w.auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const session = await resolveSession(w.auth.config, token);
+    if (!session) throw new Error("no session");
+    const phone = "+14155550100";
+    if (!(await addPhone(w.auth.config, { session, phone, ip: null })).ok) throw new Error("add");
+    const set = await verifyAddPhone(w.auth.config, {
+      session,
+      code: w.lastSms(),
+      ip: null,
+      userAgent: null,
+    });
+    if (!set.ok) throw new Error(set.code);
+    await w.ban();
+    await w.post("/phone/request", { phone });
+    expect(await answerOf(await w.post("/phone/verify", { phone, code: w.lastSms() }))).toEqual(
+      BANNED,
+    );
   });
 
   it("answers 403 account_banned to the verify link of a sign-up when the ban came after the mail", async () => {

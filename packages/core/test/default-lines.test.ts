@@ -25,7 +25,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { changePassword, passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { effectiveIn } from "../src/engine/permissions.js";
-import { sendPhoneCode } from "../src/engine/phone.js";
+import { addPhone, sendPhoneCode, verifyAddPhone } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { createRole, listRoles } from "../src/engine/roles.js";
 import { rewrapSecrets } from "../src/engine/secrets.js";
@@ -48,6 +48,7 @@ import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webaut
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
@@ -976,6 +977,36 @@ describe("the gave-up lines (plans 12a and 12f)", () => {
       await setUsername(auth.config, { session: me, username: "ada", ip: null, userAgent: null }),
     ).toEqual({ ok: false, code: "conflict", status: 409 });
     expect(log.mock.calls).toEqual([["authtempo: username set gave up", me.user.id]]);
+  });
+
+  it("phone.set_gave_up", async () => {
+    // A write lands on the row between each read and its compare-and-set.
+    const sms = createRecordingSms();
+    let auth: ReturnType<typeof totpAuth> | null = null;
+    auth = totpAuth({
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+      hooks: {
+        user: {
+          beforeUpdate: async (e) => {
+            if (!auth || e.via !== "phone") return;
+            await auth.storage.update("user", [{ field: "id", op: "eq", value: e.user.id }], {
+              name: "Other",
+              updatedAt: new Date(e.user.updatedAt.getTime() + 1),
+            });
+          },
+        },
+      },
+    });
+    const me = await verifiedSession(auth);
+    expect((await addPhone(auth.config, { session: me, phone: "+14155550100", ip: null })).ok).toBe(
+      true,
+    );
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const log = errors();
+    expect(
+      await verifyAddPhone(auth.config, { session: me, code, ip: null, userAgent: null }),
+    ).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(log.mock.calls).toEqual([["authtempo: phone set gave up", me.user.id]]);
   });
 
   it("operator.ban_write_gave_up", async () => {

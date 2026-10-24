@@ -4,7 +4,7 @@ import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import { StorageError, type Where } from "../storage/port.js";
-import { hasAddress, verifiedHandle } from "./address.js";
+import { handleProved } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -83,10 +83,7 @@ export async function setUsername(
   if (!config.username) return fail("not_found");
   const { user, session } = input.session;
   // A claimant must not set what the owner inherits (the rule of the profile update).
-  if (
-    hasAddress(user) ? !user.emailVerified : !(await verifiedHandle(config, config.storage, user))
-  )
-    return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   const name = normalizeUsername(config, input.username);

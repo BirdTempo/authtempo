@@ -54,7 +54,7 @@ import test from "../../../../../samples/guides/second-factor.test.ts?raw";
 - They are the password sign-in, the magic link, the email code sign-in, social, and the reset.
 - A reset still sets the new password and ends every session. Then the person passes the challenge.
 - A passkey sign-in has no gate. A passkey is a factor of its own.
-- `totp.gate.magicLink`, `totp.gate.emailOtp`, and `totp.gate.social` turn one gate off. Each is on by default.
+- `totp.gate.magicLink`, `totp.gate.emailOtp`, `totp.gate.social`, and `totp.gate.phone` turn one gate off. Each is on by default.
 - The `email` method appears only after a password sign-in. After a magic link, the mailbox was the first factor.
 - The TOTP code is RFC 6238: SHA-1, 6 digits, 30 seconds, one step before and after now. A code passes once.
 - A backup code has 23 characters in groups. It holds 113.9 bits, above the 112 bits of ASVS 5.0 6.5.2.

@@ -61,6 +61,7 @@ export {
   type OAuthClientsApi,
   type OrganizationTokensApi,
   type PasswordApi,
+  type PhoneApi,
   type ScimApi,
   type SecretsApi,
   type SessionApi,
@@ -183,6 +184,15 @@ export {
   PENDING_HASH_PREFIX,
 } from "./engine/password.js";
 export type { PermissionInput } from "./engine/permissions.js";
+export {
+  PHONE_RE,
+  type PhoneAdd,
+  type PhoneAddVerify,
+  type PhoneRemove,
+  type PhoneRequest,
+  type PhoneSession,
+  type PhoneVerify,
+} from "./engine/phone.js";
 export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";

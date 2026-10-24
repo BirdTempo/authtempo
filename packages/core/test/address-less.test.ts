@@ -21,10 +21,15 @@ import {
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { passwordSignUp, verifyPassword } from "../src/engine/password.js";
+import { addPhone, requestPhone, verifyAddPhone, verifyPhone } from "../src/engine/phone.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { createSession, type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
+import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { draftUserRow, mayCreateUser } from "../src/engine/users.js";
+import { createRouter } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
 import { decodeJws } from "../src/primitives/jwk.js";
+import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -341,26 +346,35 @@ describe("the account with no address (plan 12i Task 1)", () => {
   });
 
   it("counts a stored phone as a way in and a handle only with phone on and the number in a region (ruling 15)", async () => {
-    // The same stored phone as the test before: a Better Auth store holds one
-    // that its code verify proved. Core's own verify of a phone is Task 5.
-    const phone = (regions: string[]) =>
-      makeAuth({
-        passkey: RP,
-        phone: { sms: createRecordingSms(), regions, isolateLimiter: "allow" },
-      });
-    const on = phone(["+1"]);
-    const phoned = await on.storage.create(
-      "user",
-      draftUserRow(
-        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
-        on.clock.now(),
-      ),
-    );
-    expect(await verifiedHandle(on.config, on.storage, phoned)).toBe(true);
-    expect(await waysIn(on.config, on.storage, phoned)).toBe(1);
-    // With a passkey too, the passkey can go: the phone stays a way in.
-    await withPasskey(on, phoned);
+    // A user with no address and a passkey adds a phone by a real code (ruling 20 m2).
+    const sms = createRecordingSms();
+    const on = makeAuth({
+      passkey: RP,
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+    });
+    const lone = await addressless(on.storage, on.clock.now());
+    await withPasskey(on, lone);
+    const session = await sessionOf(on, lone);
+    expect(await addPhone(on.config, { session, phone: "+14155550100", ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    expect(await verifyAddPhone(on.config, { session, code, ip: null, userAgent: null })).toEqual({
+      ok: true,
+      value: { phone: "+14155550100" },
+    });
+    const read = async (auth: Auth) => {
+      const row = await auth.config.storage.findOne("user", [
+        { field: "id", op: "eq", value: lone.id },
+      ]);
+      if (!row) throw new Error("no user");
+      return row;
+    };
+    const phoned = await read(on);
+    expect(phoned.phone).toBe("+14155550100");
     expect(await waysIn(on.config, on.storage, phoned)).toBe(2);
+    // The passkey can go: the phone stays a way in and a handle.
     const [passkey] = await on.storage.findMany("passkey", [
       { field: "userId", op: "eq", value: phoned.id },
     ]);
@@ -369,17 +383,18 @@ describe("the account with no address (plan 12i Task 1)", () => {
       ok: true,
       value: { ok: true },
     });
-    // A number outside every region gets no code, so it is no way in and no handle.
-    const elsewhere = phone(["+44"]);
-    const far = await elsewhere.storage.create(
-      "user",
-      draftUserRow(
-        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
-        elsewhere.clock.now(),
-      ),
-    );
-    expect(await verifiedHandle(elsewhere.config, elsewhere.storage, far)).toBe(false);
-    expect(await waysIn(elsewhere.config, elsewhere.storage, far)).toBe(0);
+    expect(await waysIn(on.config, on.storage, phoned)).toBe(1);
+    expect(await verifiedHandle(on.config, on.storage, phoned)).toBe(true);
+    // The app moves its regions to +44 on the same store. A number outside
+    // every region gets no code, so it is no way in and no handle.
+    const elsewhere = makeAuth({
+      storage: on.storage,
+      passkey: RP,
+      phone: { sms, regions: ["+44"], isolateLimiter: "allow" },
+    });
+    const far = await read(elsewhere);
+    expect(await verifiedHandle(elsewhere.config, elsewhere.config.storage, far)).toBe(false);
+    expect(await waysIn(elsewhere.config, elsewhere.config.storage, far)).toBe(0);
   });
 
   it("sorts a member with no address after every address", () => {
@@ -467,5 +482,177 @@ describe("the account with no address (plan 12i Task 1)", () => {
       code: "email_mismatch",
       status: 403,
     });
+  });
+});
+
+/**
+ * A user with no address from a real phone code (plan 12i Task 5): the
+ * sign-up by `verifyPhone`, then a first password through the route. The
+ * world serves every route of the config.
+ */
+async function phoneWorld(extra: Parameters<typeof makeAuth>[0] = {}) {
+  const sms = createRecordingSms();
+  const auth = makeAuth({
+    passkey: RP,
+    password: { hash: FAST, uniformSignUp: false },
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    ...extra,
+  });
+  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  const phone = "+14155550100";
+  const signIn = async () => {
+    await requestPhone(auth.config, { phone, ip: "203.0.113.7" });
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    return verifyPhone(auth.config, { phone, code, ip: "203.0.113.7", userAgent: null });
+  };
+  const made = await signIn();
+  if (!made.ok || !("token" in made.value)) throw new Error("no phone session");
+  const cookie = `${auth.config.cookieName}=${made.value.token}`;
+  const first = await handle(
+    post("/auth/password/change", { newPassword: "correct horse battery" }, { cookie }),
+  );
+  expect(first.status).toBe(200);
+  return { auth, handle, phone, signIn, user: made.value.user, cookie };
+}
+
+describe("a user with no address and a verified handle (plan 12i Task 5, ruling 15)", () => {
+  it("opens the profile update and the API tokens to a verified handle (ruling 15 m2)", async () => {
+    const w = await phoneWorld();
+    const update = await w.handle(post("/auth/user/update", { name: "Ada" }, { cookie: w.cookie }));
+    expect(update.status).toBe(200);
+    expect(await update.json()).toMatchObject({ user: { email: null, name: "Ada" } });
+    const created = await w.handle(post("/auth/tokens", { name: "cli" }, { cookie: w.cookie }));
+    expect(created.status).toBe(200);
+    const { token } = (await created.json()) as { token: string };
+    const current = await w.handle(
+      get("/auth/tokens/current", { authorization: `Bearer ${token}` }),
+    );
+    expect(current.status).toBe(200);
+    expect(await current.json()).toMatchObject({ user: { id: w.user.id, email: null } });
+    // A user with no address and no handle still gets email_unverified.
+    const lone = await addressless(w.auth.storage, w.auth.clock.now());
+    const { token: loneToken } = await createSession(w.auth.config, {
+      userId: lone.id,
+      ip: null,
+      userAgent: null,
+    });
+    const loneCookie = { cookie: `${w.auth.config.cookieName}=${loneToken}` };
+    for (const [path, body] of [
+      ["/auth/user/update", { name: "Bob" }],
+      ["/auth/tokens", { name: "cli" }],
+    ] as const) {
+      const res = await w.handle(post(path, body, loneCookie));
+      expect(res.status, path).toBe(403);
+      expect(await res.json()).toEqual({ error: "email_unverified" });
+    }
+  });
+
+  it("signs a phone user in by a passkey and by a second factor", async () => {
+    const w = await phoneWorld();
+    // A passkey, by a real ceremony through the routes.
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
+    const options = await w.handle(
+      post("/auth/passkey/register/options", {}, { cookie: w.cookie }),
+    );
+    const { challenge } = (await options.json()) as { challenge: string };
+    const registered = await w.handle(
+      post(
+        "/auth/passkey/register/verify",
+        { response: await soft.register(challenge, new TextEncoder().encode(w.user.id)) },
+        { cookie: w.cookie },
+      ),
+    );
+    expect(registered.status).toBe(200);
+    const request = await w.handle(post("/auth/passkey/authenticate/options", {}));
+    const req = (await request.json()) as { challenge: string };
+    const byPasskey = await w.handle(
+      post("/auth/passkey/authenticate/verify", {
+        response: await soft.authenticate(req.challenge),
+      }),
+    );
+    expect(byPasskey.status).toBe(200);
+    expect(await byPasskey.json()).toMatchObject({ user: { id: w.user.id, email: null } });
+    // The TOTP factor of a user with no address (`provedAccount`), then a phone sign-in.
+    const session = await sessionOf(w.auth, w.user);
+    const setup = await setupTotp(w.auth.config, {
+      userId: w.user.id,
+      password: "correct horse battery",
+    });
+    if (!setup.ok) throw new Error(setup.code);
+    const secret = base32Decode(setup.value.secret);
+    const enabled = await enableTotp(w.auth.config, {
+      session,
+      code: await totpCode(secret, w.auth.clock.now()),
+    });
+    expect(enabled.ok).toBe(true);
+    w.auth.clock.advance(30_000);
+    const gated = await w.signIn();
+    if (!gated.ok || !("twoFactor" in gated.value)) throw new Error("no challenge");
+    const verified = await w.handle(
+      post("/auth/totp/verify", {
+        challenge: gated.value.twoFactor.challenge,
+        code: await totpCode(secret, w.auth.clock.now()),
+      }),
+    );
+    expect(verified.status).toBe(200);
+    expect(await verified.json()).toMatchObject({ user: { id: w.user.id, email: null } });
+  });
+
+  it("deletes an account with no address on a fresh re-authentication (ruling 15 m3)", async () => {
+    // The mailed confirm is on, and a user with no address gets no mail: the fresh session is the proof.
+    const w = await phoneWorld({ account: { deleteConfirm: { ttlMinutes: 60 } } });
+    const del = (cookie: string) => w.handle(post("/auth/user/delete", {}, { cookie }));
+    // A stale session answers session_not_fresh.
+    w.auth.clock.advance(w.auth.config.session.freshMinutes * 60_000);
+    const stale = await del(w.cookie);
+    expect(stale.status).toBe(403);
+    expect(await stale.json()).toEqual({ error: "session_not_fresh" });
+    // A new sign-in by a phone code is a fresh re-authentication.
+    const again = await w.signIn();
+    if (!again.ok || !("token" in again.value)) throw new Error("no session");
+    const deleted = await del(`${w.auth.config.cookieName}=${again.value.token}`);
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(
+      await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: w.user.id }]),
+    ).toBeNull();
+    expect(w.auth.mail).toEqual([]);
+  });
+
+  it("deletes an account with no address after a passkey re-authentication (ruling 15 m3)", async () => {
+    const w = await phoneWorld({ account: { deleteConfirm: { ttlMinutes: 60 } } });
+    await withPasskey(w.auth, w.user);
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
+    // `withPasskey` used its own authenticator: register this one too, while the session is fresh.
+    const options = await w.handle(
+      post("/auth/passkey/register/options", {}, { cookie: w.cookie }),
+    );
+    const { challenge } = (await options.json()) as { challenge: string };
+    await w.handle(
+      post(
+        "/auth/passkey/register/verify",
+        { response: await soft.register(challenge, new TextEncoder().encode(w.user.id)) },
+        { cookie: w.cookie },
+      ),
+    );
+    w.auth.clock.advance(w.auth.config.session.freshMinutes * 60_000);
+    expect((await w.handle(post("/auth/user/delete", {}, { cookie: w.cookie }))).status).toBe(403);
+    const reauthOptions = await w.handle(
+      post("/auth/reauth/passkey/options", {}, { cookie: w.cookie }),
+    );
+    const reauthChallenge = ((await reauthOptions.json()) as { challenge: string }).challenge;
+    const reauth = await w.handle(
+      post(
+        "/auth/reauth",
+        { passkey: await soft.authenticate(reauthChallenge) },
+        { cookie: w.cookie },
+      ),
+    );
+    expect(reauth.status).toBe(200);
+    const deleted = await w.handle(post("/auth/user/delete", {}, { cookie: w.cookie }));
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(
+      await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: w.user.id }]),
+    ).toBeNull();
   });
 });

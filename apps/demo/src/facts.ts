@@ -41,6 +41,8 @@ export const DEMO_EXEMPT = {
   readiness: "A probe for a host, not a sign-in method.",
   passkeyRelatedOrigins: "The demo has one origin, so it has no related origin to list.",
   username: "The demo signs in by a mailed link and a passkey, so it has no name to sign in with.",
+  phone:
+    "The demo sends no SMS: a supplier costs money per text, and the demo has no number to prove.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

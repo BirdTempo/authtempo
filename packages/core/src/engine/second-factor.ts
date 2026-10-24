@@ -379,14 +379,18 @@ export type ChallengeMethod = SecondFactorMethod | "backup";
  */
 const PREFERENCE: readonly ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
 
-/** The first factors that a challenge can follow (plan 12c; `sso` since plan 12d). Each is a `SessionVia`. */
-export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso";
+/**
+ * The first factors that a challenge can follow (plan 12c; `sso` since plan
+ * 12d; `phone` since plan 12i). Each is a `SessionVia`.
+ */
+export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso" | "phone";
 const GATED_VIA: ReadonlySet<string> = new Set([
   "password",
   "magic_link",
   "email_otp",
   "social",
   "sso",
+  "phone",
 ]);
 
 /** How the person proved the first factor: the session's `via`, and `reset` for a password reset. */

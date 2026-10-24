@@ -3,6 +3,7 @@ import { CAPTCHA_FLOWS, type CaptchaFlow, type CaptchaPort } from "../src/captch
 import { type AuthConfig, ConfigError } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
 import { FAST } from "./password-helpers.js";
 
@@ -29,6 +30,8 @@ function setup(captcha: AuthConfig["captcha"], extra: Partial<AuthConfig> = {}) 
     storage: createMemoryAdapter(),
     mail: { send: async () => {} },
     password: { hash: FAST },
+    // The phone code request of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
     ...(captcha ? { captcha } : {}),
     ...extra,
   });
@@ -54,9 +57,8 @@ const ROUTE_OF: Record<CaptchaFlow, Array<{ path: string; body: Record<string, s
     { path: "/password/reset/request", body: { email: "a@example.com" } },
     { path: "/otp/reset/request", body: { email: "a@example.com" } },
   ],
-  // Plan 12i: the phone routes come with Task 5. phone-code.test.ts checks
-  // the flow through the request gate of the phone code.
-  "phone-request": [],
+  // Plan 12i Task 5: the code request. The add has a fresh session and no captcha.
+  "phone-request": [{ path: "/phone/request", body: { phone: "+14155550100" } }],
 };
 
 const post = (path: string, body: unknown, token?: string, ip = "203.0.113.5") =>
@@ -413,6 +415,7 @@ describe("the captcha port (plan 12b)", () => {
           return false;
         },
       },
+      phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
       captcha: { port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] },
     });
     const known = "known@example.com";
@@ -424,10 +427,13 @@ describe("the captcha port (plan 12b)", () => {
     });
     expect(seeded?.ok).toBe(true);
     const answer = async (path: string, email: string) => {
+      // The phone request names a number: no user holds either one, and the refusal reads none.
       const body =
         path === "/password/sign-up" || path === "/password/sign-in"
           ? { email, password: "correct horse battery" }
-          : { email };
+          : path === "/phone/request"
+            ? { phone: email === known ? "+14155550100" : "+14155550101" }
+            : { email };
       const res = await auth.handle(post(path, body));
       // The trace header is random for each answer (plan 12h Task 4). Each answer
       // carries one, and the compare leaves it out.
@@ -436,7 +442,7 @@ describe("the captcha port (plan 12b)", () => {
       return { status: res.status, headers, body: await res.text() };
     };
     const paths = Object.values(ROUTE_OF).flatMap((routes) => routes.map((r) => r.path));
-    expect(paths).toHaveLength(6);
+    expect(paths).toHaveLength(7);
     for (const k of Object.keys(counts) as Array<keyof typeof counts>) counts[k] = 0;
     for (const path of paths) {
       const a = await answer(path, known);

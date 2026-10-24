@@ -21,6 +21,7 @@ import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRouteModules, coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { everyFeature, SOCIAL } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { basicHeader, pkce, requestIdOf } from "./oauth-helpers.js";
@@ -134,6 +135,8 @@ function world(secretHash = "0".repeat(64)) {
     scim: {},
     // The username routes of plan 12i Task 2.
     username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -503,6 +506,26 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /otp/reset/request", body: { email: "ada@example.com" }, refused: INVALID_BODY },
+    // Plan 12i Task 5: the phone routes.
+    { key: "POST /phone/request", body: { phone: "+14155550100" }, refused: INVALID_BODY },
+    {
+      key: "POST /phone/verify",
+      body: { phone: "+14155550100", code: "000000" },
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /phone/add",
+      body: { phone: "+14155550101" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /phone/add/verify",
+      body: { code: "000000" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /phone/remove", body: {}, session: true, refused: INVALID_BODY },
     {
       key: "POST /otp/reset",
       body: { email: "ada@example.com", code: "000000", password: "another horse battery" },
@@ -795,7 +818,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
-    expect(keys.length).toBe(189);
+    // Plan 12i Task 5 adds the five phone routes.
+    expect(keys.length).toBe(194);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -809,8 +833,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
     // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
     // module scim, so 22 became 23. Plan 12i Task 2 adds the module
-    // username, so 23 became 24.
-    expect(modules.length).toBe(24);
+    // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
+    expect(modules.length).toBe(25);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1357,7 +1381,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 9b adds the two SCIM token writes.
     // Plan 12i Task 9 adds the bodies of the two passkey options routes.
     // Plan 12i Task 2 adds the body of POST /user/username.
-    expect(withBody.length).toBe(94);
+    // Plan 12i Task 5 adds the bodies of the five phone routes.
+    expect(withBody.length).toBe(99);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1383,7 +1408,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(92);
+    expect(refusals).toBe(97);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1405,7 +1430,8 @@ describe("the route contract (plan 11g)", () => {
     // Task 8: the SAML ACS reads a form.
     // Plan 12i Task 9 adds the two passkey options bodies to json.
     // Plan 12i Task 2 adds the body of POST /user/username to json.
-    expect(counts).toEqual({ json: 85, both: 10, form: 8 });
+    // Plan 12i Task 5 adds the five phone bodies to json.
+    expect(counts).toEqual({ json: 90, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

@@ -11,6 +11,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { type ModelName, schema } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, sessionOf } from "./operator-helpers.js";
@@ -64,6 +65,8 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     scim: {},
     // The username routes of plan 12i Task 2.
     username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
   };
 }
 

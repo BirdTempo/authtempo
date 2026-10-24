@@ -1,10 +1,28 @@
 import { checkCaptcha } from "../captcha.js";
-import type { ResolvedConfig } from "../config.js";
+import type { ResolvedConfig, ResolvedPhone } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow, VerificationRow } from "../schema.js";
-import { compareCode, issueCode } from "./email-otp.js";
+import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
+import { StorageError, type Where } from "../storage/port.js";
+import { handleProved } from "./address.js";
+import { createSteps } from "./create-steps.js";
+import { compareCode, consumeCode, issueCode } from "./email-otp.js";
+import { requireFresh } from "./fresh.js";
+import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
+import { guardedRemove } from "./identities.js";
+import { sendNotice } from "./notices.js";
+import { unchanged } from "./profile.js";
+import {
+  gatedSteps,
+  later,
+  type Opened,
+  ROUNDS,
+  type TwoFactorPending,
+  touchTrust,
+} from "./second-factor.js";
+import { challengeOpened, type ResolvedSession, sessionOpened } from "./sessions.js";
+import { draftUserRow } from "./users.js";
 
 /**
  * The phone code (plan 12i, spec 32 items 4 and 5). The SMS port only sends
@@ -29,6 +47,8 @@ const REQUEST_PER_PHONE_DAY = { seconds: 86_400, max: 10 };
 // Per 15 minutes, for every check of a code.
 const VERIFY_PER_IP = { seconds: 900, max: 30 };
 const VERIFY_PER_PHONE = { seconds: 900, max: 10 };
+// Per 15 minutes, per user: the codes and notes of `/phone/add` (spec 32 item 5).
+const ADD_PER_USER = { seconds: 900, max: 3 };
 /** The window of the daily cap. The max is `phone.dailyCap`. */
 const CAP_WINDOW_SECONDS = 86_400;
 /** The subject of the daily cap: one count for the deployment. */
@@ -121,14 +141,32 @@ export async function sendPhoneCode(
   // A sign-in code binds to its number (ASVS 5.0.0 6.6.2): a caller cannot send it elsewhere.
   if (input.purpose === "phone-otp" && input.identifier !== input.to)
     throw new Error("authtempo phone: a phone-otp code goes to its own number");
+  return countedSend(config, phone, input.to, async () => {
+    const code = await issueCode(config, phone, input.purpose, input.identifier, input.data);
+    return () => phone.message({ code, appName: config.appName, ttlMinutes: phone.ttlMinutes });
+  });
+}
+
+/**
+ * The one send of an SMS in core (plan 12i Task 5). The daily cap counts
+ * first: a refusal answers `"capped"`, runs no `prepare`, and makes no
+ * call. Then `prepare` (the row of a code, or nothing for a note) and the
+ * send. The text builder runs inside the try: its throw answers as a failed
+ * send. A source test holds that no other call of `sms.send` exists, so
+ * every SMS counts against the cap.
+ */
+async function countedSend(
+  config: ResolvedConfig,
+  phone: ResolvedPhone,
+  to: string,
+  prepare: () => Promise<() => string>,
+): Promise<"sent" | "unavailable" | "capped"> {
   const cap = { seconds: CAP_WINDOW_SECONDS, max: phone.dailyCap };
   if (!(await limit(config, "phone-otp:all-day", CAP_SUBJECT, cap))) return "capped";
-  const code = await issueCode(config, phone, input.purpose, input.identifier, input.data);
+  const text = await prepare();
   try {
-    // The builder runs inside the try: its throw answers as a failed send.
-    const text = phone.message({ code, appName: config.appName, ttlMinutes: phone.ttlMinutes });
-    // To the number of the code, whatever the builder wrote.
-    return (await phone.sms.send({ to: input.to, text })) === "sent" ? "sent" : "unavailable";
+    // To the number of the caller, whatever the builder wrote.
+    return (await phone.sms.send({ to, text: text() })) === "sent" ? "sent" : "unavailable";
   } catch (e) {
     // The line names the error, never the number or the text.
     config.observe.emit({ name: "sms.port_threw", errorName: e });
@@ -163,4 +201,384 @@ export async function checkPhoneCode(
   }
   const now = config.clock.now();
   return compareCode(config, phone.maxAttempts, input.purpose, input.identifier, input.code, now);
+}
+
+/** The where of one stored phone. */
+function byPhone(phone: string): Where<"user">[] {
+  return [{ field: "phone", op: "eq", value: phone }];
+}
+
+/**
+ * The answer of a route that sent an SMS. `"capped"` answers 429 and
+ * `"unavailable"` 503 (spec 32 item 5). The form and region refusals come
+ * from the gate first, so they reach here only as a guard.
+ */
+function sentAnswer(
+  answer: "sent" | "unavailable" | "capped" | "phone_invalid" | "phone_region",
+): Result<{ sent: true }> {
+  if (answer === "sent") return ok({ sent: true });
+  if (answer === "capped") return fail("rate_limited");
+  if (answer === "unavailable") return fail("sms_unavailable");
+  return fail(answer);
+}
+
+/** The text of the note to a number that another user holds. It holds no code. */
+function takenNote(config: ResolvedConfig): string {
+  return `This number is already in use with ${config.appName}.`;
+}
+
+export interface PhoneRequest {
+  phone: string;
+  ip: string | null;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
+}
+
+/**
+ * `POST /phone/request` (spec 32 item 5). The gate runs first: the limits,
+ * the captcha, and the form and region checks. So a 429 and a refusal tell
+ * nothing about an account. Then one read by number. A known number gets a
+ * code. An unknown number gets a code only with `phone.signUp`; else it
+ * gets no SMS and the same `{ sent: true }`. A cap or an outage answers 429
+ * or 503 only on a branch that sends: with `signUp` off, an unknown number
+ * answers `{ sent: true }` in both cases (the residual of spec 32 item 5).
+ */
+export async function requestPhone(
+  config: ResolvedConfig,
+  input: PhoneRequest,
+): Promise<Result<{ sent: true }>> {
+  const phone = config.phone;
+  if (!phone) return fail("not_found");
+  const gate = await phoneRequestGate(config, input);
+  if (!gate.ok) return gate;
+  const number = gate.value;
+  const known = await config.storage.findOne("user", byPhone(number));
+  if (!known && !phone.signUp) return ok({ sent: true });
+  return sentAnswer(
+    await sendPhoneCode(config, {
+      purpose: "phone-otp",
+      identifier: number,
+      to: number,
+      data: {},
+    }),
+  );
+}
+
+export interface PhoneVerify {
+  phone: string;
+  code: string;
+  ip: string | null;
+  userAgent: string | null;
+  /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
+  trustDevice?: string | undefined;
+}
+
+/** A sign-in by a phone code: the session token, the user, and the session row. */
+export interface PhoneSession {
+  token: string;
+  user: UserRow;
+  session: SessionRow;
+}
+
+/**
+ * `POST /phone/verify` (spec 32 item 5). The check of the code, then one
+ * transaction: the read by number, or with `phone.signUp` a new user with
+ * no address. The sign-up rule and `user.beforeCreate` run on the draft
+ * (`createSteps`). The gate of plan 12c (`totp.gate.phone`) and the session
+ * hook run before the first write. Then the spend of the code, so a code
+ * is used once and a refusal before it leaves the code live. A user with
+ * the factor on gets the challenge, with no email method: the code proves
+ * the phone, not the mailbox.
+ */
+export async function verifyPhone(
+  config: ResolvedConfig,
+  input: PhoneVerify,
+): Promise<Result<PhoneSession | TwoFactorPending>> {
+  if (!config.phone) return fail("not_found");
+  const checked = await checkPhoneCode(config, {
+    purpose: "phone-otp",
+    identifier: input.phone,
+    code: input.code,
+    ip: input.ip,
+  });
+  if (!checked.ok) return checked;
+  const row = checked.value;
+  const now = config.clock.now();
+  const steps = gatedSteps(
+    config,
+    {
+      ip: input.ip,
+      userAgent: input.userAgent,
+      via: "phone",
+      next: "/",
+      trustDevice: input.trustDevice,
+      gate: config.totp?.gate.phone ?? false,
+    },
+    now,
+  );
+  const made = createSteps(config, "phone", { signUpRule: true });
+  const resolved = await hookGuard(async () =>
+    ok(await resolvePhoneUser(config, input.phone, row, now, steps, made)),
+  );
+  if (!resolved.ok) return resolved;
+  const { user, opened } = resolved.value;
+  await made.after(user);
+  if (opened.kind === "challenge") {
+    challengeOpened(config, user, "phone");
+    return ok(opened.pending);
+  }
+  await touchTrust(config, steps.trustId(), now);
+  await sessionOpened(config, opened.session, user, "phone");
+  return ok({ token: opened.token, user, session: opened.session });
+}
+
+/**
+ * The transaction of `verifyPhone`. Every hook runs before the first write
+ * (the D1 undo, `BeforeResolveWrite` in users.ts). Two parallel sign-ups of
+ * one number race on the unique key of `phone`: the loser runs once more,
+ * outside its failed transaction, and finds the winner.
+ */
+async function resolvePhoneUser(
+  config: ResolvedConfig,
+  phone: string,
+  row: VerificationRow,
+  now: Date,
+  steps: ReturnType<typeof gatedSteps>,
+  made: ReturnType<typeof createSteps>,
+): Promise<{ user: UserRow; opened: Opened }> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await config.storage.transaction(async (tx) => {
+        made.begin();
+        const found = await tx.findOne("user", byPhone(phone));
+        // A code that went out with `signUp` on, and a config that turned it off since.
+        if (!found && !config.phone?.signUp) stopWith("invalid_code");
+        const user =
+          found ??
+          (await made.user(
+            tx,
+            draftUserRow({ email: null, emailVerified: false, name: null, phone }, now),
+          ));
+        await steps.before(tx, user);
+        // The spend of the code, in the transaction of the act (ruling 20 of plan 12i).
+        if (!(await consumeCode(tx, row, now)).ok) stopWith("invalid_code");
+        if (!found) await tx.create("user", user);
+        return { user, opened: await steps.write(tx) };
+      });
+    } catch (err) {
+      if (
+        attempt === 0 &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        err.model === "user"
+      )
+        continue;
+      throw err;
+    }
+  }
+}
+
+export interface PhoneAdd {
+  session: ResolvedSession;
+  phone: string;
+  ip: string | null;
+}
+
+/**
+ * `POST /phone/add` (spec 32 item 5). It needs a proved handle and a fresh
+ * session, as the username does: the phone becomes a way in. The per-user
+ * limit, then the gate of a request, run before the read by number. A free
+ * number gets a code bound to the user, with the number in its row. A
+ * number that another user holds gets a note with no code and the same
+ * answer. The note counts against the daily cap as a code does.
+ */
+export async function addPhone(
+  config: ResolvedConfig,
+  input: PhoneAdd,
+): Promise<Result<{ sent: true }>> {
+  const phone = config.phone;
+  if (!phone) return fail("not_found");
+  const { user, session } = input.session;
+  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
+  if (!(await limit(config, "phone-add:user", user.id, ADD_PER_USER))) return fail("rate_limited");
+  // No captcha: the fresh session and the per-user limit bound the sends.
+  const gate = await phoneRequestGate(config, { phone: input.phone, ip: input.ip });
+  if (!gate.ok) return gate;
+  const number = gate.value;
+  const holder = await config.storage.findOne("user", byPhone(number));
+  if (holder && holder.id !== user.id)
+    return sentAnswer(
+      await countedSend(config, phone, number, async () => () => takenNote(config)),
+    );
+  return sentAnswer(
+    await sendPhoneCode(config, {
+      purpose: "phone-add-otp",
+      identifier: user.id,
+      to: number,
+      data: { phone: number },
+    }),
+  );
+}
+
+export interface PhoneAddVerify {
+  session: ResolvedSession;
+  code: string;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/**
+ * `POST /phone/add/verify` (spec 32 item 5). The check of the code that
+ * `addPhone` sent, then one transaction: the compare-and-set of the user
+ * row with the number first, then the spend of the code. The unique key of
+ * `phone` decides a race of two users: the loser answers `phone_taken`, and
+ * its code stays live, because its transaction spent nothing. The notice
+ * goes after the commit, to the address when the user has one.
+ */
+export async function verifyAddPhone(
+  config: ResolvedConfig,
+  input: PhoneAddVerify,
+): Promise<Result<{ phone: string }>> {
+  if (!config.phone) return fail("not_found");
+  const { user, session } = input.session;
+  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
+  const checked = await checkPhoneCode(config, {
+    purpose: "phone-add-otp",
+    identifier: user.id,
+    code: input.code,
+    ip: input.ip,
+  });
+  if (!checked.ok) return checked;
+  const row = checked.value;
+  const number = (row.data as { phone?: unknown } | null)?.phone;
+  // Only `addPhone` writes the row, so a row with no number is damaged.
+  if (typeof number !== "string" || !PHONE_RE.test(number)) return fail("invalid_code");
+  const written = await writePhone(config, user.id, number, row);
+  if (!written.ok) return written;
+  await runAfter(
+    config.observe,
+    "user.afterUpdate",
+    config.hooks.user.afterUpdate,
+    { user: written.value.user, previous: written.value.previous, via: "phone" },
+    user.id,
+  );
+  await sendNotice(config, {
+    event: "phone_changed",
+    email: written.value.user.email,
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  return ok({ phone: number });
+}
+
+/**
+ * The transaction of `verifyAddPhone`: the compare-and-set of the user row
+ * with the number, then the spend of the code. `user.beforeUpdate` runs
+ * before the write of each round, with no row lock held. A loser of the
+ * unique key of `phone` answers `phone_taken`.
+ */
+async function writePhone(
+  config: ResolvedConfig,
+  userId: string,
+  number: string,
+  row: VerificationRow,
+): Promise<Result<{ previous: UserRow; user: UserRow }>> {
+  const now = config.clock.now();
+  const hooks = config.hooks.user;
+  const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
+  let written: Result<{ previous: UserRow; user: UserRow }>;
+  try {
+    written = await hookGuard(() =>
+      config.storage.transaction(
+        async (tx): Promise<Result<{ previous: UserRow; user: UserRow }>> => {
+          let previous = await tx.findOne("user", byId);
+          for (let round = 0; round < ROUNDS; round++) {
+            if (!previous) return fail("unauthorized");
+            await runBefore(config.observe, "user.beforeUpdate", hooks.beforeUpdate, {
+              user: previous,
+              patch: { phone: number },
+              via: "phone",
+            });
+            // `updatedAt` moves past the read, so a later compare-and-set sees this write.
+            const updatedAt = later(now, previous.updatedAt);
+            const n = await tx.update("user", unchanged(previous), { phone: number, updatedAt });
+            if (n === 1) {
+              // After the phone write: a loser of the unique key spends no code.
+              if (!(await consumeCode(tx, row, now)).ok) stopWith("invalid_code");
+              return ok({ previous, user: { ...previous, phone: number, updatedAt } });
+            }
+            previous = await tx.findOne("user", byId);
+          }
+          config.observe.emit({ name: "phone.set_gave_up", userId });
+          return fail("conflict");
+        },
+      ),
+    );
+  } catch (err) {
+    // Caught outside the transaction: inside, Postgres has already aborted it.
+    if (err instanceof StorageError && err.code === "unique_violation" && err.model === "user")
+      return fail("phone_taken");
+    throw err;
+  }
+  return written;
+}
+
+export interface PhoneRemove {
+  session: ResolvedSession;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/**
+ * `POST /phone/remove` (spec 32 item 5). A fresh session, then the removal
+ * under the last-credential guard of plan 12a (`guardedRemove`): a user
+ * whose phone is the last way in answers `last_credential`. A user with no
+ * phone answers `not_found`. The notice goes after the commit.
+ */
+export async function removePhone(
+  config: ResolvedConfig,
+  input: PhoneRemove,
+): Promise<Result<{ ok: true }>> {
+  if (!config.phone) return fail("not_found");
+  const { user, session } = input.session;
+  const fresh = requireFresh(config, session);
+  if (!fresh.ok) return fresh;
+  const hooks = config.hooks.user;
+  // The row before the remove, for `user.afterUpdate`.
+  const seen: { previous: UserRow | null } = { previous: null };
+  const removed = await guardedRemove(
+    config,
+    user.id,
+    async (tx, held) => {
+      if (held.phone === null) return 0;
+      seen.previous = held;
+      await runBefore(config.observe, "user.beforeUpdate", hooks.beforeUpdate, {
+        user: held,
+        patch: { phone: null },
+        via: "phone",
+      });
+      return tx.update("user", [{ field: "id", op: "eq", value: held.id }], { phone: null });
+    },
+    { phone: null },
+  );
+  if (!removed.ok) return removed;
+  if (seen.previous)
+    await runAfter(
+      config.observe,
+      "user.afterUpdate",
+      hooks.afterUpdate,
+      { user: removed.value, previous: seen.previous, via: "phone" },
+      user.id,
+    );
+  await sendNotice(config, {
+    event: "phone_changed",
+    email: removed.value.email,
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  return ok({ ok: true });
 }

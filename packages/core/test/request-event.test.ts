@@ -5,6 +5,7 @@ import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE_URL, get, post, tokenFromMail } from "./helpers.js";
 import { REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { formPost, observed } from "./observe-helpers.js";
@@ -82,6 +83,12 @@ const FAILING: Readonly<
   "POST /otp/verify": {
     via: "email_otp",
     make: async () => post("/auth/otp/verify", { email: "ada@example.com", code: "000000" }),
+  },
+  // Plan 12i Task 5: a code for a number that got none.
+  "POST /phone/verify": {
+    via: "phone",
+    over: { phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" } },
+    make: async () => post("/auth/phone/verify", { phone: "+14155550100", code: "000000" }),
   },
   "POST /passkey/authenticate/verify": {
     via: "passkey",

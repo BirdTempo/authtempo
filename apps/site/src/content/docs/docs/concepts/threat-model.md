@@ -90,7 +90,7 @@ An email code of 8 digits divides each figure of its row by 100.
 
 ## What stays open
 
-- An app that sets `totp.gate.magicLink`, `totp.gate.emailOtp`, or `totp.gate.social` to `false` lets the holder of the mailbox, or of the social account, past the factor.
+- An app that sets `totp.gate.magicLink`, `totp.gate.emailOtp`, or `totp.gate.social` to `false` lets the holder of the mailbox, or of the social account, past the factor. `totp.gate.phone` set to `false` lets the holder of the phone past it.
 - The email method is the weakest method. A holder of the mailbox resets the password, signs in with it, and passes the email code. It stops a person with the password and no mailbox.
 - A reset of a user with the factor off that races the user's first method enable can keep the reset's session, with the factor on. The password sign-in has the same window. Spec 9 records it.
 - A person who lost every method and every backup code needs the operator. [Second factor recovery](/docs/operations/second-factor-recovery/) gives the steps. The operator's check of who the person is must reach the level of the enrollment. A weaker check is an easier path past the factor than the factor itself.

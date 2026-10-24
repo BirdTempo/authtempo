@@ -139,6 +139,19 @@ import {
   verifyPasswordEmail,
 } from "./engine/password.js";
 import { hasPermission, type PermissionInput, permissionsOf } from "./engine/permissions.js";
+import {
+  addPhone,
+  type PhoneAdd,
+  type PhoneAddVerify,
+  type PhoneRemove,
+  type PhoneRequest,
+  type PhoneSession,
+  type PhoneVerify,
+  removePhone,
+  requestPhone,
+  verifyAddPhone,
+  verifyPhone,
+} from "./engine/phone.js";
 import { type ProfileUpdate, updateProfile } from "./engine/profile.js";
 import {
   type ReauthInput,
@@ -672,6 +685,19 @@ export interface EmailOtpApi {
   reset(input: EmailOtpReset): Promise<Result<EmailOtpSession | TwoFactorPending>>;
 }
 
+/** Present on `api` while `phone` is on (plan 12i, spec 32 item 5). */
+export interface PhoneApi {
+  /** A sign-in code by SMS. `{ sent: true }` for a known and an unknown number. */
+  request(input: PhoneRequest): Promise<Result<{ sent: true }>>;
+  verify(input: PhoneVerify): Promise<Result<PhoneSession | TwoFactorPending>>;
+  /** A code to a new phone of the caller. Fresh rule, a proved handle. */
+  add(input: PhoneAdd): Promise<Result<{ sent: true }>>;
+  /** Sets the phone that `add` sent a code to. Fresh rule. `phone_taken` when another user holds it. */
+  verifyAdd(input: PhoneAddVerify): Promise<Result<{ phone: string }>>;
+  /** Removes the phone under the last-credential guard. Fresh rule. */
+  remove(input: PhoneRemove): Promise<Result<{ ok: true }>>;
+}
+
 /**
  * The fresh rule and the session operations of a settings page (plan 12a).
  * Present in every deployment. An app's own sensitive change calls
@@ -985,6 +1011,7 @@ export interface AuthApi {
   operator: OperatorApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
+  phone?: PhoneApi;
   totp?: TotpApi;
   jwt?: JwtApi;
   oauth?: OAuthApi;
@@ -1387,6 +1414,17 @@ export function createAuth(input: AuthConfig): Auth {
               verify: (i) => verifyEmailOtp(config, i),
               requestReset: (i) => requestResetOtp(config, i),
               reset: (i) => resetPasswordWithOtp(config, i),
+            },
+          }
+        : {}),
+      ...(config.phone
+        ? {
+            phone: {
+              request: (i) => requestPhone(config, i),
+              verify: (i) => verifyPhone(config, i),
+              add: refusesImpersonation((i) => addPhone(config, i)),
+              verifyAdd: refusesImpersonation((i) => verifyAddPhone(config, i)),
+              remove: refusesImpersonation((i) => removePhone(config, i)),
             },
           }
         : {}),

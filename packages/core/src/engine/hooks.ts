@@ -40,6 +40,7 @@ export type RemoveVia = "remove" | "leave" | "operator" | "scim";
 /**
  * How a session came. `impersonation`: a platform operator opened it for the
  * user (plan 12f). `sso`: the IdP of an organization's connection (plan 12d).
+ * `phone`: a code by SMS (plan 12i).
  */
 export type SessionVia =
   | "password"
@@ -49,7 +50,8 @@ export type SessionVia =
   | "handoff"
   | "email_otp"
   | "impersonation"
-  | "sso";
+  | "sso"
+  | "phone";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -63,6 +65,7 @@ export const SESSION_VIA = {
   email_otp: true,
   impersonation: true,
   sso: true,
+  phone: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -380,6 +383,7 @@ export const USER_CREATE_VIA = {
   handoff: true,
   email_otp: true,
   sso: true,
+  phone: true,
   password_reset: true,
   operator: true,
   scim: true,
@@ -388,9 +392,17 @@ export const USER_CREATE_VIA = {
  * The profile update, the change of address (plan 12a), or an operator's ban
  * and unban (plan 12f). `scim`: the organization's directory moves the
  * address of its staff (plan 12d). `username`: the person sets the
- * username (plan 12i).
+ * username (plan 12i). `phone`: the person adds or removes the phone
+ * (plan 12i).
  */
-export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban" | "scim" | "username";
+export type UserUpdateVia =
+  | "profile"
+  | "email_change"
+  | "ban"
+  | "unban"
+  | "scim"
+  | "username"
+  | "phone";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
@@ -442,6 +454,8 @@ export interface UserPatch {
   /** The set of a username writes both fields (plan 12i). */
   username?: string;
   displayUsername?: string;
+  /** The verify of an added phone writes the number; the remove writes null (plan 12i). */
+  phone?: string | null;
 }
 
 /**

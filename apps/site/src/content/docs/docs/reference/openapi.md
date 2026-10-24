@@ -90,6 +90,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `health` | always on | on |
 | `readiness` | `observe.readiness` | off |
 | `username` | `username` | off |
+| `phone` | `phone` | off |
 
 ## The error shape
 

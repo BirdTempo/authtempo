@@ -12,6 +12,7 @@ import { operatorRoutes } from "./operator.js";
 import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { passwordRoutes } from "./password.js";
+import { phoneRoutes } from "./phone.js";
 import { reauthRoutes } from "./reauth.js";
 import { roleRoutes } from "./roles.js";
 import { scimRoutes } from "./scim.js";
@@ -42,6 +43,7 @@ export type RouteModule =
   | "totp"
   | "second-factor"
   | "email-otp"
+  | "phone"
   | "handoff"
   | "organizations"
   | "roles"
@@ -75,6 +77,7 @@ export function coreRouteModules(
     { module: "totp", routes: totpRoutes(config) },
     { module: "second-factor", routes: secondFactorRoutes(config) },
     { module: "email-otp", routes: emailOtpRoutes(config) },
+    { module: "phone", routes: phoneRoutes(config) },
     { module: "handoff", routes: handoffRoutes(config) },
     { module: "organizations", routes: organizationRoutes(config) },
     { module: "roles", routes: roleRoutes(config) },

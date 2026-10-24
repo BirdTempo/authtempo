@@ -39,6 +39,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "phone-otp:all-day",
   "phone-verify:ip",
   "phone-verify:phone",
+  // Plan 12i Task 5: the codes and notes of /phone/add.
+  "phone-add:user",
   "totp-code:user",
   "totp-code:user-day",
   "totp-setup:user",

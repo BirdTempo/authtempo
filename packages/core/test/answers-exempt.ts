@@ -122,6 +122,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /passkey/authenticate/options",
   "POST /passkeys/delete",
   "POST /passkeys/rename",
+  // Plan 12i Task 5: the remove of a user with no phone.
+  "POST /phone/remove",
   "POST /password/change",
   "POST /password/reset",
   "POST /password/reset/request",
@@ -284,6 +286,12 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/update",
   // Plan 12i Task 2: the set of a username.
   "POST /user/username",
+  // Plan 12i Task 5: the phone routes.
+  "POST /phone/request",
+  "POST /phone/verify",
+  "POST /phone/add",
+  "POST /phone/add/verify",
+  "POST /phone/remove",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",
@@ -347,7 +355,7 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "conflict",
     "five lost rounds of the credential guard; identities.test.ts proves the engine path",
-    ["POST /identities/unlink", "POST /passkeys/delete"],
+    ["POST /identities/unlink", "POST /passkeys/delete", "POST /phone/remove"],
   ),
   ...rows(
     "conflict",
@@ -387,6 +395,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows("conflict", "five lost rounds of the user hold; profile.test.ts proves the engine path", [
     "POST /user/update",
   ]),
+  // Plan 12i Task 5: the set of a phone, the compare-and-set of the profile update.
+  ...rows(
+    "conflict",
+    "five lost rounds of the compare-and-set of the user row; default-lines.test.ts proves the engine path (phone.set_gave_up)",
+    ["POST /phone/add/verify"],
+  ),
   // Plan 12d: two adds of one domain at once, and an update that races another write of the row.
   ...rows(
     "conflict",
@@ -550,31 +564,6 @@ export const UNTIL_ANONYMOUS_SIGN_IN: readonly AnswerShapeExempt[] = (
   }),
 );
 
-/**
- * Plan 12i Task 1 (ruling 15): the rows of a user with no address and a
- * verified handle (a phone or a passkey). An anonymous user cannot reach
- * them. Task 5 opens the profile update and the API token create to such a
- * user, and its phone user signs in by a password, a passkey, or a second
- * factor. Task 5 answers each null form, and then this list is empty.
- */
-export const UNTIL_VERIFIED_HANDLE: readonly AnswerShapeExempt[] = (
-  [
-    ["GET /tokens/current", "user.email"],
-    ["POST /passkey/authenticate/verify", "user.email"],
-    ["POST /password/sign-in", "user.email"],
-    ["POST /totp/verify", "user.email"],
-    ["POST /user/update", "user.email"],
-  ] as const
-).map(
-  ([key, field]): AnswerShapeExempt => ({
-    key,
-    field,
-    form: "null",
-    reason:
-      "the route needs a verified address or a credential that a user with no address gets at plan 12i Task 5; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
-  }),
-);
-
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
     "timeout",
@@ -681,7 +670,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     }),
   ),
   ...UNTIL_ANONYMOUS_SIGN_IN,
-  ...UNTIL_VERIFIED_HANDLE,
   // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
   // has a verified address. The organization create, the member add, and the
   // invitation accept each need one (`verified` in organizations.ts), and no

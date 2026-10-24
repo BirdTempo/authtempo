@@ -31,6 +31,7 @@ import {
   requestPasswordReset,
   resetPassword,
 } from "../src/engine/password.js";
+import { addPhone, removePhone, verifyAddPhone } from "../src/engine/phone.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
 import {
   disableMethod,
@@ -44,6 +45,7 @@ import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { post, tokenFromMail } from "./helpers.js";
 import {
@@ -711,11 +713,14 @@ function tracked() {
   const sent: { m: MailMessage; depth: number }[] = [];
   // Google too, for the unlink path (plan 12a Task 9).
   const jwtTokens: Record<string, FakeIdToken> = {};
+  // The phone of plan 12i Task 5 reads its codes from this port.
+  const sms = createRecordingSms();
   const auth = totpAuth({
     passkey: RP,
     social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn },
     jwt: fakeJwt(jwtTokens),
     username: {},
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
   });
   const store = auth.config.storage as StorageAdapter;
   const origTx = store.transaction.bind(store);
@@ -741,7 +746,8 @@ function tracked() {
   };
   const mail = () => sent.map((x) => x.m);
   const noticesSent = () => sent.filter((x) => x.m.subject === SUBJECT);
-  return { auth, st, mail, noticesSent, jwtTokens };
+  const lastSms = () => /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+  return { auth, st, mail, noticesSent, jwtTokens, lastSms };
 }
 
 type Tracked = ReturnType<typeof tracked>;
@@ -759,6 +765,35 @@ const PATHS: {
         act: () =>
           setUsername(auth.config, { session: s, username: "Ada", ip: null, userAgent: null }),
       };
+    },
+  },
+  // Plan 12i Task 5: the phone is a way in.
+  {
+    name: "phone add",
+    run: async ({ auth, lastSms }) => {
+      const s = await verifiedSession(auth);
+      if (!(await addPhone(auth.config, { session: s, phone: "+14155550100", ip: null })).ok)
+        throw new Error("no code");
+      const code = lastSms();
+      return {
+        act: () => verifyAddPhone(auth.config, { session: s, code, ip: null, userAgent: null }),
+      };
+    },
+  },
+  {
+    name: "phone remove",
+    run: async ({ auth, lastSms }) => {
+      const s = await verifiedSession(auth);
+      if (!(await addPhone(auth.config, { session: s, phone: "+14155550100", ip: null })).ok)
+        throw new Error("no code");
+      const set = await verifyAddPhone(auth.config, {
+        session: s,
+        code: lastSms(),
+        ip: null,
+        userAgent: null,
+      });
+      if (!set.ok) throw new Error(set.code);
+      return { act: () => removePhone(auth.config, { session: s, ip: null, userAgent: null }) };
     },
   },
   {

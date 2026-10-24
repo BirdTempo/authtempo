@@ -54,8 +54,8 @@ describe("the call table of the client (plan 11d)", () => {
     expect(new Set(operations).size).toBe(operations.length);
     // Plan 12k Task 8 adds the five organization token calls.
     // Plan 12d Task 13 adds the eleven SSO calls and the three SCIM token calls.
-    // Plan 12i Task 2 adds the two username calls.
-    expect(CLIENT_CALLS).toHaveLength(114);
+    // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
+    expect(CLIENT_CALLS).toHaveLength(119);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -98,6 +98,11 @@ describe("the call table of the client (plan 11d)", () => {
     await c.emailOtp.verify({ email: "a@b.c", code: "1" });
     await c.emailOtp.requestReset({ email: "a@b.c" });
     await c.emailOtp.reset({ email: "a@b.c", code: "1", password: "p" });
+    await c.phone.request({ phone: "+14155550100" });
+    await c.phone.verify({ phone: "+14155550100", code: "1" });
+    await c.phone.add({ phone: "+14155550100" });
+    await c.phone.verifyAdd({ code: "1" });
+    await c.phone.remove();
     await c.organizations.create({ slug: "s", name: "n" });
     await c.organizations.list();
     await c.organizations.update(org);
@@ -211,13 +216,13 @@ describe("the call table of the client (plan 11d)", () => {
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
     // Plan 12d Task 13: thirteen compared rows, and the start link, which is not.
-    // Plan 12i Task 2 adds the two username calls.
-    expect(COMPARED).toHaveLength(107);
+    // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
+    expect(COMPARED).toHaveLength(112);
     expect(NOT_COMPARED).toHaveLength(7);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    // Plan 12i Task 2 adds username.set.
-    expect(BODY_AS_INPUT).toHaveLength(63);
+    // Plan 12i Task 2 adds username.set. Task 5 adds phone.verify, phone.add, and phone.verifyAdd.
+    expect(BODY_AS_INPUT).toHaveLength(66);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

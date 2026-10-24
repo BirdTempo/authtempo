@@ -430,7 +430,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/reset/request`](/docs/reference/routes/#post-password-reset-request), [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request), [`POST /otp/request`](/docs/reference/routes/#post-otp-request), [`POST /otp/reset/request`](/docs/reference/routes/#post-otp-reset-request), each when `captcha.flows` names its flow. |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/reset/request`](/docs/reference/routes/#post-password-reset-request), [`POST /magic-link/request`](/docs/reference/routes/#post-magic-link-request), [`POST /otp/request`](/docs/reference/routes/#post-otp-request), [`POST /otp/reset/request`](/docs/reference/routes/#post-otp-reset-request), [`POST /phone/request`](/docs/reference/routes/#post-phone-request), each when `captcha.flows` names its flow. |
 
 <h3 id="captcha_failed"><code>captcha_failed</code> 403</h3>
 
@@ -457,7 +457,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| The phone routes, with `phone` set. |
+| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
 
 <h3 id="phone_region"><code>phone_region</code> 400</h3>
 
@@ -466,7 +466,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| The phone routes, with `phone` set. |
+| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
 
 <h3 id="sms_unavailable"><code>sms_unavailable</code> 503</h3>
 
@@ -475,7 +475,16 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| The phone routes, with `phone` set. |
+| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
+
+<h3 id="phone_taken"><code>phone_taken</code> 409</h3>
+
+- **Meaning:** Another account set this phone number first. The unique key of the number decided a race. The code of this request stays live.
+- **Do:** Tell the person that another account has the number. To move the number, that account must remove it first.
+
+| Routes |
+| --- |
+| [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
 
 <h3 id="host_not_allowed"><code>host_not_allowed</code> 421</h3>
 

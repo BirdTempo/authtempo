@@ -64,6 +64,12 @@ export const CLIENT_CALLS = [
   { operation: "emailOtp.verify", method: "POST", path: "/otp/verify" },
   { operation: "emailOtp.requestReset", method: "POST", path: "/otp/reset/request" },
   { operation: "emailOtp.reset", method: "POST", path: "/otp/reset" },
+  // Plan 12i Task 5: the phone code. The add, its verify, and the remove need a fresh session.
+  { operation: "phone.request", method: "POST", path: "/phone/request" },
+  { operation: "phone.verify", method: "POST", path: "/phone/verify" },
+  { operation: "phone.add", method: "POST", path: "/phone/add" },
+  { operation: "phone.verifyAdd", method: "POST", path: "/phone/add/verify" },
+  { operation: "phone.remove", method: "POST", path: "/phone/remove" },
   { operation: "organizations.create", method: "POST", path: "/organizations/create" },
   {
     operation: "organizations.list",

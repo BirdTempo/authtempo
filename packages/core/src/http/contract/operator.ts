@@ -120,6 +120,9 @@ const OperatorUserJson = z.strictObject({
   /** Null for a user with no address (plan 12i). */
   email: z.string().nullable(),
   emailVerified: z.boolean(),
+  /** The username and the phone, or null (plan 12i). */
+  username: z.string().nullable(),
+  phone: z.string().nullable(),
   name: z.string().nullable(),
   createdAt: z.iso.datetime(),
   ban: z

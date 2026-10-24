@@ -114,6 +114,9 @@ export async function guardedRemove(
   config: ResolvedConfig,
   userId: string,
   remove: (tx: StorageAdapter, user: UserRow) => Promise<number>,
+  // The fields of the user row that `remove` wrote, so the recount reads the
+  // row as `remove` left it: the phone remove of plan 12i writes `phone: null`.
+  wrote: Partial<UserRow> = {},
 ): Promise<Result<UserRow>> {
   const now = config.clock.now();
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
@@ -126,8 +129,9 @@ export async function guardedRemove(
         if ((await tx.update("user", unchanged(seen), { updatedAt })) === 1) {
           const held: UserRow = { ...seen, updatedAt };
           if ((await remove(tx, held)) === 0) stopWith("not_found");
-          if ((await waysIn(config, tx, held)) < 1) stopWith("last_credential");
-          return ok(held);
+          const left: UserRow = { ...held, ...wrote };
+          if ((await waysIn(config, tx, left)) < 1) stopWith("last_credential");
+          return ok(left);
         }
         // A parallel write landed first. No write of this call has run.
         seen = await tx.findOne("user", byId);

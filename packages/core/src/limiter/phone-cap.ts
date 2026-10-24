@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config.js";
+import { createAuth } from "../create-auth.js";
 import { checkPhoneCode, sendPhoneCode } from "../engine/phone.js";
 import type { StorageAdapter } from "../storage/port.js";
 import { createRecordingSms } from "../testing/recording-sms.js";
@@ -65,6 +66,46 @@ export function runPhoneCapConformance(name: string, factory: () => Promise<Phon
         );
         expect(answers.filter((a) => a === "sent")).toHaveLength(5);
         expect(answers.filter((a) => a === "capped")).toHaveLength(35);
+        expect(sms.sent).toHaveLength(5);
+      } finally {
+        await target.close();
+      }
+    });
+
+    it("the daily cap holds under 40 parallel requests through POST /phone/request", async () => {
+      // Plan 12i Task 5: the same race through the route, with `signUp` on, so
+      // each new number takes the branch that sends. Each request has its own
+      // IP, so the per-IP key never decides.
+      const target = await factory();
+      try {
+        const sms = createRecordingSms();
+        const auth = createAuth({
+          baseURL: "https://auth.example.com",
+          secret: "0123456789abcdef0123456789abcdef",
+          trustedOrigins: ["https://app.example.com"],
+          storage: target.storage,
+          mail: { send: async () => {} },
+          limiter: target.limiter,
+          phone: { sms, regions: ["+1"], dailyCap: 5, signUp: true },
+        });
+        const answers = await Promise.all(
+          Array.from({ length: 40 }, (_, i) =>
+            auth.handle(
+              new Request("https://auth.example.com/auth/phone/request", {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  origin: "https://app.example.com",
+                  "cf-connecting-ip": `198.51.100.${i + 1}`,
+                },
+                body: JSON.stringify({ phone: `+1415555${String(200 + i).padStart(4, "0")}` }),
+              }),
+            ),
+          ),
+        );
+        const statuses = answers.map((r) => r.status);
+        expect(statuses.filter((st) => st === 200)).toHaveLength(5);
+        expect(statuses.filter((st) => st === 429)).toHaveLength(35);
         expect(sms.sent).toHaveLength(5);
       } finally {
         await target.close();

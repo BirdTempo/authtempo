@@ -170,12 +170,15 @@ export async function deleteAccount(
  * `POST /user/delete` and `api.user.delete` (plan 12a Task 20). With
  * `account.deleteConfirm` on, the request mails a link and deletes nothing.
  * Else the delete runs at once. This is the one place of that choice.
+ * A user with no address gets no mail (plan 12i, ruling 15 m3). Its proof
+ * is the fresh session: a sign-in by a phone code, or a passkey
+ * re-authentication, makes the session fresh. So its delete runs at once.
  */
 export function startAccountDelete(
   config: ResolvedConfig,
   input: AccountDelete,
 ): Promise<Result<{ ok: true } | { sent: true }>> {
-  return config.account.deleteConfirm
+  return config.account.deleteConfirm && hasAddress(input.session.user)
     ? requestAccountDelete(config, input)
     : deleteAccount(config, input);
 }

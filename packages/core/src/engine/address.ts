@@ -35,6 +35,21 @@ export async function verifiedHandle(
 }
 
 /**
+ * True when the user may change what the owner of the account keeps: a
+ * verified address, or, for a user with no address, a verified handle
+ * (ruling 15 of plan 12i). A claimant of an unverified address has
+ * neither, so a claim never inherits what the claimant set. The profile
+ * update, the API tokens, the username, and the phone add read it.
+ */
+export async function handleProved(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  user: UserRow,
+): Promise<boolean> {
+  return hasAddress(user) ? user.emailVerified : verifiedHandle(config, storage, user);
+}
+
+/**
  * True when the account's own handle is proved: a verified address, or, for
  * a user with no address, an account that is not anonymous. Such a user
  * signed up by a proof that core checked (a phone code or a passkey). The

@@ -311,6 +311,7 @@ export const CONFIG_KEYS = {
     emailOtp: true,
     social: true,
     sso: true,
+    phone: true,
   } satisfies Keys<TotpGateConfig>,
   jwtMint: {
     alg: true,

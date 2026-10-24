@@ -100,6 +100,11 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.emailOtp.verify({ email, code, trustDevice? })` | `POST /otp/verify` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.emailOtp.requestReset({ email })` | `POST /otp/reset/request` | `{ sent: true }` |
 | `client.emailOtp.reset({ email, code, password, trustDevice? })` | `POST /otp/reset` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
+| `client.phone.request({ phone, captchaToken? })` | `POST /phone/request` | `{ sent: true }` for a known and an unknown number |
+| `client.phone.verify({ phone, code, trustDevice? })` | `POST /phone/verify` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
+| `client.phone.add({ phone })` | `POST /phone/add` | `{ sent: true }`. It needs a fresh session |
+| `client.phone.verifyAdd({ code })` | `POST /phone/add/verify` | `{ phone }`. It needs a fresh session |
+| `client.phone.remove()` | `POST /phone/remove` | `{ ok: true }`. It needs a fresh session |
 | `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
 | `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |

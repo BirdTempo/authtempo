@@ -10,8 +10,8 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * `ROUTE_FEATURES` (plan 11g) lists every feature once; the OpenAPI document
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
- * `passkeyRelatedOrigins`, the document of WebAuthn Level 3, and
- * `username`.
+ * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
+ * `username`, and `phone`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -44,6 +44,7 @@ export const ROUTE_FEATURES = [
   "health",
   "readiness",
   "username",
+  "phone",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -86,7 +87,7 @@ export interface RouteEntry {
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
-   * `username` (plan 12i) needs `username`.
+   * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -978,6 +979,97 @@ export const ROUTES = Object.freeze([
       "conflict",
       "account_banned",
       "sso_required",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 5: the phone code and the phone on an account (spec 32 item 5).
+  {
+    method: "POST",
+    path: "/phone/request",
+    feature: "phone",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "phone_invalid",
+      "phone_region",
+      "sms_unavailable",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/verify",
+    feature: "phone",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "invalid_code",
+      "too_many_attempts",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+      "account_banned",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/add",
+    feature: "phone",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "phone_invalid",
+      "phone_region",
+      "sms_unavailable",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/add/verify",
+    feature: "phone",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "invalid_code",
+      "too_many_attempts",
+      "phone_taken",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/remove",
+    feature: "phone",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "session_not_fresh",
+      "last_credential",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
     ],
     oauthCodes: [],
   },

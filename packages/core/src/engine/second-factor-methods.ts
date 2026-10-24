@@ -8,7 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
-import { hasAddress } from "./address.js";
+import { hasAddress, provedAccount } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -188,7 +188,8 @@ export async function enableMethod(
 }
 
 /**
- * Turns the passkey method on (plan 12c). Needs a verified address, the
+ * Turns the passkey method on (plan 12c). Needs a proved account (a verified
+ * address, or no address and not anonymous: `provedAccount`), the
  * password, and a sign-in assertion of one of the user's passkeys: the
  * assertion proves that the person holds a passkey now.
  */
@@ -198,7 +199,8 @@ export async function enablePasskeyMethod(
 ): Promise<Result<MethodEnabled>> {
   if (!config.totp || !config.passkey) return fail("not_found");
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
+  if (!provedAccount(user)) return fail("email_unverified");
   // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
   // plan 12a). Before the password limit, so a stale session counts no try.
   const fresh = requireFresh(config, session);

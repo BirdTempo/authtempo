@@ -53,12 +53,13 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, re-authentication code, and change-of-address code |
-| `phone-otp:ip:<ip>` | 15 minutes | 10 | Phone code request, before the read of the number |
-| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request, after the form and region checks |
-| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request, after the form and region checks |
-| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every phone code send of the deployment, before the row and the SMS. It needs a shared limiter |
+| `phone-otp:ip:<ip>` | 15 minutes | 10 | Phone code request and phone add, before the read of the number |
+| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request and phone add, after the form and region checks |
+| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request and phone add, after the form and region checks |
+| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every SMS of the deployment, each code and each note to a taken number, before the row and the send. It needs a shared limiter |
 | `phone-verify:ip:<ip>` | 15 minutes | 30 | Every phone code check |
 | `phone-verify:phone:<phone>` | 15 minutes | 10 | Phone sign-in code check |
+| `phone-add:user:<userId>` | 15 minutes | 3 | Phone add, after the fresh rule and before the request limits. The note to a taken number counts too |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |

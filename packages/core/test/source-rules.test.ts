@@ -51,6 +51,25 @@ describe("the source rules of plan 12i", () => {
     expect(hits).toEqual([]);
   });
 
+  it("sends every SMS through the one counted send (plan 12i Task 5)", async () => {
+    // The daily cap is a promise of core (ruling 20 of plan 12i). A call of
+    // the port outside `countedSend` would send a text that the cap does not count.
+    const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+    const src = new URL("../src/", import.meta.url);
+    const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));
+    const calls = files.flatMap((file) => {
+      const text = readFileSync(new URL(file, src), "utf8");
+      return [...text.matchAll(/\.sms\.send\(/g)].map(() => file);
+    });
+    expect(calls).toEqual(["engine/phone.ts"]);
+    const phone = readFileSync(new URL("../src/engine/phone.ts", import.meta.url), "utf8");
+    const at = phone.indexOf(".sms.send(");
+    const body = phone.slice(phone.indexOf("async function countedSend("), at);
+    expect(body).toContain('limit(config, "phone-otp:all-day"');
+    // The note and the code reach the port through it only.
+    expect(phone.match(/countedSend\(config, /g)).toHaveLength(2);
+  });
+
   it("checks a phone code through the one compare of the email code", async () => {
     // compareCode runs one keyed HMAC and one constant-time compare on every
     // path. A second compare in the phone code would drift from it.

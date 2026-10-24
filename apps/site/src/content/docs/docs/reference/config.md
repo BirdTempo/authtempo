@@ -280,11 +280,12 @@ Another key of `totp` is refused.
 | `totp.trustDays` | number | 30 | An integer from 1 to 365. |
 | `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName` or `tempo_session`. |
 | `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
-| `totp.gate` | object | all three on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
+| `totp.gate` | object | each key on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
 | `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
 | `totp.gate.sso` | boolean | `true` | `false` lets every SSO connection open a session with no second factor. A connection's `mfa` list passes the gate when the provider asserts one of its values. |
+| `totp.gate.phone` | boolean | `true` | `false` lets the phone code sign-in open a session with no challenge. A challenge after a phone code offers no email method. |
 | `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting

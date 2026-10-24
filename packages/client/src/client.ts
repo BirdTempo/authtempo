@@ -768,6 +768,33 @@ export interface Client {
       username: string;
     }): Promise<ClientResult<{ username: string; displayUsername: string }>>;
   };
+  /**
+   * The phone (plan 12i). Every operation answers `not_found` when the server
+   * runs without the `phone` config. A phone code is one factor over the
+   * phone network: a passkey is the stronger method.
+   */
+  phone: {
+    /**
+     * A sign-in code by SMS. `{ sent: true }` for a known and an unknown
+     * number. `captchaToken`: the captcha widget's token (plan 12b), sent in
+     * the header `x-captcha-response`.
+     */
+    request(input: {
+      phone: string;
+      captchaToken?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
+    verify(input: {
+      phone: string;
+      code: string;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
+    /** Needs a fresh session. A code to the new number, or a note when another account holds it. */
+    add(input: { phone: string }): Promise<ClientResult<{ sent: true }>>;
+    /** Needs a fresh session. `phone_taken` when another account set the number first. */
+    verifyAdd(input: { code: string }): Promise<ClientResult<{ phone: string }>>;
+    /** Needs a fresh session. `last_credential` when the phone is the last way in. */
+    remove(): Promise<ClientResult<{ ok: true }>>;
+  };
   /** The linked identities of the signed-in person (plan 12a). */
   identities: {
     list(): Promise<ClientResult<IdentityListJSON>>;
@@ -1340,6 +1367,27 @@ export function createClient(options: ClientOptions): Client {
     set: ({ username: name }) =>
       send<{ username: string; displayUsername: string }>("username.set", { username: name }),
   };
+  // A verify signs in, so the store reads again; the add, its verify, and the remove change no session.
+  const phone: Client["phone"] = {
+    request: ({ phone: number, captchaToken }) =>
+      send<{ sent: true }>(
+        "phone.request",
+        { phone: number },
+        undefined,
+        captchaHeader(captchaToken),
+      ),
+    verify: ({ phone: number, code, trustDevice }) =>
+      changes(
+        send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>("phone.verify", {
+          phone: number,
+          code,
+          ...(trustDevice !== undefined ? { trustDevice } : {}),
+        }),
+      ),
+    add: ({ phone: number }) => send<{ sent: true }>("phone.add", { phone: number }),
+    verifyAdd: ({ code }) => send<{ phone: string }>("phone.verifyAdd", { code }),
+    remove: () => shaped(send<unknown>("phone.remove", {}), isOkTrue),
+  };
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),
     unlink: ({ id }) => shaped(send<unknown>("identities.unlink", { id }), isOkTrue),
@@ -1763,6 +1811,7 @@ export function createClient(options: ClientOptions): Client {
     reauth,
     user,
     username,
+    phone,
     identities,
     sso: {
       // JSON leaves out a key whose value is undefined, so the body names only the set fields.

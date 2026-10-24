@@ -88,6 +88,8 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/tokens$/, "a new API token"],
   [/^\/user\/delete(\/confirm)?$/, "the account delete"],
   [/^\/user\/username$/, "the username"],
+  // Plan 12i Task 5: the add, its verify, and the remove of a phone.
+  [/^\/phone\/(add|add\/verify|remove)$/, "the phone"],
   [/^\/totp(\/|$)|^\/second-factor\//, "each second-factor route"],
   [/^\/handoff\/start$/, "the handoff start"],
   [/^\/handoff\/continue$/, "the handoff continue"],

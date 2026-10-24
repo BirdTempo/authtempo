@@ -239,8 +239,9 @@ describe("the column map (plan 12g)", () => {
     // Task 2 adds 2: the username set and the availability check. Plan 12i
     // Task 3 adds 2: the password sign-in by username and by phone. Plan 12i
     // Task 4 adds 6: the three request keys, the daily cap, and the two
-    // verify keys of the phone code.
-    expect(sites.length).toBe(95);
+    // verify keys of the phone code. Plan 12i Task 5 adds 1: the phone add
+    // per user.
+    expect(sites.length).toBe(96);
     expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(

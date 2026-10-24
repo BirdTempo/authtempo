@@ -20,9 +20,13 @@ import {
  */
 export interface OperatorUser {
   id: string;
-  /** Null for a user with no address (plan 12i). Task 2 or Task 5 of plan 12i adds `username` and `phone` to the list. */
+  /** Null for a user with no address (plan 12i). */
   email: string | null;
   emailVerified: boolean;
+  /** The stored form of the username, or null (plan 12i). */
+  username: string | null;
+  /** The phone in E.164, or null (plan 12i). A support person reads it as the address. */
+  phone: string | null;
   name: string | null;
   createdAt: string;
   /** The ban while it holds, else null. */
@@ -142,6 +146,8 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
       id: user.id,
       email: user.email,
       emailVerified: user.emailVerified,
+      username: user.username,
+      phone: user.phone,
       name: user.name,
       createdAt: user.createdAt.toISOString(),
       ban:

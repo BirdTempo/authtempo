@@ -52,6 +52,7 @@ const START_LIST: readonly string[] = [
   "authtempo: passkey counter moved",
   "authtempo: profile update gave up",
   "authtempo: username set gave up",
+  "authtempo: phone set gave up",
   "authtempo: backup code spend gave up",
   "authtempo: backup code replacement gave up",
   "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
@@ -121,9 +122,10 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 of plan 12i (Task 14: 1).
-    expect(START_LIST).toHaveLength(77 + 1);
-    expect(texts).toHaveLength(77 + 1);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 1 of plan 12i
+    // (Task 14: 1, Task 5: 1).
+    expect(START_LIST).toHaveLength(77 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

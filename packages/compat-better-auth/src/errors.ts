@@ -181,6 +181,9 @@ export const BETTER_AUTH_CODES = {
   // Plan 12i Task 18: Better Auth 1.7.2 throws at a host outside allowedHosts
   // and names no code. The shim answers HOST_NOT_ALLOWED. The status stays core's.
   host_not_allowed: "HOST_NOT_ALLOWED",
+  // Plan 12i Task 5: the phone-number plugin's name for a number that another
+  // user holds (plugins/phone-number/error-codes.mjs, read 2026-10-24).
+  phone_taken: "PHONE_NUMBER_EXIST",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

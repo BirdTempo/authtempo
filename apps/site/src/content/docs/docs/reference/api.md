@@ -126,6 +126,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `ORGANIZATION_TOKEN_PREFIX`, `ORGANIZATION_TOKEN_CAP` | `to_`, and 50, the live tokens of one organization. |
 | `DEFAULT_RESERVED_SLUGS` | The default reserved slugs. |
 | `USERNAME_RE` | The stored form of a username: `^[a-z0-9_.]+$`, after NFKC and lower case. |
+| `PHONE_RE` | A phone number in E.164: `^\+[1-9][0-9]{7,14}$`. |
 | `CORE_STATEMENTS` | The resources and actions of core: `organization`, `member`, `invitation`, `team`, `ac`, and `apiToken`. |
 | `DELETE_CONFIRM_TTL_MINUTES` | The bounds and the default of `account.deleteConfirm.ttlMinutes`: 5, 1440, and 60. |
 | `DEFAULT_SESSION_COOKIE` | `__Host-tempo_session`, the default name of the session cookie. |
@@ -161,6 +162,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Handoff | `HandoffStart` |
 | Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignUpResult`, `PasswordSignUpPending`, `PasswordSignIn`, `PasswordIdentifier`, `PasswordSignInFields`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `ResetResult`, `ResetChallenge`, `PasswordChange`, `PasswordReauth` |
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
+| Phone | `PhoneApi`, `PhoneRequest`, `PhoneVerify`, `PhoneSession`, `PhoneAdd`, `PhoneAddVerify`, `PhoneRemove` |
 | Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge`, `MethodEnabled`, `ChallengeView` |
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary`, `ApiTokenUpdate`, `TokenQuota`, `AuthCode`, `OrganizationTokensApi`, `OrganizationTokenCreate`, `OrganizationTokenSummary`, `OrganizationTokenUpdate`, `ResolvedOrganizationToken` |
 | Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `Username`, `UsernameSet`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart`, `AccountDelete` |

@@ -20,6 +20,7 @@ import {
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
+import { addPhone, requestPhone, verifyAddPhone } from "../src/engine/phone.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { createScimToken } from "../src/engine/scim/tokens.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
@@ -37,6 +38,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { SOCIAL } from "./every-feature.js";
 import { BASE_URL, emailOf, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
@@ -130,6 +132,12 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /otp/verify": { email: "$otpEmail", code: "$otpCode" },
   "POST /otp/reset/request": { email: "ada@example.com" },
   "POST /otp/reset": { email: "$otpEmail", code: "$otpCode", password: PASSWORD },
+  // Plan 12i Task 5: the phone routes. A new number for the request and the add.
+  "POST /phone/request": { phone: "+14155550100" },
+  "POST /phone/verify": { phone: "$phone", code: "$phoneCode" },
+  "POST /phone/add": { phone: "+14155550101" },
+  "POST /phone/add/verify": { code: "$phoneCode" },
+  "POST /phone/remove": {},
   "POST /handoff/continue": { h: `hs_${BODY43}` },
   "POST /handoff/redeem": { code: BODY43, verifier: BODY43 },
   "POST /organizations/create": { slug: "acme", name: "Acme" },
@@ -237,6 +245,8 @@ const UNFILLED: Fills = {
   $domain: "d1",
   $connection: "c1",
   $scimToken: "k1",
+  $phone: "+14155550100",
+  $phoneCode: "123456",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -328,6 +338,7 @@ function requestOf(
  */
 function world(extra: Partial<AuthConfig> = {}) {
   const limiter = { refuse: false, allow: async () => !limiter.refuse };
+  const sms = createRecordingSms();
   const auth = makeAuth({
     limiter,
     password: { hash: FAST, uniformSignUp: false },
@@ -358,6 +369,8 @@ function world(extra: Partial<AuthConfig> = {}) {
     scim: {},
     // The username routes of plan 12i Task 2.
     username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -378,7 +391,13 @@ function world(extra: Partial<AuthConfig> = {}) {
     if (!m?.[1]) throw new Error("no invitation in mail");
     return m[1];
   };
-  return { auth, limiter, handle, cookie, lastToken, lastCode, lastInvitation };
+  /** The code of the last SMS: the default text starts with it (plan 12i Task 5). */
+  const lastSms = () => {
+    const m = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "");
+    if (!m?.[1]) throw new Error("no code in the SMS");
+    return m[1];
+  };
+  return { auth, limiter, handle, cookie, lastToken, lastCode, lastInvitation, lastSms };
 }
 type World = ReturnType<typeof world>;
 
@@ -665,12 +684,16 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const resetToken = w.lastToken();
     must(await requestEmailOtp(config, { email, ip: null }));
     const otpCode = w.lastCode();
+    // A phone code to a new number: `phone.signUp` sends it, and the verify meets the closed sign-up (plan 12i Task 5).
+    must(await requestPhone(config, { phone: "+14155550199", ip: null }));
     const fills: Fills = {
       $newEmail: email,
       $otpEmail: email,
       $otpCode: otpCode,
       $magicToken: magicToken,
       $resetToken: resetToken,
+      $phone: "+14155550199",
+      $phoneCode: w.lastSms(),
     };
     // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
     // The SSO callback needs an IdP exchange: sso/resolve.test.ts proves it through the route (plan 12d).
@@ -1251,7 +1274,20 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const totpForm = await enrolled(w.auth, "totp-form@example.com");
   const formChallenge = await challengeOf(w, emailOf(totpForm.user));
   const formCode = await codeNow(w.auth, totpForm.secret);
+  // Plan 12i Task 5: ada holds a phone set by a code, and has a live add code for a second number.
+  const phone = "+14155550100";
+  must(await addPhone(config, { session: ada, phone, ip: null }));
+  must(
+    await verifyAddPhone(config, { session: ada, code: w.lastSms(), ip: null, userAgent: null }),
+  );
+  must(await addPhone(config, { session: ada, phone: "+14155550101", ip: null }));
+  const addCode = w.lastSms();
+  must(await requestPhone(config, { phone, ip: null }));
+  const signInCode = w.lastSms();
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /phone/verify": { phone, code: signInCode },
+    "POST /phone/add/verify": { code: addCode },
+    "POST /phone/remove": {},
     "POST /password/sign-in": { email: ada.user.email, password: PASSWORD },
     "POST /password/sign-up": { email: "new@example.com", password: PASSWORD },
     "POST /password/verify": { token: verifyToken },

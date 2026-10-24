@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { type PasswordSignIn, passwordSignIn } from "../src/engine/password.js";
+import { requestPhone, verifyPhone } from "../src/engine/phone.js";
 import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -11,8 +12,8 @@ import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 // One sign-in route for three identifiers (plan 12i Task 3, spec 32 item 6).
-// A phone that a code proved comes with Task 5, so the case "signs in by
-// phone" is written there: no test here seeds a phone.
+// The case "signs in by phone" (Task 5) makes its phone user by a real
+// code: no test here seeds a phone.
 
 const PHONE = "+14155550100";
 
@@ -275,6 +276,50 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
     expect(await signIn(auth, { username: "alice" }, "203.0.113.50")).toMatchObject({
       code: "rate_limited",
     });
+  });
+
+  it("signs in by phone", async () => {
+    // A user with no address: the phone sign-up by a real code, then a first password.
+    const sms = createRecordingSms();
+    const auth = world({
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    });
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    expect(await requestPhone(auth.config, { phone: PHONE, ip: "203.0.113.7" })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const made = await verifyPhone(auth.config, {
+      phone: PHONE,
+      code,
+      ip: "203.0.113.7",
+      userAgent: "ua",
+    });
+    if (!made.ok || !("token" in made.value)) throw new Error("no phone session");
+    const cookie = { cookie: `${auth.config.cookieName}=${made.value.token}` };
+    const first = await call(
+      handle,
+      post("/auth/password/change", { newPassword: PASSWORD }, cookie),
+    );
+    expect(first).toEqual({ status: 200, body: { ok: true } });
+    const res = await call(
+      handle,
+      post("/auth/password/sign-in", { phone: PHONE, password: PASSWORD }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.user).toMatchObject({ id: made.value.user.id, email: null });
+    // A wrong password answers as an unknown number does.
+    const wrongPassword = await call(
+      handle,
+      post("/auth/password/sign-in", { phone: PHONE, password: "a wrong horse battery" }),
+    );
+    const unknown = await call(
+      handle,
+      post("/auth/password/sign-in", { phone: "+14155550199", password: PASSWORD }),
+    );
+    expect(wrongPassword).toEqual({ status: 401, body: { error: "invalid_credentials" } });
+    expect(unknown).toEqual(wrongPassword);
   });
 
   it("gates a username sign-in as an address sign-in", async () => {

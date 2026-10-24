@@ -17,7 +17,7 @@ import type {
   UserRow,
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { passkeyUserName } from "./address.js";
+import { passkeyUserName, provedAccount } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { isLastMethod, type LastMethod } from "./last-method.js";
@@ -308,7 +308,8 @@ export interface TotpSetupInput {
 
 /**
  * The secret, the key URI, and the backup codes for a new factor (plan 9f).
- * Needs the user's password and a verified email. The password check is
+ * Needs the user's password and a proved account (a verified email, or no
+ * address and not anonymous: `provedAccount`). The password check is
  * `checkUserPassword` under its own key, `totp-setup:user` 5 per 15 minutes
  * (plan 9h), with the dummy verify, and `invalid_credentials` on a miss,
  * before any row write. A session alone
@@ -334,7 +335,8 @@ export async function setupTotp(
   ]);
   // checkUserPassword found the password row; a user deleted since then gets no factor.
   if (!user) return fail("invalid_credentials");
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
+  if (!provedAccount(user)) return fail("email_unverified");
   const now = config.clock.now();
   const existing = await config.storage.findOne("totp", [
     { field: "userId", op: "eq", value: user.id },
@@ -434,7 +436,7 @@ export async function enableTotp(
   const totp = config.totp;
   if (!totp) return fail("not_found");
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(user)) return fail("email_unverified");
   // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
   // plan 12a). Before the code limit, so a stale session counts no try.
   const fresh = requireFresh(config, session);

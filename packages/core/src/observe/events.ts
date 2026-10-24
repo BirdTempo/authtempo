@@ -170,6 +170,8 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "GET /magic-link/verify": "magic_link",
   "POST /magic-link/verify": "magic_link",
   "POST /otp/verify": "email_otp",
+  // The phone code of plan 12i Task 5.
+  "POST /phone/verify": "phone",
   "POST /passkey/authenticate/verify": "passkey",
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
@@ -467,6 +469,7 @@ export const EVENTS = {
     userId: ROW_ID,
   }),
   "username.set_gave_up": fault("error", "authtempo: username set gave up", { userId: ROW_ID }),
+  "phone.set_gave_up": fault("error", "authtempo: phone set gave up", { userId: ROW_ID }),
   "notice.mail_failed": fault("error", "authtempo: notice mail failed", {
     event: { kind: "identifier" },
     errorName: ERROR_NAME,
