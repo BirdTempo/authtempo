@@ -3,10 +3,10 @@ import type { ScimCaller } from "./engine/scim/tokens.js";
 /**
  * The seams of a compat package (plan 12d Task 14, ruling 61 P3). Each one
  * holds a value for one object: an AuthConfig, a resolved config and its
- * copies, or a Request that the compat package built. Only core's own functions of `compat.ts` set a value. A
- * core route or the sweep reads the value in place of its own input. Every
- * other step stays core's: the session, the limiter, the manager guard, the
- * scopes, and the audit row.
+ * copies, or a Request that the compat package built. Only core's own
+ * functions of `compat.ts` set a value. A core route or the sweep reads the
+ * value in place of its own input. Every other step stays core's: the
+ * session, the limiter, the manager guard, the scopes, and the audit row.
  */
 
 /**
@@ -42,7 +42,10 @@ export function carryDomainRecord(input: object, resolved: object): void {
   if (record) Object.defineProperty(resolved, RECORD, { value: record, enumerable: true });
 }
 
-/** The record function of the compat package of this resolved config or of a copy of it, else null. */
+/**
+ * The record function of the compat package of this resolved config or of a
+ * copy of it, else null.
+ */
 export function domainRecordFor(resolved: object): DomainRecordOf | null {
   return (resolved as { [RECORD]?: DomainRecordOf })[RECORD] ?? null;
 }
