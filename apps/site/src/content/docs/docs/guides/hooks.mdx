@@ -138,6 +138,7 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 - A SCIM group write runs the member role hooks with `by: null`, and no team hook (plan 12d ruling 54). Its team create, rename, delete, and member changes are part of the group write, as a cascade is. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each group write after its commit.
 - On Postgres a slow before hook in one of these flows blocks every other write of its locked rows until the commit. A sign-in of a verified user writes its user row, so it waits too.
 - A passkey sign-in moves the passkey counter outside the transaction of the session. No lock of the passkey row holds while `session.beforeCreate` runs.
+- The sweep deletes anonymous users past `anonymous.ttlDays` with no `user.beforeDelete`: the user did not ask for the delete. It fires `user.afterDelete` once for each deleted user, outside the call budget of the sweep. See [the sweep](/docs/guides/sweep/).
 
 :::caution
 Warning: a before hook must not await a core write of a row that its flow locks, such as `auth.api.user.update` of the same user. On Postgres the request hangs with no error, with a pool of any size. Write from the after hook instead, or start the write with no `await` and catch its error. D1 has no row lock, so this hang cannot occur there.

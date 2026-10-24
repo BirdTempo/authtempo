@@ -20,6 +20,7 @@ import { sweepExpired } from "../src/engine/sweep.js";
 import { createApiToken } from "../src/engine/tokens.js";
 import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { setUsername } from "../src/engine/username.js";
+import { draftUserRow } from "../src/engine/users.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter, type Route } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -28,6 +29,7 @@ import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
 import { authorizeGet, oauthHandle, pkce, REDIRECT, registered } from "./oauth-helpers.js";
+import { observed } from "./observe-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
@@ -295,6 +297,26 @@ describe("anonymous sign-in (plan 12i Task 6)", () => {
     expect((await w.handle(post("/auth/anonymous/sign-in", {}, same))).status).toBe(200);
   });
 
+  it("caps the anonymous users of the deployment per day (ruling 25 M4)", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const o = observed({ anonymous: { dailyCap: 2 } });
+    const signIn = () => o.auth.handle(post("/auth/anonymous/sign-in", {}, fromNewIp()));
+    expect((await signIn()).status).toBe(200);
+    expect((await signIn()).status).toBe(200);
+    // A new IP: the per-IP limit allows it, and the cap of the deployment refuses it.
+    const third = await signIn();
+    expect(third.status).toBe(429);
+    expect(await third.json()).toEqual({ error: "rate_limited" });
+    expect(await o.storage.findMany("user", [])).toHaveLength(2);
+    const hits = (await o.events()).filter((e) => e.name === "limit.hit");
+    expect(hits.map((e) => e.family)).toEqual(["anonymous:all-day"]);
+    // The window is 24 hours.
+    o.clock.advance(day - 1000);
+    expect((await signIn()).status).toBe(429);
+    o.clock.advance(1000);
+    expect((await signIn()).status).toBe(200);
+  });
+
   it("answers not_found in process with anonymous off", async () => {
     const auth = makeAuth(features({ anonymous: false }));
     expect(
@@ -317,18 +339,33 @@ describe("the anonymous config (plan 12i Task 6)", () => {
     mail: { send: async () => {} },
   };
   it("defaults ttlDays to 30 and refuses a value out of bounds", () => {
-    expect(resolveConfig({ ...input, anonymous: {} }).anonymous).toEqual({ ttlDays: 30 });
-    expect(resolveConfig({ ...input, anonymous: { ttlDays: 365 } }).anonymous).toEqual({
-      ttlDays: 365,
+    expect(resolveConfig({ ...input, anonymous: {} }).anonymous).toEqual({
+      ttlDays: 30,
+      sweepBatch: 100,
+      dailyCap: 1000,
     });
+    expect(
+      resolveConfig({
+        ...input,
+        anonymous: { ttlDays: 365, sweepBatch: 1, dailyCap: 100_000 },
+      }).anonymous,
+    ).toEqual({ ttlDays: 365, sweepBatch: 1, dailyCap: 100_000 });
     expect(resolveConfig({ ...input, anonymous: false }).anonymous).toBeNull();
     expect(resolveConfig(input).anonymous).toBeNull();
     for (const ttlDays of [0, 366, 1.5])
       expect(() => resolveConfig({ ...input, anonymous: { ttlDays } })).toThrow(
         "anonymous.ttlDays must be an integer from 1 to 365",
       );
+    for (const sweepBatch of [0, 101, 2.5])
+      expect(() => resolveConfig({ ...input, anonymous: { sweepBatch } })).toThrow(
+        "anonymous.sweepBatch must be an integer from 1 to 100",
+      );
+    for (const dailyCap of [0, 100_001, 2.5])
+      expect(() => resolveConfig({ ...input, anonymous: { dailyCap } })).toThrow(
+        "anonymous.dailyCap must be an integer from 1 to 100000",
+      );
     expect(() => resolveConfig({ ...input, anonymous: { ttl: 3 } as never })).toThrow(
-      "anonymous.ttl is not an option; core has ttlDays",
+      "anonymous.ttl is not an option; core has ttlDays, sweepBatch, dailyCap",
     );
     expect(() => resolveConfig({ ...input, anonymous: true as never })).toThrow(
       "anonymous must be an object or false",
@@ -623,6 +660,20 @@ describe("the anonymous delete (plan 12i Task 6)", () => {
     expect(await sixth.json()).toEqual({ error: "rate_limited" });
   });
 
+  it("deletes nothing when the proof session ended after the router read it (ruling 25 L2)", async () => {
+    const afterDelete = vi.fn();
+    const w = world({ hooks: { user: { afterDelete } } });
+    const a = await anonymous(w);
+    // A sign-out in parallel ends the session after the router step resolved it.
+    expect((await w.handle(post("/auth/sign-out", {}, { cookie: a.cookie }))).status).toBe(200);
+    expect(await deleteAnonymous(w.auth.config, { session: a.resolved })).toMatchObject({
+      ok: false,
+      code: "unauthorized",
+    });
+    expect((await users(w)).map((u) => u.id)).toEqual([a.resolved.user.id]);
+    expect(afterDelete).not.toHaveBeenCalled();
+  });
+
   it("holds ANONYMOUS_ROWS to the user child models", () => {
     expect(Object.keys(ANONYMOUS_ROWS).sort()).toEqual([...USER_CHILD_MODELS].sort());
     for (const [model, what] of Object.entries(ANONYMOUS_ROWS))
@@ -654,6 +705,95 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
     expect(second.anonymousUsers).toBe(1);
     expect((await users(w)).map((u) => u.id)).toEqual([live.resolved.user.id]);
     expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(0);
+  });
+
+  it("keeps a user that is not anonymous: a verified address and a phone sign-up (ruling 25 M3)", async () => {
+    const sms = createRecordingSms();
+    const w = world({
+      limiter: { allow: async () => true },
+      session: { ttlDays: 7 },
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    });
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    const phone = "+14155550100";
+    expect((await w.handle(post("/auth/phone/request", { phone }, fromNewIp()))).status).toBe(200);
+    const code = /^(\d+) is your /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const verified = await w.handle(post("/auth/phone/verify", { phone, code }, fromNewIp()));
+    expect(verified.status).toBe(200);
+    const phoneUser = ((await verified.json()) as { user: { id: string } }).user.id;
+    const guest = await anonymous(w);
+    // Past the 30 days of anonymous.ttlDays and the 7 days of each session: no session is live.
+    w.auth.clock.advance(31 * 24 * 60 * 60 * 1000);
+    const kept = await users(w);
+    expect(kept.find((u) => u.id === phoneUser)).toMatchObject({ email: null, isAnonymous: false });
+    expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(1);
+    expect((await users(w)).map((u) => u.id).sort()).toEqual([ada.user.id, phoneUser].sort());
+    expect((await users(w)).some((u) => u.id === guest.resolved.user.id)).toBe(false);
+  });
+
+  it("deletes the session rows of a swept user that are past the cap but not past expiresAt (ruling 25 L1)", async () => {
+    const opened = world({
+      limiter: { allow: async () => true },
+      session: { ttlDays: 7 },
+      anonymous: { ttlDays: 1 },
+    });
+    const a = await anonymous(opened);
+    // The app then turns on an absolute cap of 1 day. The session keeps its expiresAt.
+    const w = world({
+      storage: opened.auth.storage,
+      clock: opened.auth.clock,
+      limiter: { allow: async () => true },
+      session: { ttlDays: 7, absoluteDays: 1 },
+      anonymous: { ttlDays: 1 },
+    });
+    // Two days on: the cap ends the session, and its expiresAt is 5 days ahead.
+    opened.auth.clock.advance(2 * 24 * 60 * 60 * 1000);
+    const rows = await opened.auth.storage.findMany("session", []);
+    expect(rows.map((r) => r.expiresAt > opened.auth.clock.now())).toEqual([true]);
+    expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(1);
+    expect(await users(opened)).toEqual([]);
+    expect(
+      await opened.auth.storage.findMany("session", [
+        { field: "userId", op: "eq", value: a.resolved.user.id },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("deletes at most anonymous.sweepBatch users per sweep (ruling 25 M1)", async () => {
+    const afterDelete = vi.fn();
+    const w = world({
+      limiter: { allow: async () => true },
+      session: { ttlDays: 7 },
+      anonymous: { sweepBatch: 3 },
+      hooks: { user: { afterDelete } },
+    });
+    for (let i = 0; i < 5; i++) await anonymous(w);
+    w.auth.clock.advance(31 * 24 * 60 * 60 * 1000);
+    expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(3);
+    expect(afterDelete).toHaveBeenCalledTimes(3);
+    expect(await users(w)).toHaveLength(2);
+    expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(2);
+    expect(afterDelete).toHaveBeenCalledTimes(5);
+  });
+
+  it("takes the oldest anonymous user first by createdAt, not by id (ruling 25 L3)", async () => {
+    const w = world({
+      limiter: { allow: async () => true },
+      anonymous: { sweepBatch: 1 },
+    });
+    // A Better Auth anonymous user keeps its random id through compat (plan 12i
+    // Task 16), so an id has no time order. The newer user has the lower id.
+    const t0 = w.auth.clock.now();
+    const day = 24 * 60 * 60 * 1000;
+    const guest = { email: null, emailVerified: false, name: null, isAnonymous: true };
+    await w.auth.storage.create("user", draftUserRow({ ...guest, id: "zQ3kV9" }, t0));
+    await w.auth.storage.create(
+      "user",
+      draftUserRow({ ...guest, id: "aB7pX2" }, new Date(t0.getTime() + day)),
+    );
+    w.auth.clock.advance(40 * day);
+    expect((await sweepExpired(w.auth.config)).anonymousUsers).toBe(1);
+    expect((await users(w)).map((u) => u.id)).toEqual(["aB7pX2"]);
   });
 
   it("keeps an anonymous user younger than ttlDays and counts 0 with anonymous off", async () => {

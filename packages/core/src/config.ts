@@ -549,6 +549,18 @@ export interface AnonymousConfig {
    * Default 30. After them the sweep deletes the user.
    */
   ttlDays?: number;
+  /**
+   * The most anonymous users that one sweep deletes, 1 to 100. Default 100.
+   * The sweep runs `user.afterDelete` once per deleted user, outside the
+   * call budget. A hook that sends queries or requests should lower it.
+   */
+  sweepBatch?: number;
+  /**
+   * The anonymous users that the deployment makes per 24 hours, 1 to
+   * 100000. Default 1000. A sign-in over the cap answers 429. The count is
+   * per deployment on a shared limiter, and per isolate on the memory limiter.
+   */
+  dailyCap?: number;
 }
 
 /**
@@ -1942,10 +1954,16 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
 /** The resolved `anonymous` (plan 12i Task 6). */
 export interface ResolvedAnonymous {
   ttlDays: number;
+  sweepBatch: number;
+  dailyCap: number;
 }
 
 /** The keys of `anonymous`. A Record, so a key added to `AnonymousConfig` and not listed here fails the compile. */
-const ANONYMOUS_KEYS: Readonly<Record<keyof AnonymousConfig, true>> = { ttlDays: true };
+const ANONYMOUS_KEYS: Readonly<Record<keyof AnonymousConfig, true>> = {
+  ttlDays: true,
+  sweepBatch: true,
+  dailyCap: true,
+};
 
 /** `anonymous` (plan 12i Task 6). Absent or `false`: off. */
 function resolveAnonymous(input: AnonymousConfig | false | undefined): ResolvedAnonymous | null {
@@ -1961,7 +1979,13 @@ function resolveAnonymous(input: AnonymousConfig | false | undefined): ResolvedA
   const ttlDays = input.ttlDays ?? 30;
   if (!Number.isInteger(ttlDays) || ttlDays < 1 || ttlDays > 365)
     throw new ConfigError("anonymous.ttlDays must be an integer from 1 to 365");
-  return { ttlDays };
+  const sweepBatch = input.sweepBatch ?? 100;
+  if (!Number.isInteger(sweepBatch) || sweepBatch < 1 || sweepBatch > 100)
+    throw new ConfigError("anonymous.sweepBatch must be an integer from 1 to 100");
+  const dailyCap = input.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("anonymous.dailyCap must be an integer from 1 to 100000");
+  return { ttlDays, sweepBatch, dailyCap };
 }
 
 /** The resolved `username` (plan 12i). Each bound counts the characters of the typed name after NFKC. */

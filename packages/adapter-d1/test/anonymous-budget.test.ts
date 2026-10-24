@@ -19,14 +19,19 @@ const RAW = Symbol("raw");
 // The counts of the run of 2026-10-24, with the D1 limiter. `refused` is a
 // route of ANONYMOUS_REFUSED: the router step reads the session and the
 // user, and answers before the handler.
+// The sign-in counts the daily cap of the deployment too (ruling 25 M4).
 const PINS = {
-  signIn: 5,
+  signIn: 6,
   signInAgain: 3,
   refused: 2,
   delete: 9,
 };
 // The sweep of 101 anonymous users past their days, with no live session.
 const SWEEP_PINS = { queries: 28, anonymousUsers: 100 };
+// The sweep of 60 anonymous users past their days behind a backlog of 300
+// client links (ruling 25 M2), on the run of 2026-10-24. With no share of
+// its own, the step gets one page, 50 users, after the link and outbox steps.
+const SHARE_PINS = { oauthSessionLinks: 10, oauthLogouts: 4, anonymousUsers: 60, queries: 48 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -65,6 +70,43 @@ function counting(db: D1Database) {
     },
   });
   return { db: counted as D1Database, count };
+}
+
+/** A view of `db` that keeps the SQL and `meta.rows_read` of each statement that it runs. */
+function reading(db: D1Database) {
+  const log: { sql: string; rows: number }[] = [];
+  const wrap = (s: D1PreparedStatement, sql: string): D1PreparedStatement =>
+    new Proxy(s, {
+      get(target, key) {
+        if (key === RAW) return target;
+        if (key === "bind") return (...values: unknown[]) => wrap(target.bind(...values), sql);
+        if (key === "all" || key === "run")
+          return async () => {
+            const r = await target[key]();
+            log.push({ sql, rows: r.meta.rows_read });
+            return r;
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const view = new Proxy(db, {
+    get(target, key) {
+      if (key === "prepare") return (sql: string) => wrap(target.prepare(sql), sql);
+      if (key === "batch")
+        return async (statements: D1PreparedStatement[]) => {
+          const raws = statements.map(
+            (s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s,
+          );
+          const results = await target.batch(raws);
+          for (const r of results) log.push({ sql: "(batch)", rows: r.meta.rows_read });
+          return results;
+        };
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { db: view as D1Database, log };
 }
 
 let current = new Date("2026-10-24T00:00:00.000Z");
@@ -178,5 +220,107 @@ describe("the anonymous routes on D1 (plan 12i Task 6)", () => {
     expect((await next.auth.api.sweepExpired()).anonymousUsers).toBe(101 - swept.anonymousUsers);
     expect(next.count.queries).toBeLessThanOrEqual(BUDGET);
     expect(await rows("ta_user")).toBe(0);
+  });
+});
+
+describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)", () => {
+  /** `count` users with a verified address, made before `at`, one per second. */
+  async function seedAddressUsers(count: number, at: number) {
+    const insert = env.DB.prepare(
+      "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, ?, ?, ?, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)",
+    );
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      const made = at - (count - i) * 1000;
+      rows.push(insert.bind(`01K${String(i).padStart(23, "0")}`, made, made, `u${i}@example.com`));
+    }
+    for (let i = 0; i < rows.length; i += 500) await env.DB.batch(rows.slice(i, i + 500));
+  }
+
+  /** `count` anonymous users made by the route at the clock time. */
+  async function signIns(count: number) {
+    const setup = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createD1Adapter(env.DB),
+      limiter: { allow: async () => true },
+      mail: { send: async () => {} },
+      clock,
+      anonymous: {},
+    });
+    for (let i = 0; i < count; i++)
+      expect((await setup.handle(post("/anonymous/sign-in", {}))).status).toBe(200);
+  }
+
+  it("reads the old anonymous users alone through the index on (is_anonymous, created_at)", async () => {
+    // 10 000 users with an address, 120 anonymous users past their days, and 300 young ones.
+    await seedAddressUsers(10_000, current.getTime() - 40 * DAY_MS);
+    await signIns(120);
+    current = new Date(current.getTime() + 31 * DAY_MS);
+    await signIns(300);
+    expect(await rows("ta_user")).toBe(10_420);
+    const { db, log } = reading(env.DB);
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createD1Adapter(db),
+      limiter: { allow: async () => true },
+      mail: { send: async () => {} },
+      clock,
+      anonymous: {},
+    });
+    expect((await auth.api.sweepExpired()).anonymousUsers).toBe(100);
+    const steps = log.filter((l) => /FROM ta_user WHERE is_anonymous = /.test(l.sql));
+    expect(steps).toHaveLength(2);
+    // The SQLite text sorts by `created_at IS NULL` first, so the index finds the rows but
+    // does not give their order. A read takes each old anonymous user: an index entry and a
+    // row, and no user with an address or a young one. A scan would read 10 420 rows.
+    for (const step of steps) expect(step.rows).toBeLessThanOrEqual(2 * 120 + 1);
+    const [first] = steps;
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${first?.sql}`)
+      .bind(1, 0, 50)
+      .all<{ detail: string }>();
+    expect(plan.results.map((r) => r.detail).join("; ")).toContain(
+      "USING INDEX ix_ta_user__is_anonymous__created_at",
+    );
+    // The next sweep takes the other 20, and then an idle sweep reads no young user.
+    expect((await auth.api.sweepExpired()).anonymousUsers).toBe(20);
+    log.length = 0;
+    expect((await auth.api.sweepExpired()).anonymousUsers).toBe(0);
+    const idle = log.filter((l) => /FROM ta_user WHERE is_anonymous = /.test(l.sql));
+    expect(idle.map((l) => l.rows)).toEqual([expect.any(Number)]);
+    expect(idle[0]?.rows).toBeLessThanOrEqual(2);
+  }, 120_000);
+
+  it("keeps its share when a link backlog fills the steps before it", async () => {
+    // A user whose sessions expired and went at a sweep, with 300 client links left. The
+    // client went too, as an idle client does (sweepClients deletes no link). The link step
+    // makes each link an outbox row, and the outbox step takes the calls that stay.
+    await seedAddressUsers(1, current.getTime());
+    const t = current.getTime();
+    const links = env.DB.prepare(
+      "INSERT INTO ta_oauth_session_client (id, created_at, updated_at, session_id, client_id, user_id, sid) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    const batch = [];
+    // 30 clients, so the outbox cap of 10 rows of one client does not end the outbox step.
+    for (let i = 0; i < 300; i++)
+      batch.push(
+        links.bind(`lk${i}`, t, t, `s${i}`, `cl_gone${i % 30}`, `01K${"0".repeat(23)}`, `sid${i}`),
+      );
+    await env.DB.batch(batch);
+    await signIns(60);
+    current = new Date(current.getTime() + 31 * DAY_MS);
+    const w = make({ limiter: { allow: async () => true } });
+    const swept = await w.auth.api.sweepExpired();
+    const got = {
+      oauthSessionLinks: swept.oauthSessionLinks,
+      oauthLogouts: swept.oauthLogouts,
+      anonymousUsers: swept.anonymousUsers,
+      queries: w.count.queries,
+    };
+    expect(got).toEqual(SHARE_PINS);
+    expect(got.queries).toBeLessThanOrEqual(BUDGET);
   });
 });

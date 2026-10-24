@@ -1560,7 +1560,7 @@ It answers one count for each kind of row:
 - `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
 - `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
 - `organizationRows`: organizations that an account delete took, whose other rows went now. The account delete takes an organization where the user is the only member: its row, its SSO connections and domains, its SCIM tokens, and its member rows. Its SCIM Users and Groups, teams, invitations, tokens, and roles wait for the sweep. So the delete fits the 50 queries of D1 Free. No flow reaches them in the meantime. The step runs before the pending sessions. A row of it with more than 50 SCIM Groups loses 50 of them in each sweep.
-- `anonymousUsers`: anonymous users past `anonymous.ttlDays` with no live session, at most 100 per sweep, oldest first. 0 while `anonymous` is off. The step runs last, in a share of the call budget that the steps before it leave free.
+- `anonymousUsers`: anonymous users past `anonymous.ttlDays` with no live session, at most `anonymous.sweepBatch` per sweep (default 100), oldest first by `createdAt`. An imported id has no time order, so the step does not sort by id. 0 while `anonymous` is off. The step runs last, in a share of the call budget that the steps before it leave free. Each deleted user gets `user.afterDelete`, and no `user.beforeDelete`. The call budget does not count the work of that hook, so an app whose hook sends queries or requests lowers `sweepBatch`.
 
 ```ts
 export default {

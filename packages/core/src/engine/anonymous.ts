@@ -106,6 +106,10 @@ export const ANONYMOUS_ROWS: Readonly<Record<string, string>> = {
 export const ANONYMOUS_PER_IP = { seconds: 3600, max: 10 };
 // Per hour, per user, as the account delete (plan 12a): a delete succeeds once.
 export const ANONYMOUS_DELETE_PER_USER = { seconds: 3600, max: 5 };
+/** The window of the daily cap (ruling 25 M4). The max is `anonymous.dailyCap`. */
+const CAP_WINDOW_SECONDS = 86_400;
+/** The subject of the daily cap: one count for the deployment. */
+const CAP_SUBJECT = "deployment";
 
 /**
  * The users of one page of the anonymous delete. A query with 50 ids stays
@@ -113,7 +117,7 @@ export const ANONYMOUS_DELETE_PER_USER = { seconds: 3600, max: 5 };
  * updated 21 April 2026, read 2026-10-24.
  */
 export const ANONYMOUS_PAGE = 50;
-/** The most anonymous users of one sweep (spec 32 item 8). */
+/** The top of `anonymous.sweepBatch`: the most anonymous users of one sweep (spec 32 item 8). */
 export const ANONYMOUS_SWEEP_MAX = 100;
 /**
  * The calls of one page of the sweep step: the read of the users, the read
@@ -141,7 +145,8 @@ export interface AnonymousSession {
 /**
  * `POST /anonymous/sign-in` (spec 32 item 8). A live anonymous session
  * answers itself and writes nothing. A live session of another kind answers
- * `conflict`. Else the per-IP limit and the captcha run. Then one
+ * `conflict`. Else the per-IP limit, the captcha, and the daily cap of the
+ * deployment run. A failed captcha does not count against the cap. Then one
  * transaction runs the sign-up rule and `user.beforeCreate` on the draft
  * (`createSteps`), and the session hook. Then it writes the user row and the
  * session row. There is no gate: an anonymous user can hold no factor
@@ -151,7 +156,8 @@ export async function signInAnonymous(
   config: ResolvedConfig,
   input: AnonymousSignIn,
 ): Promise<Result<AnonymousSession>> {
-  if (!config.anonymous) return fail("not_found");
+  const { anonymous } = config;
+  if (!anonymous) return fail("not_found");
   if (input.current) {
     const { session, token } = input.current;
     if (!session.user.isAnonymous) return fail("conflict");
@@ -161,6 +167,9 @@ export async function signInAnonymous(
     return fail("rate_limited");
   const captcha = await checkCaptcha(config, "anonymous-sign-in", input.captchaToken, input.ip);
   if (captcha) return captcha;
+  // The sweep deletes at most `sweepBatch` users a run. The cap bounds the users that wait for it.
+  const cap = { seconds: CAP_WINDOW_SECONDS, max: anonymous.dailyCap };
+  if (!(await limit(config, "anonymous:all-day", CAP_SUBJECT, cap))) return fail("rate_limited");
   const now = config.clock.now();
   const made = createSteps(config, "anonymous", { signUpRule: true });
   const opened = await hookGuard(async () =>
@@ -212,7 +221,7 @@ export async function deleteAnonymous(
   const ended = endedList(config);
   const done = await hookGuard(async () =>
     ok(
-      await deleteAnonymousUsers(config, [user.id], config.clock.now(), {
+      await deleteAnonymousRows(config, [user.id], config.clock.now(), {
         proof: session.id,
         ended: ended ?? null,
       }),
@@ -224,14 +233,31 @@ export async function deleteAnonymous(
   return ok({ ok: true });
 }
 
-/** What one call of `deleteAnonymousUsers` deleted. */
+/** What one call of `deleteAnonymousUsers` or of the route's delete deleted. */
 export interface AnonymousDeleted {
   users: UserRow[];
   sessions: number;
 }
 
 /**
- * The one delete of anonymous users (plan 12i Task 6, the lane ruling). The
+ * The one delete of anonymous users with no act of the user (ruling 25
+ * L4): the sweep, and the sign-in of Task 7 that replaces an anonymous
+ * user. The caller ends the sessions that it needs ended first. After the
+ * commit, `user.afterDelete` runs once per deleted user. No
+ * `user.beforeDelete` runs: the user did not ask, and a refusal would hold
+ * the rows. A user that is no longer anonymous stays.
+ */
+export async function deleteAnonymousUsers(
+  config: ResolvedConfig,
+  ids: readonly string[],
+): Promise<AnonymousDeleted> {
+  const deleted = await deleteAnonymousRows(config, ids, config.clock.now());
+  await anonymousDeleted(config, deleted, undefined);
+  return deleted;
+}
+
+/**
+ * The rows of the anonymous delete (plan 12i Task 6, the lane ruling). The
  * account delete of plan 12a costs about 40 queries for one user. So it
  * fits neither a page of the sweep nor its share of the D1 budget. This
  * delete costs 3 calls for a page of up to `ANONYMOUS_PAGE` users, plus
@@ -247,10 +273,11 @@ export interface AnonymousDeleted {
  * With `route`, the call is the route's, for one user. The session of the
  * proof must still be live, and `user.beforeDelete` runs before the first
  * write. `endSessions` ends the sessions with the outbox and the `afterEnd`
- * list. Without `route`, the call is the sweep's. No user of it has a live
- * session, so no client link and no hook of a session end applies.
+ * list. Without `route`, the call is that of `deleteAnonymousUsers`. No
+ * user of it has a live session, so no client link and no hook of a
+ * session end applies.
  */
-export async function deleteAnonymousUsers(
+async function deleteAnonymousRows(
   config: ResolvedConfig,
   ids: readonly string[],
   now: Date,
@@ -330,11 +357,12 @@ async function anonymousDeleted(
 /**
  * The anonymous step of the sweep (spec 32 item 8): anonymous users made
  * more than `ttlDays` ago with no live session, at most
- * `ANONYMOUS_SWEEP_MAX` per run, oldest first. Each page costs
- * `ANONYMOUS_PAGE_CALLS` calls, and a page that does not fit inside `cap`
- * waits for the next sweep. A user with a live session stays, and the next
- * page of the run starts after it. It runs no `user.beforeDelete`: an
- * expiry is no act of the user, and a refusal would hold the page.
+ * `anonymous.sweepBatch` per run, oldest first by `createdAt`. The index
+ * on `(isAnonymous, createdAt)` of schema 15 serves the read (ruling 25
+ * H1). Each page costs `ANONYMOUS_PAGE_CALLS` calls, and a page that does
+ * not fit inside `cap` waits for the next sweep. A user with a live session
+ * stays, and the next page of the run starts after it. The delete is
+ * `deleteAnonymousUsers`.
  */
 export async function sweepAnonymous(
   config: ResolvedConfig,
@@ -342,25 +370,32 @@ export async function sweepAnonymous(
   meter: Meter,
   cap: number,
 ): Promise<number> {
-  const ttl = config.anonymous?.ttlDays;
-  if (ttl === undefined) return 0;
-  const before = new Date(now.getTime() - ttl * 24 * 60 * 60 * 1000);
+  const { anonymous } = config;
+  if (!anonymous) return 0;
+  const before = new Date(now.getTime() - anonymous.ttlDays * 24 * 60 * 60 * 1000);
+  const most = Math.min(anonymous.sweepBatch, ANONYMOUS_SWEEP_MAX);
   let n = 0;
-  // The id of the last user of the page before: an id grows with its time (newId).
-  let after: string | null = null;
-  while (n < ANONYMOUS_SWEEP_MAX && meter.used + ANONYMOUS_PAGE_CALLS <= cap) {
-    const take = Math.min(ANONYMOUS_PAGE, ANONYMOUS_SWEEP_MAX - n);
+  // The createdAt of the last user of the page before. An imported id has no time order.
+  let after: Date | null = null;
+  // The users with a live session whose createdAt is `after`. The next read gets them again
+  // first, and leaves them out, so a kept user never holds the next page of the run.
+  let held = new Set<string>();
+  while (n < most && meter.used + ANONYMOUS_PAGE_CALLS <= cap) {
+    const take = Math.min(ANONYMOUS_PAGE, most - n);
     const where: Where<"user">[] = [
       { field: "isAnonymous", op: "eq", value: true },
       { field: "createdAt", op: "lt", value: before },
     ];
-    // A user with a live session stays, and must not hold the next page of the run.
-    if (after !== null) where.push({ field: "id", op: "gt", value: after });
-    const page = await config.storage.findMany("user", where, {
-      sort: { field: "id", dir: "asc" },
-      limit: take,
+    if (after !== null) where.push({ field: "createdAt", op: "gte", value: after });
+    const read = await config.storage.findMany("user", where, {
+      sort: [
+        { field: "createdAt", dir: "asc" },
+        { field: "id", dir: "asc" },
+      ],
+      limit: take + held.size,
     });
     meter.step(1);
+    const page = read.filter((u) => !held.has(u.id)).slice(0, take);
     if (page.length === 0) break;
     const sessions = await config.storage.findMany("session", [
       { field: "userId", op: "in", value: page.map((u) => u.id) },
@@ -371,14 +406,16 @@ export async function sweepAnonymous(
     );
     const going = page.filter((u) => !live.has(u.id)).map((u) => u.id);
     if (going.length > 0) {
-      const deleted = await deleteAnonymousUsers(config, going, now);
+      const deleted = await deleteAnonymousUsers(config, going);
       meter.step(ANONYMOUS_PAGE_CALLS - 2);
-      await anonymousDeleted(config, deleted, undefined);
       n += deleted.users.length;
     }
     const last = page.at(-1);
-    if (page.length < take || !last) break;
-    after = last.id;
+    if (read.length < take + held.size || !last) break;
+    const t = last.createdAt.getTime();
+    if (after?.getTime() !== t) held = new Set();
+    for (const u of page) if (live.has(u.id) && u.createdAt.getTime() === t) held.add(u.id);
+    after = last.createdAt;
   }
   return n;
 }

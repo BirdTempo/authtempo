@@ -37,13 +37,16 @@ describe("checkConfig", () => {
     // Plan 12i Task 22 adds five keys of social.oauth2[]: authorizeClientIdParam,
     // authorizeSuffix, pkce, addressless, and tokenRequest.
     // Plan 12i Task 5 adds totp.gate.phone.
-    // Plan 12i Task 6 adds anonymous and anonymous.ttlDays.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 2);
+    // Plan 12i Task 6 adds anonymous and anonymous.ttlDays. Ruling 25 adds
+    // anonymous.sweepBatch and anonymous.dailyCap.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 4);
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");
     expect(keys).toContain("social.twitter.redirectURI");
     expect(keys).toContain("lastMethod.days");
     expect(keys).toContain("social.oauth2[].redirectURI");
+    expect(keys).toContain("anonymous.sweepBatch");
+    expect(keys).toContain("anonymous.dailyCap");
     expect(keys).toContain("username.reserved");
     expect(keys).toContain("phone.dailyCap");
     expect(keys).toContain("social.microsoft.tenant");

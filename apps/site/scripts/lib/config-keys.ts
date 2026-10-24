@@ -403,7 +403,7 @@ export const CONFIG_KEYS = {
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
   username: { minLength: true, maxLength: true, reserved: true } satisfies Keys<UsernameConfig>,
   lastMethod: { cookieName: true, days: true } satisfies Keys<LastMethodConfig>,
-  anonymous: { ttlDays: true } satisfies Keys<AnonymousConfig>,
+  anonymous: { ttlDays: true, sweepBatch: true, dailyCap: true } satisfies Keys<AnonymousConfig>,
   observe: {
     sink: true,
     include: true,

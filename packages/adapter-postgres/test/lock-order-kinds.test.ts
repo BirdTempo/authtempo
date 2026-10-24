@@ -1265,7 +1265,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "username setUsername": "one kind: the compare-and-set of the user row",
   // Plan 12i Task 6: the anonymous sign-in, and the one delete of anonymous users.
   "anonymous signInAnonymous": ["an anonymous sign-in"],
-  "anonymous deleteAnonymousUsers": ["an anonymous delete"],
+  "anonymous deleteAnonymousRows": ["an anonymous delete"],
   // Plan 12i Task 5: the phone sign-in reads the user, then spends the code, then
   // creates the user and the session or the challenge, as the email code sign-in does.
   "phone resolvePhoneUser":
