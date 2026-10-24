@@ -93,6 +93,16 @@ Send one real SMS through the port of your supplier. Then sign in with its code.
 - [`phone_taken`](/docs/reference/errors/#phone_taken): another account stored the number first.
 - [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user for an unknown number.
 - [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `phone-request` refused the request.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON, or a field has the wrong type.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account of the number.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the sign-in or the change, or threw.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /phone/add`, `POST /phone/add/verify`, and `POST /phone/remove` need a session.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): at an add, the user has no proved handle. Confirm the address first.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): an add or a remove needs a fresh session. Sign in again, then send it again.
+- [`last_credential`](/docs/reference/errors/#last_credential): the number is the last way into the account. Add another way in first.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the user at the same moment. Send the request again.
+- [`anonymous_refused`](/docs/reference/errors/#anonymous_refused): an anonymous session tried to add a number. Sign in first.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot add or remove a number.
 
 ## Next
 

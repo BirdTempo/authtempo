@@ -76,6 +76,10 @@ With `uniformSignUp: true`, the default, the session of a password sign-up opens
 - [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `anonymous-sign-in` refused the request.
 - [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): `signUp` is not `"open"`.
 - [`hook_refused`](/docs/reference/errors/#hook_refused): `beforeLink` refused the sign-in. The guest session stays.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app threw.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /anonymous/delete` needs a session.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot delete the guest.
 
 ## Next
 

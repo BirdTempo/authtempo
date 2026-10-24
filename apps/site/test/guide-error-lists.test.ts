@@ -35,3 +35,23 @@ describe("the If it fails section of the SSO and SCIM guides", () => {
     expect(missing).toEqual([]);
   });
 });
+
+// Ruling 41 m3 and I2 of plan 12i Task 17: each guide of a sign-in addition
+// links every code that its routes declare, so a list cannot drift from
+// ROUTES. last-method.mdx and related-origins.mdx have no route of their own.
+describe("the If it fails section of the sign-in addition guides", () => {
+  it.each([
+    ["phone.mdx", ["phone"]],
+    ["username.mdx", ["username"]],
+    ["anonymous.mdx", ["anonymous"]],
+    ["multi-session.mdx", ["multiSession"]],
+    ["passkey-sign-up.mdx", ["passkeySignUp"]],
+    ["one-tap.mdx", ["socialIdToken"]],
+    ["native-apple.mdx", ["socialIdToken"]],
+  ] as const)("%s links every code of the routes of %j", (page, features) => {
+    const codes = routeCodes(features);
+    expect(codes.length).toBeGreaterThan(0);
+    const missing = codes.filter((c) => !linkedCodes(page).includes(c));
+    expect(missing).toEqual([]);
+  });
+});

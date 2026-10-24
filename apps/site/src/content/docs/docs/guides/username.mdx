@@ -66,6 +66,10 @@ import test from "../../../../../samples/guides/username.test.ts?raw";
 - [`invalid_body`](/docs/reference/errors/#invalid_body): the sign-in body has two identifiers or none, or the sign-up has a name under the uniform answer.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): too many checks from the IP, sets by the user, or tries for the name.
 - [`anonymous_refused`](/docs/reference/errors/#anonymous_refused): an anonymous session tried to set a name.
+- [`conflict`](/docs/reference/errors/#conflict): a parallel write won five rounds of the set. Core writes the line `username.set_gave_up`. Send the name again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the change or threw.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot set the name.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /user/username` needs a session.
 
 ## Next
 

@@ -1,9 +1,12 @@
 import {
   type Auth,
   createMemoryAdapter,
+  createMemoryLimiter,
+  type LimiterPort,
   type MailMessage,
   type MailPort,
   type StorageAdapter,
+  systemClock,
 } from "@authtempo/core";
 
 // The test side of the samples. No page includes this file.
@@ -35,6 +38,15 @@ export function harness(): Harness {
     secret: SECRET,
     sent,
   };
+}
+
+/**
+ * A memory limiter that says it is shared, for the construct check. It is a
+ * test of one process: the counts stay in this isolate. Never use it in an app.
+ */
+export function sharedTestLimiter(): LimiterPort {
+  const memory = createMemoryLimiter(systemClock);
+  return { allow: (key, window) => memory.allow(key, window), scope: "shared" };
 }
 
 export function lastMailTo(h: Harness, to: string): MailMessage {
