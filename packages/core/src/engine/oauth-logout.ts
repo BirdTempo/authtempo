@@ -232,8 +232,8 @@ export async function linkIdToken(
  * token, so a new secret version since then changes nothing (ruling 57). An
  * account delete removes a pairwise subject first. Then the token holds
  * `sid` alone, which section 2.4 allows. It never holds a nonce. `iss` is
- * the issuer that the client saw in its ID token (section 2.6 checks it as
- * for the ID token), kept on the row (plan 12i Task 18).
+ * the issuer that the client saw in its ID token, kept on the row (plan 12i
+ * Task 18). Section 2.6 checks it as for the ID token.
  */
 export async function logoutToken(
   config: ResolvedConfig,
@@ -255,15 +255,15 @@ export async function logoutToken(
 }
 
 /**
- * The `iss` of the logout token of `row`: the issuer that the row keeps
- * while it is the issuer of an entry of `baseURL`. A row of an older core
- * keeps none, and an entry can leave the list. Both name the primary, never
- * an issuer that this deployment no longer holds. The delivery can run on
- * any entry, so the request's own issuer takes no part.
+ * The `iss` of the logout token of `row`: the issuer that the row keeps. It
+ * stays also when its entry has left `baseURL`, because the client refuses
+ * any other `iss` (section 2.6, ruling 32 of plan 12i). The keys are the
+ * same, and the token only ends a session. A row of an older core keeps no
+ * issuer, so it names the primary. The delivery can run on any entry, so the
+ * request's own issuer takes no part.
  */
 function logoutIssuer(config: ResolvedConfig, row: OAuthLogoutRow): string {
-  if (row.issuer !== null && entryOfIssuer(config, row.issuer) !== null) return row.issuer;
-  return primaryIssuer(config);
+  return row.issuer ?? primaryIssuer(config);
 }
 
 /** The wait after `attempts` failed attempts. */

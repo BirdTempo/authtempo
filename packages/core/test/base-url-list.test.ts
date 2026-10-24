@@ -7,6 +7,9 @@ import { json } from "../src/http/json.js";
 import { createRouter, type Route } from "../src/http/router.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { newId } from "../src/primitives/ids.js";
+import { tiktokEntry } from "../src/social/entries/index.js";
+import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
+import tiktokUserText from "./fixtures/providers/tiktok/user.json?raw";
 import { makeAuth, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
 import { pkce, requestIdOf } from "./oauth-helpers.js";
 import { fakeFetch, GOOGLE } from "./social-helpers.js";
@@ -449,6 +452,42 @@ describe("the base URL list (plan 12i Task 18)", () => {
     );
   });
 
+  it("gives the tokenRequest hook the callback of the entry where the sign-in started", async () => {
+    // The TikTok entry exchanges its code through the Task 22 hook, not the standard exchange.
+    const sent: string[] = [];
+    const fetchFn: typeof fetch = async (input, init) => {
+      const real = new Request(input, init);
+      sent.push(`${real.method} ${real.url} ${await real.text()}`);
+      if (real.url.startsWith("https://open.tiktokapis.com/v2/oauth/token/"))
+        return new Response(tiktokTokenText);
+      if (real.url.startsWith("https://open.tiktokapis.com/v2/user/info/"))
+        return new Response(tiktokUserText);
+      return new Response("not found", { status: 404 });
+    };
+    const w = world({
+      social: {
+        oauth2: [tiktokEntry({ clientKey: "tiktok-client-key", clientSecret: "tt-secret" })],
+        fetch: fetchFn,
+      },
+    });
+    const start = await w.auth.handle(new Request(`${B}/auth/social/tiktok/start?next=/home`));
+    const url = new URL(start.headers.get("location") ?? "");
+    expect(url.searchParams.get("redirect_uri")).toBe(`${B}/auth/social/tiktok/callback`);
+    const set = start.headers.getSetCookie().find((c) => c.startsWith("__Secure-")) ?? "";
+    const state = encodeURIComponent(url.searchParams.get("state") ?? "");
+    const done = await w.auth.handle(
+      new Request(`${B}/auth/social/tiktok/callback?code=c&state=${state}`, {
+        headers: { cookie: set.split(";")[0] ?? "" },
+      }),
+    );
+    const token = sent.find((s) => s.includes("/v2/oauth/token/")) ?? "";
+    expect(new URLSearchParams(token.split(" ")[2]).get("redirect_uri")).toBe(
+      `${B}/auth/social/tiktok/callback`,
+    );
+    expect(done.status).toBe(302);
+    expect(done.headers.get("location")).toBe(`${B}/home`);
+  });
+
   it("mints a session JWT on B for B's audience, and B verifies it", async () => {
     const w = world();
     const s = await signedIn(w);
@@ -623,15 +662,16 @@ describe("the back-channel logout on a base URL list (plan 12i Task 18)", () => 
     expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
   });
 
-  it("names the primary for an issuer that left the list", async () => {
+  it("names the stored issuer of an entry that left the list", async () => {
     const w = logoutWorld();
     const s = await signedIn(w);
     await idTokenOn(w, B, s.cookie);
-    // The deployment drops B. Its old link must not sign a token for a host it no longer holds.
+    // The deployment drops B. The client checks iss as for its ID token (section 2.6),
+    // so a token that names A leaves its session live.
     const later = createAuth({ ...w.input, baseURL: [A] });
     const out = await later.handle(postOn(A, "/auth/sign-out", {}, { cookie: s.cookie }));
     expect(out.status).toBe(200);
-    expect(w.logoutIssuers()).toEqual([`${A}/auth`]);
+    expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
   });
 
   it("takes an ID token hint of B at the end-session route on A", async () => {
