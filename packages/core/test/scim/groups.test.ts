@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import { deleteAccount } from "../../src/engine/account-delete.js";
+import { setActiveOrganization } from "../../src/engine/invitations.js";
 import { addMember, removeMember } from "../../src/engine/organizations.js";
 import { createRole, deleteRole } from "../../src/engine/roles.js";
 import { scimPatchGroup } from "../../src/engine/scim/groups.js";
@@ -8,6 +9,7 @@ import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { scimDeleteUser } from "../../src/engine/scim/users.js";
 import { createSession, resolveSession } from "../../src/engine/sessions.js";
 import { setRoleMap, updateConnection } from "../../src/engine/sso/connections.js";
+import { setActiveTeam } from "../../src/engine/teams.js";
 import type { ScimScope } from "../../src/schema.js";
 import type { StorageAdapter } from "../../src/storage/port.js";
 import { seedPlatform } from "../helpers.js";
@@ -696,6 +698,60 @@ describe("the teams of the SCIM Groups (plan 12d Task 11 Behavior 3)", () => {
       "scim Group update",
       "scim Group delete",
     ]);
+  });
+
+  it("ends the active team of the sessions of a person who leaves the team, and of each session at a group delete (rulings 86 and 87 of plan 12d)", async () => {
+    const w = await world("teams");
+    const ada = await userOf(w, "ada");
+    const bob = await userOf(w, "bob");
+    const group = await groupOf(w, "Core", [ada, bob]);
+    const row = await w.storage.findOne("scimGroup", [{ field: "id", op: "eq", value: group }]);
+    const teamId = row?.teamId ?? "";
+    /** A session of the SCIM User `scimUserId` that acts in the team: its id. */
+    const inTeam = async (scimUserId: string) => {
+      const su = await w.storage.findOne("scimUser", [
+        { field: "id", op: "eq", value: scimUserId },
+      ]);
+      const s = await createSession(w.config, {
+        userId: su?.userId ?? "",
+        ip: null,
+        userAgent: null,
+      });
+      let session = await resolveSession(w.config, s.token);
+      if (!session) throw new Error("no session");
+      const org = await setActiveOrganization(w.config, {
+        session,
+        organizationId: w.organizationId,
+      });
+      if (!org.ok) throw new Error(org.code);
+      session = await resolveSession(w.config, s.token);
+      if (!session) throw new Error("no session");
+      const set = await setActiveTeam(w.config, { session, teamId });
+      if (!set.ok) throw new Error(set.code);
+      return s.session.id;
+    };
+    const ids = [await inTeam(ada), await inTeam(ada), await inTeam(bob)];
+    const teams = async () =>
+      Promise.all(
+        ids.map(
+          async (id) =>
+            (await w.storage.findOne("session", [{ field: "id", op: "eq", value: id }]))
+              ?.activeTeamId,
+        ),
+      );
+    expect(await teams()).toEqual([teamId, teamId, teamId]);
+    const out = await scim(
+      w,
+      w.token,
+      "PATCH",
+      `/Groups/${group}`,
+      patch({ op: "remove", path: `members[value eq "${ada}"]` }),
+    );
+    expect(out.status).toBe(204);
+    // Both sessions of ada leave the team; the session of bob stays in it.
+    expect(await teams()).toEqual([null, null, teamId]);
+    expect((await scim(w, w.token, "DELETE", `/Groups/${group}`)).status).toBe(204);
+    expect(await teams()).toEqual([null, null, null]);
   });
 
   it("leaves the team rows of a member that a user caller removes from the organization", async () => {
