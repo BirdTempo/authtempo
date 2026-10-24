@@ -33,7 +33,8 @@ export const TeamMemberJson = z.strictObject({
   id: z.string(),
   teamId: z.string(),
   userId: z.string(),
-  email: z.string(),
+  /** Null for a member with no address (plan 12i). */
+  email: z.string().nullable(),
   name: z.string().nullable(),
   createdAt: z.iso.datetime(),
 });

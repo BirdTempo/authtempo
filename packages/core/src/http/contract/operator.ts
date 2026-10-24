@@ -117,7 +117,8 @@ export const endAllBody = z.strictObject({
 /** One user as `api.operator.users` answers it: no hash, no sealed value, no token, no subject. */
 const OperatorUserJson = z.strictObject({
   id: z.string(),
-  email: z.string(),
+  /** Null for a user with no address (plan 12i). */
+  email: z.string().nullable(),
   emailVerified: z.boolean(),
   name: z.string().nullable(),
   createdAt: z.iso.datetime(),

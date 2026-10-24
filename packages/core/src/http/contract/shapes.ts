@@ -11,7 +11,8 @@ import { PASSKEY_HINTS } from "../../primitives/passkey-hints.js";
 /** The public user, as `publicUser` of the engine answers it. */
 export const UserJson = z.strictObject({
   id: z.string(),
-  email: z.string(),
+  /** Null for a user with no address (plan 12i). */
+  email: z.string().nullable(),
   emailVerified: z.boolean(),
   name: z.string().nullable(),
   image: z.string().nullable(),

@@ -608,4 +608,57 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     reason:
       "the answer is the status after the write, where the key is set; GET /totp answers it null; totp.test.ts proves the enable",
   },
+  // Plan 12i Task 1: the address is nullable, and these routes answer the user of an address.
+  ...(
+    [
+      ["POST /magic-link/verify", "user.email"],
+      ["POST /otp/verify", "user.email"],
+      ["POST /otp/reset", "user.email"],
+      ["POST /password/reset", "user.email"],
+      ["POST /password/sign-up", "user.email"],
+      ["POST /user/change-email/confirm", "user.email"],
+      ["POST /user/change-email/verify", "user.email"],
+    ] as const
+  ).map(
+    ([key, field]): AnswerShapeExempt => ({
+      key,
+      field,
+      form: "null",
+      reason:
+        "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
+    }),
+  ),
+  // Plan 12i Task 1: no route makes a user with no address before the anonymous sign-in of Task 6.
+  ...(
+    [
+      ["GET /session", "user.email"],
+      ["POST /session/refresh", "user.email"],
+      ["GET /tokens/current", "user.email"],
+      ["POST /handoff/redeem", "user.email"],
+      ["POST /passkey/authenticate/verify", "user.email"],
+      ["POST /password/sign-in", "user.email"],
+      ["POST /totp/verify", "user.email"],
+      ["POST /user/update", "user.email"],
+      ["POST /organizations/active", "user.email"],
+      ["POST /organizations/teams/active", "user.email"],
+      ["POST /organizations/create", "member.email"],
+      ["POST /organizations/invitations/accept", "member.email"],
+      ["POST /organizations/members/add", "member.email"],
+      ["POST /organizations/members/role", "member.email"],
+      ["POST /organizations/teams/members/add", "member.email"],
+      ["GET /organizations/members", "members[].email"],
+      ["GET /organizations/teams/members", "members[].email"],
+      ["GET /operator/users", "users[].email"],
+      ["GET /operator/users/search", "users[].email"],
+      ["GET /operator/users/get", "user.email"],
+    ] as const
+  ).map(
+    ([key, field]): AnswerShapeExempt => ({
+      key,
+      field,
+      form: "null",
+      reason:
+        "no route makes a user with no address before the anonymous sign-in of plan 12i Task 6; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
+    }),
+  ),
 ];
