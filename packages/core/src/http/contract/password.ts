@@ -9,6 +9,8 @@ export const signUpBody = z.object({
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
   name: z.string().max(200).optional(),
+  // Plan 12i Task 2: only with `username` on. The engine applies NFKC and the bounds.
+  username: z.string().max(256).optional(),
 });
 
 export const signInBody = z.object({

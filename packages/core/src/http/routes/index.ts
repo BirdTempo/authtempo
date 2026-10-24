@@ -23,6 +23,7 @@ import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
 import { userRoutes } from "./user.js";
+import { usernameRoutes } from "./username.js";
 
 /**
  * The name of one route module file under `src/http/routes/` (plan 11g).
@@ -32,6 +33,7 @@ export type RouteModule =
   | "sessions"
   | "reauth"
   | "user"
+  | "username"
   | "identities"
   | "magic-link"
   | "social"
@@ -64,6 +66,7 @@ export function coreRouteModules(
     { module: "sessions", routes: sessionRoutes(config) },
     { module: "reauth", routes: reauthRoutes(config) },
     { module: "user", routes: userRoutes(config) },
+    { module: "username", routes: usernameRoutes(config) },
     { module: "identities", routes: identityRoutes(config) },
     { module: "magic-link", routes: magicLinkRoutes(config) },
     { module: "social", routes: socialRoutes(config) },

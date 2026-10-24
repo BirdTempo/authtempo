@@ -104,6 +104,8 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `sso-manage:user:<userId>` | 15 minutes | 30 | Each SSO domain, SSO connection, and SCIM token route, before the manager guard |
 | `scim-auth:ip:<ip>` | 15 minutes | 60 | Each failed SCIM token check: a missing, wrong, expired, or revoked token. A valid token never counts here |
 | `scim:token:<tokenId>` | 10 minutes | 1200 | Each call of one SCIM token, after the token check |
+| `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
+| `username-available:ip:<ip>` | 15 minutes | 30 | Username check, before the name rules |
 
 For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
 

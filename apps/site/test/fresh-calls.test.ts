@@ -34,7 +34,8 @@ describe("the calls that can answer session_not_fresh", () => {
     // Plan 12k Task 7 adds tokens.update; Task 8 adds the two organization token
     // calls and organizations.members.remove. Plan 12d Task 13 adds sso.domains,
     // sso.connections, and scim.tokens: each of their calls needs a fresh session.
-    expect(listed).toHaveLength(26);
+    // Plan 12i Task 2 adds username.set.
+    expect(listed).toHaveLength(27);
     expect(named).toEqual(listed);
   });
 });

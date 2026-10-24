@@ -85,6 +85,9 @@ export const LIMIT_FAMILIES = Object.freeze([
   "sso-acs:ip",
   "scim-auth:ip",
   "scim:token",
+  // Plan 12i: the username set and the availability check.
+  "username:user",
+  "username-available:ip",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

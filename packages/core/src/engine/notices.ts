@@ -20,6 +20,8 @@ export type NoticeEvent =
   | "identity_linked"
   | "identity_unlinked"
   | "account_deleted"
+  // plan 12i: the username is a way in (spec 32 item 7).
+  | "username_changed"
   // plan 12f: a platform operator opened a session on the account, for support.
   | "impersonation_started";
 
@@ -50,6 +52,7 @@ const WHAT: Readonly<Record<Exclude<NoticeEvent, "impersonation_started">, strin
   identity_linked: "A sign-in provider was linked to your account.",
   identity_unlinked: "A sign-in provider was removed from your account.",
   account_deleted: "Your account was deleted.",
+  username_changed: "The username of your account was changed.",
 };
 
 /** The default notices. `account.notices.mail` replaces them. */

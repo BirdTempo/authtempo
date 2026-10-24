@@ -24,6 +24,7 @@ import { TOKENS_CONTRACT } from "./tokens.js";
 import { TOTP_CONTRACT } from "./totp.js";
 import type { RouteContract } from "./types.js";
 import { USER_CONTRACT } from "./user.js";
+import { USERNAME_CONTRACT } from "./username.js";
 
 /**
  * The contract of every route of `ROUTES` (plan 11g), one module after
@@ -36,6 +37,7 @@ export const ROUTE_CONTRACT = {
   ...SESSIONS_CONTRACT,
   ...REAUTH_CONTRACT,
   ...USER_CONTRACT,
+  ...USERNAME_CONTRACT,
   ...IDENTITIES_CONTRACT,
   ...MAGIC_LINK_CONTRACT,
   ...SOCIAL_CONTRACT,

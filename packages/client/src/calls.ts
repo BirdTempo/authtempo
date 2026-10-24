@@ -283,6 +283,9 @@ export const CLIENT_CALLS = [
   { operation: "user.verifyEmailChange", method: "POST", path: "/user/change-email/verify" },
   { operation: "user.delete", method: "POST", path: "/user/delete" },
   { operation: "user.confirmDelete", method: "POST", path: "/user/delete/confirm" },
+  // Plan 12i Task 2: the username. The check is public; the set needs a fresh session.
+  { operation: "username.available", method: "GET", path: "/username/available" },
+  { operation: "username.set", method: "POST", path: "/user/username" },
   { operation: "identities.list", method: "GET", path: "/identities" },
   { operation: "identities.unlink", method: "POST", path: "/identities/unlink" },
   // A POST, not a navigation: the start needs the session. client.identities.link

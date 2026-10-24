@@ -62,6 +62,8 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     sso: { dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes and the SCIM server of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
   };
 }
 

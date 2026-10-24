@@ -87,6 +87,7 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/social\/:provider\/link$/, "a social link"],
   [/^\/tokens$/, "a new API token"],
   [/^\/user\/delete(\/confirm)?$/, "the account delete"],
+  [/^\/user\/username$/, "the username"],
   [/^\/totp(\/|$)|^\/second-factor\//, "each second-factor route"],
   [/^\/handoff\/start$/, "the handoff start"],
   [/^\/handoff\/continue$/, "the handoff continue"],

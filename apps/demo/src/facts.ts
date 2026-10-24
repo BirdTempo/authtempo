@@ -40,6 +40,7 @@ export const DEMO_EXEMPT = {
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
   readiness: "A probe for a host, not a sign-in method.",
   passkeyRelatedOrigins: "The demo has one origin, so it has no related origin to list.",
+  username: "The demo signs in by a mailed link and a passkey, so it has no name to sign in with.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

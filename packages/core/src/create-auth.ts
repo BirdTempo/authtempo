@@ -275,6 +275,12 @@ import {
   totpUri,
   verifyTwoFactor,
 } from "./engine/totp.js";
+import {
+  setUsername,
+  type Username,
+  type UsernameSet,
+  usernameAvailable,
+} from "./engine/username.js";
 import { ERRORS } from "./errors.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
@@ -729,6 +735,16 @@ export interface UserApi {
    * foreign link; `sole_owner` again.
    */
   confirmDelete(input: AccountDelete & { token: string }): Promise<Result<{ ok: true }>>;
+  /**
+   * Sets the username (plan 12i). Fresh rule, a proved handle. `not_found`
+   * with `username` off; `username_taken` when another user holds it.
+   */
+  setUsername(input: UsernameSet): Promise<Result<Username>>;
+  /** True when no user holds the name. Counts per IP. `not_found` with `username` off. */
+  usernameAvailable(input: {
+    username: string;
+    ip: string | null;
+  }): Promise<Result<{ available: boolean }>>;
 }
 
 /** The linked identities of a settings page (plan 12a). Present in every deployment. */
@@ -1332,6 +1348,8 @@ export function createAuth(input: AuthConfig): Auth {
         verifyEmailChange: refusesImpersonation((i) => verifyEmailChange(config, i)),
         delete: refusesImpersonation((i) => startAccountDelete(config, i)),
         confirmDelete: refusesImpersonation((i) => confirmAccountDelete(config, i)),
+        setUsername: refusesImpersonation((i) => setUsername(config, i)),
+        usernameAvailable: (i) => usernameAvailable(config, i),
       },
       identities: {
         list: (i) => listIdentities(config, i),

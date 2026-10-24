@@ -321,6 +321,8 @@ export interface Client {
       email: string;
       password: string;
       name?: string | undefined;
+      /** The username (plan 12i), with the server's `username` config on. */
+      username?: string | undefined;
       /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
       captchaToken?: string | undefined;
     }): Promise<
@@ -725,6 +727,21 @@ export interface Client {
      * confirm page. Needs a session of the same user, not a fresh one.
      */
     confirmDelete(input: { token: string }): Promise<ClientResult<{ ok: true }>>;
+  };
+  /**
+   * The username (plan 12i). Every operation answers `not_found` when the
+   * server runs without the `username` config. A username is public.
+   */
+  username: {
+    /** True when no account holds the name. `username_invalid` for a name that breaks a rule. */
+    available(input: { username: string }): Promise<ClientResult<{ available: boolean }>>;
+    /**
+     * Needs a fresh session. Answers the stored form and the typed case.
+     * `username_taken` when another account holds the name.
+     */
+    set(input: {
+      username: string;
+    }): Promise<ClientResult<{ username: string; displayUsername: string }>>;
   };
   /** The linked identities of the signed-in person (plan 12a). */
   identities: {
@@ -1148,7 +1165,7 @@ export function createClient(options: ClientOptions): Client {
     }
   }
   const password: Client["password"] = {
-    signUp: ({ name, captchaToken, ...rest }) =>
+    signUp: ({ name, username, captchaToken, ...rest }) =>
       changes(
         send<
           | ({ token: string } & PublicSessionJSON)
@@ -1156,7 +1173,11 @@ export function createClient(options: ClientOptions): Client {
           | { sent: true }
         >(
           "password.signUp",
-          { ...rest, ...(name !== undefined ? { name } : {}) },
+          {
+            ...rest,
+            ...(name !== undefined ? { name } : {}),
+            ...(username !== undefined ? { username } : {}),
+          },
           undefined,
           captchaHeader(captchaToken),
         ),
@@ -1290,6 +1311,13 @@ export function createClient(options: ClientOptions): Client {
     },
     confirmDelete: ({ token }) =>
       changes(shaped(send<unknown>("user.confirmDelete", { token }), isOkTrue)),
+  };
+  // A new name changes no session, so the store does not read again.
+  const username: Client["username"] = {
+    available: ({ username: name }) =>
+      send<{ available: boolean }>("username.available", undefined, { username: name }),
+    set: ({ username: name }) =>
+      send<{ username: string; displayUsername: string }>("username.set", { username: name }),
   };
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),
@@ -1709,6 +1737,7 @@ export function createClient(options: ClientOptions): Client {
     sessions,
     reauth,
     user,
+    username,
     identities,
     sso: {
       // JSON leaves out a key whose value is undefined, so the body names only the set fields.

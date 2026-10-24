@@ -169,6 +169,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /scim/v2/Groups/.search",
   "POST /scim/v2/Users",
   "POST /scim/v2/Users/.search",
+  // A check of a name on a deployment with the username off (plan 12i Task 2).
+  "GET /username/available",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -280,6 +282,8 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/create",
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
+  // Plan 12i Task 2: the set of a username.
+  "POST /user/username",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",

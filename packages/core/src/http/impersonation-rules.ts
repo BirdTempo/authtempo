@@ -71,6 +71,8 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /user/change-email/verify",
   "POST /user/delete",
   "POST /user/delete/confirm",
+  // The username is a way in: the password sign-in takes it (plan 12i Task 3).
+  "POST /user/username",
   "POST /identities/unlink",
   "POST /social/:provider/link",
   "POST /passkey/register/options",
@@ -150,6 +152,7 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /user/change-email/confirm": NO_SESSION,
   "POST /user/change-email/confirm": NO_SESSION,
   "GET /user/delete/confirm": "It shows a page and writes nothing; its POST is refused.",
+  "GET /username/available": NO_SESSION,
   "GET /identities": READ,
   "POST /magic-link/request": NO_SESSION,
   "GET /magic-link/verify": NO_SESSION,

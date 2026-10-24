@@ -40,6 +40,7 @@ import {
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startLink } from "../src/engine/social.js";
 import { disableTotp, disableTotpWithCode } from "../src/engine/totp.js";
+import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -714,6 +715,7 @@ function tracked() {
     passkey: RP,
     social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn },
     jwt: fakeJwt(jwtTokens),
+    username: {},
   });
   const store = auth.config.storage as StorageAdapter;
   const origTx = store.transaction.bind(store);
@@ -748,6 +750,17 @@ const PATHS: {
   name: string;
   run: (t: Tracked) => Promise<{ act: () => Promise<{ ok: boolean }> }>;
 }[] = [
+  // Plan 12i Task 2: the username is a way in.
+  {
+    name: "username set",
+    run: async ({ auth }) => {
+      const s = await verifiedSession(auth);
+      return {
+        act: () =>
+          setUsername(auth.config, { session: s, username: "Ada", ip: null, userAgent: null }),
+      };
+    },
+  },
   {
     name: "password change",
     run: async ({ auth }) => {

@@ -111,6 +111,10 @@ export const ERRORS = {
   role_not_found: 409,
   // plan 12i: an assertion of a credential with no row, for signalUnknownCredential (spec 32 item 3)
   passkey_unknown: 400,
+  // plan 12i Task 2: the unique key of the username refused it (spec 32 item 7)
+  username_taken: 409,
+  // plan 12i Task 2: the form, the length bounds, or the reserved set refused the name
+  username_invalid: 400,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

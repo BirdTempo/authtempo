@@ -1238,6 +1238,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "password applyReset": ["a password reset"],
   "password changePassword": ["a password set", "a password change", "a second factor enable"],
   "profile updateProfile": "one kind: the compare-and-set of the user row",
+  // Plan 12i Task 2: the set of a username, the compare-and-set of updateProfile.
+  "username setUsername": "one kind: the compare-and-set of the user row",
   "roles createRole": ["a role create"],
   "roles deleteRole": "no kind: reads of member and invitation rows, then the role row",
   "second-factor-methods enableMethod":
@@ -1353,8 +1355,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
     // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
-    // Ruling 78 adds the one of organization-rest.ts.
-    expect(found.length).toBe(77);
+    // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
+    // one of username.ts.
+    expect(found.length).toBe(78);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

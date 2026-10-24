@@ -363,6 +363,15 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.deleteConfirm` | `AccountDeleteConfirmConfig` or `false` | `false` | A mailed link before the delete. The default is off: the fresh session already proves the person (ASVS 5.0.0 7.5.1), and Better Auth deletes at once unless an app sets `sendDeleteAccountVerification`. The link adds a proof of the mailbox, for an app whose sessions live on shared devices. `{}` turns it on. |
 | `account.deleteConfirm.ttlMinutes` | number | 60 | An integer from 5 to 1440. A delete is not undone, and a short window lowers the risk of a link in an old mailbox. Better Auth's default is 24 hours. |
 
+## Username
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `username` | `UsernameConfig` or `false` | `false` | Turns on the username: `GET /username/available`, `POST /user/username`, and `username` at the password sign-up. `{}` turns it on with the defaults. |
+| `username.minLength` | number | 3 | An integer from 3 to 30. The fewest characters of the name after NFKC. |
+| `username.maxLength` | number | 30 | An integer from `minLength` to 30. |
+| `username.reserved` | string array | none | More names in the stored form that no account may take. Core always reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while organizations are on, `root`, `support`, `security`, and `admin`. |
+
 ## Observability
 
 With no `observe`, core writes its log lines with `console` and sends nothing anywhere. With a sink, core buffers each event, and a flush sends the batch after the answer. Pass `{ waitUntil }` to `handle`, or call `auth.observe.flush()`.

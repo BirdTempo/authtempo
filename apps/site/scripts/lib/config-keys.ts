@@ -33,6 +33,7 @@ import type {
   TokensConfig,
   TotpConfig,
   TotpGateConfig,
+  UsernameConfig,
 } from "@authtempo/core";
 
 /** One `true` for each key of T, the optional keys too. */
@@ -89,6 +90,7 @@ export const CONFIG_KEYS = {
     account: true,
     captcha: true,
     observe: true,
+    username: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -330,6 +332,7 @@ export const CONFIG_KEYS = {
   "account.notices": { mail: true } satisfies Keys<AccountNoticesConfig>,
   "account.deleteConfirm": { ttlMinutes: true } satisfies Keys<AccountDeleteConfirmConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
+  username: { minLength: true, maxLength: true, reserved: true } satisfies Keys<UsernameConfig>,
   observe: {
     sink: true,
     include: true,

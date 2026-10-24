@@ -54,7 +54,8 @@ describe("the call table of the client (plan 11d)", () => {
     expect(new Set(operations).size).toBe(operations.length);
     // Plan 12k Task 8 adds the five organization token calls.
     // Plan 12d Task 13 adds the eleven SSO calls and the three SCIM token calls.
-    expect(CLIENT_CALLS).toHaveLength(112);
+    // Plan 12i Task 2 adds the two username calls.
+    expect(CLIENT_CALLS).toHaveLength(114);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -164,6 +165,8 @@ describe("the call table of the client (plan 11d)", () => {
     await c.user.verifyEmailChange({ code: "1" });
     await c.user.delete();
     await c.user.confirmDelete({ token: "t" });
+    await c.username.available({ username: "ada" });
+    await c.username.set({ username: "ada" });
     await c.identities.list();
     await c.identities.unlink({ id: "i" });
     await c.identities.link({ provider: "google" });
@@ -208,11 +211,13 @@ describe("the call table of the client (plan 11d)", () => {
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
     // Plan 12d Task 13: thirteen compared rows, and the start link, which is not.
-    expect(COMPARED).toHaveLength(105);
+    // Plan 12i Task 2 adds the two username calls.
+    expect(COMPARED).toHaveLength(107);
     expect(NOT_COMPARED).toHaveLength(7);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(62);
+    // Plan 12i Task 2 adds username.set.
+    expect(BODY_AS_INPUT).toHaveLength(63);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

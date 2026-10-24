@@ -69,7 +69,7 @@ describe("the demo lists and the routes of core", () => {
         checked++;
       }
       expect(served).toEqual([]);
-      // Count what ran: the routes of the thirteen exempt features. Plan 12e added
+      // Count what ran: the routes of the fourteen exempt features. Plan 12e added
       // three oauth routes (GET and POST /oauth/end-session, POST /oauth/introspect)
       // and the three routes of oauthDevice, so 24 became 30. Plan 12f adds the
       // eleven routes of operatorUsers and the two routes of
@@ -85,8 +85,8 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12d Task 10 adds the six routes of the SCIM Users, so 86 became 92.
       // Plan 12d Task 11 adds the six routes of the SCIM Groups, so 92 became 98.
       // Plan 12i Task 9 adds GET /.well-known/webauthn of passkeyRelatedOrigins,
-      // so 98 became 99.
-      expect(checked).toBe(99);
+      // so 98 became 99. Plan 12i Task 2 adds the two routes of username: 101.
+      expect(checked).toBe(101);
     },
     LONG_TEST_MS,
   );

@@ -29,6 +29,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   sessions: ["session", "account"],
   reauth: ["account", "passkey", "emailOtp"],
   user: ["account", "emailOtp", "accountDelete"],
+  username: ["username"],
   identities: ["account"],
   "magic-link": ["magicLink"],
   social: ["social"],
@@ -72,7 +73,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
-    expect(listed.length).toBe(187);
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    expect(listed.length).toBe(189);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -285,6 +287,8 @@ describe("ROUTES (plan 11a)", () => {
       features: ["scim"],
     },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
+    // Plan 12i Task 2: the username needs its own key, and no other feature.
+    { name: "username", delta: { username: {} }, features: ["username"] },
     // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.
     {
       name: "observe with a sink",

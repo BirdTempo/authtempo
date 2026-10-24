@@ -95,6 +95,8 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sessions/revoke": { id: "s1" },
   "POST /reauth": { password: PASSWORD },
   "POST /user/update": { name: "Ada" },
+  // Plan 12i Task 2: a free name that passes the form and the reserved set.
+  "POST /user/username": { username: "Ada" },
   "POST /user/change-email": { newEmail: "new@example.com" },
   "POST /user/change-email/confirm": { token: "$emailChangeToken" },
   "POST /user/change-email/verify": { code: "123456" },
@@ -213,6 +215,7 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /sso/domains": { organizationId: "$org" },
   "GET /sso/connections": { organizationId: "$org" },
   "GET /scim/tokens": { organizationId: "$org" },
+  "GET /username/available": { username: "ada" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -353,6 +356,8 @@ function world(extra: Partial<AuthConfig> = {}) {
     sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -1258,6 +1263,7 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     "POST /totp/verify": { challenge: totpChallenge, code: totpCode },
     "POST /totp/challenge": { challenge: formChallenge, code: formCode },
     "POST /user/update": { name: "Ada" },
+    "POST /user/username": { username: "Ada" },
     "POST /user/change-email/verify": { code: changeCode },
     "POST /user/change-email/confirm": { token: changeToken },
     "POST /user/delete/confirm": { token: deleteToken },

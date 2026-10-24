@@ -10,7 +10,8 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * `ROUTE_FEATURES` (plan 11g) lists every feature once; the OpenAPI document
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
- * `passkeyRelatedOrigins`, the document of WebAuthn Level 3.
+ * `passkeyRelatedOrigins`, the document of WebAuthn Level 3, and
+ * `username`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -42,6 +43,7 @@ export const ROUTE_FEATURES = [
   "openapi",
   "health",
   "readiness",
+  "username",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -84,6 +86,7 @@ export interface RouteEntry {
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
+   * `username` (plan 12i) needs `username`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -300,6 +303,35 @@ export const ROUTES = Object.freeze([
       "rate_limited",
       "sole_owner",
       "delete_too_large",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 2: the username (spec 32 item 7).
+  {
+    method: "GET",
+    path: "/username/available",
+    feature: "username",
+    auth: ["none"],
+    codes: ["invalid_body", "rate_limited", "username_invalid"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/user/username",
+    feature: "username",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "username_invalid",
+      "username_taken",
       "hook_refused",
       "hook_failed",
       "conflict",
@@ -554,6 +586,8 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "sso_required",
+      "username_invalid",
+      "username_taken",
     ],
     oauthCodes: [],
   },

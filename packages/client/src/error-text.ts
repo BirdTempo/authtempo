@@ -99,6 +99,9 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   account_disabled: "Your organization turned off this account.",
   role_not_found: "The organization no longer has the role of this sign-in.",
   passkey_unknown: "This site does not know this passkey. Use another passkey or another method.",
+  username_taken: "Another account has this username. Choose another username.",
+  username_invalid:
+    "Use letters, digits, the underscore, and the dot only. This username is not available.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

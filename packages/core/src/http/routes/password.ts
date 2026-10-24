@@ -72,6 +72,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           email: body.value.email,
           password: body.value.password,
           name: body.value.name,
+          username: body.value.username,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),

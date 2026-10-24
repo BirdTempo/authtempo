@@ -226,8 +226,9 @@ describe("the column map (plan 12g)", () => {
     // The count of the call sites at the 12k merge, the same after plan 12h.
     // Plan 12d adds 8: the SSO manager, the domain verify, the discovery, the
     // start, the ACS, and the three of the SCIM token check. Plan 12i adds 1:
-    // the password:user key of a check with no address (ruling 15).
-    expect(sites.length).toBe(85);
+    // the password:user key of a check with no address (ruling 15). Plan 12i
+    // Task 2 adds 2: the username set and the availability check.
+    expect(sites.length).toBe(87);
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(
       'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',

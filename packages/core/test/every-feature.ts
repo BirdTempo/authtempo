@@ -91,6 +91,8 @@ export function everyFeature(): ResolvedConfig {
     // Plan 12d Task 9b: the SCIM token routes and the SCIM server.
     scim: {},
     openapi: true,
+    // Plan 12i Task 2: the two username routes.
+    username: {},
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },
   });

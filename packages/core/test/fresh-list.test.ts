@@ -84,6 +84,7 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/user/change-email": { newEmail: "new@example.com" },
   "/user/change-email/verify": { code: "000000" },
   "/user/update": { name: "Ada" },
+  "/user/username": { username: "Ada" },
 };
 
 /** Each POST route's answer to a stale session of a verified user with no password and no factor. */
@@ -96,6 +97,7 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
     password: {},
     oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: "0".repeat(64) },
+    username: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const user = await auth.seedUser(EMAIL);
@@ -231,8 +233,8 @@ describe("the routes that answer session_not_fresh and the client README list", 
     const listed = readmeList();
     // Plan 12k Task 7 adds tokens.update; Task 8 adds the two organization token
     // calls and organizations.members.remove. Plan 12d Task 13 adds sso.domains,
-    // sso.connections, and scim.tokens.
-    expect(listed).toHaveLength(26);
+    // sso.connections, and scim.tokens. Plan 12i Task 2 adds username.set.
+    expect(listed).toHaveLength(27);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

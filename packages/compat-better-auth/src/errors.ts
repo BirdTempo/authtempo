@@ -166,6 +166,10 @@ export const BETTER_AUTH_CODES = {
   // Plan 12i deviation 10: @better-auth/passkey 1.7.2's name for a sign-in by a
   // credential with no row (dist/index.mjs:470, read 2026-10-22). The status stays core's.
   passkey_unknown: "PASSKEY_NOT_FOUND",
+  // Plan 12i deviation 10: the names of Better Auth 1.7.2's username plugin
+  // (plugins/username/error-codes.mjs). The status stays core's.
+  username_taken: "USERNAME_IS_ALREADY_TAKEN",
+  username_invalid: "INVALID_USERNAME",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

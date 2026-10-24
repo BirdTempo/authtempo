@@ -132,6 +132,8 @@ function world(secretHash = "0".repeat(64)) {
     sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -358,6 +360,8 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // Plan 12i Task 2: the set of a username.
+    { key: "POST /user/username", body: { username: "Ada" }, session: true, refused: INVALID_BODY },
     {
       key: "POST /user/change-email",
       body: { newEmail: "ada.other@example.com", method: "link", next: "/inbox" },
@@ -790,7 +794,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
-    expect(keys.length).toBe(187);
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    expect(keys.length).toBe(189);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -803,8 +808,9 @@ describe("the route contract (plan 11g)", () => {
       }
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
     // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
-    // module scim, so 22 became 23.
-    expect(modules.length).toBe(23);
+    // module scim, so 22 became 23. Plan 12i Task 2 adds the module
+    // username, so 23 became 24.
+    expect(modules.length).toBe(24);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1350,7 +1356,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 3 adds the three connection writes. Task 4 adds the discovery.
     // Plan 12d Task 9b adds the two SCIM token writes.
     // Plan 12i Task 9 adds the bodies of the two passkey options routes.
-    expect(withBody.length).toBe(93);
+    // Plan 12i Task 2 adds the body of POST /user/username.
+    expect(withBody.length).toBe(94);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1376,7 +1383,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(91);
+    expect(refusals).toBe(92);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1397,7 +1404,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 4: the discovery reads JSON and a form. Task 9b: the two SCIM token writes.
     // Task 8: the SAML ACS reads a form.
     // Plan 12i Task 9 adds the two passkey options bodies to json.
-    expect(counts).toEqual({ json: 84, both: 10, form: 8 });
+    // Plan 12i Task 2 adds the body of POST /user/username to json.
+    expect(counts).toEqual({ json: 85, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1449,6 +1457,9 @@ describe("the route contract (plan 11g)", () => {
     await check("POST /reauth", post("/auth/reauth", { password: PASSWORD }, cookie));
     await check("POST /reauth/email", post("/auth/reauth/email", {}, cookie));
     await check("POST /user/update", post("/auth/user/update", { name: "Ada" }, cookie));
+    // Plan 12i Task 2: the username routes.
+    await check("POST /user/username", post("/auth/user/username", { username: "Ada" }, cookie));
+    await check("GET /username/available", get("/auth/username/available?username=ada"));
     await check(
       "POST /user/change-email",
       post("/auth/user/change-email", { newEmail: "ada.new@example.com" }, cookie),

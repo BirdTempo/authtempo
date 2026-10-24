@@ -94,7 +94,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
     // Plan 12i Task 9 adds GET /.well-known/webauthn.
-    expect(keys.length).toBe(187);
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    expect(keys.length).toBe(189);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -194,8 +195,9 @@ describe("openApiDocument (plan 11g)", () => {
     // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
     // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99. Task 8
     // adds the form of the SAML ACS: 100. Plan 12i Task 9 adds the two passkey
-    // options bodies: 102.
-    expect(bodies.length).toBe(102);
+    // options bodies: 102. Plan 12i Task 2 adds the body of POST
+    // /user/username: 103.
+    expect(bodies.length).toBe(103);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -427,7 +429,9 @@ describe("openApiDocument (plan 11g)", () => {
     // Task 8 adds the form of the SAML ACS; its answers are a redirect and
     // the XML of the SP metadata. Plan 12i Task 9 adds the answer of
     // GET /.well-known/webauthn and the 2 passkey options bodies.
-    expect([answers, bodies, queries]).toEqual([137, 102, 31]);
+    // Plan 12i Task 2 adds the 2 answers of the username routes, the body
+    // of the set, and the query of the check.
+    expect([answers, bodies, queries]).toEqual([139, 103, 32]);
   });
 
   it("takes the request_id form of the authorize query", () => {

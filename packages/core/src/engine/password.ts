@@ -42,6 +42,7 @@ import {
   twoFactorGate,
 } from "./totp.js";
 import { holdUser, userStays } from "./user-hold.js";
+import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
   ClaimLostError,
   claimEmail,
@@ -148,6 +149,8 @@ export interface PasswordSignUp {
   email: string;
   password: string;
   name?: string | undefined;
+  /** The username (plan 12i). Only with `username` on, else `invalid_body`. */
+  username?: string | undefined;
   ip: string | null;
   userAgent: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
@@ -200,6 +203,14 @@ async function screen(
   return answer === true ? "password_breached" : null;
 }
 
+/** The fields of a new password user that the sign-up checked. */
+interface SignUpRow {
+  email: string;
+  name: string | null;
+  hash: string;
+  username: Username | null;
+}
+
 interface Created {
   answer: PasswordSession | PasswordSignUpPending;
   passwordId: string;
@@ -234,6 +245,14 @@ export async function passwordSignUp(
   if (config.signUp === false) return fail("sign_up_closed");
   const name = input.name;
   if (name !== undefined && !validUserName(name)) return fail("invalid_body");
+  // The form of the username, with the other body checks (plan 12i Task 2).
+  // The read by username runs in the transaction, before any read by address.
+  let username: Username | null = null;
+  if (input.username !== undefined) {
+    if (!config.username) return fail("invalid_body");
+    username = normalizeUsername(config, input.username);
+    if (username === null) return fail("username_invalid");
+  }
   const refused = await screen(pw, input.password, email);
   if (refused) return fail(refused);
   // After the body checks, which answer the same for every address and send
@@ -246,12 +265,12 @@ export async function passwordSignUp(
   // The user hooks of the new user (plan 12a). The transaction runs the sign-up rule itself.
   const made = createSteps(config, "password", { signUpRule: false });
   if (pw.uniformSignUp)
-    return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now, made);
+    return uniformSignUp(config, pw, { email, name: name ?? null, hash, username }, now, made);
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
       created = await hookGuard(() =>
-        insertSignUp(config, input, { email, name: name ?? null, hash }, now, made),
+        insertSignUp(config, input, { email, name: name ?? null, hash, username }, now, made),
       );
     } catch (err) {
       // A concurrent sign-up or sign-in created the user between our read
@@ -261,7 +280,8 @@ export async function passwordSignUp(
       // Run once more, so the read finds the winner's row and the answer
       // follows the rules for an existing user: `email_taken_unverified`
       // tells an unverified social winner's owner to use the magic link,
-      // and the owner's verified user answers `email_taken`.
+      // and the owner's verified user answers `email_taken`. A race on the
+      // username answers `username_taken` at the read of the second run.
       if (
         attempt === 0 &&
         err instanceof StorageError &&
@@ -295,13 +315,16 @@ export async function passwordSignUp(
 function insertSignUp(
   config: ResolvedConfig,
   input: PasswordSignUp,
-  row: { email: string; name: string | null; hash: string },
+  row: SignUpRow,
   now: Date,
   made: CreateSteps,
 ): Promise<Result<Created>> {
   return config.storage.transaction(async (tx): Promise<Result<Created>> => {
     // A retry forgets the user of the attempt that rolled back.
     made.begin();
+    // The username before any read by address (spec 32 item 7), so the
+    // answer to a taken name is the same for a known and a new address.
+    if (await usernameTaken(tx, row.username)) return fail("username_taken");
     // "invited": before the existence read, so a known address with no
     // invitation gets the same answer as a new one (plan 12b).
     if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
@@ -325,7 +348,10 @@ function insertSignUp(
     // `user.beforeCreate` before the session hook and the first write (plan 12a).
     const minted: UserRow = await made.user(
       tx,
-      draftUserRow({ email: row.email, emailVerified: false, name: row.name }, now),
+      draftUserRow(
+        { email: row.email, emailVerified: false, name: row.name, ...(row.username ?? {}) },
+        now,
+      ),
     );
     // The session hook before the first write, with the minted user (plan
     // 9d, fix round 1). On D1 a refusal after a create makes the undo
@@ -412,7 +438,7 @@ type UniformOutcome =
 async function uniformSignUp(
   config: ResolvedConfig,
   pw: Resolved,
-  row: { email: string; name: string | null; hash: string },
+  row: SignUpRow,
   now: Date,
   made: CreateSteps,
 ): Promise<Result<{ sent: true }>> {
@@ -457,7 +483,7 @@ async function uniformSignUp(
  */
 function insertUniform(
   config: ResolvedConfig,
-  row: { email: string; name: string | null; hash: string },
+  row: SignUpRow,
   now: Date,
   made: CreateSteps,
 ): Promise<Result<UniformOutcome>> {
@@ -467,6 +493,8 @@ function insertUniform(
     // "invited": before the existence read, as in `insertSignUp` (plan 12b
     // Task 8). A known and a new address with no invitation then do the
     // same reads and get no mail, so the time of the answer tells nothing.
+    // The username comes first, as in `insertSignUp` (spec 32 item 7).
+    if (await usernameTaken(tx, row.username)) return fail("username_taken");
     if (config.signUp !== "open") await mayCreateUser(config, tx, row.email);
     const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: row.email }]);
     if (existing) return ok({ outcome: "existing" });
@@ -475,7 +503,10 @@ function insertUniform(
     // returned above, so only a new address meets the hook.
     const minted = await made.user(
       tx,
-      draftUserRow({ email: row.email, emailVerified: false, name: row.name }, now),
+      draftUserRow(
+        { email: row.email, emailVerified: false, name: row.name, ...(row.username ?? {}) },
+        now,
+      ),
     );
     const user = await tx.create("user", minted);
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
@@ -499,6 +530,12 @@ function insertUniform(
       active === 0 ? { outcome: "quiet" } : { outcome: "created", passwordId: password.id, user },
     );
   });
+}
+
+/** True when a user holds the stored name. No name: false, and no read. */
+async function usernameTaken(tx: StorageAdapter, name: Username | null): Promise<boolean> {
+  if (name === null) return false;
+  return (await tx.findOne("user", byUsername(name.username))) !== null;
 }
 
 /** The mail to a known address, after the commit. To the address, whatever the builder wrote. */

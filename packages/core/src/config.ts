@@ -57,6 +57,7 @@ import {
 } from "./engine/ranks.js";
 import type { DnsTxtPort } from "./engine/sso/dns.js";
 import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
+import { USERNAME_LENGTH, USERNAME_RE } from "./engine/username.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
@@ -469,6 +470,29 @@ export interface AuthConfig {
    * each event, and the flush of `auth.observe` sends the batch after the answer.
    */
   observe?: ObserveConfig;
+  /**
+   * The username (plan 12i Task 2, spec 32 item 7). Off when absent or
+   * `false`. `{}` turns it on with the defaults. A username is public by
+   * design: `GET /username/available` answers for any name.
+   */
+  username?: UsernameConfig | false;
+}
+
+/**
+ * The username config (plan 12i). The stored form is NFKC in lower case and
+ * matches `^[a-z0-9_.]+$`. The typed case stays in `displayUsername`.
+ */
+export interface UsernameConfig {
+  /** The fewest characters, 3 to 30. Default 3. */
+  minLength?: number;
+  /** The most characters, `minLength` to 30. Default 30. */
+  maxLength?: number;
+  /**
+   * More names that no user may take, in the stored form. Core always
+   * reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while
+   * organizations are on, `root`, `support`, `security`, and `admin`.
+   */
+  reserved?: string[];
 }
 
 /**
@@ -1166,6 +1190,8 @@ export interface ResolvedConfig {
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
+  /** Null: the username is off, and no username route is mounted (plan 12i). */
+  username: ResolvedUsername | null;
   captcha: ResolvedCaptcha | null;
   /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
   observe: Observer;
@@ -1585,6 +1611,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       input.scim !== undefined && input.scim !== false,
     ),
     account: resolveAccount(input.account),
+    username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1604,6 +1631,73 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     instance: Object.freeze({}),
     configKeys: configKeyPaths(input),
   };
+}
+
+/** The resolved `username` (plan 12i). Each bound counts the characters of the typed name after NFKC. */
+export interface ResolvedUsername {
+  minLength: number;
+  maxLength: number;
+  /** Each name in the stored form that no user may take. */
+  reserved: ReadonlySet<string>;
+}
+
+/** The keys of `username`. A Record, so a key added to `UsernameConfig` and not listed here fails the compile. */
+const USERNAME_KEYS: Readonly<Record<keyof UsernameConfig, true>> = {
+  minLength: true,
+  maxLength: true,
+  reserved: true,
+};
+
+/**
+ * The names that core reserves beyond the slug list (spec 32 item 7). A
+ * person who sees one of them trusts it as the voice of the app.
+ */
+const USERNAME_RESERVED = ["root", "support", "security", "admin"] as const;
+
+/**
+ * `username` (plan 12i Task 2). Absent or `false`: off. The reserved set
+ * reads `DEFAULT_RESERVED_SLUGS` and the resolved slug list of
+ * organizations, never a copy, so the two lists cannot drift.
+ */
+function resolveUsername(
+  input: UsernameConfig | false | undefined,
+  organizationSlugs: ReadonlySet<string> | null,
+): ResolvedUsername | null {
+  if (input === undefined || input === false) return null;
+  // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("username must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(USERNAME_KEYS, key))
+      throw new ConfigError(
+        `username.${key} is not an option; core has ${Object.keys(USERNAME_KEYS).join(", ")}`,
+      );
+  const minLength = integerIn(
+    "username.minLength",
+    input.minLength ?? USERNAME_LENGTH.min,
+    USERNAME_LENGTH.min,
+    USERNAME_LENGTH.max,
+  );
+  const maxLength = integerIn(
+    "username.maxLength",
+    input.maxLength ?? USERNAME_LENGTH.max,
+    minLength,
+    USERNAME_LENGTH.max,
+  );
+  const reserved = new Set<string>([...DEFAULT_RESERVED_SLUGS, ...USERNAME_RESERVED]);
+  for (const slug of organizationSlugs ?? []) reserved.add(slug);
+  if (input.reserved !== undefined) {
+    if (!Array.isArray(input.reserved))
+      throw new ConfigError("username.reserved must be an array of names");
+    for (const name of input.reserved as unknown[]) {
+      if (typeof name !== "string" || !USERNAME_RE.test(name))
+        throw new ConfigError(
+          `username.reserved entry is not a username in the stored form: ${String(name)}`,
+        );
+      reserved.add(name);
+    }
+  }
+  return { minLength, maxLength, reserved };
 }
 
 function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"] {

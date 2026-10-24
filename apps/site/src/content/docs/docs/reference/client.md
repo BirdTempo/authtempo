@@ -89,7 +89,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
 | `client.passkeys.rename({ id, name })` | `POST /passkeys/rename` | `PasskeySummaryJSON`. No fresh session is needed |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |
-| `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `{ token }` and `PublicSession` |
+| `client.password.signUp({ email, password, name?, username? })` | `POST /password/sign-up` | `{ token }` and `PublicSession` |
 | `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `{ sent: true }` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true }` |
@@ -197,6 +197,8 @@ These operations serve the settings page of the signed-in person. Each one needs
 | `client.user.verifyEmailChange({ code })` | `POST /user/change-email/verify` | `{ user: PublicUserJSON }` |
 | `client.user.delete()` | `POST /user/delete` | `{ ok: true }`: the account and the caller's session end. `{ sent: true }`: the server's `account.deleteConfirm` is on, a link went to the address, and nothing is deleted yet |
 | `client.user.confirmDelete({ token })` | `POST /user/delete/confirm` | `{ ok: true }`, for an app that serves its own confirm page of the mailed delete link. It needs a session of the same user, not a fresh one |
+| `client.username.available({ username })` | `GET /username/available` | `{ available }`. It needs no session |
+| `client.username.set({ username })` | `POST /user/username` | `{ username, displayUsername }`. It needs a fresh session |
 | `client.identities.list()` | `GET /identities` | `IdentityListJSON`: `identities`, `password`, `passkeys` |
 | `client.identities.unlink({ id })` | `POST /identities/unlink` | `{ ok: true }` |
 | `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `{ url }`; `invalid_body` with status 0 for a name that core refuses |

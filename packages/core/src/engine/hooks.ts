@@ -387,9 +387,10 @@ export const USER_CREATE_VIA = {
 /**
  * The profile update, the change of address (plan 12a), or an operator's ban
  * and unban (plan 12f). `scim`: the organization's directory moves the
- * address of its staff (plan 12d).
+ * address of its staff (plan 12d). `username`: the person sets the
+ * username (plan 12i).
  */
-export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban" | "scim";
+export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban" | "scim" | "username";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
@@ -438,6 +439,9 @@ export interface UserPatch {
   bannedAt?: Date | null;
   banReason?: string | null;
   banUntil?: Date | null;
+  /** The set of a username writes both fields (plan 12i). */
+  username?: string;
+  displayUsername?: string;
 }
 
 /**

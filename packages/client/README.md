@@ -432,6 +432,7 @@ can answer it:
 
 - `sessions.revoke`, `sessions.revokeOthers`
 - `user.changeEmail`, `user.delete`
+- `username.set`
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`
 - `tokens.create`, `tokens.update`

@@ -89,6 +89,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `openapi` | `openapi` | off |
 | `health` | always on | on |
 | `readiness` | `observe.readiness` | off |
+| `username` | `username` | off |
 
 ## The error shape
 
