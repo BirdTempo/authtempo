@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { requestEmailOtp } from "../src/engine/email-otp.js";
+import { passwordMethod } from "../src/engine/last-method.js";
 import { requestMagicLink } from "../src/engine/magic-link.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { passwordMethod } from "../src/engine/last-method.js";
 import { passwordSignIn as engineSignIn } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { setUsername } from "../src/engine/username.js";
