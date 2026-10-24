@@ -9,9 +9,11 @@ import { FIELD_KINDS } from "../src/redact.js";
  * 2 texts of the 12k merge, read again at 91c26417. These are the waitUntil line
  * of 12h Task 2 and the role row line of 12k. Plan 12i Task 13 adds the
  * claims line of the social flow. Plan 12i Task 2 adds the username set
- * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the token answer refusal line. A call that builds a text for each value gives one text for each
- * value. These are the email code and second-factor
- * counts, and the three sweep steps. A part that a field fills is written `<field>`.
+ * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the
+ * token answer refusal line. A call that builds a text for each value gives
+ * one text for each value. These are the email code and second-factor
+ * counts, and the three sweep steps. A part that a field fills is written
+ * `<field>`.
  */
 const START_LIST: readonly string[] = [
   "authtempo: the captcha port threw",

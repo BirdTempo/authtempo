@@ -336,6 +336,8 @@ export interface AuthConfig {
     /**
      * Slack, an oauth2 preset with scope `openid profile email` on the user
      * info endpoint (plan 12i). An address is verified with `email_verified`.
+     * The subject is `<team_id>:<user_id>`: a Slack user id is unique only in
+     * its workspace (Slack's user object page, read 2026-10-24).
      */
     slack?: SlackConfig;
     /**

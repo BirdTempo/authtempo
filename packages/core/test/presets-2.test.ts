@@ -23,7 +23,7 @@ const X_TOKEN = "https://api.x.com/2/oauth2/token";
 const X_ME = "https://api.x.com/2/users/me";
 const GRAPH = "v26.0";
 const FB_TOKEN = `https://graph.facebook.com/${GRAPH}/oauth/access_token`;
-const FB_ME = "https://graph.facebook.com/me?fields=id,name,email,picture";
+const FB_ME = `https://graph.facebook.com/${GRAPH}/me?fields=id,name,email,picture`;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -57,11 +57,17 @@ const tokenAnswer = () => Response.json({ access_token: ACCESS, token_type: "bea
 
 const slackToken = () => Response.json({ ok: true, access_token: ACCESS, token_type: "Bearer" });
 
-const slackWorld = (token: () => Response = slackToken) =>
+const slackWorld = (
+  token: () => Response = slackToken,
+  user: () => Response = () => new Response(slackUserinfoText),
+) =>
   world(
     { slack: { clientId: "slack-id", clientSecret: "slack-secret" } },
-    { [SLACK_TOKEN]: token, [SLACK_USER]: () => new Response(slackUserinfoText) },
+    { [SLACK_TOKEN]: token, [SLACK_USER]: user },
   );
+
+/** The recorded Slack user info answer with `patch` over it. */
+const slackUser = (patch: Json) => () => Response.json({ ...json(slackUserinfoText), ...patch });
 
 const twitterWorld = (email: () => Response = () => new Response(twitterMeEmailText)) =>
   world(
@@ -126,6 +132,82 @@ describe("the presets of plan 12i Task 14", () => {
     expect(await subjects(fb, "facebook")).toEqual([fx.subject]);
   });
 
+  it("keys a Slack identity by the team id and the user id", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Slack's user object page (read 2026-10-24): a user id is unique only in its workspace.
+    const first = slackUser({});
+    const second = slackUser({ "https://slack.com/team_id": "T0OTHER", email: "b@example.com" });
+    let n = 0;
+    const slack = slackWorld(slackToken, () => (n++ === 0 ? first() : second()));
+    expect((await signIn(slack.config, "slack")).done).toMatchObject({
+      ok: true,
+      value: { user: { email: "krane@slack-corp.com" } },
+    });
+    // The same user id in another workspace is another person, not the first account.
+    expect((await signIn(slack.config, "slack")).done).toMatchObject({
+      ok: true,
+      value: { user: { email: "b@example.com" } },
+    });
+    expect((await subjects(slack, "slack")).sort()).toEqual(["T0OTHER:U0R7JM", "T0R7GR:U0R7JM"]);
+    for (const team of [undefined, "", "T0:R7GR"]) {
+      const bad = slackWorld(slackToken, slackUser({ "https://slack.com/team_id": team }));
+      expect((await signIn(bad.config, "slack")).done).toMatchObject({
+        ok: false,
+        code: "oauth_failed",
+      });
+      expect(await bad.storage.findMany("user", [])).toHaveLength(0);
+    }
+  });
+
+  it("answers oauth_failed on a Slack user info answer without ok true", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const ok of [false, undefined, "true"]) {
+      // The claims are whole, so only the ok check refuses the answer.
+      const slack = slackWorld(slackToken, slackUser({ ok }));
+      expect((await signIn(slack.config, "slack")).done).toMatchObject({
+        ok: false,
+        code: "oauth_failed",
+      });
+      expect(await slack.storage.findMany("user", [])).toHaveLength(0);
+    }
+  });
+
+  it("counts a Slack address verified only on the boolean email_verified true", async () => {
+    for (const verified of [false, "true", undefined]) {
+      const fresh = slackWorld(slackToken, slackUser({ email_verified: verified }));
+      expect((await signIn(fresh.config, "slack")).done).toMatchObject({
+        ok: true,
+        value: { user: { email: "krane@slack-corp.com", emailVerified: false } },
+      });
+      // An unverified address never links the user who holds it.
+      const slack = slackWorld(slackToken, slackUser({ email_verified: verified }));
+      const owner = await slack.seedUser("krane@slack-corp.com");
+      expect((await signIn(slack.config, "slack")).done).toMatchObject({
+        ok: false,
+        code: "email_taken_unverified",
+      });
+      expect(
+        await slack.storage.findMany("identity", [{ field: "userId", op: "eq", value: owner.id }]),
+      ).toEqual([]);
+    }
+  });
+
+  it("takes an X address only from a second read of the same id", async () => {
+    // A second read of another id gives no address, so a new user is refused.
+    const otherId = () =>
+      Response.json({ data: { id: "2244994946", confirmed_email: "xdev@example.com" } });
+    expect((await signIn(twitterWorld(otherId).config, "twitter")).done).toMatchObject({
+      ok: false,
+      code: "email_required",
+    });
+    // A 200 answer that is not JSON is a failed second read: no address, not oauth_failed.
+    const notJson = () => new Response("<html>busy</html>", { status: 200 });
+    expect((await signIn(twitterWorld(notJson).config, "twitter")).done).toMatchObject({
+      ok: false,
+      code: "email_required",
+    });
+  });
+
   it("answers oauth_failed on a Slack token answer with ok false and status 200", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const slack = slackWorld(() => new Response(slackTokenErrorText, { status: 200 }));
@@ -168,11 +250,15 @@ describe("the presets of plan 12i Task 14", () => {
     expect(await fb.storage.findMany("session", [])).toHaveLength(0);
   });
 
-  it("pins the Graph version with its read date", () => {
+  it("pins the Graph version with its read date", async () => {
     const fb = facebookWorld();
     const p = fb.config.social.providers[0];
-    expect(p?.authorizeUrl).toBe(`https://www.facebook.com/${GRAPH}/dialog/oauth`);
-    expect(p?.tokenUrl).toBe(FB_TOKEN);
+    if (p?.kind !== "oauth2") throw new Error("facebook is not an oauth2 provider");
+    expect(p.authorizeUrl).toBe(`https://www.facebook.com/${GRAPH}/dialog/oauth`);
+    expect(p.tokenUrl).toBe(FB_TOKEN);
+    // An unversioned profile read uses the dashboard version (Meta's guide, read 2026-10-24).
+    expect((await signIn(fb.config, "facebook")).done).toMatchObject({ ok: true });
+    expect(fb.calls.map((c) => c.url)).toEqual([FB_TOKEN, FB_ME]);
     // The version constant carries the day of the changelog read in its comment.
     expect(facebookSource).toMatch(
       /\/\*\*[^\n]*read \d{4}-\d{2}-\d{2}[^\n]*\*\/\nexport const GRAPH_VERSION = "v26\.0";/,

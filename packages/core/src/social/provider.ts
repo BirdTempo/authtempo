@@ -16,7 +16,7 @@ export const PROVIDER_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
  * compatibility package reads this list, so a preset added here changes its
  * refusal text with no compat edit.
  */
-export const PRESET_PROVIDER_NAMES: readonly string[] = [
+export const PRESET_PROVIDER_NAMES: readonly string[] = Object.freeze([
   "google",
   "apple",
   "github",
@@ -27,14 +27,16 @@ export const PRESET_PROVIDER_NAMES: readonly string[] = [
   "slack",
   "twitter",
   "facebook",
-];
+]);
 
 /**
  * The names kept for presets that do not exist yet, so no list entry takes
  * one. Plan 12i Task 13 kept `slack`, `twitter`, and `facebook`. Task 14
- * moved them to `PRESET_PROVIDER_NAMES`, so the list is empty now.
+ * moved them to `PRESET_PROVIDER_NAMES`, so the list is empty now. Both
+ * lists are frozen: `RESERVED_PROVIDER_NAMES` and compat read them, so a
+ * change at run time would open a reserved name.
  */
-export const COMING_PRESET_NAMES: readonly string[] = [];
+export const COMING_PRESET_NAMES: readonly string[] = Object.freeze([]);
 
 /**
  * Names a list entry must not take: each preset, each coming preset, `email`,

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
+import {
+  type AuthConfig,
+  DEFAULT_RESERVED_SLUGS,
+  isAppScheme,
+  resolveConfig,
+} from "../src/config.js";
 import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
@@ -11,7 +16,7 @@ import { defaultResetPage } from "../src/http/password-pages.js";
 import { defaultTotpPage } from "../src/http/totp-page.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import type { OidcEntry } from "../src/social/oidc.js";
-import { PRESET_PROVIDER_NAMES } from "../src/social/provider.js";
+import { COMING_PRESET_NAMES, PRESET_PROVIDER_NAMES } from "../src/social/provider.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -140,22 +145,26 @@ describe("social config", () => {
   });
   it("lists each preset that the config builds in PRESET_PROVIDER_NAMES, in order", () => {
     // Compat reads the list (plan 12i), so a preset missing from it gets the wrong refusal there.
-    const c = resolveConfig({
-      ...base,
-      social: {
-        google: { clientId: "g", clientSecret: "s" },
-        apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "pem" },
-        github: { clientId: "h", clientSecret: "s" },
-        linkedin: { clientId: "l", clientSecret: "s" },
-        microsoft: { clientId: "m", clientSecret: "s", tenant: "common" },
-        discord: { clientId: "d", clientSecret: "s" },
-        gitlab: { clientId: "gl", clientSecret: "s" },
-        slack: { clientId: "sl", clientSecret: "s" },
-        twitter: { clientId: "x", clientSecret: "s" },
-        facebook: { clientId: "f", clientSecret: "s" },
-      },
-    });
+    // The type names no key by hand, so a new preset key fails the type check until it is here.
+    const presets: Required<
+      Omit<NonNullable<AuthConfig["social"]>, "oidc" | "oauth2" | "fetch" | "stateData">
+    > = {
+      google: { clientId: "g", clientSecret: "s" },
+      apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "pem" },
+      github: { clientId: "h", clientSecret: "s" },
+      linkedin: { clientId: "l", clientSecret: "s" },
+      microsoft: { clientId: "m", clientSecret: "s", tenant: "common" },
+      discord: { clientId: "d", clientSecret: "s" },
+      gitlab: { clientId: "gl", clientSecret: "s" },
+      slack: { clientId: "sl", clientSecret: "s" },
+      twitter: { clientId: "x", clientSecret: "s" },
+      facebook: { clientId: "f", clientSecret: "s" },
+    };
+    const c = resolveConfig({ ...base, social: presets });
     expect(c.social.providers.map((p) => p.name)).toEqual(PRESET_PROVIDER_NAMES);
+    // The lists are frozen, so no code can open a reserved name at run time.
+    expect(Object.isFrozen(PRESET_PROVIDER_NAMES)).toBe(true);
+    expect(Object.isFrozen(COMING_PRESET_NAMES)).toBe(true);
   });
   it("refuses a provider with an empty field", () => {
     expect(() =>

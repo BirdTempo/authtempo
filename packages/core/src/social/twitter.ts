@@ -41,7 +41,12 @@ export function twitterProvider(c: TwitterConfig): OAuth2Provider {
 /** The `data` object of a `GET /2/users/me` answer, or null. */
 async function meData(res: Response): Promise<Record<string, unknown> | null> {
   if (!res.ok) return null;
-  const body: unknown = await res.json();
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return null;
+  }
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
   const data = (body as Record<string, unknown>).data;
   return typeof data === "object" && data !== null && !Array.isArray(data)

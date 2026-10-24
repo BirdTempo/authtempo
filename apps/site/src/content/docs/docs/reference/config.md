@@ -99,7 +99,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.microsoft` | `MicrosoftConfig` | none | The Microsoft Entra ID preset, with the scope `openid profile email`. The subject is `oid`. |
 | `social.discord` | `DiscordConfig` | none | The Discord preset, with the scope `identify email`. |
 | `social.gitlab` | `GitLabConfig` | none | The GitLab preset, with the scope `read_user`. A GitLab address is never verified. |
-| `social.slack` | `SlackConfig` | none | The Slack preset, on the user info endpoint, with the scope `openid profile email`. The subject is the Slack user id. A token answer without `ok: true` answers `oauth_failed`. |
+| `social.slack` | `SlackConfig` | none | The Slack preset, on the user info endpoint, with the scope `openid profile email`. The subject is `<team_id>:<user_id>`, because Slack's user object page (read 2026-10-24) says a user id is unique only in its workspace. A user info answer with no team id answers `oauth_failed`. A token answer without `ok: true` answers `oauth_failed`. |
 | `social.twitter` | `TwitterConfig` | none | The X preset, with the scope `users.read tweet.read users.email`. Core sends the client secret to the token endpoint as HTTP Basic. Only `confirmed_email` gives an address, and it counts as verified. |
 | `social.facebook` | `FacebookConfig` | none | The Facebook preset on Graph API `v26.0`, with the scope `email public_profile`. A Facebook address is never verified. |
 | `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |

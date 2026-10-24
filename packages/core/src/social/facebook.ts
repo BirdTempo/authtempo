@@ -13,7 +13,11 @@ export interface FacebookConfig extends RedirectOverride {
 /** The Graph API version: the newest in Meta's Graph API changelog, read 2026-10-24. */
 export const GRAPH_VERSION = "v26.0";
 
-const ME_URL = "https://graph.facebook.com/me?fields=id,name,email,picture";
+/**
+ * The profile read on the pinned version. Meta's versioning guide (read
+ * 2026-10-24) says an unversioned call uses the version of the app dashboard.
+ */
+const ME_URL = `https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name,email,picture`;
 /** An app-scoped user id: decimal text. */
 const FB_ID_RE = /^[1-9][0-9]{0,24}$/;
 

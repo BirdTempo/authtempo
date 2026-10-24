@@ -11,8 +11,10 @@ export interface SlackConfig extends RedirectOverride {
 }
 
 const USERINFO_URL = "https://slack.com/api/openid.connect.userInfo";
-/** The subject claim, the key that Better Auth 1.7.2 reads as the account id. */
+/** The user id claim, the key that Better Auth 1.7.2 reads as the account id. */
 const USER_ID = "https://slack.com/user_id";
+/** The workspace id claim of the user info answer, read 2026-10-24. */
+const TEAM_ID = "https://slack.com/team_id";
 
 /**
  * "Sign in with Slack" as an `oauth2` provider on the user info endpoint
@@ -41,10 +43,15 @@ export function slackProvider(c: SlackConfig): OAuth2Provider {
 }
 
 /**
- * The profile from `openid.connect.userInfo`. The subject is the Slack user
- * id. Only the boolean `email_verified: true` makes the address verified.
- * An answer with no `ok: true` or no user id throws, and the engine answers
- * `oauth_failed`.
+ * The profile from `openid.connect.userInfo`. The subject is
+ * `<team_id>:<user_id>`. Slack's user object page (read 2026-10-24) says a
+ * user id is unique only in its workspace, and names the pair as the
+ * unique key. The engine finds an identity by `(provider, subject)`, so a
+ * user id alone from a second workspace could sign in as another person.
+ * Better Auth 1.7.2 stores the user id alone; plan 12i Task 16 maps that
+ * row. Only the boolean `email_verified: true` makes the address verified.
+ * An answer with no `ok: true`, no team id, or no user id throws, and the
+ * engine answers `oauth_failed`.
  */
 export async function slackUserinfo(
   accessToken: string,
@@ -59,8 +66,12 @@ export async function slackUserinfo(
     throw new Error("slack userInfo is not an object");
   const u = body as Record<string, unknown>;
   if (u.ok !== true) throw new Error("slack userInfo answered ok false");
-  const subject = stringClaim(u, USER_ID);
-  if (subject === null) throw new Error("slack userInfo has no user id");
+  const team = stringClaim(u, TEAM_ID);
+  const user = stringClaim(u, USER_ID);
+  // A colon in either id would let two pairs give one subject.
+  if (team === null || team.includes(":")) throw new Error("slack userInfo has no team id");
+  if (user === null || user.includes(":")) throw new Error("slack userInfo has no user id");
+  const subject = `${team}:${user}`;
   const email = stringClaim(u, "email");
   return {
     subject,
