@@ -202,5 +202,18 @@ for (const server of MYSQL_SERVERS) {
       // Plan 12d appends the file of schema version 14 after it.
       expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(["0001_schema_v13", "0002_schema_v14"]);
     });
+
+    it("holds each shipped record to its digest (ruling 81 l3 of plan 12d)", () => {
+      // Each shipped file is append-only, as the baseline is. A later file gets its pin here
+      // when it ships, so an edit of a shipped file fails with no compare to schemaDdl.
+      const digests = MYSQL_MIGRATIONS.map((m) => [
+        m.name,
+        createHash("sha256").update(JSON.stringify(m.statements)).digest("hex"),
+      ]);
+      expect(digests).toEqual([
+        ["0001_schema_v13", "1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9"],
+        ["0002_schema_v14", "35a0f032d884b2ff0f117fa6d4e2b46dbdf76324930afca6e9ba332b8761f03b"],
+      ]);
+    });
   });
 }
