@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 214 keys, the nested ones by their path", () => {
+  it("lists 229 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
