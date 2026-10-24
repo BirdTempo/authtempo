@@ -33,6 +33,8 @@ import test from "../../../../../samples/guides/passkey-extensions.test.ts?raw";
 4. Call `client.passkey.signIn({ extensions: { prf: { first } }, onExtensionResults })`. Add `largeBlob: { read: true }` to read the blob.
 5. Read the PRF output and the blob in `onExtensionResults`. It runs only after a sign-in that succeeded.
 6. To write a blob, wrap the browser seam and add `largeBlob.write` to the sign-in options. Core never sends a blob to write.
+7. In the same wrap, set `allowCredentials` to exactly one credential. Use the id of a passkey that the app kept from an earlier sign-in. A browser refuses a write with no credential or with two or more. Core's verify does not read `allowCredentials`, so the sign-in still verifies.
+8. Do not ask for a read and a write in one sign-in. A browser refuses that request. The wrap above replaces a read with the write.
 
 <Code code={client} lang="ts" title="The sign-in with a PRF salt, and a blob to write" />
 
@@ -48,6 +50,7 @@ import test from "../../../../../samples/guides/passkey-extensions.test.ts?raw";
 - One salt for every user is safe. The browser hashes the salt with a fixed context, and the output also depends on a secret of each passkey. So two passkeys give two different outputs for one salt.
 - The PRF output is a key of the browser, not of the server. If the person loses the passkey, the key is gone. Keep a recovery path for the data that it protects.
 - The second factor and the re-authentication take no extension in their options.
+- The write rules come from WebAuthn Level 3, section 10.1.5 (read 2026-10-25).
 
 ## If it fails
 

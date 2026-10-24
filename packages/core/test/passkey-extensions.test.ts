@@ -272,6 +272,24 @@ describe("the passkey extensions (plan 12i Task 21)", () => {
       });
       expect({ prf, api }).toMatchObject({ prf, api: { ok: false, code: "invalid_body" } });
     }
+    // More bad salts than the limit (30) from one IP: none counts, so a good request passes.
+    const ip = "203.0.113.21";
+    const good = { prf: { first: salt(32) } };
+    for (let i = 0; i < 35; i++) {
+      const bad = await passkeyAuthenticationOptions(w.auth.config, {
+        ip,
+        extensions: { prf: { first: salt(31) } },
+      });
+      expect(bad).toMatchObject({ ok: false, code: "invalid_body" });
+    }
+    for (let i = 0; i < 30; i++) {
+      const pass = await passkeyAuthenticationOptions(w.auth.config, { ip, extensions: good });
+      expect({ i, ok: pass.ok }).toEqual({ i, ok: true });
+    }
+    // The limit is live for this IP: the 31st good request is refused.
+    expect(
+      await passkeyAuthenticationOptions(w.auth.config, { ip, extensions: good }),
+    ).toMatchObject({ ok: false, code: "rate_limited" });
     // An extension that the config does not turn on is refused.
     const off = await world(rp({ credProps: true }));
     for (const extensions of [{ prf: { first: salt(32) } }, { largeBlob: { read: true } }]) {

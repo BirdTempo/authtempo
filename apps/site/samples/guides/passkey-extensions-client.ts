@@ -20,14 +20,25 @@ export async function signInAndUnlock(
   return r.ok ? "Signed in." : r.code;
 }
 
-/** A browser seam that adds a large blob to write to each sign-in. Core never sends one. */
-export function writingBlob(blob: string): BrowserWebAuthn {
-  const browser = browserWebAuthn();
+/**
+ * A browser seam that writes a large blob at a sign-in. Core never sends one.
+ * A write needs exactly one allowed credential: the id of a passkey that the
+ * app kept from an earlier sign-in. A request cannot both read and write.
+ */
+export function writingBlob(
+  blob: string,
+  credentialId: string,
+  browser: BrowserWebAuthn = browserWebAuthn(),
+): BrowserWebAuthn {
   return {
     create: (options) => browser.create(options),
     get: (options, ceremony) =>
       browser.get(
-        { ...options, extensions: { ...options.extensions, largeBlob: { write: blob } } as never },
+        {
+          ...options,
+          allowCredentials: [{ type: "public-key", id: credentialId }],
+          extensions: { ...options.extensions, largeBlob: { write: blob } } as never,
+        },
         ceremony,
       ),
   };
