@@ -34,8 +34,24 @@ const hintsField = z
   .max(PASSKEY_HINTS.length)
   .refine((list) => new Set(list).size === list.length, "a hint twice")
   .optional();
-/** The body of both options routes. It is optional: an empty body is `{}`. */
+/** The body of the registration options. It is optional: an empty body is `{}`. */
 export const optionsBody = z.strictObject({ hints: hintsField });
+/** A PRF salt: the base64url of 32 bytes. The engine checks the bytes again. */
+const prfSalt = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+/**
+ * The body of the sign-in options (plan 12i): the hints and the extensions
+ * of one ceremony. The extensions are PRF salts and a `largeBlob` read. No
+ * body asks for a large blob write: the app's client adds it itself.
+ */
+export const authenticateOptionsBody = z.strictObject({
+  hints: hintsField,
+  extensions: z
+    .strictObject({
+      prf: z.strictObject({ first: prfSalt, second: prfSalt.optional() }).optional(),
+      largeBlob: z.strictObject({ read: z.literal(true) }).optional(),
+    })
+    .optional(),
+});
 export const deleteBody = z.object({ id: z.string().min(1).max(64) });
 export const renameBody = z.strictObject({ id: z.string().min(1).max(64), name: z.string() });
 
@@ -52,7 +68,7 @@ export const PASSKEYS_CONTRACT = {
     answer: { kind: "json", schema: passkeyAnswer },
   },
   "POST /passkey/authenticate/options": {
-    body: { schema: optionsBody, media: ["json"], parsedBy: "zod", optional: true },
+    body: { schema: authenticateOptionsBody, media: ["json"], parsedBy: "zod", optional: true },
     answer: { kind: "json", schema: RequestOptionsJson },
   },
   "POST /passkey/authenticate/verify": {

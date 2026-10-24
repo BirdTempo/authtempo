@@ -294,7 +294,7 @@ These routes exist when the config sets `passkey`.
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
 | Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.register` for this ceremony |
-| Answer | The creation options JSON for `navigator.credentials.create`, with `hints` |
+| Answer | The creation options JSON for `navigator.credentials.create`, with `hints`, and with `extensions` when `passkey.extensions` asks for one |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-passkey-register-verify"><code>POST /passkey/register/verify</code></h3>
@@ -311,8 +311,8 @@ These routes exist when the config sets `passkey`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.signIn` for this ceremony |
-| Answer | The request options JSON for `navigator.credentials.get`, with `hints` when the ceremony has some |
+| Input | JSON `{ hints?, extensions? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.signIn` for this ceremony. `extensions` is `{ prf?: { first, second? }, largeBlob?: { read: true } }`: each PRF salt is the base64url of 32 bytes, and each extension needs its key of `passkey.extensions` on |
+| Answer | The request options JSON for `navigator.credentials.get`, with `hints` when the ceremony has some, and `extensions` when the body has some |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-passkey-authenticate-verify"><code>POST /passkey/authenticate/verify</code></h3>
@@ -320,7 +320,7 @@ These routes exist when the config sets `passkey`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ response }` |
+| Input | JSON `{ response }`. Core drops `prf.results` and `largeBlob.blob` from `clientExtensionResults` before any read, store, or log |
 | Answer | `{ user, session }` with the session cookie. A credential with no row answers `passkey_unknown`, so the app can call `PublicKeyCredential.signalUnknownCredential` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`passkey_unknown`](/docs/reference/errors/#passkey_unknown), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
@@ -330,7 +330,7 @@ These routes exist when the config sets `passkey`.
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }], rpId, userHandle }`. `rpId` and `userHandle` (base64url of the user id bytes) are the inputs of `PublicKeyCredential.signalAllAcceptedCredentials` |
+| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle }`. `discoverable` (or null), `prf`, and `largeBlob` are advice from unsigned client outputs. `rpId` and `userHandle` (base64url of the user id bytes) are the inputs of `PublicKeyCredential.signalAllAcceptedCredentials` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-passkeys-delete"><code>POST /passkeys/delete</code></h3>

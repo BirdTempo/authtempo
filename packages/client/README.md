@@ -92,7 +92,7 @@ more request headers go in the fifth.
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `ClientResult<{ sent: true }>` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `ClientResult<PublicSession \| TwoFactorChallengeJSON>` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
-| `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
+| `client.passkey.signIn({ autofill?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read (plan 12i). After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |

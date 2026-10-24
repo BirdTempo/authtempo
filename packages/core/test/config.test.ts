@@ -389,7 +389,29 @@ describe("passkey config", () => {
       origins: ["https://example.com", "https://app.example.com:8443"],
       relatedOrigins: false,
       hints: { register: [], signIn: [] },
+      // Plan 12i Task 21: each passkey extension is off by default.
+      extensions: { prf: false, largeBlob: false, credProps: false },
     });
+  });
+  it("refuses a passkey extension value of another type (plan 12i Task 21)", () => {
+    const pk = { rpID: "api.example.com", rpName: "Example", origins: ["https://api.example.com"] };
+    const withExtensions = (extensions: unknown) =>
+      resolveConfig({
+        ...base,
+        passkey: { ...pk, extensions: extensions as { prf?: boolean } },
+      });
+    expect(() => withExtensions({ prf: "yes" })).toThrow(
+      "passkey.extensions.prf must be a boolean",
+    );
+    expect(() => withExtensions({ credProps: 1 })).toThrow(
+      "passkey.extensions.credProps must be a boolean",
+    );
+    expect(() => withExtensions({ largeBlob: true })).toThrow(
+      'passkey.extensions.largeBlob must be "preferred", "required", or false',
+    );
+    expect(
+      withExtensions({ prf: true, largeBlob: "required", credProps: false }).passkey?.extensions,
+    ).toEqual({ prf: true, largeBlob: "required", credProps: false });
   });
   it("accepts the baseURL or a trusted origin and refuses any other passkey origin", () => {
     const pk = { rpID: "example.com", rpName: "Example" };

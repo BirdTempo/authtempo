@@ -36,9 +36,9 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
 | POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed`. A `name` that is blank after the trim, or that breaks the passkey name rule, is stored as no name (see "Passkeys") |
-| POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
+| POST | `/passkey/authenticate/options` | `{ hints?, extensions? }` | the request options JSON for `navigator.credentials.get`; 400 `invalid_body` (a PRF salt that is not 32 bytes, or an extension that `passkey.extensions` does not turn on); 429 `rate_limited` |
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
-| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
+| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle }`; 401 |
 | POST | `/passkeys/delete` | session (fresh), `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
 | POST | `/passkeys/rename` | session, `{ id, name }` | `{ passkey }` in the shape of `GET /passkeys` (plan 12a). No fresh rule: a name is no way in. 400 `invalid_body` (a `name` that breaks the passkey name rule, or any other field); 401; 404 `not_found` (an unknown id, or an id of another user); 429 `rate_limited` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
@@ -445,6 +445,15 @@ trim, or that breaks the rule, as no name. The rename
 session. It sends no notice, because a name is not a credential. The id of
 another user's passkey answers `not_found`, as an unknown id does, by the
 same calls. Its limit is `passkey-rename:user:<userId>` (see "Account").
+
+The passkey extensions (plan 12i): `passkey.extensions` asks for
+`credProps`, `prf`, and `largeBlob` at the registration, and stores the
+flags `discoverable`, `prf`, and `largeBlob` on the passkey row. Each is
+off by default. The client outputs are not signed, so the flags are advice
+for the app's own client, and no check of core reads them. The sign-in
+options take PRF salts and a `largeBlob` read. Each verify keeps only the
+boolean outputs of `clientExtensionResults`, so a PRF output and a large
+blob never reach a read, a store, or a log of core.
 
 `webauthn` in the config replaces the seam. The default is
 @simplewebauthn/server 14.0.3, which runs on Workers without

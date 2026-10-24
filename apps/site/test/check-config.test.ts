@@ -33,7 +33,9 @@ describe("checkConfig", () => {
     // Plan 12i Task 12 adds lastMethod, its two keys, and redirectURI on the seven
     // presets and the two lists.
     // Plan 12i Task 14 adds social.slack, social.twitter, social.facebook, and their nine keys.
-    expect(keys.length).toBe(255 + 12);
+    // Plan 12i Task 21 adds passkey.extensions and its three keys.
+    expect(keys.length).toBe(255 + 12 + 4);
+    expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.twitter.redirectURI");
     expect(keys).toContain("lastMethod.days");
     expect(keys).toContain("social.oauth2[].redirectURI");

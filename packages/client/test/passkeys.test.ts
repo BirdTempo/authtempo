@@ -196,4 +196,100 @@ describe("passkeys through the client", () => {
     });
     expect(await client.passkey.signIn()).toEqual({ ok: false, code: "unexpected", status: 0 });
   });
+
+  it("sends PRF salts and a largeBlob read, and keeps both outputs in the browser (plan 12i)", async () => {
+    const server = makeServer({
+      passkey: { ...RP, extensions: { prf: true, largeBlob: "preferred", credProps: true } },
+    });
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+    const seam = softSeam(soft);
+    const { client } = await cookieClient(server, seam);
+    const reg = await client.passkey.register();
+    if (!reg.ok) throw new Error(reg.code);
+    const first = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+    const asked: unknown[] = [];
+    const prfOutput = "cHJmLW91dHB1dC1zZWNyZXQ";
+    const blob = "bGFyZ2UtYmxvYi1zZWNyZXQ";
+    const outputs: BrowserWebAuthn = {
+      create: seam.create,
+      async get(options) {
+        asked.push(options.extensions);
+        return {
+          ...(await soft.authenticate(options.challenge)),
+          clientExtensionResults: {
+            prf: { enabled: true, results: { first: prfOutput } },
+            largeBlob: { blob },
+          } as never,
+        };
+      },
+    };
+    const bodies: string[] = [];
+    const { fetch } = inProcessFetch(server.auth);
+    const spy: typeof globalThis.fetch = async (input, init) => {
+      bodies.push(await new Request(input, init).clone().text());
+      return fetch(input, init);
+    };
+    const fresh = createClient({ baseURL: BASE_URL, fetch: spy, webauthn: outputs });
+    const got: unknown[] = [];
+    const s = await fresh.passkey.signIn({
+      extensions: { prf: { first }, largeBlob: { read: true } },
+      onExtensionResults: (r) => got.push(r),
+    });
+    expect(s.ok).toBe(true);
+    expect(asked).toEqual([{ prf: { eval: { first } }, largeBlob: { read: true } }]);
+    expect(got).toEqual([{ prf: { first: prfOutput }, largeBlob: blob }]);
+    expect(bodies).toHaveLength(2);
+    expect(JSON.parse(bodies[0] ?? "")).toEqual({
+      extensions: { prf: { first }, largeBlob: { read: true } },
+    });
+    // The verify body holds neither output.
+    expect(bodies[1]).not.toContain(prfOutput);
+    expect(bodies[1]).not.toContain(blob);
+    // A sign-in that fails gives the app no output.
+    await client.passkeys.delete({ id: reg.value.id });
+    const failed = await fresh.passkey.signIn({
+      extensions: { prf: { first } },
+      onExtensionResults: (r) => got.push(r),
+    });
+    expect(failed.ok).toBe(false);
+    expect(got).toHaveLength(1);
+  });
+
+  it("keeps the outputs of a registration in the browser (plan 12i)", async () => {
+    const server = makeServer({ passkey: { ...RP, extensions: { prf: true, credProps: true } } });
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+    const prfOutput = "cmVnaXN0ZXItcHJmLXNlY3JldA";
+    const webauthn: BrowserWebAuthn = {
+      async create(options) {
+        return {
+          ...(await soft.register(options.challenge)),
+          clientExtensionResults: {
+            credProps: { rk: true },
+            prf: { enabled: true, results: { first: prfOutput } },
+          } as never,
+        };
+      },
+      get: async (options) => soft.authenticate(options.challenge),
+    };
+    const bodies: string[] = [];
+    const { fetch } = inProcessFetch(server.auth);
+    const spy: typeof globalThis.fetch = async (input, init) => {
+      bodies.push(await new Request(input, init).clone().text());
+      return fetch(input, init);
+    };
+    const client = createClient({ baseURL: BASE_URL, fetch: spy, webauthn });
+    const req = await client.magicLink.request({ email: "ada@example.com" });
+    if (!req.ok) throw new Error(req.code);
+    const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
+    const v = await client.magicLink.verify({ token });
+    if (!v.ok) throw new Error(v.code);
+    const reg = await client.passkey.register();
+    expect(reg.ok && { discoverable: reg.value.discoverable, prf: reg.value.prf }).toEqual({
+      discoverable: true,
+      prf: true,
+    });
+    const verifyBody = bodies.at(-1) ?? "";
+    expect(verifyBody).toContain('"enabled":true');
+    expect(verifyBody).not.toContain(prfOutput);
+  });
 });

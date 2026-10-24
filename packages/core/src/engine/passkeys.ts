@@ -18,6 +18,14 @@ import { passkeyUserName, provedAccount } from "./address.js";
 import { hookGuard } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
+import {
+  type PasskeySignInExtensions,
+  registrationExtensions,
+  signInExtensions,
+  storedFlags,
+  withExtensions,
+  withoutSecretOutputs,
+} from "./passkey-extensions.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
 import { openSession, sessionOpened } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
@@ -73,6 +81,13 @@ export interface PasskeySummary {
   name: string | null;
   deviceType: string;
   backedUp: boolean;
+  /**
+   * The extension flags of the registration (plan 12i): advice for the
+   * app's own client from unsigned outputs. No check of core reads them.
+   */
+  discoverable: boolean | null;
+  prf: boolean;
+  largeBlob: boolean;
   createdAt: Date;
 }
 
@@ -83,6 +98,9 @@ function summary(row: PasskeyRow): PasskeySummary {
     name: row.name,
     deviceType: row.deviceType,
     backedUp: row.backedUp,
+    discoverable: row.discoverable,
+    prf: row.prf,
+    largeBlob: row.largeBlob,
     createdAt: row.createdAt,
   };
 }
@@ -212,7 +230,12 @@ export async function passkeyRegistrationOptions(
       transports: p.transports ? p.transports.split(",") : null,
     })),
   });
-  return ok(withHints(options, input.hints ?? config.passkey.hints.register));
+  return ok(
+    withHints(
+      withExtensions(options, registrationExtensions(config.passkey)),
+      input.hints ?? config.passkey.hints.register,
+    ),
+  );
 }
 
 /** The bytes that a base64url text without padding decodes to. */
@@ -225,15 +248,17 @@ export async function verifyPasskeyRegistration(
   input: { user: UserRow; response: unknown; name?: string | undefined },
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
+  // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
+  const response = withoutSecretOutputs(input.response);
   if (!provedAccount(input.user)) return fail("email_unverified");
-  const challenge = challengeFromResponse(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
   if (!consumed.ok) return consumed;
   let registered: Awaited<ReturnType<typeof config.webauthn.verifyRegistration>>;
   try {
     registered = await config.webauthn.verifyRegistration({
-      response: input.response as RegistrationResponseJSON,
+      response: response as RegistrationResponseJSON,
       expectedChallenge: challenge,
       expectedOrigin: config.passkey.origins,
       expectedRPID: config.passkey.rpID,
@@ -262,10 +287,8 @@ export async function verifyPasskeyRegistration(
       deviceType: registered.deviceType,
       backedUp: registered.backedUp,
       name: registeredName(input.name),
-      // The extension flags of plan 12i Task 21; this ceremony reads none of them yet.
-      discoverable: null,
-      prf: false,
-      largeBlob: false,
+      // Advice from unsigned outputs (plan 12i): no check reads them.
+      ...storedFlags(config.passkey, response),
       createdAt: now,
       updatedAt: now,
     });
@@ -291,9 +314,16 @@ export async function verifyPasskeyRegistration(
 
 export async function passkeyAuthenticationOptions(
   config: ResolvedConfig,
-  input: { ip: string | null; hints?: PasskeyHint[] | undefined },
+  input: {
+    ip: string | null;
+    hints?: PasskeyHint[] | undefined;
+    extensions?: PasskeySignInExtensions | undefined;
+  },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
+  // Before the limit, so a refused body counts no try.
+  const extensions = signInExtensions(config.passkey, input.extensions);
+  if (!extensions.ok) return extensions;
   if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
@@ -302,7 +332,12 @@ export async function passkeyAuthenticationOptions(
     rpID: config.passkey.rpID,
     challenge: bytes,
   });
-  return ok(withHints(options, input.hints ?? config.passkey.hints.signIn));
+  return ok(
+    withHints(
+      withExtensions(options, extensions.value),
+      input.hints ?? config.passkey.hints.signIn,
+    ),
+  );
 }
 
 /**
@@ -370,14 +405,16 @@ export async function verifyPasskeyAuthentication(
   input: { response: unknown; ip: string | null; userAgent: string | null },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.passkey) return fail("not_found");
+  // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
+  const response = withoutSecretOutputs(input.response);
   if (!(await limit(config, "passkey-verify:ip", ipKey(input.ip), VERIFY_LIMIT))) {
     return fail("rate_limited");
   }
-  const challenge = challengeFromResponse(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, SIGN_IN, "authentication");
   if (!consumed.ok) return consumed;
-  const checked = await checkAssertion(config, input.response, challenge, null);
+  const checked = await checkAssertion(config, response, challenge, null);
   if (!checked.ok) return checked;
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: checked.value.userId },
@@ -441,11 +478,12 @@ export async function provePasskeyOf(
   input: { userId: string; response: unknown },
 ): Promise<Result<true>> {
   if (!config.passkey) return fail("not_found");
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.userId, "reauth");
   if (!consumed.ok) return consumed;
-  const checked = await checkAssertion(config, input.response, challenge, input.userId);
+  const checked = await checkAssertion(config, response, challenge, input.userId);
   return checked.ok ? ok(true) : fail("passkey_failed");
 }
 
@@ -486,7 +524,8 @@ export async function checkSecondFactorPasskey(
   config: ResolvedConfig,
   input: { userId: string; challengeId: string; response: unknown },
 ): Promise<boolean> {
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return false;
   const consumed = await consumeChallenge(
     config,
@@ -496,7 +535,7 @@ export async function checkSecondFactorPasskey(
     input.challengeId,
   );
   if (!consumed.ok) return false;
-  return (await checkAssertion(config, input.response, challenge, input.userId)).ok;
+  return (await checkAssertion(config, response, challenge, input.userId)).ok;
 }
 
 /**
@@ -508,11 +547,12 @@ export async function checkSignInAssertionOf(
   config: ResolvedConfig,
   input: { userId: string; response: unknown },
 ): Promise<boolean> {
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return false;
   const consumed = await consumeChallenge(config, challenge, SIGN_IN, "authentication");
   if (!consumed.ok) return false;
-  return (await checkAssertion(config, input.response, challenge, input.userId)).ok;
+  return (await checkAssertion(config, response, challenge, input.userId)).ok;
 }
 
 /**

@@ -29,6 +29,7 @@ export type {
   OrganizationLimits,
   OrganizationsConfig,
   PasskeyConfig,
+  PasskeyExtensions,
   PasswordConfig,
   PhoneConfig,
   PhoneMessageInput,
@@ -154,6 +155,7 @@ export {
 } from "./engine/organization-tokens.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
+export type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   ExistingAccountMailInput,

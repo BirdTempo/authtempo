@@ -174,6 +174,10 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `passkey.hints` | object | none | The hints of each ceremony. |
 | `passkey.hints.register` | hint list | none | `security-key`, `client-device`, or `hybrid`, each once, in order of preference, for the registration. |
 | `passkey.hints.signIn` | hint list | none | The same, for the sign-in. |
+| `passkey.extensions` | object | none | The WebAuthn extensions that the registration asks for. Each is off by default. See [Use the passkey extensions](/docs/guides/passkey-extensions/). |
+| `passkey.extensions.prf` | boolean | `false` | Asks for PRF at the registration and stores the `prf` flag. The sign-in options take PRF salts. |
+| `passkey.extensions.largeBlob` | `"preferred"`, `"required"`, or `false` | `false` | The `largeBlob.support` value of the registration. Stores the `largeBlob` flag. The sign-in options take a `largeBlob` read. |
+| `passkey.extensions.credProps` | boolean | `false` | Asks for `credProps` at the registration and stores `rk` as the `discoverable` flag. |
 
 ## Handoff
 

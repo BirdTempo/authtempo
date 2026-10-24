@@ -1,0 +1,61 @@
+---
+title: Use the passkey extensions
+description: Ask for PRF, largeBlob, and credProps at the passkey registration, and get the PRF output and a large blob in the browser at the sign-in.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 21"
+  - packages/core/README.md "Passkeys"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/passkey-extensions.ts?raw";
+import client from "../../../../../samples/guides/passkey-extensions-client.ts?raw";
+import test from "../../../../../samples/guides/passkey-extensions.test.ts?raw";
+
+**For:** an app developer who must derive a key in the browser from a passkey, or keep a small blob on the authenticator.
+
+**What it does:** core asks for the WebAuthn extensions PRF, `largeBlob`, and `credProps` at the registration. The sign-in takes PRF salts and a `largeBlob` read. The PRF output and the large blob stay in the browser.
+
+## Before you start
+
+- A working passkey sign-in from [Sign in with a passkey](/docs/guides/passkeys/).
+- A browser and an authenticator that support the extension. Many do not, so plan for a passkey with no PRF and no large blob. [Passkeys](/docs/reference/config/#passkeys) lists the three keys.
+
+## Steps
+
+1. Set `passkey.extensions` in the config. Each key is off by default.
+
+<Code code={config} lang="ts" title="The extensions in the config" />
+
+2. Read the flags `prf`, `largeBlob`, and `discoverable` from `client.passkeys.list()`. Use them to show what each passkey can do.
+3. Choose a PRF salt: 32 bytes, as base64url. Keep it in the app's code.
+4. Call `client.passkey.signIn({ extensions: { prf: { first } }, onExtensionResults })`. Add `largeBlob: { read: true }` to read the blob.
+5. Read the PRF output and the blob in `onExtensionResults`. It runs only after a sign-in that succeeded.
+6. To write a blob, wrap the browser seam and add `largeBlob.write` to the sign-in options. Core never sends a blob to write.
+
+<Code code={client} lang="ts" title="The sign-in with a PRF salt, and a blob to write" />
+
+<Code code={test} lang="ts" title="The sign-in options as a test" />
+
+## How it behaves
+
+- The client extension outputs are not signed by the authenticator. So the three flags are advice for your client, and no check of core reads them. A client that claims an extension changes no security decision.
+- Core stores a flag only for an extension that the config asks for. An output of the wrong shape stores no flag.
+- `discoverable` is null when the browser does not answer `credProps`, or when `credProps` is off.
+- Each verify keeps only the boolean outputs of `clientExtensionResults`. So `prf.results` and `largeBlob.blob` never reach a read, a store, or a log of core.
+- The client takes both outputs out of the response before it sends the verify. A client of your own must do the same: call `splitExtensionResults` from `@authtempo/client`.
+- One salt for every user is safe. The browser hashes the salt with a fixed context, and the output also depends on a secret of each passkey. So two passkeys give two different outputs for one salt.
+- The PRF output is a key of the browser, not of the server. If the person loses the passkey, the key is gone. Keep a recovery path for the data that it protects.
+- The second factor and the re-authentication take no extension in their options.
+
+## If it fails
+
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a PRF salt is not the base64url of 32 bytes, or the body asks for an extension that `passkey.extensions` does not turn on. The limit counts no try.
+- [`passkey_failed`](/docs/reference/errors/#passkey_failed): the assertion failed. The outputs of the extensions play no part in it.
+
+## Next
+
+- [Sign in with a passkey](/docs/guides/passkeys/)
+- [Passkeys](/docs/reference/config/#passkeys)
+- [The client](/docs/reference/client/)

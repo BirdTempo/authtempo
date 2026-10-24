@@ -8,6 +8,7 @@ import type {
   OAuthGrantSummary,
   OrganizationSummary,
   OrganizationTokenSummary,
+  PasskeySignInExtensions,
   PasskeySummary,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -37,6 +38,8 @@ import {
   type BrowserWebAuthn,
   browserWebAuthn,
   type CeremonyOptions,
+  type PasskeyExtensionResults,
+  splitExtensionResults,
   supportsAutofill,
   WebAuthnCancelled,
 } from "./webauthn.js";
@@ -307,6 +310,16 @@ export interface Client {
      */
     signIn(input?: {
       autofill?: boolean | undefined;
+      /**
+       * PRF salts (base64url of 32 bytes each) and a `largeBlob` read (plan
+       * 12i). Each needs its key of the server's `passkey.extensions` on.
+       */
+      extensions?: PasskeySignInExtensions | undefined;
+      /**
+       * Gets the PRF output and the large blob after a sign-in that
+       * succeeded. The client never sends them to the server.
+       */
+      onExtensionResults?: ((results: PasskeyExtensionResults) => void) | undefined;
     }): Promise<ClientResult<PublicSessionJSON & Via>>;
     /** Ends a waiting passkey ceremony, the autofill or another. It answers `cancelled`. */
     abort(): void;
@@ -1449,20 +1462,27 @@ export function createClient(options: ClientOptions): Client {
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.create(options.value));
         if (!response.ok) return response;
+        // A PRF output or a large blob stays in the browser (plan 12i).
+        const sent = splitExtensionResults(response.value).response;
         return part<{ passkey: PasskeySummaryJSON }, "passkey.register.verify">(
           "passkey.register.verify",
-          { response: response.value, ...(input.name !== undefined ? { name: input.name } : {}) },
+          { response: sent, ...(input.name !== undefined ? { name: input.name } : {}) },
         );
       },
       async signIn(input = {}) {
+        const body = input.extensions !== undefined ? { extensions: input.extensions } : {};
         const response = await assertion(
-          () => send<PublicKeyCredentialRequestOptionsJSON>("passkey.signIn.options", {}),
+          () => send<PublicKeyCredentialRequestOptionsJSON>("passkey.signIn.options", body),
           input.autofill === true,
         );
         if (!response.ok) return response;
-        return changes(
-          send<PublicSessionJSON & Via>("passkey.signIn.verify", { response: response.value }),
+        // A PRF output or a large blob stays in the browser (plan 12i).
+        const split = splitExtensionResults(response.value);
+        const signedIn = await changes(
+          send<PublicSessionJSON & Via>("passkey.signIn.verify", { response: split.response }),
         );
+        if (signedIn.ok && input.onExtensionResults) input.onExtensionResults(split.results);
+        return signedIn;
       },
       abort() {
         pending?.abort();

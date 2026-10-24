@@ -573,6 +573,23 @@ export interface PasskeyConfig {
    * options request replaces the list for that ceremony.
    */
   hints?: { register?: PasskeyHint[]; signIn?: PasskeyHint[] };
+  /**
+   * The WebAuthn extensions that the registration asks for (plan 12i). Each
+   * is off by default. `credProps`, `prf`, and `largeBlob` store the flags
+   * `discoverable`, `prf`, and `largeBlob` on the passkey row. The client
+   * outputs are not signed, so the flags are advice for the app's own
+   * client. No check of core reads them. With `prf` on, the sign-in options
+   * take PRF salts; with `largeBlob` on, they take a `largeBlob` read. A
+   * PRF output and a large blob stay in the browser.
+   */
+  extensions?: PasskeyExtensions;
+}
+
+/** The passkey extensions of the config (plan 12i). `largeBlob` is the `support` value of the registration. */
+export interface PasskeyExtensions {
+  prf?: boolean;
+  largeBlob?: "preferred" | "required" | false;
+  credProps?: boolean;
 }
 
 export interface ResolvedPasskey {
@@ -581,6 +598,7 @@ export interface ResolvedPasskey {
   origins: string[];
   relatedOrigins: boolean;
   hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
+  extensions: Required<PasskeyExtensions>;
 }
 
 /**
@@ -625,6 +643,20 @@ function passkeyHints(path: string, list: readonly string[] | undefined): Passke
       throw new ConfigError(`${path} has ${h}; a hint is one of ${PASSKEY_HINTS.join(", ")}`);
   if (new Set(list).size !== list.length) throw new ConfigError(`${path} has a value twice`);
   return [...list] as PasskeyHint[];
+}
+
+/** The extensions of the passkey config, each off by default (plan 12i). */
+function passkeyExtensions(input: PasskeyExtensions | undefined): Required<PasskeyExtensions> {
+  const flag = (key: "prf" | "credProps"): boolean => {
+    const value: unknown = input?.[key];
+    if (value !== undefined && typeof value !== "boolean")
+      throw new ConfigError(`passkey.extensions.${key} must be a boolean`);
+    return value === true;
+  };
+  const largeBlob: unknown = input?.largeBlob ?? false;
+  if (largeBlob !== false && largeBlob !== "preferred" && largeBlob !== "required")
+    throw new ConfigError('passkey.extensions.largeBlob must be "preferred", "required", or false');
+  return { prf: flag("prf"), largeBlob, credProps: flag("credProps") };
 }
 
 export interface PasswordConfig {
@@ -1600,6 +1632,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         register: passkeyHints("passkey.hints.register", input.passkey.hints?.register),
         signIn: passkeyHints("passkey.hints.signIn", input.passkey.hints?.signIn),
       },
+      extensions: passkeyExtensions(input.passkey.extensions),
     };
   }
   let password: ResolvedConfig["password"] = null;

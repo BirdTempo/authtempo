@@ -105,6 +105,7 @@ import {
   updateMemberRole,
   updateOrganization,
 } from "./engine/organizations.js";
+import type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
 import {
   deletePasskey,
   listPasskeys,
@@ -786,10 +787,15 @@ export interface AuthApi {
     response: unknown;
     name?: string | undefined;
   }): Promise<Result<PasskeySummary>>;
-  /** `hints` replaces `passkey.hints.signIn` for this ceremony (plan 12i). */
+  /**
+   * `hints` replaces `passkey.hints.signIn` for this ceremony (plan 12i).
+   * `extensions` takes PRF salts (base64url of 32 bytes) and a `largeBlob`
+   * read; each needs its `passkey.extensions` key on, else `invalid_body`.
+   */
   passkeyAuthenticationOptions(input: {
     ip: string | null;
     hints?: PasskeyHint[] | undefined;
+    extensions?: PasskeySignInExtensions | undefined;
   }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
   verifyPasskeyAuthentication(input: {
     response: unknown;

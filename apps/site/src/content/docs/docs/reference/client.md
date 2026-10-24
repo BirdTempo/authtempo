@@ -83,7 +83,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `{ sent: true }` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON` |
-| `client.passkey.signIn({ autofill? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing |
+| `client.passkey.signIn({ autofill?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read. After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
@@ -247,6 +247,7 @@ A failed re-authentication is the answer, and the change does not run again. A s
 | `readRedirectError` | The redirect error reader of `client.readRedirectError`. |
 | `credentialToJSON` | Converts a credential of the browser to the JSON that core reads. |
 | `toBinaryCreationOptions`, `toBinaryRequestOptions` | Convert the options JSON of core for a browser with no `parseCreationOptionsFromJSON`. |
+| `splitExtensionResults` | Takes `prf.results` and `largeBlob.blob` out of a ceremony response, as `PasskeyExtensionResults`. The passkey calls of the client use it. |
 | `base64UrlEncode`, `base64UrlDecode` | The base64url codec of the conversions. |
 | `WebAuthnCancelled` | The error that the seam throws for a dismissed prompt. The client answers `cancelled` for it. |
 | `ERRORS` | The error table of core. |
@@ -268,7 +269,7 @@ The types of the package:
 | Area | Types |
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `Statements`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
-| Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
+| Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions`, `PasskeyExtensionResults` |
 | Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
 | Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON` |

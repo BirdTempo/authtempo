@@ -219,9 +219,13 @@ export const CONFIG_KEYS = {
     origins: true,
     relatedOrigins: true,
     hints: true,
+    extensions: true,
   } satisfies Keys<Part<"passkey">>,
   "passkey.hints": { register: true, signIn: true } satisfies Keys<
     NonNullable<Part<"passkey">["hints"]>
+  >,
+  "passkey.extensions": { prf: true, largeBlob: true, credProps: true } satisfies Keys<
+    NonNullable<Part<"passkey">["extensions"]>
   >,
   handoff: {
     schemes: true,

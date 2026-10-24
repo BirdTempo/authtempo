@@ -108,6 +108,10 @@ export const PasskeySummary = z.strictObject({
   name: z.string().nullable(),
   deviceType: z.string(),
   backedUp: z.boolean(),
+  // The extension flags of plan 12i: advice from unsigned client outputs.
+  discoverable: z.boolean().nullable(),
+  prf: z.boolean(),
+  largeBlob: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 

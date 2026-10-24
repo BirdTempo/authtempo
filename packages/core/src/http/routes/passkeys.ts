@@ -17,6 +17,7 @@ import {
   sessionMaxAgeSeconds,
 } from "../../engine/sessions.js";
 import {
+  authenticateOptionsBody,
   authenticateVerifyBody,
   deleteBody,
   optionsBody,
@@ -93,10 +94,14 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       path: "/passkey/authenticate/options",
       key: "POST /passkey/authenticate/options",
       async handler(ctx) {
-        const body = await readOptionalJson(ctx.request, optionsBody);
+        const body = await readOptionalJson(ctx.request, authenticateOptionsBody);
         if (!body.ok) return respond(body);
         return respond(
-          await passkeyAuthenticationOptions(ctx.config, { ip: ctx.ip, hints: body.value.hints }),
+          await passkeyAuthenticationOptions(ctx.config, {
+            ip: ctx.ip,
+            hints: body.value.hints,
+            extensions: body.value.extensions,
+          }),
         );
       },
     },

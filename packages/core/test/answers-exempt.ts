@@ -581,7 +581,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     "attestation",
     "authenticatorSelection",
     "excludeCredentials",
-    "extensions",
     "hints",
     "rp.id",
     "authenticatorSelection.residentKey",
