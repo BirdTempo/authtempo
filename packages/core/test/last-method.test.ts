@@ -238,17 +238,23 @@ async function signedUp(w: World): Promise<{ res: Response; token: string }> {
  * More browser sign-ins of a value of CASES (review I2): the name of the
  * case, the value, and the run. `json` is true when the answer has `via`.
  */
-const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolean }>][] = [
+const MORE: [
+  string,
+  string,
+  (w: World, headers?: Record<string, string>) => Promise<{ res: Response; json: boolean }>,
+][] = [
   [
     "the passkey-first sign-up (plan 12i Task 8)",
     "passkey",
-    async (w) => {
-      const options = await w.handle(post("/auth/passkey/sign-up/options", { name: "Ada" }));
+    async (w, headers = {}) => {
+      const options = await w.handle(
+        post("/auth/passkey/sign-up/options", { name: "Ada" }, headers),
+      );
       const o = (await options.json()) as { challenge: string; user: { id: string } };
       const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
       const response = await soft.register(o.challenge, fromBase64Url(o.user.id));
       return {
-        res: await w.handle(post("/auth/passkey/sign-up/verify", { response })),
+        res: await w.handle(post("/auth/passkey/sign-up/verify", { response }, headers)),
         json: true,
       };
     },
@@ -323,8 +329,8 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
     // Google gets providerNonce, the hash of the nonce (ruling 37 I1).
     "the ID-token route",
     "social:google",
-    async (w) => {
-      const n = await w.handle(post("/auth/social/google/id-token/nonce", {}));
+    async (w, headers = {}) => {
+      const n = await w.handle(post("/auth/social/google/id-token/nonce", {}, headers));
       const { nonce, providerNonce } = (await n.json()) as { nonce: string; providerNonce: string };
       recordCredential(nonce);
       const iat = Math.floor(w.auth.clock.now().getTime() / 1000);
@@ -343,7 +349,7 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
           exp: iat + 3600,
         },
       };
-      const res = await w.handle(post("/auth/social/google/id-token", { idToken, nonce }));
+      const res = await w.handle(post("/auth/social/google/id-token", { idToken, nonce }, headers));
       expect(res.status).toBe(200);
       return { res, json: true };
     },
@@ -576,6 +582,30 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(afterLink).toHaveBeenCalledTimes(1);
     expect(lastCookie(res)).toBe(expected("password"));
     expect(await bodyOf(res)).toMatchObject({ via: "password" });
+  });
+
+  it("keeps the value of the passkey-first sign-up and the ID-token route at an upgrade", async () => {
+    // The join of plan 12i Tasks 8 and 10: both sign-ins can replace an anonymous user.
+    for (const name of ["the passkey-first sign-up (plan 12i Task 8)", "the ID-token route"]) {
+      const row = MORE.find(([n]) => n === name);
+      if (!row) throw new Error(`no case: ${name}`);
+      const [, value, run] = row;
+      const afterLink = vi.fn();
+      const w = world({
+        anonymous: { isolateLimiter: "allow" },
+        hooks: { anonymous: { afterLink } },
+      });
+      const anon = await w.handle(post("/auth/anonymous/sign-in", {}));
+      const token = anon.headers
+        .getSetCookie()
+        .find((c) => c.startsWith(`${SESSION}=`))
+        ?.slice(SESSION.length + 1)
+        .split(";")[0];
+      const { res } = await run(w, { cookie: `${SESSION}=${token}` });
+      expect(afterLink, name).toHaveBeenCalledTimes(1);
+      expect(lastCookie(res), name).toBe(expected(value));
+      expect((await bodyOf(res)).via, name).toBe(value);
+    }
   });
 
   it("names the password sign-in by its identifier: phone for a number (plan 12i Task 4)", () => {

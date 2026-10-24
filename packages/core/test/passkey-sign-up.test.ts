@@ -337,6 +337,79 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     ).toEqual([]);
   });
 
+  it("keeps the sign-up when the clean-up after afterLink fails", async () => {
+    // The join of plan 12i Tasks 8 and 10: the rules of ruling 36 hold at this sign-in too.
+    const events: { name: string; rowId?: unknown; errorName?: unknown }[] = [];
+    let down = false;
+    const w = world({
+      // The next transaction after afterLink is the end of the anonymous session.
+      hooks: {
+        anonymous: {
+          afterLink: () => {
+            down = true;
+          },
+        },
+      },
+      observe: { sink: { write: (b) => void events.push(...b) } },
+    });
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}, ip()));
+    const jar = `${w.config.cookieName}=${setToken(w.config, anon)}`;
+    const [anonUser] = await w.storage.findMany("user", []);
+    const transaction = w.storage.transaction.bind(w.storage);
+    // A store error after the commit, such as query 51 on D1 Free (ruling 36 L2).
+    w.storage.transaction = ((work) => {
+      if (!down) return transaction(work);
+      down = false;
+      return Promise.reject(new Error("Too many API requests by single worker invocation."));
+    }) as typeof w.storage.transaction;
+    const o = await options(w.handle, { name: "Ana" }, { ...ip(), cookie: jar });
+    const res = await verify(w.handle, (await ceremony(o.json)).response, { ...ip(), cookie: jar });
+    expect(res.status).toBe(200);
+    expect(setToken(w.config, res)).not.toBeNull();
+    await w.config.observe.flush();
+    const lines = events.filter((e) => e.name === "anonymous.cleanup_failed");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ rowId: anonUser?.id, errorName: "Error" });
+    // The anonymous user stays for the sweep.
+    const users = await w.storage.findMany("user", []);
+    expect(users.map((u) => [u.isAnonymous, u.name]).sort()).toEqual([
+      [false, "Ana"],
+      [true, null],
+    ]);
+  });
+
+  it("links nothing through options recorded before anonymous was turned off", async () => {
+    const w = world();
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}, ip()));
+    const jar = `${w.config.cookieName}=${setToken(w.config, anon)}`;
+    const [anonUser] = await w.storage.findMany("user", []);
+    // The options record the anonymous user. Then the deployment turns anonymous off.
+    const o = await options(w.handle, { name: "Ana" }, { ...ip(), cookie: jar });
+    const ended: string[] = [];
+    const off = world({
+      anonymous: false,
+      storage: w.storage,
+      clock: w.config.clock,
+      hooks: { session: { afterEnd: (e) => void ended.push(e.session.userId) } },
+    });
+    const res = await verify(off.handle, (await ceremony(o.json)).response, {
+      ...ip(),
+      cookie: jar,
+    });
+    expect(res.status).toBe(200);
+    expect(setToken(off.config, res)).not.toBeNull();
+    expect(ended).toEqual([]);
+    const still = await w.storage.findOne("user", [
+      { field: "id", op: "eq", value: anonUser?.id ?? "" },
+    ]);
+    expect(still?.isAnonymous).toBe(true);
+    const [row] = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: anonUser?.id ?? "" },
+    ]);
+    // No claim: the anonymous session keeps its freshAt.
+    expect(row?.freshAt).not.toBeNull();
+  });
+
   it("limits the options by IP", async () => {
     const w = world();
     const one = ip();
