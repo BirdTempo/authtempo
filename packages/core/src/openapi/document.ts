@@ -5,6 +5,7 @@ import { RESET_PAGE_ERRORS } from "../http/contract/password.js";
 import * as shapes from "../http/contract/shapes.js";
 import { CHALLENGE_PAGE_ERROR } from "../http/contract/totp.js";
 import type { RouteContract } from "../http/contract/types.js";
+import { PARAM_SEGMENT_RE } from "../http/route-key.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../http/route-list.js";
 import { PROVIDER_NAME_RE } from "../social/provider.js";
 import type { OpenApiOptions } from "./deployment.js";
@@ -13,6 +14,28 @@ import { ERROR_SCHEMAS, OPENAPI_VERSION, responsesOf } from "./responses.js";
 import { SCHEME_NAMES, securityOf, securitySchemes } from "./schemes.js";
 
 export { OPENAPI_VERSION } from "./responses.js";
+
+/** Each `:<name>` segment of a route path, as `{<name>}` (plan 12d ruling 10). */
+function openApiPath(path: string): string {
+  return path.replace(/:([A-Za-z]+)/g, "{$1}");
+}
+
+/**
+ * One path parameter per `:<name>` segment. `provider` takes the name rule
+ * of a social provider; every other name takes the rule of the router's
+ * parameter segment (plan 12d ruling 10).
+ */
+function pathParameters(path: string): object[] {
+  return [...path.matchAll(/:([A-Za-z]+)/g)].map(([, name]) => ({
+    name,
+    in: "path",
+    required: true,
+    schema: {
+      type: "string",
+      pattern: (name === "provider" ? PROVIDER_NAME_RE : PARAM_SEGMENT_RE).source,
+    },
+  }));
+}
 
 /** The OpenAPI document as plain JSON data. */
 export type OpenApiDoc = { readonly openapi: string } & Record<string, unknown>;
@@ -34,7 +57,7 @@ const RULES = [
   "",
   "- A route that a config key turns off answers 404 `not_found`.",
   "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
-  '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, and `not_ready` also carries `reason`.',
+  '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.',
   "- An unhandled error answers 500 `internal` and writes one log line.",
   "- An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.",
   "- Every answer to a trusted origin carries the CORS headers with credentials.",
@@ -107,19 +130,10 @@ export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
     const contract: RouteContract = ROUTE_CONTRACT[key];
     const security = securityOf(entry.auth);
     for (const requirement of security) for (const name of Object.keys(requirement)) used.add(name);
-    const path = entry.path.replace(":provider", "{provider}");
+    const path = openApiPath(entry.path);
     const operationId = routeAnchor(entry.method, entry.path);
     const parameters = [
-      ...(path.includes("{provider}")
-        ? [
-            {
-              name: "provider",
-              in: "path",
-              required: true,
-              schema: { type: "string", pattern: PROVIDER_NAME_RE.source },
-            },
-          ]
-        : []),
+      ...pathParameters(entry.path),
       ...(contract.query
         ? queryParameters(schemaOf(contract.query.schema, "input"), ALONE[key])
         : []),

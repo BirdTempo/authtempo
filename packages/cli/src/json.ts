@@ -157,6 +157,7 @@ export interface SecretStatusJson extends RunKeys {
     backupCodes: number;
     signingKeys: number;
     emailCodes: number;
+    ssoClientSecrets: number;
   }[];
 }
 export const SECRET_STATUS_JSON_KEYS = {

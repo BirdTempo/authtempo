@@ -24,8 +24,8 @@ describe("the ban copy of migration 0009 on D1 with no admin plugin (ruling 65 X
     const version = await env.DB.prepare(
       "SELECT value FROM ta_meta WHERE key = 'compat_better_auth'",
     ).first<{ value: string }>();
-    // Every shipped file ran: 0010 of plan 12k comes after 0009.
-    expect(version?.value).toBe("10");
+    // Every shipped file ran: 0010 of plan 12k and 0011 of plan 12d come after 0009.
+    expect(version?.value).toBe("11");
     const auth = plainShim(betterAuthSchemaStorage({ dialect: "d1", db: env.DB }));
     for (const id of ["ann", "cy"])
       await expect(

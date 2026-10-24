@@ -268,9 +268,11 @@ export const OPERATOR_CALL_BUDGET = 50;
  * The worst case of D1 statements before a session call, for each actor
  * (rulings 34, 35, and 37 of plan 12f). It holds when the caller passes no
  * `callsUsed`, and it leaves out the ready check. A user actor through
- * the route costs 9. The impersonation step of the router reads the
- * session once (plan 12f Task 11). The route limiter is 1. `resolveSession` is 3: the
- * session, the user, and the sliding refresh. `requireOperatorUser` is 4:
+ * the route costs 11. The impersonation step of the router reads the
+ * session once (plan 12f Task 11). The route limiter is 1. `resolveSession` is 5: the
+ * session, the user, the pending-end read of `revokedFor` (ruling 50 of
+ * plan 12d), the session-cap read of a due refresh with `sso.saml` on
+ * (ruling 44 of plan 12d), and the sliding refresh. `requireOperatorUser` is 4:
  * the platform organization, the member row, the second factor, and its
  * limiter. The app: none. A secret actor: the limiter per IP and the
  * limiter per secret (ruling 38); the route test counts these 2. The
@@ -282,11 +284,12 @@ export const OPERATOR_CALL_BUDGET = 50;
  * The ready check comes on top: `readyStatements` of the storage, or 1
  * when the storage has none. The check of a core D1 adapter is 1 query.
  * The check of the D1 storage of the Better Auth tables is 4 or more.
- * The D1 tests count each whole invocation on the binding: 9 before a
- * user-actor call on core D1 (`operator-sessions-budget.test.ts`).
+ * The D1 tests count each whole invocation on the binding: 11 before a
+ * user-actor call on core D1 with `sso.saml` on, and 10 with it off
+ * (`operator-sessions-budget.test.ts`).
  */
 export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
-  user: 9,
+  user: 11,
   secret: 2,
   app: 0,
 };

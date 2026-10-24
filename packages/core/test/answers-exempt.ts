@@ -144,6 +144,29 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /user/change-email/verify",
   "POST /user/delete",
   "POST /user/delete/confirm",
+  // Plan 12d: a domain id that names no domain, or sso off.
+  "POST /operator/sso/enforce-off",
+  "POST /sso/domains/add",
+  "POST /sso/domains/delete",
+  "POST /sso/domains/update",
+  "POST /sso/domains/verify",
+  // Plan 12d Task 3: a connection id that names no connection, or an organization that does not exist.
+  "GET /sso/connections",
+  "POST /sso/connections/create",
+  "POST /sso/connections/delete",
+  "POST /sso/connections/update",
+  // Plan 12d Task 8: the ACS with sso off.
+  "POST /sso/:connectionId/acs",
+  // Plan 12d Task 4: the discovery with sso off.
+  "POST /sso/discover", // Plan 12d Task 9b: the SCIM posts with scim off, and a token id that names no token.
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
+  "POST /scim/v2/.search",
+  "POST /scim/v2/Bulk",
+  "POST /scim/v2/Groups",
+  "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users",
+  "POST /scim/v2/Users/.search",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -245,6 +268,26 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /user/delete",
   "POST /user/delete/confirm",
   "POST /user/update",
+  // Plan 12d: the domain writes and the override.
+  "POST /operator/sso/enforce-off",
+  "POST /sso/domains/add",
+  "POST /sso/domains/delete",
+  "POST /sso/domains/update",
+  "POST /sso/domains/verify",
+  // Plan 12d Task 3: the connection writes.
+  "POST /sso/connections/create",
+  "POST /sso/connections/delete",
+  "POST /sso/connections/update",
+  // Plan 12d Task 4: the discovery at sign-in.
+  "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
+  "POST /scim/v2/.search",
+  "POST /scim/v2/Bulk",
+  "POST /scim/v2/Groups",
+  "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users",
+  "POST /scim/v2/Users/.search",
 ];
 
 /** The two provider callbacks: one engine function, `completeSocial`, after a provider exchange. */
@@ -338,6 +381,18 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows("conflict", "five lost rounds of the user hold; profile.test.ts proves the engine path", [
     "POST /user/update",
   ]),
+  // Plan 12d: two adds of one domain at once, and an update that races another write of the row.
+  ...rows(
+    "conflict",
+    "a parallel add of the same domain loses the unique key, and a parallel write moves updatedAt under an update; no request can cause either on its own",
+    ["POST /sso/domains/add", "POST /sso/domains/update"],
+  ),
+  // Plan 12d Task 3: an update of a connection that races another write of the row.
+  ...rows(
+    "conflict",
+    "a parallel write moves updatedAt between the read and the update of a connection; no request can cause it on its own",
+    ["POST /sso/connections/update"],
+  ),
   ...rows(
     "conflict",
     "five lost rounds of the user hold; account-delete.test.ts proves the engine path",
@@ -363,7 +418,35 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "account_banned",
     "the sign-in needs a passkey ceremony or a provider exchange; operator-ban-doors.test.ts proves the ban at the engine door of each",
-    [...CALLBACKS, "POST /passkey/authenticate/verify"],
+    [
+      ...CALLBACKS,
+      "POST /passkey/authenticate/verify",
+      "GET /sso/:connectionId/callback",
+      "POST /sso/:connectionId/acs",
+    ],
+  ),
+  // Plan 12d Task 5: the doors of the enforcement and the SSO resolution.
+  ...rows(
+    "sso_required",
+    "the Apple callback needs an Apple key; sso/enforce.test.ts drives the same door of completeSocial through the Google callback",
+    ["POST /social/apple/callback"],
+  ),
+  ...rows(
+    "sso_required",
+    "the form route of verifyTwoFactor; sso/enforce.test.ts drives the same door through POST /totp/verify (ruling 38 of plan 12d)",
+    ["POST /totp/challenge"],
+  ),
+  ...rows(
+    "account_disabled",
+    "the ACS needs a signed SAML Response; it shares resolveSsoUser with the OIDC callback, where sso/resolve.test.ts proves the refusal (plan 12d Task 10)",
+    ["POST /sso/:connectionId/acs"],
+  ),
+  // sso/resolve.test.ts answers it at the OIDC callback: an address change before the hold
+  // (ruling 78 of plan 12d).
+  ...rows(
+    "conflict",
+    "the ACS needs a signed SAML Response; it shares resolveSsoUser with the OIDC callback, where sso/resolve.test.ts answers it",
+    ["POST /sso/:connectionId/acs"],
   ),
   ...rows(
     "account_banned",
@@ -477,6 +560,16 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     reason:
       "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
   },
+  // Plan 12d: a verify answers 200 only for a verified domain, where both times are set.
+  ...(["verifiedAt", "checkedAt"] as const).map(
+    (field): AnswerShapeExempt => ({
+      key: "POST /sso/domains/verify",
+      field: `domain.${field}`,
+      form: "null",
+      reason:
+        "a verify answers 200 only with the claim, which sets both times; GET /sso/domains and POST /sso/domains/update answer them null; sso/domain-routes.test.ts proves both",
+    }),
+  ),
   {
     key: "POST /passkeys/rename",
     field: "passkey.name",

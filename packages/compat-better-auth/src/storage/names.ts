@@ -12,11 +12,22 @@ export type BaseTable =
   | "passkey";
 
 /**
- * Every Better Auth table this package reads or writes: 0001's tables, the
- * three tables of plan 12k, and `apikey`. Only `moveBetterAuthApiKeys` reads
- * `apikey` (plan 12k Task 12).
+ * Every Better Auth table this package reads or writes. These are 0001's
+ * tables, the three tables of plan 12k, `apikey`, and four tables of
+ * @better-auth/sso and @better-auth/scim. Only `moveBetterAuthApiKeys` reads
+ * `apikey` (plan 12k Task 12). Only `copyBetterAuthSso` reads the four
+ * (plan 12d Task 14).
  */
-export type BetterAuthTable = BaseTable | "organizationRole" | "team" | "teamMember" | "apikey";
+export type BetterAuthTable =
+  | BaseTable
+  | "organizationRole"
+  | "team"
+  | "teamMember"
+  | "apikey"
+  | CopiedSsoTable;
+
+/** The Better Auth tables that `copyBetterAuthSso` reads. No migration writes them. */
+export type CopiedSsoTable = "ssoProvider" | "scimUser" | "scimGroup" | "scimGroupMember";
 
 export const BETTER_AUTH_TABLES: readonly BaseTable[] = [
   "user",
@@ -43,11 +54,18 @@ export const MAPPED_TABLES: readonly BetterAuthTable[] = [
 ];
 
 /**
- * Every table that has names: the mapped tables and `apikey`. The api-key
- * table is not mapped, and an app without the plugin has none. So no check
- * or test walks it as a mapped table.
+ * Every table that has names: the mapped tables, `apikey`, and the tables
+ * that `copyBetterAuthSso` reads. None of those is mapped, and an app
+ * without the plugin has none. So no check or test walks it as a mapped table.
  */
-export const NAMED_TABLES: readonly BetterAuthTable[] = [...MAPPED_TABLES, "apikey"];
+export const NAMED_TABLES: readonly BetterAuthTable[] = [
+  ...MAPPED_TABLES,
+  "apikey",
+  "ssoProvider",
+  "scimUser",
+  "scimGroup",
+  "scimGroupMember",
+];
 
 /**
  * The Better Auth 1.7 field names this package reads or writes, per table,
@@ -185,6 +203,33 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "permissions",
     "metadata",
   ],
+  // The columns that copyBetterAuthSso reads, read 2026-10-22: @better-auth/sso
+  // 1.7.2 dist/index.mjs:4546 to :4591, and @better-auth/scim 1.7.2
+  // dist/index.mjs:7315, :7480, and :7532. No migration writes these tables.
+  ssoProvider: [
+    "id",
+    "issuer",
+    "oidcConfig",
+    "samlConfig",
+    "userId",
+    "providerId",
+    "organizationId",
+    "domain",
+    "domainVerified",
+  ],
+  scimUser: [
+    "id",
+    "connectionId",
+    "provisioningDomainId",
+    "userId",
+    "userName",
+    "displayName",
+    "serializedAttributes",
+    "externalId",
+    "active",
+  ],
+  scimGroup: ["id", "connectionId", "provisioningDomainId", "displayName", "externalId"],
+  scimGroupMember: ["id", "groupId", "scimUserId"],
 };
 
 /**

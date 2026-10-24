@@ -99,6 +99,8 @@ vi.mock("../../src/observe/observer.js", async (importOriginal) => {
         return tap(real.scope(scope), record.scope(scope));
       },
       unscoped: () => tap(real.unscoped(), record.unscoped()),
+      // The secrets of one request reach both observers (plan 12d).
+      secrets: (values: readonly string[]) => tap(real.secrets(values), record.secrets(values)),
       flush: () => real.flush(),
       stats: () => real.stats(),
     };

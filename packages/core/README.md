@@ -80,8 +80,8 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
 | POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` and `jwtMint` |
-| GET | `/operator/secrets/status` | `Authorization: Operator <secret>` | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes`, as `api.secrets.status()`; 401 `unauthorized`; 429 `rate_limited` after 120 calls per IP per hour (`operator-secrets:ip:<ip>`), one count with rewrap and info, right or wrong. Only with `operator` |
-| POST | `/operator/secrets/rewrap` | `Authorization: Operator <secret>`, `{ limit?, after? }` (`limit` 1 to 1000, default 100; `after` the `next` of the last answer); an empty body is `{}` | `{ resealed, failed, skipped, more, next }`, as `api.secrets.rewrap({ limit, after })`; 400 `invalid_body` for another key, a limit outside the range, or a cursor that is not `totp:<id>` or `jwk:<id>`; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
+| GET | `/operator/secrets/status` | `Authorization: Operator <secret>` | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets`, as `api.secrets.status()`; 401 `unauthorized`; 429 `rate_limited` after 120 calls per IP per hour (`operator-secrets:ip:<ip>`), one count with rewrap and info, right or wrong. Only with `operator` |
+| POST | `/operator/secrets/rewrap` | `Authorization: Operator <secret>`, `{ limit?, after?, callBudget? }` (`limit` 1 to 1000, default 100; `after` the `next` of the last answer; `callBudget` the storage calls of the call, 50 to 1000, default 50); an empty body is `{}` | `{ resealed, failed, skipped, more, next }`, as `api.secrets.rewrap({ limit, after })`; 400 `invalid_body` for another key, a limit outside the range, or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
 | GET | `/operator/info` | `Authorization: Operator <secret>` | `{ core, schemaVersion, configKeys }`: the version of core, its schema version, and the sorted key paths of the config, names only, never a value; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
 | GET | `/operator/users` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `?after=&limit=` | `{ users, next }`: the users by id, 1 to 100 per page; 401 `unauthorized`; 403 `operator_required`; 429 `rate_limited`. Only with `operator.users` |
 | GET | `/operator/users/search` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, one of `?email=`, `?emailPrefix=`, `?id=` | `{ users, next }`; a prefix search reads the whole user table. Only with `operator.users` |
@@ -1158,6 +1158,40 @@ Plan 12f gives the operator of a deployment the support tools of day one. `opera
 - The audit table `ta_operator_audit` is append-only: core never updates or deletes a row. `hooks.operator.afterAction` sends each row to a separate system.
 - An audit id is a monotonic ULID (`newMonotonicId`). The audit list reads the rows in id order. So the rows of one isolate list in the order of their writes, also inside one millisecond. The rows of two isolates in one millisecond have no defined order between them.
 
+## Enterprise SSO and SCIM
+
+Plan 12d. `sso` and `scim` are off by default, and each needs
+`organizations`. The guides are on the site: Enterprise SSO, SSO with
+Entra ID, Okta, and Google Workspace, and SCIM provisioning. The routes
+page gives each route with its errors.
+
+- An organization proves an email domain by a TXT record at
+  `_authtempo-challenge.<domain>`. Every resolver of `sso.dns` must give
+  the value. Core has no default resolver: pass `dohCloudflare(fetch)` and
+  `dohGoogle(fetch)`, or your own ports.
+- A verified domain of an organization can sign in as any existing user
+  at that domain. Core never reads `email_verified` of the provider.
+- An organization adds OIDC (`sso.oidc`) and SAML (`sso.saml`)
+  connections. Core is the service provider. A SAML connection takes one
+  narrow profile: a signed Assertion, RSA-SHA256 or ECDSA-SHA256, a
+  persistent `NameID` or `subjectAttribute`, no encryption.
+- An owner manages domains, connections, and SCIM tokens from a fresh
+  session with a second factor. A platform operator manages every
+  organization. The app calls `auth.api.sso` and `auth.api.scim` with
+  `{ kind: "app", name }` as the actor. Each write writes one audit row.
+- `enforce: true` on a domain refuses every other first factor of its
+  addresses with `sso_required`. The operator turns it off with
+  `POST /operator/sso/enforce-off` and a reason.
+- The discovery names an OIDC or a SAML connection, when the config turns
+  its kind on.
+- SCIM 2.0 lives under `<basePath>/scim/v2`. An organization holds at
+  most 2 live `sk_` tokens. A SCIM create needs an address in a verified
+  domain of the token's organization. A deactivate ends the person's
+  access at once when a domain of the organization claims the address.
+- One SCIM request names at most 1000 members of a group, and takes
+  away at most 1000 (the D1 Free budget). Okta sends up to 1000 members
+  in one group PATCH, so its batch fits.
+
 ## Hooks
 
 A hook is your code at a named point of a core flow (plan 9d). Pass plain
@@ -1210,7 +1244,7 @@ const auth = createAuth({
 | Flow | Before hooks | Rows locked before the hook |
 | --- | --- | --- |
 | Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
-| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row |
+| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; none in an SSO sign-in or a SCIM write, whose hook runs before any lock and write |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
@@ -1220,6 +1254,7 @@ const auth = createAuth({
 | Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
+| SCIM group write | `organization.beforeUpdateMemberRole` | the scimGroup row, first; the users of the added and removed members, and of each member whose role the write computes; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
@@ -1318,6 +1353,10 @@ const auth = createAuth({
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A
   verify is not a change of a credential, so it sends no notice mail.
+- SSO point (plan 12d): `hooks.sso.beforeSignIn`, with the connection,
+  the IdP's profile, and the user that the sign-in answers, or null for a
+  create. It needs `sso`. It runs in the sign-in's transaction before its
+  first write. A refusal answers `hook_refused` with no write.
 - Operator points (plan 12f): `hooks.operator.beforeAction` and
   `afterAction`. They need `operator.users`. `beforeAction` gets the audit
   row with no id, before the act's transaction, and a refusal answers
@@ -1470,6 +1509,10 @@ It answers one count for each kind of row:
 - `oauthSessionLinks`: client links whose session is gone, at most 250 per sweep, and as many as the calls of the sweep allow. The sweep reads all links in turn. Each one becomes a back-channel logout: an expiry ends a session too.
 - `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run before the pending sessions. The whole sweep fits its call budget, its posts too: 50 calls by default (`callBudget` below). D1 Free allows 50 queries per run (D1 limits page of 21 April 2026). Workers Free allows 50 subrequests (Workers limits page of 12 October 2026). Both pages were read 2026-10-21. Each step stops before a call that does not fit, and a posted row always has room for its delete. Take 45 sessions, each with a link to one public and one pairwise client. On D1 the 90 links go out within 23 sweeps in any order. Both orders of the test take 22. A pairwise row costs 1 call more than a public row, the read of its subject. The step keeps 9 calls for each next row, so a pairwise row first can cost a post. A test on D1 pins the best and the worst order. Run the sweep more often than once an hour to send more. A storage error in either step writes one log line and counts 0. A stop loses no logout. The rows of a page of links and the delete of those links are one write. Only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
 - `oauthClientSecrets`: old OAuth client secrets past the overlap of a rotation, cleared from the client.
+- `ssoDomains`: verified SSO domains checked again by DNS, 30 days after their last check (plan 12d). Each row asks every resolver of `sso.dns`, and each resolver call counts as one call of the sweep. The idle clients leave 7 calls for this step and the pending delete below: one row with two resolvers. With more calls left, the step takes up to 20 rows. A failed check tries again one day later. Three failures that span 72 hours lose the domain: its claim and `enforce` go, with one audit row `sso_domain_lost`. 0 while `sso` is off.
+- `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
+- `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
+- `organizationRows`: organizations that an account delete took, whose other rows went now. The account delete takes an organization where the user is the only member: its row, its SSO connections and domains, its SCIM tokens, and its member rows. Its SCIM Users and Groups, teams, invitations, tokens, and roles wait for the sweep. So the delete fits the 50 queries of D1 Free. No flow reaches them in the meantime. The step runs before the pending sessions. A row of it with more than 50 SCIM Groups loses 50 of them in each sweep.
 
 ```ts
 export default {
@@ -1506,8 +1549,8 @@ under that version.
 
 | Call | Answer |
 | --- | --- |
-| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. It reads every row of four tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
-| `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets and keys under the current version. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that is not `totp:<id>` or `jwk:<id>`. |
+| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets` (live codes only; the OIDC client secrets of the SSO connections). A version that a row names and the config lacks has `configured: false`. It reads every row of five tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
+| `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets, keys, and SSO client secrets under the current version. One call stays inside `callBudget` storage calls (50 to 1000, default 50 for D1 Free). A call that the budget stops answers `more: true` and `next`: call again with it. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`. |
 
 One pass of the rewrap reads each row under a configured old version once,
 in the order of the ids. Pass `next` as `after` to the next call, until
@@ -1650,6 +1693,7 @@ writes each value under version 1.
 - Core at version 11 needs the `0011_schema_v11` migration in both adapters (plan 12e). Version 11 adds the columns of a confidential client to `ta_oauth_client`, two columns to `ta_oauth_token`, and four tables of the OAuth provider's second version. Each client row of an earlier version reads as a public client. The compat package's migration is `0008_compat_schema_v11`.
 - Core at version 12 needs the `0012_schema_v12` migration in both adapters (plan 12f). Version 12 adds the three ban fields to `ta_user`, `actor_id` to `ta_session`, and the table `ta_operator_audit`. A row of an earlier version holds null: no ban and no impersonation. The compat package's migration is `0009_compat_schema_v12`.
 - Core at version 13 needs the `0013_schema_v13` migration in both adapters (plan 12k). Version 13 adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`. It adds the tables of stored roles, teams, team members, organization tokens, and moved keys. A row of an earlier version holds null in each new column. The compat package's migration is `0010_compat_schema_v13`.
+- Core at version 14 needs the `0014_schema_v14` migration in both adapters (plan 12d). Version 14 adds the tables of SSO connections, claimed domains, SCIM tokens, SCIM users, SCIM groups, and SCIM group members. It changes no earlier table. The compat package's migration is `0011_compat_schema_v14`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start
@@ -1663,6 +1707,15 @@ writes each value under version 1.
   handler that returns a `Response` with immutable headers, such as
   `Response.redirect` or a proxied fetch answer, must copy it first. Every
   route core ships builds its own `Response`.
+
+## Dev dependencies
+
+`xml-crypto` 6.3.3 is a dev dependency of this package only (plan 12d).
+The differential test signs the same SAML Responses with a second,
+independent canonicalizer, so one bug in the owned C14N cannot cancel out
+in both the signer and the verifier. It never ships: `files` is `dist`,
+and no file under `src/` imports it. The test
+`test/saml/no-dev-import.test.ts` holds both facts.
 
 ## The storage port
 

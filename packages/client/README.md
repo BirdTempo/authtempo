@@ -313,6 +313,37 @@ a script passes `token: () => "to_…"` to `createClient`. Pass
 `revokeTokens: true` to `members.remove` to delete the tokens that the
 person made in the organization; that needs `apiToken:revoke` too.
 
+## Enterprise SSO and SCIM tokens
+
+These calls exist when the server sets `sso` or `scim` (plan 12d). Else
+each one answers `not_found`.
+
+| Operation | Route | Value |
+| --- | --- | --- |
+| `sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, connectionId, start }` or `{ sso: false }`. `start` is an absolute URL on the server origin, with `next` |
+| `sso.startURL({ connectionId, next? })` | `GET /sso/:connectionId/start` | the start URL, with no request |
+| `sso.signIn({ connectionId, next? })` | `GET /sso/:connectionId/start` | `{ url }`, after `navigate` |
+| `sso.domains.list({ organizationId })` | `GET /sso/domains` | list of `SsoDomainJSON` |
+| `sso.domains.add({ organizationId, domain })` | `POST /sso/domains/add` | the domain, with the TXT `record` |
+| `sso.domains.verify({ id })` | `POST /sso/domains/verify` | the verified domain |
+| `sso.domains.update({ id, connectionId?, enforce?, includeSubdomains? })` | `POST /sso/domains/update` | the domain |
+| `sso.domains.delete({ id })` | `POST /sso/domains/delete` | `{ ok: true }` |
+| `sso.connections.list({ organizationId })` | `GET /sso/connections` | list of `SsoConnectionJSON` |
+| `sso.connections.create(input)` | `POST /sso/connections/create` | the connection |
+| `sso.connections.update({ id, ...fields })` | `POST /sso/connections/update` | the connection |
+| `sso.connections.delete({ id })` | `POST /sso/connections/delete` | `{ ok: true }` |
+| `scim.tokens.list({ organizationId })` | `GET /scim/tokens` | list of `ScimTokenJSON` |
+| `scim.tokens.create({ organizationId, name, scopes?, expiresInDays? })` | `POST /scim/tokens/create` | `{ token, id, hint }`, the clear token once |
+| `scim.tokens.revoke({ id })` | `POST /scim/tokens/revoke` | `{ ok: true }` |
+
+The discovery and the start take no session. Every other call needs a
+fresh session of an owner of the organization with a second factor on,
+or of a platform operator. A start is a link: `startURL` and `signIn`
+send no request, and they answer `invalid_body` with status 0 for an id
+outside the router's segment rule. No answer holds a client secret. The
+directory calls the SCIM routes itself with its token, so the client has
+no SCIM protocol call.
+
 ## Passkeys
 
 The client reaches WebAuthn through a seam, `BrowserWebAuthn`. The
@@ -408,6 +439,7 @@ can answer it:
   `organizations.roles.delete`
 - `organizations.tokens.create`, `organizations.tokens.update`
 - `organizations.members.remove` with `revokeTokens: true`
+- each call of `sso.domains`, `sso.connections`, and `scim.tokens`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
 - `secondFactor.passkey.enable`, `secondFactor.email.enable`,
   `secondFactor.disable`

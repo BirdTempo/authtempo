@@ -1073,6 +1073,11 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       count.n++;
     };
     const wrap = (s: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => {
+        tick();
+        return s.createMany(m, r);
+      },
+      rowsPerInsert: (m) => s.rowsPerInsert(m),
       create: (m, d) => {
         tick();
         return s.create(m, d);
@@ -1296,6 +1301,8 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     const capped = <T>(f: () => Promise<T>): Promise<T> =>
       ++calls > 50 ? Promise.reject(new Error("too many queries")) : f();
     const wrap = (s: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => capped(() => s.createMany(m, r)),
+      rowsPerInsert: (m) => s.rowsPerInsert(m),
       create: (m, d) => capped(() => s.create(m, d)),
       findOne: (m, wh) => capped(() => s.findOne(m, wh)),
       findMany: (m, wh, o) => capped(() => s.findMany(m, wh, o)),

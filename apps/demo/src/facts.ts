@@ -31,6 +31,11 @@ export const DEMO_EXEMPT = {
   operatorImpersonation: "An operator tool, not a sign-in method.",
   dynamicRoles: "An organization tool, not a sign-in method.",
   teams: "An organization tool, not a sign-in method.",
+  // Plan 12d: a domain proof needs a DNS record of the visitor's own domain.
+  sso: "Enterprise SSO needs a domain that the visitor proves by DNS, and a sign-in provider of its own.",
+  operatorSso: "An operator tool, not a sign-in method.",
+  // Plan 12d Task 9b: a SCIM server needs a directory of the visitor's own.
+  scim: "SCIM provisioning needs a directory, such as Entra ID or Okta, and a domain that the visitor proves by DNS.",
   // Ruling 33 of the lane: the owner may move it later.
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
   readiness: "A probe for a host, not a sign-in method.",

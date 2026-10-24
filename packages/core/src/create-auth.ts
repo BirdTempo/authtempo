@@ -1,5 +1,13 @@
 import type { Statements } from "./access.js";
-import { type AuthConfig, resolveConfig } from "./config.js";
+import {
+  carryDomainRecord,
+  type DomainRecordOf,
+  domainRecordFor,
+  markRecordVerify,
+  setConfigDomainRecord,
+  setScimCaller,
+} from "./compat-seams.js";
+import { type AuthConfig, type ResolvedConfig, resolveConfig } from "./config.js";
 import {
   type AccountDelete,
   confirmAccountDelete,
@@ -71,6 +79,7 @@ import {
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import { deliverLogouts } from "./engine/oauth-logout.js";
 import type { OAuthResult } from "./engine/oauth-result.js";
+import { checkActor } from "./engine/operator/guards.js";
 import { refuseImpersonation } from "./engine/operator/impersonation.js";
 import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
@@ -144,6 +153,30 @@ import {
   type RoleSummary,
   updateRole,
 } from "./engine/roles.js";
+import {
+  scimCreateGroup,
+  scimDeleteGroup,
+  scimGetGroup,
+  scimListGroups,
+  scimPatchGroup,
+  scimReplaceGroup,
+} from "./engine/scim/groups.js";
+import {
+  createScimToken,
+  listScimTokens,
+  revokeScimToken,
+  SCIM_SCOPES,
+  type ScimTokenSummary,
+} from "./engine/scim/tokens.js";
+import {
+  type ScimResult,
+  scimCreateUser,
+  scimDeleteUser,
+  scimGetUser,
+  scimListUsers,
+  scimPatchUser,
+  scimReplaceUser,
+} from "./engine/scim/users.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -178,6 +211,24 @@ import {
   startLink,
   startSocial,
 } from "./engine/social.js";
+import {
+  type ConnectionFields,
+  type ConnectionInput,
+  createConnection,
+  deleteConnection,
+  listConnections,
+  type SsoConnectionSummary,
+  setRoleMap,
+  updateConnection,
+} from "./engine/sso/connections.js";
+import {
+  addDomain,
+  deleteDomain,
+  listDomains,
+  type SsoDomainSummary,
+  updateDomain,
+  verifyDomain,
+} from "./engine/sso/domains.js";
 import { type SweepResult, sweepExpired } from "./engine/sweep.js";
 import {
   addTeamMember,
@@ -232,7 +283,7 @@ import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
-import type { SessionRow, UserRow } from "./schema.js";
+import type { ScimScope, SessionRow, UserRow } from "./schema.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -311,6 +362,186 @@ export interface JwtApi {
  * nothing existed. An access token that a client holds lives on to its
  * `exp`, at most `oauth.accessTtlMinutes`.
  */
+/** The app as the actor of an SSO call in process (plan 12d). The name follows the operator app rule. */
+export type SsoAppActor = { kind: "app"; name: string };
+
+/**
+ * The SSO setup in process (plan 12d, spec 30). Present when `sso` is set.
+ * Each call takes the app as its actor and writes the audit rows of the
+ * routes. An app name outside 1 to 64 characters of `[a-z0-9_.-]` answers
+ * `invalid_body`.
+ */
+export interface SsoApi {
+  domains: {
+    /** The domains of an organization, oldest first. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<SsoDomainSummary[]>>;
+    /** Starts the proof of a domain and answers the TXT record to publish. */
+    add(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      domain: string;
+    }): Promise<Result<SsoDomainSummary>>;
+    /** Asks every resolver of `sso.dns` for the record, and claims the domain when each gives it. */
+    verify(input: { actor: SsoAppActor; id: string }): Promise<Result<SsoDomainSummary>>;
+    /** Changes the route and the flags of a domain. */
+    update(input: {
+      actor: SsoAppActor;
+      id: string;
+      connectionId?: string | null;
+      enforce?: boolean;
+      includeSubdomains?: boolean;
+    }): Promise<Result<SsoDomainSummary>>;
+    /** Deletes a domain and its claim. */
+    delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+  /**
+   * The OIDC and SAML connections of an organization (plan 12d Task 3). No
+   * answer holds the client secret or its sealed value.
+   */
+  connections: {
+    /** The connections of an organization, oldest first. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<SsoConnectionSummary[]>>;
+    /** Adds a connection. An OIDC client secret is sealed under the current app secret. */
+    create(input: { actor: SsoAppActor } & ConnectionInput): Promise<Result<SsoConnectionSummary>>;
+    /** Changes the fields of a connection. `kind` and `organizationId` never change. */
+    update(
+      input: { actor: SsoAppActor; id: string } & ConnectionFields,
+    ): Promise<Result<SsoConnectionSummary>>;
+    /** Deletes a connection, and takes the route and `enforce` off its domains. */
+    delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+}
+
+/**
+ * The SCIM setup in process (plan 12d Task 9). Present when `scim` is set.
+ * Each call takes the app as its actor and writes the audit rows of the
+ * routes. An app name outside 1 to 64 characters of `[a-z0-9_.-]` answers
+ * `invalid_body`.
+ */
+export interface ScimApi {
+  tokens: {
+    /** The newest 100 SCIM tokens of an organization, oldest first. No answer holds a token or its hash. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<ScimTokenSummary[]>>;
+    /**
+     * A new SCIM token. The answer holds the token, the one time it leaves
+     * core. At most two live tokens per organization, else `token_limit`.
+     */
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      name: string;
+      scopes?: ScimScope[];
+      expiresInDays?: number;
+    }): Promise<Result<{ token: string; id: string; hint: string }>>;
+    /** Deletes a token. The next SCIM call with it answers 401. */
+    revoke(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+  /**
+   * The SCIM Users of one organization (plan 12d Task 10), with the rules of
+   * the routes: the address rule, the version, the deactivate, and the audit
+   * rows with the app as the actor. Each call answers the SCIM answer of its
+   * route: the status, the body, and the headers. A `url` holds the query of
+   * a list or a read, as the route reads it.
+   */
+  users: {
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      body: unknown;
+    }): Promise<ScimResult>;
+    get(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    list(input: { actor: SsoAppActor; organizationId: string; url?: URL }): Promise<ScimResult>;
+    replace(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    patch(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    delete(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+  };
+  /**
+   * The SCIM Groups of one organization (plan 12d Task 11), with the rules
+   * of the routes: the member caps, the role map, the teams, the version,
+   * and the audit rows with the app as the actor. A `patch` answers 204
+   * with no body unless its `url` asks for `attributes`.
+   */
+  groups: {
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      body: unknown;
+    }): Promise<ScimResult>;
+    get(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    list(input: { actor: SsoAppActor; organizationId: string; url?: URL }): Promise<ScimResult>;
+    replace(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    patch(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    delete(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+  };
+  /**
+   * Sets the role map of an organization: `{ [group displayName]: role }`
+   * (plan 12d Task 11 Behavior 2). It is the `scimRoles` of the enabled
+   * connection that the organization created first, with the role rule of
+   * a connection update: never `owner`, never the platform role. Null
+   * clears it. No role changes at once: each member gets the role of the
+   * map at the next change of its groups, or at a rename of a group.
+   */
+  setRoleMap(input: {
+    actor: SsoAppActor;
+    organizationId: string;
+    map: Record<string, string> | null;
+  }): Promise<Result<SsoConnectionSummary>>;
+}
+
 export interface OAuthApi {
   grants(input: { userId: string }): Promise<Result<OAuthGrantSummary[]>>;
   revoke(input: { userId: string; clientId: string }): Promise<Result<{ ok: true }>>;
@@ -409,10 +640,17 @@ export interface SecretsApi {
   status(): Promise<SecretsStatus>;
   /**
    * `limit`: 1 to 1000 rows, default 100. `after`: the `next` of the call
-   * before, to go on with the pass. `invalid_body` for a limit outside that
-   * range or a cursor that `rewrap` did not answer.
+   * before, to go on with the pass. `callBudget`: the storage calls of the
+   * call, 50 to 1000, default 50 for D1 Free (ruling 33 of plan 12d). A call
+   * that the budget stops answers `more: true` and `next`: call again with
+   * it. `invalid_body` for a limit or a budget outside its range, or a
+   * cursor that `rewrap` did not answer.
    */
-  rewrap(input?: { limit?: number; after?: string }): Promise<Result<SecretsRewrap>>;
+  rewrap(input?: {
+    limit?: number;
+    after?: string;
+    callBudget?: number;
+  }): Promise<Result<SecretsRewrap>>;
 }
 
 /** Present on `api` unless the config sets `emailOtp: false` (plan 9e). */
@@ -723,6 +961,8 @@ export interface AuthApi {
   totp?: TotpApi;
   jwt?: JwtApi;
   oauth?: OAuthApi;
+  sso?: SsoApi;
+  scim?: ScimApi;
 }
 
 export interface Auth {
@@ -832,17 +1072,19 @@ function refusesImpersonation<I extends { session: Pick<ResolvedSession, "sessio
   };
 }
 
-/** The POST gate of each Auth, for `crossSiteRefusal`. A WeakMap keeps it off the Auth type. */
+/** The gate of each Auth, for `crossSiteRefusal`. A WeakMap keeps it off the Auth type. */
 const gates = new WeakMap<Auth, (request: Request) => Response | null>();
 
 /**
- * The 403 `origin_not_trusted` that `auth.handle` answers a POST before any
- * handler, or null when the POST passes: the Origin rule and the Fetch
- * Metadata rule, with the route exceptions of core. A path that core does not
- * serve gets both rules. A package that answers its own POST paths beside
- * `auth.handle` calls it first, so a cross-site post reaches none of them
- * (plan 12a fix wave, final review F1; the Better Auth shim). Throws a
- * TypeError for an object that `createAuth` did not make.
+ * The 403 `origin_not_trusted` that `auth.handle` answers a `POST`, `PUT`,
+ * `PATCH`, or `DELETE` before any handler, or null when the request passes.
+ * The gate applies the Origin rule and the Fetch Metadata rule, with the
+ * route exceptions of core (plan 12d). `GET`, `HEAD`, and `OPTIONS` always
+ * pass. A path that core does not serve gets both rules. A package that
+ * answers its own paths beside `auth.handle` calls it first. Then a
+ * cross-site request reaches none of those paths (plan 12a fix wave, final
+ * review F1; the Better Auth shim). Throws a TypeError for an object that
+ * `createAuth` did not make.
  */
 export function crossSiteRefusal(auth: Auth, request: Request): Response | null {
   const gate = gates.get(auth);
@@ -850,8 +1092,111 @@ export function crossSiteRefusal(auth: Auth, request: Request): Response | null 
   return gate(request);
 }
 
+/** The resolved config of each Auth, for the compat seams. A WeakMap keeps it off the Auth type. */
+const configs = new WeakMap<Auth, ResolvedConfig>();
+
+/**
+ * Gives `config` the record of a domain proof of a compat package (plan 12d
+ * Task 14, ruling 61 F4). Call it before `createAuth(config)`. The verify of
+ * `verifyDomainByRecord` asks for this record, and the 30-day recheck asks
+ * for it when the row's own record fails. So a domain that the compat
+ * package proved keeps its claim. Answers `config`.
+ */
+export function withDomainRecord<C extends AuthConfig>(config: C, record: DomainRecordOf): C {
+  setConfigDomainRecord(config, record);
+  return config;
+}
+
+/**
+ * Runs `POST <basePath>/sso/domains/verify` with the record of
+ * `withDomainRecord` in place of core's own record (plan 12d Task 14). Every
+ * other step is the route's: the session, the limiter, the manager guard,
+ * the claim, and the audit row. Throws a TypeError for another path, an
+ * Auth that `createAuth` did not make, or a config with no such record.
+ */
+export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Response> {
+  const config = configs.get(auth);
+  if (!config) throw new TypeError("verifyDomainByRecord takes an Auth from createAuth");
+  if (domainRecordFor(config) === null)
+    throw new TypeError("verifyDomainByRecord takes an Auth whose config has withDomainRecord");
+  if (
+    request.method !== "POST" ||
+    new URL(request.url).pathname !== `${auth.basePath}/sso/domains/verify`
+  )
+    throw new TypeError("verifyDomainByRecord takes a POST to <basePath>/sso/domains/verify");
+  markRecordVerify(request);
+  return auth.handle(request);
+}
+
+/** A SCIM caller that a compat package checked itself: one credential of one organization. */
+export interface CheckedScimCaller {
+  /** The key of the credential's limit and the actor name of its audit rows: 1 to 128 characters. */
+  id: string;
+  organizationId: string;
+  scopes: readonly ScimScope[];
+}
+
+/**
+ * Runs a `<basePath>/scim/v2` route with `caller` in place of the check of
+ * a SCIM token (plan 12d Task 14). The compat package of Better Auth checks
+ * the SHA-256 of a credential of its config, then calls this. The scope of
+ * the route, the limit of the credential (`scim:token:<id>`), the body, and
+ * the audit rows stay core's. Throws a TypeError for another path, a bad
+ * caller, or an Auth that `createAuth` did not make.
+ */
+export function scimRequestAs(
+  auth: Auth,
+  request: Request,
+  caller: CheckedScimCaller,
+): Promise<Response> {
+  if (!configs.has(auth)) throw new TypeError("scimRequestAs takes an Auth from createAuth");
+  if (!new URL(request.url).pathname.startsWith(`${auth.basePath}/scim/v2/`))
+    throw new TypeError("scimRequestAs takes a request under <basePath>/scim/v2/");
+  if (
+    typeof caller.id !== "string" ||
+    caller.id.length < 1 ||
+    caller.id.length > 128 ||
+    typeof caller.organizationId !== "string" ||
+    caller.organizationId.length < 1 ||
+    !caller.scopes.every((s) => SCIM_SCOPES.includes(s))
+  )
+    throw new TypeError("scimRequestAs takes an id of 1 to 128 characters and SCIM scopes");
+  setScimCaller(request, {
+    tokenId: caller.id,
+    tokenName: caller.id,
+    organizationId: caller.organizationId,
+    scopes: new Set(caller.scopes),
+  });
+  return auth.handle(request);
+}
+
+/** One SSO call of the app: the name rule of the app actor first, as each operator entry checks it. */
+function appCall<I extends { actor: SsoAppActor }, R>(
+  run: (input: I) => Promise<Result<R>>,
+): (input: I) => Promise<Result<R>> {
+  return async (input) => {
+    const named = checkActor(input.actor);
+    if (!named.ok) return named;
+    return run(input);
+  };
+}
+
+/**
+ * The app as the caller of `api.scim.users`: the organization of the call
+ * in place of the token's. A write checks the name rule of the app actor
+ * when it writes its audit row.
+ */
+function scimApp(input: { actor: SsoAppActor; organizationId: string }) {
+  return { organizationId: input.organizationId, actor: input.actor };
+}
+
+/** The URL of a call of `api.scim.users` with no query. */
+const SCIM_NO_QUERY = new URL("https://scim.invalid/");
+
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
+  // The record of a compat package (withDomainRecord) reaches the routes and the sweep.
+  carryDomainRecord(input, config);
   // The route modules get a config whose observer marks each event unscoped.
   // A handler emits through ctx.config, the scope of its request (plan 12h).
   const routes = coreRoutes({ ...config, observe: unscopedOf(config.observe) });
@@ -1040,6 +1385,63 @@ export function createAuth(input: AuthConfig): Auth {
             } satisfies JwtApi,
           }
         : {}),
+      ...(config.sso
+        ? {
+            sso: {
+              domains: {
+                list: appCall(({ actor, ...i }) => listDomains(config, actor, i)),
+                add: appCall(({ actor, ...i }) => addDomain(config, actor, i)),
+                verify: appCall(({ actor, ...i }) => verifyDomain(config, actor, i)),
+                update: appCall(({ actor, ...i }) => updateDomain(config, actor, i)),
+                delete: appCall(({ actor, ...i }) => deleteDomain(config, actor, i)),
+              },
+              connections: {
+                list: appCall(({ actor, ...i }) => listConnections(config, actor, i)),
+                create: appCall(({ actor, ...i }) => createConnection(config, actor, i)),
+                update: appCall(({ actor, ...i }) => updateConnection(config, actor, i)),
+                delete: appCall(({ actor, ...i }) => deleteConnection(config, actor, i)),
+              },
+            } satisfies SsoApi,
+          }
+        : {}),
+      ...(config.scim
+        ? {
+            scim: {
+              tokens: {
+                list: appCall(({ actor, ...i }) => listScimTokens(config, actor, i)),
+                create: appCall(({ actor, ...i }) => createScimToken(config, actor, i)),
+                revoke: appCall(({ actor, ...i }) => revokeScimToken(config, actor, i)),
+              },
+              users: {
+                create: (i) => scimCreateUser(config, scimApp(i), i.body),
+                get: (i) => scimGetUser(config, scimApp(i), i.id, i.url ?? SCIM_NO_QUERY),
+                list: (i) => scimListUsers(config, scimApp(i), i.url ?? SCIM_NO_QUERY),
+                replace: (i) =>
+                  scimReplaceUser(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                patch: (i) => scimPatchUser(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                delete: (i) => scimDeleteUser(config, scimApp(i), i.id, i.ifMatch ?? null),
+              },
+              groups: {
+                create: (i) => scimCreateGroup(config, scimApp(i), i.body),
+                get: (i) => scimGetGroup(config, scimApp(i), i.id, i.url ?? SCIM_NO_QUERY),
+                list: (i) => scimListGroups(config, scimApp(i), i.url ?? SCIM_NO_QUERY),
+                replace: (i) =>
+                  scimReplaceGroup(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                patch: (i) =>
+                  scimPatchGroup(
+                    config,
+                    scimApp(i),
+                    i.id,
+                    i.body,
+                    i.ifMatch ?? null,
+                    i.url ?? SCIM_NO_QUERY,
+                  ),
+                delete: (i) => scimDeleteGroup(config, scimApp(i), i.id, i.ifMatch ?? null),
+              },
+              setRoleMap: appCall(({ actor, ...i }) => setRoleMap(config, actor, i)),
+            } satisfies ScimApi,
+          }
+        : {}),
       ...(config.oauth
         ? {
             oauth: {
@@ -1060,5 +1462,6 @@ export function createAuth(input: AuthConfig): Auth {
     errors: ERRORS,
   };
   gates.set(auth, gate);
+  configs.set(auth, config);
   return auth;
 }

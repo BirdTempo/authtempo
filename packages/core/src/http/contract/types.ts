@@ -6,7 +6,9 @@ import type { z } from "zod";
  * script, its own CSP. `redirect` is a 302, or the 303 that `status` names:
  * the answer to a form post that the browser follows with a GET. `param` is
  * the query parameter of the error that a redirect carries, and a redirect
- * with an error is a 302. `metadata` is a standard document.
+ * with an error is a 302. `metadata` is a standard document: JSON, or the
+ * XML of SAML metadata (plan 12d Task 8). `scim` is a
+ * SCIM answer (plan 12d).
  */
 export type AnswerKind =
   | { readonly kind: "json"; readonly schema: z.ZodType; readonly status?: 200 | 201 }
@@ -18,8 +20,15 @@ export type AnswerKind =
     }
   | {
       readonly kind: "metadata";
-      readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi";
-    };
+      readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi" | "saml-metadata";
+    }
+  /**
+   * A SCIM answer (plan 12d deviation 14): `application/scim+json` that
+   * `schema` describes, with the status 200. A failure is the SCIM error
+   * message of RFC 7644 section 3.12. A null schema: the route answers only
+   * that error, with 501.
+   */
+  | { readonly kind: "scim"; readonly schema: z.ZodType | null };
 
 /**
  * The contract of one route (plan 11g): its input schemas and its answer.
@@ -38,6 +47,17 @@ export interface RouteContract {
     readonly optional?: true;
   };
   readonly answer: AnswerKind;
-  /** A second answer kind: a JSON body gets JSON, a form post gets a redirect. */
-  readonly alt?: AnswerKind;
+  /**
+   * The other answer kinds: a JSON body gets JSON, a form post gets a
+   * redirect. A list holds more than one kind. The SSO form gets a page or
+   * a redirect (plan 12d Task 4 fix M1).
+   */
+  readonly alt?: AnswerKind | readonly AnswerKind[];
+}
+
+/** Each answer kind of a route: `answer` first, then each kind of `alt`. */
+export function answerKinds(contract: RouteContract): readonly AnswerKind[] {
+  const alt = contract.alt;
+  if (alt === undefined) return [contract.answer];
+  return "kind" in alt ? [contract.answer, alt] : [contract.answer, ...alt];
 }

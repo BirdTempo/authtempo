@@ -84,6 +84,20 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   impersonation_refused: "You cannot act as this user.",
   impersonation_session: "You cannot do this while you act as another user.",
   not_ready: "The service is not ready. Try again later.",
+  domain_unverified: "The DNS record of the domain was not found. Publish it and try again.",
+  domain_taken: "Another organization holds this domain.",
+  domain_limit: "The organization holds the most domains it can have.",
+  delete_too_large:
+    "The delete is too large for one request. Delete some organizations or SCIM groups first.",
+  connection_limit: "The organization holds the most SSO connections it can have.",
+  second_factor_required: "Turn on a second factor first, then try again.",
+  sso_failed: "The single sign-on did not complete. Try again.",
+  sso_not_configured: "Single sign-on is not set up for this address.",
+  sso_required: "This address signs in with single sign-on only.",
+  sso_domain_mismatch: "The organization did not prove the domain of this address.",
+  sso_not_provisioned: "Ask your organization to give you access first.",
+  account_disabled: "Your organization turned off this account.",
+  role_not_found: "The organization no longer has the role of this sign-in.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

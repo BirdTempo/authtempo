@@ -70,6 +70,32 @@ describe("the D1 statements seam", () => {
     expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u2" }])).toBeNull();
   });
 
+  it("routes the undo of many rows through the list statements (ruling 84 of plan 12d)", async () => {
+    const { statements, counts } = counting();
+    const db = createD1AdapterOn(env.DB, { statements, toStorageError, ready: async () => {} });
+    await db.createMany("user", [user("u1", "a@example.com"), user("u2", "b@example.com")]);
+    const ids = { field: "id" as const, op: "in" as const, value: ["u1", "u2"] };
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", [ids], { name: "Ada" });
+        await tx.delete("user", [ids]);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(counts).toMatchObject({
+      insertMany: 1,
+      restoreRows: 1,
+      reinsertRows: 1,
+      restoreRow: 0,
+      reinsertRow: 0,
+    });
+    const back = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+    expect(back.map((u) => [u.id, u.name])).toEqual([
+      ["u1", null],
+      ["u2", null],
+    ]);
+  });
+
   it("maps a unique violation through the given toStorageError", async () => {
     const seen: unknown[] = [];
     const db = createD1AdapterOn(env.DB, {

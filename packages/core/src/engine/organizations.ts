@@ -5,11 +5,12 @@ import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.js";
-import { findManyIn } from "../storage/batch.js";
+import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import {
   hookGuard,
+  type MemberVia,
   type OrganizationPatch,
   type RemoveVia,
   runAfter,
@@ -29,6 +30,7 @@ import {
   touchCheck,
 } from "./permissions.js";
 import {
+  isOwner,
   needs,
   normalizeSlug,
   type ResolvedOrganizations,
@@ -167,10 +169,8 @@ async function ownerCount(
   return members.filter((m) => rankOf(o.ranks, m.role) >= ownerRank).length;
 }
 
-/** True when `rank` is at the owner rank or above: the member counts as an owner. */
-export function isOwner(o: ResolvedOrganizations, rank: number): boolean {
-  return rank >= (o.ranks.owner ?? Number.POSITIVE_INFINITY);
-}
+// The owner rule lives in ranks.ts, so the config reads it too (plan 12d Task 9b).
+export { isOwner };
 
 /**
  * The owner lock in the caller's transaction (plan 6): the owner count, the
@@ -276,15 +276,21 @@ interface RoleLoss {
 /**
  * The fixed calls of a member write before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router, the route limiter, and `resolveSession` (3). Then the
- * standing of the caller (3): the organization, and the organization and
- * member row of `membership`. Then the target's `membership` (2), and its
- * user (1). The reads of the role rows (plan 12k) and the ready check of
- * the storage come on top. `roleLossOf` takes the count of the role reads
- * that ran. The D1 test `operator-loss-budget.test.ts` counts the whole
- * invocation on the binding.
+ * the router (1) and `resolveSession` (5, with the pending-end read of
+ * ruling 50 and the session-cap read of ruling 44 of plan 12d). The member
+ * routes have no limiter. Then the standing of the caller (3): the
+ * organization, and the organization and member row of `membership`. Then
+ * the target's `membership` (2), and its user (1). The sum is 12. The
+ * reads of the role rows (plan 12k) and the ready check of the storage
+ * come on top. `roleLossOf` takes the count of the role reads that ran.
+ * The D1 test `operator-loss-budget.test.ts` counts the whole invocation
+ * on the binding. At 10, a removal with a due refresh sent 51 queries, and
+ * 52 with `sso.saml` on (run of 2026-10-22). So 10 left out the refresh
+ * and the session-cap read, and 12 holds them. A log of the statements of
+ * that removal on 2026-10-24 showed these 12 before the user hold, after
+ * the ready check (ruling 74 item 4 of plan 12d).
  */
-const MEMBER_WRITE_CALLS_BEFORE = 9;
+const MEMBER_WRITE_CALLS_BEFORE = 12;
 
 /** The worst case of the member write in `withRoleLoss`: the owner lock, the write, and the recount. */
 const MEMBER_WRITE_WORST = 5;
@@ -621,8 +627,13 @@ export async function deleteOrganization(
         // user-hold.ts (rulings 49 and 50 of plan 12k). With row locks, the ids are read
         // first and locked by id. The delete clears their active organization last.
         const locks = tx.lockInOrder !== undefined;
+        // The scimGroup rows come first, in the order of user-hold.ts (ruling 74 of plan 12d).
+        // A SCIM group write holds its group row before every other lock.
+        await tx.lockInOrder?.("scimGroup", [{ field: "organizationId", op: "eq", value: id }]);
         const ids = locks ? (await tx.findMany("session", byOrganization)).map((x) => x.id) : [];
         await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
+        // The scimUser rows come before the organization row (ruling 74 M3 of plan 12d).
+        await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "eq", value: id }]);
         if (locks) {
           // After the organization lock, no set moves a session into the organization: a set
           // takes the same lock. A session that a set moved in after the read above has no
@@ -655,8 +666,9 @@ export async function deleteOrganization(
 }
 
 /**
- * The rows of one organization, in the caller's transaction. One copy for
- * the organization delete and the account delete (plan 12a).
+ * The rows of one organization, in the caller's transaction. One copy of
+ * the order for the organization delete, the account delete, and the sweep
+ * (plan 12a, ruling 78 of plan 12d).
  *
  * The order closes the gaps of the flows in flight. The organization row
  * goes first (ruling 43 of plan 12k). A token create, a team create, and a
@@ -678,34 +690,128 @@ export async function deleteOrganization(
  * and the member read below sees that member. An accept that starts later
  * finds no invitation. The organization row goes before the members: D1 has
  * no lock, and an accept reads the organization after its member insert.
- * With `alone`, the organization goes with that user's account, so any
- * other member answers `conflict`: the organization is no longer one the
- * user alone holds.
+ * The account delete takes the member rows in its act and checks that no
+ * other member joined (`deleteAccountRows` in account-delete.ts).
  */
-export async function deleteOrganizationRows(
+export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Promise<void> {
+  await deleteOrganizationsRows(tx, [id], ORGANIZATION_DELETE_GROUPS);
+}
+
+/**
+ * The most SCIM Groups that one organization delete removes (ruling 74 of
+ * plan 12d): ten deletes of IN_CHUNK group ids. On the D1 binding the route
+ * sent 23 queries with 50 groups, 20 of them with no group (2026-10-24). So
+ * ten deletes fit the 50 queries of D1 Free with room for a due refresh.
+ */
+export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
+
+/**
+ * `deleteOrganizationRows` for many organizations at once (ruling 30 of
+ * plan 12d). Each model is one statement with `in` over the ids, so the
+ * cost does not grow with the count of organizations. The order of the
+ * statements is the order above: `deleteOrganizationsHead`, then
+ * `deleteOrganizationsRest`.
+ */
+export async function deleteOrganizationsRows(
   tx: StorageAdapter,
-  id: string,
-  alone: string | null = null,
+  ids: readonly string[],
+  groupsMax: number,
 ): Promise<void> {
-  const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
-  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+  if (ids.length === 0) return;
+  const list = organizationList(ids);
+  // Ruling 74 of plan 12d (P9 of ruling 53): the SCIM Groups go with their organizations. A
+  // scimGroupMember row names its group, not the organization, so one read takes the group
+  // ids, before any write. One delete binds at most IN_CHUNK ids on D1, and the caller gives
+  // the count of groups that its call budget holds (`groupsMax`). More groups answer
+  // delete_too_large. The caller locked the scimGroup rows first, in the order of user-hold.ts.
+  const groups = await organizationGroups(tx, list, groupsMax + 1);
+  if (groups.length > groupsMax) stopWith("delete_too_large");
+  await deleteOrganizationsHead(tx, list);
+  await deleteOrganizationsRest(tx, list, groups);
+}
+
+/**
+ * The ids of one set-based delete, in id order. They fit one chunk of
+ * `IN_CHUNK`: D1 binds at most 100 parameters. A longer list throws, so a
+ * caller refuses it first (`delete_too_large`).
+ */
+export function organizationList(ids: readonly string[]): string[] {
+  if (ids.length > IN_CHUNK) throw new StorageError("invalid_argument", "organization", ["id"]);
+  return [...ids].sort();
+}
+
+/** The ids of at most `limit` SCIM Groups of the organizations of `list`. */
+export async function organizationGroups(
+  tx: StorageAdapter,
+  list: string[],
+  limit: number,
+): Promise<string[]> {
+  return (
+    await tx.findMany("scimGroup", [{ field: "organizationId", op: "in", value: list }], { limit })
+  ).map((g) => g.id);
+}
+
+/**
+ * The rows of the organizations of `list` that give access or hold a claim
+ * (ruling 78 of plan 12d): the organization rows, then the connection, the
+ * domain, and the SCIM token rows. The organization rows lock first, in id
+ * order (`lockInOrder`), in the step of the organization row. The account
+ * delete takes these rows and the member rows in its act. A flow that comes
+ * later finds no organization, no domain claim, and no SCIM token.
+ */
+export async function deleteOrganizationsHead(tx: StorageAdapter, list: string[]): Promise<void> {
+  // The scimUser rows come before the organization row (ruling 74 M3): a SCIM deactivate holds
+  // its scimUser row and then takes the organization lock. On Postgres this lock costs one
+  // statement; D1 has no row lock.
+  await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  await tx.delete("organization", [{ field: "id", op: "in", value: list }]);
+  // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
+  // organization row. A kept domain row would hold its claim forever, so no
+  // other organization could verify the domain. The three models are no
+  // kind of user-hold.ts, so the lock order does not change. The connection
+  // rows go before the domain rows, the order of `lockConnection` in
+  // sso/domains.ts (ruling 35). The other order deadlocks with a domain update.
+  await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
+}
+
+/**
+ * The rows of the organizations of `list` that only their organization
+ * reaches (ruling 78 of plan 12d), after `deleteOrganizationsHead`. The
+ * organization delete runs it in its act. The account delete leaves it to
+ * the sweep (organization-rest.ts): each read of these rows needs its
+ * organization row, or a member row of the organization, which the act
+ * deleted. `groups` names the SCIM Groups that go, at most `IN_CHUNK` in
+ * each delete of their member rows.
+ */
+export async function deleteOrganizationsRest(
+  tx: StorageAdapter,
+  list: string[],
+  groups: readonly string[],
+): Promise<void> {
+  // Plan 12d Task 10: the SCIM view of the staff is personal data of the organization.
+  await tx.delete("scimUser", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
-  await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("team", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("invitation", [{ field: "organizationId", op: "in", value: list }]);
   // The tokens and the role rows of the organization have no use without it (plan 12k).
-  await tx.delete("organizationToken", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("organizationRole", [{ field: "organizationId", op: "eq", value: id }]);
-  if (
-    alone !== null &&
-    (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
-  )
-    stopWith("conflict");
+  await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
   // The members go before their team rows, in the order of a member removal (ruling 44).
-  await tx.delete("member", byOrganization);
-  await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("member", [{ field: "organizationId", op: "in", value: list }]);
+  // The scimGroupMember rows come after the member rows, as in a group write (ruling 59 M1).
+  for (let i = 0; i < groups.length; i += IN_CHUNK)
+    await tx.delete("scimGroupMember", [
+      { field: "groupId", op: "in", value: groups.slice(i, i + IN_CHUNK) },
+    ]);
+  if (groups.length > 0)
+    await tx.delete("scimGroup", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("teamMember", [{ field: "organizationId", op: "in", value: list }]);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   // Its active team is a team of that organization, so it goes in the same write.
-  await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
+  await tx.update("session", [{ field: "activeOrganizationId", op: "in", value: list }], {
     activeOrganizationId: null,
     activeTeamId: null,
   });
@@ -742,16 +848,25 @@ export async function organizationsOfDelete(
   const o = on(config);
   // With organizations off, the engine has no ranks. The member rows still go.
   if (!o) return ok(plan);
-  for (const m of await storage.findMany("member", [
-    { field: "userId", op: "eq", value: userId },
-  ])) {
-    const organization = await storage.findOne("organization", [
-      { field: "id", op: "eq", value: m.organizationId },
-    ]);
+  // Three reads for any count of organizations (ruling 30 of plan 12d):
+  // the memberships, their organizations, and the members of those.
+  const mine = await storage.findMany("member", [{ field: "userId", op: "eq", value: userId }]);
+  if (mine.length === 0) return ok(plan);
+  const organizations = new Map(
+    (
+      await findManyIn(
+        storage,
+        "organization",
+        "id",
+        mine.map((m) => m.organizationId),
+      )
+    ).map((x) => [x.id, x]),
+  );
+  const all = await findManyIn(storage, "member", "organizationId", [...organizations.keys()]);
+  for (const m of mine) {
+    const organization = organizations.get(m.organizationId);
     if (!organization) continue;
-    const members = await storage.findMany("member", [
-      { field: "organizationId", op: "eq", value: organization.id },
-    ]);
+    const members = all.filter((x) => x.organizationId === organization.id);
     const platform = organization.slug === o.platformOrganization;
     if (!platform && members.every((x) => x.userId === userId)) {
       plan.going.push(organization);
@@ -762,6 +877,10 @@ export async function organizationsOfDelete(
     if (owners <= 1) return fail("sole_owner");
     plan.owned.push(organization);
   }
+  // The solo organizations go in one set-based delete, and its ids fit one
+  // chunk of IN_CHUNK (ruling 30 of plan 12d).
+  if (plan.going.length > IN_CHUNK) return fail("delete_too_large");
+  plan.going.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // One lock order for every delete (review m1): two co-owners of two
   // organizations who delete at once would else wait on each other, and
   // Postgres would abort one with a deadlock in place of `conflict`.
@@ -869,48 +988,18 @@ export async function addMember(
     createdAt: now,
     updatedAt: now,
   };
-  const hooks = config.hooks.organization;
   const organization = publicOrganization(s.value.organization);
-  const limit = o.limits.membersPerOrganization;
   try {
     const written = await hookGuard(() =>
-      config.storage.transaction(async (tx): Promise<Result<true>> => {
-        // The added user, then the organization row, in the lock order of user-hold.ts. A member
-        // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
-        // value, so a refusal below changes nothing.
-        await holdUser(config.observe, tx, target.id);
-        // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
-        // commit, and then counts its member row. A gone organization answers not_found.
-        if (limit !== null && !(await lockOrganization(tx, s.value.organization)))
-          return fail("not_found");
-        // A no-op add runs no hook. The unique key stays the guard for a race.
-        if (
-          await tx.findOne("member", [
-            { field: "organizationId", op: "eq", value: input.organizationId },
-            { field: "userId", op: "eq", value: target.id },
-          ])
-        )
-          return fail("already_member");
-        if (limit !== null) {
-          const held = await tx.findMany(
-            "member",
-            [{ field: "organizationId", op: "eq", value: input.organizationId }],
-            { limit },
-          );
-          if (held.length >= limit) return fail("member_limit");
-        }
-        await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
-          organization,
-          member: { userId: target.id, role: input.role },
-          memberUser: target,
+      config.storage.transaction((tx) =>
+        addMemberIn(config, tx, o, {
+          organization: s.value.organization,
+          member,
+          user: target,
           by: input.user,
           via: "add",
-          invitation: null,
-        });
-        await tx.create("member", member);
-        await userStays(tx, target.id);
-        return ok(true);
-      }),
+        }),
+      ),
     );
     if (!written.ok) return written;
   } catch (err) {
@@ -929,7 +1018,7 @@ export async function addMember(
   await runAfter(
     config.observe,
     "organization.afterAddMember",
-    hooks.afterAddMember,
+    config.hooks.organization.afterAddMember,
     {
       organization,
       member: added,
@@ -942,6 +1031,96 @@ export async function addMember(
   );
   config.observe.emit(organizationChange("afterAddMember", organization.id));
   return ok(added);
+}
+
+/** The input of a member add in the caller's transaction. */
+interface MemberAdd {
+  organization: OrganizationRow;
+  member: MemberRow;
+  user: UserRow;
+  by: UserRow | null;
+  via: MemberVia;
+}
+
+/** True when the user holds a member row of the organization. */
+export async function holdsMember(
+  tx: StorageAdapter,
+  organizationId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await tx.findOne("member", [
+    { field: "organizationId", op: "eq", value: organizationId },
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  return row !== null;
+}
+
+/** True when the organization holds `membersPerOrganization` member rows or more. */
+export async function atMemberLimit(
+  tx: StorageAdapter,
+  o: ResolvedOrganizations,
+  organizationId: string,
+): Promise<boolean> {
+  const limit = o.limits.membersPerOrganization;
+  if (limit === null) return false;
+  const held = await tx.findMany(
+    "member",
+    [{ field: "organizationId", op: "eq", value: organizationId }],
+    { limit },
+  );
+  return held.length >= limit;
+}
+
+/**
+ * The member add in the caller's transaction (ruling 25 N3 of plan 12d).
+ * `addMember` calls it after its standing check, and an SSO sign-in calls it
+ * with no user caller (`by` null). It holds the added user, then, with
+ * `membersPerOrganization`, the organization row before its count: the lock
+ * order of user-hold.ts. Then the before hook and the row. A member row
+ * that exists answers `already_member` and writes nothing. The caller runs
+ * `afterAddMember` after its commit, and maps a `unique_violation`.
+ *
+ * With `checked`, the caller ran the member read, the count, and the hook before
+ * its first write (ruling 41 of plan 12d). The add then runs no hook. It
+ * reads the row and the count again after the locks, because a parallel add
+ * can come between.
+ */
+export async function addMemberIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  o: ResolvedOrganizations,
+  input: MemberAdd,
+  checked = false,
+): Promise<Result<true>> {
+  const { member, user } = input;
+  // The added user, then the organization row, in the lock order of user-hold.ts. A member
+  // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
+  // value, so a refusal below changes nothing.
+  await holdUser(config.observe, tx, user.id);
+  // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
+  // commit, and then counts its member row. A gone organization answers not_found.
+  if (o.limits.membersPerOrganization !== null && !(await lockOrganization(tx, input.organization)))
+    return fail("not_found");
+  // A no-op add runs no hook. The unique key stays the guard for a race.
+  if (await holdsMember(tx, member.organizationId, user.id)) return fail("already_member");
+  if (await atMemberLimit(tx, o, member.organizationId)) return fail("member_limit");
+  if (!checked)
+    await runBefore(
+      config.observe,
+      "organization.beforeAddMember",
+      config.hooks.organization.beforeAddMember,
+      {
+        organization: publicOrganization(input.organization),
+        member: { userId: user.id, role: member.role },
+        memberUser: user,
+        by: input.by,
+        via: input.via,
+        invitation: null,
+      },
+    );
+  await tx.create("member", member);
+  await userStays(tx, user.id);
+  return ok(true);
 }
 
 export async function updateMemberRole(
@@ -1043,6 +1222,46 @@ export async function updateMemberRole(
   return ok(updated);
 }
 
+/**
+ * The writes of a member removal in the caller's transaction (ruling 25 N3
+ * of plan 12d). `removeMember` calls it after its before hook, and a SCIM
+ * deactivate calls it with no user caller. The caller holds the person's
+ * user row and sessions first, and with `revokeTokens` the organization
+ * lock, in the order of user-hold.ts. The role from the caller's read is in
+ * the where: when another request changed it since, zero rows match and
+ * nothing else is written. The person's team rows and active team go with
+ * the membership, with no team hook (plan 12k). The active organization is
+ * a choice, not a right, so it goes in the same write. With `revokeTokens`
+ * the organization tokens that the person created go too. The answer is the
+ * count of member rows deleted.
+ */
+export async function removeMemberIn(
+  tx: StorageAdapter,
+  member: MemberRow,
+  revokeTokens: boolean,
+): Promise<number> {
+  const n = await tx.delete("member", [
+    { field: "id", op: "eq", value: member.id },
+    { field: "role", op: "eq", value: member.role },
+  ]);
+  if (n === 0) return 0;
+  await dropMemberTeams(tx, member.organizationId, member.userId);
+  await tx.update(
+    "session",
+    [
+      { field: "userId", op: "eq", value: member.userId },
+      { field: "activeOrganizationId", op: "eq", value: member.organizationId },
+    ],
+    { activeOrganizationId: null },
+  );
+  if (revokeTokens)
+    await tx.delete("organizationToken", [
+      { field: "organizationId", op: "eq", value: member.organizationId },
+      { field: "createdById", op: "eq", value: member.userId },
+    ]);
+  return n;
+}
+
 /** The second right of `revokeTokens` (deviation 9 of plan 12k): a creator has no right of their own on a token. */
 const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
 
@@ -1091,7 +1310,6 @@ export async function removeMember(
     ? input.user
     : await config.storage.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
   if (!memberUser) return fail("not_found");
-  const organizationId = input.organizationId;
   const hooks = config.hooks.organization;
   const via: RemoveVia = self ? "leave" : "remove";
   const event = {
@@ -1108,8 +1326,7 @@ export async function removeMember(
     by: input.user,
     via,
   };
-  // The role from the read is in the where: if another request changed it since, zero rows match.
-  // The active organization is a choice, not a right; it goes with the membership in the same write.
+  // The writes of the removal are removeMemberIn, after the before hook.
   const drop = async (storage: StorageAdapter) => {
     // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
     // first, and the token delete below sees its row. The user hold and the session locks run
@@ -1121,27 +1338,7 @@ export async function removeMember(
       hooks.beforeRemoveMember,
       event,
     );
-    const n = await storage.delete("member", [
-      { field: "id", op: "eq", value: target.member.id },
-      { field: "role", op: "eq", value: target.member.role },
-    ]);
-    if (n === 0) return 0;
-    // Plan 12k: the person's team rows and active team go with the membership, with no team hook.
-    await dropMemberTeams(storage, organizationId, target.member.userId);
-    await storage.update(
-      "session",
-      [
-        { field: "userId", op: "eq", value: target.member.userId },
-        { field: "activeOrganizationId", op: "eq", value: organizationId },
-      ],
-      { activeOrganizationId: null },
-    );
-    if (revokeTokens)
-      await storage.delete("organizationToken", [
-        { field: "organizationId", op: "eq", value: organizationId },
-        { field: "createdById", op: "eq", value: target.member.userId },
-      ]);
-    return n;
+    return removeMemberIn(storage, target.member, revokeTokens);
   };
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).

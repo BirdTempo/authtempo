@@ -12,7 +12,13 @@ import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FOOTER_LINKS, NAV_LINKS, SITE } from "../src/data/site.ts";
-import { DOCUMENTATION_HOSTS, unusedDocumentationHosts, vendorHosts } from "../src/data/vendors.ts";
+import {
+  DOCUMENTATION_HOSTS,
+  FILE_HOST_EXCEPTIONS,
+  unusedDocumentationHosts,
+  unusedFileHostExceptions,
+  vendorHosts,
+} from "../src/data/vendors.ts";
 
 /** Every string inside a value, at any depth. */
 function leaves(v: unknown): string[] {
@@ -48,6 +54,10 @@ function realCore(): Map<string, string> {
  */
 const CORE_VENDORS: readonly string[] = [];
 
+/** A URL of www.w3.org, as an XML namespace name, and a URL of a vendor. */
+const W3C = 'const NS = "http://www.w3.org/2000/09/xmldsig#";';
+const VENDOR = 'fetch("https://api.vendor.dev/v1");';
+
 /** The keys of SITE that are a URL or a path, typed as keys so a renamed key fails the typecheck. */
 const ADDRESSES: readonly (keyof typeof SITE)[] = ["origin", "docs"];
 
@@ -74,6 +84,16 @@ describe("the data of the home page (plan 11b1)", () => {
       ["packages/core/src/b.ts", '"https://app.example.com/x", "https://x.invalid/"'],
     ]);
     expect(vendorHosts(files)).toEqual(["api.vendor.dev"]);
+  });
+
+  it("skips the DNS resolver presets of src/engine/sso/dns.ts and counts a host of another sso file", () => {
+    const files = new Map([
+      ["packages/core/src/engine/sso/dns.ts", '"https://cloudflare-dns.com/dns-query"'],
+      ["packages/core/src/engine/sso/oidc.ts", '"https://idp.vendor.dev/.well-known/x"'],
+      ["packages/core/src/engine/oauth-clients.ts", 'fetch("https://api.vendor.dev/v1")'],
+      ["packages/core/src/engine/ssox/a.ts", '"https://other.vendor.dev/"'],
+    ]);
+    expect(vendorHosts(files)).toEqual(["api.vendor.dev", "idp.vendor.dev", "other.vendor.dev"]);
   });
 
   it("does not count a host in a line comment or a block comment", () => {
@@ -180,6 +200,76 @@ describe("the data of the home page (plan 11b1)", () => {
     for (const d of DOCUMENTATION_HOSTS)
       expect({ host: d.host, reason: d.reason.trim() !== "" }).toEqual({
         host: d.host,
+        reason: true,
+      });
+  });
+
+  it.each([
+    ["in saml/xml.ts", "packages/core/src/saml/xml.ts", W3C, []],
+    ["in saml/dsig.ts", "packages/core/src/saml/dsig.ts", W3C, []],
+    ["in another core file", "packages/core/src/engine/a.ts", W3C, ["www.w3.org"]],
+    ["in another saml file", "packages/core/src/saml/c14n.ts", W3C, ["www.w3.org"]],
+    [
+      "in a file of the same name in another folder",
+      "packages/core/src/x/saml/dsig.ts",
+      W3C,
+      ["www.w3.org"],
+    ],
+    [
+      "of another host in a saml file of the list",
+      "packages/core/src/saml/dsig.ts",
+      VENDOR,
+      ["api.vendor.dev"],
+    ],
+  ])(
+    "reads www.w3.org by the exception list of each file: a URL %s",
+    (_case, path, text, hosts) => {
+      expect(vendorHosts(new Map([[path, text]]))).toEqual(hosts);
+    },
+  );
+
+  it("drops a host of the exception list in its own file only", () => {
+    const list = [
+      { path: "packages/core/src/saml/xml.ts", hosts: ["www.w3.org"], reason: "a name" },
+    ];
+    const files = new Map([
+      ["packages/core/src/saml/xml.ts", `${W3C}\n${VENDOR}`],
+      ["packages/core/src/saml/dsig.ts", W3C],
+    ]);
+    expect(vendorHosts(files, [], [])).toEqual(["api.vendor.dev", "www.w3.org"]);
+    expect(vendorHosts(files, [], list)).toEqual(["api.vendor.dev", "www.w3.org"]);
+    expect(vendorHosts(new Map([["packages/core/src/saml/xml.ts", W3C]]), [], list)).toEqual([]);
+  });
+
+  it("names each host of the exception list that its file does not name", () => {
+    const list = [
+      {
+        path: "packages/core/src/saml/xml.ts",
+        hosts: ["www.w3.org", "x.vendor.dev"],
+        reason: "a name",
+      },
+    ];
+    expect(
+      unusedFileHostExceptions(new Map([["packages/core/src/saml/xml.ts", W3C]]), list),
+    ).toEqual(["packages/core/src/saml/xml.ts x.vendor.dev"]);
+    // The host in another file does not make the entry used.
+    expect(unusedFileHostExceptions(new Map([["packages/core/src/a.ts", W3C]]), list)).toEqual([
+      "packages/core/src/saml/xml.ts www.w3.org",
+      "packages/core/src/saml/xml.ts x.vendor.dev",
+    ]);
+  });
+
+  it("finds each entry of the exception list in the source of core, with a reason", () => {
+    expect(FILE_HOST_EXCEPTIONS.map((e) => [e.path, [...e.hosts]])).toEqual([
+      ["packages/core/src/saml/xml.ts", ["www.w3.org"]],
+      ["packages/core/src/saml/dsig.ts", ["www.w3.org"]],
+      ["packages/core/src/engine/sso/dns.ts", ["cloudflare-dns.com", "dns.google"]],
+      ["packages/core/src/engine/scim/groups.ts", ["schemas.microsoft.com"]],
+    ]);
+    expect(unusedFileHostExceptions(realCore())).toEqual([]);
+    for (const e of FILE_HOST_EXCEPTIONS)
+      expect({ path: e.path, reason: e.reason.trim() !== "" }).toEqual({
+        path: e.path,
         reason: true,
       });
   });

@@ -7,6 +7,12 @@ import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
 import { endPendingRows, PENDING_PAGE_RESERVE, readPendingEnds } from "./operator/access-end.js";
+import {
+  ORGANIZATION_REST,
+  ORGANIZATION_REST_CALLS,
+  sweepOrganizationRest,
+} from "./organization-rest.js";
+import { recheckDomains } from "./sso/domains.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -44,6 +50,17 @@ export interface SweepResult {
   oauthLogouts: number;
   /** Client secrets of a rotation past their overlap, cleared from the client row (plan 12e). */
   oauthClientSecrets: number;
+  /** Verified SSO domains checked again by DNS (plan 12d), inside the call budget. 0 while `sso` is off. */
+  ssoDomains: number;
+  /** Pending SSO domains past `expiresAt`, which no verify can prove (plan 12d). 0 while `sso` is off. */
+  ssoPendingDomains: number;
+  /** SCIM tokens past `expiresAt` (plan 12d). A token with no expiry is never swept. 0 while `scim` is off. */
+  scimTokens: number;
+  /**
+   * Organizations that an account delete took, whose teams, invitations,
+   * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
+   */
+  organizationRows: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -113,6 +130,16 @@ export const OUTBOX_SHARE = 16;
 
 /** The calls that the idle client step leaves for the link step: one page needs 5. */
 const LINK_SHARE = 8;
+
+/**
+ * The calls that the idle client, link, and outbox steps leave for the
+ * recheck of the SSO domains (plan 12d), while `sso` is on. The read of the
+ * recheck takes 1 call. One row with two resolvers takes 5 calls at most.
+ * Each resolver takes one call. The update and the audit row of a loss take
+ * 3 calls on D1. The recheck runs after the links and the outbox. So it also takes
+ * the calls that they leave, up to `RECHECK_BATCH` rows.
+ */
+export const RECHECK_SHARE = 7;
 
 /** The most calls of one idle client: the consent read, the token read, and the update or the delete. */
 const CLIENT_CALLS = 3;
@@ -250,6 +277,10 @@ const SOFT_STEPS = {
   link: "sweep.link_stopped",
   outbox: "sweep.outbox_stopped",
   "pending end": "sweep.pending_end_stopped",
+  // The two last steps of plan 12d: the recheck of the verified domains, and the rows that a
+  // solo organization of an account delete leaves.
+  "sso recheck": "sweep.sso_recheck_stopped",
+  "organization rest": "sweep.organization_rest_stopped",
 } as const;
 
 /**
@@ -379,29 +410,83 @@ export async function sweepExpired(
   // idle clients. So the read takes its 1 call from the clients and the
   // links, not from the outbox. While a row waits, the outbox leaves the calls of
   // one page for it (ruling 50 of plan 12f), so a backlog cannot hold it.
+  // The pending rows of the solo organizations of an account delete come in the same read
+  // (ruling 78 of plan 12d).
   const pending: VerificationRow[] = [];
   await softStep(
     config.observe,
     "pending end",
-    readPendingEnds(storage, meter, budget).then((rows) => pending.push(...rows)),
+    readPendingEnds(storage, meter, budget, [ORGANIZATION_REST]).then((rows) =>
+      pending.push(...rows),
+    ),
   );
+  const rests = pending.filter((row) => row.purpose === ORGANIZATION_REST);
+  const ends = pending.filter((row) => row.purpose !== ORGANIZATION_REST);
   // After the refresh tokens, so a client whose last token just expired can go.
   // After the four single-statement steps too: the client step may use the
   // calls up to its limit, and the link step must still get `LINK_SHARE`.
   // A page of links needs 5 calls (review m1 of the 12f Task 7 fix 2).
-  const oauthClients = await sweepClients(storage, now, meter, budget - LINK_SHARE - OUTBOX_SHARE);
-  // Last, so a storage limit met here leaves every count above done. The
-  // links of the sessions that ended become outbox rows, and the outbox
-  // sends its due rows (plan 12e Task 16).
+  // A pending domain past its expiry can never verify, and a verify of it
+  // answers token_expired. A claimed row has no expiry, so it never matches.
+  const ssoPendingDomains = config.sso
+    ? await storage.delete("ssoDomain", [
+        { field: "expiresAt", op: "lt", value: now },
+        { field: "claimedDomain", op: "eq", value: null },
+      ])
+    : 0;
+  if (config.sso) meter.step(1);
+  // An expired SCIM token answers 401 (`authenticateScim`), and its row holds a
+  // hash that no flow reads. A null expiry never matches lt, so it stays.
+  const scimTokens = config.scim
+    ? await storage.delete("scimToken", [{ field: "expiresAt", op: "lt", value: now }])
+    : 0;
+  if (config.scim) meter.step(1);
+  const recheckShare = config.sso ? RECHECK_SHARE : 0;
+  // While a row waits, the outbox and the recheck leave the calls of one row for its step.
+  const pendingReserve =
+    (ends.length > 0 ? PENDING_PAGE_RESERVE : 0) + (rests.length > 0 ? ORGANIZATION_REST_CALLS : 0);
+  const oauthClients = await sweepClients(
+    storage,
+    now,
+    meter,
+    budget - LINK_SHARE - OUTBOX_SHARE - recheckShare,
+  );
+  // Then the steps that may fail on a storage limit, so each count above is
+  // done. The links of the sessions that ended become outbox rows, and the
+  // outbox sends its due rows (plan 12e Task 16). Each stops short of the
+  // share of the recheck.
   const oauthSessionLinks = await softStep(
     config.observe,
     "link",
-    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE),
+    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE - recheckShare),
   );
   const oauthLogouts = await softStep(
     config.observe,
     "outbox",
-    deliverDueLogouts(config, meter, budget - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0)),
+    deliverDueLogouts(config, meter, budget - recheckShare - pendingReserve),
+  );
+  // The recheck of the verified domains comes after the logouts, which
+  // reach another party. It takes its share and every call that the links
+  // and the outbox left (review m4 of plan 12d Task 2b). With an idle outbox
+  // a sweep of 50 calls rechecks several domains, not one.
+  const ssoDomains = config.sso
+    ? await softStep(
+        config.observe,
+        "sso recheck",
+        recheckDomains(config, now, { meter, limit: budget - pendingReserve }),
+      )
+    : 0;
+  // The rows of the solo organizations of an account delete. No flow reaches them: each read
+  // needs the organization row or a member row, which the act deleted.
+  const organizationRows = await softStep(
+    config.observe,
+    "organization rest",
+    sweepOrganizationRest(
+      config,
+      rests,
+      meter,
+      budget - (ends.length > 0 ? PENDING_PAGE_RESERVE : 0),
+    ),
   );
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
@@ -409,7 +494,7 @@ export async function sweepExpired(
   const pendingSessions = await softStep(
     config.observe,
     "pending end",
-    endPendingRows(config, pending, meter, budget),
+    endPendingRows(config, ends, meter, budget),
   );
   const result: SweepResult = {
     verificationExpired,
@@ -429,6 +514,10 @@ export async function sweepExpired(
     oauthSessionLinks,
     oauthLogouts,
     oauthClientSecrets,
+    ssoDomains,
+    ssoPendingDomains,
+    scimTokens,
+    organizationRows,
   };
   // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
   config.observe.emit({

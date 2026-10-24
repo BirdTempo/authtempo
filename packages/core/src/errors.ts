@@ -84,6 +84,31 @@ export const ERRORS = {
   impersonation_session: 403,
   // plan 12h: the readiness route (spec 31 item 12)
   not_ready: 503,
+  // plan 12d: the domain proof. A resolver did not give the value, another
+  // organization holds the domain, or the organization holds its limit.
+  domain_unverified: 400,
+  domain_taken: 409,
+  domain_limit: 409,
+  // plan 12d ruling 30: an account delete takes at most IN_CHUNK solo organizations at once
+  delete_too_large: 409,
+  // plan 12d Task 3: the organization holds its limit of SSO connections, and the
+  // SSO manager guard needs a second factor of the owner.
+  connection_limit: 409,
+  second_factor_required: 403,
+  // plan 12d Task 4: an SSO sign-in failed at a named step. Or the connection
+  // is gone, is off, or is of a kind that cannot sign in yet.
+  sso_failed: 400,
+  sso_not_configured: 404,
+  // plan 12d Task 5, in order. Only SSO signs in an address of an enforced
+  // domain. The address is outside the verified domains of the connection's
+  // organization. The connection creates no user (jit off). SCIM deactivated
+  // the user.
+  sso_required: 403,
+  sso_domain_mismatch: 403,
+  sso_not_provisioned: 403,
+  account_disabled: 403,
+  // plan 12d ruling 25 N2: the connection's default role is gone from the organization.
+  role_not_found: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;
@@ -167,6 +192,28 @@ export const OAUTH_ERRORS = {
 } as const;
 
 export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;
+
+/**
+ * The `scimType` values of the SCIM error message, with their status
+ * (RFC 7644 section 3.12, plan 12d Task 9). Section 3.12 was not re-read on
+ * 2026-10-20, because this task allowed no network read. A SCIM route answers
+ * the SCIM error message and never a code of `ERRORS`. So the client codes and
+ * the compatibility table do not change (spec section 30 item 21).
+ */
+export const SCIM_ERRORS = {
+  invalidFilter: 400,
+  tooMany: 400,
+  uniqueness: 409,
+  mutability: 400,
+  invalidSyntax: 400,
+  invalidPath: 400,
+  noTarget: 400,
+  invalidValue: 400,
+  invalidVers: 400,
+  sensitive: 403,
+} as const;
+
+export type ScimType = keyof typeof SCIM_ERRORS;
 
 /**
  * The status of `invalid_client` at a route that takes client auth, for a

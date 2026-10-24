@@ -16,6 +16,7 @@ import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
+import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
@@ -115,14 +116,21 @@ export function createHandler(
       headers.set("origin", expoOrigin);
       req = new Request(request, { headers });
     }
-    // Core's Origin and Fetch Metadata rules for every POST, before any shim
-    // route: the account, email OTP, and two-factor paths answer in the shim,
-    // so core's router alone would not see them (plan 12a fix wave, final
-    // review F1). After the expo-origin step, so a native app's scheme counts.
+    // Core's Origin and Fetch Metadata rules for every POST, PUT, PATCH, and
+    // DELETE, before any shim route (plan 12d). The account, email OTP, and
+    // two-factor paths answer in the shim. Core's router alone does not see
+    // them (plan 12a fix wave, final review F1). The check comes after the
+    // expo-origin step, so the scheme of a native app counts.
     // In Better Auth's shape on every path (the lead's ruling): Better Auth
     // 1.7.2 has one origin check, so both of core's rules answer INVALID_ORIGIN.
+    // An IdP posts the SAML form cross-site: core's own ACS route takes it (plan 12d Task 14).
+    const acs = await ssoAcsRoute(auth, mapped, req);
+    if (acs) return acs;
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
+    // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
+    const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
+    if (sso) return sso;
     const copy = req.method === "POST" ? req.clone() : null;
     // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
     // serve, then the calls that map onto core's operator routes. Null for every other request.
@@ -169,7 +177,10 @@ export function createHandler(
   };
 }
 
-/** Core's 403 of a cross-site POST in Better Auth's shape, with core's status and headers. */
+/**
+ * Core's 403 of a cross-site POST, PUT, PATCH, or DELETE in Better Auth's
+ * shape, with core's status and headers.
+ */
 function invalidOrigin(refusal: Response): Response {
   const code = BETTER_AUTH_CODES.origin_not_trusted;
   return new Response(JSON.stringify({ code, message: messageOf(code) }), {

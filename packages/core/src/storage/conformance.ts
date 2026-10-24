@@ -21,8 +21,14 @@ import type {
   OrganizationRoleRow,
   OrganizationTokenRow,
   PasskeyRow,
+  ScimGroupMemberRow,
+  ScimGroupRow,
+  ScimTokenRow,
+  ScimUserRow,
   SecondFactorRow,
   SessionRow,
+  SsoConnectionRow,
+  SsoDomainRow,
   TeamMemberRow,
   TeamRow,
   TotpRow,
@@ -30,6 +36,7 @@ import type {
   UserRow,
   VerificationRow,
 } from "../schema.js";
+import { schema } from "../schema.js";
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import { type StorageAdapter, StorageError, type Where } from "./port.js";
 import { USER_CHILD_MODELS } from "./sql.js";
@@ -1887,6 +1894,335 @@ export function runAdapterConformance(
       });
     });
 
+    describe("createMany (ruling 57 of plan 12d)", () => {
+      const at = new Date("2026-10-24T00:00:00.000Z");
+      /** `n` member rows of group `g`, ids `<g>-<i>` in order. */
+      const members = (g: string, n: number, from = 0): ScimGroupMemberRow[] =>
+        Array.from({ length: n }, (_, k) => {
+          const i = String(from + k).padStart(6, "0");
+          return {
+            id: `${g}-${i}`,
+            groupId: g,
+            scimUserId: `su-${i}`,
+            createdAt: at,
+            updatedAt: at,
+          };
+        });
+      const ofGroup = (g: string) =>
+        db.findMany("scimGroupMember", [{ field: "groupId", op: "eq", value: g }], {
+          sort: { field: "id", dir: "asc" },
+        });
+      /** The growth of `statementsSent` across `step`, or null with no counter. */
+      const growth = async (step: () => Promise<unknown>) => {
+        const before = db.statementsSent?.();
+        await step();
+        const after = db.statementsSent?.();
+        return before === undefined || after === undefined ? null : after - before;
+      };
+      const counted = (n: number) => (db.statementsSent ? n : null);
+
+      it("answers an empty list with no row and no statement", async () => {
+        // The ready check first, so the count below holds the call alone.
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        let out: unknown;
+        expect(
+          await growth(async () => {
+            out = await db.createMany("scimGroupMember", []);
+          }),
+        ).toBe(counted(0));
+        expect(out).toEqual([]);
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+      });
+
+      it("writes one row in one statement and answers it", async () => {
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        const [row] = members("g1", 1);
+        let out: unknown;
+        expect(
+          await growth(async () => {
+            out = await db.createMany("scimGroupMember", members("g1", 1));
+          }),
+        ).toBe(counted(1));
+        expect(out).toEqual([row]);
+        expect(await ofGroup("g1")).toEqual([row]);
+      });
+
+      it("writes a full chunk in one statement and one row more in two", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        // From 1 to 1000 rows: a larger statement ran a MySQL test server out of memory.
+        expect(Number.isSafeInteger(size) && size >= 1 && size <= 1000).toBe(true);
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        expect(await growth(() => db.createMany("scimGroupMember", members("g1", size)))).toBe(
+          counted(1),
+        );
+        expect(await growth(() => db.createMany("scimGroupMember", members("g2", size + 1)))).toBe(
+          counted(2),
+        );
+        expect(await ofGroup("g1")).toEqual(members("g1", size));
+        expect(await ofGroup("g2")).toEqual(members("g2", size + 1));
+      });
+
+      it("writes a full chunk of team member rows, with the columns that a storage adds, in one statement or two halves", async () => {
+        if (options.unmapped?.some((m) => m === "team" || m === "teamMember")) return;
+        // The Better Auth tables add a key column to a team member row, so its chunk is smaller.
+        const size = db.rowsPerInsert("teamMember");
+        const ids = Array.from({ length: size }, (_, i) => `u-${String(i).padStart(6, "0")}`);
+        // The parents first: a storage with foreign keys (the Better Auth tables) needs them.
+        await db.createMany(
+          "user",
+          ids.map((id) => user(id, `${id}@example.com`, at)),
+        );
+        await db.create("organization", {
+          id: "o1",
+          slug: "o1",
+          name: "O",
+          metadata: null,
+          createdAt: at,
+          updatedAt: at,
+        });
+        await db.create("team", {
+          id: "t1",
+          organizationId: "o1",
+          name: "Ops",
+          createdAt: at,
+          updatedAt: at,
+        });
+        const rows: TeamMemberRow[] = ids.map((userId, i) => ({
+          id: `tm-${String(i).padStart(6, "0")}`,
+          teamId: "t1",
+          organizationId: "o1",
+          userId,
+          createdAt: at,
+          updatedAt: at,
+        }));
+        // The key column of the Better Auth tables makes a chunk of 1000 rows pass 100 KB on
+        // SQLite, so it splits in two halves there (ruling 84 of plan 12d).
+        const sent = await growth(() => db.createMany("teamMember", rows));
+        if (sent !== null) expect([1, 2]).toContain(sent);
+        expect(
+          await db.findMany("teamMember", [{ field: "teamId", op: "eq", value: "t1" }], {
+            sort: { field: "id", dir: "asc" },
+          }),
+        ).toEqual(rows);
+      });
+
+      it("writes no row of the call when the last row of the second chunk breaks a unique key", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        const [stored] = members("g1", 1, size);
+        if (!stored) throw new Error("no row");
+        await db.create("scimGroupMember", { ...stored, id: "kept" });
+        // The last row holds the pair (groupId, scimUserId) of the stored row.
+        await expect(
+          db.createMany("scimGroupMember", members("g1", size + 1)),
+        ).rejects.toMatchObject({
+          name: "StorageError",
+          code: "unique_violation",
+          model: "scimGroupMember",
+        });
+        expect((await ofGroup("g1")).map((r) => r.id)).toEqual(["kept"]);
+      });
+
+      it("writes no row when two rows of the list share an id", async () => {
+        const [a, b] = members("g1", 2);
+        if (!a || !b) throw new Error("no row");
+        await expect(
+          db.createMany("scimGroupMember", [a, { ...b, id: a.id }]),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unique_violation" });
+        expect(await ofGroup("g1")).toEqual([]);
+      });
+
+      it("rolls back its rows with the transaction, and an earlier write with them", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        await expect(
+          db.transaction(async (tx) => {
+            await tx.create("user", user("u1", "a@example.com", at));
+            const out = await tx.createMany("scimGroupMember", members("g1", size + 1));
+            expect(out).toHaveLength(size + 1);
+            expect(await tx.findMany("scimGroupMember", [])).toHaveLength(size + 1);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).toBeNull();
+      });
+
+      it("fails a transaction with a unique clash of a later chunk and keeps no row of it", async () => {
+        const size = db.rowsPerInsert("scimGroupMember");
+        const [stored] = members("g1", 1, size);
+        if (!stored) throw new Error("no row");
+        await db.create("scimGroupMember", { ...stored, id: "kept" });
+        await expect(
+          db.transaction(async (tx) => {
+            await tx.create("user", user("u1", "a@example.com", at));
+            await tx.createMany("scimGroupMember", members("g1", size + 1));
+          }),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unique_violation" });
+        expect((await ofGroup("g1")).map((r) => r.id)).toEqual(["kept"]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u1" }])).toBeNull();
+      });
+
+      it("rejects an unknown model and an unknown field, and writes nothing", async () => {
+        const [row] = members("g1", 1);
+        await expect(db.createMany("nope" as ModelName, [row] as never[])).rejects.toMatchObject({
+          name: "StorageError",
+          code: "unknown_model",
+        });
+        await expect(
+          db.createMany("scimGroupMember", [{ ...row, nope: 1 } as unknown as ScimGroupMemberRow]),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
+        expect(await ofGroup("g1")).toEqual([]);
+      });
+    });
+
+    describe("lists of up to 1000 values (ruling 84 of plan 12d)", () => {
+      const at = new Date("2026-10-24T00:00:00.000Z");
+      const later = new Date(at.getTime() + 60_000);
+      /** `n` member rows of group `g`, with a scimUserId of `width` characters. */
+      const members = (g: string, n: number, width = 9): ScimGroupMemberRow[] =>
+        Array.from({ length: n }, (_, k) => {
+          const i = String(k).padStart(6, "0");
+          return {
+            id: `${g}-${i}`,
+            groupId: g,
+            scimUserId: `su-${i}`.padEnd(width, "x"),
+            createdAt: at,
+            updatedAt: at,
+          };
+        });
+      const growth = async (step: () => Promise<unknown>) => {
+        const before = db.statementsSent?.();
+        await step();
+        const after = db.statementsSent?.();
+        return before === undefined || after === undefined ? null : after - before;
+      };
+      const counted = (n: number) => (db.statementsSent ? n : null);
+
+      it("reads, updates, and deletes by an in list of 1000 values in one statement each", async () => {
+        const rows = members("g1", 1000);
+        await db.createMany("scimGroupMember", rows);
+        const ids = rows.map((r) => r.id);
+        const inIds = [{ field: "id" as const, op: "in" as const, value: ids }];
+        let found: ScimGroupMemberRow[] = [];
+        expect(
+          await growth(async () => {
+            found = await db.findMany("scimGroupMember", inIds);
+          }),
+        ).toBe(counted(1));
+        expect(found).toHaveLength(1000);
+        let changed = 0;
+        expect(
+          await growth(async () => {
+            changed = await db.update("scimGroupMember", inIds, { updatedAt: later });
+          }),
+        ).toBe(counted(1));
+        expect(changed).toBe(1000);
+        let gone = 0;
+        expect(
+          await growth(async () => {
+            gone = await db.delete("scimGroupMember", [
+              { field: "id", op: "in", value: ids.slice(0, 999) },
+            ]);
+          }),
+        ).toBe(counted(1));
+        expect(gone).toBe(999);
+        const left = await db.findMany("scimGroupMember", []);
+        expect(left.map((r) => [r.id, r.updatedAt.getTime()])).toEqual([
+          ["g1-000999", later.getTime()],
+        ]);
+      });
+
+      it("reads, updates, and deletes by an in list of 2000 values in one statement each (ruling 85 of plan 12d)", async () => {
+        const rows = [...members("g1", 1000), ...members("g2", 1000)];
+        await db.createMany("scimGroupMember", rows.slice(0, 1000));
+        await db.createMany("scimGroupMember", rows.slice(1000));
+        const inIds = [{ field: "id" as const, op: "in" as const, value: rows.map((r) => r.id) }];
+        let found: ScimGroupMemberRow[] = [];
+        expect(
+          await growth(async () => {
+            found = await db.findMany("scimGroupMember", inIds);
+          }),
+        ).toBe(counted(1));
+        expect(found).toHaveLength(2000);
+        expect(
+          await growth(async () => {
+            expect(await db.update("scimGroupMember", inIds, { updatedAt: later })).toBe(2000);
+          }),
+        ).toBe(counted(1));
+        expect(
+          await growth(async () => {
+            expect(await db.delete("scimGroupMember", inIds)).toBe(2000);
+          }),
+        ).toBe(counted(1));
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+      });
+
+      it("keeps each value of a long in list bound: quotes, brackets, and SQL text match only their own row", async () => {
+        const odd = [
+          "x') OR 1=1 --",
+          'y"] OR 1=1 --',
+          "z'; DELETE FROM ta_scim_group_member; --",
+          "\\u0027 OR '1'='1",
+          "[1, 2]",
+        ];
+        const rows = [...members("g1", 60), ...members("g2", 2)].map((r, i) => {
+          const id = odd[i] ?? r.id;
+          return { ...r, id };
+        });
+        await db.createMany("scimGroupMember", rows);
+        // 58 values: more than 50, so a D1 or SQLite store binds the list as one JSON text.
+        const wanted = [
+          ...odd,
+          ...rows.slice(odd.length, 55).map((r) => r.id),
+          "none",
+          "' OR ''='",
+          // A where value only: an ascii column of MySQL holds no such id.
+          "ü-ß-東京",
+        ];
+        const found = await db.findMany("scimGroupMember", [
+          { field: "id", op: "in", value: wanted },
+        ]);
+        expect(found.map((r) => r.id).sort()).toEqual(
+          rows
+            .slice(0, 55)
+            .map((r) => r.id)
+            .sort(),
+        );
+        expect(await db.findMany("scimGroupMember", [])).toHaveLength(62);
+      });
+
+      it("writes 1000 rows of long values in one call and reads each back", async () => {
+        // A scimUserId of 64 characters, the width of the column on MySQL: about 115 KB of
+        // values. A D1 statement holds at most 100 KB, so D1 splits the call.
+        const rows = members("g1", 1000, 64);
+        expect(await db.createMany("scimGroupMember", rows)).toEqual(rows);
+        expect(
+          await db.findMany("scimGroupMember", [], { sort: { field: "id", dir: "asc" } }),
+        ).toEqual(rows);
+      });
+
+      it("rolls back an update and a delete of 1000 rows each with the transaction", async () => {
+        const users = Array.from({ length: 1000 }, (_, i) => {
+          const id = `u-${String(i).padStart(6, "0")}`;
+          return user(id, `${id}@example.com`, at);
+        });
+        await db.createMany("user", users);
+        const ids = users.map((u) => u.id);
+        const all = () => db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+        const before = await all();
+        await expect(
+          db.transaction(async (tx) => {
+            const inIds = [{ field: "id" as const, op: "in" as const, value: ids }];
+            expect(await tx.update("user", inIds, { name: "changed", updatedAt: later })).toBe(
+              1000,
+            );
+            expect(await tx.delete("user", inIds)).toBe(1000);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await all()).toEqual(before);
+      });
+    });
+
     describe("schema version 13 (plan 12k)", () => {
       const at = new Date("2026-10-20T00:00:00.000Z");
       const later = new Date(at.getTime() + 3_600_000);
@@ -2114,6 +2450,248 @@ export function runAdapterConformance(
         expect(USER_CHILD_MODELS).not.toContain("team");
       });
     });
+
+    describe("SSO and SCIM models (plan 12d)", () => {
+      const at = new Date("2026-10-21T00:00:00.000Z");
+      const later = new Date(at.getTime() + 3_600_000);
+      const connection: SsoConnectionRow = {
+        id: "c1",
+        organizationId: "o1",
+        kind: "oidc",
+        label: "Acme IdP",
+        enabled: true,
+        jit: false,
+        defaultRole: "member",
+        config: { issuer: "https://idp.acme.example", scopes: ["openid", "email"] },
+        clientSecret: "sealed-1",
+        secretVersion: 1,
+        mfa: { amr: ["mfa"], acr: [] },
+        scimRoles: { Admins: "admin" },
+        createdAt: at,
+        updatedAt: at,
+      };
+      const domain = (id: string, organizationId: string): SsoDomainRow => ({
+        id,
+        organizationId,
+        domain: "acme.example",
+        challenge: `challenge-${id}`,
+        claimedDomain: null,
+        connectionId: null,
+        enforce: false,
+        includeSubdomains: false,
+        verifiedAt: null,
+        checkedAt: null,
+        failures: 0,
+        firstFailureAt: null,
+        expiresAt: later,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const scimToken: ScimTokenRow = {
+        id: "st1",
+        organizationId: "o1",
+        name: "Entra",
+        tokenHash: "sh1",
+        hint: "abcdefgh",
+        scopes: ["scim.users.read", "scim.groups.write"],
+        expiresAt: later,
+        lastUsedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const scimUser = (
+        id: string,
+        organizationId: string,
+        userId: string,
+        userNameKey: string,
+      ): ScimUserRow => ({
+        id,
+        organizationId,
+        userId,
+        userName: userNameKey.toUpperCase(),
+        userNameKey,
+        externalId: `ext-${id}`,
+        active: true,
+        displayName: null,
+        data: { name: { givenName: "Ada" }, emails: [{ value: userNameKey, primary: true }] },
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const scimGroup: ScimGroupRow = {
+        id: "sg1",
+        organizationId: "o1",
+        displayName: "Admins",
+        displayNameKey: "admins",
+        externalId: null,
+        teamId: "t1",
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const scimGroupMember: ScimGroupMemberRow = {
+        id: "sgm1",
+        groupId: "sg1",
+        scimUserId: "su1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      const samlRow = (id: string, purpose: VerificationRow["purpose"]): VerificationRow => ({
+        id,
+        purpose,
+        identifier: "c1",
+        valueHash: `saml-${purpose}`,
+        expiresAt: later,
+        consumedAt: null,
+        data: null,
+        createdAt: at,
+        updatedAt: at,
+        secretVersion: 1,
+      });
+      const byId = (id: string) => [{ field: "id" as const, op: "eq" as const, value: id }];
+
+      it("round-trips the six models", async () => {
+        const claimed: SsoDomainRow = {
+          ...domain("d1", "o1"),
+          claimedDomain: "acme.example",
+          connectionId: "c1",
+          enforce: true,
+          includeSubdomains: true,
+          verifiedAt: at,
+          checkedAt: later,
+          failures: 2,
+          firstFailureAt: at,
+          expiresAt: null,
+        };
+        const bare: SsoConnectionRow = {
+          ...connection,
+          id: "c2",
+          kind: "saml",
+          enabled: false,
+          jit: true,
+          config: {},
+          clientSecret: null,
+          secretVersion: 3,
+          mfa: null,
+          scimRoles: null,
+        };
+        const user1 = scimUser("su1", "o1", "u1", "ada@acme.example");
+        const user2: ScimUserRow = {
+          ...scimUser("su2", "o1", "u2", "bob@acme.example"),
+          externalId: null,
+          active: false,
+          displayName: "Bob",
+          data: {},
+          version: 7,
+        };
+        await db.create("ssoConnection", connection);
+        await db.create("ssoConnection", bare);
+        await db.create("ssoDomain", claimed);
+        await db.create("ssoDomain", domain("d2", "o2"));
+        await db.create("scimToken", scimToken);
+        await db.create("scimUser", user1);
+        await db.create("scimUser", user2);
+        await db.create("scimGroup", scimGroup);
+        await db.create("scimGroupMember", scimGroupMember);
+        // toEqual reads a Date by its time, so each date reads back as the same epoch milliseconds.
+        expect(await db.findOne("ssoConnection", byId("c1"))).toEqual(connection);
+        expect(await db.findOne("ssoConnection", byId("c2"))).toEqual(bare);
+        expect(await db.findOne("ssoDomain", byId("d1"))).toEqual(claimed);
+        expect(await db.findOne("ssoDomain", byId("d2"))).toEqual(domain("d2", "o2"));
+        expect((await db.findOne("ssoDomain", byId("d1")))?.firstFailureAt?.getTime()).toBe(
+          at.getTime(),
+        );
+        expect(await db.findOne("scimToken", byId("st1"))).toEqual(scimToken);
+        expect(await db.findOne("scimUser", byId("su1"))).toEqual(user1);
+        expect(await db.findOne("scimUser", byId("su2"))).toEqual(user2);
+        expect(await db.findOne("scimGroup", byId("sg1"))).toEqual(scimGroup);
+        expect(await db.findOne("scimGroupMember", byId("sgm1"))).toEqual(scimGroupMember);
+        await expect(
+          db.create("scimGroupMember", { ...scimGroupMember, id: "sgm2" }),
+        ).rejects.toMatchObject({ code: "unique_violation", fields: ["groupId", "scimUserId"] });
+        await expect(db.create("scimToken", { ...scimToken, id: "st2" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["tokenHash"],
+        });
+      });
+
+      it("keeps one organization per claimed domain", async () => {
+        await db.create("ssoDomain", domain("d1", "o1"));
+        await db.create("ssoDomain", domain("d2", "o2"));
+        const claim = (id: string) =>
+          db.update("ssoDomain", [...byId(id), { field: "claimedDomain", op: "eq", value: null }], {
+            claimedDomain: "acme.example",
+            verifiedAt: at,
+          });
+        expect(await claim("d1")).toBe(1);
+        await expect(claim("d2")).rejects.toBeInstanceOf(StorageError);
+        await expect(claim("d2")).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["claimedDomain"],
+        });
+        expect((await db.findOne("ssoDomain", byId("d2")))?.claimedDomain).toBeNull();
+      });
+
+      it("refuses a second userName key in one organization", async () => {
+        await db.create("scimUser", scimUser("su1", "o1", "u1", "ada@acme.example"));
+        await expect(
+          db.create("scimUser", scimUser("su2", "o1", "u2", "ada@acme.example")),
+        ).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["organizationId", "userNameKey"],
+        });
+        await db.create("scimUser", scimUser("su3", "o2", "u2", "ada@acme.example"));
+        expect(
+          (
+            await db.findMany("scimUser", [
+              { field: "userNameKey", op: "eq", value: "ada@acme.example" },
+            ])
+          )
+            .map((r) => r.id)
+            .sort(),
+        ).toEqual(["su1", "su3"]);
+      });
+
+      it("spends a version once", async () => {
+        await db.create("scimUser", scimUser("su1", "o1", "u1", "ada@acme.example"));
+        const spend = () =>
+          db.update("scimUser", [...byId("su1"), { field: "version", op: "eq", value: 1 }], {
+            version: 2,
+            active: false,
+          });
+        expect(await spend()).toBe(1);
+        expect(await spend()).toBe(0);
+        expect(await db.findOne("scimUser", byId("su1"))).toMatchObject({
+          version: 2,
+          active: false,
+        });
+      });
+
+      it("spends a saml-request row once", async () => {
+        await db.create("verification", samlRow("v1", "saml-request"));
+        const spend = () =>
+          db.update(
+            "verification",
+            [...byId("v1"), { field: "consumedAt", op: "eq", value: null }],
+            { consumedAt: later },
+          );
+        expect(await spend()).toBe(1);
+        expect(await spend()).toBe(0);
+        expect((await db.findOne("verification", byId("v1")))?.purpose).toBe("saml-request");
+      });
+
+      it("refuses a second saml-assertion row with one valueHash", async () => {
+        await db.create("verification", samlRow("v1", "saml-assertion"));
+        await expect(
+          db.create("verification", samlRow("v2", "saml-assertion")),
+        ).rejects.toMatchObject({ code: "unique_violation", fields: ["valueHash"] });
+        expect(
+          await db.findMany("verification", [
+            { field: "purpose", op: "eq", value: "saml-assertion" },
+          ]),
+        ).toHaveLength(1);
+      });
+    });
   });
 }
 
@@ -2279,6 +2857,7 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
     backupCodes: setup.backupCodes.length - 1,
     signingKeys: 0,
     emailCodes: 0,
+    ssoClientSecrets: 0,
   });
   // Version 1 goes. The TOTP user and the JWT of version 1 still pass.
   const only2 = make([{ version: 2, value: S2 }]);
@@ -2296,4 +2875,206 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
 function must<T>(r: Result<T> | undefined): T {
   if (!r?.ok) throw new Error(`rotation: ${r ? r.code : "no api"}`);
   return r.value;
+}
+
+/** One SQLite store for `runStoredFormConformance`: the adapter and a raw read of its database. */
+export interface StoredFormTarget {
+  adapter: StorageAdapter;
+  /** The rows of one SQL read on the database, as the driver answers them. */
+  all(sql: string): Promise<Record<string, unknown>[]>;
+  close(): Promise<void>;
+}
+
+export interface StoredFormOptions {
+  /**
+   * Models whose rows other rows name by a foreign key. Their rows go in
+   * first, and the undo row does not delete them, because a delete cascades
+   * to the rows that name them. Default: none.
+   */
+  parents?: readonly ModelName[];
+}
+
+/** Values that a column type can read back in another form: numbers, JSON, keywords, and spaces. */
+const STORED_TEXTS = (r: number) => [
+  `1234${r}`,
+  `1.50${r}`,
+  `{"a":${r}}`,
+  `[${r}]`,
+  `-0${r}`,
+  `${r}e3`,
+  `true${r}`,
+  `null ${r}`,
+  ` 4${r} `,
+  `東京-${r}-😀`,
+];
+
+/**
+ * Row `r` of `model` with a value of each type in each field. A field that
+ * names a parent row names row `r` of that parent. With `nulls`, each
+ * nullable field is null. `prefix` starts each free text.
+ */
+function storedRow(model: ModelName, r: number, nulls: boolean, prefix = "") {
+  const fields = schema[model].fields as Record<
+    string,
+    { type: string; nullable?: boolean; int64?: true }
+  >;
+  const out: Record<string, unknown> = {};
+  let i = 0;
+  for (const [f, def] of Object.entries(fields)) {
+    i++;
+    if (f === "id") out[f] = `id-${model}-${r}`;
+    else if (f === "userId" || f === "inviterId" || f === "actorId") out[f] = `id-user-${r}`;
+    else if (f === "organizationId" || f === "activeOrganizationId")
+      out[f] = `id-organization-${r}`;
+    else if (f === "teamId" || f === "activeTeamId") out[f] = `id-team-${r}`;
+    else if (nulls && def.nullable) out[f] = null;
+    else if (model === "invitation" && f === "teamIds") out[f] = [`id-team-${r}`];
+    else if (model === "organizationRole" && f === "permissions") out[f] = { project: ["read"] };
+    else if (model === "passkey" && f === "publicKey") out[f] = "AQID-_";
+    else if (model === "identity" && f === "provider") out[f] = `github${r}`;
+    else if (def.type === "string") out[f] = `${prefix}${STORED_TEXTS(r)[i % 10]}`;
+    else if (def.type === "integer") out[f] = def.int64 ? Number.MAX_SAFE_INTEGER - r : 7 + r;
+    else if (def.type === "boolean") out[f] = r % 2 === 0;
+    else if (def.type === "date") out[f] = new Date(1761264000123 + r * 1001);
+    else out[f] = { k: `v"q\\${r}`, n: 1.5, big: 1e21, arr: [1, "2", null, true, { z: "東" }] };
+  }
+  return out;
+}
+
+/**
+ * The stored form of each row on D1 and on each SQLite driver (rulings 84
+ * and 85 of plan 12d). `createMany` binds its rows as one JSON list, and
+ * `create` binds one parameter per value. Both must store the same type and
+ * the same bytes in each column. Else a compare such as `expiresAt > now`
+ * goes wrong with no error. The undo of an update and a delete of many rows
+ * binds JSON lists too, and must restore the same bytes. A SQLite store
+ * runs it from its own test file with a factory that opens a fresh,
+ * migrated, empty database.
+ */
+export function runStoredFormConformance(
+  name: string,
+  open: () => Promise<StoredFormTarget>,
+  options: StoredFormOptions = {},
+): void {
+  const parents = options.parents ?? [];
+  const models = [
+    ...parents,
+    ...(Object.keys(schema) as ModelName[]).filter((m) => !parents.includes(m)),
+  ];
+
+  /** Each row of each table, a column as its type and `form` of its value, in one sorted text. */
+  async function snapshot(t: StoredFormTarget, form: "quote" | "hex"): Promise<string> {
+    const tables = (
+      await t.all(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT LIKE 'd1\\_%' ESCAPE '\\' AND name NOT IN ('ta_migrations', 'ta_meta', 'ta_limit') ORDER BY name",
+      )
+    ).map((r) => String(r.name));
+    const lines: string[] = [];
+    for (const table of tables) {
+      const cols = (await t.all(`SELECT name FROM pragma_table_info('${table}')`)).map((r) =>
+        String(r.name),
+      );
+      // One pair of terms per column: a text of all columns nests too deep for D1.
+      const each = cols.map((c, i) => `typeof("${c}") AS t${i}, ${form}("${c}") AS v${i}`);
+      for (const r of await t.all(`SELECT ${each.join(", ")} FROM "${table}"`))
+        lines.push(
+          `${table}: ${cols.map((c, i) => `${c}=${String(r[`t${i}`])}:${String(r[`v${i}`])}`).join(" | ")}`,
+        );
+    }
+    return lines.sort().join("\n");
+  }
+
+  /** Rows 0, 1, and 2 of each model, 2 with nulls, by `create` or by `createMany`. */
+  async function writeAll(db: StorageAdapter, many: boolean, prefix = ""): Promise<string[]> {
+    const errors: string[] = [];
+    for (const m of models) {
+      const rows = [0, 1, 2].map((r) => storedRow(m, r, r === 2, prefix));
+      try {
+        if (many) await db.createMany(m, rows as never[]);
+        else for (const row of rows) await db.create(m, row as never);
+      } catch (e) {
+        errors.push(`${m}: ${(e as Error).message}`);
+      }
+    }
+    return errors;
+  }
+
+  describe(`stored form: ${name}`, () => {
+    it("stores the same type and value in each column by create and by createMany, and the undo of many rows restores them (ruling 85 of plan 12d)", async () => {
+      const one = await open();
+      let created: string;
+      let refusedOne: string[];
+      try {
+        refusedOne = await writeAll(one.adapter, false);
+        created = await snapshot(one, "quote");
+      } finally {
+        await one.close();
+      }
+      const two = await open();
+      try {
+        expect(await writeAll(two.adapter, true)).toEqual(refusedOne);
+        const many = await snapshot(two, "quote");
+        expect(many.split("\n").length).toBeGreaterThan(models.length);
+        expect(many).toBe(created);
+        // An update and a delete of the three rows of each model, in a transaction that
+        // throws. The undo of many rows restores each column as it was.
+        const errors: string[] = [];
+        const written = models.filter((m) => !refusedOne.some((e) => e.startsWith(`${m}: `)));
+        for (const m of [...written].reverse()) {
+          const fields = schema[m].fields as Record<string, { type: string }>;
+          const data: Record<string, unknown> = {};
+          for (const [f, def] of Object.entries(fields)) {
+            if (f === "id") continue;
+            if (def.type === "date") data[f] = new Date(1800000000000);
+            else if (def.type === "boolean") data[f] = true;
+            else if (def.type === "integer") data[f] = 99;
+          }
+          const inIds = [
+            { field: "id", op: "in", value: [0, 1, 2].map((r) => `id-${m}-${r}`) },
+          ] as never[];
+          try {
+            await two.adapter.transaction(async (tx) => {
+              expect(await tx.update(m, inIds, data as never)).toBe(3);
+              if (!parents.includes(m)) expect(await tx.delete(m, inIds)).toBe(3);
+              throw new Error("boom");
+            });
+          } catch (e) {
+            if ((e as Error).message !== "boom") errors.push(`${m}: ${(e as Error).message}`);
+          }
+        }
+        expect(errors).toEqual([]);
+        expect(await snapshot(two, "quote")).toBe(many);
+      } finally {
+        await two.close();
+      }
+    });
+
+    it("stores a lone surrogate as U+FFFD by create and by createMany, and reads it back (ruling 85 of plan 12d)", async () => {
+      // Each free text starts with a lone high and a lone low surrogate.
+      const names = async (db: StorageAdapter) =>
+        (await db.findMany("user", [], { sort: { field: "id", dir: "asc" } })).map((u) => u.name);
+      const fixed = [0, 1, 2].map((r) => storedRow("user", r, r === 2, "a\ufffdb\ufffd").name);
+      const one = await open();
+      let created: string;
+      try {
+        await writeAll(one.adapter, false, "a\ud800b\udc00");
+        created = await snapshot(one, "hex");
+        expect(await names(one.adapter)).toEqual(fixed);
+      } finally {
+        await one.close();
+      }
+      // The bytes of U+FFFD at the start of a text column, and no CESU-8 form of a
+      // surrogate (ED A0 80 for U+D800).
+      expect(created).toContain("=text:61EFBFBD62EFBFBD");
+      expect(created).not.toContain("=text:61EDA080");
+      const two = await open();
+      try {
+        await writeAll(two.adapter, true, "a\ud800b\udc00");
+        expect(await snapshot(two, "hex")).toBe(created);
+        expect(await names(two.adapter)).toEqual(fixed);
+      } finally {
+        await two.close();
+      }
+    });
+  });
 }

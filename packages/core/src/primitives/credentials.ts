@@ -15,9 +15,13 @@ export const API_TOKEN_PREFIX = "tk_";
 /** An organization token: `to_` and 32 random bytes as base64url (plan 12k, spec 29 item 14). */
 export const ORGANIZATION_TOKEN_PREFIX = "to_";
 
+/** A SCIM token of an organization's directory: `sk_` and 32 random bytes as base64url (plan 12d). */
+export const SCIM_TOKEN_PREFIX = "sk_";
+
 /**
  * Every prefix of a credential that core issues, `to_` (organization tokens,
- * plan 12k) included. A moved key prefix (`tokens.movedPrefixes`)
+ * plan 12k), `sk_` (SCIM tokens, plan 12d), and `rs_` (the SAML `RelayState`,
+ * plan 12d Task 8) included. A moved key prefix (`tokens.movedPrefixes`)
  * may not shadow one of them (ruling 12 of plan 12k). A test reads each
  * `randomToken` call of core against this list.
  */
@@ -43,6 +47,8 @@ export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "ec_",
   "pv_",
   "pr_",
+  "sk_",
+  "rs_",
 ]);
 
 /** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */

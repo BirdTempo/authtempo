@@ -21,8 +21,11 @@ import {
 } from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
+import { createScimToken } from "../src/engine/scim/tokens.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { createSession } from "../src/engine/sessions.js";
+import { createConnection } from "../src/engine/sso/connections.js";
+import { addDomain } from "../src/engine/sso/domains.js";
 import { addTeamMember, createTeam } from "../src/engine/teams.js";
 import { API_TOKEN_CAP, createApiToken } from "../src/engine/tokens.js";
 import { CHALLENGE_MAX_ATTEMPTS } from "../src/engine/totp.js";
@@ -174,6 +177,27 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   },
   "POST /oauth/device": { user_code: "BCDF-GHJK" },
   "POST /oauth/grants/revoke": { clientId: "client-1" },
+  // Plan 12d: `$domain` names a domain of the world, so a route with an id reaches its guard.
+  "POST /sso/domains/add": { organizationId: "$org", domain: "acme.example" },
+  "POST /sso/domains/verify": { id: "$domain" },
+  "POST /sso/domains/update": { id: "$domain", includeSubdomains: true },
+  "POST /sso/domains/delete": { id: "$domain" },
+  // Plan 12d Task 3: `$connection` names a connection of the world.
+  "POST /sso/connections/create": {
+    organizationId: "$org",
+    kind: "oidc",
+    label: "Acme",
+    issuer: "https://login.idp.example",
+    clientId: "acme",
+    clientSecret: "acme-secret",
+  },
+  "POST /sso/connections/update": { id: "$connection", label: "Acme" },
+  "POST /sso/connections/delete": { id: "$connection" },
+  // Plan 12d Task 4: the discovery at sign-in.
+  "POST /sso/discover": { email: "ada@example.com" },
+  // Plan 12d Task 9b: `$scimToken` names a SCIM token of the world.
+  "POST /scim/tokens/create": { organizationId: "$org", name: "directory" },
+  "POST /scim/tokens/revoke": { id: "$scimToken" },
 };
 
 /** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
@@ -186,6 +210,9 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/teams": { organizationId: "$org" },
   "GET /organizations/teams/members": { teamId: "$team" },
   "GET /organizations/tokens": { organizationId: "$org" },
+  "GET /sso/domains": { organizationId: "$org" },
+  "GET /sso/connections": { organizationId: "$org" },
+  "GET /scim/tokens": { organizationId: "$org" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -204,6 +231,9 @@ const UNFILLED: Fills = {
   $challenge: BODY43,
   $org: "o1",
   $team: "t1",
+  $domain: "d1",
+  $connection: "c1",
+  $scimToken: "k1",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -313,12 +343,16 @@ function world(extra: Partial<AuthConfig> = {}) {
         {
           name: "default",
           secretHash: "0".repeat(64),
-          scopes: ["keys", "secrets", "users", "sessions", "audit"],
+          scopes: ["keys", "secrets", "users", "sessions", "audit", "sso"],
         },
       ],
       users: true,
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
+    // The domain and connection routes of plan 12d. No family of this file reaches a resolver.
+    sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
+    // The SCIM token routes of plan 12d Task 9b.
+    scim: {},
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -475,14 +509,20 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
               : // The device page counts a request with no session only.
                 key === "GET /oauth/device"
                 ? {}
-                : // The operator user tools count a secret call before the compare (plan 12f).
-                  entryOf(key).feature === "operatorUsers"
+                : // The operator user tools count a secret call before the compare
+                  // (plan 12f), and so does the override of plan 12d.
+                  entryOf(key).feature === "operatorUsers" || entryOf(key).feature === "operatorSso"
                   ? { authorization: `Operator ${"x".repeat(32)}` }
                   : w.cookie(me.token),
       fills,
     );
-    // The two routes that carry the code in a redirect to the app.
-    const redirects: RouteKey[] = ["GET /social/:provider/start", "POST /totp/challenge"];
+    // The four routes that carry the code in a redirect to the app.
+    const redirects: RouteKey[] = [
+      "GET /social/:provider/start",
+      "POST /totp/challenge",
+      "GET /sso/:connectionId/start",
+      "POST /sso/:connectionId/acs",
+    ];
     expect(unlike(results, "rate_limited", 429, redirects)).toEqual({});
   });
 
@@ -542,9 +582,46 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // a user outside answers not_found there. token-scope.test.ts proves the route answer.
     const routes = declaring("forbidden_rank").filter((key) => key !== "POST /tokens");
     expect(routes.length).toBeGreaterThan(0);
+    // A domain of the organization, so each domain route with an id reaches the guard (plan 12d).
+    const domain = must(
+      await addDomain(
+        config,
+        { kind: "app", name: "route-codes" },
+        {
+          organizationId: org.organization.id,
+          domain: "acme.example",
+        },
+      ),
+    );
+    // A connection of the organization, for the connection routes with an id (plan 12d Task 3).
+    const connection = must(
+      await createConnection(
+        config,
+        { kind: "app", name: "route-codes" },
+        {
+          organizationId: org.organization.id,
+          kind: "oidc",
+          label: "Acme",
+          issuer: "https://login.idp.example",
+          clientId: "acme",
+          clientSecret: "acme-secret",
+        },
+      ),
+    );
+    // A SCIM token of the organization, for the revoke (plan 12d Task 9b).
+    const scimToken = must(
+      await createScimToken(
+        config,
+        { kind: "app", name: "route-codes" },
+        { organizationId: org.organization.id, name: "directory" },
+      ),
+    );
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,
       $team: team.id,
+      $domain: domain.id,
+      $connection: connection.id,
+      $scimToken: scimToken.id,
     });
     expect(unlike(results, "forbidden_rank", 403)).toEqual({});
   });
@@ -591,7 +668,14 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       $resetToken: resetToken,
     };
     // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
-    const callbacks: RouteKey[] = ["GET /social/:provider/callback", "POST /social/apple/callback"];
+    // The SSO callback needs an IdP exchange: sso/resolve.test.ts proves it through the route (plan 12d).
+    // The SAML ACS needs a signed Response of a start; it runs the same resolveSsoUser (plan 12d Task 8).
+    const callbacks: RouteKey[] = [
+      "GET /social/:provider/callback",
+      "POST /social/apple/callback",
+      "GET /sso/:connectionId/callback",
+      "POST /sso/:connectionId/acs",
+    ];
     const routes = declaring("sign_up_closed").filter((key) => !callbacks.includes(key));
     expect(routes.length).toBeGreaterThan(0);
     const otpReset = "POST /otp/reset";
@@ -1035,6 +1119,12 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   // operator-impersonation.test.ts drives both hook codes of each route.
   "POST /operator/impersonate",
   "POST /operator/impersonate/stop",
+  // The override of plan 12d runs through operatorAct: sso/domain-routes.test.ts arms beforeAction.
+  "POST /operator/sso/enforce-off",
+  // The SSO callback needs an IdP exchange: sso/resolve.test.ts drives hooks.sso.beforeSignIn (plan 12d).
+  "GET /sso/:connectionId/callback",
+  // The SAML ACS needs a signed Response of a start, and it runs the same resolveSsoUser (plan 12d Task 8).
+  "POST /sso/:connectionId/acs",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */
@@ -1236,6 +1326,9 @@ const EXPIRY_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /reauth",
   "POST /passkey/register/verify",
   "POST /passkey/authenticate/verify",
+  // A pending domain past 7 days needs a platform operator with a fresh session after the
+  // move of the clock: sso/domain-routes.test.ts drives it.
+  "POST /sso/domains/verify",
 ];
 
 describe("token_expired on every route that declares it (plan 11g)", () => {

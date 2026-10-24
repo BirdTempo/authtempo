@@ -26,6 +26,7 @@ sources:
 | --- | --- |
 | `createSqliteAdapter` | The storage port on SQLite, from a `SqliteDriver`. The first call checks the integer reads, then the schema version. Its `ping` checks the integer reads (a pass is kept, a failure is not), then reads the schema version with no cache, for `GET /auth/ready`. |
 | `createSqliteLimiter` | The owned limiter on SQLite, from a `SqliteDriver`. It keeps its counts in `ta_limit`. |
+| `SQLITE_BOUND_PARAMS` | 32766, the bound parameters of one statement on SQLite since 3.32.0. `createMany` binds its rows as one JSON list, so the bound does not set its chunk. |
 | `SqliteDriver` | One database through one driver. An entry of a driver makes it from the handle that the app opens. |
 | `applySqliteMigrations` | Applies each migration that `ta_migrations` lacks, and answers the names that ran. It is safe on every start. |
 | `SQLITE_MIGRATIONS` | The migrations, in order: the D1 files of `@authtempo/adapter-d1`, copied at build. |

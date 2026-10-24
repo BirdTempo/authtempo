@@ -1,6 +1,6 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { type ModelName, SCHEMA_VERSION, schema } from "@authtempo/core";
-import { runAdapterConformance } from "@authtempo/core/conformance";
+import { runAdapterConformance, runStoredFormConformance } from "@authtempo/core/conformance";
 import { columnsOf, type LiveShape, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import { createD1Adapter, D1_SHAPE_SQL, expectedD1Shape, parseD1Shape } from "../src/index.js";
@@ -32,6 +32,15 @@ runAdapterConformance(
   },
   { updateInTransaction: 2, oldStore, ping: true },
 );
+
+runStoredFormConformance("d1", async () => {
+  await truncateAll();
+  return {
+    adapter: createD1Adapter(env.DB),
+    all: async (sql) => (await env.DB.prepare(sql).all()).results,
+    close: truncateAll,
+  };
+});
 
 /** The live shape of the test database, read with the two exported SQL texts. */
 async function liveShape(): Promise<LiveShape> {

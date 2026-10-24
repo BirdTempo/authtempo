@@ -7,7 +7,7 @@ import {
 
 type Simple = Extract<
   ClientPlugin,
-  { id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" }
+  { id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" | "sso" }
 >;
 
 /** Better Auth's `organizationClient({ ac, roles })`: `checkRolePermission` reads the roles (plan 12k). */
@@ -42,4 +42,11 @@ export function twoFactorClient(
 /** Better Auth's `apiKeyClient()` (plan 12k Task 12). `authClient.apiKey` is there with or without it. */
 export function apiKeyClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "api-key" };
+}
+/**
+ * Better Auth's `ssoClient()` of @better-auth/sso 1.7.2 (plan 12d Task 14).
+ * `authClient.sso` and `authClient.signIn.sso` are there with or without it.
+ */
+export function ssoClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "sso" };
 }

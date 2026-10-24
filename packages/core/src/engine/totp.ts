@@ -52,6 +52,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
+import { enforcedAnswer } from "./sso/enforce.js";
 import { holdUser } from "./user-hold.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -949,13 +950,25 @@ async function answerChallenge(
     { field: "id", op: "eq", value: challenge.identifier },
   ]);
   if (!user) return fail("invalid_token");
-  const data = challenge.data as { ip?: unknown; userAgent?: unknown; next?: unknown } | null;
+  // A challenge of another first factor, written before enforce went on, opens no session
+  // (plan 12d ruling 38). A challenge of an SSO sign-in passes: SSO is the way in.
+  const enforced =
+    challengeOrigin(challenge.data).via === "sso" ? null : await enforcedAnswer(config, user.email);
+  if (enforced) return enforced;
+  const data = challenge.data as {
+    ip?: unknown;
+    userAgent?: unknown;
+    next?: unknown;
+    notAfter?: unknown;
+  } | null;
   // The first factor of the challenge: the session keeps its `via` (plan 12c).
   // A row of plan 9f holds `password`.
   const { via } = challengeOrigin(challenge.data);
   const ip = typeof data?.ip === "string" ? data.ip : null;
   const userAgent = typeof data?.userAgent === "string" ? data.userAgent : null;
   const next = safeNext(data?.next);
+  // The IdP's cap of an SSO sign-in (plan 12d): the session keeps it through the challenge.
+  const notAfter = typeof data?.notAfter === "string" ? new Date(data.notAfter) : null;
   const trust = input.trustDevice
     ? {
         id: newId(now),
@@ -966,7 +979,11 @@ async function answerChallenge(
   const trustHash = trust ? await sha256Hex(trust.token) : null;
   const opened = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
-      const s = await openSession(config, { user, ip, userAgent, via }, tx);
+      const s = await openSession(
+        config,
+        { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) },
+        tx,
+      );
       if (trust && trustHash)
         await tx.create("trustedDevice", {
           id: trust.id,

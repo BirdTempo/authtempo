@@ -1,6 +1,14 @@
 import type { ModelName, StorageAdapter } from "@authtempo/core";
 import { StorageError } from "@authtempo/core";
-import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import {
+  assertModel,
+  D1_BOUND_PARAMS,
+  insertChunks,
+  rowsPerInsertOf,
+  type SqlStatements,
+  type Statement,
+  undoCreateMany,
+} from "@authtempo/core/sql";
 import type { D1Subset, D1SubsetResult } from "./seam.js";
 
 type Row = Record<string, unknown>;
@@ -17,6 +25,12 @@ interface Undo extends Statement {
   model: ModelName;
   /** The write this entry reverses. A failed entry reports it as `<model>:<op>`. */
   op: "create" | "update" | "delete";
+  /**
+   * The undo of `createMany` calls of one model, one after the other in the
+   * log. It holds their rows and the count of the entries that delete them.
+   * Each entry of the run holds the same object (ruling 85 of plan 12d).
+   */
+  many?: { rows: readonly Row[]; entries: number };
 }
 
 /** What the adapter runs. `createD1Adapter` passes core's statements; plan 9's compatibility storage passes its own. */
@@ -39,11 +53,20 @@ export interface D1AdapterOptions {
    * new count with no `ready`.
    */
   sent?: { statements: number; ready?: number };
+  /**
+   * The bound parameters of one statement, for the chunks of `createMany`
+   * (ruling 57 of plan 12d). Default: `D1_BOUND_PARAMS`, 100. A SQLite
+   * driver passes the limit of its own build. A statement set whose rows
+   * bind as one JSON list (ruling 84) does not read it.
+   */
+  boundParams?: number;
 }
 
 interface Ctx extends D1AdapterOptions {
   undo: Undo[] | null;
   sent: { statements: number; ready?: number };
+  /** The first entry of the log that the open nested transaction owns: a run of `many` never joins an entry below it. */
+  floor: number;
 }
 
 async function run(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<D1SubsetResult> {
@@ -117,6 +140,46 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       }
       return structuredClone(data);
     },
+    async createMany(model, rows) {
+      await ctx.ready();
+      assertModel(model);
+      if (rows.length === 0) return [];
+      const chunks = insertChunks(st, model, rows, ctx.boundParams ?? D1_BOUND_PARAMS);
+      try {
+        const [only] = chunks;
+        if (chunks.length === 1 && only) await run(db, only, ctx.sent);
+        else {
+          // One batch is one unit on D1 and on each SQLite driver: a failed chunk
+          // applies no chunk. A batch sends each of its statements.
+          ctx.sent.statements += chunks.length;
+          await db.batch(chunks.map((c) => db.prepare(c.sql).bind(...c.params)));
+        }
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+      if (ctx.undo) {
+        // The undo of a createMany right after a createMany of the same model joins its
+        // run: one delete per list of all their ids. An insert of 1000 rows in four chunks
+        // then takes one undo statement, not four. So the undo of a late conflict stays
+        // inside the D1 budget (ruling 85 of plan 12d). Only an entry just before this one
+        // joins, so the reverse order of the log does not change.
+        const log = ctx.undo;
+        const last = log.at(-1);
+        let all: readonly Row[] = rows as unknown as Row[];
+        if (last?.many && last.model === model && log.length - last.many.entries >= ctx.floor) {
+          all = [...last.many.rows, ...all];
+          log.splice(log.length - last.many.entries);
+        }
+        const undo = undoCreateMany(st, model, all as never);
+        // A user row keeps one statement per row (undoCreate), so its run does not join.
+        const many = model === "user" ? undefined : { rows: all, entries: undo.length };
+        for (const u of undo) log.push({ model, op: "create", ...u, ...(many ? { many } : {}) });
+      }
+      return structuredClone([...rows]);
+    },
+    rowsPerInsert(model) {
+      return rowsPerInsertOf(st, model, ctx.boundParams ?? D1_BOUND_PARAMS);
+    },
     async findOne(model, where) {
       await ctx.ready();
       const s = st.select(model, where, { limit: 1 });
@@ -157,8 +220,14 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
-      for (const row of results[0]?.results ?? [])
-        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row, data) });
+      // The list form for more than one row when the statement set has one: the undo of an
+      // update of many rows stays inside the query budget (ruling 84 of plan 12d).
+      const prior = results[0]?.results ?? [];
+      const restores =
+        prior.length > 1 && st.restoreRows
+          ? st.restoreRows(model, prior, data)
+          : prior.map((row) => st.restoreRow(model, row, data));
+      for (const u of restores) ctx.undo.push({ model, op: "update", ...u });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {
@@ -179,7 +248,12 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       const returning = st.deleteReturning(model, where);
       if (!returning) return 0;
       const rows = await all(db, returning, ctx.sent);
-      for (const row of rows) ctx.undo.push({ model, op: "delete", ...st.reinsertRow(model, row) });
+      // The list form for more than one row, as for an update (ruling 84 of plan 12d).
+      const reinserts =
+        rows.length > 1 && st.reinsertRows
+          ? st.reinsertRows(model, rows)
+          : rows.map((row) => st.reinsertRow(model, row));
+      for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
       return rows.length;
     },
     async transaction(fn) {
@@ -188,14 +262,18 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         // A nested call shares the log. A throw reverses only its own entries.
         const log = ctx.undo;
         const mark = log.length;
+        const floor = ctx.floor;
+        ctx.floor = mark;
         try {
           return await fn(self);
         } catch (e) {
           const own = log.splice(mark);
           return rethrowAfterUndo(db, own, e, ctx.sent);
+        } finally {
+          ctx.floor = floor;
         }
       }
-      const inner: Ctx = { ...ctx, undo: [] };
+      const inner: Ctx = { ...ctx, undo: [], floor: 0 };
       const tx = adapterOn(db, inner);
       try {
         return await fn(tx);
@@ -219,7 +297,12 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
 }
 
 export function createD1AdapterOn(db: D1Subset, options: D1AdapterOptions): StorageAdapter {
-  return adapterOn(db, { ...options, undo: null, sent: options.sent ?? { statements: 0 } });
+  return adapterOn(db, {
+    ...options,
+    undo: null,
+    sent: options.sent ?? { statements: 0 },
+    floor: 0,
+  });
 }
 
 export { StorageError };

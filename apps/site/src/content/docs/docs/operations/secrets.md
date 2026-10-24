@@ -68,9 +68,9 @@ The packages are not on a registry yet. In this repo, run each command below as 
 4. Put version 2 first in `secrets`, then version 1. Deploy to every instance at 100 percent. Each new value is now written under version 2.
 5. Run `authtempo secret rewrap <base url> --yes`. The command ends when no row of an old version remains, when a pass ends, or at `--max-calls`. It exits 1 when a row did not open or rows remain. [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) gives the flags.
 
-   The operator routes allow 120 calls an hour from one IP address. A run makes at most 100 calls of 100 rows, so it moves 10 000 rows. On a large deployment, add `--limit 1000`: each call then moves up to 1000 rows, and one run moves 100 000.
+   The operator routes allow 120 calls an hour from one IP address. Each call stays inside 50 queries, the limit of D1 Free. The route's limiter query counts in the 50, so a call moves at most 42 rows. A call may stop early with `more: true`, and the command calls again. A run makes at most 100 calls, so it moves about 4 200 rows. Run it again while it exits 1.
 
-   In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
+   In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true. On Workers Paid or Postgres, pass `callBudget` up to 1000 to move more rows in one call.
 
 6. In the API's process, pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass. The command does this step itself.
 7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0. With the command, run it again while it exits 1.
@@ -84,7 +84,7 @@ The packages are not on a registry yet. In this repo, run each command below as 
 
    In the API's process, run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
 
-10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, and `backupCodes` are 0. Make sure that the config has no key `secret`. Deploy.
+10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, `backupCodes`, and `ssoClientSecrets` are 0. A count of `ssoClientSecrets` above 0 means a sealed client secret of an SSO connection. Without the version, its sign-in fails. A SCIM token has no count. Core stores its SHA-256, not a sealed value, so a new app secret keeps it working. Make sure that the config has no key `secret`. Deploy.
 
    On Node and Bun, restart each process: it reads the environment only at start.
 
@@ -103,7 +103,7 @@ The packages are not on a registry yet. In this repo, run each command below as 
 - `more` is true while a row of a configured old version remains, also a row that failed or was skipped. A `limit` outside 1 to 1000, or a cursor that `rewrap` did not answer, answers `invalid_body`.
 - `skipped` counts a TOTP setup that is not confirmed, holds backup codes, and is less than 15 minutes old. A later pass reseals the expired setup and clears its codes.
 - `failed` counts a row that did not open under its version, or that a concurrent write changed first. The log names the table, the row, and the version. A later pass reads it again.
-- `status` reads every row of four tables, one query per 1000 rows. Run it from a script, not from a request.
+- `status` reads every row of five tables, one query per 1000 rows. Run it from a script, not from a request.
 - A backup code cannot move to a new version: core never sees the code again. `status` counts the unused codes under each version.
 - `rewrap` never reads a row of a version that the config does not hold. `status` lists that version with `configured: false`.
 - A signing key of a removed version does not open. It retires at the next signature, and a new key signs.

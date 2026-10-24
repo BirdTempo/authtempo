@@ -74,13 +74,15 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - `users.ban` writes the ban in one transaction. The same transaction ends every challenge, handoff code, and OAuth refresh token and code of the user. It ends a page of the sessions too.
 - The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions that do not fit stay, with one pending-end row. The sweep ends them with `session.afterEnd` and the reason `banned`.
 - Until the sweep ends a left session, every door refuses it: the session read, the session JWT mint, and `api.jwt.sessionLive`.
+- The pending-end row also covers a session that began in the 5 seconds after the act. So does the row of a revoke and of a SCIM deactivate.
+- This bound covers a server whose clock runs ahead of the clock of the act. The cost: the sweep also ends a sign-in in those 5 seconds, for example after a fast unban.
 - A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in 50 queries. Two sweeps of 48 and 24 queries ended the other 29.
 - A sign-in of a banned user answers `account_banned` only after the credential check. So only a person who proved the credential learns of the ban. A wrong password answers `invalid_credentials`, as for any user.
 - The mail flows answer a banned user as any user.
 - An API token stays. Core refuses it while the ban holds, and it works again after an unban.
 - A refused call of an API token spends nothing of its window or its quota: the ban check comes first (plan 12k).
 - An organization token that the user made still acts: it belongs to the organization. Revoke it, or remove the member with `revokeTokens: true`.
-- The unban restores no session. A session, a refresh token, or an access token from before the end of the ban stays refused.
+- The unban restores no session. A session, a refresh token, or an access token from before the end of the ban stays refused. For a refresh token, the start of its family counts: the refresh grant and introspection refuse a new row of an old family too.
 - A ban of a platform operator also ends the impersonation sessions that the operator opened. The call ends those that fit, and the sweep ends the rest. Until then each door refuses them.
 - A session JWT and an OAuth access token live to their `exp`. [Ban a user](/docs/operations/ban-a-user/) gives the check of a resource server.
 - An answer with `familyEndFailed: true` means that the ban committed, and the end of the OAuth families after the commit failed. Call `sessions.endUser` for the user: it reads the refresh tokens again, and ends each family. The CLI prints a `warning:` line for it and exits 1.
@@ -137,6 +139,9 @@ An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. 
 - the OAuth authorize, sign-in, device approval, grant revoke, and end-session routes;
 - the organization delete, and the add, the role change, the removal, and the invitation of a member.
 - the role writes of dynamic roles, and the token writes: an API token narrow, and an organization token create, narrow, or revoke.
+- the domain writes of SSO: the add, the verify, the update, and the delete of a domain (plan 12d).
+- the connection writes of SSO: the create, the update, and the delete of a connection to a sign-in provider (plan 12d).
+- the SCIM token writes: the create and the revoke of the tokens of a directory, because a token outlives the impersonation (plan 12d).
 
 ## The audit table
 

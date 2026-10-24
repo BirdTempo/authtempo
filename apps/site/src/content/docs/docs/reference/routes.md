@@ -25,7 +25,7 @@ sources:
 
 - A route that a config key turns off answers 404 `not_found`.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
-- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, and `not_ready` also carries `reason`.
+- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.
 - An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
 - An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.
 - Every answer to a trusted origin carries the CORS headers with credentials.
@@ -191,8 +191,8 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
 
@@ -210,7 +210,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | Needs | A session cookie, or a `ts_` bearer token. The session is of the user who asked for the link. It need not be fresh |
 | Input | JSON or form `{ token }` |
 | Answer | A form: 302 to the app, or to `?auth_error=<code>` on a failure. JSON: `{ ok: true }`. Both clear the session cookie. The delete of `POST /user/delete` runs |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 ## Magic link
 
@@ -242,7 +242,7 @@ These routes exist in every deployment.
 | Needs | Nothing |
 | Input | JSON or form `{ token, trustDevice? }`. `trustDevice` is JSON only: the `td_` token of a trusted device. A browser sends the trust cookie |
 | Answer | A form: 302 to `appURL` plus `next`, with the cookie. JSON: `{ user, session }` with the cookie. For a user with the second factor on, no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## Social sign-in
 
@@ -273,7 +273,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | Nothing. The callback reads the binding cookie |
 | Input | Query `{ code?, state?, error? }`. `code` and `state`, or `error`, come from the provider. The browser sends the trust cookie of a trusted device |
 | Answer | 302 to `appURL` plus `next`, with the session cookie. For a user with the second factor on, a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge) with no session cookie. A failure redirects to `/?auth_error=<code>` |
-| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-social-apple-callback"><code>POST /social/apple/callback</code></h3>
 
@@ -282,7 +282,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | Nothing. The callback reads the binding cookie. The Origin check is skipped |
 | Input | JSON or form `{ code?, state?, error?, user?, id_token? }`. Apple sends a form with `code`, `state`, and `user?` |
 | Answer | The same as the GET callback. A cross-site post carries no trust cookie, so a user with the second factor on goes to the challenge page, which offers the trusted device |
-| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## Passkeys
 
@@ -322,7 +322,7 @@ These routes exist when the config sets `passkey`.
 | Needs | Nothing |
 | Input | JSON `{ response }` |
 | Answer | `{ user, session }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="get-passkeys"><code>GET /passkeys</code></h3>
 
@@ -362,7 +362,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON `{ email, password, name? }` |
 | Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sso_required`](/docs/reference/errors/#sso_required) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
 
 <h3 id="post-password-sign-in"><code>POST /password/sign-in</code></h3>
@@ -372,7 +372,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON `{ email, password, trustDevice?, next? }` |
 | Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
 
 <h3 id="get-password-verify"><code>GET /password/verify</code></h3>
@@ -391,7 +391,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON or form `{ token }` |
 | Answer | A form: 302 to `appURL` with the cookie. JSON: `{ verified: true }`, with the cookie when the address was unverified |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-password-verify-resend"><code>POST /password/verify/resend</code></h3>
 
@@ -428,7 +428,7 @@ These routes exist when the config sets `password`.
 | Needs | Nothing |
 | Input | JSON or form `{ token, password, trustDevice? }`. `trustDevice` is JSON only |
 | Answer | A form: 302 to `next` with the cookie, or back to the form. JSON: `{ token, user, session }` with the cookie. For a user with the second factor on, the reset still sets the password and ends every session, then answers no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` |
-| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-password-change"><code>POST /password/change</code></h3>
 
@@ -437,7 +437,7 @@ These routes exist when the config sets `password`.
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified. A first password, and a change while the second factor is on, need a fresh session |
 | Input | JSON `{ currentPassword?, newPassword }` |
 | Answer | `{ ok: true }`; every other session ends |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## Second factor
 
@@ -504,7 +504,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing |
 | Input | JSON `{ challenge, code?, backupCode?, emailCode?, passkey?, trustDevice? }`. The body has one of `code`, `backupCode`, `emailCode`, or `passkey`. `passkey` is an assertion over the options of [`POST /second-factor/passkey/options`](/docs/reference/routes/#post-second-factor-passkey-options). |
 | Answer | `{ token, user, session, next, backupCodesLeft, trustDevice }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="get-totp-challenge"><code>GET /totp/challenge</code></h3>
 
@@ -522,7 +522,7 @@ These routes exist when the config sets `password` and `totp` is not `false`.
 | Needs | Nothing |
 | Input | JSON or form `{ challenge, code?, backupCode?, emailCode?, trustDevice?, action? }`. A form post sends `code`, `backupCode`, or `emailCode` with `trustDevice=1`; or `action=send-email`; or `action=trusted` |
 | Answer | 302 to `next` with the cookies. Back to the form on a wrong code and after a send. `action=trusted` passes with the trust cookie alone |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`conflict`](/docs/reference/errors/#conflict), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`account_banned`](/docs/reference/errors/#account_banned), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`conflict`](/docs/reference/errors/#conflict), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`account_banned`](/docs/reference/errors/#account_banned), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-second-factor-passkey-enable"><code>POST /second-factor/passkey/enable</code></h3>
 
@@ -590,7 +590,7 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Needs | Nothing |
 | Input | JSON `{ email, code, trustDevice? }` |
 | Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-otp-reset-request"><code>POST /otp/reset/request</code></h3>
 
@@ -609,7 +609,7 @@ These routes exist unless the config sets `emailOtp: false`. The two reset route
 | Needs | Nothing |
 | Input | JSON `{ email, code, password, trustDevice? }` |
 | Answer | `{ token, user, session }` with the cookie. For a user with the second factor on, the reset sets the password and answers `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## Handoff
 
@@ -688,8 +688,8 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `owner` |
 | Input | JSON `{ organizationId }` |
-| Answer | `{ ok: true }`. On Postgres, a set of the active organization at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Answer | `{ ok: true }`. On Postgres, a set of the active organization at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict`. The SCIM Groups of the organization go too. An organization with more than 500 SCIM Groups answers `delete_too_large`, and nothing changes |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 <h3 id="get-organizations-members"><code>GET /organizations/members</code></h3>
 
@@ -1090,7 +1090,7 @@ These routes exist when the config sets `operator.secretHash` or `operator.secre
 | --- | --- |
 | Needs | The operator secret. `Authorization: Operator <secret>`, as `POST /operator/keys/rotate`. The secret needs the scope `secrets` |
 | Input | None |
-| Answer | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes`, the answer of `api.secrets.status()`. It counts on `operator-secrets:ip:<ip>`, 120 per hour with rewrap and info, right or wrong secret ([Limits](/docs/reference/limits/)) |
+| Answer | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets`, the answer of `api.secrets.status()`. It counts on `operator-secrets:ip:<ip>`, 120 per hour with rewrap and info, right or wrong secret ([Limits](/docs/reference/limits/)) |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-secrets-rewrap"><code>POST /operator/secrets/rewrap</code></h3>
@@ -1098,7 +1098,7 @@ These routes exist when the config sets `operator.secretHash` or `operator.secre
 | Field | Value |
 | --- | --- |
 | Needs | The operator secret. `Authorization: Operator <secret>`, as `POST /operator/keys/rotate`. The secret needs the scope `secrets` |
-| Input | JSON `{ limit?, after? }`. `limit` is a whole number from 1 to 1000, default 100. `after` is the `next` of the last answer, so a pass reads each row once. An empty body is `{}`. Another key, a limit of another form, or a cursor that is not `totp:<id>` or `jwk:<id>`, answers `invalid_body` |
+| Input | JSON `{ limit?, after?, callBudget? }`. `limit` is a whole number from 1 to 1000, default 100. `after` is the `next` of the last answer, so a pass reads each row once. `callBudget` is the storage calls of the call, 50 to 1000, default 50 for D1 Free. A call that the budget stops answers `more: true` and `next`. An empty body is `{}`. Another key, a limit of another form, or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`, answers `invalid_body` |
 | Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit, after })`: the rows this call moved to the current version, the rows that did not open or did not write, the live setups it left, whether a row under a configured old version remains, and the cursor. It counts on `operator-secrets:ip:<ip>` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
@@ -1170,7 +1170,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | --- | --- |
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason, until? }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. `until` is a date and time with a zone, 1 minute to 3650 days from now; with no `until` the ban has no end |
-| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. The ban ends every challenge, handoff code, and OAuth refresh token and code of the user, and the sessions that fit the call. The sweep ends the other sessions, and until then every door refuses them. API tokens stay, and work again after an unban |
+| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. The ban ends every challenge, handoff code, and OAuth refresh token and code of the user, and the sessions that fit the call. The sweep ends the other sessions, and until then every door refuses them. The row that holds them for the sweep also refuses a session or a family that starts in the 5 seconds after the ban. That bound covers a server whose clock runs ahead. API tokens stay, and work again after an unban |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-unban"><code>POST /operator/users/unban</code></h3>
@@ -1188,7 +1188,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | --- | --- |
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, grant, reason }. `grant` true grants the platform role, and false revokes it. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
-| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. A grant needs a verified address and no ban. A revoke ends the sessions of the user that fit the call, and keeps one owner of the platform organization. The sweep ends the other sessions, and a second revoke ends them too. Until then each operator check refuses them |
+| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. A grant needs a verified address and no ban. A revoke ends the sessions of the user that fit the call, and keeps one owner of the platform organization. The sweep ends the other sessions, and a second revoke ends them too. Until then each operator check refuses them. The row that holds them for the sweep also refuses a session that starts in the 5 seconds after the revoke. That bound covers a server whose clock runs ahead |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`email_unverified`](/docs/reference/errors/#email_unverified), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-second-factor-disable"><code>POST /operator/users/second-factor/disable</code></h3>
@@ -1226,6 +1226,15 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Input | JSON { reason, limit? }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. `limit` is 1 to 1000 sessions, default 500 |
 | Answer | `{ ended, more, auditId }`. It ends up to `limit` sessions of all users, and keeps the session of a platform operator who calls it. A call stops early to stay inside 50 storage calls. Call again while `more` is true |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-operator-sso-enforce-off"><code>POST /operator/sso/enforce-off</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `sso`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
+| Input | JSON { domainId, reason }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
+| Answer | The domain with `enforce: false`, and `auditId`. The audit row `sso_enforce_off` holds the reason. The route exists when the config sets `operator` and `sso` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`invalid_body`](/docs/reference/errors/#invalid_body), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-operator-audit"><code>GET /operator/audit</code></h3>
 
@@ -1400,6 +1409,417 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Needs | Nothing |
 | Input | None |
 | Answer | The same document, for OpenID Connect Discovery |
+| Errors | None |
+
+## Enterprise SSO
+
+These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. An organization adds an OIDC or a SAML connection to its sign-in provider. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each write writes one audit row.
+
+The manager guard runs these steps in order. An impersonation session answers `forbidden_rank`, and the router refuses each write to it with `impersonation_session`. A platform operator who passes the operator user guard manages every organization. The operator user guard needs the platform role, a verified address, a second factor, and a fresh session. An operator who fails it and owns no organization of the call gets `operator_required`. Else the user is an owner of the organization: a member whose role holds a static role of the owner rank, else `forbidden_rank`. The owner needs a second factor (`second_factor_required`) and a fresh session (`session_not_fresh`).
+
+<h3 id="get-sso-domains"><code>GET /sso/domains</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ domains }`: each domain with `id`, `organizationId`, `domain`, `record`, `verified`, `verifiedAt`, `checkedAt`, `connectionId`, `enforce`, `includeSubdomains`, and `expiresAt`, oldest first |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
+
+<h3 id="post-sso-domains-add"><code>POST /sso/domains/add</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ organizationId, domain }`. The domain is a host name of two labels or more, with no IP literal and no trailing dot. Its proof name `_authtempo-challenge.<domain>` has at most 253 characters |
+| Answer | `{ domain }`. A pending domain holds `record`, the TXT record to publish, and lives 7 days. A second add of a pending domain gives a new value. A verified domain answers as it is |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-verify"><code>POST /sso/domains/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }`. It counts on `sso-domain-verify:org:<organizationId>`, 10 per hour, before any resolver |
+| Answer | `{ domain }` with `verified: true`. A domain that another organization holds answers `domain_taken` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-update"><code>POST /sso/domains/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id, connectionId?, enforce?, includeSubdomains? }`. `connectionId` names a connection of the same organization, else `not_found`, or null for no route. `enforce: true` needs a verified domain routed to an enabled connection, else `invalid_body` with a message |
+| Answer | `{ domain }` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-delete"><code>POST /sso/domains/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The row and its claim go |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-connections"><code>GET /sso/connections</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, `endpoints`, and `tokenEndpointAuthMethod`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. No answer holds the client secret or its sealed value |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
+
+<h3 id="post-sso-connections-create"><code>POST /sso/connections/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ organizationId, kind, label, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. An OIDC connection (`sso.oidc`) needs `issuer`, `clientId`, and `clientSecret`. A SAML connection (`sso.saml`) needs `idpEntityId`, `ssoUrl`, and `certificates`. A field of the other kind answers `invalid_body`. A kind that the config does not turn on answers `not_found`. Each rule failure answers `invalid_body` with a message that names the field. The rules: `label` has 1 to 80 characters. `defaultRole` (default `member`) and each value of `scimRoles` name a role that the organization has, below the owner rank and never the platform role. The issuer and each endpoint are https URLs of a public host: no IP literal, no local name, and not the host of `baseURL`. `scope` holds `openid`. `tokenEndpointAuthMethod` is `client_secret_post` (the default: the secret in the body of the token request) or `client_secret_basic` (the id and the secret in an HTTP Basic header, each form-encoded first, RFC 6749 section 2.3.1). `certificates` holds 1 or 2 PEM certificates. `idpMetadata`, the metadata XML of the provider of at most 100 KB, takes the place of `idpEntityId`, `ssoUrl`, and `certificates`. Core parses it once and never fetches a metadata URL |
+| Answer | `{ connection }`. Core seals the client secret under the current app secret, bound to the connection id. The organization holds at most `sso.limits.connectionsPerOrganization` connections |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`connection_limit`](/docs/reference/errors/#connection_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-connections-update"><code>POST /sso/connections/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id, organizationId?, kind?, label?, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. Each field of the create for the kind of the connection takes its rule. `kind` and `organizationId` never change. A new `clientSecret` is sealed again under the current app secret. `enabled: false` answers `invalid_body` while an enforced domain routes to the connection |
+| Answer | `{ connection }` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-connections-delete"><code>POST /sso/connections/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. Each domain routed to the connection loses its route and its `enforce` flag in the same transaction |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+The sign-in routes of a connection take no session. `:connectionId` is the id of the connection: one segment of `[A-Za-z0-9._:-]`, 1 to 128 characters. An OIDC connection signs in through the start and the callback. A SAML connection signs in through the start and the ACS.
+
+<h3 id="post-sso-discover"><code>POST /sso/discover</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-discover:ip:<ip>`, 30 per 15 minutes |
+| Input | JSON or form `{ email, next? }` |
+| Answer | JSON: `{ sso: true, connectionId, start }` when a verified domain claims the address, the most specific first, and routes it to an enabled connection. `start` is `<baseURL><basePath>/sso/<connectionId>/start`, an absolute URL, with `next` as its query when the body has it. Else `{ sso: false }`. The connection may be an OIDC or a SAML connection, when `sso.oidc` or `sso.saml` turns its kind on. The answer reads no user, so it tells nothing about a person. A form: a page of this origin with a link and a meta refresh to `start`, with `next` as its query. The page has no script. Or a 302 to `/?auth_error=<code>` of `appURL`. Chromium applies `form-action` to each redirect after a form post, so a redirect to `start` would stop at the step to the provider |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
+
+<h3 id="get-sso-connectionid-start"><code>GET /sso/:connectionId/start</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-start:ip:<ip>`, 30 per 15 minutes |
+| Input | Query `{ next? }` |
+| Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. For SAML, the 302 goes to the `ssoUrl` with `SAMLRequest` and `RelayState`, by the HTTP-Redirect binding. For OIDC, the redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`sso_failed`](/docs/reference/errors/#sso_failed) |
+
+<h3 id="get-sso-connectionid-callback"><code>GET /sso/:connectionId/callback</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The callback reads the binding cookie |
+| Input | Query `{ code?, state?, error? }`. They come from the provider of the connection |
+| Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Then the address must be in a verified domain of the connection's organization. A known identity signs in its user, a user at the address gets the identity, and with `jit` a new user is created. The person gets a member row with the connection's `defaultRole`. A user with the second factor on gets the challenge page, unless the provider asserts a value of the connection's `mfa` list. Then a 302 to `next` with the session cookie. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+
+<h3 id="post-sso-connectionid-acs"><code>POST /sso/:connectionId/acs</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-acs:ip:<ip>`, 60 per 15 minutes. The provider posts the form cross-site, so the Origin and Fetch Metadata rules skip this route. The request row and the binding cookie bind the post to the browser of the start |
+| Input | Form `{ SAMLResponse, RelayState }`. Each key comes once, and the form holds at most 1 081 519 bytes. `SAMLResponse` is the base64 of the Response, by the HTTP-POST binding |
+| Answer | The `RelayState` names the request row of a start of this connection, and the binding cookie must match. The Response then passes the checks in order. First come the parse, the wrapping guard, and the signature of the Assertion. The signature of the Response follows when it has one. Then come the status, the `Destination`, the issuer, and the conditions with the clock skew. Last come the audience, the bearer confirmation with `InResponseTo`, the `AuthnStatement`, the subject, and the address. The request row is spent once, and the Assertion ID is kept until its `NotOnOrAfter`, so a replay fails. Then the resolution of the OIDC callback runs. A `SessionNotOnOrAfter` caps the session, also through each sliding refresh. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+
+<h3 id="get-sso-connectionid-metadata"><code>GET /sso/:connectionId/metadata</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | `application/samlmetadata+xml`: one `EntityDescriptor` whose `entityID` is this URL, with one `SPSSODescriptor` (`AuthnRequestsSigned="false"`, `WantAssertionsSigned="true"`) and one HTTP-POST `AssertionConsumerService` at the ACS URL. It is not signed. An id that names no SAML connection answers 404 |
+| Errors | [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
+
+## SCIM
+
+These routes exist when the config sets `scim` (plan 12d). A directory, such as Entra ID or Okta, provisions the staff of an organization with a SCIM token. A token holds `sk_` and 43 characters. Core stores its SHA-256 only, so the answer of the create is the one time the token leaves core.
+
+The three token routes run the steps of the SSO manager routes: a session, the count on `sso-manage:user:<userId>`, then the manager guard of [Enterprise SSO](#enterprise-sso). An impersonation session gets `impersonation_session` from the router at the create and the revoke, and `forbidden_rank` from the guard at the list. Each write writes one audit row, and no row holds the token or its hash.
+
+<h3 id="get-scim-tokens"><code>GET /scim/tokens</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ tokens }`: the newest 100 tokens, oldest first. The sweep deletes each expired token. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
+
+<h3 id="post-scim-tokens-create"><code>POST /scim/tokens/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ organizationId, name, scopes?, expiresInDays? }`. `name` has 1 to 64 characters with no control character. `scopes` is a non-empty list of distinct scopes of `scim.users.read`, `scim.users.write`, `scim.groups.read`, and `scim.groups.write`; absent gives all four. `expiresInDays` is a whole number from 1 to 730; absent, the token never expires |
+| Answer | `{ token, id, hint }`. An organization holds at most 2 live tokens: the one in use and the next one of a rollover. An expired token does not count |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`token_limit`](/docs/reference/errors/#token_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-scim-tokens-revoke"><code>POST /scim/tokens/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The row goes, and the next SCIM call with the token answers 401 |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+The routes under `/scim/v2` take an `sk_` bearer token as `Authorization: Bearer <token>`, and no session. The organization of each call is the organization of the token, never a value of the path or the body. Each answer is `application/scim+json` with `cache-control: no-store`. A failure is the SCIM error message of RFC 7644 section 3.12, `{ schemas, status, scimType?, detail }`, never a code of the errors page.
+
+A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403.
+
+<h3 id="get-scim-v2-serviceproviderconfig"><code>GET /scim/v2/ServiceProviderConfig</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The ServiceProviderConfig of RFC 7643 section 5: PATCH, filters with at most 100 results, and ETags are on; bulk, sort, and the password change are off. The one scheme is `oauthbearertoken`. The extension `urn:authtempo:params:scim:schemas:extension:limits:2.0` states the member caps of the Groups: `groupMembersMax` 10000, `membersPerRequestMax` 1000, and `roleRecomputeMax` 1000. `membersPerRequestMax` counts the members that one request names, and the members that it takes away |
+| Errors | None |
+
+<h3 id="get-scim-v2-resourcetypes"><code>GET /scim/v2/ResourceTypes</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | A ListResponse of the resource types `User`, with the enterprise extension as not required, and `Group`. The discovery lists ignore paging and sorting, as RFC 7644 section 4 says. A `filter` answers 403 |
+| Errors | None |
+
+<h3 id="get-scim-v2-resourcetypes-id"><code>GET /scim/v2/ResourceTypes/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The resource type `User` or `Group`. Another id answers 404 |
+| Errors | None |
+
+<h3 id="get-scim-v2-schemas"><code>GET /scim/v2/Schemas</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | A ListResponse of the core User, the core Group, and the enterprise User schemas, with the facts of each attribute that core reads or stores. The discovery lists ignore paging and sorting, as RFC 7644 section 4 says. A `filter` answers 403 |
+| Errors | None |
+
+<h3 id="get-scim-v2-schemas-id"><code>GET /scim/v2/Schemas/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The schema of the URN in the path. Another id answers 404 |
+| Errors | None |
+
+The Users routes (plan 12d Task 10) serve the SCIM view of the staff of the token's organization. A create, and a change of the address, needs an address in a verified domain of the organization. Each write answers the version as a weak `ETag`, and `If-Match` with another version answers 412.
+
+Core ignores an attribute that the User schema does not know. It stores nothing of it and answers the User as stored. Entra ID and Okta send such attributes from their attribute maps. In a PATCH with no path, core ignores an unknown key of the value in the same way. A path to an unknown attribute answers 400 `invalidPath`.
+
+A schema URN in `schemas` other than the core User and the enterprise extension answers 400 `invalidSyntax`. A custom extension in the attribute map of Entra ID or Okta sends such a URN. To fix it, remove the custom mapping in the directory, or ask for the extension.
+
+A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once. A deactivate also ends the OAuth refresh tokens of the user. The families that do not fit the budget stay on the pending-end row, and the sweep ends them. Until then the refresh grant and introspection refuse each of them.
+
+After its work, the sweep keeps the pending-end row of a deactivate as the record of the act. Each door still refuses a session or a refresh family of the user that began before the deactivate. This holds also for one that no act or sweep ended. It also holds for one that began in the 5 seconds after the deactivate. That bound covers a server whose clock runs ahead of the clock of the deactivate. The record lives as long as such a session or family can live on any server of the app. That is the longer of `session.ttlDays` and 365 days and 30 minutes, and then one day more. 365 days is the top value of `oauth.refreshTtlDays`, and 30 minutes is the longest code life. Another server of the app can run a longer `oauth.refreshTtlDays`, and write a family that the deactivate does not read. The session life comes from the config at the deactivate or at the sweep, whichever is longer. So a deploy that lowers `session.ttlDays` does not shorten it. Then the sweep deletes it. One deactivate keeps at most one such row per user.
+
+In a PATCH, Entra ID sends the manager as a list of one object. The path is `manager` or the path of the enterprise extension. Core reads that object as the `manager` of the enterprise extension. A list of two or more objects answers 400 `invalidValue`.
+
+A write of a mapped group can change the role of a person while a deactivate or a delete of that person runs. The deactivate then reads the member row again under its user hold. When the role changed, the deactivate runs again with its before hooks. It runs at most 5 rounds. A new round that does not fit the D1 Free budget of 50 queries is a small round. A small round removes the member row and ends no session in the request. It writes one pending-end row that covers every session and OAuth refresh family of the person. Each door refuses them at once, and the sweep ends them. The code exchange and the device poll also refuse an OAuth code or an approved device from before the deprovision. So, apart from the 409 below, the deprovision always ends access at once. A small round also reads the newest OAuth code and approved device row, so its row covers one from a server whose clock runs ahead. A test on D1 deactivated a person with 40 sessions, 3 families, and a `session.afterEnd` hook. After 2 lost rounds, it answered in 46 queries (measured 2026-10-24).
+
+The answer is 409 only when every round is lost, or when no small round fits the D1 Free budget. D1 stops a request at its 51st query, so core does not start that round. An address move and a name fill each add calls to a round, so they leave less room. A round is lost at the member read when a group write changes the role before the deactivate reads the member row again. It is lost at the member delete when the group write comes between that read and the delete. On D1, these cases answer 409 (measured 2026-10-24):
+
+- A deactivate with no address move and no name fill: 3 lost rounds at the member read, or 2 at the member delete.
+- A deactivate that also gives a name to a user with no name: 3 lost rounds at the member read.
+- A deactivate that also moves the address: 1 lost round at the member read or at the member delete.
+- A deactivate that moves the address and gives a name: 1 lost round.
+- A delete: 3 lost rounds at the member read, or 2 at the member delete.
+
+Then nothing changes, so the person keeps access. The directory then marks the push as failed. Okta needs an admin to retry a failed deprovision task (Okta docs, read 2026-10-22).
+
+A person can change the address of the account, for example to a personal address. The directory owns the address only while a verified domain of the organization claims it. When no such domain claims the current address, a PUT or a PATCH that changes the address answers 400 `mutability`. A reactivate answers the same, so the member row does not come back. Nothing changes then. A write that sends the address it sent before keeps the address that the person chose. A deactivate and a delete still run.
+
+<h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.read` |
+| Input | None. The query may hold `filter`, `startIndex`, `count`, `attributes`, or `excludedAttributes`. The filter is one `eq` of `userName`, `externalId`, `emails.value`, or `id`, or the email match of Entra ID: `emails[type eq "<type>"].value eq "<address>"`. That form finds the person at the address, with an email of that type and that value. Both compare with no case |
+| Answer | A ListResponse of the Users of the organization, by `id`, at most 100 per page |
+| Errors | None |
+
+<h3 id="post-scim-v2-users"><code>POST /scim/v2/Users</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a User of RFC 7643 section 4.1, with the enterprise extension at most. Core ignores a `password`: it stores, logs, and answers nothing of it. Okta sends a placeholder password in each create |
+| Answer | 201 with the User, `Location`, and `ETag`. The user at the address gets a member row with `scim.defaultRole`, or a new user comes with a verified address and no password |
+| Errors | None |
+
+<h3 id="get-scim-v2-users-id"><code>GET /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.read` |
+| Input | None. The query may hold `attributes` or `excludedAttributes` |
+| Answer | The User, with `ETag`. An id of another organization answers 404 |
+| Errors | None |
+
+<h3 id="put-scim-v2-users-id"><code>PUT /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a User, and `If-Match` may name the version. Core ignores a `password`, as in a create |
+| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. A new address or a reactivate of a user whose current address no verified domain of the organization claims answers 400 `mutability` |
+| Errors | None |
+
+<h3 id="patch-scim-v2-users-id"><code>PATCH /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version. A change of `password` answers 400 `invalidValue`, because the password change is off. A remove of `userName`, or a replace of it with null, answers 400 `mutability` |
+| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. When an operation writes a value with `primary` true, each other value of that attribute gets `primary` false. A new address or a reactivate of a user whose current address no verified domain of the organization claims answers 400 `mutability` |
+| Errors | None |
+
+<h3 id="delete-scim-v2-users-id"><code>DELETE /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. `If-Match` may name the version |
+| Answer | 204 with no body. The deactivate runs first, and the core user stays. A delete answers 409 only when group writes race each round, or on D1 after 3 lost rounds at the member read or 2 at the member delete. Then nothing changes. The paragraphs on these races above say what the directory does then |
+| Errors | None |
+
+The Groups routes (plan 12d Task 11) serve the groups of the token's organization. A member of a group is a User of the same organization. A group id, an id of another organization, an unknown id, or a `type` other than `User` answers 400 `invalidValue`. Core serves no nested group. Each member in an answer holds `value`, `$ref`, and `type`.
+
+The caps come from the D1 Free budget of 50 queries per request. One request names at most 1000 members of a group. The count holds the members of a POST or a PUT body, or the values of the operations of a PATCH. It takes away at most 1000 members, so a PUT of 1000 members that replaces 1000 other members passes. The caps are the same on every store: D1, SQLite, Postgres, and MySQL. Core reads, deletes, and updates up to 2000 ids in one statement, and inserts the rows of one request in a few statements. On D1 and SQLite a list binds as one JSON text. A group holds at most 10000 members. A rename or a delete of a mapped group computes the role of each member again, and refuses a group of more than 1000 members. Each refusal is 400 `invalidValue`, and nothing changes.
+
+On D1 a write that fails late, such as at a conflict with an account delete, reverses its own writes in the same request. The budget keeps room for those statements. So a write whose many role changes leave no such room answers 400 `invalidValue`. Its first writes are the group row and the team row, and its undo restores both, so nothing changes. A write whose role changes make 3 or more pairs of an old and a new role can cause it. An Okta push can meet it. Take 999 adds and 1 removal to the mapped group `Admins`. 300 of the added persons hold the role of the mapped group `Web`. The pairs are then `web` to `admin`, `member` to `admin`, and `admin` to `member`. Okta marks such a push failed and does not split it. Push the group in smaller steps then. On D1 (2026-10-24) a push of 500 members with 3 pairs answers 204, and so does a push of 333 members with 4 pairs. The sessions of the persons who leave the team lose its active team in the last write. At a group delete, each session in the team loses it in the last write. So the count of sessions does not change the budget of a POST, a PUT, a PATCH, or a DELETE.
+
+Okta sends up to 1000 members in one group PATCH, and the cap takes that batch. An Okta app of the App Integration Wizard sends a PUT with every member. Such a PUT answers 400 when it holds more than 1000 members, or when it takes away more than 1000 members. Push the group again in smaller steps. Entra ID sends one member in each operation.
+
+The role map gives a role to each member of a mapped group: `scimRoles` of the connection, set by `POST /sso/connections/update` or `api.scim.setRoleMap`. The map of an organization is the map of its enabled connection that it created first. A member gets the highest-ranked role of its mapped groups, else `scim.defaultRole`. SCIM never gives or takes the owner role or the platform role. A mapped role that the organization no longer has answers 409 with the detail `role_not_found`, and nothing changes.
+
+A change of the role map changes no role at once. A member gets the role of the new map at the next change of its groups, or at a rename of a mapped group. A reactivated User gets back the role of its groups, and not the teams. A group write that changes the groups of the User during its reactivate makes the reactivate answer 409, and the directory sends it again. The teams come back at the next member change of each group.
+
+With `scim.groups` set to `teams` or `both`, each group has one team of the organization. A group create creates the team, a rename renames it, a delete deletes it, and a member change is a team member change. These team writes run no team hook. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each group write after its commit. With `keepLastTeam`, the delete of the group of the last team answers 409.
+
+<h3 id="get-scim-v2-groups"><code>GET /scim/v2/Groups</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.read` |
+| Input | None. The query may hold `filter`, `startIndex`, `count`, `attributes`, or `excludedAttributes`. The filter is one `eq` of `displayName`, `externalId`, or `id`, or the member check of Entra ID: `id eq "<group>" and members[value eq "<user>"]` |
+| Answer | A ListResponse of the Groups of the organization, by `id`, at most 100 per page. `excludedAttributes=members` reads no member row, as Entra ID asks. A page with members holds at most 10000 member rows, as one group does. It ends before the first group that does not fit whole, and `itemsPerPage` gives the count of groups on the page. Ask the next page from `startIndex` plus `itemsPerPage`. On D1 such a page costs 6 queries (measured 2026-10-22) |
+| Errors | None |
+
+<h3 id="post-scim-v2-groups"><code>POST /scim/v2/Groups</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a Group of RFC 7643 section 4.2. `displayName` is required, 1 to 255 characters, and unique in the organization with no case. `schemas` holds the core Group URN. Entra ID also sends `http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group`, and core reads nothing of it. Another URN answers 400 `invalidSyntax` |
+| Answer | 201 with the Group, `Location`, and `ETag`. A second group with the same `displayName` answers 409 `uniqueness` |
+| Errors | None |
+
+<h3 id="get-scim-v2-groups-id"><code>GET /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.read` |
+| Input | None. The query may hold `attributes` or `excludedAttributes` |
+| Answer | The Group, with `ETag`. An id of another organization answers 404 |
+| Errors | None |
+
+<h3 id="put-scim-v2-groups-id"><code>PUT /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a Group, and `If-Match` may name the version |
+| Answer | The Group. A PUT replaces the name, the `externalId`, and the whole member list |
+| Errors | None |
+
+<h3 id="patch-scim-v2-groups-id"><code>PATCH /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. A `remove` of `displayName`, or a `replace` of it with null, answers 400 `mutability`. `If-Match` may name the version |
+| Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A PATCH that changes nothing writes nothing: no new version and no audit row. So a remove of a User that is not a member, by the filter path or by a list of values, answers as a removal does. A directory sends a removal again after a time-out, and an error marks its push as failed |
+| Errors | None |
+
+<h3 id="delete-scim-v2-groups-id"><code>DELETE /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. `If-Match` may name the version |
+| Answer | 204 with no body. The member rows and the team of the group go, and each member of a mapped group gets its role again. The Users stay |
+| Errors | None |
+
+Core does not serve these SCIM operations. Each answers 501 with the detail "not supported by this server", after the token check.
+
+<h3 id="post-scim-v2-bulk"><code>POST /scim/v2/Bulk</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="get-scim-v2-me"><code>GET /scim/v2/Me</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-search"><code>POST /scim/v2/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-users-search"><code>POST /scim/v2/Users/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-groups-search"><code>POST /scim/v2/Groups/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
 | Errors | None |
 
 ## OpenAPI document

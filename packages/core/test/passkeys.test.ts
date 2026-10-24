@@ -399,6 +399,8 @@ describe("passkey authentication", () => {
     // A concurrent replay moves the counter between our read and our write.
     const inner = auth.config.storage;
     const racing: StorageAdapter = {
+      createMany: (m, r) => inner.createMany(m, r),
+      rowsPerInsert: (m) => inner.rowsPerInsert(m),
       create: (m, d) => inner.create(m, d),
       findOne: (m, w) => inner.findOne(m, w),
       findMany: (m, w, o) => inner.findMany(m, w, o),

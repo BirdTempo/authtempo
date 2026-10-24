@@ -29,6 +29,8 @@ export type {
   OrganizationsConfig,
   PasswordConfig,
   ResolvedEmailOtp,
+  ScimConfig,
+  SsoConfig,
   TeamsConfig,
   TokensConfig,
   TotpConfig,
@@ -52,8 +54,11 @@ export {
   type OAuthClientsApi,
   type OrganizationTokensApi,
   type PasswordApi,
+  type ScimApi,
   type SecretsApi,
   type SessionApi,
+  type SsoApi,
+  type SsoAppActor,
   type TokensApi,
   type TotpApi,
   type UserApi,
@@ -171,6 +176,11 @@ export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";
 export type { RoleSummary } from "./engine/roles.js";
+export {
+  SCIM_SCOPES,
+  SCIM_TOKEN_PREFIX,
+  type ScimTokenSummary,
+} from "./engine/scim/tokens.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
 export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";
@@ -189,6 +199,19 @@ export type {
   SocialStart,
   SocialStarted,
 } from "./engine/social.js";
+export type {
+  ConnectionFields,
+  ConnectionInput,
+  SsoConnectionSummary,
+  SsoMfaInput,
+} from "./engine/sso/connections.js";
+export {
+  type DnsTxtPort,
+  DOH_BODY_MAX,
+  dohCloudflare,
+  dohGoogle,
+} from "./engine/sso/dns.js";
+export type { SsoDomainSummary } from "./engine/sso/domains.js";
 export type { SweepResult } from "./engine/sweep.js";
 export type { TeamMemberSummary, TeamSummary } from "./engine/teams.js";
 export type { TokenQuota } from "./engine/token-use.js";
@@ -287,6 +310,7 @@ export {
   type PasskeyRow,
   type PasswordRow,
   SCHEMA_VERSION,
+  type ScimScope,
   type SecondFactorMethod,
   type SecondFactorRow,
   type SessionRow,

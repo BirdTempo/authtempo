@@ -648,19 +648,35 @@ describe("totp (plan 9f)", () => {
   });
 
   it("turns the gate on for the magic link, the email code, and social by default, takes false per method, and refuses another key (plan 12c)", () => {
-    expect(resolveConfig(pw).totp?.gate).toEqual({ magicLink: true, emailOtp: true, social: true });
+    // Plan 12d Task 5 adds the key sso, on by default.
+    expect(resolveConfig(pw).totp?.gate).toEqual({
+      magicLink: true,
+      emailOtp: true,
+      social: true,
+      sso: true,
+    });
     expect(resolveConfig({ ...pw, totp: { gate: { social: false } } }).totp?.gate).toEqual({
       magicLink: true,
       emailOtp: true,
       social: false,
+      sso: true,
+    });
+    expect(resolveConfig({ ...pw, totp: { gate: { sso: false } } }).totp?.gate).toEqual({
+      magicLink: true,
+      emailOtp: true,
+      social: true,
+      sso: false,
     });
     expect(() =>
       resolveConfig({ ...pw, totp: { gate: { handoff: false } as never } }),
     ).toThrowError(
-      "totp.gate.handoff is not an option; core has magicLink, emailOtp, and social. The handoff has no key: it continues a browser session that passed the gate",
+      "totp.gate.handoff is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate",
     );
     expect(() => resolveConfig({ ...pw, totp: { gate: { social: "no" } as never } })).toThrowError(
       "totp.gate.social must be true or false",
+    );
+    expect(() => resolveConfig({ ...pw, totp: { gate: { sso: 1 } as never } })).toThrowError(
+      "totp.gate.sso must be true or false",
     );
     expect(() => resolveConfig({ ...pw, totp: { gate: true as never } })).toThrowError(
       "totp.gate must be an object",

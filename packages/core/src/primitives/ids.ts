@@ -15,6 +15,20 @@ export function newId(now: Date): string {
   return time + rand;
 }
 
+/**
+ * The time in the first 10 chars of a ULID of `newId`, in ms, or null when
+ * `id` does not start with 10 chars of the Crockford alphabet.
+ */
+export function idTime(id: string): number | null {
+  let ms = 0;
+  for (const c of id.slice(0, 10)) {
+    const digit = CROCKFORD.indexOf(c);
+    if (digit < 0) return null;
+    ms = ms * 32 + digit;
+  }
+  return id.length >= 10 ? ms : null;
+}
+
 /** The last id of `newMonotonicId` in this isolate, or "" before the first. */
 let lastMonotonic = "";
 

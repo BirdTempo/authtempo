@@ -6,7 +6,7 @@ import {
   OAUTH_ERRORS,
 } from "../errors.js";
 import { DOCS_ORIGIN, type ErrorTable, errorAnchor } from "../http/anchors.js";
-import type { AnswerKind, RouteContract } from "../http/contract/types.js";
+import { type AnswerKind, answerKinds, type RouteContract } from "../http/contract/types.js";
 import { ROUTER_CODES, type RouteEntry } from "../http/route-list.js";
 
 /** The schema of an answer, as the document writes it: a converter that owns `components.schemas`. */
@@ -18,12 +18,21 @@ export const ERROR_SCHEMAS = {
     type: "object",
     properties: {
       error: { type: "string" },
-      message: { type: "string", description: "The app's text. Present only on `hook_refused`." },
+      message: {
+        type: "string",
+        description:
+          "The app's text on `hook_refused`, or the rule that an SSO or SCIM manager body broke on `invalid_body`.",
+      },
       // Plan 12h Task 8 (spec 31 item 12): a fixed string, never the text of the cause.
       reason: {
         type: "string",
         enum: ["storage", "schema"],
         description: "What is not ready. Present only on `not_ready`.",
+      },
+      detail: {
+        type: "string",
+        description:
+          "The SSO start URL of the address, absolute, on the origin of `baseURL`. Present only on `sso_required`.",
       },
     },
     required: ["error"],
@@ -46,6 +55,7 @@ const STANDARDS: Record<Extract<AnswerKind, { kind: "metadata" }>["standard"], s
   "oidc-discovery": "The provider metadata of OpenID Connect Discovery 1.0.",
   jwks: "The JSON Web Key Set of RFC 7517.",
   openapi: `This OpenAPI document, by the [OpenAPI Specification ${OPENAPI_VERSION}](https://spec.openapis.org/oas/v${OPENAPI_VERSION}.html).`,
+  "saml-metadata": "The SAML 2.0 metadata of the service provider of one connection.",
 };
 
 interface OpenApiResponse {
@@ -70,7 +80,11 @@ function answerOf(kind: AnswerKind, schemaOf: SchemaOf): [string, OpenApiRespons
         "200",
         {
           description: STANDARDS[kind.standard],
-          content: { "application/json": { schema: { type: "object" } } },
+          // SAML metadata is an XML document (SAML Metadata 2.0 section 4.1.1), not JSON.
+          content:
+            kind.standard === "saml-metadata"
+              ? { "application/samlmetadata+xml": { schema: { type: "string" } } }
+              : { "application/json": { schema: { type: "object" } } },
         },
       ];
     case "html":
@@ -81,6 +95,24 @@ function answerOf(kind: AnswerKind, schemaOf: SchemaOf): [string, OpenApiRespons
           content: { "text/html": { schema: { type: "string" } } },
         },
       ];
+    case "scim":
+      // Plan 12d: the 501 refusals have no success answer (schema null).
+      return kind.schema === null
+        ? [
+            "501",
+            {
+              description:
+                "Not supported by this server: the SCIM error message of RFC 7644 section 3.12.",
+              content: { "application/scim+json": { schema: { type: "object" } } },
+            },
+          ]
+        : [
+            "200",
+            {
+              description: "The answer.",
+              content: { "application/scim+json": { schema: schemaOf(kind.schema, "output") } },
+            },
+          ];
     case "redirect":
       return [
         String(kind.status ?? 302),
@@ -144,9 +176,7 @@ export function responsesOf(
   pageCodes: ReadonlySet<string> = new Set(),
 ): Record<string, OpenApiResponse> {
   const out: Record<string, OpenApiResponse> = {};
-  for (const kind of contract.alt === undefined
-    ? [contract.answer]
-    : [contract.answer, contract.alt]) {
+  for (const kind of answerKinds(contract)) {
     const [status, response] = answerOf(kind, schemaOf);
     const seen = out[status];
     out[status] =
@@ -157,7 +187,7 @@ export function responsesOf(
             content: { ...seen.content, ...response.content },
           };
   }
-  const redirect = [contract.answer, contract.alt].find((k) => k?.kind === "redirect");
+  const redirect = answerKinds(contract).find((k) => k.kind === "redirect");
   const byStatus = new Map<number, { code: string; table: ErrorTable }[]>();
   for (const { code, table, status } of codesOf(entry)) {
     const list = byStatus.get(status) ?? [];

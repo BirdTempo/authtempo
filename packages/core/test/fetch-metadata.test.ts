@@ -86,10 +86,12 @@ describe("the router applies it on every POST route (plan 12b)", () => {
     // /handoff/continue, /oauth/authorize, and /oauth/device answer the same 403 from their own
     // handlers, so on those three routes this case cannot tell the router from the handler. The
     // stub route test below closes that gap: its handler never refuses.
+    // The SAML ACS (plan 12d Task 8) takes the IdP's cross-site form; saml-acs.test.ts holds its cases.
     if (
       path === "/social/apple/callback" ||
       path === "/oauth/token" ||
-      path === "/oauth/end-session"
+      path === "/oauth/end-session" ||
+      path === "/sso/:connectionId/acs"
     ) {
       expect(res.status).not.toBe(403);
       return;
@@ -168,7 +170,7 @@ describe("crossSiteRefusal: the router's gate for POST paths beside core (plan 1
   const form = (path: string, origin: string | null = TRUSTED) =>
     request(`${config.basePath}${path}`, "cross-site", "application/x-www-form-urlencoded", origin);
 
-  it("refuses a cross-site form post on every POST route but the three exceptions", async () => {
+  it("refuses a cross-site form post on every POST route but the four exceptions", async () => {
     const passed: string[] = [];
     for (const path of posts) {
       const res = gate(form(path));
@@ -180,9 +182,14 @@ describe("crossSiteRefusal: the router's gate for POST paths beside core (plan 1
           body: { error: "origin_not_trusted" },
         });
     }
-    // Apple's form callback and the end-session form (allowCrossSiteForm), and the token endpoint
-    // (clientOrigin), pass, as in the router.
-    expect(passed.sort()).toEqual(["/oauth/end-session", "/oauth/token", "/social/apple/callback"]);
+    // Apple's form callback, the end-session form, and the SAML ACS (allowCrossSiteForm), and the
+    // token endpoint (clientOrigin), pass, as in the router.
+    expect(passed.sort()).toEqual([
+      "/oauth/end-session",
+      "/oauth/token",
+      "/social/apple/callback",
+      "/sso/:connectionId/acs",
+    ]);
   });
 
   it("refuses a path that core does not serve, and passes a GET and a same-origin post", async () => {

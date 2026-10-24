@@ -4,7 +4,7 @@ import { resolveConfig } from "../src/config.js";
 import { ERRORS, OAUTH_ERRORS } from "../src/errors.js";
 import { DOCS_ORIGIN, routeAnchor } from "../src/http/anchors.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
-import type { RouteContract } from "../src/http/contract/types.js";
+import { answerKinds, type RouteContract } from "../src/http/contract/types.js";
 import { routeKeyOf } from "../src/http/route-key.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../src/http/route-list.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -64,7 +64,7 @@ const reference = () => openApiDocument(openApiReferenceOptions()) as unknown as
 function operations(doc: Doc): { key: string; op: Operation }[] {
   return Object.entries(doc.paths).flatMap(([path, item]) =>
     Object.entries(item).map(([method, op]) => ({
-      key: `${method.toUpperCase()} ${path.replace("{provider}", ":provider")}`,
+      key: `${method.toUpperCase()} ${path.replace(/\{([A-Za-z]+)\}/g, ":$1")}`,
       op,
     })),
   );
@@ -86,8 +86,15 @@ describe("openApiDocument (plan 11g)", () => {
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
-    expect(keys.length).toBe(146);
-    const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
+    // Plan 12d Task 2b adds the five domain routes and the operator's override.
+    // Plan 12d Task 3 adds the four connection routes.
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    // Plan 12d Task 10 adds the six routes of the SCIM Users.
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(keys.length).toBe(186);
+    const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
 
@@ -178,8 +185,12 @@ describe("openApiDocument (plan 11g)", () => {
     ]);
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
     // Plan 12f adds the seven bodies of the operator writes, then the two of
-    // the impersonation: 64 became 73.
-    expect(bodies.length).toBe(88);
+    // the impersonation: 64 became 73. Plan 12d Task 2b adds four domain
+    // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
+    // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
+    // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99. Task 8
+    // adds the form of the SAML ACS: 100.
+    expect(bodies.length).toBe(100);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -241,6 +252,7 @@ describe("openApiDocument (plan 11g)", () => {
       initialAccessToken: ["initialAccessToken"],
       clientSecretBasic: ["clientSecretBasic"],
       dpopAccessToken: ["oauthDpop"],
+      scimToken: ["scimToken"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -362,8 +374,8 @@ describe("openApiDocument (plan 11g)", () => {
     for (const { key, op } of operations(doc)) {
       const contract = contracts[key];
       if (contract === undefined) throw new Error(`no contract ${key}`);
-      for (const kind of [contract.answer, contract.alt]) {
-        if (kind?.kind !== "json") continue;
+      for (const kind of answerKinds(contract)) {
+        if (kind.kind !== "json") continue;
         const schema =
           op.responses[String(kind.status ?? 200)]?.content?.["application/json"]?.schema;
         expect(inline(schema), key).toEqual(own(kind.schema, "output"));
@@ -400,8 +412,16 @@ describe("openApiDocument (plan 11g)", () => {
     }
     // Plan 12f adds 11 JSON answers, 7 bodies, and 4 queries of the operator
     // routes, then 2 answers and 2 bodies of the impersonation. Plan 12h
-    // adds the 2 answers of GET /health and GET /ready.
-    expect([answers, bodies, queries]).toEqual([122, 88, 26]);
+    // adds the 2 answers of GET /health and GET /ready. Plan 12d
+    // Task 2b adds 6 answers, 5 bodies, and the query of the domain list.
+    // Plan 12d Task 3 adds 4 answers, 3 bodies, and the query of the
+    // connection list. Plan 12d Task 4 adds the answer and the body of the
+    // discovery, and the queries of the start and the callback. Plan 12d
+    // Task 9b adds the 3 JSON answers, 2 bodies, and the query of the SCIM
+    // token routes. Task 13 holds the SCIM answers of /scim/v2. Plan 12d
+    // Task 8 adds the form of the SAML ACS; its answers are a redirect and
+    // the XML of the SP metadata.
+    expect([answers, bodies, queries]).toEqual([136, 100, 31]);
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -450,6 +470,29 @@ describe("openApiDocument (plan 11g)", () => {
         expect(param, path).toMatchObject({ name: "provider", required: true });
         expect(param?.schema.pattern, path).toBe("^[a-z][a-z0-9-]{0,31}$");
       }
+  });
+
+  it("gives each connection path one parameter of the router's segment rule (plan 12d ruling 10)", () => {
+    const paths = Object.entries(reference().paths).filter(([p]) => p.includes("{connectionId}"));
+    expect(paths.map(([p]) => p)).toEqual([
+      "/sso/{connectionId}/start",
+      "/sso/{connectionId}/callback",
+      "/sso/{connectionId}/acs",
+      "/sso/{connectionId}/metadata",
+    ]);
+    for (const [path, item] of paths)
+      for (const op of Object.values(item))
+        expect(
+          op.parameters?.filter((p) => p.in === "path"),
+          path,
+        ).toEqual([
+          {
+            name: "connectionId",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,128}$" },
+          },
+        ]);
   });
 
   it("names the page form of the codes of a form post", () => {

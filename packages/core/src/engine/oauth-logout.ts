@@ -432,15 +432,21 @@ const deliverRows = (config: ResolvedConfig, rows: OAuthLogoutRow[]) =>
  * Delivers the due outbox rows of `userId`, at most `LOGOUT_REQUEST_MAX`.
  * Each flow that ends a session calls it after its commit, beside its
  * `sessionsEnded` call. It never throws: the session end that the person
- * asked for is already done, and the sweep delivers what is left.
+ * asked for is already done, and the sweep delivers what is left. With
+ * `all`, a row that waits for a retry counts as due too: the account delete
+ * sends every row of the user at once (ruling 78 of plan 12d).
  */
-export async function deliverLogouts(config: ResolvedConfig, userId: string): Promise<void> {
+export async function deliverLogouts(
+  config: ResolvedConfig,
+  userId: string,
+  all = false,
+): Promise<void> {
   try {
     const due = await config.storage.findMany(
       "oauthLogout",
       [
         { field: "userId", op: "eq", value: userId },
-        { field: "nextAttemptAt", op: "lte", value: config.clock.now() },
+        ...(all ? [] : [{ field: "nextAttemptAt", op: "lte", value: config.clock.now() } as const]),
       ],
       { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_REQUEST_MAX },
     );

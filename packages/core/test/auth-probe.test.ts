@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createOrganization } from "../src/engine/organizations.js";
+import { createScimToken } from "../src/engine/scim/tokens.js";
 import { createSession } from "../src/engine/sessions.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
@@ -42,6 +44,11 @@ async function answerOf(res: Response): Promise<Answer> {
     const body = (await res.json()) as { error?: string };
     return { status: res.status, code: body.error ?? null };
   }
+  // A SCIM route answers the SCIM error message, whose code is its scimType (plan 12d).
+  if (type.startsWith("application/scim+json")) {
+    const body = (await res.json()) as { scimType?: string };
+    return { status: res.status, code: body.scimType ?? null };
+  }
   return { status: res.status, code: null };
 }
 
@@ -57,13 +64,18 @@ const authOf = (key: RouteKey): readonly string[] => entryOf(key).auth;
 /** The request of one route: the path with a real provider, the body by its media, the headers. */
 function requestOf(key: RouteKey, headers: Record<string, string>): Request {
   const entry = entryOf(key);
-  const url = `${BASE}/auth${entry.path.replace(":provider", "google")}`;
+  // Each other parameter takes a value of the id form, so an event field of it passes its kind (plan 12h).
+  const path = entry.path.replace(":provider", "google").replace(/:([A-Za-z]+)/g, "p-$1");
+  const url = `${BASE}/auth${path}`;
   if (entry.method === "GET") return new Request(url, { headers });
+  // A DELETE carries no body (plan 12d Task 10, the SCIM Users).
+  if (entry.method === "DELETE")
+    return new Request(url, { method: "DELETE", headers: { origin: BASE, ...headers } });
   const body = PROBE_BODIES[key] ?? {};
   const media = CONTRACT[key]?.body?.media ?? ["json"];
   if (media.includes("json"))
     return new Request(url, {
-      method: "POST",
+      method: entry.method,
       headers: { "content-type": "application/json", origin: BASE, ...headers },
       body: JSON.stringify(body),
     });
@@ -100,6 +112,13 @@ function world() {
   return { config, handle, session, cookie };
 }
 
+/** The verified user of a session token, by the session row. */
+async function userOf(w: ReturnType<typeof world>, email: string) {
+  const user = await w.config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user) throw new Error(`no user ${email}`);
+  return user;
+}
+
 /** The answers of the routes in `keys` with the same headers, by key. */
 async function probe(
   w: ReturnType<typeof world>,
@@ -130,6 +149,8 @@ describe("the auth probe (plan 11g)", () => {
       if (CONTRACT[key]?.answer.kind === "html" && key.startsWith("GET "))
         expected[key] = { status: 302, code: null };
       else if (auth.includes("accessToken")) expected[key] = { status: 401, code: "invalid_token" };
+      // The SCIM 401 of RFC 7644 section 3.12 has no scimType (plan 12d).
+      else if (auth.includes("scimToken")) expected[key] = { status: 401, code: null };
       else expected[key] = { status: 401, code: "unauthorized" };
     }
     expect(await probe(w, needs, {})).toEqual(expected);
@@ -170,6 +191,7 @@ describe("the auth probe (plan 11g)", () => {
       "garbage access token": { authorization: `Bearer ${garbage}` },
       "wrong operator secret": { authorization: `Operator ${garbage}` },
       "garbage bearer": { authorization: "Bearer nope" },
+      "wrong sk_ bearer": { authorization: `Bearer sk_${garbage}` },
     };
     const formsOf: Record<string, string[]> = {
       session: ["wrong cookie", "wrong ts_ bearer"],
@@ -177,6 +199,7 @@ describe("the auth probe (plan 11g)", () => {
       sessionJwt: ["garbage JWT"],
       accessToken: ["garbage access token"],
       operator: ["wrong operator secret"],
+      scimToken: ["wrong sk_ bearer"],
     };
     const needs = keys.filter((key) => !authOf(key).includes("none"));
     const results: Record<string, Answer> = {};
@@ -184,7 +207,11 @@ describe("the auth probe (plan 11g)", () => {
     for (const key of needs) {
       const auth = authOf(key);
       const labels = [...auth.flatMap((form) => formsOf[form] ?? []), "garbage bearer"];
-      const code = auth.includes("accessToken") ? "invalid_token" : "unauthorized";
+      const code = auth.includes("accessToken")
+        ? "invalid_token"
+        : auth.includes("scimToken")
+          ? null
+          : "unauthorized";
       for (const label of labels) {
         const headers = wrong[label];
         if (!headers) throw new Error(`no credential ${label}`);
@@ -207,5 +234,36 @@ describe("the auth probe (plan 11g)", () => {
     const expected: Record<string, Answer> = {};
     for (const key of tokenOnly) expected[key] = { status: 401, code: "unauthorized" };
     expect(await probe(w, tokenOnly, cookie)).toEqual(expected);
+  });
+  it("answers an sk_ bearer on every route outside /scim/v2 as a request with no credential (plan 12d)", async () => {
+    const w = world();
+    // A live SCIM token of an organization whose owner holds a live session.
+    await w.session("owner@acme.example");
+    const owner = await userOf(w, "owner@acme.example");
+    const org = await createOrganization(w.config, { user: owner, slug: "acme", name: "Acme" });
+    if (!org.ok) throw new Error(org.code);
+    const made = await createScimToken(
+      w.config,
+      { kind: "app", name: "probe" },
+      { organizationId: org.value.organization.id, name: "directory" },
+    );
+    if (!made.ok) throw new Error(made.code);
+    const others = keys.filter((key) => !key.includes(" /scim/v2/"));
+    // Plan 12d Task 10 adds the six routes of the SCIM Users to the ten of Task 9b.
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(others.length).toBe(keys.length - 22);
+    // A route of client auth answers any Authorization header with a 401 and no header with a
+    // 400 (ruling 19 of plan 12e). There, the live token answers as a token that names no row.
+    const unknown = { authorization: `Bearer sk_${"C".repeat(43)}` };
+    const withToken: Record<string, Answer> = {};
+    const expected: Record<string, Answer> = {};
+    for (const key of others) {
+      withToken[key] = await answerOf(
+        await w.handle(requestOf(key, { authorization: `Bearer ${made.value.token}` })),
+      );
+      const basic = authOf(key).includes("clientSecretBasic");
+      expected[key] = await answerOf(await w.handle(requestOf(key, basic ? unknown : {})));
+    }
+    expect(withToken).toEqual(expected);
   });
 });

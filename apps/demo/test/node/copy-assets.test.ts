@@ -89,7 +89,8 @@ describe("copy-assets.mjs", () => {
     const copy = readFileSync(join(client, "transport.js"), "utf8");
     expect(copy).toContain('import { ERRORS } from "../core/errors.js";');
     expect(readFileSync(join(client, "client.js"), "utf8")).toContain(
-      'import { PROVIDER_NAME_RE } from "../core/routes.js";',
+      // The start link of client.sso reads the segment rule too (plan 12d Task 13).
+      'import { PARAM_SEGMENT_RE, PROVIDER_NAME_RE } from "../core/routes.js";',
     );
     for (const name of files(client))
       expect(readFileSync(join(client, name), "utf8"), name).not.toContain("@authtempo/");
@@ -98,6 +99,7 @@ describe("copy-assets.mjs", () => {
       "errors.js",
       "http/anchors.js",
       "http/redirect.js",
+      "http/route-key.js",
       "http/route-list.js",
       "primitives/crypto.js",
       "primitives/totp.js",

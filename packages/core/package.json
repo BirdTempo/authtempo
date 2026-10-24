@@ -60,6 +60,10 @@
       "types": "./dist/bindings.d.ts",
       "default": "./dist/bindings.js"
     },
+    "./compat": {
+      "types": "./dist/compat.d.ts",
+      "default": "./dist/compat.js"
+    },
     "./openapi": {
       "types": "./dist/openapi/index.d.ts",
       "default": "./dist/openapi/index.js"
@@ -89,6 +93,7 @@
   "devDependencies": {
     "ajv": "8.20.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "xml-crypto": "6.3.3"
   }
 }

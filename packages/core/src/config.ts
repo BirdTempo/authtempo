@@ -33,8 +33,12 @@ import {
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
   type ResolvedHooks,
+  SCIM_HOOK_POINTS,
+  type ScimHooks,
   SESSION_HOOK_POINTS,
   type SessionHooks,
+  SSO_HOOK_POINTS,
+  type SsoHooks,
   USER_HOOK_POINTS,
   type UserHooks,
 } from "./engine/hooks.js";
@@ -43,7 +47,15 @@ import type { CimdEntry, JwksEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
-import { deriveRoles, normalizeSlug, ROLE_RE } from "./engine/ranks.js";
+import {
+  deriveRoles,
+  holdsRolePart,
+  isOwner,
+  normalizeSlug,
+  ROLE_RE,
+  rankOf,
+} from "./engine/ranks.js";
+import type { DnsTxtPort } from "./engine/sso/dns.js";
 import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
@@ -376,6 +388,18 @@ export interface AuthConfig {
    */
   operator?: OperatorConfig | false;
   /**
+   * Enterprise SSO (plan 12d, spec 30): the email domains that an
+   * organization proves by DNS, and its connections to its IdP. Off when
+   * absent or `false`. Needs `organizations` and `sso.dns`.
+   */
+  sso?: SsoConfig | false;
+  /**
+   * A SCIM 2.0 server for each organization (plan 12d Task 9, spec 30). A
+   * directory provisions and removes the staff of an organization with a
+   * SCIM token. Off when absent or `false`. Needs `organizations`.
+   */
+  scim?: ScimConfig | false;
+  /**
    * `GET <basePath>/openapi.json`, the OpenAPI document of the routes that
    * this config mounts (plan 11g). Off when absent. It lists no route of a
    * feature that is off, and holds no secret.
@@ -494,6 +518,11 @@ export interface TotpGateConfig {
   emailOtp?: boolean;
   /** Every social provider. Default true. */
   social?: boolean;
+  /**
+   * Every SSO connection (plan 12d). Default true. A connection's `mfa` list
+   * passes the gate when the IdP asserts one of its values.
+   */
+  sso?: boolean;
 }
 
 export interface TotpConfig {
@@ -536,7 +565,7 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
-  gate: { magicLink: boolean; emailOtp: boolean; social: boolean };
+  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean };
   emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
@@ -584,7 +613,7 @@ export interface ResolvedJwtMint {
 }
 
 /** The scopes of a named operator secret (plan 12f). Each scope opens one group of operator routes. */
-export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "sso";
 
 /** One named operator secret with its scopes (plan 12f, owner decision 1). */
 export interface OperatorSecretEntry {
@@ -878,6 +907,59 @@ export interface TokensConfig {
   movedPrefixes?: string[];
 }
 
+/** The SSO config (plan 12d, spec 30 item 1). */
+export interface SsoConfig {
+  /** OIDC connections (plan 12d Task 3). Off when absent. */
+  oidc?: true;
+  /** SAML connections (plan 12d Task 8). `clockSkewSeconds` is 0 to 300, default 120. */
+  saml?: { clockSkewSeconds?: number } | true;
+  /**
+   * The DNS resolvers of the domain proof, each a `DnsTxtPort`. Required:
+   * core has no default resolver (ruling 15 of plan 12d). Pass the presets
+   * `dohCloudflare` and `dohGoogle` with your fetch, or your own ports.
+   * Every resolver must give the value. Two resolvers: one resolver that
+   * is wrong or compromised must not give a domain to an organization.
+   */
+  dns?: DnsTxtPort[];
+  /** The fetch of the IdP calls. Core wraps it so that no redirect is followed (plan 12b). */
+  fetch?: typeof fetch;
+  /** Default 10 connections and 20 domains per organization. Each is a positive integer. */
+  limits?: { connectionsPerOrganization?: number; domainsPerOrganization?: number };
+}
+
+/** The SSO config after construction (plan 12d). */
+export interface ResolvedSso {
+  oidc: boolean;
+  saml: { clockSkewSeconds: number } | null;
+  dns: readonly DnsTxtPort[];
+  fetch: typeof fetch;
+  limits: { connectionsPerOrganization: number; domainsPerOrganization: number };
+}
+
+/** The SCIM config (plan 12d Task 9, spec 30 item 17). */
+export interface ScimConfig {
+  /**
+   * What a SCIM group gives (Task 11): `roles` (the default), the role map
+   * of the connection; `teams`, a team of 12k per group; or `both`.
+   * `teams` and `both` need `organizations.teams`.
+   */
+  groups?: "roles" | "teams" | "both";
+  /**
+   * The role of a member that SCIM adds. A role of the role table, below the
+   * owner rank, and never the platform role. Default `member`. A dynamic
+   * role is refused here: core checks the config at construction, and a
+   * dynamic role lives in one organization. The `defaultRole` of a
+   * connection may name a dynamic role (ruling 25 N2 of plan 12d).
+   */
+  defaultRole?: string;
+}
+
+/** The SCIM config after construction (plan 12d). */
+export interface ResolvedScim {
+  groups: "roles" | "teams" | "both";
+  defaultRole: string;
+}
+
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
@@ -953,6 +1035,10 @@ export interface ResolvedConfig {
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
   operator: ResolvedOperator | null;
+  /** Null: SSO is off, and no SSO route is mounted (plan 12d). */
+  sso: ResolvedSso | null;
+  /** Null: SCIM is off, and no SCIM route is mounted (plan 12d Task 9). */
+  scim: ResolvedScim | null;
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
@@ -1208,6 +1294,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (!basePath.startsWith("/") || basePath.endsWith("/")) {
     throw new ConfigError("basePath must start with / and not end with /");
   }
+  // The router reads a segment that starts with ":" as a path parameter (plan 12d).
+  if (basePath.split("/").some((segment) => segment.startsWith(":"))) {
+    throw new ConfigError("basePath must not hold a segment that starts with :");
+  }
   const clock = input.clock ?? systemClock;
   const providers = socialProviders(input.social);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
@@ -1344,12 +1434,16 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       trustedOrigins: input.trustedOrigins,
     }),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
+    sso: resolveSso(input.sso, organizations !== null),
+    scim: resolveScim(input.scim, organizations),
     openapi,
     // The operator key resolved above, so `users` is true or absent here.
     hooks: resolveHooks(
       input.hooks,
       organizations !== null,
       typeof input.operator === "object" && input.operator.users === true,
+      input.sso !== undefined && input.sso !== false,
+      input.scim !== undefined && input.scim !== false,
     ),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(
@@ -1768,19 +1862,20 @@ const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
   magicLink: true,
   emailOtp: true,
   social: true,
+  sso: true,
 };
 
 /** `totp.gate` (plan 12c): each method on unless the app sets it false. */
 function resolveGate(input: unknown): ResolvedTotp["gate"] {
-  const gate = { magicLink: true, emailOtp: true, social: true };
+  const gate = { magicLink: true, emailOtp: true, social: true, sso: true };
   if (input === undefined) return gate;
   if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
       throw new ConfigError(
-        `totp.gate.${key} is not an option; core has magicLink, emailOtp, and social. The handoff has no key: it continues a browser session that passed the gate`,
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate`,
       );
-  for (const key of ["magicLink", "emailOtp", "social"] as const) {
+  for (const key of ["magicLink", "emailOtp", "social", "sso"] as const) {
     const value = (input as TotpGateConfig)[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);
@@ -1936,6 +2031,156 @@ function resolveJwtMint(
   };
 }
 
+const SSO_KEYS: Readonly<Record<keyof SsoConfig, true>> = {
+  oidc: true,
+  saml: true,
+  dns: true,
+  fetch: true,
+  limits: true,
+};
+const SSO_LIMIT_KEYS: Readonly<Record<keyof NonNullable<SsoConfig["limits"]>, true>> = {
+  connectionsPerOrganization: true,
+  domainsPerOrganization: true,
+};
+const SSO_SAML_KEYS: Readonly<Record<keyof Exclude<SsoConfig["saml"], true | undefined>, true>> = {
+  clockSkewSeconds: true,
+};
+/** The largest clock skew of a SAML assertion, in seconds (plan 12d Task 8). */
+const SAML_SKEW_MAX = 300;
+
+/** One positive integer of `sso.limits`, or its default. */
+function ssoLimit(value: unknown, key: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+    throw new ConfigError(`sso.limits.${key} must be a positive integer`);
+  return value;
+}
+
+/**
+ * `sso` (plan 12d). Off when absent or `false`. It needs `organizations`:
+ * a domain and a connection belong to an organization. `dns` is required
+ * and is never a default (ruling 15 of plan 12d): the app picks its
+ * resolvers. Two resolvers: one resolver that is wrong or compromised must
+ * not give a domain to an organization.
+ */
+function resolveSso(
+  input: SsoConfig | false | undefined,
+  organizations: boolean,
+): ResolvedSso | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("sso must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(SSO_KEYS, key))
+      throw new ConfigError(
+        `sso.${key} is not an option; core has oidc, saml, dns, fetch, and limits`,
+      );
+  if (!organizations) throw new ConfigError("sso needs organizations");
+  if (input.oidc !== undefined && input.oidc !== true)
+    throw new ConfigError("sso.oidc must be true or absent");
+  let saml: ResolvedSso["saml"] = null;
+  if (input.saml !== undefined) {
+    const raw: unknown = input.saml;
+    if (raw !== true && !isPlainObject(raw))
+      throw new ConfigError("sso.saml must be true or an object");
+    if (isPlainObject(raw))
+      for (const [key, value] of Object.entries(raw))
+        if (value !== undefined && !Object.hasOwn(SSO_SAML_KEYS, key))
+          throw new ConfigError(`sso.saml.${key} is not an option; core has clockSkewSeconds`);
+    const skew =
+      raw === true ? undefined : (raw as { clockSkewSeconds?: unknown }).clockSkewSeconds;
+    if (
+      skew !== undefined &&
+      (typeof skew !== "number" || !Number.isSafeInteger(skew) || skew < 0 || skew > SAML_SKEW_MAX)
+    )
+      throw new ConfigError(
+        `sso.saml.clockSkewSeconds must be an integer from 0 to ${SAML_SKEW_MAX}`,
+      );
+    saml = { clockSkewSeconds: typeof skew === "number" ? skew : 120 };
+  }
+  const dns: unknown = input.dns;
+  if (!Array.isArray(dns) || dns.length === 0)
+    throw new ConfigError(
+      "sso.dns must list one DNS resolver or more; core has no default resolver",
+    );
+  for (const port of dns as unknown[])
+    if (
+      typeof port !== "object" ||
+      port === null ||
+      typeof (port as { name?: unknown }).name !== "string" ||
+      typeof (port as { txt?: unknown }).txt !== "function"
+    )
+      throw new ConfigError("sso.dns must hold objects with a name string and a txt function");
+  if (input.fetch !== undefined && typeof input.fetch !== "function")
+    throw new ConfigError("sso.fetch must be a function");
+  const limits: unknown = input.limits;
+  if (limits !== undefined) {
+    if (!isPlainObject(limits)) throw new ConfigError("sso.limits must be an object");
+    for (const [key, value] of Object.entries(limits))
+      if (value !== undefined && !Object.hasOwn(SSO_LIMIT_KEYS, key))
+        throw new ConfigError(
+          `sso.limits.${key} is not an option; core has connectionsPerOrganization and domainsPerOrganization`,
+        );
+  }
+  const l = (limits ?? {}) as Record<string, unknown>;
+  return {
+    oidc: input.oidc === true,
+    saml,
+    dns: Object.freeze([...(dns as DnsTxtPort[])]),
+    // A caller's fetch must be callable without a receiver; no redirect is followed (plan 12b).
+    fetch: providerFetch(input.fetch ?? globalThis.fetch.bind(globalThis)),
+    limits: {
+      connectionsPerOrganization: ssoLimit(
+        l.connectionsPerOrganization,
+        "connectionsPerOrganization",
+        10,
+      ),
+      domainsPerOrganization: ssoLimit(l.domainsPerOrganization, "domainsPerOrganization", 20),
+    },
+  };
+}
+
+const SCIM_KEYS: Readonly<Record<keyof ScimConfig, true>> = { groups: true, defaultRole: true };
+const SCIM_GROUPS: ReadonlySet<string> = new Set(["roles", "teams", "both"]);
+
+/**
+ * `scim` (plan 12d Task 9 Behavior 11). Off when absent or `false`. It
+ * needs `organizations`: a SCIM token belongs to an organization. A group
+ * gives a team only with `organizations.teams`. `defaultRole` names a role
+ * of the role table, each part of it, below the owner rank, and never the
+ * platform role. So a directory never makes an owner or a platform
+ * operator. A dynamic role is refused: this check runs at construction,
+ * and a dynamic role lives in one organization. The connection `defaultRole`
+ * may name one (ruling 25 N2 of plan 12d).
+ */
+function resolveScim(
+  input: ScimConfig | false | undefined,
+  organizations: ResolvedConfig["organizations"],
+): ResolvedScim | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("scim must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(SCIM_KEYS, key))
+      throw new ConfigError(`scim.${key} is not an option; core has groups and defaultRole`);
+  if (organizations === null) throw new ConfigError("scim needs organizations");
+  const groups: unknown = input.groups ?? "roles";
+  if (typeof groups !== "string" || !SCIM_GROUPS.has(groups))
+    throw new ConfigError("scim.groups must be roles, teams, or both");
+  if (groups !== "roles" && organizations.teams === null)
+    throw new ConfigError(`scim.groups ${groups} needs organizations.teams`);
+  const role: unknown = input.defaultRole ?? "member";
+  if (
+    typeof role !== "string" ||
+    !ROLE_RE.test(role) ||
+    role.split(",").some((part) => !Object.hasOwn(organizations.roles, part))
+  )
+    throw new ConfigError("scim.defaultRole must be a role of the role table");
+  if (isOwner(organizations, rankOf(organizations.ranks, role)))
+    throw new ConfigError("scim.defaultRole must rank below owner");
+  if (organizations.platformRole !== null && holdsRolePart(role, organizations.platformRole))
+    throw new ConfigError("scim.defaultRole must not hold the platform role");
+  return { groups: groups as ResolvedScim["groups"], defaultRole: role };
+}
+
 const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = {
   secretHash: true,
   secrets: true,
@@ -1956,6 +2201,7 @@ const OPERATOR_SCOPES: ReadonlySet<string> = new Set<OperatorScope>([
   "users",
   "sessions",
   "audit",
+  "sso",
 ]);
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -1979,7 +2225,7 @@ function resolveOperatorEntry(input: unknown): ResolvedOperatorSecret {
   for (const scope of scopes as unknown[])
     if (typeof scope !== "string" || !OPERATOR_SCOPES.has(scope))
       throw new ConfigError(
-        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, or audit",
+        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, audit, or sso",
       );
   return Object.freeze({
     name,
@@ -2222,11 +2468,25 @@ function resolveDevice(input: unknown): ResolvedOAuth["device"] {
   if (typeof interval !== "number")
     throw new ConfigError("oauth.device.interval must be an integer from 5 to 60");
   return {
-    codeTtlMinutes: integerIn("oauth.device.codeTtlMinutes", ttl, 1, 30),
+    codeTtlMinutes: integerIn(
+      "oauth.device.codeTtlMinutes",
+      ttl,
+      1,
+      OAUTH_DEVICE_CODE_TTL_MINUTES_MAX,
+    ),
     // RFC 8628 section 3.2: a client with no interval polls every 5 seconds, so no shorter value.
     interval: integerIn("oauth.device.interval", interval, 5, 60),
   };
 }
+
+/**
+ * The bounds of the OAuth lives. The record of a SCIM deactivate lives past
+ * the longest family that any instance can write, so it reads these bounds
+ * (ruling 74 item 7 of plan 12d).
+ */
+export const OAUTH_REFRESH_TTL_DAYS_MAX = 365;
+export const OAUTH_CODE_TTL_MINUTES_MAX = 10;
+export const OAUTH_DEVICE_CODE_TTL_MINUTES_MAX = 30;
 
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
@@ -2348,8 +2608,18 @@ function resolveOAuth(
       1,
       60,
     ),
-    refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
-    codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
+    refreshTtlDays: integerIn(
+      "oauth.refreshTtlDays",
+      input.refreshTtlDays ?? 30,
+      1,
+      OAUTH_REFRESH_TTL_DAYS_MAX,
+    ),
+    codeTtlMinutes: integerIn(
+      "oauth.codeTtlMinutes",
+      input.codeTtlMinutes ?? 5,
+      1,
+      OAUTH_CODE_TTL_MINUTES_MAX,
+    ),
     introspection: resolveIntrospection(input.introspection, resources as string[]),
     dpop: resolveDpop(input.dpop),
     signInURL: resolveSignInURL(input.signInURL, origins),
@@ -2392,20 +2662,38 @@ function hookGroup(
 }
 
 /** The hook groups of core. The refusal message names them in this order. */
-const HOOK_GROUPS: readonly string[] = ["organization", "session", "user", "identity", "operator"];
+const HOOK_GROUPS: readonly string[] = [
+  "organization",
+  "session",
+  "user",
+  "identity",
+  "operator",
+  "sso",
+  "scim",
+];
 
 function resolveHooks(
   input: HooksConfig | undefined,
   organizationsOn: boolean,
   operatorUsersOn: boolean,
+  ssoOn: boolean,
+  scimOn: boolean,
 ): ResolvedHooks {
   if (input === undefined)
-    return { organization: {}, session: {}, user: {}, identity: {}, operator: {} };
+    return {
+      organization: {},
+      session: {},
+      user: {},
+      identity: {},
+      operator: {},
+      sso: {},
+      scim: {},
+    };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, and operator`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, and scim`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -2431,10 +2719,21 @@ function resolveHooks(
     input.operator,
     OPERATOR_HOOK_POINTS,
   ) as unknown as OperatorHooks;
-  // Only an operator act runs these points, and the acts need operator.users.
-  if (Object.keys(operator).length > 0 && !operatorUsersOn)
-    throw new ConfigError("hooks.operator needs operator.users: the hooks would never run");
-  return { organization, session, user, identity, operator };
+  // An act that writes an audit row runs these points: an operator act of operator.users,
+  // and an SSO or SCIM act (spec 30 item 24). With none of the three on, no act runs them.
+  if (Object.keys(operator).length > 0 && !operatorUsersOn && !ssoOn && !scimOn)
+    throw new ConfigError(
+      "hooks.operator needs operator.users, sso, or scim: the hooks would never run",
+    );
+  const sso = hookGroup("hooks.sso", input.sso, SSO_HOOK_POINTS) as unknown as SsoHooks;
+  // Only an SSO sign-in runs this point (plan 12d).
+  if (Object.keys(sso).length > 0 && !ssoOn)
+    throw new ConfigError("hooks.sso needs sso: the hooks would never run");
+  const scim = hookGroup("hooks.scim", input.scim, SCIM_HOOK_POINTS) as unknown as ScimHooks;
+  // Only a SCIM write runs this point (plan 12d Task 10).
+  if (Object.keys(scim).length > 0 && !scimOn)
+    throw new ConfigError("hooks.scim needs scim: the hooks would never run");
+  return { organization, session, user, identity, operator, sso, scim };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
+import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
 import { stopWith } from "./hooks.js";
@@ -471,8 +472,9 @@ async function resolveInTransaction(
 /**
  * The sign-up rule at a create (plan 12b): stops the flow with
  * `sign_up_closed` unless `signUp` lets `email` become a user. It reads the
- * invitation in the create's transaction, so an invitation revoked before
- * the commit refuses it.
+ * invitations and their organizations in the create's transaction. So an
+ * invitation revoked before the commit refuses it, and so does an
+ * invitation of a deleted organization.
  */
 export async function mayCreateUser(
   config: ResolvedConfig,
@@ -481,16 +483,29 @@ export async function mayCreateUser(
 ): Promise<void> {
   if (config.signUp === "open") return;
   if (config.signUp === "invited") {
-    const [pending] = await tx.findMany(
+    const pending = await tx.findMany(
       "invitation",
       [
         { field: "email", op: "eq", value: email },
         { field: "acceptedAt", op: "eq", value: null },
         { field: "expiresAt", op: "gt", value: config.clock.now() },
       ],
-      { limit: 1 },
+      { limit: IN_CHUNK },
     );
-    if (pending) return;
+    // An account delete leaves the invitations of its solo organizations to the sweep (ruling
+    // 78 of plan 12d). So an invitation counts only while its organization stays: one read.
+    if (
+      pending.length > 0 &&
+      (
+        await findManyIn(
+          tx,
+          "organization",
+          "id",
+          pending.map((x) => x.organizationId),
+        )
+      ).length > 0
+    )
+      return;
   }
   stopWith("sign_up_closed");
 }

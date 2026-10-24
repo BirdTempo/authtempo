@@ -39,17 +39,25 @@ interface Fn {
 }
 
 /**
- * The top-level functions of the engine folder of core and of its operator
- * folder, where the flows of plan 12f are. A function starts at a line that
- * opens `function` or `async function`, with or without `export`.
+ * The folders of the engine that hold flows: the operator folder of plan
+ * 12f, and the SSO and SCIM folders of plan 12d.
+ */
+const SUBFOLDERS = ["operator", "sso", "scim"] as const;
+
+/**
+ * The top-level functions of the engine folder of core and of its
+ * SUBFOLDERS. A function starts at a line that opens `function` or
+ * `async function`, with or without `export`.
  */
 function functions(): Fn[] {
   const out: Fn[] = [];
   const files = [
     ...readdirSync(ENGINE).filter((n) => n.endsWith(".ts")),
-    ...readdirSync(`${ENGINE}operator/`)
-      .filter((n) => n.endsWith(".ts"))
-      .map((n) => `operator/${n}`),
+    ...SUBFOLDERS.flatMap((d) =>
+      readdirSync(`${ENGINE}${d}/`)
+        .filter((n) => n.endsWith(".ts"))
+        .map((n) => `${d}/${n}`),
+    ),
   ];
   for (const f of files) {
     const src = readFileSync(`${ENGINE}${f}`, "utf8");
@@ -61,9 +69,10 @@ function functions(): Fn[] {
   return out;
 }
 
-const DIRECT_NAMES = new Set(["holdUser", "lockOrganization", "lockTeam"]);
+// holdUsers is the batch hold of ruling 25 N3 of plan 12d: lockInOrder of the user rows.
+const DIRECT_NAMES = new Set(["holdUser", "holdUsers", "lockOrganization", "lockTeam"]);
 /** A direct call of a lock function. */
-const DIRECT = /(?<!function )\b(holdUser|lockOrganization|lockTeam)\(/g;
+const DIRECT = /(?<!function )\b(holdUser|holdUsers|lockOrganization|lockTeam)\(/g;
 /**
  * A compare-and-set write: an update whose where holds `updatedAt` with
  * `eq`, or the `unchanged(...)` where of profile.ts. The write fails when
@@ -77,7 +86,7 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
 /**
  * The lock scan. It finds a lock before a before hook in three forms:
  *
- * 1. A direct call of `holdUser`, `lockOrganization`, or `lockTeam`, or a
+ * 1. A direct call of `holdUser`, `holdUsers`, `lockOrganization`, or `lockTeam`, or a
  *    compare-and-set write (CAS above), earlier in the same function text.
  * 2. A call of a lock helper earlier in the same function text. A lock
  *    helper is a function that holds form 1 or calls another lock helper.
@@ -91,7 +100,7 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
  * The scan reads text, not the control flow. A lock on another branch
  * before the hook counts, so a listed lock can miss some paths. The scan
  * misses these locks:
- * - a lock outside the engine folder and its operator folder;
+ * - a lock outside the engine folder and its SUBFOLDERS;
  * - a lock in an arrow function bound to a top-level `const`, or in a class
  *   method;
  * - a call through a variable or an object field;
@@ -183,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the fifteen flows", () => {
+  it("names the sixteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -196,6 +205,7 @@ describe("the table of locks over a before hook", () => {
       "Team delete",
       "Team member add",
       "Team member removal",
+      "SCIM group write",
       "Identity unlink",
       "Account delete",
       "Platform role revoke",
@@ -215,19 +225,45 @@ describe("the table of locks over a before hook", () => {
         "Invitation accept",
         "acceptInvitation organization.beforeUpdateMemberRole: holdUser, lockOrganization, lockTeam",
       ],
-      ["Member add", "addMember organization.beforeAddMember: holdUser, lockOrganization"],
-      ["Team member add", "addTeamMember organization.beforeAddTeamMember: holdUser, lockTeam"],
+      // The member add of ruling 25 N3 of plan 12d: addMember and the SSO sign-in call it.
+      // The SCIM writes of plan 12d Task 10 call it through joinWrite, after their user
+      // hold, with checked: then it runs no hook. Their joinChecks ran the hook before any lock.
+      [
+        "Member add",
+        "addMemberIn organization.beforeAddMember: holdUser, lockOrganization, joinWrite > scimCreateUser > holdUser, joinWrite > writeChange > holdUser, joinWrite > writeChange > lockOrganization",
+      ],
+      // The team writes of ruling 25 N3 of plan 12d: the user-caller functions call the
+      // tx-level forms after their checks, and take no lock before the call.
+      // A SCIM group write (plan 12d Task 11) calls the team functions with no user caller,
+      // and then they run no team hook (ruling 54). So its writeGroup paths hold no hook.
+      // A group create takes the organization lock after its user hold (ruling 78).
+      [
+        "Team member add",
+        "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",
+      ],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],
-      ["Team create", "createTeam organization.beforeCreateTeam: lockOrganization"],
+      [
+        "Team create",
+        "createTeamIn organization.beforeCreateTeam: lockOrganization, writeGroup > holdUsers, writeGroup > lockOrganization",
+      ],
       [
         "Account delete",
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
       ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
-      ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization, lockTeam"],
+      // A SCIM group delete holds the users of a mapped group first (ruling 59 M2 of plan 12d).
+      [
+        "Team delete",
+        "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization",
+      ],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
+      // The role plan of a SCIM group write runs the role hook with by null after its locks.
+      [
+        "SCIM group write",
+        "planRoles organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockOrganization, writeMembers > writeGroup > lockTeam",
+      ],
       [
         "Impersonation start",
         "prepareSession session.beforeCreate: openSession > startImpersonation > holdUser",
@@ -236,7 +272,10 @@ describe("the table of locks over a before hook", () => {
         "Member removal or leave",
         "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
-      ["Team member removal", "removeTeamMember organization.beforeRemoveTeamMember: lockTeam"],
+      [
+        "Team member removal",
+        "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",
+      ],
       [
         "Platform role revoke",
         "revokePlatformRole organization.beforeRemoveMember: holdUser, ownerLock",

@@ -23,6 +23,7 @@ const FS_MODULE = "node:fs";
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
+ *    The `saml-metadata` standard of `metadata` answers its own XML type.
  *    A redirect has the status of its kind: a 302, or the 303 that the kind
  *    names. A redirect that carries a code is a 302.
  * 4. A route that takes `clientSecretBasic` answers `invalid_client` after
@@ -34,17 +35,25 @@ const FS_MODULE = "node:fs";
  * 6. A JSON error body holds only the keys of its table's error schema in
  *    the OpenAPI document (plan 12h Task 8). So the body of a 503 `not_ready`
  *    cannot gain a key, such as the name of the error, with no sign.
+ * 7. A route of the `scim` kind (plan 12d) answers `application/scim+json`
+ *    with `cache-control: no-store`. A failure is the SCIM error message of
+ *    RFC 7644 section 3.12. It holds the Error URN and the status as its
+ *    string. A `scimType` is one of the entry's `scimTypes`, with the status
+ *    of `SCIM_ERRORS`.
+ *    A 401 carries `Bearer realm="scim"`. A 2xx parses under the schema.
+ *    A 204 of a DELETE, or of a Group PATCH, carries no body and no type.
+ *    The record's code is the `scimType`, or null.
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
   const { shapeVerdict } = await import("./answer-shape.js");
-  const { DPOP_PROOF_AT_RESOURCE, ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } = await import(
-    "../../src/errors.js"
-  );
+  const { DPOP_PROOF_AT_RESOURCE, ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, SCIM_ERRORS } =
+    await import("../../src/errors.js");
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
+  const { answerKinds } = await import("../../src/http/contract/types.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
   const { ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
@@ -66,12 +75,15 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const ROUTER = new Set<string>(ROUTER_CODES);
   /**
    * The keys of an error body beside `error`, for each code that has one
-   * (ruling 7 of plan 12h). `message` is only on hook_refused, and `reason`
-   * is only on not_ready.
+   * (ruling 7 of plan 12h). `message` is on hook_refused, and on the
+   * invalid_body of an SSO or SCIM manager write (plan 12d). `reason` is
+   * only on not_ready, and `detail` only on sso_required (plan 12d).
    */
   const CODE_KEYS: Readonly<Record<string, readonly string[]>> = {
     hook_refused: ["message"],
     not_ready: ["reason"],
+    invalid_body: ["message"],
+    sso_required: ["detail"],
   };
 
   interface AnswerRecord {
@@ -90,24 +102,26 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   type JsonJudged = import("./answer-shape.js").ShapeJudged;
   const NO_SHAPE = { absent: [], nulls: [] };
 
-  /** The key of the mounted route, or the entry of ROUTES whose feature is off (the router's `not_found`), or null. */
+  /**
+   * The key of the mounted route, or the entry of ROUTES whose feature is off
+   * (the router's `not_found`), or null. The router's own matcher finds the
+   * mounted route, so a parameter route records its key (plan 12d Task 4).
+   */
   function keyOf(
     config: import("../../src/config.js").ResolvedConfig,
-    routes: readonly import("../../src/http/router.js").Route[],
+    matchRoute: ReturnType<typeof m.createRouteMatcher>,
     method: string,
     pathname: string,
   ): string | null {
-    const mounted = routes.find(
-      (r) => r.method === method && config.basePath + r.path === pathname,
-    );
+    const mounted = matchRoute(method, pathname)?.route;
     if (mounted) return mounted.key ?? null;
     if (!pathname.startsWith(config.basePath)) return null;
     const key = routeKeyOf(method, pathname.slice(config.basePath.length));
     return ENTRIES.has(key) ? key : null;
   }
 
-  function kinds(contract: RouteContract): AnswerKind[] {
-    return contract.alt ? [contract.answer, contract.alt] : [contract.answer];
+  function kinds(contract: RouteContract): readonly AnswerKind[] {
+    return answerKinds(contract);
   }
 
   /** Rule 1: the code is declared for the route, with the status of its table (a redirect has none). */
@@ -155,6 +169,43 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     return { verdict, ...NO_SHAPE };
   }
 
+  const NS_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error";
+
+  /** Rule 7: a SCIM answer, judged by the SCIM error message or by the schema of its kind. */
+  function scimVerdict(
+    key: string,
+    res: Response,
+    body: unknown,
+    schema: import("zod").ZodType | null,
+  ): { code: string | null; verdict: string } {
+    if (res.headers.get("cache-control") !== "no-store")
+      return { code: null, verdict: "a SCIM answer is not no-store" };
+    const status = res.status;
+    if (status < 400) {
+      if (schema === null) return { code: null, verdict: `a ${status} answer of a 501 route` };
+      const parsed = schema.safeParse(body);
+      return { code: null, verdict: parsed.success ? "ok" : parsed.error.message };
+    }
+    const e = body as { schemas?: unknown; status?: unknown; scimType?: unknown; detail?: unknown };
+    const keys = Object.keys(e).sort().join(",");
+    if (keys !== "detail,schemas,status" && keys !== "detail,schemas,scimType,status")
+      return { code: null, verdict: `the SCIM error holds the keys ${keys}` };
+    if (JSON.stringify(e.schemas) !== JSON.stringify([NS_ERROR]) || typeof e.detail !== "string")
+      return { code: null, verdict: "the SCIM error has no Error URN or no detail" };
+    if (e.status !== String(status))
+      return { code: null, verdict: `the SCIM error says status ${String(e.status)}` };
+    if (status === 401 && res.headers.get("www-authenticate") !== 'Bearer realm="scim"')
+      return { code: null, verdict: "a SCIM 401 carries no Bearer realm challenge" };
+    if (e.scimType === undefined) return { code: null, verdict: "ok" };
+    const type = String(e.scimType);
+    const declared = (ENTRIES.get(key)?.scimTypes ?? []) as readonly string[];
+    if (!declared.includes(type))
+      return { code: type, verdict: `the scimType ${type} is not declared` };
+    if (SCIM_ERRORS[type as keyof typeof SCIM_ERRORS] !== status)
+      return { code: type, verdict: `the scimType ${type} answered ${status}` };
+    return { code: type, verdict: "ok" };
+  }
+
   /**
    * The answer of one request. `carried` is the code that a redirect carries
    * to the app or to the OAuth client. The rule of the router gives it
@@ -181,6 +232,28 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (key === null) return { ...base, verdict: "ok" };
     const contract = CONTRACT[key];
     if (!contract) return { ...base, verdict: `no contract for ${key}` };
+    // Rule 6: a SCIM delete answers 204 with no body and no type (RFC 7644 section 3.6).
+    // A Group PATCH answers 204 too, unless its query asks for attributes (plan 12d
+    // Task 11 Behavior 4, ruling 53 P10).
+    if (status === 204 && contract.answer.kind === "scim") {
+      const text = await res.text();
+      const bare = text === "" && res.headers.get("content-type") === null;
+      const verdict =
+        request.method !== "DELETE" && key !== "PATCH /scim/v2/Groups/:id"
+          ? "a SCIM 204 answers a method that is not DELETE"
+          : !bare
+            ? "a SCIM 204 carries a body or a type"
+            : res.headers.get("cache-control") !== "no-store"
+              ? "a SCIM answer is not no-store"
+              : "ok";
+      return { ...base, verdict };
+    }
+    if (type === "application/scim+json") {
+      if (contract.answer.kind !== "scim")
+        return { ...base, verdict: "a SCIM answer fits no kind of the contract" };
+      const judged = scimVerdict(key, res, await res.json(), contract.answer.schema);
+      return { ...base, ...judged };
+    }
     const allowed = kinds(contract);
     if (redirected) {
       const redirects = allowed.filter((k) => k.kind === "redirect");
@@ -242,6 +315,12 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       if (allowed.some((k) => k.kind === "html")) return { ...base, verdict: "ok" };
       return { ...base, verdict: "an HTML answer fits no kind of the contract" };
     }
+    // The SP metadata of a SAML connection is XML (plan 12d Task 8, SAML Metadata 2.0 section 4.1.1).
+    if (type === "application/samlmetadata+xml" && status === 200) {
+      if (allowed.some((k) => k.kind === "metadata" && k.standard === "saml-metadata"))
+        return { ...base, verdict: "ok" };
+      return { ...base, verdict: "a SAML metadata answer fits no kind of the contract" };
+    }
     return { ...base, verdict: `a ${status} ${type} answer fits no kind of the contract` };
   }
 
@@ -250,9 +329,10 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     createRouter: (...a: Parameters<typeof m.createRouter>) => {
       const handle = m.createRouter(...a);
       const [config, routes] = a;
+      const matchRoute = m.createRouteMatcher(config, routes);
       return async (request: Request) => {
         const res = await handle(request);
-        const key = keyOf(config, routes, request.method, new URL(request.url).pathname);
+        const key = keyOf(config, matchRoute, request.method, new URL(request.url).pathname);
         // The mark of `errorRedirect` is on res, not on its clone.
         const record = await judge(request, res.clone(), key, m.redirectCode(res));
         appendFileSync(FILE, `${JSON.stringify(record)}\n`);

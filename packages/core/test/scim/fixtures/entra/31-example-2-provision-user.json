@@ -1,0 +1,37 @@
+{
+  "method": "POST",
+  "path": "/Users",
+  "headers": {
+    "Content-type": "application/scim+json"
+  },
+  "body": {
+    "schemas": [
+      "urn:ietf:params:scim:schemas:core:2.0:User",
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0User"
+    ],
+    "externalId": "jyoung",
+    "userName": "jyoung@testuser.com",
+    "active": true,
+    "addresses": null,
+    "displayName": "Joy Young",
+    "emails": [
+      {
+        "type": "work",
+        "value": "jyoung@Contoso.com",
+        "primary": true
+      }
+    ],
+    "meta": {
+      "resourceType": "User"
+    },
+    "name": {
+      "familyName": "Young",
+      "givenName": "Joy"
+    },
+    "phoneNumbers": null,
+    "preferredLanguage": null,
+    "title": null,
+    "department": null,
+    "manager": null
+  }
+}

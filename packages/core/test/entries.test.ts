@@ -19,7 +19,13 @@ import {
 import { mintSessionJwt, publicKeySet } from "../src/engine/jwt.js";
 import { createSession } from "../src/engine/sessions.js";
 import { createApiToken } from "../src/engine/tokens.js";
-import { AUTH_ERROR_PARAM, PROVIDER_NAME_RE, ROUTES, type RoutePath } from "../src/routes.js";
+import {
+  AUTH_ERROR_PARAM,
+  PARAM_SEGMENT_RE,
+  PROVIDER_NAME_RE,
+  ROUTES,
+  type RoutePath,
+} from "../src/routes.js";
 import { ROUTES as TESTING_ROUTES } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 
@@ -72,6 +78,11 @@ describe("the SDK entries of core (plan 11d)", () => {
     ]);
     expect(PROVIDER_NAME_RE.test("google")).toBe(true);
     expect(PROVIDER_NAME_RE.test("Google")).toBe(false);
+    // The segment rule of an SSO connection id and a SCIM id (plan 12d), for an SDK's start link.
+    expect(PARAM_SEGMENT_RE.test("01JABCDEF")).toBe(true);
+    expect(PARAM_SEGMENT_RE.test("urn:ietf:params:scim:schemas:core:2.0:User")).toBe(true);
+    expect(PARAM_SEGMENT_RE.test("a/b")).toBe(false);
+    expect(PARAM_SEGMENT_RE.test("a%2Fb")).toBe(false);
   });
 
   it("names the query parameter of a browser flow failure", async () => {

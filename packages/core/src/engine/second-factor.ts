@@ -377,9 +377,15 @@ export type ChallengeMethod = SecondFactorMethod | "backup";
  */
 const PREFERENCE: readonly ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
 
-/** The first factors that a challenge can follow (plan 12c). Each is a `SessionVia`. */
-export type GatedVia = "password" | "magic_link" | "email_otp" | "social";
-const GATED_VIA: ReadonlySet<string> = new Set(["password", "magic_link", "email_otp", "social"]);
+/** The first factors that a challenge can follow (plan 12c; `sso` since plan 12d). Each is a `SessionVia`. */
+export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso";
+const GATED_VIA: ReadonlySet<string> = new Set([
+  "password",
+  "magic_link",
+  "email_otp",
+  "social",
+  "sso",
+]);
 
 /** How the person proved the first factor: the session's `via`, and `reset` for a password reset. */
 export interface ChallengeOrigin {
@@ -435,6 +441,8 @@ export interface ChallengeInput extends ChallengeOrigin {
   ip: string | null;
   userAgent: string | null;
   next: string | undefined;
+  /** The latest expiry of the session that the verify opens (plan 12d): a SAML `SessionNotOnOrAfter`. */
+  notAfter?: Date | undefined;
 }
 
 /**
@@ -472,6 +480,7 @@ export async function writeChallenge(
       userAgent: input.userAgent,
       next: safeNext(input.next),
       attempts: 0,
+      ...(input.notAfter ? { notAfter: input.notAfter.toISOString() } : {}),
     },
     createdAt: now,
     updatedAt: now,
@@ -571,6 +580,10 @@ export function gatedSteps(
     next: string;
     trustDevice: string | undefined;
     gate: boolean;
+    /** The latest expiry of the session (plan 12d): a SAML `SessionNotOnOrAfter`. */
+    notAfter?: Date | undefined;
+    /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
+    sameAddress?: boolean;
   },
   now: Date,
 ): {
@@ -596,7 +609,14 @@ export function gatedSteps(
       trustId = read.trustId;
       prepared = await prepareSession(
         config,
-        { user, ip: open.ip, userAgent: open.userAgent, via: open.via },
+        {
+          user,
+          ip: open.ip,
+          userAgent: open.userAgent,
+          via: open.via,
+          ...(open.notAfter ? { notAfter: open.notAfter } : {}),
+          ...(open.sameAddress ? { sameAddress: true } : {}),
+        },
         tx,
       );
     },
@@ -615,6 +635,7 @@ export function gatedSteps(
             ip: open.ip,
             userAgent: open.userAgent,
             next: open.next,
+            notAfter: open.notAfter,
           },
           now,
         );

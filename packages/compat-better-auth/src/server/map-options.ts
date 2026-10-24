@@ -4,8 +4,10 @@ import {
   isIpLiteral,
   type LimiterPort,
   normalizeSlug,
+  SCIM_SCOPES,
   type SignInPageInput,
 } from "@authtempo/core";
+import { type DomainRecordOf, withDomainRecord } from "@authtempo/core/compat";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
 import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
@@ -16,10 +18,12 @@ import {
   type CompatDatabase,
   type CompatPlugin,
   type OrganizationOptions,
+  type ScimScope,
   type User,
 } from "../types.js";
 import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
 import { appSchemes, DEFAULT_ROLE_RANKS, pluginOf, signUpClosed } from "./check-options.js";
+import { BETTER_AUTH_CLOCK_SKEW_MS, DEFAULT_TOKEN_PREFIX } from "./check-sso.js";
 import { compatHooks } from "./hooks.js";
 import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
@@ -79,6 +83,72 @@ export interface Mapped {
   platformRole: string | null;
   /** The api-key plugin's options, or null without the plugin (plan 12k Task 12). */
   apiKey: ApiKeyOptions | null;
+  /** The sso plugin's mapping, or null without the plugin (plan 12d Task 14). */
+  sso: MappedSso | null;
+  /** The credentials of the scim plugin, by the hash of each token, or null without the plugin. */
+  scim: { credentials: MappedScimCredential[] } | null;
+}
+
+/** What the shim's SSO paths read of the sso plugin (plan 12d Task 14). */
+export interface MappedSso {
+  /** `organizationProvisioning.defaultRole`: the role of a new member of each connection. */
+  defaultRole: "member" | "admin";
+  /** False with `disableImplicitSignUp`: no just-in-time create on each connection. */
+  jit: boolean;
+  /** The prefix of Better Auth's record of a domain proof. */
+  tokenPrefix: string;
+}
+
+/** One SCIM credential: the SHA-256 of its token in hex, never the token. */
+export interface MappedScimCredential {
+  /** `<connection id>:<credential id>`: the key of its limit and the actor of its audit rows. */
+  id: string;
+  tokenHash: string;
+  organizationId: string;
+  scopes: ScimScope[];
+  expiresAt: Date | null;
+}
+
+/** Each scim credential, with the organization of its connection: provisioningDomainId, else the id. */
+function scimCredentials(options: BetterAuthOptions): Mapped["scim"] {
+  const o = pluginOf(options, "scim")?.options;
+  if (!o) return null;
+  return {
+    credentials: o.connections.flatMap((c) =>
+      c.credentials.map((k) => ({
+        id: `${c.id}:${k.id}`,
+        // checkOptions refused a null hash, so each one here is set.
+        tokenHash: k.tokenHash ?? "",
+        organizationId: c.provisioningDomainId ?? c.id,
+        scopes: [...(k.scopes ?? SCIM_SCOPES)],
+        expiresAt: k.expiresAt ?? null,
+      })),
+    ),
+  };
+}
+
+/**
+ * The sso plugin as core's `sso` (plan 12d Task 14). OIDC and SAML are on.
+ * Better Auth's clock skew of 5 minutes applies first (rule 16.1), in whole
+ * seconds. `providersLimit` is core's connections per organization, 10 as
+ * in Better Auth.
+ */
+function ssoConfig(options: BetterAuthOptions): Pick<AuthConfig, "sso" | "scim"> {
+  const o = pluginOf(options, "sso")?.options;
+  const out: Pick<AuthConfig, "sso" | "scim"> = {};
+  if (o)
+    out.sso = {
+      oidc: true,
+      saml: {
+        clockSkewSeconds: (o.saml?.clockSkew ?? BETTER_AUTH_CLOCK_SKEW_MS) / 1000,
+      },
+      dns: [...(options.authtempo?.ssoDns ?? [])],
+      limits: {
+        connectionsPerOrganization: typeof o.providersLimit === "number" ? o.providersLimit : 10,
+      },
+    };
+  if (pluginOf(options, "scim")) out.scim = {};
+  return out;
 }
 
 /**
@@ -312,6 +382,50 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
   return out;
 }
 
+/**
+ * A providerId: letters, digits, `_`, and `-`, so it sits in one DNS label
+ * of the record and in one path segment. Better Auth refuses a record
+ * identifier over 63 characters (DNS_LABEL_MAX_LENGTH, dist/index.mjs:2584).
+ */
+export const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Better Auth's record of a domain proof (@better-auth/sso 1.7.2
+ * dist/index.mjs:2522 and :2593 to :2604, read 2026-10-22). Its name is
+ * `_<prefix>-<providerId>.<domain>`. Its value is `<identifier>=<token>` or
+ * the token alone. The token is core's current challenge of the row. The
+ * providerId is the label of the domain's connection (ruling 61 P5). A
+ * domain with no connection has no Better Auth record. A label outside
+ * `PROVIDER_ID_RE` has none either: a dot in it would put the record in the
+ * zone of a subdomain, whose owner could then prove the parent domain.
+ */
+export function betterAuthRecord(tokenPrefix: string): DomainRecordOf {
+  return (row, label) => {
+    if (label === null || !PROVIDER_ID_RE.test(label)) return null;
+    const identifier = verificationIdentifier(tokenPrefix, label);
+    return {
+      name: `${identifier}.${row.domain}`,
+      values: [`${identifier}=${row.challenge}`, row.challenge],
+    };
+  };
+}
+
+/** `_<prefix>-<providerId>`, Better Auth's identifier of a domain proof (dist/index.mjs:2522). */
+export function verificationIdentifier(tokenPrefix: string, providerId: string): string {
+  return `_${tokenPrefix}-${providerId}`;
+}
+
+/** The sso plugin's mapping, or null without the plugin. `copyBetterAuthSso` reads it too. */
+export function ssoOf(options: BetterAuthOptions): MappedSso | null {
+  const o = pluginOf(options, "sso")?.options;
+  if (!o) return null;
+  return {
+    defaultRole: o.organizationProvisioning?.defaultRole ?? "member",
+    jit: o.disableImplicitSignUp !== true,
+    tokenPrefix: o.domainVerification?.tokenPrefix ?? DEFAULT_TOKEN_PREFIX,
+  };
+}
+
 /** Runs after checkOptions found no refusal, so every value here has its checked type. */
 export function mapOptions(options: BetterAuthOptions): Mapped {
   const url = new URL(options.baseURL ?? "");
@@ -500,10 +614,13 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       : {}),
     ...pluginConfig(options),
     ...apiKeyTokens(options),
+    ...ssoConfig(options),
     hooks: compatHooks(options),
   };
+  const sso = ssoOf(options);
   return {
-    config,
+    // The Better Auth record of a domain proof reaches the verify and the recheck (ruling 61 F4).
+    config: sso ? withDomainRecord(config, betterAuthRecord(sso.tokenPrefix)) : config,
     origin,
     basePath,
     plugins,
@@ -518,5 +635,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     changeVerifyBefore: options.emailVerification?.beforeEmailVerification ?? null,
     platformRole: admin ? platformRoleOf(admin.options) : null,
     apiKey: pluginOf(options, "api-key")?.options ?? null,
+    sso,
+    scim: scimCredentials(options),
   };
 }

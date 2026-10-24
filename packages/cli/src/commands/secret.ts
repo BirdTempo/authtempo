@@ -5,6 +5,8 @@ import { isOperatorSecret } from "@authtempo/core/operator-secret";
 import {
   ENTROPY_WARN_BITS,
   entropyBits,
+  REWRAP_CALL_BUDGET,
+  REWRAP_CALL_BUDGET_MAX,
   REWRAP_LIMIT,
   SECRET_VERSION_MAX,
 } from "@authtempo/core/secrets";
@@ -42,6 +44,7 @@ const REWRAP_OPTIONS = {
   ...OPERATOR_OPTIONS,
   limit: { type: "string" },
   "max-calls": { type: "string" },
+  "call-budget": { type: "string" },
   yes: { type: "boolean" },
   "no-input": { type: "boolean" },
 } as const;
@@ -89,11 +92,18 @@ function versionOf(flag: string | undefined): number | null {
   return version;
 }
 
-/** A whole number flag from 1 to `max`, or its default, or a usage error. */
-function countOf(flag: string, value: string | undefined, max: number, fallback: number): number {
+/** A whole number flag from `min` to `max`, or its default, or a usage error. */
+function countOf(
+  flag: string,
+  value: string | undefined,
+  max: number,
+  fallback: number,
+  min = 1,
+): number {
   if (value === undefined) return fallback;
   const n = WHOLE_NUMBER.test(value) ? Number(value) : Number.NaN;
-  if (!(n >= 1 && n <= max)) throw new UsageError(`--${flag} is a whole number from 1 to ${max}`);
+  if (!(n >= min && n <= max))
+    throw new UsageError(`--${flag} is a whole number from ${min} to ${max}`);
   return n;
 }
 
@@ -116,7 +126,7 @@ function readTarget(
 
 type VersionCount = SecretStatusJson["versions"][number];
 
-/** The seven keys of one entry of the status answer, each with its type. */
+/** The eight keys of one entry of the status answer, each with its type. */
 const COUNT_KEYS = {
   version: "number",
   configured: "boolean",
@@ -125,6 +135,7 @@ const COUNT_KEYS = {
   backupCodes: "number",
   signingKeys: "number",
   emailCodes: "number",
+  ssoClientSecrets: "number",
 } as const;
 
 /** The entries of a status answer, or null when the body is not a list of version counts. */
@@ -148,14 +159,15 @@ function versionCounts(body: unknown): VersionCount[] | null {
       backupCodes: e.backupCodes as number,
       signingKeys: e.signingKeys as number,
       emailCodes: e.emailCodes as number,
+      ssoClientSecrets: e.ssoClientSecrets as number,
     });
   }
   return out;
 }
 
-/** True when a version has a row of any of the four counts. */
+/** True when a version has a row of any of the five counts. */
 const hasRows = (v: VersionCount) =>
-  v.totpSecrets + v.backupCodes + v.signingKeys + v.emailCodes > 0;
+  v.totpSecrets + v.backupCodes + v.signingKeys + v.emailCodes + v.ssoClientSecrets > 0;
 
 /**
  * `authtempo secret status <base url>` (plan 11c2, spec 19 item 17): the
@@ -189,7 +201,7 @@ async function runStatus(argv: string[], ctx: Ctx): Promise<number> {
   if (!json)
     for (const v of versions)
       ctx.out(
-        `version ${v.version}: ${v.current ? "current" : "old"}, ${v.configured ? "configured" : "not configured"}, totpSecrets ${v.totpSecrets}, backupCodes ${v.backupCodes}, signingKeys ${v.signingKeys}, emailCodes ${v.emailCodes}`,
+        `version ${v.version}: ${v.current ? "current" : "old"}, ${v.configured ? "configured" : "not configured"}, totpSecrets ${v.totpSecrets}, backupCodes ${v.backupCodes}, signingKeys ${v.signingKeys}, emailCodes ${v.emailCodes}, ssoClientSecrets ${v.ssoClientSecrets}`,
       );
   const orphans = versions.filter((v) => !v.configured && hasRows(v));
   for (const v of orphans)
@@ -233,6 +245,9 @@ function rewrapAnswer(body: unknown): RewrapAnswer | null {
  * of skipped setups is not the end (spec 19 item 17 predates the cursor).
  * It exits 1 when a row did not open or rows remain. A stop in the middle
  * keeps the sums of the calls before it in the stop document.
+ * `--call-budget` goes in each body as `callBudget`: the storage calls of
+ * one call (ruling 88 of plan 12d). With no flag the body has no key, and
+ * the route keeps its default of 50.
  */
 async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
   const { values, positionals } = parseOrUsage(
@@ -244,6 +259,18 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
   const t = readTarget(target, values);
   const limit = countOf("limit", values.limit, REWRAP_LIMIT.max, REWRAP_LIMIT.default);
   const maxCalls = countOf("max-calls", values["max-calls"], MAX_CALLS_MAX, DEFAULT_MAX_CALLS);
+  // The bounds of the route (one source). No flag sends no key: a deployment from before the
+  // key refuses a body that holds it.
+  const callBudget =
+    values["call-budget"] === undefined
+      ? null
+      : countOf(
+          "call-budget",
+          values["call-budget"],
+          REWRAP_CALL_BUDGET_MAX,
+          REWRAP_CALL_BUDGET,
+          REWRAP_CALL_BUDGET,
+        );
   const yes = values.yes === true;
   const json = values.json === true;
   // Before any read of the secret and any request: a run that cannot ask must say yes.
@@ -272,7 +299,11 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
         ...t,
         path,
         method: "POST",
-        body: { limit, ...(after === null ? {} : { after }) },
+        body: {
+          limit,
+          ...(after === null ? {} : { after }),
+          ...(callBudget === null ? {} : { callBudget }),
+        },
         secret,
         perHour: CALLS_PER_HOUR,
         scope: "secrets",

@@ -5,8 +5,9 @@ import { SCHEMA_VERSION, schema } from "../src/schema.js";
 // fields and models are in the conformance suite, so every adapter runs them.
 
 describe("schema version 13 (plan 12k)", () => {
-  it("has schema version 13", () => {
-    expect(SCHEMA_VERSION).toBe(13);
+  it("has schema version 13 or a later version", () => {
+    // Plan 12d moves the version to 14: test/sso-schema.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(13);
   });
 
   it("adds the new fields of session, invitation, and apiToken as the last nullable fields", () => {
@@ -33,7 +34,8 @@ describe("schema version 13 (plan 12k)", () => {
   });
 
   it("defines the five models with their keys", () => {
-    expect(Object.keys(schema).slice(-5)).toEqual([
+    // Plan 12d adds its six models after them.
+    expect(Object.keys(schema).slice(-11, -6)).toEqual([
       "organizationRole",
       "team",
       "teamMember",

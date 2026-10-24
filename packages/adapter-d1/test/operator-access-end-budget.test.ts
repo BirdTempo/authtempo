@@ -257,19 +257,29 @@ async function auditOf(userId: string): Promise<string[]> {
  */
 // The sweeps count 1 more query since plan 12k (the runs of 2026-10-21 at the rebase): the
 // delete of the organization tokens. The acts do not change.
+// Since ruling 50 of plan 12d (run of 2026-10-22), the session read of a user actor keeps 1
+// more call for the pending-end read of `revokedFor`, so its act ends 1 session fewer.
+// Since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22), it keeps 1 more call
+// for the session-cap read of a due refresh with sso.saml on, so its act ends 1 session fewer.
+// Since ruling 78 of plan 12d (run of 2026-10-24), the session read of the handler takes the row
+// of the router, so a user actor sends 1 query fewer. Its reserve keeps the call, so the page
+// ends the same sessions.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
-  "user 45": [49, 22, [45]],
+  "user 45": [47, 20, [47]],
   "secret 60": [50, 31, [48, 24]],
-  "user 60": [49, 22, [48, 33]],
+  "user 60": [47, 20, [48, 35]],
 };
 // The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
-// rows of the member row it deletes, and so the sweep and a retry end more.
+// rows of the member row it deletes, and so the sweep and a retry end more. The retry of a
+// user ends 1 session fewer since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22).
+// The retry of a user sends 1 query fewer since ruling 78 of plan 12d (run of 2026-10-24): the
+// handler takes the session row of the router.
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
   "secret 45": [50, 46, 21, 24, [21]],
-  "user 45": [50, 49, 21, 19, [29]],
+  "user 45": [50, 47, 21, 17, [31]],
   "secret 60": [50, 50, 21, 28, [35]],
-  "user 60": [50, 49, 21, 19, [44]],
+  "user 60": [50, 47, 21, 17, [46]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };
@@ -311,8 +321,9 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     if (!granted.ok) throw new Error(granted.code);
     const old = await list(left);
     expect([old.status, await old.json()]).toEqual([403, { error: "operator_required" }]);
-    // A sign-in after the re-grant acts.
-    current = new Date(current.getTime() + 1);
+    // A sign-in after the re-grant acts. It comes past the skew bound of the revoke
+    // (ACCESS_END_SKEW_MS of core, 5 s): the sweep ends a sign-in inside it (ruling 58 of plan 12d).
+    current = new Date(current.getTime() + 5_001);
     const fresh = await signIns(setup, sent, "bob@example.com", 1);
     expect((await list(fresh.token)).status).toBe(200);
     // The sweep still ends the left sessions, and keeps the new one.
@@ -574,4 +585,153 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
         );
         expect(Math.max(first.queries, retry.queries, ...sweeps)).toBeLessThanOrEqual(50);
       });
+});
+
+const APP_ORIGIN = "https://app.example.com";
+const REDIRECT = "https://client.example.com/callback";
+
+/** The OAuth provider, so a user can hold refresh families (ruling 55 of plan 12d). */
+const OAUTH: Partial<AuthConfig> = {
+  trustedOrigins: [APP_ORIGIN],
+  oauth: {
+    resources: [`${BASE}/mcp`],
+    scopes: { "mcp:read": "Read" },
+    registration: { cimd: false, dynamic: true },
+  },
+};
+
+const base64Url = (bytes: ArrayBuffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+
+const tokenRequest = (body: Record<string, string>) =>
+  new Request(`${BASE}/auth/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(body).toString(),
+  });
+
+/** `n` refresh families of the session of `token` through the code flow: the client and each refresh token. */
+async function families(auth: Auth, token: string, n: number) {
+  const reg = await auth.handle(
+    new Request(`${BASE}/auth/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: APP_ORIGIN },
+      body: JSON.stringify({ redirect_uris: [REDIRECT] }),
+    }),
+  );
+  if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+  const clientId = ((await reg.json()) as { client_id: string }).client_id;
+  const cookie = `__Host-tempo_session=${token}`;
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer);
+    const challenge = base64Url(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+    );
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      scope: "mcp:read offline_access",
+      resource: `${BASE}/mcp`,
+      state: "st-1",
+    });
+    const page = await auth.handle(
+      new Request(`${BASE}/auth/oauth/authorize?${query}`, { headers: { cookie } }),
+    );
+    let location = page.headers.get("location");
+    if (page.status === 200) {
+      const id = /name="request_id" value="(oq_[A-Za-z0-9_-]{43})"/.exec(await page.text())?.[1];
+      const done = await auth.handle(
+        new Request(`${BASE}/auth/oauth/authorize`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE, cookie },
+          body: new URLSearchParams({ request_id: id ?? "", decision: "allow" }).toString(),
+        }),
+      );
+      location = done.headers.get("location");
+    }
+    const code = new URL(location ?? "").searchParams.get("code");
+    if (!code) throw new Error("no code");
+    const res = await auth.handle(
+      tokenRequest({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+        resource: `${BASE}/mcp`,
+      }),
+    );
+    if (res.status !== 200) throw new Error(`token answered ${res.status}`);
+    out.push(((await res.json()) as { refresh_token: string }).refresh_token);
+  }
+  return { clientId, tokens: out };
+}
+
+/** The end marks of the refresh families: one per family that ended. */
+async function familyMarks(): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM ta_verification WHERE purpose = 'oauth-family-end'",
+  ).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * The counts of a secret ban of a user with 45 sessions, a hook, and k OAuth
+ * refresh families, on the binding, 2026-10-22: the queries of the act, the
+ * sessions it ended, the families it ended with their marks, and the queries
+ * of each sweep (ruling 55 of plan 12d).
+ */
+const BAN_FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
+  0: [50, 31, 0, [36]],
+  7: [50, 17, 7, [48, 23]],
+  20: [50, 1, 15, [48, 49]],
+};
+
+describe("the OAuth families of a ban on D1 (ruling 55 of plan 12d)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  for (const k of [0, 7, 20])
+    it(`bans a user with 45 sessions and ${k} families in 50 queries, and refuses each family at once`, async () => {
+      const sent: MailMessage[] = [];
+      const { auth: setup } = await engine(env.DB, sent, undefined, OAUTH);
+      const { userId, tokens: signed } = await signIns(setup, sent, "ada@example.com", 45);
+      const { clientId, tokens } = await families(setup, signed[0] ?? "", k);
+      endings.length = 0;
+      const r = await invoke(
+        sent,
+        "/operator/users/ban",
+        asSecret,
+        { userId, reason: REASON },
+        OAUTH,
+      );
+      expect([r.status, Object.keys(r.body)], JSON.stringify(r.body)).toEqual([200, ["auditId"]]);
+      const inAct = endings.length;
+      const marked = await familyMarks();
+      // Each family is refused at once, before any sweep.
+      const statuses: number[] = [];
+      for (const t of tokens)
+        statuses.push(
+          (
+            await setup.handle(
+              tokenRequest({ grant_type: "refresh_token", refresh_token: t, client_id: clientId }),
+            )
+          ).status,
+        );
+      expect(statuses).toEqual(Array(k).fill(400));
+      const sweeps = await sweepAll(sent, OAUTH);
+      expect(await sessionsOf(userId)).toBe(0);
+      expect(await familyMarks()).toBe(k);
+      expect([r.queries, inAct, marked, sweeps]).toEqual(BAN_FAMILY_COUNTS[k]);
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
 });

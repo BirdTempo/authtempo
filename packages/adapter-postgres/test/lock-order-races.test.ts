@@ -243,6 +243,8 @@ function lockLog(log: string[]): StorageAdapter {
     ...tx,
     lockInOrder: (async (m, where) => {
       if (m === "session") log.push("sessions");
+      // The batch hold of the team member add (holdUsers, ruling 53 of plan 12d) locks by id.
+      if (m === "user") log.push("user");
       await tx.lockInOrder?.(m, where);
     }) as NonNullable<StorageAdapter["lockInOrder"]>,
     update(m, where, data) {
@@ -278,8 +280,11 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(added).toMatchObject({ ok: true });
     expect(await deleted).toEqual({ ok: true, value: { ok: true } });
     expect(await rows("user")).toEqual([]);
-    expect(await rows("team")).toEqual([]);
     expect(await rows("teamMember")).toEqual([]);
+    // The team row of the solo organization waits for the sweep (ruling 78 of plan 12d).
+    expect(await rows("team")).toHaveLength(1);
+    expect(await plain.api.sweepExpired()).toMatchObject({ organizationRows: 1 });
+    expect(await rows("team")).toEqual([]);
   });
   it("holds a member removal during a team member add, so no team row of a non-member stays (m2)", async () => {
     const sent: MailMessage[] = [];

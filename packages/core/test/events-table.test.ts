@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EVENTS, type EventSpec, validateEvent } from "../src/observe/events.js";
+import { STAMP_FIELDS } from "../src/observe/port.js";
 import { FIELD_KINDS } from "../src/redact.js";
 
 /**
@@ -76,6 +77,17 @@ const START_LIST: readonly string[] = [
   "authtempo: role row invalid <rowId>",
   // Plan 12g (ruling 7): the credential id bound of a passkey registration.
   "authtempo: passkey credential id over 1023 bytes",
+  // Plan 12d, read again at the move onto main: the SSO lines and the two sweep steps of 12d.
+  "authtempo: the sweep sso recheck step stopped",
+  "authtempo: the sweep organization rest step stopped",
+  "authtempo: sso guard refused",
+  "authtempo: sso failed",
+  "authtempo: sso denied",
+  "authtempo: sso refused",
+  "authtempo: saml certificate expired",
+  "authtempo: an sso client secret did not open",
+  "authtempo: sso domain unverified",
+  "authtempo: sso domain lost",
 ];
 
 /** Field names that can hold a secret, a credential, or free text (spec 31 item 8). */
@@ -101,9 +113,9 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h and 1 of plan 12g.
-    expect(START_LIST).toHaveLength(64);
-    expect(texts).toHaveLength(64);
+    // 63 of plan 12h, 1 of plan 12g, and 10 of plan 12d.
+    expect(START_LIST).toHaveLength(74);
+    expect(texts).toHaveLength(74);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 
@@ -113,6 +125,21 @@ describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
         expect(Object.hasOwn(FIELD_KINDS, f.kind), `${name}.${field}`).toBe(true);
         if (f.kind === "enum") expect(f.values?.length ?? 0, `${name}.${field}`).toBeGreaterThan(0);
       }
+  });
+
+  it("names a stamp field only in the three route rows of plan 12h", () => {
+    // The observer writes the stamp first, so a field of a stamp name would be lost (plan 12h).
+    // The rows of plan 12d (SSO and SCIM) hold none.
+    const stamped = ENTRIES.flatMap(([name, spec]) =>
+      Object.keys(spec.fields)
+        .filter((f) => (STAMP_FIELDS as readonly string[]).includes(f))
+        .map((f) => `${name}.${f}`),
+    );
+    expect(stamped.sort()).toEqual([
+      "error.internal.route",
+      "operator.guard_refused.route",
+      "operator.route_unauthorized.route",
+    ]);
   });
 
   it("names no field that can hold a secret, a credential, or free text", () => {

@@ -18,6 +18,7 @@ import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
 import { openSession, sessionOpened } from "./sessions.js";
+import { enforcedAnswer } from "./sso/enforce.js";
 import { validShownName } from "./users.js";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -352,6 +353,9 @@ export async function verifyPasskeyAuthentication(
     { field: "id", op: "eq", value: checked.value.userId },
   ]);
   if (!user) return fail("passkey_failed");
+  // Only SSO signs in an address of an enforced domain (plan 12d): the assertion names the user.
+  const enforced = await enforcedAnswer(config, user.email);
+  if (enforced) return enforced;
   // One transaction, so a session hook's membership check and the write read the same state.
   const opened = await hookGuard(async () =>
     ok(

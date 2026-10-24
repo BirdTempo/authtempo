@@ -25,11 +25,12 @@ import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
-import { familyEnded, revokeFamily } from "./oauth-family.js";
+import { familyEnded, familyStart, revokeFamily } from "./oauth-family.js";
 import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { sidFor, subjectFor, userOfSubject } from "./oauth-subject.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
+import { revokedFor } from "./operator/guards.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -157,7 +158,8 @@ export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
  * tokens. With it, the call also refuses a row from before the end of the
  * last ban (`bannedFor`, ruling 29). The ban deleted every such row, so it is a row
  * that a race wrote beside the ban. It gives no token after the unban or
- * the end either.
+ * the end either. The refresh grant and introspection pass the start of
+ * the family (ruling 56 of plan 12d).
  */
 export async function liveUser(
   config: ResolvedConfig,
@@ -168,6 +170,31 @@ export async function liveUser(
   if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
   if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
+}
+
+/**
+ * True when a SCIM deactivate ended the access of the user after the family
+ * of `row` began (ruling 55 of plan 12d). The deactivate ends the families
+ * that fit its budget. A pending-end row names the rest until the sweep,
+ * and this door refuses them, as `revokedFor` refuses a session. It reads
+ * the start of the family, so a race row of an old family is refused too.
+ * The refresh grant and introspection read it. After the sweep the record
+ * of the act refuses such a family (ruling 56). The code exchange and the
+ * device poll read it too, with the code or the device row as the start of
+ * the family (ruling 69): the small round of a raced deprovision deletes
+ * neither.
+ *
+ * The cost: a family that began after the last write of the user reads
+ * nothing more, +0 D1 queries. A family that began at or before that write
+ * reads the rows once, +1 D1 query per refresh, per introspection, per
+ * code exchange, and per device poll that gets this far.
+ */
+export function familyRevoked(
+  config: ResolvedConfig,
+  user: UserRow,
+  row: Pick<OAuthTokenRow, "familyId" | "createdAt">,
+): Promise<boolean> {
+  return revokedFor(config, user, { createdAt: familyStart(row) });
 }
 
 /**
@@ -410,6 +437,10 @@ export async function exchangeCode(
   // The code row's time: a code that an authorize wrote beside the ban gives nothing (ruling 29).
   const user = await liveUser(config, data.userId, consumed.value.createdAt);
   if (!user) return oauthFail("invalid_grant");
+  // The family of the code starts at the code. A SCIM deprovision that ended the access of
+  // the user after it gives nothing (ruling 69 of plan 12d): its small round keeps the codes.
+  const code = { familyId: consumed.value.id, createdAt: consumed.value.createdAt };
+  if (await familyRevoked(config, user, code)) return oauthFail("invalid_grant");
   // Every code comes from a consent that covers its scopes. A grant revoke
   // after the authorize step deletes the consent, and the code gives nothing.
   if (!(await consentCovers(config, user.id, client.id, data.scopes)))
@@ -589,8 +620,10 @@ export async function refreshGrant(
   const askedResource = namedResource(input.resource);
   if (askedResource !== null && askedResource !== row.resource) return oauthFail("invalid_target");
   // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
-  const user = await liveUser(config, row.userId);
-  if (!user) return reuse(config, row);
+  // The ban rule takes the start of the family (ruling 56 of plan 12d). So a race row of a
+  // family from before the ban stays refused after the unban.
+  const user = await liveUser(config, row.userId, familyStart(row));
+  if (!user || (await familyRevoked(config, user, row))) return reuse(config, row);
   const spent =
     row.usedAt !== null
       ? await spendChild(config, row, now)

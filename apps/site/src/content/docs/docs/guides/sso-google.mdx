@@ -1,0 +1,85 @@
+---
+title: SSO with Google Workspace
+description: Connect the Google Workspace of an organization to core by OIDC or by SAML, with the values to copy each way.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 30
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - packages/core/README.md "Enterprise SSO and SCIM"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/sso-google.ts?raw";
+import test from "../../../../../samples/guides/sso-providers.test.ts?raw";
+
+**For:** an app developer, or the Google Workspace admin of a customer, who connects the customer's Google Workspace to an organization.
+
+**What it does:** this page gives the console steps for OIDC, through a Google Cloud OAuth client, and for SAML, through a custom SAML app. Each field name is the name on the Google pages of the last table.
+
+## Before you start
+
+- A verified domain of the organization, by the steps of [Enterprise SSO](/docs/guides/sso/).
+- A super administrator of the customer's Google Workspace for SAML ([Google help](https://support.google.com/a/answer/6087519?hl=en)), or a Google Cloud project for OIDC.
+
+## Steps
+
+Pick one kind. OIDC needs fewer values.
+
+### OIDC
+
+1. In the Google Cloud console, open the Google Auth Platform "Clients" page.
+2. Select "CREATE CLIENT", and pick the application type "Web application".
+3. Copy the client ID and the client secret. Google shows the secret only after the create.
+4. Create the connection with these two values, as `googleOidc` below does.
+5. In "Authorized redirect URIs", enter `<baseURL><basePath>/sso/<connectionId>/callback`.
+
+The issuer is `https://accounts.google.com`. Any Google account can sign in to such a client. Core refuses each address outside the verified domains of the organization with [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch). A redirect URI must use https.
+
+### SAML
+
+1. In the Google Admin console, go to "Apps" > "Web and mobile apps".
+2. Select "Add App" > "Add custom SAML app". Enter the app name.
+3. On "Google Identity Provider details", copy the "SSO URL" and the "Entity ID", and download the "Certificate".
+4. Create the connection with these three values, as `googleSaml` below does.
+5. On "Service Provider Details", enter the `acsUrl` of the connection in "ACS URL".
+6. Enter the `spEntityId` of the connection in "Entity ID".
+7. Set "Name ID format" to `PERSISTENT`.
+8. Under "Add mapping", map the primary email to the app attribute `email`.
+9. Select "Finish". Under "User access", turn the app on for the people of the customer.
+
+The "Name ID format" must be `PERSISTENT`. Core asks for the persistent format, and refuses any other `NameID` format. The default "Name ID" value is the primary email. So a change of the address gives the person a new subject. To avoid that, map an attribute that never changes, and name it in `subjectAttribute` of the connection. Then core reads the subject from that attribute, and the "Name ID format" may stay as it is.
+
+Google signs the Assertion by default. Leave "Signed response" as it is: core verifies a signed Response too.
+
+In step 3, you may also download the metadata file. Pass its text as `idpMetadata` in place of the three values.
+
+<Code code={sample} lang="ts" title="The connection input of Google Workspace" />
+
+<Code code={test} lang="ts" title="The connection of each provider as a test" />
+
+## How it behaves
+
+- Core verifies the Assertion with the certificate of the connection, never with a key of the document.
+- A connection holds one or two certificates. When Google makes a new certificate, add it to `certificates` first, then remove the old one.
+- A change of the app in the Admin console can take up to 24 hours.
+
+## If it fails
+
+- [`sso_failed`](/docs/reference/errors/#sso_failed): the log line names the step. `audience` means a wrong "Entity ID". `destination` or `subject_confirmation` means a wrong "ACS URL". `address` means no attribute `email`. `subject` means a "Name ID format" other than `PERSISTENT`.
+- [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the address is outside the verified domains.
+- [`email_required`](/docs/reference/errors/#email_required): the ID token of an OIDC sign-in holds no address.
+- [`sso_not_configured`](/docs/reference/errors/#sso_not_configured): the connection is off, or the config does not turn its kind on.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the connection create refused a value. The message names the field.
+
+## The Google pages
+
+| Page | Read (UTC) | Updated on the page |
+| --- | --- | --- |
+| [Set up your own custom SAML app](https://support.google.com/a/answer/6087519?hl=en) | 2026-10-23 20:58 | 2026-10-22 |
+| [OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect) | 2026-10-23 20:58 | 2026-06-15 |
+| [Manage OAuth Clients](https://support.google.com/cloud/answer/15549257?hl=en) | 2026-10-23 20:58 | not shown |
+
+## Next
+
+- [Enterprise SSO](/docs/guides/sso/)
+- [Provision the staff with SCIM](/docs/guides/scim/)

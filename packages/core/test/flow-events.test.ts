@@ -43,6 +43,7 @@ import { post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
+import { acmeWithSso, ssoSignIn, ssoSignInWorld } from "./sso/sign-in-helpers.js";
 import {
   type Auth,
   codeNow,
@@ -296,6 +297,23 @@ const SIGN_INS: Record<
     };
   },
   email_otp: async (w) => ({ act: () => emailCode(w), events: w.events }),
+  // An SSO sign-in through the OIDC start and callback routes (plan 12d).
+  sso: async () => {
+    const batches: AuthEvent[][] = [];
+    const s = ssoSignInWorld({ observe: { sink: { write: (b) => void batches.push([...b]) } } });
+    const { connectionId } = await acmeWithSso(s);
+    return {
+      act: async () => {
+        const r = await ssoSignIn(s, connectionId, "acme", {
+          sub: "ada-1",
+          email: "ada@acme.example",
+          email_verified: true,
+        });
+        expect(r.token).not.toBeNull();
+      },
+      events: () => flushed(s, batches),
+    };
+  },
   // An operator of the platform starts it through its route (plan 12f).
   impersonation: async () => {
     const batches: AuthEvent[][] = [];

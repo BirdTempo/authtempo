@@ -17,6 +17,7 @@ import {
   resolveSession,
   writeSession,
 } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
@@ -975,5 +976,116 @@ describe("the ban (plan 12f Task 6)", () => {
     const off = { ok: false, code: "not_found", status: 404 };
     expect(await operatorApi(auth.config).users.ban(input)).toEqual(off);
     expect(await operatorApi(auth.config).users.unban(input)).toEqual(off);
+  });
+});
+
+describe("the pending-end row of a ban and a clock that runs ahead (ruling 55 of plan 12d)", () => {
+  it("ends in the sweep a session that an instance 2 s ahead wrote before the ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    for (let i = 0; i < 60; i++)
+      await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+    // An instance whose clock runs 2 s ahead writes one more session.
+    w.clock.advance(2000);
+    const ahead = await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+    w.clock.advance(-2000);
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    // The act ends a page; the session from ahead sorts last and waits for the sweep.
+    expect(
+      await w.storage.findOne("session", [{ field: "id", op: "eq", value: ahead.session.id }]),
+    ).not.toBeNull();
+    const pending = () =>
+      w.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "session-end" }]);
+    for (let i = 0; i < 5 && (await pending()).length > 0; i++) await sweepExpired(w.config);
+    expect(await pending()).toEqual([]);
+    expect(
+      await w.storage.findMany("session", [{ field: "userId", op: "eq", value: s.user.id }]),
+    ).toEqual([]);
+  });
+});
+
+describe("the OAuth families of a ban after an unban (ruling 56 of plan 12d)", () => {
+  it("refuses a race row of a family on the ban row after the unban, at introspection and the refresh grant", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    // A confidential client that introspects its own refresh tokens.
+    const made = await w.auth.api.oauth?.clients.create({
+      name: "Notes server",
+      authMethod: "client_secret_basic",
+      redirectUris: [REDIRECT],
+      introspect: true,
+    });
+    if (!made?.ok || !made.value.clientSecret) throw new Error("the create failed");
+    const rs = { clientId: made.value.client.id, secret: made.value.clientSecret };
+    const auth = { authorization: basicHeader(rs.clientId, rs.secret) };
+    // 20 families: more than the ban ends in its call, so its row names the rest.
+    for (let i = 0; i < 20; i++) {
+      const p = await pkce();
+      const { code } = await authorized(w, s.cookie, {
+        clientId: rs.clientId,
+        challenge: p.challenge,
+        scope: "mcp:read offline_access",
+      });
+      const res = await w.auth.handle(
+        tokenPost(
+          {
+            grant_type: "authorization_code",
+            code,
+            code_verifier: p.verifier,
+            redirect_uri: REDIRECT,
+            resource: RESOURCE,
+          },
+          auth,
+        ),
+      );
+      expect(res.status).toBe(200);
+    }
+    const rows = await w.storage.findMany(
+      "oauthToken",
+      [{ field: "userId", op: "eq", value: s.user.id }],
+      { sort: { field: "id", dir: "asc" } },
+    );
+    const last = rows.at(-1);
+    if (!last) throw new Error("no refresh row");
+    w.clock.advance(MINUTE_MS);
+    // A refresh in flight on Postgres writes its new row after the token delete of the ban.
+    const race = `or_${randomBase64Url(32)}`;
+    const storage = w.storage as StorageAdapter;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            const n = await tx.delete(model, where);
+            if (model === "oauthToken")
+              await storage.create("oauthToken", {
+                ...last,
+                id: `${last.id.slice(0, 10)}${"Z".repeat(16)}`,
+                tokenHash: await sha256Hex(race),
+                usedAt: null,
+                parentId: last.id,
+                createdAt: w.clock.now(),
+                updatedAt: w.clock.now(),
+              });
+            return n;
+          },
+        }),
+      );
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    storage.transaction = transaction;
+    const [row] = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "session-end" },
+      { field: "identifier", op: "eq", value: s.user.id },
+    ]);
+    expect(row?.data?.families).toContain(last.familyId);
+    // The unban comes before the sweep.
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await introspect(w, rs, race)).toEqual({ active: false });
+    const res = await w.auth.handle(
+      tokenPost({ grant_type: "refresh_token", refresh_token: race }, auth),
+    );
+    expect(res.status).toBe(400);
   });
 });

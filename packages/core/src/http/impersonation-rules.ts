@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
-import { peekSession, readSessionToken } from "../engine/sessions.js";
+import { peekRequestSession } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { json } from "./json.js";
 import type { RouteKey } from "./route-list.js";
@@ -41,6 +41,23 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /operator/sessions/end-user",
   "POST /operator/sessions/end-all",
   "GET /operator/audit",
+  "POST /operator/sso/enforce-off",
+  // The SSO writes of plan 12d: an operator who acts as a user must not add
+  // or change a domain proof. The guard refuses such a session too, for the
+  // calls of api.sso (plan 12d deviation 4).
+  "POST /sso/domains/add",
+  "POST /sso/domains/verify",
+  "POST /sso/domains/update",
+  "POST /sso/domains/delete",
+  // The connection writes of plan 12d Task 3: a connection adds an IdP that
+  // outlives the impersonation.
+  "POST /sso/connections/create",
+  "POST /sso/connections/update",
+  "POST /sso/connections/delete",
+  // The SCIM token writes of plan 12d Task 9: a credential route, as POST
+  // /organizations/tokens (12k ruling 7). A token outlives the impersonation.
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
@@ -117,6 +134,8 @@ const NO_SESSION = "It takes no session.";
 const READ = "It reads what the user sees.";
 /** Each change behind the fresh rule refuses: the session has no fresh time. */
 const FRESH = "It needs a fresh session, and an impersonation session is never fresh.";
+/** A route of the SCIM server: the credential is a SCIM token (plan 12d). */
+const SCIM_TOKEN = "It takes a SCIM token, never a session.";
 /** A team write gives or takes no role, and the user can undo it; only the owner writes are refused. */
 const TEAM_WRITE = "It writes a team of the organization; it gives or takes no role.";
 
@@ -204,6 +223,45 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /openapi.json": NO_SESSION,
   "GET /health": NO_SESSION,
   "GET /ready": NO_SESSION,
+  // Plan 12d (ruling 25 N7): a read of the manager holds no secret. The TXT
+  // value is public once published. The guard still refuses the session.
+  "GET /sso/domains": READ,
+  // The answer holds no client secret and no sealed value (plan 12d Task 3);
+  // a certificate is public. The guard still refuses the session.
+  "GET /sso/connections": READ,
+  // The list holds a hint of each token, never the token or its hash (ruling 25 N7
+  // of plan 12d). The guard still refuses the session.
+  "GET /scim/tokens": READ,
+  // The SSO sign-in of plan 12d Task 4, as the social sign-in.
+  "POST /sso/discover": NO_SESSION,
+  "GET /sso/:connectionId/start": NO_SESSION,
+  "GET /sso/:connectionId/callback": "It takes the state of a start, as the social callback.",
+  // The SAML service provider of plan 12d Task 8, as the OIDC sign-in.
+  "POST /sso/:connectionId/acs": "It takes the request row of a start, as the OIDC callback.",
+  "GET /sso/:connectionId/metadata": NO_SESSION,
+  // The SCIM server of plan 12d Task 9. impersonationRefusal reads only a session.
+  "GET /scim/v2/ServiceProviderConfig": SCIM_TOKEN,
+  "GET /scim/v2/ResourceTypes": SCIM_TOKEN,
+  "GET /scim/v2/ResourceTypes/:id": SCIM_TOKEN,
+  "GET /scim/v2/Schemas": SCIM_TOKEN,
+  "GET /scim/v2/Schemas/:id": SCIM_TOKEN,
+  "GET /scim/v2/Users": SCIM_TOKEN,
+  "POST /scim/v2/Users": SCIM_TOKEN,
+  "GET /scim/v2/Users/:id": SCIM_TOKEN,
+  "PUT /scim/v2/Users/:id": SCIM_TOKEN,
+  "PATCH /scim/v2/Users/:id": SCIM_TOKEN,
+  "DELETE /scim/v2/Users/:id": SCIM_TOKEN,
+  "GET /scim/v2/Groups": SCIM_TOKEN,
+  "POST /scim/v2/Groups": SCIM_TOKEN,
+  "GET /scim/v2/Groups/:id": SCIM_TOKEN,
+  "PUT /scim/v2/Groups/:id": SCIM_TOKEN,
+  "PATCH /scim/v2/Groups/:id": SCIM_TOKEN,
+  "DELETE /scim/v2/Groups/:id": SCIM_TOKEN,
+  "POST /scim/v2/Bulk": SCIM_TOKEN,
+  "GET /scim/v2/Me": SCIM_TOKEN,
+  "POST /scim/v2/.search": SCIM_TOKEN,
+  "POST /scim/v2/Users/.search": SCIM_TOKEN,
+  "POST /scim/v2/Groups/.search": SCIM_TOKEN,
 };
 
 /**
@@ -219,9 +277,8 @@ export async function impersonationRefusal(
   key: RouteKey,
 ): Promise<Response | null> {
   if (!IMPERSONATION_REFUSED.has(key)) return null;
-  const token = readSessionToken(config, request);
-  if (token === null) return null;
-  const row = await peekSession(config, token);
+  // The handler's session read takes this row, so the route reads it once (ruling 78 of plan 12d).
+  const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
 }

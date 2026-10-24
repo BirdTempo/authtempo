@@ -1,0 +1,22 @@
+{
+  "method": "PATCH",
+  "path": "/Users/a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1",
+  "headers": {
+    "Content-type": "application/scim+json"
+  },
+  "body": {
+    "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+    "Operations": [
+      {
+        "op": "Add",
+        "path": "manager",
+        "value": [
+          {
+            "$ref": "http://.../scim/Users/00aa00aa-bb11-cc22-dd33-44ee44ee44ee",
+            "value": "00aa00aa-bb11-cc22-dd33-44ee44ee44ee"
+          }
+        ]
+      }
+    ]
+  }
+}

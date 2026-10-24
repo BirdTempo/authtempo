@@ -4,10 +4,14 @@ import { readBody } from "../src/http/body.js";
 import { readJson } from "../src/http/json.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { readQuery } from "../src/http/routes/sso.js";
 import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "../src/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import { BASE_URL } from "./helpers.js";
 import { oauthHandle, REDIRECT, tokenPost } from "./oauth-helpers.js";
+import { scimAuth, scimToken } from "./scim/helpers.js";
 import { GOOGLE } from "./social-helpers.js";
+import { samlWorld } from "./sso/saml-helpers.js";
 import { totpAuth, verifiedSession } from "./totp-helpers.js";
 
 // A NUL or a lone surrogate in a JSON body answers invalid_body (plan 12g fix
@@ -206,5 +210,59 @@ describe("the operator rewrap reader refuses a NUL and a lone surrogate (ruling 
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "invalid_body" });
+  });
+});
+
+describe("the 12d readers refuse a NUL and a lone surrogate (move onto main)", () => {
+  it("answers a SCIM body with a NUL in a key or a value as invalidValue", async () => {
+    const w = await scimAuth();
+    const { token } = await scimToken(w);
+    const user = (extra: string) =>
+      `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"ada@acme.example"${extra}}`;
+    for (const extra of [',"displayName":"A\\u0000da"', ',"x\\u0000":1', ',"nickName":"\\ud800"']) {
+      const res = await w.handle(
+        new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+          body: user(extra),
+        }),
+      );
+      expect([res.status, await res.json()], extra).toEqual([
+        400,
+        {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
+          status: "400",
+          scimType: "invalidValue",
+          detail: "the body holds a NUL or a lone surrogate",
+        },
+      ]);
+    }
+  });
+
+  it("reads an ACS form with a NUL as an empty form", async () => {
+    const w = samlWorld();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await w.handle(
+      new Request(`${BASE_URL}/auth/sso/c1/acs`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "SAMLResponse=PHg%2B&RelayState=a%00b",
+      }),
+    );
+    expect(res.headers.get("location")).toContain("auth_error=sso_failed");
+    // The form step, not the request step: the reader gave an empty form.
+    expect(log.mock.calls).toEqual([["authtempo: sso failed", "c1", "form"]]);
+  });
+
+  it("answers a query with a NUL as invalid_body", () => {
+    const schema = z.strictObject({ q: z.string() });
+    expect(readQuery(new URL("https://x.example/?q=a%00b"), schema)).toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
+    expect(readQuery(new URL("https://x.example/?q=ab"), schema)).toEqual({
+      ok: true,
+      value: { q: "ab" },
+    });
   });
 });

@@ -44,7 +44,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
 | `magicLink` | object | the defaults below | See the keys under Magic link. |
 | `social` | object | no provider | See the keys under Social. |
-| `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. |
+| `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. A seam must read the JWKS through `fetch` of `VerifyIdTokenInput` when the call gives one. An SSO sign-in gives the capped `sso.fetch`. |
 | `passkey` | object | off | Passkeys are on when it is set. |
 | `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
 | `handoff` | object | off | The handoff is on when it is set. |
@@ -220,6 +220,7 @@ Another key of `totp` is refused.
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
 | `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
+| `totp.gate.sso` | boolean | `true` | `false` lets every SSO connection open a session with no second factor. A connection's `mfa` list passes the gate when the provider asserts one of its values. |
 | `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting
@@ -277,11 +278,37 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `operator.secrets` | list | none | One entry or more, each a named secret with its scopes. Two entries with one name or one hash are refused. |
 | `operator.secrets[].name` | string | required | `^[a-z0-9][a-z0-9_-]{0,31}$`. The audit row names the secret by it. |
 | `operator.secrets[].secretHash` | string | required | The SHA-256 of the secret as 64 lowercase hex characters, as `operator.secretHash`. |
-| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, and `audit`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. A secret with no scope for a route gets 403 `operator_required`. |
+| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, `audit`, and `sso`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. `sso` opens `POST /operator/sso/enforce-off` (plan 12d). A secret with no scope for a route gets 403 `operator_required`. |
 | `operator.users` | `true` | off | Turns on the user, session, and audit tools of plan 12f. It needs a secret with the scope `users` or `organizations.platformRole`, so that an actor can use the tools. |
 | `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
 | `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
 | `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. `account.notices: false` turns it off too. |
+
+## SSO
+
+`sso` turns on enterprise SSO (plan 12d). It needs `organizations`, else the config is refused with "sso needs organizations". Another key of `sso` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `sso` | object | off | Turns on the domain routes. See [Enterprise SSO](/docs/reference/routes/#enterprise-sso). |
+| `sso.dns` | list | required | One DNS resolver or more, each an object with a `name` string and a `txt` function. Core has no default resolver: pick the presets `dohCloudflare` and `dohGoogle` with your fetch, or pass your own. Every resolver must give the value of a proof. Two resolvers: one resolver that is wrong or compromised must not give a domain to an organization. |
+| `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). Each connection names how its token request sends the client secret, `tokenEndpointAuthMethod`: see [create a connection](/docs/reference/routes/#post-sso-connections-create). |
+| `sso.saml` | `true` or object | off | Turns on the SAML connections (plan 12d Task 8). |
+| `sso.saml.clockSkewSeconds` | number | 120 | A whole number from 0 to 300. |
+| `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. Core reads the discovery document, the token answer, and the JWKS with a cap of 65536 bytes each. A larger answer fails the sign-in with `sso_failed`. |
+| `sso.limits` | object | see below | The limits of one organization. |
+| `sso.limits.connectionsPerOrganization` | number | 10 | A positive whole number. |
+| `sso.limits.domainsPerOrganization` | number | 20 | A positive whole number. The add of one more domain answers `domain_limit`. |
+
+## SCIM
+
+`scim` turns on the SCIM token routes and the SCIM server under `<basePath>/scim/v2` (plan 12d). It needs `organizations`, else the config is refused with "scim needs organizations". Another key of `scim` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `scim` | object | off | Turns on the SCIM routes. See [SCIM](/docs/reference/routes/#scim). |
+| `scim.groups` | string | `roles` | `roles`, `teams`, or `both`: what a SCIM group gives. `teams` and `both` need `organizations.teams`. |
+| `scim.defaultRole` | string | `member` | The role of a member that SCIM adds. Each part is a role of the role table, below the owner rank, and never the platform role. A dynamic role is refused here: core checks the config at construction, and a dynamic role lives in one organization. The `defaultRole` of a connection may name a dynamic role of its organization. |
 
 ## Hooks
 
@@ -291,7 +318,9 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
 | `hooks.user` | `UserHooks` | none | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, and `afterVerify`. [Run your code at a hook point](/docs/guides/hooks/) gives the order. |
 | `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
-| `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit; send the row to a separate system there. |
+| `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`, `sso`, or `scim`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit, also the rows of SSO and SCIM; send the row to a separate system there. |
+| `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
+| `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
 
 ## Captcha
 

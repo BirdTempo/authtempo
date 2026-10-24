@@ -82,6 +82,30 @@ export class StorageError extends Error {
  * schema version older than `SCHEMA_VERSION`, or no version at all. Run the
  * adapter's migrations.
  *
+ * Many-row rule (ruling 57 of plan 12d). `createMany` writes its rows in
+ * chunks of `rowsPerInsert(model)`, one INSERT statement per chunk, so
+ * `statementsSent` grows by ceil(n / chunk), or more on a split below.
+ * An empty list sends nothing and answers []. It is all or nothing,
+ * inside a transaction and outside one: when a row breaks a unique key,
+ * with a stored row or with another row of the list, the call fails with
+ * `unique_violation` and writes no row. Each row meets the rules of
+ * `create` data. On D1 and SQLite the rows of a chunk bind as one JSON
+ * list, and a statement of more than 100 KB splits in halves (ruling 84 of
+ * plan 12d). The halves stop at one row. So one value of more than 90 KB,
+ * or one row of more than 100 KB, goes alone in its statement. D1 may
+ * refuse such a statement; then the whole call fails, all or nothing
+ * (ruling 85). A string with a lone surrogate stores U+FFFD in its place,
+ * by `create` and by `createMany` alike. On MySQL a chunk of more than 50
+ * rows takes one of the sizes 64, 128, 256, 512, and 1000. So the server
+ * keeps few prepared statements (ruling 85).
+ *
+ * List rule (rulings 84 and 85 of plan 12d). An `in` list of up to 2000 values
+ * is one statement on every store. On D1 and SQLite a list of more than 50
+ * values binds as one JSON text, so the bound parameters do not grow. On MySQL
+ * such a list pads to the next of the sizes 64, 128, 256, 512, 1000, and 2000.
+ * The pad repeats its last value, which matches no other row. The values stay
+ * bound, and none enters the SQL text.
+ *
  * Transaction rules. Reads inside a transaction see its own writes; the
  * engine relies on this. If the function throws, only the transaction's own
  * writes are reversed. Rows that other callers wrote in the meantime stay.
@@ -90,6 +114,15 @@ export class StorageError extends Error {
  */
 export interface StorageAdapter {
   create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]>;
+  /** Inserts `rows` of one model by the many-row rule above. */
+  createMany<M extends ModelName>(model: M, rows: readonly Models[M][]): Promise<Models[M][]>;
+  /**
+   * The most rows of `model` that one statement of `createMany` writes: the
+   * bound-parameter limit of the database over the parameters of one row,
+   * and at most 1000 (`INSERT_ROWS_MAX` of sql.ts).
+   * The engine reads it for the worst case of its call budget.
+   */
+  rowsPerInsert(model: ModelName): number;
   findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null>;
   findMany<M extends ModelName>(
     model: M,

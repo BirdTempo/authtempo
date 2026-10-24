@@ -30,7 +30,7 @@ import {
   writeStopRow,
 } from "./operator/audit.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
-import { impersonationLoss } from "./operator/guards.js";
+import { impersonationLoss, revokedFor } from "./operator/guards.js";
 import { holdUser } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
@@ -136,6 +136,8 @@ export interface SessionInput {
   freshAt?: Date;
   /** Set only through `openSession` for an impersonation (plan 12f). */
   impersonation?: SessionImpersonation;
+  /** The latest expiry that the sign-in allows: a SAML `SessionNotOnOrAfter` (plan 12d). */
+  notAfter?: Date;
 }
 
 /**
@@ -162,6 +164,14 @@ export interface SessionOpen {
   signedInAt?: Date;
   /** The marks of an impersonation session, with `via: "impersonation"` (plan 12f). */
   impersonation?: SessionImpersonation;
+  /** The latest expiry that the sign-in allows: a SAML `SessionNotOnOrAfter` (plan 12d). */
+  notAfter?: Date;
+  /**
+   * The flow checked the address of `user` before the hold of the user row
+   * (ruling 78 of plan 12d): the SSO domain rule. The read after the insert
+   * answers `conflict` when the row holds another address by then.
+   */
+  sameAddress?: boolean;
 }
 
 export interface ResolvedSession {
@@ -177,6 +187,14 @@ export interface ResolvedSession {
 }
 
 /**
+ * The `valueHash` of the `session-cap` row of a session (ruling 38 Q1 of
+ * plan 12d): the SHA-256 hex of `session-cap:<sessionId>`.
+ */
+export function sessionCapHash(sessionId: string): Promise<string> {
+  return sha256Hex(`session-cap:${sessionId}`);
+}
+
+/**
  * `storage` is the adapter to write through. A sign-in that resolves the
  * user in a transaction passes its `tx`, so the session commits with the
  * claim that deletes a claimant's sessions (plan 7 input).
@@ -189,11 +207,30 @@ export async function createSession(
 ): Promise<{ token: string; session: SessionRow }> {
   const now = config.clock.now();
   const token = randomToken(SESSION_TOKEN_PREFIX);
+  const expiry = input.impersonation?.expiresAt ?? sessionExpiry(config, now, now);
+  const id = newId(now);
+  // The cap row goes in the handle of the session, so both commit or neither does.
+  if (input.notAfter) {
+    await storage.create("verification", {
+      id: newId(now),
+      purpose: "session-cap",
+      identifier: input.userId,
+      valueHash: await sessionCapHash(id),
+      expiresAt: input.notAfter,
+      consumedAt: null,
+      data: null,
+      createdAt: now,
+      updatedAt: now,
+      secretVersion: config.keyring.current,
+    });
+  }
   const session = await storage.create("session", {
-    id: newId(now),
+    id,
     userId: input.userId,
     tokenHash: await sha256Hex(token),
-    expiresAt: input.impersonation?.expiresAt ?? sessionExpiry(config, now, now),
+    // The IdP's cap holds when it is earlier (plan 12d Task 5 Behavior 9).
+    expiresAt:
+      input.notAfter && input.notAfter.getTime() < expiry.getTime() ? input.notAfter : expiry,
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
@@ -277,6 +314,8 @@ async function patchedInput(
 /** The session fields after `session.beforeCreate` and its patch check, not yet written (plan 9d). */
 export interface PreparedSession {
   readonly input: SessionInput;
+  /** The address that `writeSession` compares again, with `sameAddress`. */
+  readonly address?: string;
 }
 
 /**
@@ -315,8 +354,10 @@ export async function prepareSession(
   );
   const patched = await patchedInput(config, storage, draft, patch);
   const signedIn = input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched;
+  const capped = input.notAfter ? { ...signedIn, notAfter: input.notAfter } : signedIn;
   const prepared = {
-    input: input.impersonation ? { ...signedIn, impersonation: input.impersonation } : signedIn,
+    input: input.impersonation ? { ...capped, impersonation: input.impersonation } : capped,
+    ...(input.sameAddress ? { address: input.user.email } : {}),
   };
   // After the hook: the hold is a write, and a before hook runs before the
   // first write (the D1 undo). Before the flow's other writes: the lock order.
@@ -350,6 +391,8 @@ export async function writeSession(
   ]);
   if (!user) stopWith("conflict");
   if (activeBan(user, config.clock.now())) stopWith("account_banned");
+  // This read follows the hold, so a change of address since the flow's check shows here.
+  if (prepared.address !== undefined && user.email !== prepared.address) stopWith("conflict");
   return written;
 }
 
@@ -468,24 +511,31 @@ export async function endSessions(
     now,
   );
   let n = 0;
-  // Each impersonation session goes by id, with its stop row in this
-  // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off
-  // and the read does not run.
-  if (stops) {
-    const impersonations = await tx.findMany(
-      "session",
-      [...where, { field: "actorId", op: "ne", value: null }],
-      { sort: { field: "id", dir: "asc" } },
-    );
-    for (const row of impersonations)
-      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+  // One read serves the stop rows and the list (ruling 79 of plan 12d): on D1 each read is
+  // a query of the 50 of one invocation. With neither, the tool is off and no hook listens.
+  const rows =
+    stops || ended
+      ? await tx.findMany(
+          "session",
+          ended ? where : [...where, { field: "actorId", op: "ne", value: null }],
+          { sort: { field: "id", dir: "asc" } },
+        )
+      : [];
+  // Each impersonation session goes by id first, with its stop row in this
+  // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off.
+  if (stops)
+    for (const row of rows)
+      if (
+        row.actorId !== null &&
+        (await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1
+      ) {
         ended?.push(row);
         n++;
         await writeStopRow(tx, stops, row, now);
       }
-  }
   if (ended)
-    for (const row of await tx.findMany("session", where, { sort: { field: "id", dir: "asc" } })) {
+    for (const row of rows) {
+      if (stops && row.actorId !== null) continue;
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
         ended.push(row);
         n++;
@@ -582,20 +632,26 @@ export function readModeOf(
  * such a row is one that a sign-in wrote in a race with the ban. It stays
  * ended after the unban and after `banUntil` (ruling 28). In `"write"` mode
  * the call deletes it by id; in `"read-only"` mode it writes nothing
- * (ruling 4).
+ * (ruling 4). A session that a SCIM deactivate left for the sweep answers
+ * null in the same way (`revokedFor`, ruling 50 of plan 12d).
  */
 export async function resolveSession(
   config: ResolvedConfig,
   token: string,
   mode: SessionReadMode = "write",
+  peeked: SessionRow | null = null,
 ): Promise<ResolvedSession | null> {
   const write = mode === "write";
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
-  const session = await config.storage.findOne("session", [
-    { field: "tokenHash", op: "eq", value: tokenHash },
-  ]);
+  // The row that the impersonation step of the router read for this request, else a read.
+  const session =
+    peeked?.tokenHash === tokenHash
+      ? peeked
+      : await config.storage.findOne("session", [
+          { field: "tokenHash", op: "eq", value: tokenHash },
+        ]);
   if (!session) return null;
   // The absolute cap ends a session whose expiresAt is later: a row written
   // before `absoluteDays` was set (plan 12b).
@@ -620,6 +676,14 @@ export async function resolveSession(
     if (n === 1) await sessionsEnded(config, [session], "banned", stops, n);
     return null;
   }
+  // A SCIM deactivate left this session for the sweep (ruling 50 of plan 12d).
+  if (await revokedFor(config, user, session)) {
+    if (!write) return null;
+    const stops = impersonationStops(config, "deprovision");
+    const n = await endSessionById(config.storage, session, now, stops);
+    if (n === 1) await sessionsEnded(config, [session], "revoked", stops, n);
+    return null;
+  }
   // The door of the operator of an impersonation session (the plan 12f Task 11 fix).
   const lost = await impersonationLoss(config, session);
   if (lost !== null) {
@@ -633,7 +697,19 @@ export async function resolveSession(
   const due = session.actorId === null && sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };
   if (due) {
-    const expiresAt = sessionExpiry(config, session.createdAt, now);
+    const slid = sessionExpiry(config, session.createdAt, now);
+    // A SAML cap holds through every refresh (ruling 38 Q1 of plan 12d). The
+    // row goes with the cap, and the session ends at the cap too, so a
+    // missing row means no cap. Only `sso.saml` writes a cap, so an app with
+    // it off sends no read. An app that turns it off ends its SAML sessions
+    // first, or they slide again.
+    const cap = config.sso?.saml
+      ? await config.storage.findOne("verification", [
+          { field: "valueHash", op: "eq", value: await sessionCapHash(session.id) },
+          { field: "purpose", op: "eq", value: "session-cap" },
+        ])
+      : null;
+    const expiresAt = cap && cap.expiresAt.getTime() < slid.getTime() ? cap.expiresAt : slid;
     await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
       expiresAt,
       lastSeenAt: now,
@@ -693,6 +769,26 @@ export async function peekSession(
   return sessionIsLive(config, row, config.clock.now()) ? row : null;
 }
 
+/**
+ * The live session row that the impersonation step of the router read for a
+ * request (ruling 78 of plan 12d). The first session read of the handler
+ * takes it in place of a second read of the same row. On D1 each read is a
+ * query of the 50 of one invocation. The map holds no row after the request.
+ */
+const peekedRows = new WeakMap<Request, SessionRow>();
+
+/** `peekSession` for the token of `request`, kept for the handler's session read. */
+export async function peekRequestSession(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<SessionRow | null> {
+  const token = readSessionToken(config, request);
+  if (token === null) return null;
+  const row = await peekSession(config, token);
+  if (row) peekedRows.set(request, row);
+  return row;
+}
+
 /** The caller's session from the cookie or the bearer header, or null. */
 export async function sessionFromRequest(
   config: ResolvedConfig,
@@ -700,7 +796,10 @@ export async function sessionFromRequest(
   options: SessionReadOptions = {},
 ): Promise<ResolvedSession | null> {
   const token = readSessionToken(config, request);
-  return token ? resolveSession(config, token, readModeOf(config, request, options)) : null;
+  // The row of the router serves one read: a later read of the request reads again.
+  const peeked = peekedRows.get(request) ?? null;
+  peekedRows.delete(request);
+  return token ? resolveSession(config, token, readModeOf(config, request, options), peeked) : null;
 }
 
 /**

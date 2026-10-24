@@ -141,6 +141,28 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
       "an operator tool: the users second-factor-off command of the CLI calls it (plan 12f); the client SDK has no operator call",
   },
   {
+    method: "GET",
+    path: "/sso/:connectionId/callback",
+    reason: "the identity provider sends the browser back to it (plan 12d Task 4b)",
+  },
+  {
+    method: "POST",
+    path: "/sso/:connectionId/acs",
+    reason: "the SAML identity provider posts the browser's form to it (plan 12d Task 8)",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/metadata",
+    reason:
+      "an owner gives its URL to the SAML identity provider, which reads it at setup (plan 12d Task 8)",
+  },
+  {
+    method: "POST",
+    path: "/operator/sso/enforce-off",
+    reason:
+      "an operator override: a platform operator turns off SSO enforce for a domain with the operator secret (plan 12d Task 2b); no SDK calls it",
+  },
+  {
     method: "POST",
     path: "/operator/users/create-admin",
     reason:
@@ -173,6 +195,138 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     method: "GET",
     path: "/user/delete/confirm",
     reason: "the confirm page of the mailed delete link; a browser opens it (plan 12a Task 20)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ServiceProviderConfig",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Users",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Users",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Users/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "PUT",
+    path: "/scim/v2/Users/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "PATCH",
+    path: "/scim/v2/Users/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "DELETE",
+    path: "/scim/v2/Users/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Groups",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Groups",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "PUT",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "PATCH",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "DELETE",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Bulk",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Me",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/.search",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Users/.search",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Groups/.search",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",
   },
   {
     method: "GET",
@@ -223,5 +377,21 @@ describe("the SDK call tables and ROUTES (plan 11d)", () => {
       `sdk routes: ${covered} called, ${EXEMPT.length} exempt, ${routes.length} of ROUTES`,
     );
     expect(covered + EXEMPT.length).toBe(routes.length);
+  });
+
+  it("calls every session route of plan 12d through the client, with no exemption", () => {
+    // The owner routes of the domains, the connections, and the SCIM tokens (plan 12d Task 13).
+    const owned = ROUTES.filter(
+      (r) =>
+        (r.feature === "sso" || r.feature === "scim") &&
+        (r.auth as readonly string[]).includes("session"),
+    ).map(key);
+    expect(owned).toHaveLength(12);
+    const client = new Set(CLIENT_CALLS.map(key));
+    const exempt = new Set(EXEMPT.map(key));
+    for (const r of owned) {
+      expect(client.has(r), r).toBe(true);
+      expect(exempt.has(r), r).toBe(false);
+    }
   });
 });

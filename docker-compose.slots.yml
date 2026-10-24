@@ -25,9 +25,16 @@
 # Each service shows its peaks, its limits, and the room. The peaks come from
 # five full test and typecheck runs on slot 1, 2026-10-22 21:42 to 22:00 CST.
 # docker stats and df sampled every 5 s, at a load of 7 to 26. The sum of the
-# limits of one set is 3 GiB. Take one set at its limits and 7 sets at their
-# peaks (1.3 GiB). Add slot 0 (1.5 GiB) and the other projects (0.2 GiB).
-# The sum is 13.8 GiB of the 15.66 GiB of Docker.
+# limits of one set was 3 GiB, and the peak of a set 1.3 GiB.
+#
+# The set total since 2026-10-24 (ruling 86 of plan 12d): the libSQL limits
+# grew for two adapter-sqlite runs in one set (see the libsql service). The
+# sum of the limits of one set is 3264 MiB (3.19 GiB). The peak of a set is
+# 1.42 GiB, with two adapter-sqlite runs. The sum of 8 sets (MAX_ACTIVE_SETS
+# of scripts/test-slots.mjs) takes one set at its limits and 7 sets at their
+# peaks: 3.19 + 7 x 1.42 = 13.13 GiB. Add slot 0 (1.5 GiB) and the other
+# projects (0.25 GiB): 14.88 GiB of the 15.66 GiB of Docker (docker info,
+# 16816451584 bytes, 2026-10-24). This comment is the one text of the sum.
 services:
   postgres:
     extends: { file: docker-compose.yml, service: postgres }
@@ -87,13 +94,23 @@ services:
     container_name: !reset null
     labels:
       authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
-    # peak 70 MiB in all, 58 MiB of it on tmpfs: 3.7 and 3.3 times room.
-    mem_limit: 256m
-    memswap_limit: 256m
+    # The libSQL server keeps the databases of a run, so its tmpfs grows with
+    # each adapter-sqlite run in a set. With a tmpfs of 192 MiB, two runs
+    # left 175 MiB (90 %), and a third run failed 85 tests with SQLITE_IOERR
+    # ("No space left on device", 2026-10-24 15:02 CST).
+    # Measure (2026-10-24 15:00 CST, slot 1, load 2.0 to 2.3): two runs of
+    # adapter-sqlite in one new set, df sampled about each 0.3 s and
+    # docker stats about each 4 s. The tmpfs held 90 MiB after the first
+    # run and 174 MiB at the peak of the second; the container peak was 195
+    # MiB. So the tmpfs is 384 MiB (2.2 times room) and mem_limit 448 MiB
+    # (2.3 times room): the tmpfs plus about 64 MiB of the server. Three
+    # runs in one set passed with these limits (2026-10-24 15:03 CST).
+    mem_limit: 448m
+    memswap_limit: 448m
     ports: !override
       - "${AUTHTEMPO_PORT_LIBSQL:?run scripts/test-servers.mjs up}:8080"
     tmpfs:
-      - /var/lib/sqld:size=192m
+      - /var/lib/sqld:size=384m
   libsql-cli:
     extends: { file: docker-compose.yml, service: libsql-cli }
     container_name: !reset null

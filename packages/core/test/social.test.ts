@@ -453,6 +453,8 @@ describe("resolveSocialUser", () => {
     // adapter, as another request on another connection would.
     let missed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && !missed) {

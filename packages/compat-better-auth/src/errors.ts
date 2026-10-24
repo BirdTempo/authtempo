@@ -143,6 +143,26 @@ export const BETTER_AUTH_CODES = {
   organization_token_limit: "ORGANIZATION_TOKEN_LIMIT",
   // Plan 12h. A name of our own: Better Auth 1.7 has no readiness route.
   not_ready: "NOT_READY",
+  // Plan 12d Task 2b. authtempo's own names until plan 12d Task 14 reads the
+  // codes of @better-auth/sso. The status stays core's.
+  domain_unverified: "DOMAIN_UNVERIFIED",
+  domain_taken: "DOMAIN_TAKEN",
+  domain_limit: "DOMAIN_LIMIT",
+  // Plan 12d ruling 30. Better Auth's deleteUser has no such limit: core's own name.
+  delete_too_large: "DELETE_TOO_LARGE",
+  // Plan 12d Task 3. authtempo's own names until plan 12d Task 14 reads the
+  // codes of @better-auth/sso. The status stays core's.
+  connection_limit: "CONNECTION_LIMIT",
+  second_factor_required: "SECOND_FACTOR_REQUIRED",
+  // Plan 12d Task 4, by the same rule until Task 14.
+  sso_failed: "SSO_FAILED",
+  sso_not_configured: "SSO_NOT_CONFIGURED",
+  // Plan 12d Task 5, by the same rule until Task 14.
+  sso_required: "SSO_REQUIRED",
+  sso_domain_mismatch: "SSO_DOMAIN_MISMATCH",
+  sso_not_provisioned: "SSO_NOT_PROVISIONED",
+  account_disabled: "ACCOUNT_DISABLED",
+  role_not_found: "ROLE_NOT_FOUND",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

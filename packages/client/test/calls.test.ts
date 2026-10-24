@@ -53,7 +53,8 @@ describe("the call table of the client (plan 11d)", () => {
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
     // Plan 12k Task 8 adds the five organization token calls.
-    expect(CLIENT_CALLS).toHaveLength(98);
+    // Plan 12d Task 13 adds the eleven SSO calls and the three SCIM token calls.
+    expect(CLIENT_CALLS).toHaveLength(112);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -66,7 +67,10 @@ describe("the call table of the client (plan 11d)", () => {
       webauthn: seam,
       navigate: (url) =>
         seen.push(
-          `GET ${new URL(url).pathname.replace(/^\/auth/, "").replace(/^\/social\/[^/]+\//, "/social/:provider/")}`,
+          `GET ${new URL(url).pathname
+            .replace(/^\/auth/, "")
+            .replace(/^\/social\/[^/]+\//, "/social/:provider/")
+            .replace(/^\/sso\/[^/]+\/start$/, "/sso/:connectionId/start")}`,
         ),
     });
     const org = { organizationId: "o1" };
@@ -168,6 +172,20 @@ describe("the call table of the client (plan 11d)", () => {
     await c.secondFactor.email.enable({ password: "p" });
     await c.secondFactor.email.send({ challenge: "c" });
     await c.secondFactor.disable({ method: "email", password: "p" });
+    await c.sso.discover({ email: "a@b.c" });
+    c.sso.signIn({ connectionId: "c1" });
+    await c.sso.domains.list(org);
+    await c.sso.domains.add({ ...org, domain: "b.c" });
+    await c.sso.domains.verify({ id: "d" });
+    await c.sso.domains.update({ id: "d", enforce: true });
+    await c.sso.domains.delete({ id: "d" });
+    await c.sso.connections.list(org);
+    await c.sso.connections.create({ ...org, kind: "oidc", label: "Staff" });
+    await c.sso.connections.update({ id: "c1", label: "Staff" });
+    await c.sso.connections.delete({ id: "c1" });
+    await c.scim.tokens.list(org);
+    await c.scim.tokens.create({ ...org, name: "Entra" });
+    await c.scim.tokens.revoke({ id: "s" });
     expect([...new Set(seen)].sort()).toEqual(
       [...new Set(CLIENT_CALLS.map((r) => `${r.method} ${r.path}`))].sort(),
     );
@@ -184,16 +202,17 @@ describe("the call table of the client (plan 11d)", () => {
     );
   });
 
-  it("compares the answer of 69 rows and the body of 37 with the contract, and names the 6 it does not (plan 11g)", () => {
+  it("compares the answer of each compared row and the body of each body row with the contract, and names the rows it does not (plan 11g)", () => {
     const operations = CLIENT_CALLS.map((r) => r.operation).sort();
     const notCompared = NOT_COMPARED.map((r) => r.operation);
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
-    expect(COMPARED).toHaveLength(92);
-    expect(NOT_COMPARED).toHaveLength(6);
+    // Plan 12d Task 13: thirteen compared rows, and the start link, which is not.
+    expect(COMPARED).toHaveLength(105);
+    expect(NOT_COMPARED).toHaveLength(7);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(52);
+    expect(BODY_AS_INPUT).toHaveLength(62);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

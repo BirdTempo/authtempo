@@ -3,6 +3,7 @@ import {
   runAdapterConformance,
   runRefreshRaceConformance,
   runSecretRotationConformance,
+  runStoredFormConformance,
 } from "@authtempo/core/conformance";
 import { runLimiterConformance } from "@authtempo/core/limiter-conformance";
 import { runShapeConformance, type ShapeSide } from "@authtempo/core/shape-conformance";
@@ -125,6 +126,14 @@ export function runSqliteSuites(
     ...(shared ? {} : { oldStore }),
   });
   runSecretRotationConformance(run, storageTarget);
+  runStoredFormConformance(run, async () => {
+    const d = await migratedDriver();
+    return {
+      adapter: createSqliteAdapter(d.driver),
+      all: async (sql) => (await d.driver.db.prepare(sql).all()).results,
+      close: async () => d.close(),
+    };
+  });
   runRefreshRaceConformance(run, storageTarget);
 
   runLimiterConformance(run, async () => {

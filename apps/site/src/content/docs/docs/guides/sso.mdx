@@ -1,0 +1,142 @@
+---
+title: Enterprise SSO
+description: Let an organization prove its email domain by DNS and sign its staff in through its own OIDC or SAML provider.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 30
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - packages/core/README.md "Enterprise SSO and SCIM"
+  - packages/client/README.md "Enterprise SSO and SCIM tokens"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/sso.ts?raw";
+import test from "../../../../../samples/guides/sso.test.ts?raw";
+
+**For:** an app developer whose customers want their staff to sign in through the company's own provider, such as Entra ID, Okta, or Google Workspace.
+
+**What it does:** an organization proves an email domain by a TXT record. Core then signs each address of that domain in through the organization's OIDC or SAML connection. Core is the service provider.
+
+## Before you start
+
+- A working setup of [organizations](/docs/guides/organizations/). `sso` needs `organizations`.
+- A [second factor](/docs/guides/second-factor/) for each owner who manages SSO. The owner routes refuse an owner with no second factor.
+- A [shared limiter](/docs/guides/limiter/) in production. The SSO limits count per isolate without one.
+
+## Steps
+
+1. Add `sso` to the config, with `oidc`, `saml`, or both.
+2. Give `sso.dns` two resolvers. Core has no default resolver.
+3. Give an operator secret the scope `sso`, for the override in the last step.
+
+<Code code={config} lang="ts" title="The SSO config and the setup by the app" />
+
+4. Add the domain: `client.sso.domains.add({ organizationId, domain })` on the owner's page.
+5. Show the owner the `record` of the answer: a TXT record at `_authtempo-challenge.<domain>`.
+6. When the owner has published it, call `client.sso.domains.verify({ id })`.
+7. Add a connection with `client.sso.connections.create(...)` and the values of the provider.
+8. Give the provider the values of the connection: `spEntityId` and `acsUrl` for SAML, or the callback for OIDC.
+9. Route the domain to the connection: `client.sso.domains.update({ id, connectionId })`.
+10. Test one sign-in. Then set `enforce: true` on the domain when the organization asks for it.
+
+The [Entra ID](/docs/guides/sso-entra/), [Okta](/docs/guides/sso-okta/), and [Google Workspace](/docs/guides/sso-google/) pages give the steps in each admin console.
+
+<Code code={test} lang="ts" title="A domain proof, a SAML sign-in, the enforce flag, and the override as a test" />
+
+An app with no owner page calls the same steps through `auth.api.sso`, with the app as the actor. The sample does that.
+
+## How it behaves
+
+### The trust of a verified domain
+
+A verified domain of an organization can sign in as any existing user whose current address is in that domain. A proof of a domain is the same trust as a mailed link: the owner of the domain controls its mail. Core never reads `email_verified` of the provider. The address of each sign-in must be in a verified domain of the connection's organization, else [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch).
+
+The same rule holds for the user that an identity names. A user can change the account address after the first SSO sign-in. When the new address is outside the verified domains of the organization, the identity answers `sso_domain_mismatch` and opens no session. The address that the provider sends does not change this.
+
+### The domain proof
+
+- Every resolver of `sso.dns` must give the exact value. One wrong or compromised resolver cannot give a domain to an organization.
+- A pending domain lives 7 days.
+- One domain belongs to one organization. A second organization that verifies it gets [`domain_taken`](/docs/reference/errors/#domain_taken).
+- `includeSubdomains: true` also claims each address of a subdomain.
+- The sweep checks each verified domain again every 30 days. Three failures that span at least 72 hours lose the domain, with its claim and its `enforce` flag.
+
+### Who manages SSO
+
+An owner of the organization manages its domains, connections, and SCIM tokens. A platform operator manages every organization. The owner needs a second factor and a [fresh session](/docs/guides/account-settings/), so wrap each call in `client.withFresh`. An impersonation session cannot manage SSO. Each write writes one audit row.
+
+### The sign-in
+
+- `client.sso.discover({ email, next })` answers the `connectionId` of an address and its `start`, or `{ sso: false }`. It reads no user, so it tells nothing about a person.
+- `start` is an absolute URL on the origin of `baseURL`, with `next` as its query. Send the browser there as it is, also when the app is on another origin.
+- `client.sso.signIn({ connectionId })` sends the browser to the start of a connection. An app button may name a connection.
+- The sign-in page of core has a "Sign in with SSO" form that posts the address to the discovery.
+- A known identity signs in its user, while the user's current address is in a verified domain of the organization. A user at the address gets the identity of the connection.
+- A new address gets a new user with a verified address and no password, when `jit` is on. With `jit: false`, the sign-in answers [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), so only SCIM creates users.
+- The person gets a member row with the connection's `defaultRole`. Core never gives `owner` or the platform role.
+- `hooks.sso.beforeSignIn` may refuse a sign-in before the first write, for example for a contractor domain.
+
+### The second factor
+
+The second factor gate applies to an SSO sign-in, by `totp.gate.sso` (on by default). A connection may name a pass list in `mfa`: `amr`, `acr`, and `authnContext`. When the provider asserts one listed value, the provider did the second factor, and the gate passes. An `amr` value of the ID token, an equal `acr`, or an equal SAML `AuthnContextClassRef` passes. With no list, a person with a second factor gets the challenge.
+
+### The enforce flag
+
+With `enforce: true` on a domain, only SSO signs in an address of that domain. A password, a magic link, an email code, a social provider, and a passkey each answer [`sso_required`](/docs/reference/errors/#sso_required), with the start URL in `detail`. It is an absolute URL on the origin of `baseURL`, as the discovery answers it, so send the browser there as it is. A magic link request, an email code request, and a password reset request give their normal answer and send no mail. `enforce` needs a verified domain routed to an enabled connection.
+
+### The operator's override
+
+When the provider is down, nobody of an enforced domain can sign in. A platform operator, or an operator secret with the scope `sso`, then posts `POST /operator/sso/enforce-off` with `{ domainId, reason }`. The flag goes off, and one audit row `sso_enforce_off` holds the reason.
+
+### The provider calls
+
+`sso.fetch` carries each call to the provider: the discovery, the token request, and the read of the key set. The token request sends the client secret by the `tokenEndpointAuthMethod` of the connection: `client_secret_post` (the default) or `client_secret_basic`. Core caps the size of each answer and follows no redirect. Each issuer and endpoint host must be public: no IP literal, no local name, and not the host of `baseURL`. The DNS presets take the fetch that you give them.
+
+### SAML
+
+Core accepts one narrow profile and refuses any construct outside it.
+
+- The sign-in starts at core. Core refuses an unsolicited Response.
+- The Assertion must be signed with RSA-SHA256 or ECDSA-SHA256, and a SHA-256 digest. Core refuses SHA-1.
+- A connection holds one or two certificates, so a provider can roll its key over. Core reads no key from the document.
+- The subject is the attribute that `subjectAttribute` names. With no `subjectAttribute`, core asks for the persistent `NameID` and refuses a transient one.
+- The address comes from the attribute of `attributes.email`, by default `email`. A `NameID` of the email address format also gives it.
+- Core does not sign its AuthnRequest. It refuses an encrypted assertion, and it serves no SAML single sign-out.
+- `SessionNotOnOrAfter` caps the session, also through each sliding refresh.
+- A connection takes `idpMetadata`, the metadata XML of the provider, or `idpEntityId`, `ssoUrl`, and `certificates`. Core never fetches a metadata URL.
+
+## If it fails
+
+- [`domain_unverified`](/docs/reference/errors/#domain_unverified): a resolver did not give the value. Wait for the DNS change, then verify again.
+- [`token_expired`](/docs/reference/errors/#token_expired): the pending domain is older than 7 days. Add the domain again for a new record.
+- [`domain_taken`](/docs/reference/errors/#domain_taken): another organization holds the domain.
+- [`domain_limit`](/docs/reference/errors/#domain_limit) and [`connection_limit`](/docs/reference/errors/#connection_limit): the organization holds `sso.limits` domains or connections.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the call to a manager route has no session.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body or the query does not match the route.
+- [`conflict`](/docs/reference/errors/#conflict): a write at the same time changed the domain, the connection, or the member. Read the row again, and retry.
+- [`second_factor_required`](/docs/reference/errors/#second_factor_required): the owner has no second factor.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): prove it again, then call once more.
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller is not an owner of the organization.
+- [`operator_required`](/docs/reference/errors/#operator_required): a platform operator failed the operator guard.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an impersonation session cannot manage SSO.
+- [`sso_not_configured`](/docs/reference/errors/#sso_not_configured): no connection or kind serves the request.
+- [`sso_failed`](/docs/reference/errors/#sso_failed): a step of the OIDC or SAML check failed. The log line names the step.
+- [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the address is outside the verified domains of the organization.
+- [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned): `jit` is off, and SCIM did not create the person.
+- [`account_disabled`](/docs/reference/errors/#account_disabled): the directory deactivated the person.
+- [`sso_required`](/docs/reference/errors/#sso_required): the domain enforces SSO. Send the browser to the start URL in `detail`.
+- [`email_required`](/docs/reference/errors/#email_required): the provider sent no address.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person said no at the provider.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): `signUp` does not let the address become a user, so `jit` creates no user.
+- [`member_limit`](/docs/reference/errors/#member_limit): the organization holds its maximum of members, so the person gets no member row.
+- [`role_not_found`](/docs/reference/errors/#role_not_found): the `defaultRole` of the connection names a role that is gone. Update the connection.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the user.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): `hooks.sso.beforeSignIn` refused the sign-in.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a hook threw. Read the log line of the hook.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): see the SSO keys of [Limits](/docs/reference/limits/).
+
+## Next
+
+- [Provision the staff with SCIM](/docs/guides/scim/)
+- [Routes](/docs/reference/routes/#enterprise-sso)
+- [Error codes](/docs/reference/errors/)

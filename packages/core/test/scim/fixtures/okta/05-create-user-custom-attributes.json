@@ -1,0 +1,27 @@
+{
+  "method": "POST",
+  "path": "/Users",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": {
+    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    "userName": "test.user@okta.local",
+    "name": {
+      "givenName": "Test",
+      "familyName": "User"
+    },
+    "emails": [
+      {
+        "primary": true,
+        "value": "test.user@okta.local",
+        "type": "work"
+      }
+    ],
+    "displayName": "Test User",
+    "locale": "en-US",
+    "groups": [],
+    "password": "1mz050nq",
+    "active": true
+  }
+}

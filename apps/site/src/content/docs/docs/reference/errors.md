@@ -61,7 +61,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback). |
+| [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback). |
 
 <h3 id="oauth_failed"><code>oauth_failed</code> 400</h3>
 
@@ -430,7 +430,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /reauth`](/docs/reference/routes/#post-reauth) makes the session fresh. The account routes [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), and [`POST /user/delete`](/docs/reference/routes/#post-user-delete) need a fresh session. So do the passkey and token routes [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /tokens`](/docs/reference/routes/#post-tokens), and [`POST /tokens/update`](/docs/reference/routes/#post-tokens-update). So do the factor routes [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /second-factor/passkey/enable`](/docs/reference/routes/#post-second-factor-passkey-enable), [`POST /second-factor/email/enable`](/docs/reference/routes/#post-second-factor-email-enable), and [`POST /second-factor/disable`](/docs/reference/routes/#post-second-factor-disable). [`POST /password/change`](/docs/reference/routes/#post-password-change) needs one for a first password, and while the second factor is on. |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth) makes the session fresh. The account routes [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), and [`POST /user/delete`](/docs/reference/routes/#post-user-delete) need a fresh session. So do the passkey and token routes [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /tokens`](/docs/reference/routes/#post-tokens), and [`POST /tokens/update`](/docs/reference/routes/#post-tokens-update). So do the factor routes [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /second-factor/passkey/enable`](/docs/reference/routes/#post-second-factor-passkey-enable), [`POST /second-factor/email/enable`](/docs/reference/routes/#post-second-factor-email-enable), and [`POST /second-factor/disable`](/docs/reference/routes/#post-second-factor-disable). [`POST /password/change`](/docs/reference/routes/#post-password-change) needs one for a first password, and while the second factor is on. An owner needs one at each SSO manager route, such as [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create) and [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add). |
 
 <h3 id="last_credential"><code>last_credential</code> 409</h3>
 
@@ -458,6 +458,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+
+<h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
+
+- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. An organization delete answers it when the organization has more than 500 SCIM Groups.
+- **Do:** For an account, delete those organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete) first. For an organization, let the directory delete some groups first. Then send the delete again.
+
+| Routes |
+| --- |
+| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete). |
 
 <h3 id="account_banned"><code>account_banned</code> 403</h3>
 
@@ -503,6 +512,114 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers the sign-out, the re-authentication, and every operator route but the stop. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. It also covers the stored role writes and the token writes of plan 12k. Their in-process calls do not answer it: such a call is the app's own act. |
+
+<h3 id="domain_unverified"><code>domain_unverified</code> 400</h3>
+
+- **Meaning:** A resolver of `sso.dns` did not give the value of the TXT record. Every resolver must give it. A resolver that answers nothing in 10 seconds counts as a refusal.
+- **Do:** Publish the record of the add answer at `_authtempo-challenge.<domain>`, wait for the DNS to show it, then send the verify again.
+
+| Routes |
+| --- |
+| [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify). |
+
+<h3 id="domain_taken"><code>domain_taken</code> 409</h3>
+
+- **Meaning:** Another organization holds the verified domain. One domain belongs to one organization.
+- **Do:** Ask the other organization to delete its domain, then send the verify again.
+
+| Routes |
+| --- |
+| [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify). |
+
+<h3 id="domain_limit"><code>domain_limit</code> 409</h3>
+
+- **Meaning:** The organization holds `sso.limits.domainsPerOrganization` domains, pending and verified, 20 by default.
+- **Do:** Delete a domain that the organization does not use, or raise the limit in the config.
+
+| Routes |
+| --- |
+| [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add). |
+
+<h3 id="connection_limit"><code>connection_limit</code> 409</h3>
+
+- **Meaning:** The organization holds `sso.limits.connectionsPerOrganization` SSO connections, 10 by default.
+- **Do:** Delete a connection that the organization does not use, or raise the limit in the config.
+
+| Routes |
+| --- |
+| [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create). |
+
+<h3 id="second_factor_required"><code>second_factor_required</code> 403</h3>
+
+- **Meaning:** The owner of the organization has no second factor. An owner manages the SSO setup only with a second factor on.
+- **Do:** Turn on a second factor, such as TOTP at `POST /totp/enable`, then send the request again with a fresh session.
+
+| Routes |
+| --- |
+| The SSO manager routes of an owner: [`GET /sso/domains`](/docs/reference/routes/#get-sso-domains), [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add), [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify), [`POST /sso/domains/update`](/docs/reference/routes/#post-sso-domains-update), [`POST /sso/domains/delete`](/docs/reference/routes/#post-sso-domains-delete), [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections), [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update), and [`POST /sso/connections/delete`](/docs/reference/routes/#post-sso-connections-delete). |
+
+<h3 id="sso_failed"><code>sso_failed</code> 400</h3>
+
+- **Meaning:** An SSO sign-in failed at one step. For OIDC, the step is the state, the binding cookie, the discovery document, the code exchange, the ID token, or the nonce. For SAML, the step is a check of the Response, such as `wrapping`, `signature`, `audience`, or `replay`. The log line `authtempo: sso failed` names the connection id and the step.
+- **Do:** Start the sign-in again. If it fails again, check the issuer, the client id, and the client secret of the connection.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/start`](/docs/reference/routes/#get-sso-connectionid-start), [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="sso_not_configured"><code>sso_not_configured</code> 404</h3>
+
+- **Meaning:** No enabled connection can sign in the person. The connection does not exist, it is off, or its kind is off. The discovery found no connection for the address.
+- **Do:** Sign in another way, or ask the organization owner to route the domain to an enabled connection.
+
+| Routes |
+| --- |
+| [`POST /sso/discover`](/docs/reference/routes/#post-sso-discover) as a form post, [`GET /sso/:connectionId/start`](/docs/reference/routes/#get-sso-connectionid-start), [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="sso_required"><code>sso_required</code> 403</h3>
+
+- **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start URL: an absolute URL on the origin of `baseURL`. A social callback carries the code in the `auth_error` query parameter of the redirect.
+- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual. A link, a code, or a second factor challenge from before `enforce` went on opens no session either.
+
+| Routes |
+| --- |
+| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), and [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge). |
+
+<h3 id="sso_domain_mismatch"><code>sso_domain_mismatch</code> 403</h3>
+
+- **Meaning:** The provider of the connection gave an address that no verified domain of the connection's organization claims. Or the identity of the sign-in names a user whose current address no such domain claims. Core never reads the `email_verified` of the provider: only the organization's DNS proof makes an address true.
+- **Do:** Ask the organization owner to verify the domain of the address, or to fix the address at the provider. A user who moved the account address out of the domain signs in another way.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback) and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="sso_not_provisioned"><code>sso_not_provisioned</code> 403</h3>
+
+- **Meaning:** The connection has `jit` off, and no user has the address. The sign-in creates no user.
+- **Do:** Ask the organization to create the account first, for example through its directory.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback) and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="account_disabled"><code>account_disabled</code> 403</h3>
+
+- **Meaning:** The organization's directory turned the user off through SCIM, so the SSO sign-in of that organization refuses the user.
+- **Do:** Ask the organization to turn the account on again in its directory.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback) and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="role_not_found"><code>role_not_found</code> 409</h3>
+
+- **Meaning:** The connection gives new members a role that the organization no longer has, so the sign-in adds no member row and writes nothing.
+- **Do:** Ask the organization owner to set the connection's `defaultRole` to a role that exists.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback) and [`POST /sso/:connectionId/acs`](/docs/reference/routes/#post-sso-connectionid-acs), in the `auth_error` query parameter of the redirect. |
 
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 

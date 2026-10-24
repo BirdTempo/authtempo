@@ -21,8 +21,11 @@ import {
   COMPAT_PLUGIN,
   type CompatPlugin,
   type OrganizationHookOptions,
+  type ScimMarkerOptions,
+  type SsoOptions,
 } from "../types.js";
 import { adminRolesOf } from "./admin.js";
+import { checkScim, checkSso } from "./check-sso.js";
 
 export interface OptionCheck {
   /** `<path>: <reason>`, sorted. Any entry stops the construction. */
@@ -657,6 +660,9 @@ const PLUGIN_RULES: Record<string, Rule> = {
   }),
   expo: object({}, "core's handoff serves the Expo client; this option is refused"),
   admin: object(ADMIN_RULES, "not mapped onto core's operator tools (spec section 26 item 14)"),
+  // Plan 12d Task 14: the rules live in check-sso.ts; the cross checks are in checkOptions.
+  sso: (v, _p, out) => checkSso(v as SsoOptions, out),
+  scim: (v, _p, out) => checkScim(v as ScimMarkerOptions, out),
   "api-key": (v, p, out) => {
     // Better Auth 1.7.5 takes a list of configurations, each with a configId (deviation 15 of plan 12k).
     if (Array.isArray(v))
@@ -984,6 +990,8 @@ const TOP: Record<string, Rule> = {
       if (!Array.isArray(v)) refuse(out, p, "expected a list of strings");
       else for (const [i, x] of v.entries()) movedPrefix(x, `${p}[${i}]`, out);
     },
+    // Plan 12d Task 14: core's sso.dns; checkOptions ties it to plugins[sso].
+    ssoDns: () => {},
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),
@@ -1315,6 +1323,32 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     }
   } else if (platformOrganization !== undefined)
     refuse(out, "authtempo.platformOrganization", "only with plugins[admin]");
+  // Plan 12d Task 14: core's SSO and SCIM need organizations; core's domain proof needs DNS ports.
+  const ssoPlugin = pluginOf(options, "sso");
+  const scimPlugin = pluginOf(options, "scim");
+  for (const [plugin, id] of [
+    [ssoPlugin, "sso"],
+    [scimPlugin, "scim"],
+  ] as const)
+    if (plugin && !org)
+      refuse(
+        out,
+        `plugins[${id}]`,
+        "needs plugins[organization]: core's SSO and SCIM act for an organization (spec 30)",
+      );
+  const dns = options.authtempo?.ssoDns;
+  if (ssoPlugin) {
+    if (
+      !Array.isArray(dns) ||
+      dns.length === 0 ||
+      !dns.every((d) => typeof d?.name === "string" && typeof d.txt === "function")
+    )
+      refuse(
+        out,
+        "authtempo.ssoDns",
+        "required by plugins[sso]: a list of DNS ports with a name and a txt function, such as [dohCloudflare(fetch), dohGoogle(fetch)]; core has no default resolver (spec 30)",
+      );
+  } else if (dns !== undefined) refuse(out, "authtempo.ssoDns", "only with plugins[sso]");
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
     refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");
   }

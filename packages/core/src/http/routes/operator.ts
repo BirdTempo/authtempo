@@ -36,6 +36,7 @@ import {
   banBody,
   createAdminBody,
   endAllBody,
+  enforceOffBody,
   factorDisableBody,
   impersonateBody,
   impersonateStopBody,
@@ -93,12 +94,13 @@ async function operatorAuthorized(
 }
 
 /**
- * The parsed body of a rewrap, or null for a body that is not a limit and a
- * cursor. A NUL or a lone surrogate is null too (`holdsBadText`, ruling 26).
+ * The parsed body of a rewrap, or null for a body that is not a limit, a
+ * cursor, and a call budget. A NUL or a lone surrogate is null too
+ * (`holdsBadText`, ruling 26).
  */
 async function readRewrapBody(
   request: Request,
-): Promise<{ limit?: number; after?: string } | null> {
+): Promise<{ limit?: number; after?: string; callBudget?: number } | null> {
   const text = await request.text();
   let raw: unknown = {};
   if (text !== "") {
@@ -111,10 +113,11 @@ async function readRewrapBody(
   if (holdsBadText(raw)) return null;
   const parsed = rewrapBody.safeParse(raw);
   if (!parsed.success) return null;
-  const { limit, after } = parsed.data;
+  const { limit, after, callBudget } = parsed.data;
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(after === undefined ? {} : { after }),
+    ...(callBudget === undefined ? {} : { callBudget }),
   };
 }
 
@@ -264,7 +267,55 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
 export function operatorRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator) return [];
   // The impersonation needs no secret entry: a platform operator starts it with a session.
-  return [...secretRoutes(config), ...toolRoutes(config), ...impersonationRoutes(config)];
+  return [
+    ...secretRoutes(config),
+    ...toolRoutes(config),
+    ...impersonationRoutes(config),
+    ...ssoOperatorRoutes(config),
+  ];
+}
+
+/**
+ * The operator's override of `enforce` (plan 12d deviation 5), only with
+ * `operator` and `sso`. When the IdP is down, no one of an enforced domain
+ * can sign in, so the operator turns the flag off from outside the domain.
+ * The actor is a secret with the scope `sso` or a platform operator who
+ * passes the guard (`readOperatorActor`). The body is JSON only.
+ */
+function ssoOperatorRoutes(config: ResolvedConfig): Route[] {
+  if (!config.operator || !config.sso) return [];
+  const path = "/operator/sso/enforce-off";
+  return [
+    {
+      method: "POST",
+      path,
+      key: `POST ${path}`,
+      async handler(ctx) {
+        const caller = await readOperatorActor(ctx.config, ctx, `POST ${path}`);
+        if (!caller.ok) return respond(caller);
+        const { actor, renewed } = caller.value;
+        const send = (res: Response) => {
+          if (renewed) res.headers.append("set-cookie", renewed);
+          return res;
+        };
+        const body = isJsonRequest(ctx.request)
+          ? await readJson(ctx.request, enforceOffBody)
+          : fail("invalid_body");
+        if (!body.ok) return send(respond(body));
+        return send(
+          respond(
+            await operatorApi(ctx.config).sso.enforceOff({
+              actor,
+              domainId: body.value.domainId,
+              reason: body.value.reason,
+              ip: ctx.ip,
+              userAgent: ctx.request.headers.get("user-agent"),
+            }),
+          ),
+        );
+      },
+    },
+  ];
 }
 
 /** The four secret routes of plans 11c and 11c2, or none when the config holds no secret entry. */
@@ -331,7 +382,8 @@ function secretRoutes(config: ResolvedConfig): Route[] {
         if (refused) return refused;
         const body = await readRewrapBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
-        return respond(await rewrapSecrets(ctx.config, body));
+        // The limiter call above counts in the budget of the call (ruling 34 of plan 12d).
+        return respond(await rewrapSecrets(ctx.config, body, "route"));
       },
     },
     {

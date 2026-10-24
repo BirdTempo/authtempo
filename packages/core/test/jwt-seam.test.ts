@@ -105,6 +105,69 @@ describe("jose jwt seam", () => {
     expect(payload.sub).toBe("com.example.app");
   });
 
+  it("keeps at most 500 remote key sets", async () => {
+    const iss = await issuer();
+    const reads = new Map<string, number>();
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      reads.set(url, (reads.get(url) ?? 0) + 1);
+      return iss.fetchFn(JWKS_URL, init);
+    };
+    const seam = createJoseJwtSeam(fetchFn);
+    const token = await iss.sign({ iss: "https://issuer.example", aud: "client-1", sub: "u1" });
+    const url = (i: number) => `https://issuer.example/jwks/${i}`;
+    const verify = (i: number) =>
+      seam.verifyIdToken({
+        token,
+        jwksUrl: url(i),
+        issuer: "https://issuer.example",
+        audience: "client-1",
+        now: NOW,
+      });
+    for (let i = 0; i < 501; i++) await verify(i);
+    // The 501st set pushed out the first: its URL is read again. The newest set stays.
+    await verify(0);
+    await verify(500);
+    expect({ first: reads.get(url(0)), newest: reads.get(url(500)), urls: reads.size }).toEqual({
+      first: 2,
+      newest: 1,
+      urls: 501,
+    });
+  });
+
+  it("keeps a set in use when 500 newer sets come (review L3 of plan 12d Task 4a)", async () => {
+    const iss = await issuer();
+    const reads = new Map<string, number>();
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      reads.set(url, (reads.get(url) ?? 0) + 1);
+      return iss.fetchFn(JWKS_URL, init);
+    };
+    const seam = createJoseJwtSeam(fetchFn);
+    const token = await iss.sign({ iss: "https://issuer.example", aud: "client-1", sub: "u1" });
+    const url = (i: number) => `https://issuer.example/jwks/${i}`;
+    const verify = (i: number) =>
+      seam.verifyIdToken({
+        token,
+        jwksUrl: url(i),
+        issuer: "https://issuer.example",
+        audience: "client-1",
+        now: NOW,
+      });
+    // Set 0 stands for Google: each sign-in uses it while the SSO sets come.
+    for (let i = 1; i < 501; i++) {
+      await verify(0);
+      await verify(i);
+    }
+    await verify(0);
+    // Set 1 was used the longest time ago, so it went; set 0 stayed.
+    await verify(1);
+    expect({ google: reads.get(url(0)), oldest: reads.get(url(1)) }).toEqual({
+      google: 1,
+      oldest: 2,
+    });
+  });
+
   it("gives the JWKS read core's provider deadline, not a jose default (plan 12b)", async () => {
     // jose turns timeoutDuration into AbortSignal.timeout(ms) and passes that
     // signal to the fetch. A jose change that drops the option fails here.

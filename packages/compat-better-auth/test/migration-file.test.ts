@@ -4,6 +4,7 @@ import { columnsOf, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import core0011D1 from "../../adapter-d1/migrations/0011_schema_v11.sql?raw";
 import core0012D1 from "../../adapter-d1/migrations/0012_schema_v12.sql?raw";
+import core0014D1 from "../../adapter-d1/migrations/0014_schema_v14.sql?raw";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
@@ -14,6 +15,7 @@ import shipped0007 from "../migrations/d1/0007_compat_schema_v10.sql?raw";
 import shipped0008 from "../migrations/d1/0008_compat_schema_v11.sql?raw";
 import shipped0009 from "../migrations/d1/0009_compat_schema_v12.sql?raw";
 import shipped0010 from "../migrations/d1/0010_compat_schema_v13.sql?raw";
+import shipped0011 from "../migrations/d1/0011_compat_schema_v14.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -24,6 +26,7 @@ import shipped0007Before17 from "../migrations/d1-before-1.7/0007_compat_schema_
 import shipped0008Before17 from "../migrations/d1-before-1.7/0008_compat_schema_v11.sql?raw";
 import shipped0009Before17 from "../migrations/d1-before-1.7/0009_compat_schema_v12.sql?raw";
 import shipped0010Before17 from "../migrations/d1-before-1.7/0010_compat_schema_v13.sql?raw";
+import shipped0011Before17 from "../migrations/d1-before-1.7/0011_compat_schema_v14.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -35,11 +38,13 @@ import {
   compatMigration0008Sql,
   compatMigration0009Sql,
   compatMigration0010Sql,
+  compatMigration0011Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
   MIGRATION_0009_NAME,
   MIGRATION_0010_NAME,
+  MIGRATION_0011_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
@@ -799,5 +804,104 @@ describe("migration 0010 (plan 12k)", () => {
     const text = compatMigration0010Sql("postgres", resolveNames());
     expect(text).toContain(`ALTER TABLE "session" ADD COLUMN IF NOT EXISTS "activeTeamId" text;`);
     expect(text).toContain(`ALTER TABLE "invitation" ADD COLUMN IF NOT EXISTS "teamId" text;`);
+  });
+});
+
+describe("migration 0011 (plan 12d)", () => {
+  const SIX = [
+    "ssoConnection",
+    "ssoDomain",
+    "scimToken",
+    "scimUser",
+    "scimGroup",
+    "scimGroupMember",
+  ] as const;
+  /** The statements of a text, without comments, blank space, and the ta_meta version writes. */
+  const statementsOf = (text: string) =>
+    normalize(text)
+      .split(";")
+      .map((st) => st.trim())
+      .filter((st) => st !== "" && !st.startsWith("UPDATE ta_meta"));
+
+  it("ships both D1 files as the SQLite text of compatMigration0011Sql", () => {
+    const text = compatMigration0011Sql("sqlite");
+    expect(normalize(shipped0011)).toBe(normalize(text));
+    expect(normalize(shipped0011Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0010, and the step writes '11'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0011_NAME)).toBe(names.indexOf(MIGRATION_0010_NAME) + 1);
+    expect(MIGRATION_0011_NAME).toBe("0011_compat_schema_v14");
+    for (const dialect of ["postgres", "sqlite"] as const) {
+      expect(compatMigration0011Sql(dialect)).toContain(
+        "UPDATE ta_meta SET value = '11' WHERE key = 'compat_better_auth';",
+      );
+      expect(compatMigration0011Sql(dialect)).toContain(
+        "UPDATE ta_meta SET value = '14' WHERE key = 'schema_version';",
+      );
+    }
+  });
+
+  it("holds core 0014's statements on Postgres and on D1", () => {
+    const pg = MIGRATIONS.find((m) => m.name === "0014_schema_v14");
+    expect(pg).toBeDefined();
+    expect(statementsOf(compatMigration0011Sql("postgres"))).toEqual(statementsOf(pg?.sql ?? ""));
+    expect(statementsOf(compatMigration0011Sql("sqlite"))).toEqual(statementsOf(core0014D1));
+  });
+
+  it("creates core's six tables with their columns and keys, and moves the versions to 14 and 11", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+      shipped0011,
+    ])
+      db.exec(text);
+    const indexes: Record<(typeof SIX)[number], string[]> = {
+      ssoConnection: ["ix_ta_sso_connection__organization_id"],
+      ssoDomain: [
+        "ix_ta_sso_domain__connection_id",
+        "ux_ta_sso_domain__claimed_domain",
+        "ux_ta_sso_domain__organization_id__domain",
+      ],
+      scimToken: ["ix_ta_scim_token__organization_id", "ux_ta_scim_token__token_hash"],
+      scimUser: [
+        "ix_ta_scim_user__organization_id__external_id",
+        "ux_ta_scim_user__organization_id__user_id",
+        "ux_ta_scim_user__organization_id__user_name_key",
+      ],
+      scimGroup: [
+        "ix_ta_scim_group__organization_id__external_id",
+        "ux_ta_scim_group__organization_id__display_name_key",
+      ],
+      scimGroupMember: [
+        "ix_ta_scim_group_member__scim_user_id",
+        "ux_ta_scim_group_member__group_id__scim_user_id",
+      ],
+    };
+    for (const model of SIX) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      const found = (db.prepare(`PRAGMA index_list(${TABLES[model]})`).all() as { name: string }[])
+        .map((i) => i.name)
+        .filter((name) => !name.startsWith("sqlite_autoindex_"))
+        .sort();
+      expect({ model, found }).toEqual({ model, found: indexes[model] });
+    }
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "11" },
+      { key: "schema_version", value: "14" },
+    ]);
   });
 });

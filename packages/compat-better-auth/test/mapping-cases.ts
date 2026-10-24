@@ -1,6 +1,10 @@
 import type { D1Subset } from "@authtempo/adapter-d1/seam";
 import { type ModelName, type StorageAdapter, schema } from "@authtempo/core";
-import { type ConformanceOptions, runAdapterConformance } from "@authtempo/core/conformance";
+import {
+  type ConformanceOptions,
+  runAdapterConformance,
+  runStoredFormConformance,
+} from "@authtempo/core/conformance";
 import { columnName, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -45,6 +49,12 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">, rawDb: D1Subse
         "ta_api_token",
         "ta_organization_token",
         "ta_moved_token",
+        "ta_sso_connection",
+        "ta_sso_domain",
+        "ta_scim_token",
+        "ta_scim_user",
+        "ta_scim_group",
+        "ta_scim_group_member",
       ].map((t) => rawDb.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -115,6 +125,20 @@ export function mappingCases(
     { updateInTransaction: 2, ...conformance },
   );
 
+  // The foreign keys of Better Auth name the user, the organization, and the team rows.
+  runStoredFormConformance(
+    runs.conformance,
+    async () => {
+      await truncate();
+      return {
+        adapter: db(),
+        all: async (sql) => (await rawDb.prepare(sql).all()).results,
+        close: truncate,
+      };
+    },
+    { parents: ["user", "organization", "team"] },
+  );
+
   describe(runs.mapping, () => {
     beforeEach(truncate);
 
@@ -132,6 +156,12 @@ export function mappingCases(
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const info = await rows<{ name: string; notnull: number }>(
           `PRAGMA table_info(${TABLES[model]})`,
@@ -159,6 +189,12 @@ export function mappingCases(
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const list = await rows<{ name: string; unique: number; origin: string }>(
           `PRAGMA index_list(${TABLES[model]})`,

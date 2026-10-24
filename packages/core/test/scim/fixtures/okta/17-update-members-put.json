@@ -1,0 +1,17 @@
+{
+  "method": "PUT",
+  "path": "/Groups/abf4dd94-a4c0-4f67-89c9-76b03340cb9b",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": {
+    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+    "displayName": "Test SCIMv2",
+    "members": [
+      {
+        "value": "23a35c27-23d3-4c03-b4c5-6443c09e7173",
+        "display": "test.user@okta.local"
+      }
+    ]
+  }
+}

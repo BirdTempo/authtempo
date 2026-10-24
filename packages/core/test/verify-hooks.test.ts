@@ -249,6 +249,8 @@ function winnerRace(provider: string) {
   const armed = { on: false };
   let winner: string | null = null;
   const wrap = (a: StorageAdapter): StorageAdapter => ({
+    createMany: (m, r) => a.createMany(m, r),
+    rowsPerInsert: (m) => a.rowsPerInsert(m),
     create: async (m, d) => {
       const row = d as unknown as IdentityRow;
       if (m === "identity" && armed.on && row.provider === provider) {

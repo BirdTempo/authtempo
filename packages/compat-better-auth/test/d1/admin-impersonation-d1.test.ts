@@ -53,6 +53,7 @@ describe("the admin impersonation on D1 (plan 12f Task 13)", () => {
     // Each answer also reads the factor rows for twoFactorEnabled (ruling 60 L2).
     expect(start.queries).toBeLessThanOrEqual(50);
     expect(stop.queries).toBeLessThanOrEqual(50);
-    expect([start.queries, stop.queries]).toEqual([33, 19]);
+    // Ruling 78 of plan 12d: the start route reads the session once (run of 2026-10-24).
+    expect([start.queries, stop.queries]).toEqual([32, 19]);
   });
 });

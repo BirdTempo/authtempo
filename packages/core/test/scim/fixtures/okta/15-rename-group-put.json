@@ -1,0 +1,22 @@
+{
+  "method": "PUT",
+  "path": "/Groups/U0FP0NMEE",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": {
+    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+    "id": "e9e30dba-f08f-4109-8486-d5c6a331660a",
+    "displayName": "Tour Guides",
+    "members": [
+      {
+        "value": "some-member-1",
+        "display": "Babs Jensen"
+      },
+      {
+        "value": "some-member-2",
+        "display": "Mandy Pepperidge"
+      }
+    ]
+  }
+}

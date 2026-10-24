@@ -409,7 +409,12 @@ describe("session create hooks (plan 9d)", () => {
     // The password gate's challenge input (plan 9f). The verify opens the
     // session with the challenge's via, not a fixed one (plan 12c).
     expect(read("totp.ts").split('via: "password"')).toHaveLength(2);
-    expect(read("totp.ts")).toContain("openSession(config, { user, ip, userAgent, via }, tx)");
+    // The verify keeps the IdP's cap of an SSO sign-in through the challenge (plan 12d).
+    expect(read("totp.ts")).toContain(
+      "{ user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) }",
+    );
+    // The SSO resolution (plan 12d Task 5).
+    expect(read("sso/resolve.ts")).toContain('via: "sso"');
     expect(read("totp.ts").match(/sessionOpened\([^;]*?\bvia,?\s*\)/g)).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     // A social sign-in also passes its provider (plan 12h Task 5).
@@ -425,6 +430,7 @@ describe("session create hooks (plan 9d)", () => {
       password: opened("password.ts", "password"),
       emailOtp: opened("email-otp.ts", "email_otp"),
       totp: opened("totp.ts", "password"),
+      sso: opened("sso/resolve.ts", "sso"),
     }).toEqual({
       magicLink: 1,
       social: 1,
@@ -433,6 +439,7 @@ describe("session create hooks (plan 9d)", () => {
       password: 4,
       emailOtp: 1,
       totp: 0,
+      sso: 1,
     });
   });
 });

@@ -28,8 +28,11 @@ import { effectiveIn } from "../src/engine/permissions.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { createRole, listRoles } from "../src/engine/roles.js";
 import { rewrapSecrets } from "../src/engine/secrets.js";
-import { createSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
+import { connectionSecret } from "../src/engine/sso/connections.js";
+import { addDomain, verifyDomain } from "../src/engine/sso/domains.js";
+import { requireSsoManager } from "../src/engine/sso/guard.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { disableTotpWithCode, regenerateBackupCodes, verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
@@ -43,8 +46,9 @@ import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webaut
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
+import { createTestIdp } from "../src/testing/saml-idp.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { codeFor, exchange, oauthHandle, REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
@@ -57,6 +61,9 @@ import {
   googleClaims,
   type TokenCall,
 } from "./social-helpers.js";
+import { SSO_APP, seedOrganization, ssoAuth, verifiedDomain } from "./sso/helpers.js";
+import { samlConnection, samlSignIn, samlWorld } from "./sso/saml-helpers.js";
+import { acmeWithSso, ssoSignIn, ssoSignInWorld } from "./sso/sign-in-helpers.js";
 import {
   codeNow,
   EMAIL,
@@ -1625,7 +1632,14 @@ describe("the sweep lines (plans 12e and 12f)", () => {
     const base = makeAuth();
     const findMany = base.storage.findMany.bind(base.storage);
     base.storage.findMany = ((m, where, opts) =>
-      m === "verification" && where.some((c) => c.field === "purpose" && c.value === "session-end")
+      // One read takes the pending rows of plan 12d too, so the purpose is a list (ruling 78).
+      m === "verification" &&
+      where.some(
+        (c) =>
+          c.field === "purpose" &&
+          (c.value === "session-end" ||
+            (Array.isArray(c.value) && c.value.includes("session-end"))),
+      )
         ? Promise.reject(new Error("too many queries"))
         : findMany(m, where, opts)) as StorageAdapter["findMany"];
     const log = errors();
@@ -1810,6 +1824,172 @@ describe("the role line (plan 12k)", () => {
     expect(log.mock.calls).toEqual([
       [`authtempo: role row invalid ${role.value.id}`],
       [`authtempo: role row invalid ${role.value.id}`],
+    ]);
+  });
+});
+
+describe("the SSO lines (plan 12d)", () => {
+  /** A start through the route: the state of the IdP redirect and the binding cookie. */
+  async function started(w: ReturnType<typeof ssoSignInWorld>, connectionId: string) {
+    const res = await w.handle(get(`/auth/sso/${connectionId}/start?next=/home`));
+    const state = new URL(res.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const bind =
+      res.headers
+        .getSetCookie()
+        .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+        ?.split(";")[0] ?? "";
+    return { state, bind };
+  }
+
+  it("sso.guard_refused", async () => {
+    const w = ssoSignInWorld();
+    const organizationId = await seedOrganization(w, "acme");
+    // A verified user with no membership of the organization fails the rank step.
+    const eve = await verifiedSession(w, "eve@other.example");
+    const resolved = await resolveSession(w.config, eve.token);
+    if (!resolved) throw new Error("no session");
+    const log = errors();
+    expect(await requireSsoManager(w.config, resolved, organizationId)).toMatchObject({
+      ok: false,
+      code: "forbidden_rank",
+    });
+    expect(log.mock.calls).toEqual([["authtempo: sso guard refused", "rank"]]);
+  });
+
+  it("sso.failed", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const log = errors();
+    // A state that no start wrote.
+    const res = await w.handle(get(`/auth/sso/${connectionId}/callback?code=c1&state=nope`));
+    expect(res.headers.get("location")).toContain("auth_error=sso_failed");
+    expect(log.mock.calls).toEqual([["authtempo: sso failed", connectionId, "state"]]);
+  });
+
+  it("sso.denied", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const s = await started(w, connectionId);
+    const log = errors();
+    const q = new URLSearchParams({ error: "access_denied", state: s.state });
+    const res = await w.handle(get(`/auth/sso/${connectionId}/callback?${q}`, { cookie: s.bind }));
+    expect(res.headers.get("location")).toContain("auth_error=oauth_denied");
+    expect(log.mock.calls).toEqual([["authtempo: sso denied", connectionId]]);
+  });
+
+  it("sso.refused", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const log = errors();
+    const r = await ssoSignIn(w, connectionId, "acme", {
+      sub: "c-1",
+      email: "ceo@other.example",
+      email_verified: true,
+    });
+    expect(r.error).toBe("sso_domain_mismatch");
+    expect(log.mock.calls).toEqual([
+      ["authtempo: sso refused", connectionId, "sso_domain_mismatch"],
+    ]);
+  });
+
+  it("saml.certificate_expired", async () => {
+    const w = samlWorld();
+    const idp = await createTestIdp({
+      alg: "rsa",
+      certificateNotAfter: new Date("2025-06-01T00:00:00Z"),
+    });
+    const organizationId = await seedOrganization(w, "acme");
+    await verifiedDomain(w, organizationId, "acme.example");
+    const connectionId = await samlConnection(w, organizationId, idp);
+    const log = warns();
+    // The expired certificate still verifies: the sign-in opens a session.
+    expect((await samlSignIn(w, connectionId, idp)).token).toMatch(/^ts_/);
+    expect(log.mock.calls).toEqual([["authtempo: saml certificate expired", connectionId]]);
+  });
+
+  it("sso.client_secret_unopened", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const row = await w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: connectionId },
+    ]);
+    if (!row) throw new Error("no connection");
+    // The app replaced the value of its secret version 1, so the sealed secret does not open.
+    const moved = makeAuth({
+      storage: w.storage,
+      secret: `${SECRET}x`,
+      organizations: {},
+      sso: { oidc: true, dns: [w.a] },
+    });
+    const log = errors();
+    expect(await connectionSecret(moved.config, row)).toBeNull();
+    expect(log.mock.calls).toEqual([["authtempo: an sso client secret did not open", row.id]]);
+  });
+
+  it("sso.domain_unverified", async () => {
+    const w = ssoAuth();
+    const organizationId = await seedOrganization(w, "acme");
+    const added = await addDomain(w.config, SSO_APP, { organizationId, domain: "acme.example" });
+    if (!added.ok) throw new Error(added.code);
+    // No record is published, so the first resolver gives no value.
+    const log = errors();
+    expect(await verifyDomain(w.config, SSO_APP, { id: added.value.id })).toMatchObject({
+      ok: false,
+      code: "domain_unverified",
+    });
+    expect(log.mock.calls).toEqual([["authtempo: sso domain unverified", "a", added.value.id]]);
+  });
+
+  it("sso.domain_lost", async () => {
+    const w = ssoAuth();
+    const organizationId = await seedOrganization(w, "acme");
+    const domainId = await verifiedDomain(w, organizationId, "acme.example");
+    w.clock.advance(31 * 86_400_000);
+    // Both resolvers lose the record: three failures over 72 hours lose the domain.
+    for (const name of Object.keys(w.answers.a)) {
+      w.answers.a[name] = [];
+      w.answers.b[name] = [];
+    }
+    const log = errors();
+    for (const hours of [0, 36, 36]) {
+      w.clock.advance(hours * 3_600_000);
+      await sweepExpired(w.config);
+    }
+    expect(log.mock.calls.filter((c) => c[0] === "authtempo: sso domain lost")).toEqual([
+      ["authtempo: sso domain lost", domainId],
+    ]);
+  });
+
+  it("sweep.sso_recheck_stopped", async () => {
+    const w = ssoAuth();
+    const findMany = w.storage.findMany.bind(w.storage);
+    w.storage.findMany = ((m, where, opts) =>
+      m === "ssoDomain"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(m, where, opts)) as StorageAdapter["findMany"];
+    const log = errors();
+    await sweepExpired(w.config);
+    expect(log.mock.calls).toEqual([["authtempo: the sweep sso recheck step stopped", "Error"]]);
+  });
+
+  it("sweep.organization_rest_stopped", async () => {
+    const auth = makeAuth({ organizations: {}, password: { hash: FAST } });
+    const ada = await verifiedSession(auth, "ada@example.com");
+    const made = await createOrganization(auth.config, {
+      user: ada.user,
+      slug: "solo",
+      name: "Solo",
+    });
+    if (!made.ok) throw new Error(made.code);
+    // The delete of the solo owner leaves the rest of the organization to the sweep.
+    const deleted = await deleteAccount(auth.config, { session: ada, ip: null, userAgent: null });
+    expect(deleted.ok).toBe(true);
+    auth.storage.transaction = (() =>
+      Promise.reject(new Error("too many queries"))) as StorageAdapter["transaction"];
+    const log = errors();
+    await sweepExpired(auth.config);
+    expect(log.mock.calls).toEqual([
+      ["authtempo: the sweep organization rest step stopped", "Error"],
     ]);
   });
 });

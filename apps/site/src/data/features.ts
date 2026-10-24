@@ -19,9 +19,11 @@ export interface Feature {
  * `openapi`, the 18th, and plan 12e adds `oauthDevice`, the 19th. Plan 12f
  * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st.
  * Plan 12k adds `dynamicRoles`, the 22nd, and `teams`, the 23rd. Plan 12h
- * adds `health`, the 24th, and `readiness`, the 25th. A Record over the
- * union fails the site's typecheck when core adds a member, so a new
- * feature cannot
+ * adds `health`, the 24th, and `readiness`, the 25th. Plan 12d adds `sso`,
+ * `operatorSso`, and `scim`. Plan 12d Task 13 points `sso` to the SSO guide,
+ * `operatorSso` to the override section of that guide, and `scim` to the
+ * SCIM guide. A Record over the union fails the site's typecheck when core
+ * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -133,6 +135,18 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     icon: "organization",
     guide: "/docs/guides/teams/",
   },
+  sso: {
+    title: "Enterprise SSO",
+    line: "An organization proves its email domain by DNS, and its staff sign in through its own OIDC or SAML provider.",
+    icon: "organization",
+    guide: "/docs/guides/sso/",
+  },
+  scim: {
+    title: "SCIM provisioning",
+    line: "A directory such as Entra ID or Okta reads the SCIM server of an organization with its own token.",
+    icon: "organization",
+    guide: "/docs/guides/scim/",
+  },
   tokens: {
     title: "API tokens",
     line: "A script or a CLI calls your routes with an API token.",
@@ -162,6 +176,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "A platform operator acts as a user for support, with a time limit, a mark, and a notice.",
     icon: "session",
     guide: "/docs/reference/routes/#impersonation",
+  },
+  operatorSso: {
+    title: "SSO override",
+    line: "The operator turns the enforce flag of a domain off when the sign-in provider of the domain is down.",
+    icon: "session",
+    guide: "/docs/guides/sso/#the-operators-override",
   },
   oauth: {
     title: "OAuth provider",

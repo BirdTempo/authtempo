@@ -14,6 +14,7 @@ import {
   expectedMysqlShape,
   readMysqlShape,
 } from "../src/index.js";
+import { statements as baseline } from "../src/migrations/0001_schema_v13.js";
 import { databaseSupply, freshDatabase, type MysqlDatabase, type MysqlServer } from "./db.js";
 
 // One migrated database per test, as on Postgres. Deviation 12 of plan 12g
@@ -54,13 +55,14 @@ export function runMysqlSuites(server: MysqlServer): void {
   };
 
   /**
-   * A database with no migration: the ping must throw schema_mismatch there
-   * (plan 12h Task 8). MySQL ships one migration file at SCHEMA_VERSION, so
-   * no MySQL store holds an older version; an app that never migrated has
-   * this one.
+   * A database at schema version 13: the ping must throw schema_mismatch
+   * there (plan 12h Task 8). It holds the first MySQL file, 0001_schema_v13,
+   * and not the file of SCHEMA_VERSION (plan 12d adds 0002_schema_v14). An
+   * app has such a database before it runs the new file.
    */
   const oldStore = async () => {
     const db = await freshDatabase(server, { migrate: false });
+    for (const sql of baseline) await db.pool.query(sql);
     return { adapter: createMysqlAdapter(db.pool), close: () => db.close() };
   };
 

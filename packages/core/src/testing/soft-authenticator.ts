@@ -253,3 +253,9 @@ export const TEST_SECRET = "0123456789abcdef0123456789abcdef";
  * authenticator above is.
  */
 export { base32Decode, totpCode } from "../primitives/totp.js";
+
+/**
+ * A SAML 2.0 identity provider for tests (plan 12d): signed Responses on Web Crypto, for the
+ * SAML tests of core and of an app. It is a test tool, as the passkey authenticator above is.
+ */
+export { createTestIdp, type TestIdp, type TestResponseInput } from "./saml-idp.js";

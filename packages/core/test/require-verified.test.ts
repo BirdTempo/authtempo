@@ -141,6 +141,7 @@ describe("password.requireVerified (plan 12b, Better Auth docs audit gap 1)", ()
         passkey: false,
         password: true,
         providers: [],
+        sso: false,
       },
       nonce: "n1",
       appName: "Acme",

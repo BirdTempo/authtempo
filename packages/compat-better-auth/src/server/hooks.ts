@@ -737,5 +737,34 @@ export function compatHooks(options: BetterAuthOptions): HooksConfig {
     session: sessionHooksOf(options.databaseHooks?.session?.create),
     user: userHooksOf(options),
     identity: identityHooksOf(options),
+    ...ssoHooksOf(options),
+  };
+}
+
+/**
+ * `provisionUser` of the sso plugin on core's `hooks.sso.beforeSignIn`
+ * (plan 12d Task 14). Better Auth runs it after the create of a user, or at
+ * each sign-in with `provisionUserOnEveryLogin`. Core runs the hook before
+ * the first write, so `user` is null for a user that the sign-in creates.
+ * The connection's label is the Better Auth providerId. A throw refuses the
+ * sign-in with `hook_refused`.
+ */
+function ssoHooksOf(options: BetterAuthOptions): Pick<HooksConfig, "sso"> {
+  const o = pluginOf(options, "sso")?.options;
+  const provision = o?.provisionUser;
+  if (!provision) return {};
+  const everyLogin = o.provisionUserOnEveryLogin === true;
+  return {
+    sso: {
+      async beforeSignIn(e) {
+        if (e.user !== null && !everyLogin) return;
+        const { subject, email, name, image } = e.profile;
+        await provision({
+          user: e.user === null ? null : toUser(e.user),
+          userInfo: { id: subject, email, name, image },
+          provider: { providerId: e.connection.label, organizationId: e.connection.organizationId },
+        });
+      },
+    },
   };
 }

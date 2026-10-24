@@ -3,7 +3,7 @@
 <ul>
 <li>A route that a config key turns off answers 404 <code dir="auto">not_found</code>.</li>
 <li>A POST with an <code dir="auto">Origin</code> header that is not <code dir="auto">baseURL</code> and not in <code dir="auto">trustedOrigins</code> answers 403 <code dir="auto">origin_not_trusted</code>. Two routes are exceptions: Apple’s form post callback, and the token endpoint, which states its own rule.</li>
-<li>A failure answers <code dir="auto">{ "error": "&lt;code&gt;" }</code> with the status of the code. <code dir="auto">hook_refused</code> also carries <code dir="auto">message</code>, and <code dir="auto">not_ready</code> also carries <code dir="auto">reason</code>.</li>
+<li>A failure answers <code dir="auto">{ "error": "&lt;code&gt;" }</code> with the status of the code. <code dir="auto">hook_refused</code> also carries <code dir="auto">message</code>, as does the <code dir="auto">invalid_body</code> of an SSO or SCIM manager write. <code dir="auto">not_ready</code> also carries <code dir="auto">reason</code>, and <code dir="auto">sso_required</code> carries <code dir="auto">detail</code>.</li>
 <li>An unhandled error answers 500 <a href="/docs/reference/errors/#internal"><code dir="auto">internal</code></a> and writes one log line.</li>
 <li>An <code dir="auto">OPTIONS</code> preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.</li>
 <li>Every answer to a trusted origin carries the CORS headers with credentials.</li>

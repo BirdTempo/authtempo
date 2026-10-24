@@ -1,4 +1,9 @@
-export { createSqliteAdapter, createSqliteLimiter, type SqliteDriver } from "./adapter.js";
+export {
+  createSqliteAdapter,
+  createSqliteLimiter,
+  SQLITE_BOUND_PARAMS,
+  type SqliteDriver,
+} from "./adapter.js";
 export {
   applySqliteMigrations,
   SQLITE_MIGRATIONS,

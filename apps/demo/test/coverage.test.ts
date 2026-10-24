@@ -76,8 +76,15 @@ describe("the demo lists and the routes of core", () => {
       // operatorImpersonation, so 30 became 43. Plan 12k Task 4 adds the five
       // routes of dynamicRoles, so 43 became 48. Plan 12k Task 5 adds the nine
       // routes of teams, so 48 became 57. Plan 12h adds GET /ready of
-      // readiness, so 57 became 58.
-      expect(checked).toBe(58);
+      // readiness, so 57 became 58. Plan 12d Task 2b adds the five routes
+      // of sso and the override of operatorSso, so 58 became 64. Plan 12d Task 3
+      // adds the four connection routes of sso, so 64 became 68. Plan 12d Task 4
+      // adds the discovery, the start, and the callback of sso, so 68 became 71.
+      // Plan 12d Task 9b adds the thirteen routes of scim, so 71 became 84.
+      // Plan 12d Task 8 adds the ACS and the SP metadata of sso, so 84 became 86.
+      // Plan 12d Task 10 adds the six routes of the SCIM Users, so 86 became 92.
+      // Plan 12d Task 11 adds the six routes of the SCIM Groups, so 92 became 98.
+      expect(checked).toBe(98);
     },
     LONG_TEST_MS,
   );

@@ -12,9 +12,11 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (rulings 49, 50,
-// and 51 of plan 12k). The order has seven kinds of rows. They are the user
-// row, the session rows, the organization row, the team row, the invitation
-// rows, the member rows, and the team member rows. A storage wrapper records
+// and 51 of plan 12k). The order has ten kinds of rows. They are the
+// scimGroup row, the user row, the session rows, the scimUser rows, the
+// organization row, the team row, the invitation rows, the member rows, the
+// scimGroupMember rows, and the team member rows (ruling 59 M1 and ruling 74
+// M3 of plan 12d). A storage wrapper records
 // each create, update, delete, and lock read of these kinds in each
 // transaction, in order. Each test runs one flow that writes these kinds,
 // most of them two kinds or more. A kind may come again, but a kind never
@@ -44,25 +46,37 @@ const OPEN = { allow: async () => true };
  * flow takes a member row and then a team row. The invitation rows come
  * between (ruling 50). The accept consumes its invitation after `lockTeam`
  * and before its member write. The organization delete deletes the
- * invitations after the team rows and before the member rows.
+ * invitations after the team rows and before the member rows. A SCIM group
+ * write takes its scimGroup row first. The scimGroupMember rows come after
+ * the member rows: a SCIM group remove and a SCIM User delete of one person
+ * took them in the two orders and formed a deadlock (ruling 59 M1 of plan
+ * 12d). The scimUser rows come before the organization row: a SCIM
+ * deactivate and an organization delete took them in the two orders and
+ * formed a deadlock (ruling 74 M3 of plan 12d).
  */
 const KINDS = [
+  "SCIM group",
   "user",
   "session",
+  "SCIM user",
   "organization",
   "team",
   "invitation",
   "member",
+  "SCIM group member",
   "team member",
 ] as const;
 const KIND_OF = {
-  user: 0,
-  session: 1,
-  organization: 2,
-  team: 3,
-  invitation: 4,
-  member: 5,
-  teamMember: 6,
+  scimGroup: 0,
+  user: 1,
+  session: 2,
+  scimUser: 3,
+  organization: 4,
+  team: 5,
+  invitation: 6,
+  member: 7,
+  scimGroupMember: 8,
+  teamMember: 9,
 } as const;
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
@@ -90,19 +104,29 @@ interface Site {
 }
 
 /**
- * The sites of the engine folder of core and of its operator folder, by
- * file and top-level function. The scan has the form of hook-locks.test.ts
- * of the site. `root` is `src` for the source, or `dist` for the build that the
+ * The folders of the engine that hold flows: the operator folder of plan
+ * 12f, and the SSO and SCIM folders of plan 12d. hook-locks.test.ts of the
+ * site scans the same folders.
+ */
+const SUBFOLDERS = ["operator", "sso", "scim"] as const;
+
+/**
+ * The sites of the engine folder of core and of its SUBFOLDERS, by file and
+ * top-level function. The scan has the form of hook-locks.test.ts of the
+ * site. `root` is `src` for the source, or `dist` for the build that the
  * test runs. A function with two sites names the second one `#2`.
  */
 function sitesIn(root: "src" | "dist"): Site[] {
   const ext = root === "src" ? ".ts" : ".js";
   const dir = `${CORE}${root}/engine/`;
+  const code = (n: string): boolean => n.endsWith(ext) && !n.endsWith(".d.ts");
   const files = [
-    ...readdirSync(dir).filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts")),
-    ...readdirSync(`${dir}operator/`)
-      .filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts"))
-      .map((n) => `operator/${n}`),
+    ...readdirSync(dir).filter(code),
+    ...SUBFOLDERS.flatMap((d) =>
+      readdirSync(`${dir}${d}/`)
+        .filter(code)
+        .map((n) => `${d}/${n}`),
+    ),
   ];
   const out: Site[] = [];
   for (const f of files) {
@@ -168,6 +192,12 @@ afterEach(async () => {
  */
 function world(teams: { keepLastTeam?: boolean } = {}) {
   const sent: MailMessage[] = [];
+  // The fake DNS and the fake IdP of the SSO sign-in (plan 12d Task 5). The
+  // token endpoint answers the code as the ID token, and the jwt seam knows
+  // the tokens of `idTokens`.
+  const txt: Record<string, string[]> = {};
+  const idTokens: Record<string, Record<string, unknown>> = {};
+  const dns = (name: string) => ({ name, txt: async (asked: string) => txt[asked] ?? [] });
   let current: string | null = null;
   const runs: { flow: string; steps: Step[] }[] = [];
   /** The engine site of each transaction that a flow opens, nested ones too. */
@@ -183,6 +213,11 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
       note(steps, model, "create");
       return tx.create(model, data);
     }) as typeof tx.create,
+    // The rows of a group or team write go in by createMany (ruling 57 of plan 12d).
+    createMany: ((model: ModelName, rows: never) => {
+      note(steps, model, "create");
+      return tx.createMany(model, rows);
+    }) as typeof tx.createMany,
     update: ((model: ModelName, where: never, data: never) => {
       note(steps, model, "update");
       return tx.update(model, where, data);
@@ -233,6 +268,26 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true, impersonation: {} },
+    sso: {
+      oidc: true,
+      dns: [dns("a"), dns("b")],
+      fetch: async (_url, init) => {
+        const code = new URLSearchParams(typeof init?.body === "string" ? init.body : "").get(
+          "code",
+        );
+        return Response.json({ id_token: code, token_type: "Bearer" });
+      },
+    },
+    // Plan 12d Task 10: the SCIM Users of Acme. Task 11: each Group has a team and a role.
+    scim: { groups: "both" },
+    jwt: {
+      verifyIdToken: async (input) => {
+        const claims = idTokens[input.token];
+        if (!claims) throw new Error("fake jwt: verify failed");
+        return claims;
+      },
+      signES256: async () => "es256",
+    },
   });
   const post = (path: string, body: unknown, cookie: string) =>
     auth.handle(
@@ -364,6 +419,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
   return {
     auth,
     storage,
+    txt,
+    idTokens,
     signIn,
     sessionOf,
     operator,
@@ -384,6 +441,13 @@ type Signed = Awaited<ReturnType<World["signIn"]>>;
 function must<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
   if (!r.ok) throw new Error(r.code);
   return r.value;
+}
+
+/** Uma's user id. */
+async function umaId(_w: World): Promise<string> {
+  const rows = await db.sql<{ id: string }[]>`
+    SELECT id FROM ta_user WHERE email = 'uma@example.org'`;
+  return rows[0]?.id ?? "";
 }
 
 /** The platform organization's id. */
@@ -481,7 +545,51 @@ async function scene(w: World) {
   const oliSecond = await w.signIn("oli@example.com");
   await activate(w, oliSecond, oliCo, den);
 
+  // Plan 12d Task 5: Acme proves example.org and adds an OIDC connection. Uma
+  // signs up at that domain by password and does not verify the address.
+  const sso = w.auth.api.sso;
+  if (!sso) throw new Error("no sso api");
+  const domain = must(
+    await sso.domains.add({ actor: APP, organizationId: acme, domain: "example.org" }),
+  );
+  if (domain.record === null) throw new Error("no domain record");
+  w.txt[domain.record.name] = [domain.record.value];
+  must(await sso.domains.verify({ actor: APP, id: domain.id }));
+  const connection = must(
+    await sso.connections.create({
+      actor: APP,
+      organizationId: acme,
+      kind: "oidc",
+      label: "Acme IdP",
+      issuer: "https://login.acme-idp.example",
+      clientId: "acme-client",
+      clientSecret: "acme-secret-0123456789",
+      endpoints: {
+        authorizeUrl: "https://login.acme-idp.example/authorize",
+        tokenUrl: "https://login.acme-idp.example/token",
+        jwksUrl: "https://login.acme-idp.example/keys",
+      },
+    }),
+  ).id;
+  must(
+    await passwordApi(w).signUp({
+      email: "uma@example.org",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    }),
+  );
+
+  const scim = w.auth.api.scim;
+  if (!scim) throw new Error("no scim api");
+  // The role map of plan 12d Task 11: a member of the group Directory gets admin.
+  must(await scim.setRoleMap({ actor: APP, organizationId: acme, map: { Directory: "admin" } }));
+  const scimToken = must(
+    await scim.tokens.create({ actor: APP, organizationId: acme, name: "directory" }),
+  ).token;
+
   return {
+    scimToken,
     ada,
     bob: bobActive,
     cal: calActive,
@@ -493,6 +601,7 @@ async function scene(w: World) {
     acme,
     core,
     oliCo,
+    connection,
     impersonation: started.token,
   };
 }
@@ -500,6 +609,19 @@ async function scene(w: World) {
 type Scene = Awaited<ReturnType<typeof scene>>;
 
 const reason = { reason: "Ticket 2", ip: null, userAgent: null } as const;
+
+/** The kinds of a SCIM group flow of plan 12d Task 11, with the create of its group. */
+const GROUP_KINDS = [
+  "SCIM group",
+  "user",
+  "session",
+  "SCIM user",
+  "organization",
+  "team",
+  "member",
+  "SCIM group member",
+  "team member",
+];
 
 /** The kinds that each flow touches on the scene, so a flow that stops its writes fails here. */
 const TOUCHED: Record<string, string[]> = {
@@ -538,8 +660,12 @@ const TOUCHED: Record<string, string[]> = {
     "member",
     "team member",
   ],
+  // Ruling 74 of plan 12d: the lock of the scimGroup rows first, and of the scimUser rows
+  // before the organization row.
   "an organization delete": [
+    "SCIM group",
     "session",
+    "SCIM user",
     "organization",
     "team",
     "invitation",
@@ -574,11 +700,12 @@ const TOUCHED: Record<string, string[]> = {
     "team member",
   ],
   "an admin create": ["user", "member"],
+  // Ruling 78 of plan 12d: the sweep takes the team rows of a solo organization.
   "an account delete with a solo and a shared organization": [
     "user",
     "session",
+    "SCIM user",
     "organization",
-    "team",
     "invitation",
     "member",
     "team member",
@@ -586,7 +713,20 @@ const TOUCHED: Record<string, string[]> = {
   "an account delete of an operator with an impersonation": [
     "user",
     "session",
+    "SCIM user",
     "organization",
+    "invitation",
+    "member",
+    "team member",
+  ],
+  // Plan 12d ruling 30: the create of a second solo organization, then the set-based delete.
+  // The team kind comes from the create: its default team (ruling 78 of plan 12d).
+  "an account delete with two solo organizations": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
+    "team",
     "invitation",
     "member",
     "team member",
@@ -604,7 +744,94 @@ const TOUCHED: Record<string, string[]> = {
   "an email claim by the sign-up link": ["user", "session"],
   "a second factor enable": ["user", "session"],
   "an email change": ["user", "session"],
+  // Plan 12d Task 5: the claim of Uma, then her member row of Acme, then her session.
+  "an SSO sign-in that claims a user": ["user", "session", "member"],
+  // Plan 12d Task 10: the SCIM create claims Uma and adds her member row.
+  "a SCIM create that claims a user": ["user", "session", "SCIM user", "member"],
+  "a SCIM update": ["user", "session", "SCIM user", "member"],
+  // The team member add of the setup takes the team row.
+  "a SCIM deactivate": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
+    "team",
+    "member",
+    "team member",
+  ],
+  "a SCIM reactivate": ["user", "session", "SCIM user", "organization", "member", "team member"],
+  // The member row lock, then the scimGroupMember rows, then the member delete (ruling 59 M1).
+  "a SCIM delete": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
+    "member",
+    "SCIM group member",
+    "team member",
+  ],
+  // Plan 12d Task 11: each group flow first creates the group of Uma in the flow, so the
+  // kinds of the create (the claim, the team create, the role) show in each of them.
+  "a SCIM group create": GROUP_KINDS,
+  "a SCIM group member removal": GROUP_KINDS,
+  "a SCIM group member add": GROUP_KINDS,
+  "a SCIM group rename": GROUP_KINDS,
+  "a SCIM group delete": GROUP_KINDS,
 };
+
+/** One SCIM request of Acme's directory, and its answer as a Result. */
+async function scimCall(w: World, s: Scene, method: string, path: string, body?: unknown) {
+  const res = await w.auth.handle(
+    new Request(`${API}/auth/scim/v2${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${s.scimToken}`,
+        ...(body === undefined ? {} : { "content-type": "application/scim+json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+  );
+  const text = await res.text();
+  return res.ok
+    ? {
+        ok: true as const,
+        value:
+          text === "" ? null : (JSON.parse(text) as { id: string; members?: { value: string }[] }),
+      }
+    : { ok: false as const, code: `${res.status} ${text}` };
+}
+
+/** Uma's SCIM User, made by Acme's directory: the claim of her unverified sign-up. */
+async function scimUma(w: World, s: Scene) {
+  return scimCall(w, s, "POST", "/Users", {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    userName: "uma@example.org",
+  });
+}
+
+/**
+ * The Group `Directory` of Acme with Uma in it (plan 12d Task 11): its id.
+ * The role map of the scene gives Uma admin, and she joins the team of the
+ * group.
+ */
+async function scimDirectory(w: World, s: Scene): Promise<string> {
+  const uma = must(await scimUma(w, s))?.id ?? "";
+  return (
+    must(
+      await scimCall(w, s, "POST", "/Groups", {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+        displayName: "Directory",
+        members: [{ value: uma }],
+      }),
+    )?.id ?? ""
+  );
+}
+
+/** A PatchOp body of one operation. */
+const scimPatch = (op: Record<string, unknown>) => ({
+  schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  Operations: [op],
+});
 
 /** Each flow of plans 12f and 12k that writes a kind of user-hold.ts, most of them two kinds or more. */
 const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
@@ -722,6 +949,17 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null }),
   "an account delete of an operator with an impersonation": (w, s) =>
     w.auth.api.user.delete({ session: s.bob, ip: null, userAgent: null }),
+  // Oli holds one solo organization in the scene. A second one makes the delete set-based
+  // over two ids (ruling 30 of plan 12d), with its organization lock in id order.
+  "an account delete with two solo organizations": async (w, s) => {
+    const made = await w.auth.api.createOrganization({
+      user: s.oli.user,
+      slug: "oli-two",
+      name: "Oli Two",
+    });
+    if (!made.ok) throw new Error(made.code);
+    return w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
+  },
   "an impersonation start": (w, s) =>
     w.auth.api.operator.impersonate({ operator: s.ada, userId: s.pat.user.id, ...reason }),
   "an impersonation stop": async (w, s) =>
@@ -734,6 +972,124 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.operator.sessions.endUser({ actor: APP, userId: s.pat.user.id, ...reason }),
   "an end of all sessions": (w) => w.auth.api.operator.sessions.endAll({ actor: APP, ...reason }),
   "a sign-in": async (w) => ({ ok: true, value: await w.signIn("pat@example.com") }),
+  "an SSO sign-in that claims a user": async (w, s) => {
+    const started = await w.auth.handle(new Request(`${API}/auth/sso/${s.connection}/start`));
+    const url = new URL(started.headers.get("location") ?? "");
+    const bind = started.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+      ?.split(";")[0];
+    w.idTokens["code-uma"] = {
+      sub: "uma-1",
+      email: "uma@example.org",
+      nonce: url.searchParams.get("nonce") ?? "",
+    };
+    const q = new URLSearchParams({ code: "code-uma", state: url.searchParams.get("state") ?? "" });
+    const res = await w.auth.handle(
+      new Request(`${API}/auth/sso/${s.connection}/callback?${q}`, {
+        headers: { cookie: bind ?? "" },
+      }),
+    );
+    const error = new URL(res.headers.get("location") ?? "", API).searchParams.get("auth_error");
+    return error === null ? { ok: true, value: res.status } : { ok: false, code: error };
+  },
+  "a SCIM create that claims a user": (w, s) => scimUma(w, s),
+  "a SCIM update": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "displayName", value: "Uma" }),
+    );
+  },
+  "a SCIM deactivate": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    // Uma joins the team Core, so the deactivate deletes her team member row.
+    must(
+      await w.auth.api.addTeamMember({ user: s.ada.user, teamId: s.core, userId: await umaId(w) }),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "active", value: false }),
+    );
+  },
+  "a SCIM reactivate": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    must(
+      await scimCall(
+        w,
+        s,
+        "PATCH",
+        `/Users/${id}`,
+        scimPatch({ op: "replace", path: "active", value: false }),
+      ),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "active", value: true }),
+    );
+  },
+  "a SCIM delete": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    return scimCall(w, s, "DELETE", `/Users/${id}`);
+  },
+  // Plan 12d Task 11: the group writes take the group row, hold the users whose role or
+  // team they change, then the organization or the team row, then the member rows of the
+  // role recompute, then the scimGroupMember rows, then the team member rows.
+  "a SCIM group create": (w, s) => scimDirectory(w, s).then((id) => ({ ok: id !== "" })),
+  "a SCIM group member removal": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    const uma = must(await scimCall(w, s, "GET", `/Groups/${id}`))?.members?.[0]?.value;
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "remove", path: `members[value eq "${uma}"]` }),
+    );
+  },
+  "a SCIM group member add": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    const uma = must(await scimCall(w, s, "GET", `/Groups/${id}`))?.members?.[0]?.value;
+    must(
+      await scimCall(
+        w,
+        s,
+        "PATCH",
+        `/Groups/${id}`,
+        scimPatch({ op: "remove", path: `members[value eq "${uma}"]` }),
+      ),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "add", path: "members", value: [{ value: uma }] }),
+    );
+  },
+  "a SCIM group rename": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "replace", path: "displayName", value: "Former" }),
+    );
+  },
+  "a SCIM group delete": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    return scimCall(w, s, "DELETE", `/Groups/${id}`);
+  },
   "an invitation accept that raises a member": async (w, s) => {
     must(
       await w.auth.api.inviteMember({
@@ -835,6 +1191,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "account-delete runDelete": [
     "an account delete with a solo and a shared organization",
     "an account delete of an operator with an impersonation",
+    "an account delete with two solo organizations",
   ],
   "email-change applyChange": ["an email change"],
   "handoff continueHandoff": "one kind: an update of the browser session, then a verification row",
@@ -860,7 +1217,10 @@ const SITES: Record<string, readonly string[] | string> = {
     "an owner demotion",
     "a role change that drops the platform role",
   ],
-  "organizations createOrganization": ["an organization create with its default team"],
+  "organizations createOrganization": [
+    "an organization create with its default team",
+    "an account delete with two solo organizations",
+  ],
   "organizations updateOrganization": "one kind: the organization row",
   "organizations deleteOrganization": ["an organization delete"],
   "organizations addMember": ["a member add"],
@@ -887,14 +1247,18 @@ const SITES: Record<string, readonly string[] | string> = {
   "session-list revokeSession": "one kind: a session row",
   "session-list revokeOtherSessions": "one kind: session rows",
   "social completeLink": "one kind: an update of the session, then a new identity row",
-  "social resolveSocialUser":
-    "a sign-in by a provider: claimEmail, then the session, as in an email claim by a magic link",
+  // Plan 12d Task 5: the SSO sign-in resolves through it, and adds a member row.
+  "social resolveSocialUser": ["an SSO sign-in that claims a user"],
   "sweep sweepLinks": "no kind: oauth logout rows only",
   "sweep sweepExpired": "one kind: ended session rows",
+  // Ruling 78 of plan 12d: the rows of the solo organizations of an account delete. The test
+  // "the sweep of the rest of a solo organization" below checks its kinds.
+  "organization-rest sweepOrganizationRest":
+    "the sweep of the rest of a solo organization: its test",
   "teams createTeam": ["a team create"],
   "teams updateTeam": "one kind: the team row",
   "teams deleteTeam": ["a team delete"],
-  "teams addTeamMember": ["a team member add"],
+  "teams addTeamMember": ["a team member add", "a SCIM deactivate"],
   "teams removeTeamMember": ["a team member removal", "a team leave"],
   "teams setActiveTeam": ["a set of the active team"],
   "tokens createApiToken": "one kind: the user hold, then token rows",
@@ -903,7 +1267,20 @@ const SITES: Record<string, readonly string[] | string> = {
   "totp twoFactorGate": "no kind: the password row and the challenge row",
   // The body of verifyTwoFactor, which emits the challenge event around it (plan 12h Task 5).
   "totp answerChallenge": "a sign-in after the second factor challenge",
-  "users createOrFindInTransaction": ["a sign-in", "an email claim by a magic link"],
+  "users createOrFindInTransaction": [
+    "a sign-in",
+    "an email claim by a magic link",
+    "a SCIM create that claims a user",
+    "a SCIM update",
+    "a SCIM deactivate",
+    "a SCIM reactivate",
+    "a SCIM delete",
+    "a SCIM group create",
+    "a SCIM group member removal",
+    "a SCIM group member add",
+    "a SCIM group rename",
+    "a SCIM group delete",
+  ],
   "operator/access-end endPendingRows": "one kind: the session rows of a pending end",
   [DOOR]: "the door of the operator acts: each call of operatorAct is a site of its own",
   "operator/ban banUser": ["a ban", "a ban of an operator with an impersonation"],
@@ -919,6 +1296,48 @@ const SITES: Record<string, readonly string[] | string> = {
     "a platform role revoke with no impersonation",
   ],
   "operator/platform-role createAdmin": ["an admin create"],
+  // The domain proof of plan 12d. Its rows are of no kind of user-hold.ts.
+  "sso/domains addDomain": "one kind: the lock of the organization row, then domain rows",
+  "sso/domains verifyDomainWith": "no kind: the claim of the domain row, then its audit row",
+  // Ruling 34 of plan 12d: the connection row comes before the domain rows in the three
+  // sites of a domain and a connection. Ruling 35 adds the organization delete: its
+  // deleteOrganizationsRows deletes the connection rows before the domain rows. The two
+  // models are no kind here, so this check cannot see that order.
+  // sso-connection-domain-race.test.ts races the four.
+  "sso/domains updateDomain":
+    "no kind: a read of the domain, the lock of the connection row, then the domain row",
+  "sso/domains deleteDomain": "no kind: the domain row, then its audit row",
+  "sso/domains enforceOff": "no kind: the domain row through operatorAct",
+  "sso/domains loseDomain": "no kind: the loss of the claim of the domain row, then its audit row",
+  // The connections of plan 12d Task 3. Their rows are of no kind of user-hold.ts either.
+  "sso/connections createConnection":
+    "one kind: the lock of the organization row, then reads of role rows and connections, then the connection row",
+  "sso/connections updateConnection":
+    "no kind: reads of role rows, the connection row, reads of domains, then its audit row",
+  "sso/connections deleteConnection":
+    "no kind: the connection row, then the domain rows routed to it, then its audit row",
+  // The SCIM tokens of plan 12d Task 9b. Their rows are of no kind of user-hold.ts.
+  "scim/tokens createScimToken":
+    "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
+  "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
+  // The SCIM Users of plan 12d Task 10: the user hold, the sessions, the scimUser row,
+  // the organization lock, the member and team member rows, then the audit row.
+  "scim/users writeChange": [
+    "a SCIM update",
+    "a SCIM deactivate",
+    "a SCIM reactivate",
+    "a SCIM delete",
+  ],
+  // The SCIM Groups of plan 12d Task 11: the group row, the user hold, the sessions of
+  // the persons who leave the team, the organization or team row, the member rows of
+  // the role recompute, the scimGroupMember rows, the team member rows, then the audit row.
+  "scim/groups writeGroup": [
+    "a SCIM group create",
+    "a SCIM group member removal",
+    "a SCIM group member add",
+    "a SCIM group rename",
+    "a SCIM group delete",
+  ],
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -931,7 +1350,11 @@ const pinnedTo = (name: string): string[] =>
 describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
   it("each has a flow of FLOWS or a reason, and no entry is stale", () => {
     const found = sites("src").map((s) => s.key);
-    expect(found.length).toBe(63);
+    // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
+    // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
+    // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
+    // Ruling 78 adds the one of organization-rest.ts.
+    expect(found.length).toBe(77);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
@@ -970,6 +1393,32 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
       "team member",
     ]);
     expect(w.sitesOf(name)).toEqual(["teams deleteTeam"]);
+    expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
+  }, 60_000);
+
+  it("the sweep of the rest of a solo organization takes the kinds in the order of user-hold.ts", async () => {
+    const w = world();
+    const s = await scene(w);
+    // Oli's account delete leaves the rest of the solo organization to the sweep (ruling 78
+    // of plan 12d).
+    const gone = await w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
+    expect(gone).toMatchObject({ ok: true });
+    const name = "the sweep of the rest of a solo organization";
+    const swept = await w.flow(name, () => w.auth.api.sweepExpired());
+    expect(swept).toMatchObject({ organizationRows: 1 });
+    expect(w.sitesOf(name)).toEqual([
+      "organization-rest sweepOrganizationRest",
+      "sweep sweepExpired",
+    ]);
+    expect(w.kindsOf(name)).toEqual([
+      "SCIM group",
+      "session",
+      "SCIM user",
+      "team",
+      "invitation",
+      "member",
+      "team member",
+    ]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 

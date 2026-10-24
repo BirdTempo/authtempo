@@ -48,8 +48,9 @@ describe("the admin plugin on D1 (plan 12f Task 13)", () => {
     // Plan 12f Task 11 adds 2: the router reads the session for the
     // impersonation step, and the ban reads the audit for the operator's impersonations.
     // Ruling 60 L2 adds 1: the factor read for the user's twoFactorEnabled.
+    // Ruling 78 of plan 12d takes 1: the handler takes the session row of the router.
     expect(count.queries).toBeLessThanOrEqual(50);
-    expect(count.queries).toBe(35);
+    expect(count.queries).toBe(34);
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`)
       .bind(ann.id)
       .first<{ n: number }>();

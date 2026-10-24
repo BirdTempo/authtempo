@@ -364,6 +364,8 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
     // A parallel sign-in creates the same address first, through another connection.
     let armed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: (m, d) => a.create(m, d),
       findOne: async (m, w) => {
         if (m === "user" && armed) {
@@ -701,6 +703,8 @@ describe("hooks.identity (plan 12a, spec 8.9)", () => {
     // A parallel sign-in of the same Google account links it first, through another connection.
     let armed = false;
     const wrap = (a: StorageAdapter): StorageAdapter => ({
+      createMany: (m, r) => a.createMany(m, r),
+      rowsPerInsert: (m) => a.rowsPerInsert(m),
       create: async (m, d) => {
         const row = d as unknown as IdentityRow;
         if (m === "identity" && armed && row.provider === "google") {
@@ -740,7 +744,7 @@ describe("the hook groups in the config (plan 12a)", () => {
   it("refuses an unknown group and an unknown point of user and identity", () => {
     expect(() => makeAuth({ hooks: { users: {} } as never })).toThrow(
       new ConfigError(
-        "hooks.users is not a hook group; core has organization, session, user, identity, and operator",
+        "hooks.users is not a hook group; core has organization, session, user, identity, operator, sso, and scim",
       ),
     );
     expect(() => makeAuth({ hooks: { user: { beforeSave: () => {} } as never } })).toThrow(

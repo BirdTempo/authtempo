@@ -141,7 +141,7 @@ const numberOf = (v: unknown): number | null =>
   typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : null;
 
 /** SQLite keeps a boolean as 0 or 1. Null keeps Better Auth's default. */
-const boolOf = (v: unknown, otherwise: boolean): boolean =>
+export const boolOf = (v: unknown, otherwise: boolean): boolean =>
   v === null || v === undefined ? otherwise : v === true || v === 1 || v === "1" || v === "t";
 
 /**
@@ -149,7 +149,7 @@ const boolOf = (v: unknown, otherwise: boolean): boolean =>
  * JSON string (`migrateDoubleStringifiedMetadata`), so a string result is
  * read once more. Anything that is not an object reads as null.
  */
-function jsonObjectOf(v: unknown): Record<string, unknown> | null {
+export function jsonObjectOf(v: unknown): Record<string, unknown> | null {
   let value = v;
   for (let i = 0; i < 2 && typeof value === "string"; i++) {
     try {

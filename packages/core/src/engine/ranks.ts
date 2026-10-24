@@ -16,6 +16,11 @@ export function rankOf(ranks: Readonly<Record<string, number>>, role: string): n
   return best;
 }
 
+/** True when `rank` is at the owner rank or above: the member counts as an owner. */
+export function isOwner(o: Pick<ResolvedOrganizations, "ranks">, rank: number): boolean {
+  return rank >= (o.ranks.owner ?? Number.POSITIVE_INFINITY);
+}
+
 /**
  * True when the role string holds `part` as one of its comma parts. This is
  * the one part rule. The platform guard, the platform role acts, and

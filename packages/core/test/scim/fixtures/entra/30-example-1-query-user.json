@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "path": "/Users?filter=externalId eq jyoung",
+  "headers": {},
+  "body": null
+}

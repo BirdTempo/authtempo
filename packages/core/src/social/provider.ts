@@ -126,6 +126,23 @@ export interface OidcDiscovery extends Omit<ProviderBase, "authorizeUrl" | "toke
 export type ConfiguredProvider = Provider | OidcDiscovery;
 
 /**
+ * How a client proves its secret at the token endpoint (RFC 6749 section
+ * 2.3.1, OIDC Core section 9): in the form body, or as HTTP Basic.
+ */
+export type TokenEndpointAuthMethod = "client_secret_post" | "client_secret_basic";
+
+/**
+ * The `Authorization` value of `client_secret_basic`. RFC 6749 section
+ * 2.3.1 form-encodes the id and the secret first, so a colon or a space
+ * in either one stays inside its half. The result is ASCII, so `btoa`
+ * takes it.
+ */
+export function basicAuthorization(clientId: string, clientSecret: string): string {
+  const form = (v: string) => new URLSearchParams([["", v]]).toString().slice(1);
+  return `Basic ${btoa(`${form(clientId)}:${form(clientSecret)}`)}`;
+}
+
+/**
  * A query string with `%20` for a space. `URLSearchParams` writes `+`, and
  * Apple rejects `+` inside `scope` (field reports, checked 2026-10-09).
  */

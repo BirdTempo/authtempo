@@ -1,4 +1,9 @@
-import { REWRAP_LIMIT, SECRET_VERSION_MAX } from "@authtempo/core/secrets";
+import {
+  REWRAP_CALL_BUDGET,
+  REWRAP_CALL_BUDGET_MAX,
+  REWRAP_LIMIT,
+  SECRET_VERSION_MAX,
+} from "@authtempo/core/secrets";
 import { CALLS_PER_HOUR, DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { OPERATOR_FLAGS, operatorFlagsWithYes } from "./keys.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
@@ -82,7 +87,7 @@ export const SECRET_REWRAP_HELP: HelpText = {
   purpose:
     "Reseal the rows of the old app secret versions under the current version. The command calls the deployment until no old row remains, the pass ends, or the run reaches --max-calls.",
   usage: [
-    "authtempo secret rewrap <base url> [--limit <n>] [--max-calls <n>] [--token-env <NAME> | --token-file <path>] --yes",
+    "authtempo secret rewrap <base url> [--limit <n>] [--max-calls <n>] [--call-budget <n>] [--token-env <NAME> | --token-file <path>] --yes",
   ],
   examples: [
     {
@@ -98,6 +103,10 @@ export const SECRET_REWRAP_HELP: HelpText = {
     {
       flag: "--max-calls <n>",
       says: `The most calls of one run, from 1 to ${MAX_CALLS_MAX}. The default is ${DEFAULT_MAX_CALLS}.`,
+    },
+    {
+      flag: "--call-budget <n>",
+      says: `The storage calls of one call, from ${REWRAP_CALL_BUDGET} to ${REWRAP_CALL_BUDGET_MAX}. The default is ${REWRAP_CALL_BUDGET}, the limit of D1 Free. Give more on D1 Paid or Postgres.`,
     },
     ...operatorFlagsWithYes(),
     { flag: "--yes", says: "Reseal with no question. A run with no terminal needs it." },

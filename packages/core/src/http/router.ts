@@ -8,6 +8,7 @@ import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
+import { PARAM_SEGMENT_RE } from "./route-key.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
@@ -21,6 +22,11 @@ export interface RouteContext {
   config: ResolvedConfig;
   ip: string | null;
   now: Date;
+  /**
+   * The value of each `:<name>` segment of the route's path (plan 12d). An
+   * empty object for a route with none.
+   */
+  params: Readonly<Record<string, string>>;
 }
 
 /** What a route's preflight hook reads (plan 11d). */
@@ -34,8 +40,11 @@ export interface PreflightContext {
   config: ResolvedConfig;
 }
 
+// The rule lives beside routeKeyOf, so the OpenAPI entry reads it without the router.
+export { PARAM_SEGMENT_RE };
+
 export interface Route {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   /**
    * The entry of ROUTES that this route serves (plan 11g). The route list
@@ -210,9 +219,84 @@ async function moveLegacyCookie(
   return res;
 }
 
+/** A mounted route and the values of its parameter segments. */
+export interface RouteMatch {
+  route: Route;
+  params: Readonly<Record<string, string>>;
+}
+
+const NO_PARAMS: Readonly<Record<string, string>> = Object.freeze({});
+
+/** A route path with a parameter segment, split on `/` with `basePath`. */
+interface ShapedRoute {
+  route: Route;
+  segments: readonly string[];
+}
+
+/** One path can match both: each literal pair is equal, and each literal beside a parameter fits it. */
+function overlap(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i] ?? "";
+    if (x.startsWith(":")) return y.startsWith(":") || PARAM_SEGMENT_RE.test(y);
+    return y.startsWith(":") ? PARAM_SEGMENT_RE.test(x) : x === y;
+  });
+}
+
 /**
- * The Origin and Fetch Metadata rules of a POST, before any handler: the 403
- * of the router, or null. A route with `allowCrossSiteForm` passes. An
+ * The one route matcher of the router and of its gate (plan 12d ruling 4).
+ * An exact route wins. Else a route whose path holds `:<name>` segments
+ * matches a path of the same segment count. Each literal must be equal, and
+ * each parameter segment must fit `PARAM_SEGMENT_RE`. The URL parser removes the
+ * dot segments, so a parameter never holds `.` or `..` as a segment. Two
+ * routes of one method that one path can match throw at construction.
+ */
+export function createRouteMatcher(
+  config: ResolvedConfig,
+  routes: readonly Route[],
+): (method: string, pathname: string) => RouteMatch | null {
+  const exact = new Map<string, Route>();
+  const shaped: ShapedRoute[] = [];
+  for (const route of routes) {
+    const path = `${config.basePath}${route.path}`;
+    const segments = path.split("/");
+    const key = `${route.method} ${path}`;
+    const hasParam = segments.some((s) => s.startsWith(":"));
+    const clash = hasParam
+      ? shaped.some((o) => o.route.method === route.method && overlap(o.segments, segments))
+      : exact.has(key);
+    if (clash) throw new Error(`two routes match ${route.method} ${route.path}`);
+    if (hasParam) shaped.push({ route, segments });
+    else exact.set(key, route);
+  }
+  return (method, pathname) => {
+    const hit = exact.get(`${method} ${pathname}`);
+    if (hit) return { route: hit, params: NO_PARAMS };
+    const parts = pathname.split("/");
+    for (const { route, segments } of shaped) {
+      if (route.method !== method || segments.length !== parts.length) continue;
+      const params: Record<string, string> = {};
+      const fits = segments.every((want, i) => {
+        const got = parts[i] ?? "";
+        if (!want.startsWith(":")) return want === got;
+        params[want.slice(1)] = got;
+        return PARAM_SEGMENT_RE.test(got);
+      });
+      if (fits) return { route, params: Object.freeze(params) };
+    }
+    return null;
+  };
+}
+
+/** The safe methods of RFC 9110 section 9.2.1. The gate passes them, because they change nothing. */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * The Origin and Fetch Metadata rules of each method but `GET`, `HEAD`, and
+ * `OPTIONS`, before any handler: the 403 of the router, or null.
+ * `PUT`, `PATCH`, and `DELETE` get the rules of a POST (plan 12d). The gate
+ * finds the route through the router's own matcher, so a parameter route
+ * keeps its flags. A route with `allowCrossSiteForm` passes. An
  * Origin on a `clientOrigin` route passes to the handler (plan 11d): a
  * trusted Origin passes there as before plan 12b, and a foreign one passes
  * only as a web origin of the named client. That route reads no cookie, so
@@ -225,12 +309,10 @@ export function createPostGate(
   config: ResolvedConfig,
   routes: readonly Route[],
 ): (request: Request) => Response | null {
-  const posts = new Map(
-    routes.filter((r) => r.method === "POST").map((r) => [`${config.basePath}${r.path}`, r]),
-  );
+  const matchRoute = createRouteMatcher(config, routes);
   return (request) => {
-    if (request.method !== "POST") return null;
-    const route = posts.get(new URL(request.url).pathname);
+    if (SAFE_METHODS.has(request.method)) return null;
+    const route = matchRoute(request.method, new URL(request.url).pathname)?.route;
     if (route?.allowCrossSiteForm) return null;
     const origin = request.headers.get("origin");
     if (route?.clientOrigin && origin !== null) return null;
@@ -248,13 +330,15 @@ export function createPostGate(
  * that reads the trusted proxy header. A null IP counts against one shared
  * IP bucket in the magic link limit, which fails closed.
  *
- * Exact match on method and `basePath + route.path`. An `OPTIONS` from a
+ * The match is `createRouteMatcher`: the exact table, then the parameter
+ * routes in mount order. A connection lives in the database, so its routes
+ * cannot be mounted one per connection (plan 12d). An `OPTIONS` from a
  * trusted origin gets 204 with the CORS headers. Any other `OPTIONS` gets 403.
- * Every response to a trusted origin carries the CORS headers. The POST
- * Origin rule is unchanged: a POST whose Origin header is present and not
- * trusted gets 403 before any handler runs. A POST with no Origin is a
- * non-browser client and passes. A POST that `fetchMetadataRefuses` names
- * gets the same 403 (plan 12b). A route with `clientOrigin` checks a
+ * Every response to a trusted origin carries the CORS headers. The Origin
+ * rule covers `POST`, `PUT`, `PATCH`, and `DELETE`: a request whose Origin
+ * header is present and not trusted gets 403 before any handler runs. One
+ * with no Origin is a non-browser client and passes. One that
+ * `fetchMetadataRefuses` names gets the same 403 (plan 12b). A route with `clientOrigin` checks a
  * foreign Origin itself, and a route with `preflight` answers a foreign
  * preflight itself (plan 11d). An impersonation session gets 403
  * `impersonation_session` at each route of `IMPERSONATION_REFUSED`, after
@@ -265,7 +349,7 @@ export function createRouter(
   routes: Route[],
   gate: (request: Request) => Response | null = createPostGate(config, routes),
 ): (request: Request) => Promise<Response> {
-  const table = new Map(routes.map((r) => [`${r.method} ${config.basePath}${r.path}`, r]));
+  const matchRoute = createRouteMatcher(config, routes);
   // The routes that answer a foreign origin's preflight themselves (plan 11d).
   const preflights = new Map(
     routes.filter((r) => r.preflight).map((r) => [`${config.basePath}${r.path}`, r]),
@@ -275,10 +359,11 @@ export function createRouter(
     const started = config.clock.now().getTime();
     const url = new URL(request.url);
     // An OPTIONS request names the route at its path: the POST, else the GET.
-    const route =
+    const match =
       request.method === "OPTIONS"
-        ? (table.get(`POST ${url.pathname}`) ?? table.get(`GET ${url.pathname}`))
-        : table.get(`${request.method} ${url.pathname}`);
+        ? (matchRoute("POST", url.pathname) ?? matchRoute("GET", url.pathname))
+        : matchRoute(request.method, url.pathname);
+    const route = match?.route;
     const routeKey = route?.key ?? "unmatched";
     // A client id only under trustTraceparent (spec 31 item 5). An invalid or all-zero header is ignored.
     const parent = trustTraceparent ? parseTraceparent(request.headers.get("traceparent")) : null;
@@ -300,7 +385,7 @@ export function createRouter(
         userAgent: request.headers.get("user-agent"),
       }),
     };
-    const res = await answer(scoped, request, url, route, traceId);
+    const res = await answer(scoped, request, url, match, traceId);
     const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
@@ -332,7 +417,7 @@ export function createRouter(
     scoped: ResolvedConfig,
     request: Request,
     url: URL,
-    route: Route | undefined,
+    match: RouteMatch | null,
     traceId: string,
   ): Promise<Response> {
     const origin = request.headers.get("origin");
@@ -366,7 +451,7 @@ export function createRouter(
       const res = await moveLegacyCookie(
         scoped,
         request,
-        await dispatch(scoped, request, url, route),
+        await dispatch(scoped, request, url, match),
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
@@ -375,7 +460,7 @@ export function createRouter(
       scoped.observe.emit({
         name: "error.internal",
         method: request.method,
-        route: route?.key ?? "unmatched",
+        route: match?.route.key ?? "unmatched",
         errorName: e,
       });
       const res = routerError("internal");
@@ -421,20 +506,22 @@ export function createRouter(
     scoped: ResolvedConfig,
     request: Request,
     url: URL,
-    route: Route | undefined,
+    match: RouteMatch | null,
   ): Promise<Response> {
-    if (!route) return routerError("not_found");
+    if (!match) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;
     // The impersonation step (plan 12f): after the match, before the handler.
-    const impersonated = route.key && (await impersonationRefusal(scoped, request, route.key));
+    const impersonated =
+      match.route.key && (await impersonationRefusal(scoped, request, match.route.key));
     if (impersonated) return impersonated;
-    return route.handler({
+    return match.route.handler({
       request,
       url,
       config: scoped,
       ip: config.clientIp(request),
       now: config.clock.now(),
+      params: match.params,
     });
   }
 }

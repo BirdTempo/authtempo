@@ -53,6 +53,9 @@ import test from "../../../../../samples/guides/pages.test.ts?raw";
 - The policy permits inline style, no script, and a form post to this origin only. A page that needs script needs its own route in the app.
 - The sign-in page is the one page with a script: the passkey ceremony, under a nonce. A custom sign-in page must put the nonce on its script tag.
 - A custom sign-in page must show `methods.providers`, or the buttons of GitHub, LinkedIn, and the list providers do not show.
+- A custom sign-in page must show a form that posts `email` to `<basePath>/sso/discover` while `methods.sso` is true. Else an SSO user cannot start a sign-in there. Put `continuePath` in a hidden `next` field, so the sign-in lands on it. The default page has the form "Sign in with SSO" with no script.
+- The form post of `/sso/discover` answers a page of this origin. That page goes on to the start of the connection with a GET. Chromium applies `form-action` to each redirect after a form post, and the origin of the sign-in provider is not in the policy. So a redirect chain from the post to the provider stops in Chromium.
+- A custom page with a script that reads the JSON answer must go to `start` with a GET navigation, such as `location.href = start`. Do not send a form to `start`, also not a form with `method="get"`: `form-action` applies to it too.
 - A custom challenge page must read `methods`, `method`, `trusted`, and `emailSent` of `TotpChallengePageInput`. Without them the page shows no email form and no trusted-device button, and a person who signs in with Apple must type a code.
 - A challenge whose only method is a passkey needs a page with a script. The default page then shows the backup code form, which passes only while a code is left.
 - The verify page of a password sign-up has no config key. Core serves `defaultPasswordVerifyPage`.

@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import type { Result } from "../../result.js";
 import type { OperatorAuditRow, SessionRow } from "../../schema.js";
+import { enforceOff, type SsoDomainSummary } from "../sso/domains.js";
 import { listAudit } from "./audit.js";
 import { type BanInput, banUser, type UnbanInput, unbanUser } from "./ban.js";
 import { checkActor, type OperatorActor } from "./guards.js";
@@ -122,6 +123,20 @@ export interface OperatorApi {
   ): Promise<Result<{ token: string; session: SessionRow; auditId: string }>>;
   /** Ends an impersonation session. A session with no `actorId` answers `not_found`. */
   stopImpersonating(input: ImpersonationStop): Promise<Result<{ auditId: string }>>;
+  sso: {
+    /**
+     * Turns `enforce` off on one domain (plan 12d deviation 5), with the
+     * operator's reason in the audit row `sso_enforce_off`. Needs `sso`
+     * (else `not_found`) and the scope `sso` of a secret actor.
+     */
+    enforceOff(input: {
+      actor: OperatorActor;
+      domainId: string;
+      reason: string;
+      ip: string | null;
+      userAgent: string | null;
+    }): Promise<Result<SsoDomainSummary & { auditId: string }>>;
+  };
 }
 
 /**
@@ -166,5 +181,8 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
     // start reads the session (requireOperatorUser).
     impersonate: (i) => startImpersonation(config, i),
     stopImpersonating: (i) => stopImpersonation(config, i),
+    sso: {
+      enforceOff: entry(({ actor, ...i }) => enforceOff(config, actor, i)),
+    },
   };
 }

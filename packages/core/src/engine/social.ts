@@ -16,6 +16,7 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose } from "../schema.js";
 import {
+  basicAuthorization,
   buildQuery,
   type ConfiguredProvider,
   type OAuth2Provider,
@@ -24,11 +25,19 @@ import {
   type Provider,
   type SocialProfile,
   stringClaim,
+  type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
-import { hookGuard, type IdentitySummary, runAfter, runBefore, stopWith } from "./hooks.js";
+import {
+  HookStop,
+  hookGuard,
+  type IdentitySummary,
+  runAfter,
+  runBefore,
+  stopWith,
+} from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import {
@@ -39,6 +48,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
+import { enforcedAnswer } from "./sso/enforce.js";
 import {
   type BeforeResolveWrite,
   ClaimLostError,
@@ -290,7 +300,14 @@ export async function completeSocial(
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
-  const token = await exchangeCode(config, provider, input.code, data.verifier, now);
+  const token = await exchangeProviderCode(
+    config,
+    provider,
+    input.code,
+    data.verifier,
+    now,
+    callbackUrl(config, provider),
+  );
   if (token === null) return fail("oauth_failed");
   const profile =
     provider.kind === "oidc"
@@ -298,6 +315,10 @@ export async function completeSocial(
       : await userinfoProfile(config, provider, token);
   const bounded = profile ? boundProfile(config.observe, profile, provider.name) : null;
   if (!bounded) return fail("oauth_failed");
+  // Only SSO signs in an address of an enforced domain (plan 12d), by the profile address, before the resolution.
+  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
+  const enforced = link || address === null ? null : await enforcedAnswer(config, address);
+  if (enforced) return enforced;
   // A link (plan 12a): no session opens, and no sign-in gate applies.
   if (link)
     return completeLink(
@@ -344,7 +365,13 @@ export async function completeSocial(
       verified,
       (tx) => steps.write(tx),
       ended,
-      steps.before,
+      async (tx, user, created) => {
+        // A known identity can carry another address than its user's (plan 12d): that user's address decides too.
+        const held =
+          created || user.email === address ? null : await enforcedAnswer(config, user.email, tx);
+        if (held) throw new HookStop(held);
+        await steps.before(tx, user);
+      },
       made,
     ),
   );
@@ -494,13 +521,23 @@ async function completeLink(
  * The token that the provider's kind needs, or null on any failure: the ID
  * token of an `oidc` provider, the access token of an `oauth2` provider.
  * Logs the status or the error name only, never a token or the code.
+ * `redirectUri` is the callback of the start: a social provider's, or an
+ * SSO connection's (plan 12d deviation 6). One exchange serves both.
+ * `fetchFn` is `social.fetch` for a social provider and `sso.fetch` for a
+ * connection (plan 12d Task 4). `method` is `client_secret_post` for a
+ * social provider. An SSO connection names its own (12d fix wave item 18).
+ * With `client_secret_basic` the body holds no client id and no secret:
+ * RFC 6749 section 2.3 allows one method per request.
  */
-async function exchangeCode(
+export async function exchangeProviderCode(
   config: ResolvedConfig,
   provider: Provider,
   code: string,
   verifier: string,
   now: Date,
+  redirectUri: string,
+  fetchFn: typeof fetch = config.social.fetch,
+  method: TokenEndpointAuthMethod = "client_secret_post",
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -513,18 +550,23 @@ async function exchangeCode(
     });
     return null;
   }
+  const basic = method === "client_secret_basic";
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json",
+  };
+  if (basic) headers.authorization = basicAuthorization(provider.clientId, clientSecret);
   let res: Response;
   try {
-    res = await config.social.fetch(provider.tokenUrl, {
+    res = await fetchFn(provider.tokenUrl, {
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      headers,
       body: buildQuery({
         grant_type: "authorization_code",
         code,
-        redirect_uri: callbackUrl(config, provider),
-        client_id: provider.clientId,
-        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        ...(basic ? {} : { client_id: provider.clientId, client_secret: clientSecret }),
         code_verifier: verifier,
       }),
     });

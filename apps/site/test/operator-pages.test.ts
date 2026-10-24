@@ -103,6 +103,12 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   // Plan 12k (ruling 5 of plan 12k): the role writes and the token writes.
   [/^\/organizations\/roles\/(create|update|delete)$/, "the role writes of dynamic roles"],
   [/^\/tokens\/update$|^\/organizations\/tokens(\/update|\/revoke)?$/, "the token writes"],
+  // Plan 12d Task 2b: the four domain writes.
+  [/^\/sso\/domains\/(add|verify|update|delete)$/, "the domain writes of SSO"],
+  // Plan 12d Task 3: the three connection writes.
+  [/^\/sso\/connections\/(create|update|delete)$/, "the connection writes of SSO"],
+  // Plan 12d Task 9b: the two SCIM token writes. The list answers a hint only (ruling 40).
+  [/^\/scim\/tokens\/(create|revoke)$/, "the SCIM token writes"],
 ];
 
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */

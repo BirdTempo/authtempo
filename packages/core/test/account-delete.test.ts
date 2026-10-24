@@ -8,6 +8,10 @@ import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import type { NoticeMailInput } from "../src/engine/notices.js";
 import { DEVICE_GRANT } from "../src/engine/oauth-clients.js";
 import {
+  authenticateOrganizationToken,
+  createOrganizationToken,
+} from "../src/engine/organization-tokens.js";
+import {
   addMember,
   createOrganization,
   removeMember,
@@ -22,8 +26,11 @@ import {
   resetPassword,
 } from "../src/engine/password.js";
 import { reauthenticate } from "../src/engine/reauth.js";
+import { createRole } from "../src/engine/roles.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { destroySession, type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
+import { createTeam } from "../src/engine/teams.js";
 import { createApiToken } from "../src/engine/tokens.js";
 import { enableTotp, setupTotp, verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
@@ -395,6 +402,23 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       teamId: "team-ops",
       organizationId: team.id,
       userId: me.user.id,
+      createdAt: at,
+      updatedAt: at,
+    });
+    // The SCIM view of the user in Bob's organization (schema version 14,
+    // plan 12d). No engine writes it yet, so the row goes in as the SCIM
+    // user engine writes it: one row per member of the organization.
+    await w.auth.storage.create("scimUser", {
+      id: "scim-ada",
+      organizationId: team.id,
+      userId: me.user.id,
+      userName: EMAIL,
+      userNameKey: EMAIL.toLowerCase(),
+      externalId: null,
+      active: true,
+      displayName: null,
+      data: {},
+      version: 1,
       createdAt: at,
       updatedAt: at,
     });
@@ -1392,6 +1416,50 @@ describe("the delete's own order and rows (review L1 to L3)", () => {
     expect(await membersOf(w, solo.id)).toEqual([]);
   });
 
+  it("on D1 answers conflict when a member joins a solo organization after the rule's read (ruling 78)", async () => {
+    // D1 has no lock. Carol's member row commits after the organization rule read the
+    // members, and before the member delete of the solo organization. That delete counts
+    // her row, so the act stops, and the undo restores every row.
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    const carol = await verifiedSession(w.auth, "carol@example.com");
+    const proof = await live(w, me.token);
+    const d1 = d1Like(w.auth.config);
+    const raw = d1.storage;
+    let joined = false;
+    const deleteView: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            delete: async (model, where) => {
+              if (model === "member" && where[0]?.field === "organizationId" && !joined) {
+                joined = true;
+                await raw.create("member", {
+                  id: "mem-carol",
+                  organizationId: solo.id,
+                  userId: carol.user.id,
+                  role: "member",
+                  createdAt: proof.session.createdAt,
+                  updatedAt: proof.session.createdAt,
+                });
+              }
+              return tx.delete(model, where);
+            },
+          }),
+        ),
+    };
+    expect(await deleteAccount({ ...d1, storage: deleteView }, input(proof))).toEqual(CONFLICT);
+    expect(joined).toBe(true);
+    expect(await organizationOf(w, solo.id)).not.toBeNull();
+    expect((await membersOf(w, solo.id)).map((m) => m.userId).sort()).toEqual(
+      [me.user.id, carol.user.id].sort(),
+    );
+    expect(await userOf(w, me.user.id)).not.toBeNull();
+  });
+
   it("answers conflict when an owner write moves the organization between the rule's read and the owner lock", async () => {
     // D1 has no lock: Carol renames the team inside the delete's open
     // transaction. The owner lock then matches no row.
@@ -1470,6 +1538,106 @@ describe("the delete's own order and rows (review L1 to L3)", () => {
     expect(await organizationOf(w, team.id)).not.toBeNull();
   });
 
+  it("leaves the rest of a solo organization to the sweep, where no read reaches it (ruling 78)", async () => {
+    const w = world({ organizations: { teams: {}, dynamicRoles: {} } });
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    const team = await createTeam(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      name: "Core",
+    });
+    if (!team.ok) throw new Error(team.code);
+    const role = await createRole(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      name: "editor",
+      rank: 1,
+      permissions: {},
+    });
+    if (!role.ok) throw new Error(role.code);
+    const made = await createOrganizationToken(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      name: "ci",
+      permissions: {},
+    });
+    if (!made.ok) throw new Error(made.code);
+    const rest = async () => ({
+      teams: (await w.auth.storage.findMany("team", [])).length,
+      teamMembers: (await w.auth.storage.findMany("teamMember", [])).length,
+      roles: (await w.auth.storage.findMany("organizationRole", [])).length,
+      tokens: (await w.auth.storage.findMany("organizationToken", [])).length,
+    });
+    const before = await rest();
+    expect(before.teams).toBeGreaterThan(0);
+    expect(before.roles).toBe(1);
+    expect(before.tokens).toBe(1);
+    expect(await deleteAccount(w.auth.config, input(await live(w, me.token)))).toEqual(DELETED);
+    // The act took the organization and the member rows, so no access stays.
+    expect(await organizationOf(w, solo.id)).toBeNull();
+    expect(await membersOf(w, solo.id)).toEqual([]);
+    expect(await rest()).toEqual(before);
+    expect(await authenticateOrganizationToken(w.auth.config, made.value.token)).toMatchObject({
+      ok: false,
+      code: "unauthorized",
+    });
+    // The sweep takes the rest and its pending row.
+    expect((await sweepExpired(w.auth.config)).organizationRows).toBe(1);
+    expect(await rest()).toEqual({ teams: 0, teamMembers: 0, roles: 0, tokens: 0 });
+    expect(
+      await w.auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "organization-rest" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("refuses an invited sign-up by an invitation of a deleted solo organization (ruling 78)", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth);
+    const solo = await organization(w, me.user, "ada-solo");
+    // A former member sent the invitation, so the delete of the invitations of the user
+    // leaves it.
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    await member(w, me.user, solo.id, bob.user.id, "admin");
+    const sent = await inviteMember(w.auth.config, {
+      user: bob.user,
+      organizationId: solo.id,
+      email: "carol@example.com",
+      role: "member",
+    });
+    if (!sent.ok) throw new Error(sent.code);
+    const gone = await removeMember(w.auth.config, {
+      user: me.user,
+      organizationId: solo.id,
+      userId: bob.user.id,
+    });
+    expect(gone.ok).toBe(true);
+    expect(await deleteAccount(w.auth.config, input(await live(w, me.token)))).toEqual(DELETED);
+    // The invitation waits for the sweep, but its organization is gone.
+    expect(
+      await w.auth.storage.findMany("invitation", [
+        { field: "email", op: "eq", value: "carol@example.com" },
+      ]),
+    ).toHaveLength(1);
+    const invited = { ...w.auth.config, signUp: "invited" as const };
+    await requestMagicLink(invited, { email: "carol@example.com", ip: null });
+    const link = w.auth.mail.findLast((m) => m.to === "carol@example.com");
+    const signed = link
+      ? await verifyMagicLink(invited, {
+          token: tokenFromMail(link.text),
+          ip: null,
+          userAgent: null,
+        })
+      : null;
+    expect(signed?.ok ?? false).toBe(false);
+    expect(
+      await w.auth.storage.findOne("user", [
+        { field: "email", op: "eq", value: "carol@example.com" },
+      ]),
+    ).toBeNull();
+  });
+
   it("deletes the invitations of an organization that goes, also those of a former member", async () => {
     const w = world();
     const me = await verifiedSession(w.auth);
@@ -1489,11 +1657,20 @@ describe("the delete's own order and rows (review L1 to L3)", () => {
       userId: bob.user.id,
     });
     expect(gone.ok).toBe(true);
+    const token = invitationToken(w);
+    const carol = await verifiedSession(w.auth, "carol@example.com");
     expect(await deleteAccount(w.auth.config, input(await live(w, me.token)))).toEqual(DELETED);
-    expect(
-      await w.auth.storage.findMany("invitation", [
+    // The sweep takes the invitation (ruling 78 of plan 12d). Until then the accept reads the
+    // organization, and refuses it.
+    const invitations = () =>
+      w.auth.storage.findMany("invitation", [
         { field: "organizationId", op: "eq", value: solo.id },
-      ]),
-    ).toEqual([]);
+      ]);
+    expect(await invitations()).toHaveLength(1);
+    expect(
+      await acceptInvitation(w.auth.config, { user: carol.user, token, ip: null }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    expect((await sweepExpired(w.auth.config)).organizationRows).toBe(1);
+    expect(await invitations()).toEqual([]);
   });
 });

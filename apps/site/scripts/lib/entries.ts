@@ -394,6 +394,11 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
       "the Postgres adapter of the tutorials; no reference page lists its exports yet (a gap from before plan 12g)",
   },
   {
+    pkg: "@authtempo/core",
+    entry: "./compat",
+    reason: "the seams of the Better Auth compat package; its README names them (plan 12d Task 14)",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",

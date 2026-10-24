@@ -170,6 +170,19 @@ export const COMPARED = [
   "identities.list",
   "identities.unlink",
   "identities.link",
+  "sso.discover",
+  "sso.domains.list",
+  "sso.domains.add",
+  "sso.domains.verify",
+  "sso.domains.update",
+  "sso.domains.delete",
+  "sso.connections.list",
+  "sso.connections.create",
+  "sso.connections.update",
+  "sso.connections.delete",
+  "scim.tokens.list",
+  "scim.tokens.create",
+  "scim.tokens.revoke",
 ] as const satisfies readonly ClientOperation[];
 type Compared = (typeof COMPARED)[number];
 
@@ -270,6 +283,19 @@ export const ANSWER_ROWS: { readonly [O in Compared]: AnswerEqual<O> } = {
   "identities.list": true,
   "identities.unlink": true,
   "identities.link": true,
+  "sso.discover": true,
+  "sso.domains.list": true,
+  "sso.domains.add": true,
+  "sso.domains.verify": true,
+  "sso.domains.update": true,
+  "sso.domains.delete": true,
+  "sso.connections.list": true,
+  "sso.connections.create": true,
+  "sso.connections.update": true,
+  "sso.connections.delete": true,
+  "scim.tokens.list": true,
+  "scim.tokens.create": true,
+  "scim.tokens.revoke": true,
 };
 /** The compared rows that fail, by name; `true` is refused while one exists. */
 type FailingAnswer = { [O in Compared]: AnswerEqual<O> extends true ? never : O }[Compared];
@@ -333,6 +359,16 @@ export const BODY_AS_INPUT = [
   "user.verifyEmailChange",
   "user.confirmDelete",
   "identities.unlink",
+  "sso.discover",
+  "sso.domains.add",
+  "sso.domains.verify",
+  "sso.domains.update",
+  "sso.domains.delete",
+  "sso.connections.create",
+  "sso.connections.update",
+  "sso.connections.delete",
+  "scim.tokens.create",
+  "scim.tokens.revoke",
 ] as const satisfies readonly Compared[];
 type BodyAsInput = (typeof BODY_AS_INPUT)[number];
 
@@ -390,6 +426,16 @@ export const BODY_ROWS: { readonly [O in BodyAsInput]: BodyEqual<O> } = {
   "user.verifyEmailChange": true,
   "user.confirmDelete": true,
   "identities.unlink": true,
+  "sso.discover": true,
+  "sso.domains.add": true,
+  "sso.domains.verify": true,
+  "sso.domains.update": true,
+  "sso.domains.delete": true,
+  "sso.connections.create": true,
+  "sso.connections.update": true,
+  "sso.connections.delete": true,
+  "scim.tokens.create": true,
+  "scim.tokens.revoke": true,
 };
 type FailingBody = { [O in BodyAsInput]: BodyEqual<O> extends true ? never : O }[BodyAsInput];
 export const noFailingBody: [FailingBody] extends [never] ? true : FailingBody = true;
@@ -408,6 +454,7 @@ export const NOT_COMPARED = [
     reason: "the first call of the passkey verify ceremony",
   },
   { operation: "reauth.passkey.options", reason: "the first call of the passkey proof" },
+  { operation: "sso.start", reason: "a browser navigation to a redirect; no JSON answer" },
 ] as const satisfies readonly { operation: ClientOperation; reason: string }[];
 /** The two lists name every operation of the table, and no other. */
 export type _covered = Expect<

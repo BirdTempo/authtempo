@@ -21,6 +21,18 @@ export interface SqliteDriver {
 }
 
 /**
+ * The bound parameters of one statement on SQLite: 32766, the default of
+ * SQLITE_MAX_VARIABLE_NUMBER since SQLite 3.32.0 (sqlite.org limits page,
+ * read 2026-10-24). A probe on 2026-10-24 found it in better-sqlite3
+ * (SQLite 3.53.4) and libSQL file (3.45.1): 32767 fails. node:sqlite
+ * (3.54.0) takes more. A statement holds at most `INSERT_ROWS_MAX` (1000)
+ * rows, so this bound acts only on a model of more than 32 columns. The
+ * conformance row at the chunk edge passed with 6553 rows on each driver,
+ * Bun and libSQL over HTTP too, on 2026-10-24.
+ */
+export const SQLITE_BOUND_PARAMS = 32_766;
+
+/**
  * The storage port on SQLite: the D1 adapter's own code over the seam, so
  * every driver runs the D1 undo log with its two limits (spec 6). Before the
  * first call, the adapter checks that the handle reads integers as numbers,
@@ -47,6 +59,7 @@ export function createSqliteAdapter(driver: SqliteDriver): StorageAdapter {
       await read();
     },
     sent,
+    boundParams: SQLITE_BOUND_PARAMS,
   });
 }
 

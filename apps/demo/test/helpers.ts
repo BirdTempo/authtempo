@@ -127,7 +127,8 @@ function keep(jar: Jar, res: Response): void {
  */
 export async function call(
   jar: Jar,
-  method: "GET" | "POST",
+  // The methods of ROUTES: plan 12d adds PUT, PATCH, and DELETE for the SCIM routes.
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},

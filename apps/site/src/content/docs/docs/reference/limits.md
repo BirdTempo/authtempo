@@ -9,6 +9,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -95,6 +96,13 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `oauth-introspect:client:<clientId>` | 1 minute | 600 | OAuth introspection by one resource server, after its client auth |
 | `oauth-end-session:ip:<ip>` | 15 minutes | 60 | OIDC end-session, GET and POST together, before the hint check |
 | `oauth-credentials:client:<clientId>` | 1 minute | 120 | The `client_credentials` grant of one client, after its client auth. `oauth-token:ip` counts each request first, so a service on one IP gets 60 tokens per 15 minutes. Keep the token until its `expires_in` ends, and ask for a new one only then |
+| `sso-discover:ip:<ip>` | 15 minutes | 30 | SSO discovery, JSON or form |
+| `sso-start:ip:<ip>` | 15 minutes | 30 | SSO start of an OIDC or a SAML connection, before the connection read |
+| `sso-acs:ip:<ip>` | 15 minutes | 60 | SAML form post to the ACS |
+| `sso-domain-verify:org:<organizationId>` | 1 hour | 10 | SSO domain verify, before any resolver |
+| `sso-manage:user:<userId>` | 15 minutes | 30 | Each SSO domain, SSO connection, and SCIM token route, before the manager guard |
+| `scim-auth:ip:<ip>` | 15 minutes | 60 | Each failed SCIM token check: a missing, wrong, expired, or revoked token. A valid token never counts here |
+| `scim:token:<tokenId>` | 10 minutes | 1200 | Each call of one SCIM token, after the token check |
 
 For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
 
@@ -135,6 +143,18 @@ These counts live in their rows, so they hold under every limiter.
 | Members of one team | `organizations.limits.membersPerTeam`. A team member add and an accept count | `team_member_limit` |
 | Stored roles of one organization | `organizations.dynamicRoles.maxPerOrganization`, 50 by default | `role_limit` |
 | Live tokens of one organization | 50 | `organization_token_limit` |
+| SSO connections of one organization | `sso.limits.connectionsPerOrganization`, 10 by default | `connection_limit` |
+| SSO domains of one organization | `sso.limits.domainsPerOrganization`, 20 by default | `domain_limit` |
+| Live SCIM tokens of one organization | 2 | `token_limit` |
+| Members of one SCIM group | 10000 | SCIM 400 `invalidValue` |
+| Members of a group that one SCIM request names | 1000, from the D1 Free budget of 50 queries, on every store | SCIM 400 `invalidValue` |
+| Members of a group that one SCIM request takes away | 1000 | SCIM 400 `invalidValue` |
+| Members whose role one rename or delete of a mapped SCIM group computes | 1000 | SCIM 400 `invalidValue` |
+| Results of one SCIM list page | 100 | The page ends there |
+| One SCIM request body | 1 MB | SCIM 413 |
+| One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
+| One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
+| The metadata XML of a provider | 100 KB | `invalid_body` |
 
 ## The lives
 
@@ -155,6 +175,10 @@ These counts live in their rows, so they hold under every limiter.
 | OAuth held request | 10 minutes |
 | OAuth refresh token | `oauth.refreshTtlDays`, 30 days by default |
 | OAuth device code and user code | `oauth.device.codeTtlMinutes`, 10 minutes by default |
+| Pending SSO domain | 7 days |
+| Recheck of a verified SSO domain | 30 days after its last check. Three failures that span 72 hours lose the domain |
+| SSO state of an OIDC start, and SAML request | 10 minutes |
+| SCIM token | `expiresInDays`, 1 to 730, or no end |
 
 ## Next
 

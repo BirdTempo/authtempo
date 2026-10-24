@@ -43,8 +43,10 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   teams: ["teams"],
   tokens: ["tokens"],
   jwt: ["jwtMint"],
-  operator: ["operator", "operatorUsers", "operatorImpersonation"],
+  operator: ["operator", "operatorUsers", "operatorImpersonation", "operatorSso"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
+  sso: ["sso"],
+  scim: ["scim"],
   openapi: ["openapi"],
   health: ["health", "readiness"],
 };
@@ -62,7 +64,14 @@ describe("ROUTES (plan 11a)", () => {
     expect(new Set(listed).size).toBe(listed.length);
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
-    expect(listed.length).toBe(146);
+    // Plan 12d Task 2b adds the five domain routes and the operator's override.
+    // Plan 12d Task 3 adds the four connection routes.
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    // Plan 12d Task 10 adds the six routes of the SCIM Users.
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(listed.length).toBe(186);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -232,6 +241,34 @@ describe("ROUTES (plan 11a)", () => {
       delta: { organizations: PLATFORM, operator: { users: true, impersonation: {} } },
       features: ["operatorImpersonation"],
     },
+    // Plan 12d: the domain routes need organizations and a resolver list.
+    {
+      name: "sso",
+      start: { organizations: {} },
+      delta: { organizations: {}, sso: { dns: [{ name: "a", txt: async () => [] }] } },
+      features: ["sso"],
+    },
+    // The override needs operator and sso; the start holds both of the other features.
+    {
+      name: "operator sso",
+      start: {
+        organizations: {},
+        sso: { dns: [{ name: "a", txt: async () => [] }] },
+      },
+      delta: {
+        organizations: {},
+        sso: { dns: [{ name: "a", txt: async () => [] }] },
+        operator: { secretHash: "0".repeat(64) },
+      },
+      features: ["operator", "operatorSso"],
+    },
+    // Plan 12d Task 9b: the SCIM routes need organizations and scim.
+    {
+      name: "scim",
+      start: { organizations: {} },
+      delta: { organizations: {}, scim: {} },
+      features: ["scim"],
+    },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
     // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.
     {
@@ -312,7 +349,11 @@ describe("the entry fields and the module tie (plan 11g)", () => {
       .map((r) => `${r.method} ${r.path}`)
       .sort();
     expect(crossSite).toEqual(marked);
-    expect(marked).toEqual(["POST /oauth/end-session", "POST /social/apple/callback"]);
+    expect(marked).toEqual([
+      "POST /oauth/end-session",
+      "POST /social/apple/callback",
+      "POST /sso/:connectionId/acs",
+    ]);
   });
 
   it("names each code once and no router code", () => {
@@ -340,6 +381,23 @@ describe("the entry fields and the module tie (plan 11g)", () => {
     expect(self.length).toBeGreaterThan(0);
     // A platform operator is the actor of operator_self: each route that answers it takes a session.
     for (const r of self) expect(r.auth, `${r.method} ${r.path}`).toContain("session");
+  });
+
+  it("gives scimTypes to each route of /scim/v2 and to no other route (plan 12d)", () => {
+    // The entry type, not the literal tuple: most entries have no scimTypes.
+    const listed: readonly RouteEntry[] = ROUTES;
+    const typed = listed
+      .filter((r) => r.scimTypes !== undefined)
+      .map((r) => `${r.method} ${r.path}`);
+    const scim = listed
+      .filter((r) => r.path.startsWith("/scim/v2/"))
+      .map((r) => `${r.method} ${r.path}`);
+    expect(typed).toEqual(scim);
+    // Plan 12d Task 10 adds the six routes of the SCIM Users.
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(scim).toHaveLength(22);
+    for (const r of listed)
+      if (r.path.startsWith("/scim/v2/")) expect(r.auth, r.path).toEqual(["scimToken"]);
   });
 
   it("lists every feature once in ROUTE_FEATURES", () => {

@@ -245,6 +245,7 @@ describe("the operator routes of the app secrets and info (plan 11c2)", () => {
       backupCodes: 10,
       signingKeys: 1,
       emailCodes: 0,
+      ssoClientSecrets: 0,
     });
     expect(versionOf(body, 2)).toEqual({
       version: 2,
@@ -254,6 +255,7 @@ describe("the operator routes of the app secrets and info (plan 11c2)", () => {
       backupCodes: 0,
       signingKeys: 0,
       emailCodes: 0,
+      ssoClientSecrets: 0,
     });
   });
 
@@ -289,6 +291,7 @@ describe("the operator routes of the app secrets and info (plan 11c2)", () => {
       backupCodes: 10,
       signingKeys: 0,
       emailCodes: 0,
+      ssoClientSecrets: 0,
     });
   });
 

@@ -109,8 +109,8 @@ folder holds is not copied again. A copy above that version with another
 text stops the run with exit 2 before any write, and the line names the
 file. The copied files hold Better Auth's default table and column names.
 The shipped 0001, 0006, 0007, 0009, and 0010 fail on other names with
-`no such table`. An app with other names writes its own ten files. It copies
-0002 to 0005 and 0008 as shipped. It writes 0001 from
+`no such table`. An app with other names writes its own eleven files. It copies
+0002 to 0005, 0008, and 0011 as shipped. It writes 0001 from
 `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
 tables from before 1.7. It writes 0006 from
 `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
@@ -124,7 +124,7 @@ names. It is the 0010 text without its two `ADD COLUMN` lines of `session`
 and `invitation`. Without it, the 0010 fails with
 `duplicate column name: activeTeamId`. The
 app applies its own files with `wrangler d1 migrations apply <database>`
-before this command. Then the compat version is 10, and the command copies
+before this command. Then the compat version is 11, and the command copies
 nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
 its table `d1_migrations` (`migrations_table`).
@@ -243,7 +243,9 @@ the row counts of each app secret version. It exits 1 when a version that
 the config does not hold has rows. `secret rewrap` calls
 `POST <basePath>/operator/secrets/rewrap` and sends each `next` back as
 `after`. It ends when no row of an old version remains, when a pass ends,
-or at `--max-calls`. With no terminal it needs `--yes`. Both send the
+or at `--max-calls`. `--call-budget <n>` (50 to 1000, default 50) sets
+the storage calls of one call on D1 Paid or Postgres. With no terminal it
+needs `--yes`. Both send the
 operator secret only, never the app secret. The deployment reseals each
 row and answers counts only. The two routes and `info` share the limit
 `operator-secrets:ip:<ip>`, 120 calls an hour.

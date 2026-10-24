@@ -43,9 +43,12 @@ describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () 
     const writer = text("engine/operator/audit.ts");
     const uses = writer.match(/operatorAudit/g)?.length ?? 0;
     const allowed = writer.match(/\.(create|findMany)\(\s*"operatorAudit",/g)?.length ?? 0;
-    // The insert, the list, the read of the impersonation targets (plan 12f
-    // Task 11), and the stop rows that the session ends write (ruling 43).
-    expect(allowed).toBe(4);
+    // The insert of writeAuditIn, the list, and the read of the impersonation
+    // targets (plan 12f Task 11). The writers operatorAct, the stop rows of
+    // ruling 43, and each act of plan 12d call writeAuditIn (plan 12d
+    // deviation 3). So the writer holds one insert.
+    expect(allowed).toBe(3);
+    expect(writer.match(/\.create\(\s*"operatorAudit",/g)?.length).toBe(1);
     expect(uses).toBe(allowed);
     // In ddl.ts, each use of the name is a key of MYSQL_STRINGS in the form
     // "operatorAudit.<field>". So a storage call there fails this test.

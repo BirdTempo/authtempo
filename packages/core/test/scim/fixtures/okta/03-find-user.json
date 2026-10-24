@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/Users?filter=userName%20eq%20%22test.user%40okta.local%22&startIndex=1&count=100",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": null
+}

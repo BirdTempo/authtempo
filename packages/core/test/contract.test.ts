@@ -128,6 +128,10 @@ function world(secretHash = "0".repeat(64)) {
       impersonation: {},
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
+    // The domain routes and the SAML ACS of plan 12d; no test of this file asks the resolver.
+    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
+    // The SCIM token routes of plan 12d Task 9b.
+    scim: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -645,6 +649,55 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // The domain rows of plan 12d. A user who is no platform operator gets
+    // forbidden_rank, and an id that names no domain gets not_found, past the parse.
+    {
+      key: "POST /sso/domains/add",
+      body: { organizationId: org, domain: "acme.example" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /sso/domains/verify", body: { id }, session: true, refused: INVALID_BODY },
+    {
+      key: "POST /sso/domains/update",
+      body: { id, enforce: false },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /sso/domains/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The connection rows of plan 12d Task 3: forbidden_rank for the create, and not_found
+    // for an id that names no connection, past the parse.
+    {
+      key: "POST /sso/connections/create",
+      body: {
+        organizationId: org,
+        kind: "oidc",
+        label: "Acme",
+        issuer: "https://login.idp.example",
+        clientId: "acme",
+        clientSecret: "acme-secret",
+      },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /sso/connections/update",
+      body: { id, label: "Acme" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /sso/connections/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The SCIM token rows of plan 12d Task 9b: forbidden_rank for the create, and not_found for
+    // an id that names no token, past the parse.
+    {
+      key: "POST /scim/tokens/create",
+      body: { organizationId: org, name: "Entra ID" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /scim/tokens/revoke", body: { id }, session: true, refused: INVALID_BODY },
+    // The discovery of plan 12d Task 4: an address with no SSO answers { sso: false }.
+    { key: "POST /sso/discover", body: { email: "ada@example.com" }, refused: INVALID_BODY },
     {
       key: "POST /organizations/delete",
       body: { organizationId: org },
@@ -679,6 +732,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_TOKEN,
     },
+    // The secret has no scope sso: the engine answers operator_required, past the parse.
+    {
+      key: "POST /operator/sso/enforce-off",
+      body: { domainId: id, reason: "case 2" },
+      headers: OPERATOR,
+      refused: INVALID_BODY,
+    },
     // The end of all sessions goes last: it ends the session of every row above.
     {
       key: "POST /operator/sessions/end-all",
@@ -710,7 +770,14 @@ describe("the route contract (plan 11g)", () => {
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
-    expect(keys.length).toBe(146);
+    // Plan 12d Task 2b adds the five domain routes and the operator's override.
+    // Plan 12d Task 3 adds the four connection routes.
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    // Plan 12d Task 10 adds the six routes of the SCIM Users.
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(keys.length).toBe(186);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -722,7 +789,9 @@ describe("the route contract (plan 11g)", () => {
         mounted.add(route.key);
       }
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
-    expect(modules.length).toBe(21);
+    // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
+    // module scim, so 22 became 23.
+    expect(modules.length).toBe(23);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -828,6 +897,23 @@ describe("the route contract (plan 11g)", () => {
         query: { code: "c", state: "s", error: "" },
         required: [],
         valid: PAGE_REFUSED,
+        missing: {},
+      },
+      // Plan 12d Task 4: an id that names no connection, and a state of no start.
+      {
+        key: "GET /sso/:connectionId/start",
+        path: "/sso/c-none/start",
+        query: { next: "/inbox" },
+        required: [],
+        valid: { status: 302, code: "sso_not_configured" },
+        missing: {},
+      },
+      {
+        key: "GET /sso/:connectionId/callback",
+        path: "/sso/c-none/callback",
+        query: { code: "c", state: "s", error: "" },
+        required: [],
+        valid: { status: 302, code: "sso_failed" },
         missing: {},
       },
       {
@@ -1021,7 +1107,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(22);
+    expect(hand.length).toBe(24);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1100,6 +1186,8 @@ describe("the route contract (plan 11g)", () => {
      */
     const VALID_FORMS: {
       key: RouteKey;
+      /** The path of a route with a parameter: its key holds the template. */
+      path?: string;
       media: "json" | "form";
       body: Record<string, unknown>;
       fresh?: () => Promise<Record<string, unknown>>;
@@ -1181,6 +1269,21 @@ describe("the route contract (plan 11g)", () => {
         missing: { token: { status: 400, code: "invalid_request" } },
       },
       {
+        // The SAML ACS (plan 12d Task 8): a form of no start answers the step request, and a
+        // form without a key the step form. Each failure of the ACS is a redirect with sso_failed.
+        key: "POST /sso/:connectionId/acs",
+        // An id that names no connection, in the id form (the events of plan 12h reject another form).
+        path: "/sso/c-none/acs",
+        media: "form",
+        body: { SAMLResponse: "PHNhbWxwOlJlc3BvbnNlLz4=", RelayState: `rs_${BODY43}` },
+        required: ["SAMLResponse", "RelayState"],
+        valid: { status: 302, code: "sso_failed" },
+        missing: {
+          SAMLResponse: { status: 302, code: "sso_failed" },
+          RelayState: { status: 302, code: "sso_failed" },
+        },
+      },
+      {
         // OIDC RP-Initiated Logout 1.0 section 2: the POST form of the same optional parameters.
         // With no session it goes on as a GET of the same request (ruling 46 of plan 12e).
         key: "POST /oauth/end-session",
@@ -1196,7 +1299,8 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_FORMS.map((row) => row.key).sort());
-    expect(hand.length).toBe(8);
+    // Plan 12d Task 8 adds the SAML ACS.
+    expect(hand.length).toBe(9);
     for (const row of VALID_FORMS) {
       const contract = CONTRACT[row.key];
       const body = contract?.body;
@@ -1205,7 +1309,7 @@ describe("the route contract (plan 11g)", () => {
       expect(contract.query, `${row.key} has a query`).toBeUndefined();
       expect(body.schema.safeParse(row.body).success, `${row.key}: the valid body`).toBe(true);
       expect(requiredOf(body.schema), row.key).toEqual(row.required);
-      const path = `/auth${row.key.slice("POST ".length)}`;
+      const path = `/auth${row.path ?? row.key.slice("POST ".length)}`;
       const send = (b: Record<string, unknown>) =>
         w.handle(
           row.media === "json" ? post(path, b, row.headers) : postForm(path, b, row.headers),
@@ -1229,7 +1333,10 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(80);
+    // Plan 12d Task 2b adds five: four domain writes and the override.
+    // Plan 12d Task 3 adds the three connection writes. Task 4 adds the discovery.
+    // Plan 12d Task 9b adds the two SCIM token writes.
+    expect(withBody.length).toBe(91);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1255,7 +1362,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(78);
+    expect(refusals).toBe(89);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1273,7 +1380,9 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 72, both: 9, form: 7 });
+    // Plan 12d Task 4: the discovery reads JSON and a form. Task 9b: the two SCIM token writes.
+    // Task 8: the SAML ACS reads a form.
+    expect(counts).toEqual({ json: 82, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

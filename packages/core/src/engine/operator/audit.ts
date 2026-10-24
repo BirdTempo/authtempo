@@ -4,7 +4,13 @@ import { isOperatorReason } from "../../operator-secret.js";
 import { newMonotonicId } from "../../primitives/ids.js";
 import { hasControlChar, removeRefusedChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { OperatorAction, OperatorAuditRow, SessionRow, UserRow } from "../../schema.js";
+import type {
+  OperatorAction,
+  OperatorAuditRow,
+  SessionRow,
+  SSO_AUDIT_ACTIONS,
+  UserRow,
+} from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore } from "../hooks.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
@@ -159,6 +165,54 @@ export interface OperatorActSteps<T> {
 }
 
 /**
+ * The one writer of an audit row (deviation 3 of plan 12d). `operatorAct`,
+ * `writeStopRow`, and each act of plan 12d call it on the handle of their
+ * own transaction, as its last statement. So the act commits with its row,
+ * or neither commits, and the writers cannot drift. The row id is a
+ * monotonic ULID of `now`, so the rows list in the order of their writes.
+ */
+export async function writeAuditIn(
+  tx: StorageAdapter,
+  draft: OperatorAuditDraft,
+  now: Date,
+): Promise<OperatorAuditRow> {
+  // The draft first, so no field of it can replace the id or the times.
+  return tx.create("operatorAudit", {
+    ...draft,
+    id: newMonotonicId(now),
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+/**
+ * The fixed reason of each audit action of plan 12d (deviation 3). An owner
+ * or a directory gives no reason, so the row holds this text. The text of
+ * `sso_enforce_off` is never written: the operator gives the reason of that
+ * act through `operatorAct`.
+ */
+export const SSO_AUDIT_REASON: Readonly<Record<(typeof SSO_AUDIT_ACTIONS)[number], string>> = {
+  sso_connection_create: "an organization added an SSO connection",
+  sso_connection_update: "an organization changed an SSO connection",
+  sso_connection_delete: "an organization deleted an SSO connection",
+  sso_domain_add: "an organization asked to prove a domain",
+  sso_domain_verify: "an organization proved a domain by DNS",
+  sso_domain_update: "an organization changed a domain",
+  sso_domain_delete: "an organization deleted a domain",
+  sso_domain_lost: "the recheck no longer found the DNS proof of a domain",
+  sso_enforce_off: "an operator turned enforce off",
+  scim_token_create: "an organization created a SCIM token",
+  scim_token_revoke: "an organization revoked a SCIM token",
+  scim_user_create: "a directory created a user",
+  scim_user_update: "a directory changed a user",
+  scim_user_deactivate: "a directory deactivated a user",
+  scim_user_delete: "a directory deleted a user",
+  scim_group_create: "a directory created a group",
+  scim_group_update: "a directory changed a group",
+  scim_group_delete: "a directory deleted a group",
+};
+
+/**
  * The one way an operator write runs (spec 26 items 8 and 10). First
  * `operatorReason` on the draft's reason: a refusal answers `invalid_body`
  * and writes nothing (spec 26 item 5). Then
@@ -208,14 +262,7 @@ export async function operatorAct<T extends object>(
     return config.storage.transaction(async (tx) => {
       const answer = await work(tx, draft, ends);
       if (!answer.ok) throw new HookStop(answer);
-      const now = config.clock.now();
-      // The draft first, so no field of it can replace the id or the times.
-      const row = await tx.create("operatorAudit", {
-        ...draft,
-        id: newMonotonicId(now),
-        createdAt: now,
-        updatedAt: now,
-      });
+      const row = await writeAuditIn(tx, draft, config.clock.now());
       return ok({ value: answer.value, row });
     });
   });
@@ -277,7 +324,8 @@ export type StopCause =
   | "revoke"
   | "role_loss"
   | "account_delete"
-  | "operator_end";
+  | "operator_end"
+  | "deprovision";
 
 /**
  * The fixed reason of each stop row that a flow writes. The stop act keeps
@@ -292,6 +340,7 @@ const STOP_REASONS: Readonly<Record<Exclude<StopCause, "stop">, string>> = {
   role_loss: "A change of the operator's platform role ended the impersonation session.",
   account_delete: "An account delete ended the impersonation session.",
   operator_end: "An operator ended the sessions, and the impersonation session with them.",
+  deprovision: "A deactivate by the organization's directory ended the impersonation session.",
 };
 
 /**
@@ -330,19 +379,20 @@ export async function writeStopRow(
   now: Date,
 ): Promise<void> {
   if (session.actorId === null) return;
-  const row = await tx.create("operatorAudit", {
-    id: newMonotonicId(now),
-    createdAt: now,
-    updatedAt: now,
-    actorKind: "user",
-    actorId: session.actorId,
-    action: "impersonation_stop",
-    targetUserId: session.userId,
-    reason: STOP_REASONS[stops.cause],
-    data: { sessionId: session.id, cause: stops.cause },
-    ip: null,
-    userAgent: null,
-  });
+  const row = await writeAuditIn(
+    tx,
+    {
+      actorKind: "user",
+      actorId: session.actorId,
+      action: "impersonation_stop",
+      targetUserId: session.userId,
+      reason: STOP_REASONS[stops.cause],
+      data: { sessionId: session.id, cause: stops.cause },
+      ip: null,
+      userAgent: null,
+    },
+    now,
+  );
   stops.rows.push(row);
 }
 

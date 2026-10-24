@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROUTE_CONTRACT } from "../../src/http/contract/index.js";
-import type { RouteContract } from "../../src/http/contract/types.js";
+import { answerKinds, type RouteContract } from "../../src/http/contract/types.js";
 import { ROUTER_CODES, ROUTES, type RouteKey } from "../../src/http/route-list.js";
 import { ANSWER_SHAPE_EXEMPT, ANSWERS_EXEMPT } from "../answers-exempt.js";
 import { shapePaths } from "../setup/answer-shape.js";
@@ -84,7 +84,7 @@ function shapesOf(): { shapes: string[]; blocked: string[] } {
   const shapes: string[] = [];
   const blocked: string[] = [];
   for (const [key, c] of Object.entries(contract)) {
-    for (const kind of c.alt ? [c.answer, c.alt] : [c.answer]) {
+    for (const kind of answerKinds(c)) {
       if (kind.kind !== "json") continue;
       const status = kind.status ?? 200;
       const walked = shapePaths(kind.schema);
