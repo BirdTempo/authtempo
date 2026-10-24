@@ -43,6 +43,7 @@ import {
   addTeamMembersIn,
   createTeamIn,
   deleteTeamIn,
+  lockOrganization,
   lockTeam,
   removeTeamMembersIn,
   renameTeamIn,
@@ -840,6 +841,16 @@ async function writeGroup(
         }
         // The users first, after the group row, in the lock order of user-hold.ts.
         if (holds.length > 0) await holdUsers(tx, holds);
+        // A create takes the organization lock next (ruling 78 of plan 12d). An organization
+        // delete in flight holds it: it commits first, and the create finds no organization.
+        // Or the delete waits for this commit, and its read of the groups sees the new row. D1
+        // has no row lock, so the lock is for the stores with one.
+        if (
+          write.kind === "create" &&
+          tx.lockInOrder !== undefined &&
+          !(await lockOrganization(tx, organization))
+        )
+          stopWith("not_found");
         // The member rows, the group rows, and the roles: in the step of the member rows.
         const step: MemberStep = {
           groupId,

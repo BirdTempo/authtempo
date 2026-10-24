@@ -236,15 +236,16 @@ describe("the table of locks over a before hook", () => {
       // tx-level forms after their checks, and take no lock before the call.
       // A SCIM group write (plan 12d Task 11) calls the team functions with no user caller,
       // and then they run no team hook (ruling 54). So its writeGroup paths hold no hook.
+      // A group create takes the organization lock after its user hold (ruling 78).
       [
         "Team member add",
-        "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam, writeGroup > holdUsers, writeGroup > lockTeam",
+        "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",
       ],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],
       [
         "Team create",
-        "createTeamIn organization.beforeCreateTeam: lockOrganization, writeGroup > holdUsers",
+        "createTeamIn organization.beforeCreateTeam: lockOrganization, writeGroup > holdUsers, writeGroup > lockOrganization",
       ],
       [
         "Account delete",
@@ -255,13 +256,13 @@ describe("the table of locks over a before hook", () => {
       // A SCIM group delete holds the users of a mapped group first (ruling 59 M2 of plan 12d).
       [
         "Team delete",
-        "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam, writeGroup > holdUsers",
+        "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization",
       ],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
       // The role plan of a SCIM group write runs the role hook with by null after its locks.
       [
         "SCIM group write",
-        "planRoles organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockTeam",
+        "planRoles organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockOrganization, writeMembers > writeGroup > lockTeam",
       ],
       [
         "Impersonation start",
@@ -273,7 +274,7 @@ describe("the table of locks over a before hook", () => {
       ],
       [
         "Team member removal",
-        "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockTeam",
+        "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",
       ],
       [
         "Platform role revoke",

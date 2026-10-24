@@ -457,4 +457,29 @@ describe("the SCIM rows and the organization delete on Postgres (ruling 74 of pl
     expect(await count("ta_scim_group_member")).toBe(0);
     expect(await count("ta_member")).toBe(0);
   }, 60_000);
+
+  it("leaves no group of a deleted organization after a group create beside the delete (ruling 78)", async () => {
+    // The create stops after its insert, before its organization lock. The organization
+    // delete runs then: it commits, and the create finds no organization.
+    let armed = false;
+    const held = signal();
+    const forGroup = tapped(async (method, model) => {
+      if (armed && method === "create" && model === "scimGroup") {
+        held.fire();
+        await within(new Promise(() => {}));
+      }
+    });
+    const g = world(forGroup);
+    const o = world(tapped(async () => {}));
+    const { token, organizationId, owner } = await g.acme();
+    armed = true;
+    const [made, gone] = await Promise.allSettled([
+      g.scim(token, "POST", "/Groups", { schemas: [GROUP_URN], displayName: "Late" }),
+      held.fired.then(() => o.auth.api.deleteOrganization({ user: owner, organizationId })),
+    ]);
+    expect(made).toMatchObject({ status: "fulfilled", value: { status: 404 } });
+    expect(gone).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(await count("ta_organization")).toBe(0);
+    expect(await count("ta_scim_group")).toBe(0);
+  }, 60_000);
 });
