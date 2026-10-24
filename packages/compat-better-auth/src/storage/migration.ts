@@ -1269,7 +1269,10 @@ export const MIGRATION_0012_NAME = "0012_compat_schema_v15";
  *
  * `isAnonymous` defaults to false, and the fill sets false in each row that
  * holds null: core reads it as NOT NULL. The unique keys on `username` and
- * `phoneNumber` give core's rule; a NULL never conflicts. Better Auth's own
+ * `phoneNumber` give core's rule; a NULL never conflicts. The index on
+ * `isAnonymous` and `createdAt` serves the anonymous step of core's sweep
+ * (ruling 25 H1 of plan 12i, 2026-10-24). It was added before the file
+ * left the lane: no database outside the tests ran it. Better Auth's own
  * `user.email` stays NOT NULL: the storage refuses a null address
  * (`notNull`), and Task 16 of plan 12i maps it to the placeholder address.
  * Better Auth's `passkey` gets `taDiscoverable`, `taPrf`, and `taLargeBlob`;
@@ -1299,6 +1302,7 @@ export function compatMigration0012Sql(dialect: "postgres" | "sqlite", n: Names)
     `UPDATE ${U} SET ${u("isAnonymous")} = ${no} WHERE ${u("isAnonymous")} IS NULL;`,
     `CREATE UNIQUE INDEX ${absent}ux_user__username ON ${U} (${u("username")});`,
     `CREATE UNIQUE INDEX ${absent}ux_user__phone_number ON ${U} (${u("phoneNumber")});`,
+    `CREATE INDEX ${absent}ix_user__is_anonymous__created_at ON ${U} (${u("isAnonymous")}, ${u("createdAt")});`,
     `ALTER TABLE ${P} ADD COLUMN ${p("taDiscoverable")} ${bool};`,
     `ALTER TABLE ${P} ADD COLUMN ${p("taPrf")} ${bool} NOT NULL DEFAULT ${no};`,
     `ALTER TABLE ${P} ADD COLUMN ${p("taLargeBlob")} ${bool} NOT NULL DEFAULT ${no};`,

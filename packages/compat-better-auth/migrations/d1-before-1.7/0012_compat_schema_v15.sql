@@ -5,7 +5,10 @@
 -- unique key on username and on phoneNumber. An app whose user table holds
 -- those columns already runs this file without its first five lines and
 -- without the unique key that it holds. Better Auth's user.email stays NOT
--- NULL. Better Auth's passkey table gets the three extension flags of core.
+-- NULL. The index on isAnonymous and createdAt serves the anonymous step
+-- of core's sweep (ruling 25 H1 of plan 12i, 2026-10-24). It was added
+-- before this file left the lane: no database outside the tests ran it.
+-- Better Auth's passkey table gets the three extension flags of core.
 -- Core's ta_oauth_session_client and ta_oauth_logout get the nullable issuer
 -- of plan 12i Task 18.
 -- This is the text of the default naming, the same for both variants.
@@ -17,6 +20,7 @@ ALTER TABLE "user" ADD COLUMN "isAnonymous" INTEGER DEFAULT 0;
 UPDATE "user" SET "isAnonymous" = 0 WHERE "isAnonymous" IS NULL;
 CREATE UNIQUE INDEX ux_user__username ON "user" ("username");
 CREATE UNIQUE INDEX ux_user__phone_number ON "user" ("phoneNumber");
+CREATE INDEX ix_user__is_anonymous__created_at ON "user" ("isAnonymous", "createdAt");
 ALTER TABLE "passkey" ADD COLUMN "taDiscoverable" INTEGER;
 ALTER TABLE "passkey" ADD COLUMN "taPrf" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "passkey" ADD COLUMN "taLargeBlob" INTEGER NOT NULL DEFAULT 0;

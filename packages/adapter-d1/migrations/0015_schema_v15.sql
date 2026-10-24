@@ -6,7 +6,10 @@
 -- its order, then username, display_username, phone, and is_anonymous. The
 -- copy names the columns of version 14, so the new columns take NULL and the
 -- default 0. Each of email, username, and phone has a unique index; a NULL
--- never conflicts. ta_passkey gets the three extension flags of plan 12i
+-- never conflicts. The index on (is_anonymous, created_at) serves the
+-- anonymous step of the sweep (ruling 25 H1 of plan 12i, 2026-10-24). It was
+-- added before schema 15 left the lane: no database outside the tests ran
+-- this file. ta_passkey gets the three extension flags of plan 12i
 -- Task 21. ta_oauth_session_client and ta_oauth_logout get the nullable
 -- issuer of plan 12i Task 18: the logout token names the issuer that the
 -- client saw. Booleans are INTEGER, and dates are INTEGER epoch
@@ -34,6 +37,7 @@ ALTER TABLE ta_user_v15 RENAME TO ta_user;
 CREATE UNIQUE INDEX ux_ta_user__email ON ta_user (email);
 CREATE UNIQUE INDEX ux_ta_user__username ON ta_user (username);
 CREATE UNIQUE INDEX ux_ta_user__phone ON ta_user (phone);
+CREATE INDEX ix_ta_user__is_anonymous__created_at ON ta_user (is_anonymous, created_at);
 
 ALTER TABLE ta_passkey ADD COLUMN discoverable INTEGER;
 ALTER TABLE ta_passkey ADD COLUMN prf INTEGER NOT NULL DEFAULT 0;

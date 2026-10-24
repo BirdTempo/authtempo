@@ -5,7 +5,10 @@
  * display_username, phone, and is_anonymous as its last columns. Each of
  * email, username, and phone has a unique index; a NULL never conflicts.
  * is_anonymous is NOT NULL with the default false, so a row of version 14
- * reads as a user that is not anonymous. ta_passkey gets the three extension
+ * reads as a user that is not anonymous. The index on (is_anonymous,
+ * created_at) serves the anonymous step of the sweep (ruling 25 H1 of plan
+ * 12i, 2026-10-24). It was added before schema 15 left the lane: no
+ * database outside the tests ran this file. ta_passkey gets the three extension
  * flags of plan 12i Task 21: discoverable is nullable, and prf and
  * large_blob default to false. ta_oauth_session_client and ta_oauth_logout
  * get the nullable issuer of plan 12i Task 18: the logout token names the
@@ -21,6 +24,7 @@ ALTER TABLE ta_user ADD COLUMN phone text;
 ALTER TABLE ta_user ADD COLUMN is_anonymous boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX ux_ta_user__username ON ta_user (username);
 CREATE UNIQUE INDEX ux_ta_user__phone ON ta_user (phone);
+CREATE INDEX ix_ta_user__is_anonymous__created_at ON ta_user (is_anonymous, created_at);
 
 ALTER TABLE ta_passkey ADD COLUMN discoverable boolean;
 ALTER TABLE ta_passkey ADD COLUMN prf boolean NOT NULL DEFAULT false;

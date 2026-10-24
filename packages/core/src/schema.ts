@@ -876,7 +876,8 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       isAnonymous: { type: "boolean" },
     },
     unique: [["email"], ["username"], ["phone"]],
-    indexes: [],
+    // The anonymous step of the sweep reads by flag and age, oldest first (ruling 25 H1).
+    indexes: [["isAnonymous", "createdAt"]],
   },
   identity: {
     fields: {

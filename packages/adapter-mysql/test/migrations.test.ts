@@ -222,8 +222,10 @@ for (const server of MYSQL_SERVERS) {
         ["0001_schema_v13", "1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9"],
         ["0002_schema_v14", "35a0f032d884b2ff0f117fa6d4e2b46dbdf76324930afca6e9ba332b8761f03b"],
         // Schema 15 exists only on the plan 12i lane, so its file can still change (ruling 25).
+        // Ruling 25 H1 of plan 12i (2026-10-24) added the key on (is_anonymous, created_at)
+        // before 0003 left the lane. No database outside the tests ran the old text.
         // Plan 12i Task 18 added the issuer of the logout tables on 2026-10-25.
-        ["0003_schema_v15", "b501421b39fa785cd3ec39e758d91fa45d3d3f5174167f37321cbf5cd6450bba"],
+        ["0003_schema_v15", "d08a803c1d282c2f512b9f0acc857baca8e63ea382d22a2460a1f61d8b48a59e"],
       ]);
     });
   });

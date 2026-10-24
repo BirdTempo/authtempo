@@ -97,8 +97,9 @@ describe("schemaDdl (plan 12g)", () => {
     const want = schemaKeys();
     // 27 models of version 13 hold 50 named keys, and ta_limit holds one.
     // Version 14 (plan 12d) adds 6 models with 13 named keys. Version 15
-    // (plan 12i) adds the unique keys of user.username and user.phone.
-    expect(want).toHaveLength(66);
+    // (plan 12i) adds the unique keys of user.username and user.phone, and
+    // the index of user on isAnonymous and createdAt (ruling 25 H1).
+    expect(want).toHaveLength(67);
     for (const d of DIALECTS) {
       const have = ddlKeys(d);
       expect({ dialect: d.name, keys: have }).toEqual({ dialect: d.name, keys: want });

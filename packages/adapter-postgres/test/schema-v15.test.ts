@@ -123,11 +123,17 @@ describe("schema version 15 on Postgres (plan 12i)", () => {
         ).map((u) => u.id),
       ).toEqual(["n1", "n2"]);
       const indexes = (
-        await a.unsafe<{ indexname: string }[]>(
-          "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'ta_user' AND indexname NOT LIKE '%_pkey' ORDER BY indexname",
+        await a.unsafe<{ indexname: string; indexdef: string }[]>(
+          "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'ta_user' AND indexname NOT LIKE '%_pkey' ORDER BY indexname",
         )
-      ).map((r) => r.indexname);
-      expect(indexes).toEqual(["ux_ta_user__email", "ux_ta_user__phone", "ux_ta_user__username"]);
+      ).map((r) => [r.indexname, r.indexdef.replace(/^.* USING /, "")]);
+      // The read of the anonymous step of the sweep (ruling 25 H1).
+      expect(indexes).toEqual([
+        ["ix_ta_user__is_anonymous__created_at", "btree (is_anonymous, created_at)"],
+        ["ux_ta_user__email", "btree (email)"],
+        ["ux_ta_user__phone", "btree (phone)"],
+        ["ux_ta_user__username", "btree (username)"],
+      ]);
     } finally {
       await close();
     }

@@ -192,7 +192,8 @@ describe("compareShape (plan 11c2)", () => {
         liveWith("ta_user", (t) => ({
           ...t,
           columns: [...t.columns].reverse(),
-          indexes: [{ name: "ix_app_user_name", columns: ["name"] }],
+          // ta_user has an index of its own since ruling 25 H1 of plan 12i: keep it.
+          indexes: [...t.indexes, { name: "ix_app_user_name", columns: ["name"] }],
           unique: [...t.unique, { name: "ux_app_user_image", columns: ["image"] }],
         })),
       ),

@@ -26,6 +26,7 @@ model TaUser {
   @@unique([email], map: "ux_ta_user__email")
   @@unique([username], map: "ux_ta_user__username")
   @@unique([phone], map: "ux_ta_user__phone")
+  @@index([isAnonymous, createdAt], map: "ix_ta_user__is_anonymous__created_at")
   @@map("ta_user")
 }
 

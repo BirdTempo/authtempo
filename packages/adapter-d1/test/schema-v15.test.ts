@@ -116,9 +116,18 @@ describe("schema version 15 on D1 (plan 12i)", () => {
     ).toEqual(["n1", "n2"]);
     const indexes = (
       await env.STAGED.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'ta_user' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
-      ).all<{ name: string }>()
-    ).results.map((r) => r.name);
-    expect(indexes).toEqual(["ux_ta_user__email", "ux_ta_user__phone", "ux_ta_user__username"]);
+        "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'ta_user' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
+      ).all<{ name: string; sql: string }>()
+    ).results;
+    expect(indexes.map((r) => r.name)).toEqual([
+      "ix_ta_user__is_anonymous__created_at",
+      "ux_ta_user__email",
+      "ux_ta_user__phone",
+      "ux_ta_user__username",
+    ]);
+    // The read of the anonymous step of the sweep (ruling 25 H1).
+    expect(indexes[0]?.sql).toBe(
+      "CREATE INDEX ix_ta_user__is_anonymous__created_at ON ta_user (is_anonymous, created_at)",
+    );
   });
 });

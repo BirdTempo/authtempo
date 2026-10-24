@@ -19,7 +19,8 @@ describe("schema version 15 (plan 12i)", () => {
       ["isAnonymous", { type: "boolean" }],
     ]);
     expect(schema.user.unique).toEqual([["email"], ["username"], ["phone"]]);
-    expect(schema.user.indexes).toEqual([]);
+    // The read of the anonymous step of the sweep (ruling 25 H1).
+    expect(schema.user.indexes).toEqual([["isAnonymous", "createdAt"]]);
   });
 
   it("adds the three passkey extension flags as the last passkey fields", () => {

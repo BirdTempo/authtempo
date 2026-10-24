@@ -35,6 +35,7 @@ export const taUser = mysqlTable(
     uniqueIndex("ux_ta_user__email").on(t.email),
     uniqueIndex("ux_ta_user__username").on(t.username),
     uniqueIndex("ux_ta_user__phone").on(t.phone),
+    index("ix_ta_user__is_anonymous__created_at").on(t.isAnonymous, t.createdAt),
   ],
 );
 

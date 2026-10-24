@@ -937,6 +937,9 @@ describe("migration 0012 (plan 12i)", () => {
     expect(pg).toContain(
       'CREATE UNIQUE INDEX IF NOT EXISTS ux_user__phone_number ON "user" ("phoneNumber");',
     );
+    expect(pg).toContain(
+      'CREATE INDEX IF NOT EXISTS ix_user__is_anonymous__created_at ON "user" ("isAnonymous", "createdAt");',
+    );
   });
 
   it("adds Better Auth's plugin columns and core's passkey flags, and keeps each row", () => {
@@ -1008,6 +1011,16 @@ describe("migration 0012 (plan 12i)", () => {
         `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","phoneNumber") VALUES ('u4','Di','di@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','+14155550100')`,
       ),
     ).toThrow(/UNIQUE constraint failed/);
+    // The read of the anonymous step of core's sweep (ruling 25 H1 of plan 12i).
+    expect(
+      db
+        .prepare(`SELECT sql FROM sqlite_master WHERE name = 'ix_user__is_anonymous__created_at'`)
+        .all(),
+    ).toEqual([
+      {
+        sql: 'CREATE INDEX ix_user__is_anonymous__created_at ON "user" ("isAnonymous", "createdAt")',
+      },
+    ]);
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "12" },
       { key: "schema_version", value: "15" },
