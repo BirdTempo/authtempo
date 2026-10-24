@@ -646,6 +646,34 @@ describe("the operator client of secret status and secret rewrap (plan 11c2)", (
     expect(SECRET_REWRAP_HELP.command).toBe("secret rewrap");
   });
 
+  it("sends --call-budget as callBudget in each body, and refuses a value outside 50 to 1000 (ruling 88 of plan 12d)", async () => {
+    const { f, auth } = await twoPhase(["ada@example.com", "bo@example.com"]);
+    const { code, io } = await run(
+      ["rewrap", BASE, "--limit", "1", "--call-budget", "60", "--yes"],
+      f,
+      auth,
+    );
+    expect(code).toBe(0);
+    expect(io.stdout).toEqual(["calls 3, resealed 3, failed 0, skipped 0, more false"]);
+    expect(f.bodies).toHaveLength(3);
+    expect(f.bodies[0]).toEqual({ limit: 1, callBudget: 60 });
+    for (const body of f.bodies) expect(body).toMatchObject({ limit: 1, callBudget: 60 });
+    const help = SECRET_REWRAP_HELP.flags.find((x) => x.flag === "--call-budget <n>");
+    expect(help?.says).toContain("from 50 to 1000. The default is 50");
+    for (const bad of ["49", "1001", "50.5", "x"]) {
+      const refused = await run(["rewrap", BASE, "--yes", "--call-budget", bad], f, auth);
+      expect(refused.code, bad).toBe(2);
+      expect(refused.io.requests).toEqual([]);
+      expect(refused.io.stderr[0]).toBe("--call-budget is a whole number from 50 to 1000");
+    }
+    // The bounds pass: each run reseals nothing, because no old row remains.
+    for (const good of ["50", "1000"]) {
+      const taken = await run(["rewrap", BASE, "--yes", "--call-budget", good], f, auth);
+      expect(taken.code, good).toBe(0);
+      expect(f.bodies.at(-1)).toEqual({ limit: 100, callBudget: Number(good) });
+    }
+  });
+
   it("names the subcommands for another positional, and keeps the generator for none", async () => {
     const f = await fixture();
     const { code, io } = await run(["nonsense"], f, f.on(ONE));

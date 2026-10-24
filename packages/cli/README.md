@@ -243,7 +243,9 @@ the row counts of each app secret version. It exits 1 when a version that
 the config does not hold has rows. `secret rewrap` calls
 `POST <basePath>/operator/secrets/rewrap` and sends each `next` back as
 `after`. It ends when no row of an old version remains, when a pass ends,
-or at `--max-calls`. With no terminal it needs `--yes`. Both send the
+or at `--max-calls`. `--call-budget <n>` (50 to 1000, default 50) sets
+the storage calls of one call on D1 Paid or Postgres. With no terminal it
+needs `--yes`. Both send the
 operator secret only, never the app secret. The deployment reseals each
 row and answers counts only. The two routes and `info` share the limit
 `operator-secrets:ip:<ip>`, 120 calls an hour.

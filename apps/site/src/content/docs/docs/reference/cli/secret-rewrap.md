@@ -32,6 +32,7 @@ authtempo secret rewrap https://api.example.com --yes
 | `<base url>` | The origin of the API, with no path. |
 | `--limit <n>` | The rows of one call, from 1 to 1000. The default is 100. |
 | `--max-calls <n>` | The most calls of one run, from 1 to 10000. The default is 100. |
+| `--call-budget <n>` | The storage calls of one call, from 50 to 1000. The default is 50, the limit of D1 Free. Give more on D1 Paid or Postgres. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
@@ -51,7 +52,7 @@ Each call prints one line on stderr: `call <i>: resealed <n>, failed <n>, skippe
 
 ## The loop
 
-Each call reseals up to `--limit` rows after the cursor of the call before. The server keeps each call inside 50 queries, the limit of D1 Free, with the limiter query of the route among them. So a call may reseal fewer rows and answer `more: true`. The command then calls again. The command sends the `next` of each answer back as `after`, so a row that fails or is skipped blocks no row behind it. The loop ends at the first of three events:
+Each call reseals up to `--limit` rows after the cursor of the call before. The server keeps each call inside 50 queries, the limit of D1 Free, with the limiter query of the route among them. `--call-budget` raises that number up to 1000, the limit of D1 Paid. So a call may reseal fewer rows and answer `more: true`. The command then calls again. The command sends the `next` of each answer back as `after`, so a row that fails or is skipped blocks no row behind it. The loop ends at the first of three events:
 
 1. The answer has `more: false`. No row of a configured old version remains. The command exits 0.
 2. The answer has `next: null`. The pass read every row that was left. Some rows stay: a row that did not open, or a live setup with codes. The command exits 1 and names the reason.
@@ -87,8 +88,8 @@ A stop in the middle of the loop keeps the sums of the calls before it, with `ex
 | --- | --- |
 | Route | [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) |
 | Header | `Authorization: Operator <secret>` |
-| Body | `{ limit, after }`: the rows of the call, and the cursor of the answer before, when there is one. |
-| Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit, after })`. |
+| Body | `{ limit, after, callBudget }`: the rows of the call, the cursor of the answer before when there is one, and `--call-budget` when you give it. With no flag the body has no `callBudget`, and the route takes 50. |
+| Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit, after, callBudget })`. |
 | Limit | The key `operator-secrets:ip:<ip>`, a window of 1 hour, and 120 calls, right or wrong secret, shared with `secret status` and `info`. A run of 100 calls fits in one hour. [Limits](/docs/reference/limits/) lists every limit. |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body) |
 

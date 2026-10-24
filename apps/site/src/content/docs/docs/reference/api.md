@@ -279,6 +279,8 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `ENTROPY_REFUSE_BITS` | The estimate under which `createAuth` refuses the value: 100 bits. |
 | `SECRET_VERSION_MAX` | The largest secret version: 999999. |
 | `REWRAP_LIMIT` | The row limit of one rewrap call: 100 by default, at most 1000. |
+| `REWRAP_CALL_BUDGET` | The default `callBudget` of one rewrap call, and its least value: 50 storage calls, the limit of D1 Free. |
+| `REWRAP_CALL_BUDGET_MAX` | The largest `callBudget` of one rewrap call: 1000 storage calls, the limit of D1 Paid. |
 
 ## Next
 

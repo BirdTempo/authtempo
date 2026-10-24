@@ -3,7 +3,7 @@
 // `@authtempo/core/operator-secret` is. `authtempo secret` refuses a value
 // that `createAuth` would warn on, from this one source.
 
-export { REWRAP_LIMIT } from "./engine/secrets.js";
+export { REWRAP_CALL_BUDGET, REWRAP_CALL_BUDGET_MAX, REWRAP_LIMIT } from "./engine/secrets.js";
 export {
   ENTROPY_REFUSE_BITS,
   ENTROPY_WARN_BITS,
