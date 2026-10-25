@@ -20,7 +20,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import type { OAuthLogoutRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, LONG_TEST_MS, post, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -1124,7 +1124,11 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     return count;
   }
 
-  it("ends a page of a pending-end row beside an outbox over the budget, inside 50 calls (ruling 50 of plan 12f)", async () => {
+  // It writes 260 sessions first. It took 104 ms alone at load 4.2 (2026-10-25). It timed
+  // out at the default 5 s in the plan 12d evidence runs at load 38 to 48 (plan 12i fix wave).
+  it("ends a page of a pending-end row beside an outbox over the budget, inside 50 calls (ruling 50 of plan 12f)", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const ended: string[] = [];
     const w = world({
       extra: {
@@ -1190,7 +1194,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(count.n + posts).toBeLessThanOrEqual(50);
   });
 
-  it("keeps one sweep with full caps inside 50 calls with its posts, the limits of Workers Free (ruling 37 of plan 12f)", async () => {
+  // It writes 1000 sessions and 1000 links first. It took 502 ms alone at load 4.2
+  // (2026-10-25). It timed out at the default 5 s in the plan 12d evidence runs at load 38
+  // to 48. LONG_TEST_MS gives it 40 times its time alone.
+  it("keeps one sweep with full caps inside 50 calls with its posts, the limits of Workers Free (ruling 37 of plan 12f)", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     for (const subjectType of ["public", "pairwise"] as const) {
       const w = world();
       const { actor } = await twoSessions(w);
