@@ -35,9 +35,10 @@ import { execFileSync } from "node:child_process";
 // adapter adds packages/adapter-mysql/vitest.config.ts (53, Task 5). Its
 // workerd run is in proof/bundle.mjs, not a pool config.
 // Counted again 2026-10-25: 54. The fix wave of plan 12i adds
-// packages/adapter-d1/vitest.measure.config.ts (55, item 3).
+// packages/adapter-d1/vitest.measure.config.ts (55, item 3), then
+// packages/core/vitest.measure.config.ts (56, ruling 48).
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 55;
+const MINIMUM = 56;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LONG_TEST_MS } from "../helpers.js";
-import { type ScimWorld, scim, scimAuth, scimToken } from "./helpers.js";
+import { scim, type ScimTokenWorld as World, scimTokenWorld as world } from "./helpers.js";
 
 // The limits of the SCIM server (plan 12d Task 12): the per-token limit of
-// Task 9, the body and operation caps of Tasks 9 and 10, the member cap of
-// Task 11, and the measure of a list with no filter (open point 8). The
-// Postgres half of the measure is adapter-postgres scim-list-measure.test.ts:
-// core tests have no Postgres.
+// Task 9, the body and operation caps of Tasks 9 and 10, and the member cap
+// of Task 11. The measure of a list with no filter (open point 8) is a named
+// measure, out of this gate: test/measure/scim-list.measure.ts. The Postgres
+// half of the measure is adapter-postgres scim-list-measure.test.ts: core
+// tests have no Postgres.
 
 const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
@@ -22,13 +23,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-async function world() {
-  const w = await scimAuth();
-  const { token } = await scimToken(w);
-  return { ...w, token };
-}
-type World = ScimWorld & { token: string };
 
 const patch = (...ops: Record<string, unknown>[]) => ({ schemas: [PATCH_URN], Operations: ops });
 
@@ -49,14 +43,6 @@ async function user(w: World, local: string): Promise<string> {
   });
   if (r.status !== 201) throw new Error(`create ${local}: ${r.status}`);
   return String(r.body.id);
-}
-
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? (sorted[mid] ?? 0)
-    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
 }
 
 describe("the SCIM limits (plan 12d Task 12)", () => {
@@ -132,37 +118,4 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
     },
     LONG_TEST_MS,
   );
-
-  it("measures a list with no filter", async () => {
-    const w = await world();
-    // 10 000 SCIM users through the route. Each create moves the clock by
-    // 600 ms, so the token stays under its limit of 1200 calls in 600 s.
-    for (let i = 0; i < 10_000; i++) {
-      const res = await scim(w, w.token, "POST", "/Users", {
-        schemas: [USER_URN],
-        userName: `u${String(i).padStart(5, "0")}@acme.example`,
-      });
-      if (res.status !== 201) expect(res.status, `create ${i}`).toBe(201);
-      w.clock.advance(600);
-    }
-    const times: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      const started = performance.now();
-      const res = await scim(w, w.token, "GET", "/Users?count=100");
-      const body = (await res.json()) as {
-        totalResults: number;
-        itemsPerPage: number;
-        Resources: { userName: string }[];
-      };
-      times.push(performance.now() - started);
-      w.clock.advance(600);
-      expect([res.status, body.totalResults, body.itemsPerPage, body.Resources.length]).toEqual([
-        200, 10_000, 100, 100,
-      ]);
-    }
-    // The number is evidence for the docs, not a gate (open point 8 of plan 12d).
-    console.log(
-      `scim-list-measure store=memory rows=10000 runs=10 median_ms=${median(times).toFixed(2)} max_ms=${Math.max(...times).toFixed(2)}`,
-    );
-  }, 120_000);
 });

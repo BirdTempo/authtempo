@@ -55,6 +55,17 @@ export async function scimToken(
 }
 
 /**
+ * The world of `scimAuth` with one token of every scope. The SCIM limit
+ * tests and the list measure (test/measure) use it.
+ */
+export async function scimTokenWorld(): Promise<ScimTokenWorld> {
+  const w = await scimAuth();
+  const { token } = await scimToken(w);
+  return { ...w, token };
+}
+export type ScimTokenWorld = ScimWorld & { token: string };
+
+/**
  * One SCIM request through the routes, with the bearer `token` (none for
  * null). A `body` that is not undefined goes as JSON. The IP is `SCIM_IP`
  * unless `headers` names another.
