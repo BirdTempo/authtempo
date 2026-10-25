@@ -50,25 +50,33 @@ const USER_ROUTE_BEFORE = 10;
 
 /** The key that gives the statement of the binding under a counting view. */
 const RAW = Symbol("raw");
+/** The key that gives the SQL text of a statement under a counting view. */
+const SQL = Symbol("sql");
 
-/** A view of `db` that counts each statement, and each statement of a batch. Query `cap + 1` throws. */
+/**
+ * A view of `db` that counts each statement, and each statement of a
+ * batch, with its SQL text in `count.sql`. Query `cap + 1` throws.
+ */
 function counting(db: D1Database, cap = Number.POSITIVE_INFINITY) {
-  const count = { queries: 0, refused: 0 };
-  const tick = (n: number) => {
-    if (count.queries + n > cap) {
+  const count = { queries: 0, refused: 0, sql: [] as string[] };
+  const tick = (texts: string[]) => {
+    if (count.queries + texts.length > cap) {
       count.refused++;
       throw new Error("Too many API requests by single worker invocation.");
     }
-    count.queries += n;
+    count.queries += texts.length;
+    count.sql.push(...texts);
   };
-  const wrapStatement = (s: D1PreparedStatement): D1PreparedStatement =>
+  const wrapStatement = (s: D1PreparedStatement, sql: string): D1PreparedStatement =>
     new Proxy(s, {
       get(target, key) {
         if (key === RAW) return target;
-        if (key === "bind") return (...values: unknown[]) => wrapStatement(target.bind(...values));
+        if (key === SQL) return sql;
+        if (key === "bind")
+          return (...values: unknown[]) => wrapStatement(target.bind(...values), sql);
         if (key === "run" || key === "all" || key === "first" || key === "raw")
           return (...args: unknown[]) => {
-            tick(1);
+            tick([sql]);
             return (target[key] as (...a: unknown[]) => unknown).apply(target, args);
           };
         const value = Reflect.get(target, key);
@@ -77,10 +85,10 @@ function counting(db: D1Database, cap = Number.POSITIVE_INFINITY) {
     });
   const counted = new Proxy(db, {
     get(target, key) {
-      if (key === "prepare") return (sql: string) => wrapStatement(target.prepare(sql));
+      if (key === "prepare") return (sql: string) => wrapStatement(target.prepare(sql), sql);
       if (key === "batch")
         return (statements: D1PreparedStatement[]) => {
-          tick(statements.length);
+          tick(statements.map((s) => String((s as unknown as Record<symbol, string>)[SQL] ?? "")));
           return target.batch(
             statements.map((s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s),
           );
@@ -320,6 +328,7 @@ async function act<T>(sent: MailMessage[], call: (auth: Auth) => Promise<T>, lim
     answer,
     queries: count.queries,
     refused: count.refused,
+    sql: count.sql,
     mails: sent.length - mails,
     posts: posts.length - before,
   };
@@ -546,6 +555,27 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(await rows("ta_operator_audit", "action = 'user_delete'")).toBe(0);
     expect(endings).toEqual([]);
     expect(await setup.api.getSession(tokens.at(-1) ?? "")).not.toBeNull();
+  }, 300_000);
+
+  it("refuses 51 solo organizations with delete_too_large before any write (ruling 30 of plan 12d)", async () => {
+    const sent: MailMessage[] = [];
+    const { userId, organizations } = await loaded(sent, 51);
+    /** Every row of every table, in a stable order: the whole store. */
+    const store = async () => {
+      const all: Record<string, unknown[]> = {};
+      for (const t of Object.values(TABLES))
+        all[t] = (await env.DB.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()).results;
+      return all;
+    };
+    const before = await store();
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+    );
+    expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
+    // No write ran, so D1 had nothing to undo: every statement of the call is a read.
+    expect(r.sql.filter((q) => !/^\s*SELECT\b/i.test(q))).toEqual([]);
+    expect(await store()).toEqual(before);
+    expect(organizations).toHaveLength(51);
   }, 300_000);
 
   it("deletes an operator with 40 impersonation sessions in 50 calls, and the sweeps end the rest with stop rows", async () => {

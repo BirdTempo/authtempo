@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
+import { IN_CHUNK } from "../../storage/batch.js";
 import { meterOf } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import {
@@ -10,6 +11,7 @@ import {
   deleteAccountRows,
 } from "../account-delete.js";
 import { runAfter, runBefore, type UserPatch } from "../hooks.js";
+import { organizationsOfDelete } from "../organizations.js";
 import { unchanged } from "../profile.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
@@ -52,6 +54,9 @@ export interface OperatorDeleteUser {
  * fits when the route comes.
  */
 const ACT_LIMIT_CALLS = 1;
+
+/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
+const ORGANIZATION_RULE_READS = 3;
 
 /**
  * The least work of a delete, in storage calls at the worst. The delete
@@ -205,7 +210,9 @@ async function lockUser(
  * per-invocation query limit (D1), a delete whose least work cannot fit
  * the budget answers `delete_too_large` (ruling 1 of plan 12f2, Q3, and
  * ruling 5). Postgres, MySQL, SQLite, and memory have no such limit, so
- * they never refuse on size. Each refusal writes nothing and leaves no
+ * they never refuse on size. On every store, more solo organizations than
+ * one set-based delete takes answer `delete_too_large` before any write
+ * (ruling 30 of plan 12d). Each refusal writes nothing and leaves no
  * audit row. The sessions end in pages, and the sweep ends the rest with
  * `account_deleted`. The audit `data` is `{ organizations }`, and the row
  * keeps no address.
@@ -216,7 +223,8 @@ async function lockUser(
  *
  * The budget counts the whole invocation (ruling 1 of plan 12f2, B2): the
  * calls before the act of `OPERATOR_CALLS_BEFORE`, the per-actor limiter
- * of the route, the ready check, the work, and the audit row. With no
+ * of the route, the read of the memberships, the ready check, the work,
+ * and the audit row. With no
  * `targetOf`, a user actor fits one solo organization on D1 (ruling 5).
  */
 export async function deleteUser(
@@ -231,9 +239,24 @@ export async function deleteUser(
   if (typeof input.userId !== "string") return fail("invalid_body");
   if (input.actor.kind === "user" && input.actor.user.id === input.userId)
     return fail("operator_self");
+  // Before any write (ruling 30 of plan 12d), more solo organizations than
+  // one set-based delete takes answer delete_too_large, as in the self
+  // delete (`runDelete`). On D1 the undo of a write is no lock. One read of
+  // the memberships decides: with at most IN_CHUNK of them, no count of
+  // solo organizations passes it. The rule runs again in the transaction.
+  const memberships = await config.storage.findMany("member", [
+    { field: "userId", op: "eq", value: input.userId },
+  ]);
+  let checked = 1;
+  if (memberships.length > IN_CHUNK) {
+    const plan = await organizationsOfDelete(config, config.storage, input.userId);
+    if (!plan.ok && plan.code === "delete_too_large") return plan;
+    checked += ORGANIZATION_RULE_READS;
+  }
   const before =
     OPERATOR_CALLS_BEFORE[input.actor.kind] +
     ACT_LIMIT_CALLS +
+    checked +
     ((await config.storage.readyStatements?.()) ?? 1);
   const budget = await workBudget(config.storage, input.actor, before, DELETE_LEAST);
   if (!budget.ok) return budget;
