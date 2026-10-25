@@ -490,7 +490,10 @@ const MEASURED_ORGANIZATION_DELETE = { delete: 31 };
  * sweep takes 50 groups at a time, so 120 groups take three sweeps.
  */
 const ACCOUNT_DELETE_GROUPS = 120;
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 36, sweeps: [24, 24, 34] };
+// Plan 12f2 ends the own sessions of the delete in a page (ruling 1 of plan 12f2, B1). With
+// no session.afterEnd hook the page sends 2 queries more than endSessions: the run of
+// 2026-10-25 at the move of 12f2 onto main gives 38, was 36.
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [24, 24, 34] };
 const GROUPS = 500;
 
 /**

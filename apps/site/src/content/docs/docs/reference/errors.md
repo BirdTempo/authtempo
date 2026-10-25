@@ -544,12 +544,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
 
-- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. An organization delete answers it when the organization has more than 500 SCIM Groups. The operator delete of an account answers it for the same count of organizations. On D1, which allows 50 queries per invocation on Workers Free, it also answers it when its least work cannot fit that budget (plan 12f2). A store tells such a limit with `queryLimitPerInvocation`; Postgres, MySQL, SQLite, and memory have none.
-- **Do:** For an account, delete those organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete) first. For an organization, let the directory delete some groups first. Then send the delete again.
+- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. An organization delete answers it when the organization has more than 500 SCIM Groups. The operator delete of an account answers it for the same count of organizations, on every store. D1 allows 50 queries per invocation on Workers Free. There the operator delete also answers it when its least work cannot fit that budget (plan 12f2). The solo organizations cost 6 calls for any count. Each organization that the user owns with another owner costs 3 calls, and a plain membership costs none. So on D1 a secret with the scope `delete` takes 1 solo organization and at most 3 such organizations. A platform operator has the smallest budget: 1 solo organization and none of them, or no solo organization and at most 2. A store tells such a limit with `queryLimitPerInvocation`; Postgres, MySQL, SQLite, and memory have none.
+- **Do:** For an account, delete those organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete) first. For an organization, let the directory delete some groups first. For an operator delete on D1, let the user leave each organization that the user owns with another owner. Or delete the account with a secret that holds the scope `delete`. Then send the delete again.
 
 | Routes |
 | --- |
-| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), and `auth.api.operator.users.delete`. |
+| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete), and `auth.api.operator.users.delete`. |
 
 <h3 id="account_banned"><code>account_banned</code> 403</h3>
 

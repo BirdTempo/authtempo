@@ -62,7 +62,7 @@ The act ends a page of the user's sessions, and the sweep ends the rest. The use
 A refusal stops with exit 2, names its cause, and changes nothing:
 
 - `sole_owner`: the user is the last owner of an organization with other members, or of the platform organization. Make another member an owner of each such organization first, then delete again.
-- `delete_too_large`: on D1, the account holds too many organizations for one call. Delete the organizations that the user alone holds first.
+- `delete_too_large`: the account holds too many organizations for one call. Delete the organizations that the user alone holds, or let the user leave the organizations that the user owns with another owner, first.
 - A secret with no `delete` scope stops with `the operator secret has no delete scope`.
 - No user has the id, a hook refused the act, or another change ran at the same time.
 

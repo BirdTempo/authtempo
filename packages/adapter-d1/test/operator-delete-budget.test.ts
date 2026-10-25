@@ -370,45 +370,53 @@ async function sweepAll(sent: MailMessage[]) {
 // Ruling 5 of plan 12f2 (2026-10-24) took the target read out of the
 // delete. The load act then ends 6 sessions, was 5, and its last sweep is
 // 28, was 29. The operator act makes 49, was 50: a page ends whole sessions.
-const LOAD_COUNTS = { act: 50, inAct: 6, sweeps: [48, 48, 48, 48, 28] };
-const OPERATOR_COUNTS = { act: 49, inAct: 5, sweeps: [48, 48, 37] };
+// The move of 12f2 onto main 7d77a7de (2026-10-25) carries plan 12d: the
+// solo organizations go set-based in 6 calls for any count, the act locks
+// no outbox row, and the operator delete reads the memberships before its
+// act (ruling 30 of plan 12d). The page of each act ends whole sessions,
+// so no act reaches 50 exactly. The runs of 2026-10-25 give these counts.
+const LOAD_COUNTS = { act: 49, inAct: 8, sweeps: [48, 48, 48, 48, 36] };
+const OPERATOR_COUNTS = { act: 48, inAct: 4, sweeps: [48, 48, 39] };
 
 /**
- * The most solo organizations that the operator delete of the load takes
- * on main, measured on the binding on 2026-10-22. Each costs 2 reads of the
- * organization rule and 10 statements of its delete, so 2 do not fit.
+ * The solo organizations of the load. Until the move onto main each cost
+ * 2 reads of the organization rule and 10 statements of its delete, so 2
+ * did not fit. Since the move they go set-based in 6 calls for any count
+ * (ruling 30 of plan 12d): 3 cost the calls of 1.
  */
-const SOLO_FITS = 1;
+const LOAD_SOLOS = 1;
 
 /**
- * The most memberships in organizations of other users that the delete of
- * the load with `SOLO_FITS` solo organization takes. Each costs 2 reads of
- * the organization rule. At this count the least work fits the budget
- * (ruling 4 of plan 12f2, measured on the binding on 2026-10-24). With no
- * `targetOf` (ruling 5) it is 44 of 45; a membership costs 2, so the next
- * one passes the budget. The user actor holds the exact edge.
+ * The most organizations that the user owns with another owner that the
+ * delete of the load takes for a secret, measured on the binding on
+ * 2026-10-25. Each costs 3 calls of the least work: the owner lock, a batch
+ * of 2 on D1, and the recount. So the next one passes the budget. Since the
+ * move onto main a plain membership costs no call: the organization rule
+ * reads in 3 calls for any count (ruling 30 of plan 12d). Until the move
+ * each membership cost 2 reads, and 3 fit.
  */
-const EDGE_MEMBERSHIPS = 3;
+const EDGE_OWNED = 3;
 
 /**
- * The most solo organizations that the operator delete of the load takes
- * for a user actor, measured on the binding on 2026-10-24 (ruling 5 of
- * plan 12f2). Its work budget is 38 calls: 50, less 11 before the act and
- * the audit row. The delete reads its target in the lock and in the
- * organization rule, with no `targetOf`. So 1 solo organization meets the
- * budget exactly: 7 calls before the size check and 31 of least work.
+ * The solo organizations that the operator delete of the load takes for a
+ * user actor (ruling 5 of plan 12f2). Its work budget is the smallest: 50,
+ * less 11 before the act, the read of the memberships, and the audit row.
+ * Measured on the binding on 2026-10-25: with 1 solo organization or more,
+ * no organization that the user owns with another owner fits. With none,
+ * 2 fit, as the 6 calls of the solo organizations are those of 2.
  */
-const USER_SOLO_FITS = 1;
+const USER_SOLOS = 1;
 
 /**
- * The counts of the user-actor deletes on the binding on 2026-10-24, by
+ * The counts of the user-actor deletes on the binding on 2026-10-25, by
  * solo organizations: the act with the route before it, and the sessions
- * that it ended. At the edge the page gets its least: the read and the
- * pending-end row, and the sweep ends the rest.
+ * that it ended. With a solo organization the page gets its least: the read
+ * and the pending-end row, and the sweep ends the rest.
  */
 const USER_COUNTS = [
-  { solos: 0, act: 50, inAct: 11 },
-  { solos: 1, act: 50, inAct: 0 },
+  { solos: 0, act: 47, inAct: 7 },
+  { solos: 1, act: 47, inAct: 0 },
+  { solos: 3, act: 47, inAct: 0 },
 ];
 
 describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => {
@@ -449,8 +457,14 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     return { setup, userId, tokens, organizations };
   }
 
-  /** `count` organizations of other users, each with the user as a member. */
-  async function memberships(setup: Auth, sent: MailMessage[], userId: string, count: number) {
+  /** `count` organizations of other users, each with the user as a member of `role`. */
+  async function memberships(
+    setup: Auth,
+    sent: MailMessage[],
+    userId: string,
+    count: number,
+    role: "member" | "owner" = "member",
+  ) {
     for (let i = 0; i < count; i++) {
       const owner = await signIns(setup, sent, `owner${i}@example.com`, 1);
       const session = await setup.api.getSession(owner.tokens[0] ?? "");
@@ -465,16 +479,16 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
         user: session.user,
         organizationId: made.value.organization.id,
         userId,
-        role: "member",
+        role,
       });
       if (!added.ok) throw new Error(added.code);
     }
     endings.length = 0;
   }
 
-  it(`deletes a user with 60 sessions, 10 client links, and ${SOLO_FITS} solo organization in 50 calls, and the sweeps end the rest`, async () => {
+  it(`deletes a user with 60 sessions, 10 client links, and ${LOAD_SOLOS} solo organization in 50 calls, and the sweeps end the rest`, async () => {
     const sent: MailMessage[] = [];
-    const { setup, userId, tokens, organizations } = await loaded(sent, SOLO_FITS);
+    const { setup, userId, tokens, organizations } = await loaded(sent, LOAD_SOLOS);
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
     );
@@ -502,30 +516,29 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     );
   }, 300_000);
 
-  it(`refuses ${SOLO_FITS + 1} solo organizations with delete_too_large in 50 calls, and changes nothing`, async () => {
+  it("deletes 3 solo organizations in the calls of 1: they go set-based (ruling 30 of plan 12d)", async () => {
     const sent: MailMessage[] = [];
-    const { userId, tokens, organizations } = await loaded(sent, SOLO_FITS + 1);
+    const { userId, organizations } = await loaded(sent, 3);
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
     );
-    expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
+    expect(r.answer).toEqual({
+      ok: true,
+      value: { organizations: [...organizations].sort(), auditId: expect.any(String) },
+    });
     expect(r.refused).toBe(0);
-    expect(ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
-    expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
-    expect(await rows("ta_session")).toBe(60);
-    expect(await rows("ta_oauth_session_client")).toBe(10);
-    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(organizations.length);
-    expect(await rows("ta_organization", "slug LIKE 'solo-%'")).toBe(organizations.length);
-    expect(await rows("ta_operator_audit", "action = 'user_delete'")).toBe(0);
-    expect(endings).toEqual([]);
-    const setup = await engine(env.DB, sent);
-    expect(await setup.api.getSession(tokens.at(-1) ?? "")).not.toBeNull();
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect({ act: calls, inAct: endings.length }).toEqual({
+      act: LOAD_COUNTS.act,
+      inAct: LOAD_COUNTS.inAct,
+    });
+    expect(await rows("ta_organization", "slug LIKE 'solo-%'")).toBe(0);
   }, 300_000);
 
-  it(`deletes at the edge of the budget with ${EDGE_MEMBERSHIPS} memberships, and the sweeps end the rest`, async () => {
+  it(`deletes at the edge of the budget with ${EDGE_OWNED} organizations that the user owns with another owner, and the sweeps end the rest`, async () => {
     const sent: MailMessage[] = [];
-    const { setup, userId, organizations } = await loaded(sent, SOLO_FITS);
-    await memberships(setup, sent, userId, EDGE_MEMBERSHIPS);
+    const { setup, userId, organizations } = await loaded(sent, LOAD_SOLOS);
+    await memberships(setup, sent, userId, EDGE_OWNED, "owner");
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
     );
@@ -533,17 +546,17 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(r.refused).toBe(0);
     expect(ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
     expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
-    expect(await rows("ta_organization", "slug LIKE 'team-%'")).toBe(EDGE_MEMBERSHIPS);
+    expect(await rows("ta_organization", "slug LIKE 'team-%'")).toBe(EDGE_OWNED);
     const sweeps = await sweepAll(sent);
     for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
-    expect(await rows("ta_session")).toBe(EDGE_MEMBERSHIPS);
+    expect(await rows("ta_session")).toBe(EDGE_OWNED);
     expect(await rows("ta_session", `user_id = '${userId}'`)).toBe(0);
   }, 300_000);
 
-  it(`refuses ${EDGE_MEMBERSHIPS + 1} memberships with delete_too_large in 50 calls, and changes nothing`, async () => {
+  it(`refuses ${EDGE_OWNED + 1} organizations that the user owns with another owner with delete_too_large in 50 calls, and changes nothing`, async () => {
     const sent: MailMessage[] = [];
-    const { setup, userId, tokens } = await loaded(sent, SOLO_FITS);
-    await memberships(setup, sent, userId, EDGE_MEMBERSHIPS + 1);
+    const { setup, userId, tokens } = await loaded(sent, LOAD_SOLOS);
+    await memberships(setup, sent, userId, EDGE_OWNED + 1, "owner");
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
     );
@@ -551,7 +564,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(r.refused).toBe(0);
     expect(ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
-    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(SOLO_FITS + EDGE_MEMBERSHIPS + 1);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(LOAD_SOLOS + EDGE_OWNED + 1);
     expect(await rows("ta_operator_audit", "action = 'user_delete'")).toBe(0);
     expect(endings).toEqual([]);
     expect(await setup.api.getSession(tokens.at(-1) ?? "")).not.toBeNull();
@@ -645,7 +658,10 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
       const r = await act(sent, (auth) =>
         auth.api.operator.users.delete({ actor, userId, ...REASON }),
       );
-      expect(r.answer).toEqual({ ok: true, value: { organizations, auditId: expect.any(String) } });
+      expect(r.answer).toEqual({
+        ok: true,
+        value: { organizations: [...organizations].sort(), auditId: expect.any(String) },
+      });
       expect(r.refused).toBe(0);
       expect([r.mails, r.posts]).toEqual([1, 0]);
       const calls = USER_ROUTE_BEFORE + r.queries + r.mails + r.posts;
@@ -657,40 +673,38 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
       );
     }, 300_000);
 
-  it(`refuses as a platform operator ${USER_SOLO_FITS + 1} solo organizations with delete_too_large in 50 calls, and changes nothing`, async () => {
+  it(`refuses as a platform operator ${USER_SOLOS} solo organization and 1 organization that the user owns with another owner: the edge is exact`, async () => {
     const sent: MailMessage[] = [];
-    const { setup, userId, tokens, organizations } = await loaded(sent, USER_SOLO_FITS + 1);
+    const { setup, userId } = await loaded(sent, USER_SOLOS);
+    await memberships(setup, sent, userId, 1, "owner");
     const actor = await userActor(setup, sent);
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor, userId, ...REASON }),
     );
+    // The owned organization adds its owner lock and its recount, 3 calls.
     expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
     expect(r.refused).toBe(0);
     expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
-    expect(await rows("ta_session", `user_id = '${userId}'`)).toBe(60);
-    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(organizations.length);
-    expect(await rows("ta_operator_audit", "action = 'user_delete'")).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(USER_SOLOS + 1);
     expect(endings).toEqual([]);
-    expect(await setup.api.getSession(tokens.at(-1) ?? "")).not.toBeNull();
   }, 300_000);
 
-  it(`refuses as a platform operator ${USER_SOLO_FITS} solo organization and 1 membership: the edge is exact`, async () => {
-    const sent: MailMessage[] = [];
-    const { setup, userId } = await loaded(sent, USER_SOLO_FITS);
-    await memberships(setup, sent, userId, 1);
-    const actor = await userActor(setup, sent);
-    const r = await act(sent, (auth) =>
-      auth.api.operator.users.delete({ actor, userId, ...REASON }),
-    );
-    // The membership adds 2 reads of the organization rule: 40 of 38.
-    expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
-    expect(r.refused).toBe(0);
-    expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
-    expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
-    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(USER_SOLO_FITS + 1);
-    expect(endings).toEqual([]);
-  }, 300_000);
+  it("refuses as a platform operator 3 organizations that the user owns with another owner and no solo organization; 2 fit", async () => {
+    for (const owned of [2, 3]) {
+      await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+      const sent: MailMessage[] = [];
+      const { setup, userId } = await loaded(sent, 0);
+      await memberships(setup, sent, userId, owned, "owner");
+      const actor = await userActor(setup, sent);
+      const r = await act(sent, (auth) =>
+        auth.api.operator.users.delete({ actor, userId, ...REASON }),
+      );
+      expect(r.refused).toBe(0);
+      expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
+      expect({ owned, ok: r.answer.ok }).toEqual({ owned, ok: owned === 2 });
+    }
+  }, 600_000);
 
   it("updates a name in 50 calls", async () => {
     const sent: MailMessage[] = [];
@@ -737,11 +751,13 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * and the mail. The secret delete meets 50 as the act of the load does.
    * The platform operator meets 48: the route before the act costs 8, not
    * the 10 that the budget keeps, so the page ends no session and the sweep
-   * ends all. The update by a secret, then by a platform operator.
+   * ends all. The update by a secret, then by a platform operator. The runs
+   * of 2026-10-25 at the move onto main give the secret delete 49 and 8
+   * sessions, and the platform operator 45: the solo organization costs 6.
    */
   const ROUTE_COUNTS = {
-    secretDelete: { act: 50, inAct: 6 },
-    userDelete: { act: 48, inAct: 0 },
+    secretDelete: { act: 49, inAct: 8 },
+    userDelete: { act: 45, inAct: 0 },
     update: [13, 20],
   };
 
@@ -752,9 +768,9 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     origin: APP_ORIGIN,
   });
 
-  it(`deletes through the route by a secret a user with 60 sessions, 10 client links, and ${SOLO_FITS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
+  it(`deletes through the route by a secret a user with 60 sessions, 10 client links, and ${LOAD_SOLOS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
     const sent: MailMessage[] = [];
-    const { userId, organizations } = await loaded(sent, SOLO_FITS);
+    const { userId, organizations } = await loaded(sent, LOAD_SOLOS);
     const r = await route(
       sent,
       "/operator/users/delete",
@@ -770,9 +786,9 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
   }, 300_000);
 
-  it(`deletes through the route as a platform operator a user with 60 sessions and ${USER_SOLO_FITS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
+  it(`deletes through the route as a platform operator a user with 60 sessions and ${USER_SOLOS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
     const sent: MailMessage[] = [];
-    const { setup, userId, organizations } = await loaded(sent, USER_SOLO_FITS);
+    const { setup, userId, organizations } = await loaded(sent, USER_SOLOS);
     const token = await platformOperator(setup, sent, "op@example.com");
     endings.length = 0;
     const r = await route(

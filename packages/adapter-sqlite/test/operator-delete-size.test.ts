@@ -58,7 +58,7 @@ async function world() {
 }
 
 describe("the operator delete on node:sqlite (ruling 5 of plan 12f2)", () => {
-  it("a platform operator deletes a user with 3 solo organizations: no per-invocation query limit, so no size check", async () => {
+  it("a platform operator deletes a user with 1 solo organization and 3 that the user owns with another owner: no per-invocation query limit, so no size check", async () => {
     const w = await world();
     expect(w.storage.queryLimitPerInvocation).toBeUndefined();
     const made = await w.auth.api.operator.createAdmin({
@@ -71,15 +71,30 @@ describe("the operator delete on node:sqlite (ruling 5 of plan 12f2)", () => {
     if (!made.ok) throw new Error(made.code);
     const op = await w.signIn("op@example.com");
     const ada = await w.signIn("ada@example.com");
-    const ids: string[] = [];
+    const solo = await w.auth.api.createOrganization({
+      user: ada.user,
+      slug: "solo-0",
+      name: "Solo",
+    });
+    if (!solo.ok) throw new Error(solo.code);
+    const ids = [solo.value.organization.id];
+    // On D1 a user actor fits 1 solo organization and no organization that the user owns
+    // with another owner (the move of 12f2 onto main, 2026-10-25). Here 3 pass.
+    const bob = await w.signIn("bob@example.com");
     for (let i = 0; i < 3; i++) {
-      const solo = await w.auth.api.createOrganization({
-        user: ada.user,
-        slug: `solo-${i}`,
-        name: "Solo",
+      const made = await w.auth.api.createOrganization({
+        user: bob.user,
+        slug: `shared-${i}`,
+        name: "Shared",
       });
-      if (!solo.ok) throw new Error(solo.code);
-      ids.push(solo.value.organization.id);
+      if (!made.ok) throw new Error(made.code);
+      const joined = await w.auth.api.addMember({
+        user: bob.user,
+        organizationId: made.value.organization.id,
+        userId: ada.user.id,
+        role: "owner",
+      });
+      if (!joined.ok) throw new Error(joined.code);
     }
     const actor = { kind: "user", user: op.user, session: op.session } as const;
     expect(

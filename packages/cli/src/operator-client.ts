@@ -75,7 +75,7 @@ export const REFUSALS: Readonly<Record<string, string>> = {
   sole_owner:
     "the user is the last owner of an organization with other members, or of the platform organization; make another member an owner first",
   delete_too_large:
-    "the account holds too many organizations to delete in one call on D1; delete the organizations that the user alone holds first",
+    "the account holds too many organizations to delete in one call; delete the organizations that the user alone holds, or let the user leave the organizations that the user owns with another owner, first",
 };
 
 /** The parsed values of the four operator flags of `OPERATOR_FLAGS`. */

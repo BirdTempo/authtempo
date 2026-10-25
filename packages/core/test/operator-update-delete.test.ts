@@ -111,6 +111,19 @@ async function soloOrganization(w: World, user: UserRow, slug: string) {
   return made.value.organization;
 }
 
+/** An organization of `owner` where `user` is an owner too: the delete of `user` locks it. */
+async function sharedOwned(w: World, owner: UserRow, user: UserRow, slug: string) {
+  const shared = await soloOrganization(w, owner, slug);
+  const joined = await addMember(w.auth.config, {
+    user: owner,
+    organizationId: shared.id,
+    userId: user.id,
+    role: "owner",
+  });
+  if (!joined.ok) throw new Error(joined.code);
+  return shared;
+}
+
 describe("the operator update (plan 12f2 Task 4)", () => {
   it("updates the name and the image and records the field names", async () => {
     const w = await world();
@@ -620,8 +633,14 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
   it("refuses a delete that cannot fit its budget with delete_too_large on a store with a per-invocation query limit, and changes nothing", async () => {
     const w = await world();
     const ada = await verifiedSession(w.auth, ADA);
-    const ids: string[] = [];
-    for (let i = 0; i < 3; i++) ids.push((await soloOrganization(w, ada.user, `solo-${i}`)).id);
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    // The solo organizations go set-based in 6 calls for any count (ruling 30 of plan
+    // 12d), so they do not grow the least work. Each shared organization that Ada owns
+    // with Bob costs its owner lock and its recount, 3 calls: 10 of them pass the budget.
+    const ids = [(await soloOrganization(w, ada.user, "solo-0")).id];
+    for (let i = 0; i < 10; i++)
+      ids.push((await sharedOwned(w, bob.user, ada.user, `shared-${i}`)).id);
+    const held = await userOf(w, ada.user.id);
     // D1 claims the limit (ruling 5 of plan 12f2). This memory store claims it too.
     (w.auth.storage as StorageAdapter).queryLimitPerInvocation = true;
     expect(await w.api.delete({ actor: w.erasure, userId: ada.user.id, ...REASON })).toEqual({
@@ -629,11 +648,11 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
       code: "delete_too_large",
       status: 409,
     });
-    expect(await userOf(w, ada.user.id)).toMatchObject({ updatedAt: ada.user.updatedAt });
+    expect(await userOf(w, ada.user.id)).toEqual(held);
     const orgs = await w.auth.storage.findMany("organization", [
       { field: "id", op: "in", value: ids },
     ]);
-    expect(orgs.length).toBe(3);
+    expect(orgs.length).toBe(11);
     expect(await resolveSession(w.auth.config, ada.token)).not.toBeNull();
     expect(await auditRows(w, "user_delete")).toEqual([]);
     expect(w.notices).toEqual([]);
@@ -642,17 +661,22 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
   it("never refuses on size on memory, a store with no per-invocation query limit (ruling 5 of plan 12f2)", async () => {
     const w = await world();
     const ada = await verifiedSession(w.auth, ADA);
-    const ids: string[] = [];
-    for (let i = 0; i < 6; i++) ids.push((await soloOrganization(w, ada.user, `solo-${i}`)).id);
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const solo = await soloOrganization(w, ada.user, "solo-0");
+    const shared: string[] = [];
+    for (let i = 0; i < 10; i++)
+      shared.push((await sharedOwned(w, bob.user, ada.user, `shared-${i}`)).id);
     expect(w.auth.storage.queryLimitPerInvocation).toBeUndefined();
-    // A user actor has the smallest budget: 6 solo organizations pass it by far.
+    // A user actor has the smallest budget. On D1 it fits a solo organization and no
+    // organization that the user owns with another owner; 10 of those pass it by far.
     expect(await w.api.delete({ actor: w.asOperator, userId: ada.user.id, ...REASON })).toEqual({
       ok: true,
-      value: { organizations: expect.any(Array), auditId: expect.any(String) },
+      value: { organizations: [solo.id], auditId: expect.any(String) },
     });
     expect(await userOf(w, ada.user.id)).toBeNull();
+    // The shared organizations stay with Bob, their other owner.
     expect(
-      await w.auth.storage.findMany("organization", [{ field: "id", op: "in", value: ids }]),
-    ).toEqual([]);
+      await w.auth.storage.findMany("organization", [{ field: "id", op: "in", value: shared }]),
+    ).toHaveLength(10);
   });
 });

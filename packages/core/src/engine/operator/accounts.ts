@@ -224,8 +224,10 @@ async function lockUser(
  * The budget counts the whole invocation (ruling 1 of plan 12f2, B2): the
  * calls before the act of `OPERATOR_CALLS_BEFORE`, the per-actor limiter
  * of the route, the read of the memberships, the ready check, the work,
- * and the audit row. With no
- * `targetOf`, a user actor fits one solo organization on D1 (ruling 5).
+ * and the audit row. On D1 the solo organizations cost 6 calls for any
+ * count, and each organization that the user owns with another owner
+ * costs 3. A user actor fits 1 solo organization and none of those; a
+ * secret fits 1 solo organization and 3 (measured 2026-10-25).
  */
 export async function deleteUser(
   config: ResolvedConfig,

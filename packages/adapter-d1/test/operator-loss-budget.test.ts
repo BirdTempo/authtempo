@@ -294,8 +294,9 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * page ends 1 session more: 46 queries, 3 sessions, sweeps of 47, 47, and 44.
  * Plan 12f2 Task 4 (2026-10-22, on 12f) ends the own sessions of the delete
  * in a page (ruling 1 of plan 12f2, B1). On 12f it gave [48, 4, [47, 47, 42]]
- * and [49, 11, [47, 47, 26]]. The move of 12f2 onto 12d and 12i measures
- * the counts again.
+ * and [49, 11, [47, 47, 26]]. The run of 2026-10-25 at the move of 12f2
+ * onto main gives the counts of main again: the act of this scene keeps the
+ * calls of the page of 12f2.
  */
 const DELETE_COUNTS: [number, number, number[]] = [46, 3, [47, 47, 44]];
 const REMOVE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 28]];
@@ -834,14 +835,20 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * (same day): the confirm of the operator scene sent 51, and its query 51
  * was the read of the back-channel outbox. `endSessions` now reads the
  * sessions once, so each scene sends 1 fewer, and that confirm sends 50.
+ * Plan 12f2 ends the own sessions in a page that keeps the least calls of
+ * the page of the impersonation sessions (ruling 1 of plan 12f2, B1). The
+ * run of 2026-10-25 at the move of 12f2 onto main: the operator scenes send
+ * 47 and 48. The act ends fewer impersonation sessions, so each last
+ * sweep sends 4 queries more. The last query of each confirm is still the
+ * read of the outbox.
  */
 const SOLO_COUNTS = {
   plain: [42, [30]],
   due: [44, [31]],
   confirm: [45, [31]],
-  operator: [49, [48, 48, 48, 35]],
-  operatorConfirm0: [50, [48, 48, 48, 35]],
-  operatorConfirm3: [50, [48, 48, 48, 37]],
+  operator: [47, [48, 48, 48, 39]],
+  operatorConfirm0: [48, [48, 48, 48, 39]],
+  operatorConfirm3: [48, [48, 48, 48, 41]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**
