@@ -549,12 +549,12 @@ type UniformOutcome =
 /**
  * The uniform sign-up (plan 12b): `{ sent: true }` on every path, no
  * session. A new address gets the verify mail, a known one the
- * existing-account mail, and a refused or raced one no mail. With the code
- * and a `waitUntil`, the answer goes first. The rows, `made.after`, and the
- * mail then run after it as one job (ruling 39 of plan 12i). So a known and
- * a new address do the same work before the answer, and its time tells
- * neither. The link keeps the order of plan 12b: the job runs before the
- * answer.
+ * existing-account mail, and a refused or raced one no mail. With a
+ * `waitUntil`, the answer goes first. The rows, `made.after`, and the mail
+ * then run after it as one job (ruling 39 of plan 12i), for the code and
+ * the link alike (final fix wave item 19). So a known and a new address do
+ * the same work before the answer, and its time tells neither. With no
+ * `waitUntil` (a call in process), the job runs before the answer.
  */
 async function uniformSignUp(
   config: ResolvedConfig,
@@ -566,13 +566,26 @@ async function uniformSignUp(
   after: AfterAnswer | undefined,
 ): Promise<Result<{ sent: true }>> {
   const job = () => uniformJob(config, pw, row, now, made, anonymous);
-  if (pw.verifyBy === "code" && after) {
+  if (after) {
     // Each refusal of the job is quiet, so the answer is true whatever the
-    // job does. A throw becomes the router's `error.internal` line.
-    after(job());
+    // job does. A throw, or a fail result that no caller reads, becomes the
+    // router's `error.internal` line.
+    after(
+      job().then((r) => {
+        if (!r.ok) throw new SignUpJobFailed(r.code);
+      }),
+    );
     return ok({ sent: true });
   }
   return job();
+}
+
+/** A fail result of the sign-up job after the answer (final fix wave item 23). */
+class SignUpJobFailed extends Error {
+  constructor(code: string) {
+    super(`authtempo: the sign-up job after the answer failed with ${code}`);
+    this.name = "SignUpJobFailed";
+  }
 }
 
 /**
@@ -768,13 +781,15 @@ export interface PasswordResend {
  * whether an address has an account; `rate_limited` is the one visible
  * failure. A mail goes only to a user that exists, is unverified, and has
  * an active password row (not `PENDING_HASH_PREFIX`). The other pending
- * links of the address go first, so one link at a time is live. A call
- * that mails takes longer than one that does not; the time can tell that
- * an address has an unverified password account. The mail goes after the
- * row is written, never inside a transaction. The old links go before the
- * send, so a mail throw leaves no live link and answers 500; the next
- * resend repairs it. Two parallel resends can leave two live links, within
- * the per-email limit of 3.
+ * links of the address go first, so one link at a time is live. With a
+ * `waitUntil`, the reads and the send run after the answer, for the code
+ * and the link alike (ruling 23 of plan 12i, final fix wave item 19). So
+ * the answer time does not tell that an address has an unverified password
+ * account. With none (a call in process), they run first, and the time can
+ * tell it. The mail goes after the row is written, never inside a
+ * transaction. The old links go before the send, so a mail throw leaves no
+ * live link; the next resend repairs it. Two parallel resends can leave two
+ * live links, within the per-email limit of 3.
  */
 export async function resendPasswordVerification(
   config: ResolvedConfig,
@@ -800,9 +815,9 @@ export async function resendPasswordVerification(
     if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return;
     await replaceVerifyMail(config, email, row.id, input.anonymous ?? null);
   };
-  // With the code, the reads and the send go after the answer (ruling 23 of
-  // plan 12i). Then the time of the answer tells no account.
-  await deliver(send, pw.verifyBy === "code" ? after : undefined);
+  // The reads and the send go after the answer (ruling 23 of plan 12i).
+  // Then the time of the answer tells no account.
+  await deliver(send, after);
   return ok({ sent: true });
 }
 

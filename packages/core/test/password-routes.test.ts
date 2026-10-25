@@ -249,10 +249,18 @@ describe("the reset page and code points (plan 8b)", () => {
 describe("password resend route (plan 8b)", () => {
   it("POST /password/verify/resend answers sent and mails a new link", async () => {
     const h = pwHandle({ hash: FAST });
-    await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
-    const res = await h.auth.handle(post("/auth/password/verify/resend", { email: EMAIL }));
+    // The rows and the mails run after the answer (final fix wave item 19): wait for them.
+    const after: Promise<unknown>[] = [];
+    const options = { waitUntil: (p: Promise<unknown>) => void after.push(p) };
+    await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }), options);
+    await Promise.all(after.splice(0));
+    const res = await h.auth.handle(
+      post("/auth/password/verify/resend", { email: EMAIL }),
+      options,
+    );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ sent: true });
+    await Promise.all(after.splice(0));
     expect(h.mails.filter((m) => m.subject.startsWith("Confirm"))).toHaveLength(2);
     const bad = await h.auth.handle(post("/auth/password/verify/resend", { email: 5 }));
     expect(bad.status).toBe(400);

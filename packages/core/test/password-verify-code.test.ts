@@ -355,50 +355,54 @@ describe("the sign-up code (plan 12i Task 20)", () => {
     expect((await userOf(w))?.emailVerified).toBe(false);
   });
 
-  it("answers the sign-up and the resend before the mail goes, for a new and a known address", async () => {
-    // Ruling 23 of plan 12i: with the code, the slow work that differs by
-    // account runs after the answer. That is the code row and its mail, or
-    // the mail to a known address. A mail port that waits until released shows it.
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const sent: MailMessage[] = [];
-    const w = world(
-      {},
-      {
-        mail: {
-          send: async (m) => {
-            await gate;
-            sent.push(m);
+  it.each(["code", "link"] as const)(
+    "answers the sign-up and the resend before the mail goes, for a new and a known address (%s)",
+    async (verifyBy) => {
+      // Ruling 23 of plan 12i: the slow work that differs by account runs
+      // after the answer. That is the code or link row and its mail, or the
+      // mail to a known address. The link does the same since final fix wave
+      // item 19. A mail port that waits until released shows it.
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const sent: MailMessage[] = [];
+      const w = world(
+        { verifyBy },
+        {
+          mail: {
+            send: async (m) => {
+              await gate;
+              sent.push(m);
+            },
           },
         },
-      },
-    );
-    const work: Promise<unknown>[] = [];
-    const call = (path: string, body: unknown) =>
-      Promise.race([
-        w.route(post(path, body, ip()), { waitUntil: (p) => void work.push(p) }),
-        new Promise<"held">((resolve) => setTimeout(() => resolve("held"), 1_000)),
-      ]);
-    const answers = [
-      await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
-      await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
-      await call("/auth/password/verify/resend", { email: EMAIL }),
-      await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
-    ];
-    for (const a of answers) {
-      expect(a).not.toBe("held");
-      if (a !== "held") expect(await a.json()).toEqual({ sent: true });
-    }
-    expect(sent).toEqual([]);
-    release();
-    await Promise.all(work);
-    // The new address got a code, the known address the existing-account
-    // mail, the resend a new code, and the unknown address nothing.
-    expect(sent.map((m) => m.to)).toEqual([EMAIL, EMAIL, EMAIL]);
-    expect(sent[1]?.subject).toBe("Your account at api.example.com");
-  });
+      );
+      const work: Promise<unknown>[] = [];
+      const call = (path: string, body: unknown) =>
+        Promise.race([
+          w.route(post(path, body, ip()), { waitUntil: (p) => void work.push(p) }),
+          new Promise<"held">((resolve) => setTimeout(() => resolve("held"), 1_000)),
+        ]);
+      const answers = [
+        await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
+        await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
+        await call("/auth/password/verify/resend", { email: EMAIL }),
+        await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
+      ];
+      for (const a of answers) {
+        expect(a).not.toBe("held");
+        if (a !== "held") expect(await a.json()).toEqual({ sent: true });
+      }
+      expect(sent).toEqual([]);
+      release();
+      await Promise.all(work);
+      // The new address got a code, the known address the existing-account
+      // mail, the resend a new code, and the unknown address nothing.
+      expect(sent.map((m) => m.to)).toEqual([EMAIL, EMAIL, EMAIL]);
+      expect(sent[1]?.subject).toBe("Your account at api.example.com");
+    },
+  );
 
   it("confirms an address posted in another case", async () => {
     // The engine normalizes the address before the compare (ruling 39 L1).
@@ -508,41 +512,45 @@ function slowStore(s: StorageAdapter, ms: number): StorageAdapter {
   }) as StorageAdapter;
 }
 
-describe("the answer time of the uniform sign-up with the code (ruling 39 M1)", () => {
-  it("answers a known and a new address within a small fixed bound", async () => {
-    // A store with 2 ms per call, through auth.handle with a waitUntil. The
-    // user rows, made.after, and the mail run after the answer for both, so
-    // the answer waits for no storage call. Before ruling 39, a new address
-    // waited for 6 more calls: about 9 ms more (review probe P1).
-    const PER_CALL_MS = 2;
-    const BOUND_MS = 3;
-    const ROUNDS = 15;
-    const auth = createAuth({
-      baseURL: "https://api.example.com",
-      secret: "0123456789abcdef0123456789abcdef",
-      trustedOrigins: ["https://app.example.com"],
-      storage: slowStore(createMemoryAdapter(), PER_CALL_MS),
-      mail: { send: async () => {} },
-      password: { hash: FAST, verifyBy: "code" },
-    });
-    const after: Promise<unknown>[] = [];
-    const time = async (email: string) => {
-      const request = post("/auth/password/sign-up", { email, password: PASSWORD }, ip());
-      const t0 = performance.now();
-      const res = await auth.handle(request, { waitUntil: (p) => void after.push(p) });
-      const ms = performance.now() - t0;
-      expect(await res.json()).toEqual({ sent: true });
-      await Promise.all(after.splice(0));
-      return ms;
-    };
-    for (let i = 0; i < ROUNDS; i++) await time(recordAddress(`known${i}@example.com`));
-    const known: number[] = [];
-    const fresh: number[] = [];
-    for (let i = 0; i < ROUNDS; i++) {
-      known.push(await time(recordAddress(`known${i}@example.com`)));
-      fresh.push(await time(recordAddress(`new${i}@example.com`)));
-    }
-    const median = (x: number[]) => [...x].sort((a, b) => a - b)[Math.floor(x.length / 2)] ?? 0;
-    expect(Math.abs(median(fresh) - median(known))).toBeLessThan(BOUND_MS);
-  }, 20_000);
+describe("the answer time of the uniform sign-up (ruling 39 M1, final fix wave item 19)", () => {
+  it.each(["code", "link"] as const)(
+    "answers a known and a new address within a small fixed bound (%s)",
+    async (verifyBy) => {
+      // A store with 2 ms per call, through auth.handle with a waitUntil. The
+      // user rows, made.after, and the mail run after the answer for both, so
+      // the answer waits for no storage call. Before ruling 39, a new address
+      // waited for 6 more calls: about 9 ms more (review probe P1).
+      const PER_CALL_MS = 2;
+      const BOUND_MS = 3;
+      const ROUNDS = 15;
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: ["https://app.example.com"],
+        storage: slowStore(createMemoryAdapter(), PER_CALL_MS),
+        mail: { send: async () => {} },
+        password: { hash: FAST, verifyBy },
+      });
+      const after: Promise<unknown>[] = [];
+      const time = async (email: string) => {
+        const request = post("/auth/password/sign-up", { email, password: PASSWORD }, ip());
+        const t0 = performance.now();
+        const res = await auth.handle(request, { waitUntil: (p) => void after.push(p) });
+        const ms = performance.now() - t0;
+        expect(await res.json()).toEqual({ sent: true });
+        await Promise.all(after.splice(0));
+        return ms;
+      };
+      for (let i = 0; i < ROUNDS; i++) await time(recordAddress(`known${i}@example.com`));
+      const known: number[] = [];
+      const fresh: number[] = [];
+      for (let i = 0; i < ROUNDS; i++) {
+        known.push(await time(recordAddress(`known${i}@example.com`)));
+        fresh.push(await time(recordAddress(`new${i}@example.com`)));
+      }
+      const median = (x: number[]) => [...x].sort((a, b) => a - b)[Math.floor(x.length / 2)] ?? 0;
+      expect(Math.abs(median(fresh) - median(known))).toBeLessThan(BOUND_MS);
+    },
+    20_000,
+  );
 });
