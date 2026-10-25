@@ -18,7 +18,7 @@ import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { sessionsEnded } from "../sessions.js";
 import { dropMemberTeams } from "../teams.js";
 import { holdUser, userStays } from "../user-hold.js";
-import { draftUserRow, normalizeEmail, validUserName } from "../users.js";
+import { createUserIn, normalizeEmail, validUserName } from "../users.js";
 import {
   ACCESS_END_KEEP,
   ACCESS_END_LEAST,
@@ -580,7 +580,8 @@ const DROP_TEAMS_WORST = 4;
  * 2. The user when no user holds the address: `emailVerified: false`, no
  *    password, and no `email` identity. `user.beforeCreate` and
  *    `afterCreate` run with `via: "operator"`. The sign-up rule does not
- *    apply: the operator, not a stranger, creates the user.
+ *    apply: the operator, not a stranger, creates the user. The shared
+ *    create `createUserIn` writes it (plan 12f2 Task 1).
  * 3. The member row. In a new organization the role is `owner` and the
  *    platform role (plan deviation 8), so the last-owner rule of plan 6
  *    holds. Else the role part goes onto the row, or a new row gets the
@@ -647,53 +648,80 @@ export async function createAdmin(
           createdAt: now,
           updatedAt: now,
         };
-        // Every before hook runs before the first write: the D1 undo (plan 9d).
-        const user =
-          existing ??
-          (await steps.user(
-            tx,
-            draftUserRow(
-              { id: userId, email, emailVerified: false, name: input.name ?? null },
+        // The member step: its before hooks, then the hold and the
+        // organization write. Every before hook runs before the first write:
+        // the D1 undo (plan 9d). A new user runs it between `user.beforeCreate`
+        // and the user write, through the `before` of `createUserIn`.
+        const join = async (user: UserRow): Promise<Result<PartChange>> => {
+          let change: PartChange;
+          if (found) {
+            const member = await memberOf(tx, organization.id, user.id);
+            const added = await addRolePart(
+              config,
+              tx,
+              p.value,
+              { organization, user, role, member, by: null },
               now,
-            ),
-          ));
+            );
+            if (!added.ok) return added;
+            change = added.value;
+          } else {
+            const member: MemberRow = {
+              id: newId(now),
+              organizationId: organization.id,
+              userId: user.id,
+              role: role === "owner" ? "owner" : `owner,${role}`,
+              createdAt: now,
+              updatedAt: now,
+            };
+            await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
+              organization: publicOrganization(organization),
+              member: { userId: user.id, role: member.role },
+              memberUser: user,
+              by: null,
+              via: "operator",
+              invitation: null,
+            });
+            change = { kind: "add", member };
+          }
+          // The hold of the user row comes before the member write, the lock
+          // order of `user-hold.ts`. The account delete takes the user row and
+          // then the member rows, so the other order can deadlock on Postgres.
+          if (existing) await holdUser(config.observe, tx, user.id);
+          if (!found) await tx.create("organization", organization);
+          return ok(change);
+        };
+        let user: UserRow;
         let change: PartChange;
-        if (found) {
-          const member = await memberOf(tx, organization.id, user.id);
-          const added = await addRolePart(
-            config,
-            tx,
-            p.value,
-            { organization, user, role, member, by: null },
-            now,
-          );
-          if (!added.ok) return added;
-          change = added.value;
+        if (existing) {
+          const joined = await join(existing);
+          if (!joined.ok) return joined;
+          user = existing;
+          change = joined.value;
         } else {
-          const member: MemberRow = {
-            id: newId(now),
-            organizationId: organization.id,
-            userId: user.id,
-            role: role === "owner" ? "owner" : `owner,${role}`,
-            createdAt: now,
-            updatedAt: now,
-          };
-          await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
-            organization: publicOrganization(organization),
-            member: { userId: user.id, role: member.role },
-            memberUser: user,
-            by: null,
-            via: "operator",
-            invitation: null,
-          });
-          change = { kind: "add", member };
+          const joined: PartChange[] = [];
+          // The act read the address above and found no user.
+          const made = await createUserIn(
+            tx,
+            steps,
+            { id: userId, email, emailVerified: false, name: input.name ?? null, image: null },
+            now,
+            {
+              addressRead: true,
+              before: async (_tx, minted) => {
+                const j = await join(minted);
+                if (j.ok) joined.push(j.value);
+                return j;
+              },
+            },
+          );
+          if (!made.ok) return made;
+          const first = joined[0];
+          if (first === undefined)
+            throw new Error("authtempo: createAdmin: the member step did not run");
+          user = made.value;
+          change = first;
         }
-        // The hold of the user row comes before the member write, the lock
-        // order of `user-hold.ts`. The account delete takes the user row and
-        // then the member rows, so the other order can deadlock on Postgres.
-        if (existing) await holdUser(config.observe, tx, user.id);
-        if (!found) await tx.create("organization", organization);
-        if (!existing) await tx.create("user", user);
         const written = await writePart(tx, change);
         if (!written.ok) return written;
         if (existing) await userStays(tx, user.id);

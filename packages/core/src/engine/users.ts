@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
+import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
@@ -493,23 +494,37 @@ async function resolveInTransaction(
     }
     return { user: resolved, created: false };
   }
-  const drafted = draftUserRow({ email, emailVerified: true, name: null }, now);
   // The sign-up rule and `user.beforeCreate`, then the session hook, all
   // before the user create (plan 12a, spec 8.9): the D1 undo (`BeforeResolveWrite`).
-  const minted = steps ? await steps.user(tx, drafted) : drafted;
-  if (before) await before(tx, minted, true);
-  const user = await tx.create("user", minted);
-  await tx.create("identity", {
-    id: newId(now),
-    userId: user.id,
-    provider: "email",
-    subject: email,
-    linkedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  });
-  return { user, created: true };
+  // The read above found no user, so the shared create sends it no second time.
+  const made = await createUserIn(
+    tx,
+    steps ?? NO_CREATE_HOOKS,
+    { email, emailVerified: true, name: null, image: null },
+    now,
+    {
+      addressRead: true,
+      ...(before
+        ? {
+            before: async (t: StorageAdapter, minted: UserRow) => {
+              await before(t, minted, true);
+              return ok(true);
+            },
+          }
+        : {}),
+    },
+  );
+  if (!made.ok) stopWith(made.code);
+  return { user: made.value, created: true };
 }
+
+/** The steps of a resolve with no hook (a test that calls the resolver directly). */
+const NO_CREATE_HOOKS: CreateSteps = {
+  begin() {},
+  user: async (_tx, user) => user,
+  identity: async () => {},
+  after: async () => {},
+};
 
 /** The fields of a new user row that a writer names; `draftUserRow` sets the rest. */
 export type UserDraftFields = Pick<UserRow, "email" | "emailVerified" | "name"> &
@@ -542,6 +557,126 @@ export function draftUserRow(fields: UserDraftFields, now: Date): UserRow {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/**
+ * The fields of a new user that `createUserIn` writes (plan 12f2 Task 1).
+ * `email` is normalized, or null with `phone`. `emailVerified: true` needs
+ * `email`. `phone` is E.164 and checked by the caller. It needs a verified
+ * address or none: a proof of the address clears the phone
+ * (`claimEmail`), so core sets no phone on an unverified address (plan 12i).
+ */
+export interface NewUserInput {
+  /** The id, when the caller names the user first (the audit draft of `createAdmin`). */
+  id?: string;
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+  image: string | null;
+  phone?: string;
+}
+
+/**
+ * A step of the caller after the hooks of `createUserIn` and before its
+ * first write, for the before hooks of the caller's other rows: the D1 undo
+ * needs every before hook first (plan 9d). A refusal answers through
+ * `createUserIn`, and the create writes nothing.
+ */
+export type BeforeUserWrite = (tx: StorageAdapter, user: UserRow) => Promise<Result<unknown>>;
+
+export interface CreateUserOptions {
+  before?: BeforeUserWrite;
+  /**
+   * The caller read `email` in this transaction and found no user, so the
+   * create does not send that read again. The unique key of the address
+   * still refuses a parallel create.
+   */
+  addressRead?: true;
+}
+
+/**
+ * The one create of a new user with its address checks (plan 12f2 Task
+ * 1), in the caller's transaction. It reads the address and the phone
+ * first: a match answers `email_taken` or `phone_taken`, and nothing is
+ * written. Then it drafts the row (`draftUserRow`) and runs `steps.user`
+ * (the sign-up rule of the steps and `user.beforeCreate` with its `via`,
+ * which may patch the name and the image). Then the caller's `before`.
+ * Then it writes the row and, for a verified address, the `email`
+ * identity. It reads no sign-up rule of its own: each caller decides it
+ * first or through its steps. The loser of a race throws `StorageError`
+ * with `unique_violation`, which the caller maps with `takenCode` after
+ * the transaction. Callers: the operator create (plan 12f2), `createAdmin`
+ * (plan 12f), and the create of `findOrCreateUserByEmail` (the magic link,
+ * the email code, and the SCIM create of plan 12d).
+ */
+export async function createUserIn(
+  tx: StorageAdapter,
+  steps: CreateSteps,
+  input: NewUserInput,
+  now: Date,
+  options: CreateUserOptions = {},
+): Promise<Result<UserRow>> {
+  // Programming errors, not answers: each caller checks its input first.
+  if (input.emailVerified && input.email === null)
+    throw new Error("authtempo: createUserIn: a verified user needs an address");
+  if (input.email === null && input.phone === undefined)
+    throw new Error("authtempo: createUserIn: a user needs an address or a phone");
+  if (input.phone !== undefined && input.email !== null && !input.emailVerified)
+    throw new Error("authtempo: createUserIn: a phone needs a verified address or none");
+  if (
+    input.email !== null &&
+    !options.addressRead &&
+    (await tx.findOne("user", [{ field: "email", op: "eq", value: input.email }]))
+  )
+    return fail("email_taken");
+  if (
+    input.phone !== undefined &&
+    (await tx.findOne("user", [{ field: "phone", op: "eq", value: input.phone }]))
+  )
+    return fail("phone_taken");
+  const drafted = draftUserRow(
+    {
+      ...(input.id !== undefined ? { id: input.id } : {}),
+      email: input.email,
+      emailVerified: input.emailVerified,
+      name: input.name,
+      image: input.image,
+      ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    },
+    now,
+  );
+  const minted = await steps.user(tx, drafted);
+  if (options.before) {
+    const ready = await options.before(tx, minted);
+    if (!ready.ok) return ready;
+  }
+  const user = await tx.create("user", minted);
+  // The `email` identity follows the address (email-change.ts), and no user
+  // holds this one, so no identity holds it: one create, not `ensureEmailIdentity`.
+  if (user.emailVerified && user.email !== null)
+    await tx.create("identity", {
+      id: newId(now),
+      userId: user.id,
+      provider: "email",
+      subject: user.email,
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  return ok(user);
+}
+
+/**
+ * The code of a create that lost a unique-key race, read after the
+ * transaction: inside it, Postgres has already aborted it (spec 8.14 item
+ * 6). Null for any other error, which the caller throws again.
+ */
+export function takenCode(error: unknown): "email_taken" | "phone_taken" | null {
+  if (!(error instanceof StorageError) || error.code !== "unique_violation") return null;
+  if (error.model !== "user") return null;
+  if (error.fields.includes("email")) return "email_taken";
+  if (error.fields.includes("phone")) return "phone_taken";
+  return null;
 }
 
 /**
