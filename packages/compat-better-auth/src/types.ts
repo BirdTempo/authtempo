@@ -1398,6 +1398,12 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   /** Plan 12f2. Core's operator delete: the account and its solo organizations go. */
   removeUser(input: { body: { userId: string }; headers: Headers }): Promise<{ success: true }>;
   /**
+   * Plan 12f2. Core's operator create, with no mail. It takes no password:
+   * any password, a role other than `user`, a ban key, and any other key of
+   * `data` throw. It answers `{ user }`, as Better Auth 1.7.7 does.
+   */
+  createUser(input: { body: AdminCreateUserBody; headers: Headers }): Promise<{ user: AdminUser }>;
+  /**
    * The calls of the sign-in plugins (plan 12i Task 16). Each runs the
    * handler's steps of its path with the caller's headers. Without the
    * plugin, each throws 404. A server caller has no cookie jar: a sign-in
@@ -1468,6 +1474,19 @@ export interface AdminListUsersQuery {
   filterOperator?: string;
   /** The shim's own key: the `next` of the page before. */
   after?: string;
+}
+
+/**
+ * Better Auth's create-user body (dist/plugins/admin/routes.mjs, read
+ * 2026-10-25) as core's operator create takes it (plan 12f2). It has no
+ * `password`: core lets no operator set one (spec section 26).
+ */
+export interface AdminCreateUserBody {
+  email: string;
+  name: string;
+  /** The default role only: a grant of the platform role goes through set-role. */
+  role?: "user" | ["user"];
+  data?: { emailVerified?: boolean; image?: string | null; role?: "user" | ["user"] };
 }
 
 /**
@@ -2178,7 +2197,8 @@ export interface AdminClientCalls {
   }): Promise<CompatClientResult<AdminUser>>;
   /** Plan 12f2. Core's operator delete. */
   removeUser(input: { userId: string }): Promise<CompatClientResult<{ success: true }>>;
-  createUser: AdminNotSupported;
+  /** Plan 12f2. Core's operator create, with no mail and no password. It answers `{ user }`. */
+  createUser(input: AdminCreateUserBody): Promise<CompatClientResult<{ user: AdminUser }>>;
   listUserSessions: AdminNotSupported;
   revokeUserSession: AdminNotSupported;
   setUserPassword: AdminNotSupported;

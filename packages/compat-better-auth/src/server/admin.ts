@@ -3,6 +3,7 @@ import {
   activeBan,
   holdsPlatformRole,
   isJsonRequest,
+  normalizeEmail,
   type OperatorUser,
   type ResolvedSession,
   type SessionRow,
@@ -10,7 +11,7 @@ import {
 } from "@authtempo/core";
 import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { AdminOptions, AdminSession, AdminUser } from "../types.js";
-import { ADMIN_NOT_SUPPORTED } from "./admin-lines.js";
+import { ADMIN_NOT_SUPPORTED, NO_PASSWORD_SET } from "./admin-lines.js";
 import type { Mapped } from "./map-options.js";
 import { sessionTokenOf, toSession, toUser } from "./shapes.js";
 
@@ -19,10 +20,10 @@ export { ADMIN_NOT_SUPPORTED };
 /**
  * Better Auth 1.7.7's admin paths (dist/plugins/admin/routes.mjs, read
  * 2026-10-21), served by `auth.handler` with the `admin` plugin (plan 12f,
- * spec section 26 item 14). The shim maps ten paths onto core's operator
+ * spec section 26 item 14). The shim maps eleven paths onto core's operator
  * routes: list-users, get-user, ban-user, unban-user, revoke-user-sessions,
- * impersonate-user, stop-impersonating, set-role, and the update-user and
- * remove-user of plan 12f2. The caller's session is the user actor (ruling
+ * impersonate-user, stop-impersonating, set-role, and the create-user,
+ * update-user, and remove-user of plan 12f2. The caller's session is the user actor (ruling
  * 39, and ruling 1 B9 of plan 12f2: no app actor). The calls of `ADMIN_NOT_SUPPORTED` (admin-lines.ts)
  * have no core tool, so each one answers NOT_SUPPORTED with a line that
  * names section 26.
@@ -223,7 +224,58 @@ function updateDataRefusal(data: Body): AdminAnswer | null {
   return extra === undefined ? null : failure(FIELD_NOT_ALLOWED, 400, updateFieldLine(extra));
 }
 
-/** The `data` object of an update-user body, or null for no object. */
+/** Better Auth's codes of create-user (routes.mjs createUser and error-codes.mjs, read 2026-10-25). */
+const SET_PASSWORD = "YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD";
+const CHANGE_ROLE = "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE";
+const BAN_USERS = "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS";
+const USER_EXISTS = "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL";
+const INVALID_EMAIL = "INVALID_EMAIL";
+const BAN_KEYS = ["banned", "banReason", "banExpires"];
+const CREATE_PATH = "/admin/create-user";
+/**
+ * The keys of Better Auth's create-user `data` that core's operator create
+ * takes (plan 12f2 Task 2). `role` is here only as the default role.
+ */
+const CREATE_DATA_FIELDS = new Set(["emailVerified", "image", "role"]);
+
+/**
+ * The shim's refusal of a create-user body, or null when core's create
+ * takes it. Core sets no password, no role but `user`, no ban, and no
+ * added field (spec section 26), so each one refuses, never drops in
+ * silence. Better Auth refuses a role and a ban key with these codes when
+ * the caller may not set them (routes.mjs createUser, read 2026-10-25).
+ * Better Auth sets a password at create, and core never does. So a
+ * password answers the code of set-user-password (plan 12f2 Task 7 item 2).
+ * A body outside the object form answers null: the mapped route refuses it.
+ */
+function createRefusal(body: Body, platformRole: string): AdminAnswer | null {
+  if (Object.hasOwn(body, "password")) return failure(SET_PASSWORD, 403, NO_PASSWORD_SET);
+  const data = dataOf(body) ?? {};
+  // Better Auth reads `role`, else `data.role` (routes.mjs createUser).
+  for (const role of [body.role, data.role])
+    if (role !== undefined && setRoleChange(role, platformRole) !== "revoke")
+      return failure(
+        CHANGE_ROLE,
+        403,
+        `core creates a user with the role ${USER_ROLE} only; grant the platform role through /admin/set-role (spec section 26 item 1)`,
+      );
+  if (BAN_KEYS.some((k) => Object.hasOwn(data, k)))
+    return failure(
+      BAN_USERS,
+      403,
+      "core bans a user through /admin/ban-user only (spec section 26 item 6)",
+    );
+  const extra = Object.keys(data).find((k) => !CREATE_DATA_FIELDS.has(k));
+  return extra === undefined
+    ? null
+    : failure(
+        FIELD_NOT_ALLOWED,
+        400,
+        `core's operator create takes data.emailVerified and data.image only, not ${extra} (spec section 26)`,
+      );
+}
+
+/** The `data` object of an update-user or a create-user body, or null for no object. */
 function dataOf(body: unknown): Body | null {
   const v = typeof body === "object" && body !== null ? (body as { data?: unknown }).data : null;
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
@@ -276,6 +328,10 @@ async function refusalAnswer(mapped: Mapped, request: Request): Promise<AdminAns
     const data = dataOf(body);
     if (data !== null) return updateDataRefusal(data);
   }
+  if (path === CREATE_PATH && request.method === "POST") {
+    const body = await objectOf(request);
+    if (body !== null) return createRefusal(body, mapped.platformRole ?? "admin");
+  }
   return null;
 }
 
@@ -297,6 +353,7 @@ export const ADMIN_FORBIDDEN: Readonly<Record<string, string>> = {
   // Plan 12f2 Task 7.
   "/admin/update-user": "YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS",
   "/admin/remove-user": "YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS",
+  "/admin/create-user": "YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS",
 };
 
 /**
@@ -458,7 +515,56 @@ function userIdOf(body: Body | null): string | null {
 }
 
 /**
- * The answer to one of the ten admin paths that map onto core's operator
+ * Core's create body of a Better Auth create-user body, or null for a body
+ * that Better Auth refuses too: `email` and `name` are strings (routes.mjs
+ * createUserBodySchema). `createRefusal` answered every other key first.
+ * `firstSignIn` is `none`, because Better Auth mails nothing at create.
+ * Core then writes no invitation and mails no link.
+ */
+function createBodyOf(body: Body | null): Body | null {
+  if (body === null) return null;
+  const { email, name } = body;
+  if (typeof email !== "string" || typeof name !== "string") return null;
+  if (body.data !== undefined && dataOf(body) === null) return null;
+  const { emailVerified, image } = dataOf(body) ?? {};
+  return {
+    email,
+    // Better Auth keeps an empty name; core keeps null for no name (as profilePatch).
+    name: name === "" ? null : name,
+    ...(emailVerified !== undefined ? { emailVerified } : {}),
+    ...(image !== undefined ? { image } : {}),
+    firstSignIn: "none",
+    reason: adminReason(CREATE_PATH),
+  };
+}
+
+/**
+ * Core's refusal of a create in Better Auth's form. A taken address answers
+ * Better Auth's code and status, 400 (plan 12f2 Task 7 item 2). Core
+ * answers `invalid_body` for a malformed address, and Better Auth
+ * `INVALID_EMAIL` 400; the rule is core's own `normalizeEmail`. Each other
+ * code answers as on every admin path.
+ */
+async function createRefusalOf(res: Response, email: unknown): Promise<AdminAnswer> {
+  const error = (
+    (await res
+      .clone()
+      .json()
+      .catch(() => null)) as Body | null
+  )?.error;
+  if (error === "email_taken")
+    return withHeaders(
+      { code: USER_EXISTS, message: "User already exists. Use another email." },
+      400,
+      res,
+    );
+  if (error === "invalid_body" && typeof email === "string" && normalizeEmail(email) === null)
+    return withHeaders({ code: INVALID_EMAIL, message: "Invalid email" }, 400, res);
+  return refusalOf(CREATE_PATH, res);
+}
+
+/**
+ * The answer to one of the eleven admin paths that map onto core's operator
  * routes (plan 12f Tasks 10 and 11, plan 12f2 Task 7). Any other request gets null. Each
  * call posts core's own route with the caller's headers, so the session of
  * the caller is the actor. Core's guard runs there: the platform role, a
@@ -604,6 +710,16 @@ async function adminAnswer(
   // core's own isJsonRequest, so the shim holds no copy (ruling 64).
   if (!isJsonRequest(request)) return invalid();
   const body = await objectOf(request);
+  if (path === CREATE_PATH) {
+    // adminRefusal answered a password, a role, a ban key, and each other key of data.
+    const create = createBodyOf(body);
+    if (create === null) return invalid();
+    const res = await core("/operator/users/create", create);
+    if (!res.ok) return createRefusalOf(res, create.email);
+    const { userId } = (await res.clone().json()) as { userId: string };
+    // Core creates no platform operator, so the role is `user`. Better Auth answers { user }.
+    return userAfter(res, userId, USER_ROLE);
+  }
   const userId = userIdOf(body);
   if (userId === null) return invalid();
   switch (path) {

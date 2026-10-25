@@ -645,10 +645,10 @@ The options:
 | `allowImpersonatingAdmins` | `false` only: core never lets an operator impersonate a platform operator. |
 | `defaultBanReason`, `defaultBanExpiresIn`, `bannedUserMessage`, `adminUserIds`, `schema`, `ac`, `roles` | Refused. Each refusal names spec section 26. |
 
-Five calls that core does not serve answer `NOT_SUPPORTED` (501) with a
+Four calls that core does not serve answer `NOT_SUPPORTED` (501) with a
 line that names spec section 26. They are `/admin/set-user-password`,
-`/admin/create-user`, `/admin/list-user-sessions`,
-`/admin/revoke-user-session`, and `/admin/has-permission`. No operator sets a
+`/admin/list-user-sessions`, `/admin/revoke-user-session`, and
+`/admin/has-permission`. No operator sets a
 password (plan 12f2): a password that an operator knows signs in outside an
 impersonation. The person resets the password through the reset link. The
 refusal comes before any read, so its answer is the same for every user id.
@@ -666,6 +666,26 @@ written. The shim never drops a key in silence:
 | `role` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/set-role`. |
 | `banned`, `banReason`, `banExpires` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/ban-user` and `/admin/unban-user`. |
 | Any other key | 400 `FIELD_NOT_ALLOWED`, with a line that names the key and spec section 26. |
+
+`/admin/create-user` takes `email`, `name`, `data.emailVerified`, and
+`data.image`, as core's operator create does (plan 12f2). An empty name is
+no name. The shim sends core's `firstSignIn: "none"`, because Better Auth
+mails nothing at create: core writes no invitation and mails no link. The
+person signs in by a path of the app, such as the reset link or a magic
+link. Each other key is refused before any read, and nothing is written.
+The shim never drops a key in silence:
+
+| Key | Answer |
+| --- | --- |
+| `password` | 403 `YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD`, the code of Better Auth's password set. No operator sets a password; the line names the reset link and spec section 26. |
+| `role` or `data.role` other than `user` | 403 `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, Better Auth's code. Grant the platform role through `/admin/set-role`. `user` and `["user"]` add nothing. |
+| `data.banned`, `data.banReason`, `data.banExpires` | 403 `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`, Better Auth's code. Use `/admin/ban-user`. |
+| Any other key of `data` (`name`, `email`, `phoneNumber`, an added field) | 400 `FIELD_NOT_ALLOWED`, with a line that names the key and spec section 26. |
+
+A taken address answers 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` and a
+malformed address 400 `INVALID_EMAIL`, as Better Auth answers. An address in
+a placeholder form answers 403 `HOOK_REFUSED` before any write: it reads
+back as no address, so it is never proved.
 
 `/admin/list-users` takes one search. `searchValue` needs `searchField`
 `email` (the default) and `searchOperator` `starts_with`: core searches the
@@ -698,10 +718,12 @@ core's guard decides (plan 12f Task 10):
 | `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |
 | `POST /admin/update-user` | `POST /operator/users/update` | The user itself, as Better Auth answers it, not `{ user }`. Core writes the change and its audit row `user_update` in one transaction. |
 | `POST /admin/remove-user` | `POST /operator/users/delete` | `{ success: true }`. Core deletes the account and each organization that the user alone holds, and writes the audit row `user_delete`. |
+| `POST /admin/create-user` | `POST /operator/users/create` | `{ user }`, as Better Auth answers it, with `role: "user"`. Core writes the user and its audit row `user_create` in one transaction, and runs `user.beforeCreate` and `user.afterCreate`. |
 
 `auth.api` has Better Auth's server calls of these paths: `listUsers`,
 `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`,
-`impersonateUser`, `stopImpersonating`, `adminUpdateUser`, and `removeUser`. Each takes Better Auth's
+`impersonateUser`, `stopImpersonating`, `adminUpdateUser`, `removeUser`,
+and `createUser`. Each takes Better Auth's
 `query` or `body` and the caller's `headers`, and runs the steps of its
 path. So it answers what the path answers, with dates as `Date` values. A
 refusal throws `APIError` with the status and the code of the path. Without
@@ -723,13 +745,15 @@ no operator secret.
 
 | Core's refusal | Answer |
 | --- | --- |
-| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`, `YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`, `YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS`, or `YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`. |
+| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`, `YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`, `YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS`, `YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`, or `YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS`. |
 | `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
 | `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
 | `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 409 `YOU_CANNOT_REMOVE_YOURSELF` on a remove, else 409 `FORBIDDEN`. |
 | `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
 | `delete_too_large` (a remove of a user who alone holds more than 50 organizations, or a remove on D1 whose least work does not fit the query limit of one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
+| `email_taken` on a create | 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`, Better Auth's code and status. |
+| `invalid_body` on a create with a malformed address | 400 `INVALID_EMAIL`, Better Auth's code. |
 | `not_found` | 404 `USER_NOT_FOUND`. |
 | `unauthorized` (no session) | 401 `UNAUTHORIZED`. |
 
@@ -782,6 +806,11 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - `/admin/remove-user` deletes the user's solo organizations with the
   account, and refuses the last owner of an organization with other members
   (`SOLE_OWNER`). Better Auth keeps every organization.
+- `/admin/create-user` takes no password, no role but `user`, no ban key,
+  and no added field. Better Auth sets each one. A server call with no
+  headers answers 401: Better Auth creates the user there with no session.
+- A refusal of a create-user key comes before the session check. So a
+  caller with no session who sends a password gets 403, not 401.
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
 With `twoFactor()`, it also reads the factor row once.
@@ -793,6 +822,8 @@ shim's read of the session for `{ session, user }`.
 A remove adds no query to core's delete route: it answers
 `{ success: true }` with no read. An update reads the user row once after
 core's route, and the factor row once with `twoFactor()`.
+A create sends 17 queries in its invocation, with the read of the user row
+and the factor row.
 
 Better Auth requires a reason nowhere, and core writes an audit row with a
 reason for each act. A ban takes `banReason` as its reason. Every other call,

@@ -196,7 +196,6 @@ describe("the admin calls that core does not serve (plan 12f)", () => {
     const on = betterAuth(options());
     const off = betterAuth(options(null, { authtempo: { passwordHash: fast } }));
     expect(Object.keys(ADMIN_NOT_SUPPORTED).sort()).toEqual([
-      "/admin/create-user",
       "/admin/has-permission",
       "/admin/list-user-sessions",
       "/admin/revoke-user-session",
@@ -820,6 +819,10 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
         () => a.call("/admin/update-user", { userId: ann.id, data: { name: "Ann" } }, a.op),
       ],
       ["/admin/remove-user", () => a.call("/admin/remove-user", { userId: ann.id }, a.op)],
+      [
+        "/admin/create-user",
+        () => a.call("/admin/create-user", { email: "dee@example.com", name: "Dee" }, a.op),
+      ],
     ];
     expect(calls.map(([p]) => p).sort()).toEqual(Object.keys(ADMIN_FORBIDDEN).sort());
     const codes: Record<string, unknown> = {};
@@ -837,6 +840,7 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       "/admin/impersonate-user": [403, "YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS"],
       "/admin/update-user": [403, "YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS"],
       "/admin/remove-user": [403, "YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS"],
+      "/admin/create-user": [403, "YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS"],
     });
     expect(await a.audit(ann.id)).toEqual([]);
   });
@@ -1227,7 +1231,6 @@ describe("the admin calls of the client (ruling 60 m1)", () => {
       "updateUser",
     ]);
     const unmapped = {
-      "/admin/create-user": admin.createUser,
       "/admin/list-user-sessions": admin.listUserSessions,
       "/admin/revoke-user-session": admin.revokeUserSession,
       "/admin/set-user-password": admin.setUserPassword,
