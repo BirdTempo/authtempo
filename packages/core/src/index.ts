@@ -14,20 +14,28 @@ export type {
   AccountConfig,
   AccountDeleteConfirmConfig,
   AccountNoticesConfig,
+  AnonymousConfig,
   AuthConfig,
   DynamicRolesConfig,
   EmailOtpConfig,
   JwtMintConfig,
+  LastMethodConfig,
   LegacyVerifyConfig,
   MailMessage,
   MailPort,
+  MultiSessionConfig,
   OAuthConfig,
   OperatorConfig,
   OperatorScope,
   OperatorSecretEntry,
   OrganizationLimits,
   OrganizationsConfig,
+  PasskeyConfig,
+  PasskeyExtensions,
+  PasskeySignUpConfig,
   PasswordConfig,
+  PhoneConfig,
+  PhoneMessageInput,
   ResolvedEmailOtp,
   ScimConfig,
   SsoConfig,
@@ -35,14 +43,18 @@ export type {
   TokensConfig,
   TotpConfig,
   TotpGateConfig,
+  UsernameConfig,
+  VerifyCodeConfig,
 } from "./config.js";
 export {
   ConfigError,
   DEFAULT_RESERVED_SLUGS,
   DELETE_CONFIRM_TTL_MINUTES,
+  defaultPhoneMessage,
   isAppScheme,
 } from "./config.js";
 export {
+  type AnonymousApi,
   type Auth,
   type AuthApi,
   createAuth,
@@ -53,7 +65,9 @@ export {
   type OAuthApi,
   type OAuthClientsApi,
   type OrganizationTokensApi,
+  onWorkers,
   type PasswordApi,
+  type PhoneApi,
   type ScimApi,
   type SecretsApi,
   type SessionApi,
@@ -65,6 +79,12 @@ export {
 } from "./create-auth.js";
 export type { AccountDelete } from "./engine/account-delete.js";
 export { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
+export {
+  ANONYMOUS_REFUSED,
+  type AnonymousDelete,
+  type AnonymousSession,
+  type AnonymousSignIn,
+} from "./engine/anonymous.js";
 export type { EmailChangeRequest } from "./engine/email-change.js";
 export type {
   EmailOtpRequest,
@@ -76,6 +96,7 @@ export {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
+  defaultVerifyCodeMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 export type { HandoffStart } from "./engine/handoff.js";
@@ -112,6 +133,7 @@ export {
 export type { IdentityEntry, IdentityList, IdentityUnlink } from "./engine/identities.js";
 export type { InvitationSummary } from "./engine/invitations.js";
 export type { MintedJwt, SessionJwtClaims } from "./engine/jwt.js";
+export { LAST_METHODS, type LastMethod } from "./engine/last-method.js";
 export type { MagicLinkRequest, MagicLinkVerify } from "./engine/magic-link.js";
 export { defaultNoticeMail, type NoticeEvent, type NoticeMailInput } from "./engine/notices.js";
 export { CLIENT_SECRET_PREFIX } from "./engine/oauth-client-secret.js";
@@ -147,22 +169,26 @@ export {
 } from "./engine/organization-tokens.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
+export type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
 export type { PasskeySummary } from "./engine/passkeys.js";
 export type {
   ExistingAccountMailInput,
   PasswordChange,
+  PasswordIdentifier,
   PasswordReauth,
   PasswordResend,
   PasswordReset,
   PasswordResetRequest,
   PasswordSession,
   PasswordSignIn,
+  PasswordSignInFields,
   PasswordSignInResult,
   PasswordSignUp,
   PasswordSignUpPending,
   PasswordSignUpResult,
   PasswordVerified,
   PasswordVerify,
+  PasswordVerifyCode,
   ResetChallenge,
   ResetResult,
 } from "./engine/password.js";
@@ -172,6 +198,15 @@ export {
   PENDING_HASH_PREFIX,
 } from "./engine/password.js";
 export type { PermissionInput } from "./engine/permissions.js";
+export {
+  PHONE_RE,
+  type PhoneAdd,
+  type PhoneAddVerify,
+  type PhoneRemove,
+  type PhoneRequest,
+  type PhoneSession,
+  type PhoneVerify,
+} from "./engine/phone.js";
 export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";
@@ -238,6 +273,7 @@ export type {
 } from "./engine/totp.js";
 /** The shape of a `tf_` challenge token (plan 9f): the compat shim checks a cookie against it before core's verify. */
 export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
+export { USERNAME_RE, type Username, type UsernameSet } from "./engine/username.js";
 export { normalizeEmail, validImageUrl, validUserName } from "./engine/users.js";
 export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export {
@@ -283,6 +319,7 @@ export {
 export { newId } from "./primitives/ids.js";
 export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
 export type { Keyring, SecretVersion } from "./primitives/keyring.js";
+export { PASSKEY_HINTS, type PasskeyHint } from "./primitives/passkey-hints.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,
@@ -333,6 +370,7 @@ export {
   type PasswordHashSeam,
   PBKDF2_ITERATIONS,
 } from "./seams/password-hash.js";
+export type { SmsPort } from "./seams/sms.js";
 export type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -346,16 +384,26 @@ export {
   type WebAuthnSeam,
 } from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
+export type { DiscordConfig } from "./social/discord.js";
+export type { FacebookConfig } from "./social/facebook.js";
 export { type GitHubConfig, isGithubSubject } from "./social/github.js";
+export type { GitLabConfig } from "./social/gitlab.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { LinkedInConfig } from "./social/linkedin.js";
+export type { MicrosoftConfig } from "./social/microsoft.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEndpoints, OidcEntry } from "./social/oidc.js";
 export {
+  COMING_PRESET_NAMES,
+  PRESET_PROVIDER_NAMES,
   PROVIDER_NAME_RE,
   type SocialProfile,
   type SocialProviderName,
+  type TokenRequestAnswer,
+  type TokenRequestInput,
 } from "./social/provider.js";
+export type { SlackConfig } from "./social/slack.js";
+export type { TwitterConfig } from "./social/twitter.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,

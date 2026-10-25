@@ -10,6 +10,7 @@ const RUNS = ["8.4", "9.7"].flatMap((v) => [
   `refresh reuse race: mysql ${v}`,
   `refresh revoke race: mysql ${v}`,
   `shape conformance: mysql ${v}`,
+  `phone cap: mysql ${v}`,
 ]);
 
 export default defineConfig({

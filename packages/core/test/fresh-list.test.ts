@@ -6,6 +6,7 @@ import { createConnection } from "../src/engine/sso/connections.js";
 import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE, SOCIAL } from "./every-feature.js";
 import { makeAuth, post } from "./helpers.js";
 import { SCIM_APP, scimAuth, scimToken } from "./scim/helpers.js";
@@ -26,6 +27,8 @@ const credential = { id: "x", response: { clientDataJSON: "x" } };
 const BODIES: Readonly<Record<string, unknown>> = {
   "/handoff/redeem": { code: "x", verifier: "v".repeat(43) },
   "/identities/unlink": { id: "x" },
+  // The ID-token sign-in of plan 12i Task 10 needs a token; it reads no session.
+  "/social/:provider/id-token": { idToken: "a.b.c", nonce: "A".repeat(43) },
   "/magic-link/request": { email: EMAIL },
   "/oauth/grants/revoke": { clientId: "x" },
   "/organizations/active": { organizationId: null },
@@ -61,11 +64,16 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/passkey/authenticate/verify": { response: credential },
   "/passkey/register/verify": { response: credential },
   "/passkeys/delete": { id: "x" },
+  "/phone/request": { phone: "+14155550100" },
+  "/phone/verify": { phone: "+14155550100", code: "000000" },
+  "/phone/add": { phone: "+14155550101" },
+  "/phone/add/verify": { code: "000000" },
   "/passkeys/rename": { id: "x", name: "Phone" },
   "/password/change": { newPassword: "another long password" },
   "/password/reset/request": { email: EMAIL },
   "/password/sign-in": { email: EMAIL, password: "another long password" },
   "/password/sign-up": { email: "new@example.com", password: "another long password" },
+  "/password/verify/code": { email: EMAIL, code: "000000" },
   "/password/verify/resend": { email: EMAIL },
   "/reauth": { password: "another long password" },
   "/second-factor/disable": { method: "email", password: "x" },
@@ -84,6 +92,7 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/user/change-email": { newEmail: "new@example.com" },
   "/user/change-email/verify": { code: "000000" },
   "/user/update": { name: "Ada" },
+  "/user/username": { username: "Ada" },
 };
 
 /** Each POST route's answer to a stale session of a verified user with no password and no factor. */
@@ -96,6 +105,8 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
     password: {},
     oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: "0".repeat(64) },
+    username: {},
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const user = await auth.seedUser(EMAIL);
@@ -231,8 +242,9 @@ describe("the routes that answer session_not_fresh and the client README list", 
     const listed = readmeList();
     // Plan 12k Task 7 adds tokens.update; Task 8 adds the two organization token
     // calls and organizations.members.remove. Plan 12d Task 13 adds sso.domains,
-    // sso.connections, and scim.tokens.
-    expect(listed).toHaveLength(26);
+    // sso.connections, and scim.tokens. Plan 12i Task 2 adds username.set,
+    // and Task 5 phone.add, phone.verifyAdd, and phone.remove.
+    expect(listed).toHaveLength(30);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

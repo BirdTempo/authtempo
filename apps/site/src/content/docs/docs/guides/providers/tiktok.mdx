@@ -1,0 +1,58 @@
+---
+title: Sign in with TikTok
+description: Add TikTok sign-in for the web as a social.oauth2 entry that finds the user by the TikTok open_id, with no address.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A `tokenRequest` hook on `oauth2` entries, with TikTok and WeChat"
+  - packages/core/src/social/entries/tiktok.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/tiktok.ts?raw";
+import test from "../../../../../../samples/guides/tiktok.test.ts?raw";
+
+**For:** an app developer whose users have TikTok accounts.
+
+**What it does:** `tiktokEntry` adds a "Continue with TikTok" button. Core finds or makes the user by the TikTok `open_id`, and the user has no address.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- A TikTok developer app with web sign-in and the scope `user.info.basic`, for [the TikTok entry](/docs/reference/api/#the-social-entries-entry).
+
+## Steps
+
+1. Register `https://<your api host>/auth/social/tiktok/callback` as the redirect URI of the TikTok app.
+2. Copy the client key and the client secret of the TikTok app to your secret store.
+3. Add `tiktokEntry` from `@authtempo/core/social-entries` to `social.oauth2`.
+
+<Code code={config} lang="ts" title="The TikTok entry in the config" />
+
+4. Link to `/auth/social/tiktok/start?next=/home` from the sign-in page.
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- TikTok names the client id `client_key`. The entry sends it in the authorize query and in the token form, through a `tokenRequest` hook.
+- Core spends the state and checks the binding cookie before the hook runs. The hook's fetch calls only the TikTok token URL.
+- The subject is `open_id`, the key that Better Auth keeps. A Better Auth `account` row of the provider `tiktok` links with no change.
+- The TikTok user object has no address. So the user has no address, no magic link, and no mail notice. Offer a passkey or a second method in the account settings.
+- Core never links a TikTok sign-in to another user by address. The settings link of a TikTok account answers `email_required`, because the link needs a proved address.
+- The TikTok page of the web sign-in names no PKCE. The entry sends a PKCE challenge. Do one real sign-in before you go live, to see that TikTok accepts it.
+- Under `signUp: "invited"`, a TikTok sign-in makes no user, because an invitation names an address.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the user info call failed, answered an error, or named another `open_id`. Check the client key, the secret, and the redirect URI.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at TikTok.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+- [`email_required`](/docs/reference/errors/#email_required): a signed-in user tried to link a TikTok account.
+
+## Next
+
+- [Sign in with WeChat](/docs/guides/providers/wechat/)
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Social](/docs/reference/config/#social)

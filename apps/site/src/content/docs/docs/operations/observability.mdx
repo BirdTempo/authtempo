@@ -140,11 +140,14 @@ With no sink, core writes each line of this table with `console`, with the text 
 | Line | Event | What to do |
 | --- | --- | --- |
 | `authtempo: waitUntil threw; the flush has no hook` | `observe.wait_until_threw` | Act. The `waitUntil` of `handle` threw, so the events of that request stay in the buffer. Bind it: `(p) => ctx.waitUntil(p)`. |
+| `authtempo: no waitUntil on Workers; the answer waited for the work after it` | `observe.wait_until_missing` | Act. On Workers, `handle` got no `waitUntil` for a request with work after the answer. Core waited for that work before it answered, so the code went out. The answer time can then tell whether a phone number has an account. Pass `waitUntil` to the binding or to `handle`. |
 | `authtempo: <path> has an estimated <bits> bits of entropy; 120 or more is recommended` | `secret.low_entropy` | Act. Core starts, but the secret is weak. Make one with `openssl rand -base64 32`. |
 | `authtempo: a stored value names secret version <version>, which is not configured` | `secret.unknown_version` | Act. A row names a secret version that `secrets` lacks. Add the version back, or rewrap the rows. |
 | `authtempo: unhandled error` | `error.internal` | Act. A route threw and answered 500. Read the route and the error name. |
 | `authtempo: the captcha port threw` | `captcha.port_threw` | Act. The captcha port of the app threw. Core reads it as no answer. |
 | `authtempo: the captcha did not answer` | `captcha.no_answer` | Act. The captcha gave no answer, and `captcha.onUnavailable` let the flow go on. |
+| `authtempo: the SMS port threw` | `sms.port_threw` | Act. The SMS port of the app threw, or `phone.message` threw. Core reads it as `"unavailable"`, and the send counted against `phone.dailyCap`. The line holds no number and no code. |
+| `authtempo: an SMS after the answer was not sent` | `sms.not_sent` | Act. A phone code request or a phone add answered `{ sent: true }`, and its SMS did not go out after the answer. The reason `capped` means that `phone.dailyCap` is spent. The reason `unavailable` means that the SMS port did not send. The reason `timeout` means that the send passed 10 seconds. The person gets no code and no error. The line holds no number and no code. |
 | `authtempo: hook event copy failed` | `hook.copy_failed` | Act. Core could not copy the event of a hook. Keep the hook data plain. |
 | `authtempo: before hook failed` | `hook.before_failed` | Act. A `before` hook threw, and the flow answered `hook_failed`. Fix the hook. |
 | `authtempo: after hook failed` | `hook.after_failed` | Act. An `after` hook threw after the commit. The app's own row for that id is missing. |
@@ -155,6 +158,8 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: email change gave up` | `email_change.gave_up` | Watch. A change of address lost its race too often. |
 | `authtempo: credential removal gave up` | `credential.removal_gave_up` | Watch. The removal of a credential lost its race too often. |
 | `authtempo: profile update gave up` | `profile.update_gave_up` | Watch. A profile update lost its race too often. |
+| `authtempo: username set gave up` | `username.set_gave_up` | Watch. A username set lost its race too often. |
+| `authtempo: phone set gave up` | `phone.set_gave_up` | Watch. The set of a phone lost its race too often. |
 | `authtempo: notice mail failed` | `notice.mail_failed` | Act when it repeats. The mail port threw on a notice mail. The act itself kept its result. |
 | `authtempo: email code count gave up` | `email_code.count_gave_up` | Watch. The guess count of an email code lost its race too often. |
 | `authtempo: second-factor challenge count gave up` | `second_factor.count_gave_up` | Watch. The guess count of a challenge lost its race too often. |
@@ -175,8 +180,11 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: social token request failed` | `social.token_request_failed` | Act when it repeats. The token request to a provider failed. |
 | `authtempo: social token endpoint answered` | `social.token_status` | Act when it repeats. The token endpoint of a provider answered an error status. Check the client secret. |
 | `authtempo: social token answer has no token` | `social.token_missing` | Act when it repeats. The token answer of a provider held no token. |
+| `authtempo: social token answer refused` | `social.token_refused` | Act when it repeats. The token answer of a provider said that the exchange failed, for example Slack's `ok: false`. |
 | `authtempo: social id token rejected` | `social.id_token_rejected` | Watch. The ID token of a provider did not verify. |
 | `authtempo: social nonce mismatch` | `social.nonce_mismatch` | Watch. The nonce of an ID token did not match the request. |
+| `authtempo: social id token used again` | `social.id_token_replayed` | Watch. A token of the ID-token route came a second time. A rise can mean that a token leaked from an app. |
+| `authtempo: social id token claims refused` | `social.claims_refused` | Watch. An ID token failed the issuer or claim check of its provider, for example a token of another Entra ID tenant. |
 | `authtempo: social user info failed` | `social.user_info_failed` | Watch. The user info request to a provider failed. |
 | `authtempo: social user info has a bad subject` | `social.bad_subject` | Watch. The user info of a provider held a subject that core refuses. |
 | `authtempo: oidc discovery request failed` | `oidc.discovery_failed` | Act. The discovery request of an `oidc` provider failed. Check the issuer, or set `endpoints`. |
@@ -205,6 +213,8 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: the sweep pending end step stopped` | `sweep.pending_end_stopped` | Act when it repeats. The sweep stopped its pending end step. The next sweep tries again. |
 | `authtempo: the sweep sso recheck step stopped` | `sweep.sso_recheck_stopped` | Act when it repeats. The sweep stopped its recheck of the verified SSO domains. The next sweep tries again. |
 | `authtempo: the sweep organization rest step stopped` | `sweep.organization_rest_stopped` | Act when it repeats. The sweep stopped its step of the rows that an account delete left. The next sweep tries again. |
+| `authtempo: the sweep anonymous step stopped` | `sweep.anonymous_stopped` | Act when it repeats. The sweep stopped its step of the anonymous users past `anonymous.ttlDays`. The next sweep tries again. |
+| `authtempo: the anonymous upgrade cleanup failed` | `anonymous.cleanup_failed` | Watch. A sign-in replaced an anonymous user, but the end of its session or its delete failed. The sign-in holds. The sweep deletes the user later. |
 | `authtempo: sso guard refused` | `sso.guard_refused` | Act when no owner acted. The SSO manager guard refused a caller at the named step. |
 | `authtempo: sso failed` | `sso.failed` | Act when it repeats for one connection. An SSO sign-in failed at the named step. Check the setup of the provider. |
 | `authtempo: sso denied` | `sso.denied` | Watch. The provider answered an error to the sign-in, such as a person who said no. |

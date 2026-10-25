@@ -1,14 +1,19 @@
 import type { ResolvedSession } from "@authtempo/core";
 import {
+  type BindingWaitUntil,
+  boundWaitUntil,
   checkGateOptions,
   DEFAULT_BASE_PATH,
   type GateAuth,
+  handleOptions,
   isAuthPath,
   readGate,
   withSetCookie,
 } from "@authtempo/core/bindings";
 // SvelteKit 3.0.1 declares Handle in the hooks module only (types/index.d.ts, read 2026-10-15).
 import type { Handle } from "@sveltejs/kit/hooks";
+
+type RequestEvent = Parameters<Handle>[0]["event"];
 
 /**
  * The SvelteKit binding of authtempo (plan 11d2). One `handle` hook mounts
@@ -57,6 +62,27 @@ export interface SvelteKitAuthOptions {
    * that mounts core under another prefix.
    */
   basePath?: string | undefined;
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Default: the `waitUntil` of `event.platform.ctx`, then of
+   * `event.platform.context`. @sveltejs/adapter-cloudflare 7.2.9 sets both
+   * and marks `context` deprecated (ambient.d.ts:14, read 2026-10-25). But
+   * adapter 7 takes Kit 2, and this binding takes Kit 3. Adapter 8.0.1, the
+   * one for Kit 3, sets no platform (files/worker.js:90-93). So on Workers
+   * with Kit 3, pass `waitUntil` of "cloudflare:workers". Without it, core
+   * waits for the work before it answers and writes
+   * `observe.wait_until_missing`, so the answer time can tell a known number.
+   */
+  waitUntil?: BindingWaitUntil<RequestEvent> | undefined;
+}
+
+/**
+ * The ExecutionContext that a Cloudflare adapter puts in `event.platform`, or
+ * undefined: `ctx` first, then the deprecated `context`.
+ */
+function platformContext(event: RequestEvent): unknown {
+  const platform = event.platform as { ctx?: unknown; context?: unknown } | undefined;
+  return platform?.ctx ?? platform?.context;
 }
 
 /**
@@ -81,7 +107,10 @@ export function authHandle(options: SvelteKitAuthOptions): Handle {
     // of core ("/%61uth/x") goes to core too, which answers 404: else the gate
     // skips protect for it and Kit runs a catch-all page.
     if (isAuthPath(event.url.pathname, basePath) || isAuthPath(path, basePath))
-      return auth.handle(event.request);
+      return auth.handle(
+        event.request,
+        handleOptions(options.waitUntil, event, () => boundWaitUntil(platformContext(event))),
+      );
     const routed = `${path}${event.url.search}`;
     // next comes from event.url, the page URL: a data request returns the person
     // to the page, and the decoded text never becomes next on its own.

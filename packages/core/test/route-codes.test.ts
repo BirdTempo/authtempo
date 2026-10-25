@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CAPTCHA_FLOWS, CAPTCHA_HEADER } from "../src/captcha.js";
 import type { AuthConfig } from "../src/config.js";
 import { requestAccountDelete } from "../src/engine/account-delete.js";
+import { signInAnonymous } from "../src/engine/anonymous.js";
 import { requestEmailChange } from "../src/engine/email-change.js";
 import { requestEmailOtp, requestResetOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -17,9 +18,11 @@ import { addMember, createOrganization } from "../src/engine/organizations.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  passkeySignUpOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
+import { addPhone, requestPhone, verifyAddPhone } from "../src/engine/phone.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { createScimToken } from "../src/engine/scim/tokens.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
@@ -35,11 +38,13 @@ import { AUTH_ERROR_PARAM } from "../src/http/redirect.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { fromBase64Url } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { SOCIAL } from "./every-feature.js";
-import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
+import { BASE_URL, emailOf, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   authorized,
   codeFor,
@@ -95,6 +100,8 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sessions/revoke": { id: "s1" },
   "POST /reauth": { password: PASSWORD },
   "POST /user/update": { name: "Ada" },
+  // Plan 12i Task 2: a free name that passes the form and the reserved set.
+  "POST /user/username": { username: "Ada" },
   "POST /user/change-email": { newEmail: "new@example.com" },
   "POST /user/change-email/confirm": { token: "$emailChangeToken" },
   "POST /user/change-email/verify": { code: "123456" },
@@ -104,11 +111,15 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /magic-link/verify": { token: "$magicToken" },
   "POST /passkey/register/verify": { response: CEREMONY },
   "POST /passkey/authenticate/verify": { response: CEREMONY },
+  // Plan 12i Task 8: the passkey-first sign-up. A family that needs a real ceremony makes one.
+  "POST /passkey/sign-up/options": { name: "Ana" },
+  "POST /passkey/sign-up/verify": { response: CEREMONY },
   "POST /passkeys/delete": { id: "p1" },
   "POST /passkeys/rename": { id: "p1", name: "Key" },
   "POST /password/sign-up": { email: "$newEmail", password: PASSWORD },
   "POST /password/sign-in": { email: "ada@example.com", password: PASSWORD },
   "POST /password/verify": { token: BODY43 },
+  "POST /password/verify/code": { email: "ada@example.com", code: "000000" },
   "POST /password/verify/resend": { email: "ada@example.com" },
   "POST /password/reset/request": { email: "ada@example.com" },
   "POST /password/reset": { token: "$resetToken", password: PASSWORD },
@@ -128,6 +139,18 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /otp/verify": { email: "$otpEmail", code: "$otpCode" },
   "POST /otp/reset/request": { email: "ada@example.com" },
   "POST /otp/reset": { email: "$otpEmail", code: "$otpCode", password: PASSWORD },
+  // Plan 12i Task 5: the phone routes. A new number for the request and the add.
+  "POST /phone/request": { phone: "+14155550100" },
+  "POST /phone/verify": { phone: "$phone", code: "$phoneCode" },
+  // Plan 12i Task 10: the ID-token route. The nonce is well formed; no row holds it.
+  "POST /social/:provider/id-token/nonce": {},
+  "POST /social/:provider/id-token": { idToken: "a.b.c", nonce: BODY43 },
+  "POST /phone/add": { phone: "+14155550101" },
+  "POST /phone/add/verify": { code: "$phoneCode" },
+  "POST /phone/remove": {},
+  // Plan 12i Task 6: the anonymous routes take an empty body.
+  "POST /anonymous/sign-in": {},
+  "POST /anonymous/delete": {},
   "POST /handoff/continue": { h: `hs_${BODY43}` },
   "POST /handoff/redeem": { code: BODY43, verifier: BODY43 },
   "POST /organizations/create": { slug: "acme", name: "Acme" },
@@ -213,6 +236,7 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /sso/domains": { organizationId: "$org" },
   "GET /sso/connections": { organizationId: "$org" },
   "GET /scim/tokens": { organizationId: "$org" },
+  "GET /username/available": { username: "ada" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -234,6 +258,8 @@ const UNFILLED: Fills = {
   $domain: "d1",
   $connection: "c1",
   $scimToken: "k1",
+  $phone: "+14155550100",
+  $phoneCode: "123456",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -325,10 +351,17 @@ function requestOf(
  */
 function world(extra: Partial<AuthConfig> = {}) {
   const limiter = { refuse: false, allow: async () => !limiter.refuse };
+  const sms = createRecordingSms();
   const auth = makeAuth({
     limiter,
     password: { hash: FAST, uniformSignUp: false },
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
+    // The passkey-first sign-up of plan 12i Task 8.
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE_URL],
+      signUp: { isolateLimiter: "allow" },
+    },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: { dynamicRoles: {}, teams: {} },
@@ -353,6 +386,14 @@ function world(extra: Partial<AuthConfig> = {}) {
     sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: { isolateLimiter: "allow" },
+    // The multi-session routes of plan 12i Task 11.
+    multiSession: {},
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -373,7 +414,13 @@ function world(extra: Partial<AuthConfig> = {}) {
     if (!m?.[1]) throw new Error("no invitation in mail");
     return m[1];
   };
-  return { auth, limiter, handle, cookie, lastToken, lastCode, lastInvitation };
+  /** The code of the last SMS: the default text starts with it (plan 12i Task 5). */
+  const lastSms = () => {
+    const m = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "");
+    if (!m?.[1]) throw new Error("no code in the SMS");
+    return m[1];
+  };
+  return { auth, limiter, handle, cookie, lastToken, lastCode, lastInvitation, lastSms };
 }
 type World = ReturnType<typeof world>;
 
@@ -387,6 +434,16 @@ async function challengeOf(w: World, email: string): Promise<string> {
   });
   if (!r.ok || !("twoFactor" in r.value)) throw new Error("the sign-in answered no challenge");
   return r.value.twoFactor.challenge;
+}
+
+/**
+ * The body of a passkey-first sign-up verify (plan 12i Task 8): the options
+ * of `config`, and a new authenticator's registration of them.
+ */
+async function signUpCeremony(config: World["auth"]["config"]): Promise<Record<string, unknown>> {
+  const options = must(await passkeySignUpOptions(config, { name: "Ana", ip: null }));
+  const soft = await SoftAuthenticator.create({ rpID: "api.example.com", origin: BASE_URL });
+  return { response: await soft.register(options.challenge, fromBase64Url(options.user.id)) };
 }
 
 /** `fn` answered ok, or the test stops with its code. */
@@ -455,7 +512,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const org = must(
       await createOrganization(config, { user: me.user, slug: "acme", name: "Acme" }),
     );
-    must(await requestPasswordReset(config, { email: me.user.email, ip: null }));
+    must(await requestPasswordReset(config, { email: emailOf(me.user), ip: null }));
     const resetToken = w.lastToken();
     must(await requestEmailChange(config, { session: me, newEmail: "ada2@example.com" }));
     const emailChangeToken = w.lastToken();
@@ -465,7 +522,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       await mintSessionJwt(config, { userId: me.user.id, sessionId: me.session.id }),
     );
     must(await enableEmailMethod(config, { session: me, password: PASSWORD }));
-    const challenge = await challengeOf(w, me.user.email);
+    const challenge = await challengeOf(w, emailOf(me.user));
     // A token with a window (plan 12k): its window is the limiter call of GET /tokens/current.
     const windowed = must(
       await createApiToken(config, {
@@ -495,25 +552,35 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // platform operator: operator-impersonation.test.ts answers its 429.
     const routes = declaring("rate_limited").filter((key) => key !== "POST /operator/impersonate");
     expect(routes.length).toBeGreaterThan(0);
+    // The anonymous delete counts for an anonymous session only (plan 12i Task 6).
+    const anonymous = must(
+      await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
+    );
     w.limiter.refuse = true;
     const results = await probe(
       w,
       routes,
       (key) =>
-        key === "POST /token/live"
-          ? { authorization: `Bearer ${jwt.token}` }
-          : key === "GET /tokens/current"
-            ? { authorization: `Bearer ${windowed.token}` }
-            : key === "GET /organizations/tokens/current"
-              ? { authorization: `Bearer ${orgWindowed.token}` }
-              : // The device page counts a request with no session only.
-                key === "GET /oauth/device"
-                ? {}
-                : // The operator user tools count a secret call before the compare
-                  // (plan 12f), and so does the override of plan 12d.
-                  entryOf(key).feature === "operatorUsers" || entryOf(key).feature === "operatorSso"
-                  ? { authorization: `Operator ${"x".repeat(32)}` }
-                  : w.cookie(me.token),
+        key === "POST /anonymous/delete"
+          ? w.cookie(anonymous.token)
+          : // The anonymous sign-in counts a request with no session only.
+            key === "POST /anonymous/sign-in"
+            ? {}
+            : key === "POST /token/live"
+              ? { authorization: `Bearer ${jwt.token}` }
+              : key === "GET /tokens/current"
+                ? { authorization: `Bearer ${windowed.token}` }
+                : key === "GET /organizations/tokens/current"
+                  ? { authorization: `Bearer ${orgWindowed.token}` }
+                  : // The device page counts a request with no session only.
+                    key === "GET /oauth/device"
+                    ? {}
+                    : // The operator user tools count a secret call before the compare
+                      // (plan 12f), and so does the override of plan 12d.
+                      entryOf(key).feature === "operatorUsers" ||
+                        entryOf(key).feature === "operatorSso"
+                      ? { authorization: `Operator ${"x".repeat(32)}` }
+                      : w.cookie(me.token),
       fills,
     );
     // The four routes that carry the code in a redirect to the app.
@@ -660,12 +727,16 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const resetToken = w.lastToken();
     must(await requestEmailOtp(config, { email, ip: null }));
     const otpCode = w.lastCode();
+    // A phone code to a new number: `phone.signUp` sends it, and the verify meets the closed sign-up (plan 12i Task 5).
+    must(await requestPhone(config, { phone: "+14155550199", ip: null }));
     const fills: Fills = {
       $newEmail: email,
       $otpEmail: email,
       $otpCode: otpCode,
       $magicToken: magicToken,
       $resetToken: resetToken,
+      $phone: "+14155550199",
+      $phoneCode: w.lastSms(),
     };
     // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
     // The SSO callback needs an IdP exchange: sso/resolve.test.ts proves it through the route (plan 12d).
@@ -673,6 +744,8 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const callbacks: RouteKey[] = [
       "GET /social/:provider/callback",
       "POST /social/apple/callback",
+      // The ID-token route needs a token of a key set: id-token.test.ts proves it (plan 12i Task 10).
+      "POST /social/:provider/id-token",
       "GET /sso/:connectionId/callback",
       "POST /sso/:connectionId/acs",
     ];
@@ -682,13 +755,18 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // The reset code is one mail of its own, after the sign-in code is spent by nothing: the last mail wins.
     const first = await probe(
       w,
-      routes.filter((key) => key !== otpReset),
+      routes.filter((key) => key !== otpReset && key !== "POST /passkey/sign-up/verify"),
       () => ({}),
       fills,
     );
     must(await requestResetOtp(config, { email, ip: null }));
     const second = await probe(w, [otpReset], () => ({}), { ...fills, $otpCode: w.lastCode() });
-    expect(unlike({ ...first, ...second }, "sign_up_closed", 403)).toEqual({});
+    // The passkey-first sign-up verify (plan 12i Task 8): options made while the sign-up was open.
+    const signUp = "POST /passkey/sign-up/verify";
+    const third = {
+      [signUp]: await call(w, signUp, {}, await signUpCeremony({ ...config, signUp: "open" })),
+    };
+    expect(unlike({ ...first, ...second, ...third }, "sign_up_closed", 403)).toEqual({});
   });
 });
 
@@ -769,7 +847,7 @@ describe("the codes of one route (plan 11g)", () => {
         fills,
       );
     const dan = await verifiedSession(w.auth, "dan@example.com");
-    expect(await invite(dan.user.email)).toEqual({ status: 200, code: null });
+    expect(await invite(emailOf(dan.user))).toEqual({ status: 200, code: null });
     const danToken = w.lastInvitation();
     expect(await invite("eve@example.com")).toEqual({ status: 200, code: null });
     expect(await invite("frank@example.com")).toEqual({ status: 200, code: null });
@@ -887,7 +965,7 @@ describe("the codes of one route (plan 11g)", () => {
     expect(
       await call(w, "POST /password/sign-up", {}, { email: "new@example.com", password: PASSWORD }),
     ).toEqual({ status: 400, code: "password_breached" });
-    must(await requestPasswordReset(w.auth.config, { email: ada.user.email, ip: null }));
+    must(await requestPasswordReset(w.auth.config, { email: emailOf(ada.user), ip: null }));
     expect(
       await call(
         w,
@@ -901,7 +979,7 @@ describe("the codes of one route (plan 11g)", () => {
       status: 503,
       code: "breach_check_unavailable",
     });
-    must(await requestResetOtp(w.auth.config, { email: ada.user.email, ip: null }));
+    must(await requestResetOtp(w.auth.config, { email: emailOf(ada.user), ip: null }));
     expect(
       await call(
         w,
@@ -925,6 +1003,10 @@ describe("the codes of one route (plan 11g)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -962,14 +1044,14 @@ describe("the codes of one route (plan 11g)", () => {
       code: "totp_not_enabled",
     });
     // The sign-in challenge: a wrong code each time, until the challenge is spent.
-    const challenge = await challengeOf(w, me.user.email);
+    const challenge = await challengeOf(w, emailOf(me.user));
     const verify = () => call(w, "POST /totp/verify", {}, { challenge, code: wrong });
     expect(await verify()).toEqual({ status: 400, code: "invalid_code" });
     const codes: string[] = [];
     for (let i = 0; i < CHALLENGE_MAX_ATTEMPTS; i++) codes.push((await verify()).code ?? "");
     expect(codes).toContain("too_many_attempts");
     // The form of the challenge page carries each code in a redirect.
-    const page = await challengeOf(w, me.user.email);
+    const page = await challengeOf(w, emailOf(me.user));
     const form = () => call(w, "POST /totp/challenge", {}, { challenge: page, code: wrong });
     const formCodes: Answer[] = [];
     for (let i = 0; i <= CHALLENGE_MAX_ATTEMPTS; i++) formCodes.push(await form());
@@ -1041,7 +1123,8 @@ describe("the codes of one route (plan 11g)", () => {
     });
   });
 
-  it("the passkey ceremonies answer passkey_failed to an assertion that no authenticator signed, and token_expired after five minutes", async () => {
+  // Plan 12i Task 9: the sign-in answers passkey_unknown, because no row holds the id `cred-1`.
+  it("the passkey ceremonies answer passkey_failed and passkey_unknown to an assertion that no authenticator signed, and token_expired after five minutes", async () => {
     const w = world();
     const me = await verifiedSession(w.auth, "ada@example.com");
     const cookie = w.cookie(me.token);
@@ -1062,7 +1145,7 @@ describe("the codes of one route (plan 11g)", () => {
     const signIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
     expect(
       await call(w, "POST /passkey/authenticate/verify", {}, { response: ceremonyOf(signIn) }),
-    ).toEqual({ status: 400, code: "passkey_failed" });
+    ).toEqual({ status: 400, code: "passkey_unknown" });
     const staleRegister = await challengeOfOptions("POST /passkey/register/options", cookie);
     const staleSignIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
     w.auth.clock.advance(6 * 60_000);
@@ -1103,6 +1186,8 @@ describe("the codes of one route (plan 11g)", () => {
 const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "GET /social/:provider/callback",
   "POST /social/apple/callback",
+  // The ID-token route needs a token of a key set: id-token.test.ts arms the hooks (plan 12i Task 10).
+  "POST /social/:provider/id-token",
   "POST /passkey/authenticate/verify",
   "POST /identities/unlink",
   // The claims hook of the JWT: its own test above.
@@ -1125,6 +1210,8 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "GET /sso/:connectionId/callback",
   // The SAML ACS needs a signed Response of a start, and it runs the same resolveSsoUser (plan 12d Task 8).
   "POST /sso/:connectionId/acs",
+  // The sign-up code needs verifyBy code: password-verify-code.test.ts drives both hook codes (plan 12i Task 20).
+  "POST /password/verify/code",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */
@@ -1183,7 +1270,7 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     await inviteMember(config, {
       user: ada.user,
       organizationId,
-      email: dan.user.email,
+      email: emailOf(dan.user),
       role: "member",
     }),
   );
@@ -1192,13 +1279,13 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const team = must(await createTeam(config, { user: ada.user, organizationId, name: "Core" }));
   const empty = must(await createTeam(config, { user: ada.user, organizationId, name: "Web" }));
   must(await addTeamMember(config, { user: ada.user, teamId: team.id, userId: carol.user.id }));
-  must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+  must(await requestMagicLink(config, { email: emailOf(ada.user), ip: null }));
   const magicToken = w.lastToken();
-  must(await requestEmailOtp(config, { email: ada.user.email, ip: null }));
+  must(await requestEmailOtp(config, { email: emailOf(ada.user), ip: null }));
   const otpCode = w.lastCode();
-  must(await requestResetOtp(config, { email: ada.user.email, ip: null }));
+  must(await requestResetOtp(config, { email: emailOf(ada.user), ip: null }));
   const resetCode = w.lastCode();
-  must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+  must(await requestPasswordReset(config, { email: emailOf(ada.user), ip: null }));
   const resetToken = w.lastToken();
   must(
     await passwordSignUp(config, {
@@ -1236,12 +1323,34 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
   // One enrolled user per TOTP route: a code passes once, and the first route spends it.
   const totp = await enrolled(w.auth, "totp@example.com");
-  const totpChallenge = await challengeOf(w, totp.user.email);
+  const totpChallenge = await challengeOf(w, emailOf(totp.user));
   const totpCode = await codeNow(w.auth, totp.secret);
   const totpForm = await enrolled(w.auth, "totp-form@example.com");
-  const formChallenge = await challengeOf(w, totpForm.user.email);
+  const formChallenge = await challengeOf(w, emailOf(totpForm.user));
   const formCode = await codeNow(w.auth, totpForm.secret);
+  // Plan 12i Task 5: ada holds a phone set by a code, and has a live add code for a second number.
+  const phone = "+14155550100";
+  must(await addPhone(config, { session: ada, phone, ip: null }));
+  must(
+    await verifyAddPhone(config, { session: ada, code: w.lastSms(), ip: null, userAgent: null }),
+  );
+  must(await addPhone(config, { session: ada, phone: "+14155550101", ip: null }));
+  const addCode = w.lastSms();
+  must(await requestPhone(config, { phone, ip: null }));
+  const signInCode = w.lastSms();
+  // Plan 12i Task 6: an anonymous session for the delete; the sign-in takes no session.
+  const anonymous = must(
+    await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
+  );
+  // Plan 12i Task 8: a passkey-first sign-up runs user.beforeCreate and the session hook.
+  const signUp = await signUpCeremony(config);
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /passkey/sign-up/verify": signUp,
+    "POST /anonymous/sign-in": {},
+    "POST /anonymous/delete": {},
+    "POST /phone/verify": { phone, code: signInCode },
+    "POST /phone/add/verify": { code: addCode },
+    "POST /phone/remove": {},
     "POST /password/sign-in": { email: ada.user.email, password: PASSWORD },
     "POST /password/sign-up": { email: "new@example.com", password: PASSWORD },
     "POST /password/verify": { token: verifyToken },
@@ -1253,6 +1362,7 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     "POST /totp/verify": { challenge: totpChallenge, code: totpCode },
     "POST /totp/challenge": { challenge: formChallenge, code: formCode },
     "POST /user/update": { name: "Ada" },
+    "POST /user/username": { username: "Ada" },
     "POST /user/change-email/verify": { code: changeCode },
     "POST /user/change-email/confirm": { token: changeToken },
     "POST /user/delete/confirm": { token: deleteToken },
@@ -1273,6 +1383,8 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const headersOf = (key: RouteKey): Record<string, string> => {
     if (key === "POST /organizations/invitations/accept") return w.cookie(dan.token);
     if (key === "POST /user/delete/confirm") return w.cookie(bob.token);
+    if (key === "POST /anonymous/delete") return w.cookie(anonymous.token);
+    if (key === "POST /anonymous/sign-in") return {};
     return takes(key, "session") ? w.cookie(ada.token) : {};
   };
   return { bodies, headersOf };
@@ -1344,14 +1456,14 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       await inviteMember(config, {
         user: ada.user,
         organizationId: org.organization.id,
-        email: dan.user.email,
+        email: emailOf(dan.user),
         role: "member",
       }),
     );
     const inviteToken = w.lastInvitation();
-    must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+    must(await requestPasswordReset(config, { email: emailOf(ada.user), ip: null }));
     const resetToken = w.lastToken();
-    must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+    must(await requestMagicLink(config, { email: emailOf(ada.user), ip: null }));
     const magicToken = w.lastToken();
     must(
       await passwordSignUp(config, {
@@ -1377,6 +1489,8 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       }),
     );
     const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
+    // Plan 12i Task 8: a sign-up challenge of 5 minutes.
+    const signUp = await signUpCeremony(config);
     // Past every lifetime. The sessions of the probe are new ones.
     w.auth.clock.advance(31 * 86_400_000);
     const adaAgain = await createSession(config, {
@@ -1397,6 +1511,7 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       "POST /password/reset": { token: resetToken, password: "a new horse battery" },
       "POST /password/verify": { token: verifyToken },
       "POST /magic-link/verify": { token: magicToken },
+      "POST /passkey/sign-up/verify": signUp,
     };
     const queries: { readonly [K in RouteKey]?: Record<string, string> } = {
       "GET /handoff/continue": { h: start.handoffId },
@@ -1813,6 +1928,10 @@ describe("the shapes of the OAuth answers (plan 11g)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });

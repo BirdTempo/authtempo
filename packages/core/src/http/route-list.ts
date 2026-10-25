@@ -9,7 +9,10 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * configured social provider; Apple's callback is the one POST callback.
  * `ROUTE_FEATURES` (plan 11g) lists every feature once; the OpenAPI document
  * reads it, and the route list test holds it to the entries. Plan 12h adds
- * `health` and `readiness`, the probes of a host.
+ * `health` and `readiness`, the probes of a host. Plan 12i adds
+ * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
+ * `passkeySignUp`, `username`, `phone`, `anonymous`, `multiSession`, and
+ * `socialIdToken`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -18,6 +21,8 @@ export const ROUTE_FEATURES = [
   "magicLink",
   "social",
   "passkey",
+  "passkeyRelatedOrigins",
+  "passkeySignUp",
   "password",
   "totp",
   "emailOtp",
@@ -40,6 +45,11 @@ export const ROUTE_FEATURES = [
   "openapi",
   "health",
   "readiness",
+  "username",
+  "phone",
+  "anonymous",
+  "multiSession",
+  "socialIdToken",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -50,6 +60,7 @@ export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 export type AuthForm =
   | "none" // no credential
   | "session" // the session cookie or a ts_ bearer
+  | "sessionCookie" // the session cookie only: a Bearer request answers 401 (plan 12i Task 11)
   | "apiToken" // a tk_ bearer
   | "organizationToken" // a `to_` bearer (plan 12k)
   | "sessionJwt" // a session JWT as the bearer (POST /token/live, plan 11d)
@@ -81,6 +92,14 @@ export interface RouteEntry {
    * needs `observe.readiness: true`. `sso` (plan 12d) needs `organizations`
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
+   * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
+   * `passkeySignUp` (plan 12i Task 8) needs `passkey` with `signUp` on:
+   * `true`, or an object with `dailyCap` or `isolateLimiter`.
+   * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
+   * `anonymous` (plan 12i Task 6) needs `anonymous`.
+   * `multiSession` (plan 12i) needs `multiSession`.
+   * `socialIdToken` (plan 12i Task 10) needs `google` or `apple`, and
+   * `social.idToken` not false. Its two routes exist for those two only.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -142,6 +161,7 @@ export const ROUTES = Object.freeze([
       "passkey_failed",
       "totp_not_enabled",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -150,7 +170,7 @@ export const ROUTES = Object.freeze([
     path: "/reauth/passkey/options",
     feature: "passkey",
     auth: ["session"],
-    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session", "anonymous_refused"],
     oauthCodes: [],
   },
   {
@@ -158,7 +178,7 @@ export const ROUTES = Object.freeze([
     path: "/reauth/email",
     feature: "emailOtp",
     auth: ["session"],
-    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session", "anonymous_refused"],
     oauthCodes: [],
   },
   {
@@ -198,6 +218,7 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "conflict",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -213,6 +234,7 @@ export const ROUTES = Object.freeze([
       "rate_limited",
       "session_not_fresh",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -256,6 +278,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -275,6 +298,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -301,6 +325,62 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 11: multi-session (spec 32 item 11). The browser's cookies only: a bearer gets 401 (ruling 34 L4).
+  {
+    method: "GET",
+    path: "/multi-session",
+    feature: "multiSession",
+    auth: ["sessionCookie"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/multi-session/switch",
+    feature: "multiSession",
+    auth: ["sessionCookie"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/multi-session/sign-out",
+    feature: "multiSession",
+    auth: ["sessionCookie"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 2: the username (spec 32 item 7).
+  {
+    method: "GET",
+    path: "/username/available",
+    feature: "username",
+    auth: ["none"],
+    codes: ["invalid_body", "rate_limited", "username_invalid"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/user/username",
+    feature: "username",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "username_invalid",
+      "username_taken",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -374,7 +454,7 @@ export const ROUTES = Object.freeze([
     path: "/social/:provider/start",
     feature: "social",
     auth: ["none"],
-    codes: ["oauth_failed", "rate_limited"],
+    codes: ["invalid_body", "oauth_failed", "rate_limited"],
     oauthCodes: [],
   },
   {
@@ -390,6 +470,7 @@ export const ROUTES = Object.freeze([
       "oauth_failed",
       "rate_limited",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -440,12 +521,49 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
     crossSiteForm: true,
   },
+  // Plan 12i Task 10: the ID-token route of google and apple (spec 32 item 10).
+  {
+    method: "POST",
+    path: "/social/:provider/id-token/nonce",
+    feature: "socialIdToken",
+    auth: ["none"],
+    codes: ["invalid_body", "rate_limited"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/social/:provider/id-token",
+    feature: "socialIdToken",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "invalid_token",
+      "rate_limited",
+      "oauth_failed",
+      "email_required",
+      "email_taken_unverified",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "account_banned",
+      "sso_required",
+    ],
+    oauthCodes: [],
+  },
   {
     method: "POST",
     path: "/passkey/register/options",
     feature: "passkey",
     auth: ["session"],
-    codes: ["unauthorized", "session_not_fresh", "email_unverified", "impersonation_session"],
+    codes: [
+      "unauthorized",
+      "session_not_fresh",
+      "invalid_body",
+      "email_unverified",
+      "impersonation_session",
+      "anonymous_refused",
+    ],
     oauthCodes: [],
   },
   {
@@ -461,6 +579,7 @@ export const ROUTES = Object.freeze([
       "token_expired",
       "passkey_failed",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -469,7 +588,7 @@ export const ROUTES = Object.freeze([
     path: "/passkey/authenticate/options",
     feature: "passkey",
     auth: ["none"],
-    codes: ["rate_limited"],
+    codes: ["invalid_body", "rate_limited"],
     oauthCodes: [],
   },
   {
@@ -483,11 +602,45 @@ export const ROUTES = Object.freeze([
       "invalid_token",
       "token_expired",
       "passkey_failed",
+      "passkey_unknown",
       "hook_refused",
       "hook_failed",
       "conflict",
       "account_banned",
       "sso_required",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 8: the passkey-first sign-up (spec 32 item 2).
+  {
+    method: "POST",
+    path: "/passkey/sign-up/options",
+    feature: "passkeySignUp",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "sign_up_closed",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/passkey/sign-up/verify",
+    feature: "passkeySignUp",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "invalid_token",
+      "token_expired",
+      "passkey_failed",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
     ],
     oauthCodes: [],
   },
@@ -544,6 +697,8 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "sso_required",
+      "username_invalid",
+      "username_taken",
     ],
     oauthCodes: [],
   },
@@ -584,6 +739,24 @@ export const ROUTES = Object.freeze([
     codes: [
       "invalid_token",
       "token_expired",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "account_banned",
+      "sso_required",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/password/verify/code",
+    feature: "password",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "invalid_code",
+      "too_many_attempts",
       "hook_refused",
       "hook_failed",
       "conflict",
@@ -661,6 +834,7 @@ export const ROUTES = Object.freeze([
       "conflict",
       "impersonation_session",
       "sso_required",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -678,6 +852,7 @@ export const ROUTES = Object.freeze([
       "totp_enabled",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -697,6 +872,7 @@ export const ROUTES = Object.freeze([
       "invalid_code",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -815,6 +991,7 @@ export const ROUTES = Object.freeze([
       "passkey_failed",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -823,7 +1000,13 @@ export const ROUTES = Object.freeze([
     path: "/second-factor/passkey/options",
     feature: "totp",
     auth: ["none"],
-    codes: ["invalid_body", "invalid_token", "rate_limited", "impersonation_session"],
+    codes: [
+      "invalid_body",
+      "invalid_token",
+      "rate_limited",
+      "impersonation_session",
+      "anonymous_refused",
+    ],
     oauthCodes: [],
   },
   {
@@ -857,6 +1040,7 @@ export const ROUTES = Object.freeze([
       "invalid_credentials",
       "conflict",
       "impersonation_session",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -937,6 +1121,135 @@ export const ROUTES = Object.freeze([
     ],
     oauthCodes: [],
   },
+  // Plan 12i Task 5: the phone code and the phone on an account (spec 32 item 5).
+  {
+    method: "POST",
+    path: "/phone/request",
+    feature: "phone",
+    auth: ["none"],
+    // No sms_unavailable: the send runs after the answer (ruling 23 of plan 12i).
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "phone_invalid",
+      "phone_region",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/verify",
+    feature: "phone",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "invalid_code",
+      "too_many_attempts",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+      "account_banned",
+      "sso_required",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/add",
+    feature: "phone",
+    auth: ["session"],
+    // No sms_unavailable: the send runs after the answer (ruling 44 of plan 12i).
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "phone_invalid",
+      "phone_region",
+      "impersonation_session",
+      "anonymous_refused",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/add/verify",
+    feature: "phone",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "session_not_fresh",
+      "rate_limited",
+      "invalid_code",
+      "too_many_attempts",
+      "phone_taken",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
+      "anonymous_refused",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/phone/remove",
+    feature: "phone",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "session_not_fresh",
+      "last_credential",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 6: the anonymous sign-in and its own delete (spec 32 item 8).
+  {
+    method: "POST",
+    path: "/anonymous/sign-in",
+    feature: "anonymous",
+    auth: ["none", "session"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "conflict",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/anonymous/delete",
+    feature: "anonymous",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "anonymous_refused",
+      "rate_limited",
+      "hook_refused",
+      "hook_failed",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
   {
     method: "GET",
     path: "/handoff/start",
@@ -994,6 +1307,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "rate_limited",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1159,6 +1473,7 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "conflict",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1455,6 +1770,7 @@ export const ROUTES = Object.freeze([
       "token_limit",
       "impersonation_session",
       "forbidden_rank",
+      "anonymous_refused",
     ],
     oauthCodes: [],
   },
@@ -1826,7 +2142,7 @@ export const ROUTES = Object.freeze([
     path: "/oauth/authorize",
     feature: "oauth",
     auth: ["session"],
-    codes: ["unauthorized", "impersonation_session"],
+    codes: ["unauthorized", "impersonation_session", "anonymous_refused"],
     oauthCodes: [
       "invalid_request",
       "rate_limited",
@@ -1914,7 +2230,7 @@ export const ROUTES = Object.freeze([
     path: "/oauth/device",
     feature: "oauthDevice",
     auth: ["session"],
-    codes: ["unauthorized", "impersonation_session"],
+    codes: ["unauthorized", "impersonation_session", "anonymous_refused"],
     oauthCodes: ["invalid_request", "rate_limited"],
   },
   {
@@ -2486,6 +2802,17 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
     scimTypes: [],
   },
+  // Plan 12i Task 9: the related origins document of WebAuthn Level 3.
+  {
+    method: "GET",
+    path: "/.well-known/webauthn",
+    feature: "passkeyRelatedOrigins",
+    auth: ["none"],
+    // A host other than the RP ID answers `not_found`. It is a router code,
+    // so it stays out of `codes`; the OpenAPI document lists it (item 29).
+    codes: [],
+    oauthCodes: [],
+  },
   {
     method: "GET",
     path: "/openapi.json",
@@ -2555,6 +2882,14 @@ export const ROUTER_CODES = [
   "internal",
 ] as const satisfies readonly ErrorCode[];
 export type RouterCode = (typeof ROUTER_CODES)[number];
+
+/**
+ * The code that the router answers on every route for a host outside a
+ * `baseURL` list (plan 12i Task 18). No entry declares it, and the OpenAPI
+ * document states it in its rules: a deployment with a `baseURL` string
+ * never answers it, so a 421 on each operation would be untrue there.
+ */
+export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
 
 /**
  * The codes of the operator routes that only a request with a session gets

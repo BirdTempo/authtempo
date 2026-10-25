@@ -13,7 +13,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { d1Like } from "./d1-like.js";
-import { get, post, seedPlatform, tokenFromMail } from "./helpers.js";
+import { emailOf, get, post, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -390,7 +390,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     if (!moved.ok) throw new Error(moved.code);
     // Root has no password: the seed wrote the user. A magic link signs in.
-    await requestMagicLink(auth.config, { email: root.email, ip: null });
+    await requestMagicLink(auth.config, { email: emailOf(root), ip: null });
     const link = await verifyMagicLink(auth.config, {
       token: tokenFromMail(auth.mail.at(-1)?.text ?? ""),
       ip: null,

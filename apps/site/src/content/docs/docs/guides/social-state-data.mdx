@@ -1,0 +1,55 @@
+---
+title: Carry app data through a social sign-in
+description: Send a small JSON payload with the social start, and read it in the session and link hooks after the callback.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A sealed state payload through the social flow"
+  - packages/core/README.md "Social sign-in"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/social-state-data.ts?raw";
+import test from "../../../../../samples/guides/social-state-data.test.ts?raw";
+
+**For:** an app developer who must know what the person chose before a social sign-in, such as a plan or an invitation code.
+
+**What it does:** the social start takes a JSON object in `data`. Core seals it in the state row, and the callback gives it to your hooks as `stateData`.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- A hook of the app at `hooks.session.afterCreate` or `hooks.identity.afterLink`. [Run your code at a hook point](/docs/guides/hooks/) tells how.
+
+## Steps
+
+1. Set `social.stateData` in the config. `maxBytes` is 1 to 1024, and the default is 1024.
+2. Read `stateData` in `hooks.session.afterCreate`. A link gives it to `hooks.identity.afterLink`, with `via: "link"`.
+
+<Code code={config} lang="ts" title="The payload in the config and in the hook" />
+
+3. Encode the object as UTF-8 JSON, then as base64url with no padding.
+4. Put it in `data` on the start URL, beside `next`. The link start takes `data` in its body.
+
+<Code code={test} lang="ts" title="The start with a payload as a test" />
+
+## How it behaves
+
+- The person's browser sends the payload, so it is never a secret and never a trust decision. Check each value against your own rules.
+- The value must be an object, not a list, with a depth of 4 at most. The depth of the object itself is 1.
+- The state row holds the payload sealed with AES-256-GCM under the current secret version. The row id binds it, so a payload moved to another row does not open.
+- The payload goes to the two hooks only. No redirect, no answer, and no log line holds it.
+- A user with the second factor on gets a challenge at the callback. The challenge row holds the payload sealed, and `session.afterCreate` gets it at the challenge verify. `identity.afterLink` gets it at the callback when the sign-in links a new provider account.
+- A state lives 10 minutes. After you make a new secret version current, keep the old version in `secrets` for 10 minutes at least. Else a flow in progress fails with `invalid_token`.
+- The Better Auth shim refuses `additionalData` with `NOT_SUPPORTED`, because it serves no `getOAuthState()`. Use core's `createAuth` for the payload.
+
+## If it fails
+
+- [`invalid_body`](/docs/reference/errors/#invalid_body): `social.stateData` is off, or `data` is not base64url JSON. It also answers for a list, more than `maxBytes` bytes, or a depth over 4. Core writes no state row.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the payload did not open at the callback or at the challenge verify. Its secret version left the config, or the row changed. Start again.
+
+## Next
+
+- [Run your code at a hook point](/docs/guides/hooks/)
+- [Secrets](/docs/operations/secrets/)
+- [Social](/docs/reference/config/#social)

@@ -74,6 +74,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/api/",
     headings: ["The secrets entry"],
   },
+  // The list entries of plan 12i Task 22 that use the tokenRequest hook.
+  {
+    label: "core-social-entries",
+    pkg: "@authtempo/core",
+    entry: "./social-entries",
+    source: "packages/core/src/social/entries/index.ts",
+    page: "/docs/reference/api/",
+    headings: ["The social entries entry"],
+  },
   // The route contract and the OpenAPI generator (plan 11g), on the page of the document.
   // The column map of each dialect and the DDL of the schema (plan 12g), on the schema page.
   {

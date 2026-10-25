@@ -5,6 +5,7 @@ import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE_URL, get, post, tokenFromMail } from "./helpers.js";
 import { REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { formPost, observed } from "./observe-helpers.js";
@@ -70,6 +71,13 @@ const FAILING: Readonly<
     make: async () =>
       post("/auth/password/sign-in", { email: "ada@example.com", password: "wrong password 1" }),
   },
+  // Plan 12i Task 20: a wrong sign-up code.
+  "POST /password/verify/code": {
+    via: "password",
+    over: { password: { hash: FAST, verifyBy: "code" } },
+    make: async () =>
+      post("/auth/password/verify/code", { email: "ada@example.com", code: "000000" }),
+  },
   "GET /magic-link/verify": {
     via: "magic_link",
     make: async () => get("/auth/magic-link/verify?token=short"),
@@ -83,9 +91,37 @@ const FAILING: Readonly<
     via: "email_otp",
     make: async () => post("/auth/otp/verify", { email: "ada@example.com", code: "000000" }),
   },
+  // Plan 12i Task 5: a code for a number that got none.
+  "POST /phone/verify": {
+    via: "phone",
+    over: { phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" } },
+    make: async () => post("/auth/phone/verify", { phone: "+14155550100", code: "000000" }),
+  },
+  // Plan 12i Task 6: a sign-in over the limit of one IP.
+  "POST /anonymous/sign-in": {
+    via: "anonymous",
+    over: { anonymous: { isolateLimiter: "allow" }, limiter: { allow: async () => false } },
+    make: async () => post("/auth/anonymous/sign-in", {}),
+  },
   "POST /passkey/authenticate/verify": {
     via: "passkey",
     make: async () => post("/auth/passkey/authenticate/verify", {}),
+  },
+  // Plan 12i Task 8: the passkey-first sign-up, with a challenge that no options made.
+  "POST /passkey/sign-up/verify": {
+    via: "passkey",
+    over: {
+      passkey: {
+        rpID: "api.example.com",
+        rpName: "Example",
+        origins: [BASE_URL],
+        signUp: { isolateLimiter: "allow" },
+      },
+    },
+    make: async () =>
+      post("/auth/passkey/sign-up/verify", {
+        response: { id: "cred", response: { clientDataJSON: "e30" } },
+      }),
   },
   "POST /handoff/redeem": {
     via: "handoff",
@@ -100,6 +136,12 @@ const FAILING: Readonly<
     via: "social",
     provider: "apple",
     make: async () => formPost("/auth/social/apple/callback", { code: "c1", state: "nope" }),
+  },
+  // No nonce with requireNonce on: invalid_token (plan 12i Task 10).
+  "POST /social/:provider/id-token": {
+    via: "social",
+    provider: "google",
+    make: async () => post("/auth/social/google/id-token", { idToken: "a.b.c" }),
   },
   // A state that no start wrote: the step `state` answers sso_failed (plan 12d).
   "GET /sso/:connectionId/callback": {

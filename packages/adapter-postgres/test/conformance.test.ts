@@ -80,9 +80,10 @@ describe("postgres migration matches the core schema", () => {
         notNull: false,
         hasDefault: true,
       });
-      expect(user?.columns.find((c) => c.name === "email")).toEqual({
-        name: "email",
-        type: "text",
+      // A NOT NULL column with no default. The address is nullable since plan 12i.
+      expect(user?.columns.find((c) => c.name === "email_verified")).toEqual({
+        name: "email_verified",
+        type: "boolean",
         notNull: true,
         hasDefault: false,
       });
@@ -135,6 +136,9 @@ describe("postgres migration matches the core schema", () => {
         transports: null,
         deviceType: "multiDevice",
         backedUp: true,
+        discoverable: null,
+        prf: false,
+        largeBlob: false,
         name: null,
         createdAt: t0,
         updatedAt: t0,

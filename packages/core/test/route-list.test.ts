@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
+import { ID_TOKEN_PROVIDERS } from "../src/engine/id-token.js";
 import { routeKeyOf } from "../src/http/route-key.js";
 import {
   ROUTE_FEATURES,
@@ -10,6 +11,7 @@ import {
   USER_ACTOR_CODES,
 } from "../src/http/route-list.js";
 import { coreRouteModules, coreRoutes, type RouteModule } from "../src/http/routes/index.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE, base, everyFeature, SOCIAL } from "./every-feature.js";
 
 /** The key of a mounted route as `ROUTES` writes it (plan 11g: `routeKeyOf`). */
@@ -29,10 +31,14 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   sessions: ["session", "account"],
   reauth: ["account", "passkey", "emailOtp"],
   user: ["account", "emailOtp", "accountDelete"],
+  username: ["username"],
+  phone: ["phone"],
+  anonymous: ["anonymous"],
+  "multi-session": ["multiSession"],
   identities: ["account"],
   "magic-link": ["magicLink"],
-  social: ["social"],
-  passkeys: ["passkey"],
+  social: ["social", "socialIdToken"],
+  passkeys: ["passkey", "passkeyRelatedOrigins", "passkeySignUp"],
   password: ["password"],
   totp: ["totp"],
   "second-factor": ["totp"],
@@ -71,7 +77,14 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
-    expect(listed.length).toBe(186);
+    // Plan 12i Task 9 adds GET /.well-known/webauthn.
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
+    // Plan 12i Task 11 adds the three multi-session routes.
+    // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
+    // Plan 12i Task 20 adds POST /password/verify/code.
+    // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
+    expect(listed.length).toBe(204);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -113,11 +126,52 @@ describe("ROUTES (plan 11a)", () => {
     features: RouteFeature[];
     off?: true;
   }[] = [
-    { name: "social", delta: { social: SOCIAL }, features: ["social"] },
+    { name: "social", delta: { social: SOCIAL }, features: ["social", "socialIdToken"] },
+    // Plan 12i Task 10: social.idToken false keeps the redirect flow and drops the ID-token route.
+    {
+      name: "social without the ID-token route",
+      delta: { social: { ...SOCIAL, idToken: false } },
+      features: ["social"],
+    },
+    {
+      name: "social.idToken false",
+      start: { social: SOCIAL },
+      delta: { social: { ...SOCIAL, idToken: false } },
+      features: ["socialIdToken"],
+      off: true,
+    },
     {
       name: "passkey",
       delta: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
       features: ["passkey"],
+    },
+    // Plan 12i Task 9: the related origins document needs its own key.
+    {
+      name: "passkey related origins",
+      start: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
+      delta: {
+        passkey: {
+          rpID: "api.example.com",
+          rpName: "Example",
+          origins: [BASE],
+          relatedOrigins: true,
+        },
+      },
+      features: ["passkeyRelatedOrigins"],
+    },
+    // Plan 12i Task 8: the passkey-first sign-up needs its own key.
+    {
+      name: "passkey sign-up",
+      start: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
+      delta: {
+        passkey: {
+          rpID: "api.example.com",
+          rpName: "Example",
+          origins: [BASE],
+          signUp: { isolateLimiter: "allow" },
+        },
+      },
+      features: ["passkeySignUp"],
     },
     { name: "password", delta: { password: {} }, features: ["password", "totp", "emailOtpReset"] },
     {
@@ -270,6 +324,16 @@ describe("ROUTES (plan 11a)", () => {
       features: ["scim"],
     },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
+    // Plan 12i Task 2: the username needs its own key, and no other feature.
+    { name: "username", delta: { username: {} }, features: ["username"] },
+    // Plan 12i Task 5: the phone needs its own key, and no other feature.
+    {
+      name: "phone",
+      delta: { phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" } },
+      features: ["phone"],
+    },
+    // Plan 12i Task 11: multi-session needs its own key, and no other feature.
+    { name: "multi-session", delta: { multiSession: {} }, features: ["multiSession"] },
     // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.
     {
       name: "observe with a sink",
@@ -323,7 +387,14 @@ describe("the entry fields and the module tie (plan 11g)", () => {
     const providers = everyFeature().social.providers.length;
     for (const key of entries.keys()) {
       const template = key.includes("/:provider/");
-      const want = !template ? 1 : key.endsWith("/callback") ? providers - 1 : providers;
+      // The ID-token route serves google and apple only (plan 12i Task 10).
+      const want = !template
+        ? 1
+        : key.includes("/:provider/id-token")
+          ? ID_TOKEN_PROVIDERS.length
+          : key.endsWith("/callback")
+            ? providers - 1
+            : providers;
       const got = mounted.get(key) ?? 0;
       expect(got, `${key} is the key of ${got} routes, not ${want}`).toBe(want);
     }

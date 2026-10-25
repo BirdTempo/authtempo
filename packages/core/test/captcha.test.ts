@@ -3,6 +3,7 @@ import { CAPTCHA_FLOWS, type CaptchaFlow, type CaptchaPort } from "../src/captch
 import { type AuthConfig, ConfigError } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
 import { FAST } from "./password-helpers.js";
 
@@ -29,6 +30,17 @@ function setup(captcha: AuthConfig["captcha"], extra: Partial<AuthConfig> = {}) 
     storage: createMemoryAdapter(),
     mail: { send: async () => {} },
     password: { hash: FAST },
+    // The phone code request of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    // The anonymous sign-in of plan 12i Task 6.
+    anonymous: { isolateLimiter: "allow" },
+    // The passkey-first sign-up of plan 12i Task 8.
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE],
+      signUp: { isolateLimiter: "allow" },
+    },
     ...(captcha ? { captcha } : {}),
     ...extra,
   });
@@ -54,6 +66,12 @@ const ROUTE_OF: Record<CaptchaFlow, Array<{ path: string; body: Record<string, s
     { path: "/password/reset/request", body: { email: "a@example.com" } },
     { path: "/otp/reset/request", body: { email: "a@example.com" } },
   ],
+  // Plan 12i Task 5: the code request. The add has a fresh session and no captcha.
+  "phone-request": [{ path: "/phone/request", body: { phone: "+14155550100" } }],
+  // Plan 12i Task 6: the anonymous sign-in writes a user row.
+  "anonymous-sign-in": [{ path: "/anonymous/sign-in", body: {} }],
+  // Plan 12i Task 8: the options of a passkey-first sign-up write a challenge row.
+  "passkey-sign-up": [{ path: "/passkey/sign-up/options", body: { name: "Ana" } }],
 };
 
 const post = (path: string, body: unknown, token?: string, ip = "203.0.113.5") =>
@@ -195,11 +213,11 @@ describe("the captcha port (plan 12b)", () => {
       [{ port: {} }, "captcha.port must have a verify function"],
       [
         { port, flows: [] },
-        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request",
+        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request, phone-request, anonymous-sign-in, passkey-sign-up",
       ],
       [
         { port, flows: ["sign-up"] },
-        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request",
+        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request, phone-request, anonymous-sign-in, passkey-sign-up",
       ],
       [{ port, onUnavailable: "fail" }, 'captcha.onUnavailable must be "allow" or "refuse"'],
       [
@@ -410,6 +428,14 @@ describe("the captcha port (plan 12b)", () => {
           return false;
         },
       },
+      phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+      anonymous: { isolateLimiter: "allow" },
+      passkey: {
+        rpID: "api.example.com",
+        rpName: "Example",
+        origins: [BASE],
+        signUp: { isolateLimiter: "allow" },
+      },
       captcha: { port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] },
     });
     const known = "known@example.com";
@@ -421,10 +447,19 @@ describe("the captcha port (plan 12b)", () => {
     });
     expect(seeded?.ok).toBe(true);
     const answer = async (path: string, email: string) => {
+      // The phone request names a number: no user holds either one, and the refusal reads none.
       const body =
         path === "/password/sign-up" || path === "/password/sign-in"
           ? { email, password: "correct horse battery" }
-          : { email };
+          : path === "/phone/request"
+            ? { phone: email === known ? "+14155550100" : "+14155550101" }
+            : // The anonymous sign-in names nobody: the two answers are the same by design.
+              path === "/anonymous/sign-in"
+              ? {}
+              : // The passkey-first sign-up names a person, never an account (plan 12i Task 8).
+                path === "/passkey/sign-up/options"
+                ? { name: email === known ? "Known" : "Unknown" }
+                : { email };
       const res = await auth.handle(post(path, body));
       // The trace header is random for each answer (plan 12h Task 4). Each answer
       // carries one, and the compare leaves it out.
@@ -433,7 +468,7 @@ describe("the captcha port (plan 12b)", () => {
       return { status: res.status, headers, body: await res.text() };
     };
     const paths = Object.values(ROUTE_OF).flatMap((routes) => routes.map((r) => r.path));
-    expect(paths).toHaveLength(6);
+    expect(paths).toHaveLength(9);
     for (const k of Object.keys(counts) as Array<keyof typeof counts>) counts[k] = 0;
     for (const path of paths) {
       const a = await answer(path, known);

@@ -14,7 +14,7 @@ const ADAPTER_FILES = readdirSync(ADAPTER)
 const ADAPTER_ENTRIES = readdirSync(ADAPTER).sort();
 const CORE = ADAPTER_FILES.map((f) => f.slice(0, -".sql".length));
 const COMPAT_DIR = join(PKG, "../compat-better-auth/migrations/d1");
-/** The eleven compat files of the package, in order. */
+/** The twelve compat files of the package, in order. */
 const COMPAT_FILES = readdirSync(COMPAT_DIR)
   .filter((f) => f.endsWith(".sql"))
   .sort();
@@ -80,18 +80,18 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(r.status, r.stderr).toBe(0);
     expect(linesOf(r.stdout)).toEqual([
       ...CORE.map((n) => `applied ${n}`),
-      "version before: none; version after: 14",
+      "version before: none; version after: 15",
     ]);
     // The direct read: wrangler's own table and ta_meta in the local database.
     expect(
       readLocal(p.dir, "SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name),
     ).toEqual(ADAPTER_FILES);
     expect(readLocal(p.dir, "SELECT value FROM ta_meta WHERE key = 'schema_version'")).toEqual([
-      { value: "14" },
+      { value: "15" },
     ]);
     const again = migrate(p.dir);
     expect(again.status).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 14; version after: 14"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 15; version after: 15"]);
   });
 
   it("stops with exit 2 and names both folders when migrations_dir is not the adapter's folder", () => {
@@ -125,6 +125,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       "0010_compat_schema_v12",
       "0011_compat_schema_v13",
       "0012_compat_schema_v14",
+      "0013_compat_schema_v15",
     ];
     const r = migrate(p.dir, ["--tables", "compat"]);
     expect(r.status, r.stderr).toBe(0);
@@ -132,7 +133,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       ...copied.map((n) => `copied ${n}`),
       "applied 0001_better_auth",
       ...copied.map((n) => `applied ${n}`),
-      "version before: none; version after: 14",
+      "version before: none; version after: 15",
     ]);
     const shipped = readdirSync(COMPAT_DIR)
       .filter((f) => f.endsWith(".sql"))
@@ -144,12 +145,12 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
       );
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 14; version after: 14"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 15; version after: 15"]);
   });
 
   // Plan 11f Task 5 (spec 23 item 11): the database's compat version decides the copies, and an edited copy stops the run.
   it("stops on an edited copy before any write, also with --dry-run", () => {
-    // The app's folder holds the eleven copies under a dry run's names, written from the package's files, and none is applied.
+    // The app's folder holds the twelve copies under a dry run's names, written from the package's files, and none is applied.
     const files: Record<string, string> = { "migrations/0001_better_auth.sql": BA_SQLITE };
     for (const [i, f] of COMPAT_FILES.entries())
       files[`migrations/${String(i + 2).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`] =
@@ -164,7 +165,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
           .map((f) => [f, readFileSync(join(dir, f), "utf8")]),
       );
     const before = snapshot();
-    expect(Object.keys(before)).toHaveLength(12);
+    expect(Object.keys(before)).toHaveLength(13);
     for (const extra of [["--dry-run"], []]) {
       const r = migrate(p.dir, ["--tables", "compat", ...extra]);
       expect(r.status).toBe(2);
@@ -183,7 +184,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     ).toEqual([]);
   });
 
-  it("copies nothing on a database at compat version 11, also with the files renamed", () => {
+  it("copies nothing on a database at compat version 12, also with the files renamed", () => {
     const p = d1Project({
       migrationsDir: "migrations",
       files: { "migrations/0001_better_auth.sql": BA_SQLITE },
@@ -191,14 +192,14 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     const first = migrate(p.dir, ["--tables", "compat"]);
     expect(first.status, first.stderr).toBe(0);
     expect(readLocal(p.dir, "SELECT value FROM ta_meta WHERE key = 'compat_better_auth'")).toEqual([
-      { value: "11" },
+      { value: "12" },
     ]);
     // The app renumbers its copies from 0090. wrangler keys its table by file name, so the app renames the rows too.
     const dir = join(p.dir, "migrations");
     const copies = readdirSync(dir)
       .filter((f) => f.includes("_compat_"))
       .sort();
-    expect(copies).toHaveLength(11);
+    expect(copies).toHaveLength(12);
     const renamed: string[] = [];
     for (const [i, f] of copies.entries()) {
       const name = `${String(90 + i).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`;
@@ -210,7 +211,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     appendFileSync(join(dir, "0090_compat_better_auth.sql"), "-- renumbered by the app\n");
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status, again.stderr).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 14; version after: 14"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 15; version after: 15"]);
     expect(readdirSync(dir).sort()).toEqual(["0001_better_auth.sql", ...renamed]);
     expect(
       readLocal(p.dir, "SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name),
@@ -249,7 +250,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(first.status, first.stderr).toBe(0);
     readLocal(p.dir, "UPDATE ta_meta SET value = 'x' WHERE key = 'compat_better_auth'");
     const before = readdirSync(join(p.dir, "migrations")).sort();
-    expect(before).toHaveLength(12);
+    expect(before).toHaveLength(13);
     for (const extra of [["--dry-run"], []]) {
       const r = migrate(p.dir, ["--tables", "compat", ...extra]);
       expect(r.status).toBe(2);
@@ -276,29 +277,29 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
         `stopped: migrations_dir ${join(p.dir, "node_modules/@authtempo/adapter-d1/migrations")} is the folder of @authtempo/adapter-d1; with --tables compat, point migrations_dir at a folder of the app`,
       );
       expect(readdirSync(ADAPTER).sort()).toEqual(ADAPTER_ENTRIES);
-      expect(ADAPTER_FILES).toHaveLength(14);
+      expect(ADAPTER_FILES).toHaveLength(15);
     }
   });
 
-  it("stops after a run that leaves the database at version 15, and before any write on the next run", () => {
+  it("stops after a run that leaves the database at version 16, and before any write on the next run", () => {
     const files = Object.fromEntries(
       ADAPTER_FILES.map((f) => [`migrations/${f}`, readFileSync(join(ADAPTER, f), "utf8")]),
     );
-    const future = readFileSync(join(PKG, "test/fixtures/d1/0015_future.sql"), "utf8");
+    const future = readFileSync(join(PKG, "test/fixtures/d1/0016_future.sql"), "utf8");
     const p = d1Project({
       migrationsDir: "migrations",
-      files: { ...files, "migrations/0015_future.sql": future },
+      files: { ...files, "migrations/0016_future.sql": future },
     });
     const first = migrate(p.dir);
     expect(first.status).toBe(2);
     expect(linesOf(first.stderr).at(-1)).toBe(
-      "stopped: the database is at version 15 after the run; this CLI expects version 14",
+      "stopped: the database is at version 16 after the run; this CLI expects version 15",
     );
     const second = migrate(p.dir);
     expect(second.status).toBe(2);
     expect(second.stdout).toBe("");
     expect(linesOf(second.stderr).at(-1)).toBe(
-      "stopped: the database is at version 15; this CLI knows version 14; use a newer CLI",
+      "stopped: the database is at version 16; this CLI knows version 15; use a newer CLI",
     );
   });
 
@@ -408,7 +409,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     wranglerLocal(p.dir, ["d1", "migrations", "apply", "cli-d1", "--local"]);
     const r = migrate(p.dir, ["--tables", "compat"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(linesOf(r.stdout).at(-1)).toBe("version before: none; version after: 14");
+    expect(linesOf(r.stdout).at(-1)).toBe("version before: none; version after: 15");
   });
 
   it("shows the usage line of each target on a usage error", () => {

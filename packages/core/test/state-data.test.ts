@@ -1,0 +1,639 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { z } from "zod";
+import { type AuthConfig, resolveConfig } from "../src/config.js";
+import type { HooksConfig } from "../src/engine/hooks.js";
+import { enableEmailMethod, sendSecondFactorEmail } from "../src/engine/second-factor-methods.js";
+import { resolveSession } from "../src/engine/sessions.js";
+import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
+import { verifyTwoFactor } from "../src/engine/totp.js";
+import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
+import { bindingCookieName } from "../src/http/cookies.js";
+import { createRouter } from "../src/http/router.js";
+import { socialRoutes } from "../src/http/routes/social.js";
+import { sha256Hex, toBase64Url } from "../src/primitives/crypto.js";
+import type { SecretVersion } from "../src/primitives/keyring.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
+import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
+import {
+  type FakeIdToken,
+  fakeJwt,
+  GOOGLE,
+  googleClaims,
+  socialAuth,
+  stateRow,
+  tokenEndpoint,
+} from "./social-helpers.js";
+import { codeNow, EMAIL, enrolled, PASSWORD } from "./totp-helpers.js";
+
+// Plan 12i Task 19: the app payload rides the state row sealed, and only
+// the two hook events see it in clear.
+const S1 = "0123456789abcdef0123456789abcdef";
+const S2 = "q8JxVd3m0Yv2sZ7rKpT4wN1hLc9eFgAuBiOjQyRtSxM";
+const ONE: SecretVersion[] = [{ version: 1, value: S1 }];
+const PHASE_1: SecretVersion[] = [
+  { version: 1, value: S1 },
+  { version: 2, value: S2 },
+];
+const PHASE_2: SecretVersion[] = [
+  { version: 2, value: S2 },
+  { version: 1, value: S1 },
+];
+const ONLY_2: SecretVersion[] = [{ version: 2, value: S2 }];
+const PRO = { plan: "pro" };
+
+/** The base64url of the UTF-8 JSON text. */
+function encoded(text: string): string {
+  return toBase64Url(new TextEncoder().encode(text));
+}
+
+/** The clear forms of the payload `{ plan: "pro" }`. A base64url value holds no quote and no backslash. */
+function holdsPro(text: string): boolean {
+  return (
+    text.includes('"pro"') ||
+    text.includes('\\"pro\\"') ||
+    text.includes('"plan"') ||
+    text.includes(encoded(JSON.stringify(PRO)))
+  );
+}
+
+interface Seen {
+  sessions: Array<{ via: string; stateData?: Record<string, unknown> }>;
+  links: Array<{ via: string; stateData?: Record<string, unknown> }>;
+}
+
+/** One storage and one clock, and a config per secret list over them. */
+function world(stateData: { maxBytes?: number } | false = {}) {
+  let current = new Date("2026-10-22T00:00:00.000Z");
+  const clock = {
+    now: () => current,
+    advance(ms: number) {
+      current = new Date(current.getTime() + ms);
+    },
+  };
+  const storage = createMemoryAdapter();
+  const jwtTokens: Record<string, FakeIdToken> = {};
+  const seen: Seen = { sessions: [], links: [] };
+  const hooks: HooksConfig = {
+    session: {
+      afterCreate: (e) => {
+        seen.sessions.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+      },
+    },
+    identity: {
+      afterLink: (e) => {
+        seen.links.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+      },
+    },
+  };
+  const config = (secrets: SecretVersion[] = ONE, extra: Partial<AuthConfig> = {}) =>
+    resolveConfig({
+      baseURL: BASE_URL,
+      trustedOrigins: [APP_ORIGIN],
+      storage,
+      mail: { send: async () => {} },
+      clock,
+      secrets,
+      social: {
+        google: GOOGLE,
+        fetch: tokenEndpoint("idtok-default").fetchFn,
+        stateData,
+      },
+      jwt: fakeJwt(jwtTokens),
+      hooks,
+      ...extra,
+    });
+  return { storage, clock, jwtTokens, seen, config };
+}
+
+type World = ReturnType<typeof world>;
+type Config = ReturnType<World["config"]>;
+
+/** A Google start with `data`: the state, the nonce, and the binding value. */
+async function start(config: Config, data: string | undefined) {
+  const r = await startSocial(config, { provider: "google", next: "/home", data, ip: "1.1.1.1" });
+  if (!r.ok) throw new Error(`start failed: ${r.code}`);
+  const url = new URL(r.value.location);
+  return {
+    state: url.searchParams.get("state") ?? "",
+    nonce: url.searchParams.get("nonce") ?? "",
+    bindToken: r.value.bindToken,
+  };
+}
+
+function complete(
+  w: World,
+  config: Config,
+  s: Awaited<ReturnType<typeof start>>,
+  claims: Record<string, unknown> = {},
+  sessionToken?: string,
+) {
+  w.jwtTokens["idtok-default"] = googleClaims(s.nonce, claims);
+  return completeSocial(config, {
+    provider: "google",
+    state: s.state,
+    code: "c",
+    error: null,
+    bindToken: s.bindToken,
+    ip: null,
+    userAgent: null,
+    ...(sessionToken !== undefined ? { sessionToken } : {}),
+  });
+}
+
+async function stateRows(w: World) {
+  return w.storage.findMany("verification", [
+    { field: "purpose", op: "in", value: ["oauth-state", "oauth-link-state"] },
+  ]);
+}
+
+/**
+ * A user with the second factor on, from real sign-ins, on one storage and
+ * one clock. `on` gives the engine of a secret list over them, and
+ * `challenge` runs a Google sign-in with `data` that answers a challenge.
+ */
+async function gated(first: SecretVersion[] = ONE, email = false) {
+  const tokens: Record<string, FakeIdToken> = {};
+  const seen: Seen = { sessions: [], links: [] };
+  const hooks: HooksConfig = {
+    session: {
+      afterCreate: (e) => {
+        seen.sessions.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+      },
+    },
+    identity: {
+      afterLink: (e) => {
+        seen.links.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+      },
+    },
+  };
+  const input = (secrets: SecretVersion[]) => ({
+    password: { hash: FAST },
+    secrets,
+    social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn, stateData: {} },
+    hooks,
+  });
+  // makeAuth also sets `secret`, version 1 with the value S1, as each list here does.
+  const base = socialAuth(input(first), fakeJwt(tokens));
+  const { secret, backupCodes, session, user } = await enrolled(base);
+  if (email) {
+    const on = await enableEmailMethod(base.config, { session, password: PASSWORD });
+    if (!on.ok) throw new Error(on.code);
+  }
+  seen.sessions.length = 0;
+  seen.links.length = 0;
+  // No `secret` here, so a list without version 1 removes it.
+  const on = (secrets: SecretVersion[]) =>
+    resolveConfig({
+      baseURL: BASE_URL,
+      trustedOrigins: [APP_ORIGIN],
+      storage: base.storage,
+      mail: { send: async () => {} },
+      clock: base.clock,
+      jwt: fakeJwt(tokens),
+      ...input(secrets),
+    });
+  async function challenge(config: Config, text: string) {
+    const started = await startSocial(config, {
+      provider: "google",
+      next: "/home",
+      data: encoded(text),
+      ip: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const url = new URL(started.value.location);
+    tokens["idtok-default"] = googleClaims(url.searchParams.get("nonce") ?? "", { email: EMAIL });
+    const r = await completeSocial(config, {
+      provider: "google",
+      state: url.searchParams.get("state"),
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok || !("twoFactor" in r.value)) throw new Error("social answered no challenge");
+    const token = r.value.twoFactor.challenge;
+    const row = await base.storage.findOne("verification", [
+      { field: "valueHash", op: "eq", value: await sha256Hex(token) },
+    ]);
+    if (!row) throw new Error("no challenge row");
+    return { token, row };
+  }
+  /** The challenge row is live with no attempt, and the user keeps every backup code. */
+  async function untouched(rowId: string) {
+    const row = await base.storage.findOne("verification", [
+      { field: "id", op: "eq", value: rowId },
+    ]);
+    expect(row?.consumedAt).toBeNull();
+    expect(row?.data?.attempts).toBe(0);
+    const factor = await base.storage.findOne("secondFactor", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    expect(factor?.backupCodes).toHaveLength(backupCodes.length);
+  }
+  return { base, seen, secret, backupCodes, on, challenge, untouched };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("the sealed state payload (plan 12i Task 19)", () => {
+  it("takes data in the query of the social start only, not of the SSO start", () => {
+    // The SSO start reads next only (routes/sso.ts). Its contract and its
+    // OpenAPI parameters must not offer an app payload that it drops.
+    const keys = (key: "GET /social/:provider/start" | "GET /sso/:connectionId/start") =>
+      Object.keys((ROUTE_CONTRACT[key].query.schema as z.ZodObject<z.ZodRawShape>).shape);
+    expect(keys("GET /social/:provider/start")).toEqual(["next", "data"]);
+    expect(keys("GET /sso/:connectionId/start")).toEqual(["next"]);
+  });
+
+  it("passes the payload to the session hook at the callback", async () => {
+    const w = world();
+    const config = w.config();
+    const done = await complete(w, config, await start(config, encoded(JSON.stringify(PRO))));
+    if (!done.ok || !("token" in done.value)) throw new Error("no session");
+    expect(w.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+    // The new user links Google at the sign-in.
+    expect(w.seen.links).toEqual([{ via: "sign_in", stateData: { plan: "pro" } }]);
+    // A start with no payload gives the hooks none.
+    w.clock.advance(1000);
+    const again = await complete(w, config, await start(config, undefined));
+    expect(again.ok).toBe(true);
+    expect(w.seen.sessions[1]).toEqual({ via: "social" });
+    // A link (plan 12a) gives it to identity.afterLink with via link.
+    const resolved = await resolveSession(config, done.value.token);
+    if (!resolved) throw new Error("no session");
+    const linkStart = await startLink(config, {
+      provider: "google",
+      session: resolved,
+      data: encoded('{"team":"blue"}'),
+      ip: "1.1.1.1",
+    });
+    if (!linkStart.ok) throw new Error(`link start failed: ${linkStart.code}`);
+    const url = new URL(linkStart.value.location);
+    const linked = await complete(
+      w,
+      config,
+      {
+        state: url.searchParams.get("state") ?? "",
+        nonce: url.searchParams.get("nonce") ?? "",
+        bindToken: linkStart.value.bindToken,
+      },
+      { sub: "g-2" },
+      done.value.token,
+    );
+    expect(linked).toMatchObject({ ok: true, value: { linked: true } });
+    expect(w.seen.links.at(-1)).toEqual({ via: "link", stateData: { team: "blue" } });
+  });
+
+  it("refuses 1025 bytes, a depth of 5, an array, and a value that is not base64url JSON", async () => {
+    const w = world();
+    const config = w.config();
+    const refused = [
+      encoded(`{"p":"${"x".repeat(1017)}"}`),
+      encoded('{"a":{"b":{"c":{"d":{"e":1}}}}}'),
+      encoded('[{"plan":"pro"}]'),
+      encoded("not json"),
+      "not base64url!",
+      // A lone continuation byte is not UTF-8.
+      toBase64Url(new Uint8Array([0x7b, 0x80, 0x7d])),
+    ];
+    expect(new TextEncoder().encode(`{"p":"${"x".repeat(1017)}"}`).length).toBe(1025);
+    for (const data of refused)
+      expect(
+        await startSocial(config, { provider: "google", data, ip: "1.1.1.1" }),
+        data.slice(0, 20),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    expect(await stateRows(w)).toEqual([]);
+    // The bounds themselves pass: 1024 bytes, and a depth of 4.
+    for (const data of [
+      encoded(`{"p":"${"x".repeat(1016)}"}`),
+      encoded('{"a":{"b":{"c":{"d":1}}}}'),
+    ])
+      expect((await startSocial(config, { provider: "google", data, ip: "1.1.1.1" })).ok).toBe(
+        true,
+      );
+    expect(await stateRows(w)).toHaveLength(2);
+    // A smaller maxBytes bounds it lower.
+    const small = world({ maxBytes: 16 }).config();
+    expect(
+      await startSocial(small, {
+        provider: "google",
+        data: encoded('{"p":"0123456789"}'),
+        ip: null,
+      }),
+    ).toMatchObject({ ok: false, code: "invalid_body" });
+  });
+
+  it("seals the payload in the row", async () => {
+    const w = world();
+    // Version 1 is current, and version 2 is added beside it.
+    const phase1 = w.config(PHASE_1);
+    const s = await start(phase1, encoded(JSON.stringify(PRO)));
+    const row = await stateRow(w.storage, s.state);
+    if (!row) throw new Error("no row");
+    expect(holdsPro(JSON.stringify(row))).toBe(false);
+    expect(typeof row.data?.sealedData).toBe("string");
+    expect(row.secretVersion).toBe(1);
+    // Version 2 becomes current: the row sealed under version 1 still opens.
+    const done = await complete(w, w.config(PHASE_2), s);
+    expect(done.ok).toBe(true);
+    expect(w.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("never writes the payload into a redirect, an answer, or a line", async () => {
+    const lines = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    const w = world();
+    // A hook that throws makes a line of its own.
+    const config = w.config(ONE, {
+      hooks: {
+        identity: {
+          afterLink: () => {
+            throw new Error("app hook failed");
+          },
+        },
+      },
+    });
+    const handle = createRouter(config, socialRoutes(config));
+    const data = encoded(JSON.stringify(PRO));
+    const answers: Response[] = [];
+    const started = await handle(get(`/auth/social/google/start?next=%2Fhome&data=${data}`));
+    answers.push(started);
+    expect(started.status).toBe(302);
+    const to = new URL(started.headers.get("location") ?? "");
+    const cookie = (started.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+    w.jwtTokens["idtok-default"] = googleClaims(to.searchParams.get("nonce") ?? "", {});
+    const callback = `/auth/social/google/callback?code=c&state=${to.searchParams.get("state")}`;
+    const done = await handle(get(callback, { cookie }));
+    answers.push(done);
+    expect(done.status).toBe(302);
+    expect(new URL(done.headers.get("location") ?? "").pathname).toBe("/home");
+    // A replay of the callback, and a refused start.
+    answers.push(await handle(get(callback, { cookie })));
+    answers.push(await handle(get(`/auth/social/google/start?data=${encoded("[1]")}`)));
+    for (const res of answers) {
+      expect(holdsPro(res.headers.get("location") ?? "")).toBe(false);
+      expect(holdsPro(await res.text())).toBe(false);
+    }
+    expect(lines.some((l) => l.mock.calls.length > 0)).toBe(true);
+    for (const l of lines) expect(holdsPro(JSON.stringify(l.mock.calls))).toBe(false);
+  });
+
+  it("answers invalid_body for data with stateData off", async () => {
+    const w = world(false);
+    const config = w.config();
+    const data = encoded(JSON.stringify(PRO));
+    expect(await startSocial(config, { provider: "google", data, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
+    const handle = createRouter(config, socialRoutes(config));
+    const res = await handle(get(`/auth/social/google/start?data=${data}`));
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("auth_error")).toBe(
+      "invalid_body",
+    );
+    expect(await stateRows(w)).toEqual([]);
+    // With no data the start works as before.
+    expect((await startSocial(config, { provider: "google", ip: null })).ok).toBe(true);
+  });
+
+  it("fails closed for a payload under a version that left the config or moved to another row", async () => {
+    const w = world();
+    const s = await start(w.config(ONE), encoded(JSON.stringify(PRO)));
+    // Version 1 leaves the config while the state is in flight.
+    expect(await complete(w, w.config(ONLY_2), s)).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    // A database write that moves a sealed payload to another state row.
+    const config = w.config(ONE);
+    const a = await start(config, encoded(JSON.stringify(PRO)));
+    const b = await start(config, encoded('{"plan":"free"}'));
+    const rowA = await stateRow(w.storage, a.state);
+    const rowB = await stateRow(w.storage, b.state);
+    if (!rowA?.data || !rowB?.data) throw new Error("no row");
+    await w.storage.update("verification", [{ field: "id", op: "eq", value: rowB.id }], {
+      data: { ...rowB.data, sealedData: rowA.data.sealedData },
+    });
+    expect(await complete(w, config, b)).toMatchObject({ ok: false, code: "invalid_token" });
+    expect(w.seen.sessions).toEqual([]);
+    // The untouched row still opens.
+    expect((await complete(w, config, a)).ok).toBe(true);
+    expect(w.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("carries the payload through a challenge to the session hook at the verify", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const seen: Seen = { sessions: [], links: [] };
+    const auth = socialAuth(
+      {
+        password: { hash: FAST },
+        social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn, stateData: {} },
+        hooks: {
+          session: {
+            afterCreate: (e) => {
+              seen.sessions.push({
+                via: e.via,
+                ...(e.stateData ? { stateData: e.stateData } : {}),
+              });
+            },
+          },
+          identity: {
+            afterLink: (e) => {
+              seen.links.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+            },
+          },
+        },
+      },
+      fakeJwt(tokens),
+    );
+    // A user with the second factor on, from real sign-ins.
+    const { secret } = await enrolled(auth);
+    seen.sessions.length = 0;
+    const started = await startSocial(auth.config, {
+      provider: "google",
+      next: "/home",
+      data: encoded(JSON.stringify(PRO)),
+      ip: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const url = new URL(started.value.location);
+    tokens["idtok-default"] = googleClaims(url.searchParams.get("nonce") ?? "", { email: EMAIL });
+    const r = await completeSocial(auth.config, {
+      provider: "google",
+      state: url.searchParams.get("state"),
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok || !("twoFactor" in r.value)) throw new Error("social answered no challenge");
+    // The callback links Google and gives the link hook the payload; no session opens yet.
+    expect(seen.links).toEqual([{ via: "sign_in", stateData: { plan: "pro" } }]);
+    expect(seen.sessions).toEqual([]);
+    const challenges = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+      { field: "consumedAt", op: "eq", value: null },
+    ]);
+    expect(challenges).toHaveLength(1);
+    expect(holdsPro(JSON.stringify(challenges))).toBe(false);
+    expect(challenges[0]?.data).toMatchObject({ sealedDataVersion: 1 });
+    const v = await verifyTwoFactor(auth.config, {
+      challenge: r.value.twoFactor.challenge,
+      code: await codeNow(auth, secret),
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("takes data in the body of POST /social/:provider/link and gives it to the link hook", async () => {
+    const w = world();
+    const config = w.config();
+    const done = await complete(w, config, await start(config, undefined));
+    if (!done.ok || !("token" in done.value)) throw new Error("no session");
+    const handle = createRouter(config, socialRoutes(config));
+    const res = await handle(
+      post(
+        "/auth/social/google/link",
+        { data: encoded('{"team":"blue"}') },
+        { cookie: `${config.cookieName}=${done.value.token}` },
+      ),
+    );
+    expect(res.status).toBe(200);
+    const { url } = (await res.json()) as { url: string };
+    const bind = new RegExp(`^${bindingCookieName(config.cookieName)}=([^;]+)`);
+    const bindToken = res.headers
+      .getSetCookie()
+      .map((c) => bind.exec(c)?.[1])
+      .find((v) => v !== undefined);
+    const authorize = new URL(url);
+    const linked = await complete(
+      w,
+      config,
+      {
+        state: authorize.searchParams.get("state") ?? "",
+        nonce: authorize.searchParams.get("nonce") ?? "",
+        bindToken: bindToken ?? "",
+      },
+      { sub: "g-2" },
+      done.value.token,
+    );
+    expect(linked).toMatchObject({ ok: true, value: { linked: true } });
+    expect(w.seen.links.at(-1)).toEqual({ via: "link", stateData: { team: "blue" } });
+  });
+
+  it("refuses a GET start value over the bound before it decodes it", async () => {
+    const w = world();
+    const config = w.config();
+    const handle = createRouter(config, socialRoutes(config));
+    const decode = vi.spyOn(globalThis, "atob");
+    // 1367 characters hold more than 1024 bytes.
+    const res = await handle(get(`/auth/social/google/start?data=${"A".repeat(1367)}`));
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("auth_error")).toBe(
+      "invalid_body",
+    );
+    expect(decode).not.toHaveBeenCalled();
+    // 1366 characters, 1024 bytes, are in the bound.
+    const fits = encoded(`{"p":"${"x".repeat(1016)}"}`);
+    expect(fits).toHaveLength(1366);
+    const ok = await handle(get(`/auth/social/google/start?data=${fits}`));
+    expect(new URL(ok.headers.get("location") ?? "").origin).toBe("https://accounts.google.com");
+    expect(decode).toHaveBeenCalled();
+    expect(await stateRows(w)).toHaveLength(1);
+  });
+
+  it("fails closed at the verify for a payload under a version that left the config", async () => {
+    const g = await gated(ONE);
+    const { token, row } = await g.challenge(g.base.config, JSON.stringify(PRO));
+    const code = g.backupCodes[0] ?? "";
+    // Version 1 leaves the config while the challenge is live.
+    const refused = await verifyTwoFactor(g.on(ONLY_2), {
+      challenge: token,
+      backupCode: code,
+      ip: null,
+    });
+    expect(refused).toMatchObject({ ok: false, code: "invalid_token" });
+    await g.untouched(row.id);
+    expect(g.seen.sessions).toEqual([]);
+    // With version 1 back, the same backup code passes: it was not spent.
+    const v = await verifyTwoFactor(g.base.config, {
+      challenge: token,
+      backupCode: code,
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(g.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("fails closed at the verify for a payload moved to another challenge row", async () => {
+    const g = await gated(ONE);
+    const a = await g.challenge(g.base.config, JSON.stringify(PRO));
+    const b = await g.challenge(g.base.config, '{"plan":"free"}');
+    // A database write that moves a sealed payload to another challenge row.
+    await g.base.storage.update("verification", [{ field: "id", op: "eq", value: b.row.id }], {
+      data: { ...b.row.data, sealedData: a.row.data?.sealedData },
+    });
+    const code = g.backupCodes[0] ?? "";
+    const refused = await verifyTwoFactor(g.base.config, {
+      challenge: b.token,
+      backupCode: code,
+      ip: null,
+    });
+    expect(refused).toMatchObject({ ok: false, code: "invalid_token" });
+    await g.untouched(b.row.id);
+    expect(g.seen.sessions).toEqual([]);
+    // The untouched row opens, with the same backup code.
+    const v = await verifyTwoFactor(g.base.config, {
+      challenge: a.token,
+      backupCode: code,
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(g.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("opens the payload under its own version after a version change, and sends no email code to a social challenge", async () => {
+    // The email method is on, but it never serves a social challenge.
+    const g = await gated(PHASE_1, true);
+    const { token, row } = await g.challenge(g.base.config, JSON.stringify(PRO));
+    expect(row.secretVersion).toBe(1);
+    // Version 2 becomes current while the challenge is live.
+    const phase2 = g.on(PHASE_2);
+    const send = await sendSecondFactorEmail(phase2, { challenge: token });
+    const after = await g.base.storage.findOne("verification", [
+      { field: "id", op: "eq", value: row.id },
+    ]);
+    const v = await verifyTwoFactor(phase2, {
+      challenge: token,
+      backupCode: g.backupCodes[0] ?? "",
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(g.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+    // Checked after the verify, so a send that moves the row's version also shows at the verify.
+    expect(send).toMatchObject({ ok: false, code: "invalid_body" });
+    expect(after?.secretVersion).toBe(1);
+    expect(after?.data).toMatchObject({ sealedData: row.data?.sealedData, sealedDataVersion: 1 });
+  });
+
+  it("gives both hooks the value of the same JSON text at a challenge", async () => {
+    const g = await gated(ONE);
+    // JSON.parse gives Infinity for 1e400, and JSON.stringify of Infinity gives null.
+    const { token } = await g.challenge(g.base.config, '{"n":1e400}');
+    expect(g.seen.links).toEqual([{ via: "sign_in", stateData: { n: Infinity } }]);
+    const v = await verifyTwoFactor(g.base.config, {
+      challenge: token,
+      code: await codeNow(g.base, g.secret),
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(g.seen.sessions).toEqual([{ via: "social", stateData: { n: Infinity } }]);
+  });
+});

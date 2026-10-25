@@ -40,7 +40,7 @@ import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkIcons } from "./check-icons.ts";
-import { checkLimits } from "./check-limits.ts";
+import { checkLimits, DYNAMIC_LIMITS } from "./check-limits.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
@@ -70,6 +70,7 @@ import { helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
 import { readChangelogs, readVersions } from "./lib/feed.ts";
+import { coreSources, limitWindows } from "./lib/limit-windows.ts";
 import {
   distFiles,
   distPageOrEmpty,
@@ -232,7 +233,12 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   },
   {
     name: "check-limits",
-    run: () => checkLimits(distPageOrEmpty("/docs/reference/limits/"), LIMIT_FAMILIES),
+    run: () =>
+      checkLimits(
+        distPageOrEmpty("/docs/reference/limits/"),
+        LIMIT_FAMILIES,
+        limitWindows(coreSources(), DYNAMIC_LIMITS),
+      ),
   },
   {
     name: "check-config",

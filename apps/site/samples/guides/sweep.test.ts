@@ -11,6 +11,7 @@ describe("delete expired rows", () => {
     const counts = await auth.api.sweepExpired();
     expect(counts.verificationExpired).toBe(1);
     expect(Object.keys(counts).sort()).toEqual([
+      "anonymousUsers",
       "apiTokens",
       "invitations",
       "jwks",

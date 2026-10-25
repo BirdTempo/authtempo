@@ -3,10 +3,12 @@ import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { IdentityRow, UserRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { PENDING_HASH_PREFIX } from "./password.js";
+import { phoneSignsIn } from "./phone.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
 import type { ResolvedSession } from "./sessions.js";
@@ -26,6 +28,13 @@ export const UNLINK_PER_USER = { seconds: 900, max: 10 };
 export interface Credentials {
   /** An active password row, not the pending row of a sign-up. A legacy row counts: the legacy seam signs the person in. */
   password: boolean;
+  /**
+   * The password row is a way in: an identifier that the password sign-in
+   * takes reaches it. That is an address, a username with `config.username`
+   * on, or a phone that signs in (plan 12i, final review A M1). The guard
+   * counts this, not `password`.
+   */
+  passwordReached: boolean;
   passkeys: number;
   identities: IdentityRow[];
   /**
@@ -34,6 +43,12 @@ export interface Credentials {
    * address alone decides. A later switch must change this one line.
    */
   mailbox: boolean;
+  /**
+   * A phone that signs in (plan 12i): a stored phone counts only with
+   * `config.phone` on and a number that the config accepts
+   * (`phoneSignsIn`, ruling 15 of plan 12i).
+   */
+  phone: boolean;
 }
 
 export async function credentialsOf(
@@ -47,11 +62,16 @@ export async function credentialsOf(
   const passkeys = config.passkey
     ? (await storage.findMany("passkey", [{ field: "userId", op: "eq", value: user.id }])).length
     : 0;
+  const password = row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX);
+  const phone = phoneSignsIn(config, user);
+  const named = hasAddress(user) || (config.username !== null && user.username !== null) || phone;
   return {
-    password: row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX),
+    password,
+    passwordReached: password && named,
     passkeys,
     identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
-    mailbox: user.emailVerified,
+    mailbox: hasAddress(user) && user.emailVerified,
+    phone,
   };
 }
 
@@ -66,10 +86,11 @@ function signsIn(config: ResolvedConfig, identity: IdentityRow): boolean {
 
 function count(config: ResolvedConfig, c: Credentials): number {
   return (
-    (c.password ? 1 : 0) +
+    (c.passwordReached ? 1 : 0) +
     c.passkeys +
     c.identities.filter((i) => signsIn(config, i)).length +
-    (c.mailbox ? 1 : 0)
+    (c.mailbox ? 1 : 0) +
+    (c.phone ? 1 : 0)
   );
 }
 
@@ -104,6 +125,9 @@ export async function guardedRemove(
   config: ResolvedConfig,
   userId: string,
   remove: (tx: StorageAdapter, user: UserRow) => Promise<number>,
+  // The fields of the user row that `remove` wrote. The recount reads the
+  // row as `remove` left it. The phone remove of plan 12i writes `phone: null`.
+  wrote: Partial<UserRow> = {},
 ): Promise<Result<UserRow>> {
   const now = config.clock.now();
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
@@ -116,8 +140,9 @@ export async function guardedRemove(
         if ((await tx.update("user", unchanged(seen), { updatedAt })) === 1) {
           const held: UserRow = { ...seen, updatedAt };
           if ((await remove(tx, held)) === 0) stopWith("not_found");
-          if ((await waysIn(config, tx, held)) < 1) stopWith("last_credential");
-          return ok(held);
+          const left: UserRow = { ...held, ...wrote };
+          if ((await waysIn(config, tx, left)) < 1) stopWith("last_credential");
+          return ok(left);
         }
         // A parallel write landed first. No write of this call has run.
         seen = await tx.findOne("user", byId);

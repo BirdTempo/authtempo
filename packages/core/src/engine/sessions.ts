@@ -10,6 +10,7 @@ import {
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
+import { IN_CHUNK } from "../storage/batch.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import {
   type PatchShapeRefusal,
@@ -125,6 +126,11 @@ export function sessionMaxAgeSeconds(config: ResolvedConfig): number {
 }
 // Built from the prefix, so the pattern and the prefix cannot drift (the prefix has no regex character).
 const TOKEN_RE = new RegExp(`^${SESSION_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
+
+/** True when `token` has the form of a session token (plan 12i: the bag of multi-session reads it). */
+export function isSessionTokenForm(token: string): boolean {
+  return TOKEN_RE.test(token);
+}
 
 export interface SessionInput {
   userId: string;
@@ -315,7 +321,7 @@ async function patchedInput(
 export interface PreparedSession {
   readonly input: SessionInput;
   /** The address that `writeSession` compares again, with `sameAddress`. */
-  readonly address?: string;
+  readonly address?: string | null;
 }
 
 /**
@@ -420,6 +426,8 @@ export async function sessionOpened(
   user: UserRow,
   via: SessionVia,
   provider?: string,
+  // The app payload of a social sign-in (plan 12i Task 19): the hook event only, never the line.
+  stateData?: Record<string, unknown> | null,
 ): Promise<void> {
   config.observe.emit({
     name: "sign_in",
@@ -435,7 +443,7 @@ export async function sessionOpened(
     config.observe,
     "session.afterCreate",
     config.hooks.session.afterCreate,
-    { session, user, via },
+    { session, user, via, ...(stateData ? { stateData } : {}) },
     session.id,
   );
 }
@@ -471,6 +479,16 @@ export function challengeOpened(
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
  *
+ * With `oneDelete` (a claim, final review B M of plan 12i), the read rows go
+ * by one delete of their ids per `IN_CHUNK`, not one per row. So the count of
+ * the claimant's sessions adds no query on D1. A delete count equal to the
+ * count of the chunk's rows puts those rows in `ended`. A smaller count
+ * means another flow ended a row of the chunk after the read, and fired its
+ * hook. This flow cannot tell which row, so it calls `oneDelete.raced`,
+ * which throws: the flow undoes its transaction and runs once more, and the
+ * new read no longer holds that row. Postgres and MySQL lock the rows before
+ * the read (`lockInOrder`), so there the counts always match.
+ *
  * The back-channel outbox (plan 12e Task 16): first the user's client links.
  * With none, nothing more runs. With some, each linked session that `where`
  * matches gets one `oauthLogout` row per link, and its links go, in this
@@ -483,6 +501,7 @@ export async function endSessions(
   ended: SessionRow[] | null,
   now: Date,
   stops: ImpersonationStops | null,
+  oneDelete: { raced(): never } | null = null,
 ): Promise<number> {
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
@@ -533,14 +552,22 @@ export async function endSessions(
         n++;
         await writeStopRow(tx, stops, row, now);
       }
-  if (ended)
-    for (const row of rows) {
-      if (stops && row.actorId !== null) continue;
+  const plain = rows.filter((row) => !(stops && row.actorId !== null));
+  if (ended && oneDelete)
+    for (let i = 0; i < plain.length; i += IN_CHUNK) {
+      const chunk = plain.slice(i, i + IN_CHUNK);
+      const ids = { field: "id", op: "in", value: chunk.map((row) => row.id) } as const;
+      const gone = await tx.delete("session", [...where, ids]);
+      if (gone !== chunk.length) oneDelete.raced();
+      ended.push(...chunk);
+      n += gone;
+    }
+  else if (ended)
+    for (const row of plain)
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
         ended.push(row);
         n++;
       }
-    }
   return n + (await tx.delete("session", where));
 }
 
@@ -601,8 +628,11 @@ export interface SessionReadOptions {
 /**
  * How `resolveSession` runs. `"write"` slides the expiry and deletes an
  * ended row. `"read-only"` writes nothing (plan 12a). `readModeOf` decides it.
+ * `"no-slide"` deletes an ended row as `"write"` does, but never slides the
+ * expiry (ruling 34 of plan 12i). A bag session of multi-session reads with
+ * it: the session is idle, so a list must not extend its life.
  */
-export type SessionReadMode = "write" | "read-only";
+export type SessionReadMode = "write" | "read-only" | "no-slide";
 
 /**
  * The one place that decides the read mode of a request (plan 12a, plan
@@ -624,7 +654,8 @@ export function readModeOf(
  * deleted on the way out. After `slidingRefreshDays` the expiry moves
  * forward by a full ttl. In `"read-only"` mode the call writes nothing: an
  * ended row answers null and stays for the sweep, and a due refresh sets
- * `needsRefresh`. No mode changes `freshAt`. An impersonation session (with
+ * `needsRefresh`. In `"no-slide"` mode the call ends an ended row and
+ * never slides. No mode changes `freshAt`. An impersonation session (with
  * `actorId`) is never due: its expiry is fixed at the start (plan 12f).
  *
  * A session from before the end of the user's last ban answers null (plan
@@ -640,8 +671,9 @@ export async function resolveSession(
   token: string,
   mode: SessionReadMode = "write",
   peeked: SessionRow | null = null,
+  peekedUser: UserRow | null = null,
 ): Promise<ResolvedSession | null> {
-  const write = mode === "write";
+  const write = mode !== "read-only";
   if (!TOKEN_RE.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const now = config.clock.now();
@@ -664,9 +696,11 @@ export async function resolveSession(
     if (n === 1) await sessionsEnded(config, [session], "expired", null, n);
     return null;
   }
-  const user = await config.storage.findOne("user", [
-    { field: "id", op: "eq", value: session.userId },
-  ]);
+  // The user that the anonymous step of the router read for this request (plan 12i Task 6), else a read.
+  const user =
+    peekedUser?.id === session.userId
+      ? peekedUser
+      : await config.storage.findOne("user", [{ field: "id", op: "eq", value: session.userId }]);
   if (!user) return null;
   if (bannedFor(user, session.createdAt)) {
     if (!write) return null;
@@ -696,7 +730,7 @@ export async function resolveSession(
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
   const due = session.actorId === null && sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };
-  if (due) {
+  if (due && mode === "write") {
     const slid = sessionExpiry(config, session.createdAt, now);
     // A SAML cap holds through every refresh (ruling 38 Q1 of plan 12d). The
     // row goes with the cap, and the session ends at the cap too, so a
@@ -776,17 +810,43 @@ export async function peekSession(
  * query of the 50 of one invocation. The map holds no row after the request.
  */
 const peekedRows = new WeakMap<Request, SessionRow>();
+/** The user row of the peeked session, read by the anonymous step of the router (plan 12i Task 6). */
+const peekedUsers = new WeakMap<Request, UserRow>();
 
-/** `peekSession` for the token of `request`, kept for the handler's session read. */
+/**
+ * `peekSession` for the token of `request`, kept for the handler's session
+ * read. A second call for the request answers the kept row with no read.
+ */
 export async function peekRequestSession(
   config: ResolvedConfig,
   request: Request,
 ): Promise<SessionRow | null> {
+  const kept = peekedRows.get(request);
+  if (kept) return kept;
   const token = readSessionToken(config, request);
   if (token === null) return null;
   const row = await peekSession(config, token);
   if (row) peekedRows.set(request, row);
   return row;
+}
+
+/**
+ * The user of the live session of `request`, kept for the handler's session
+ * read (plan 12i Task 6). The anonymous step of the router reads it, and
+ * `resolveSession` takes it in place of a second read of the same row. So a
+ * refused route pays no query more on D1. It writes nothing.
+ */
+export async function peekRequestUser(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<UserRow | null> {
+  const row = await peekRequestSession(config, request);
+  if (row === null) return null;
+  const kept = peekedUsers.get(request);
+  if (kept?.id === row.userId) return kept;
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
+  if (user) peekedUsers.set(request, user);
+  return user;
 }
 
 /** The caller's session from the cookie or the bearer header, or null. */
@@ -798,8 +858,12 @@ export async function sessionFromRequest(
   const token = readSessionToken(config, request);
   // The row of the router serves one read: a later read of the request reads again.
   const peeked = peekedRows.get(request) ?? null;
+  const peekedUser = peekedUsers.get(request) ?? null;
   peekedRows.delete(request);
-  return token ? resolveSession(config, token, readModeOf(config, request, options), peeked) : null;
+  peekedUsers.delete(request);
+  return token
+    ? resolveSession(config, token, readModeOf(config, request, options), peeked, peekedUser)
+    : null;
 }
 
 /**
@@ -829,7 +893,8 @@ export function renewedSessionCookie(
 /** The public shape of a user. Never an internal field. */
 export function publicUser(user: UserRow): {
   id: string;
-  email: string;
+  /** Null for a user with no address (plan 12i). */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   image: string | null;

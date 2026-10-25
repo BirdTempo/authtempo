@@ -1,0 +1,70 @@
+---
+title: Social sign-in on preview deployments
+description: Make Google, GitHub, and other providers work on a preview host, by its own registered callback, with no proxy through production.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 12"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 18"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/preview-deployments.ts?raw";
+import test from "../../../../../samples/guides/preview-deployments.test.ts?raw";
+
+**For:** an app developer whose host makes a deployment on a new host for each branch or pull request.
+
+**What it does:** this page gives the two ways to register the callback of a preview host at a provider. Core sends each provider the callback of the host where the sign-in started.
+
+## Before you start
+
+- A working social sign-in, as in [Sign in with Google and Apple](/docs/guides/social/).
+- The host of each preview deployment, or a stable list of preview hosts for [Serve one deployment on several hosts](/docs/guides/base-url-list/).
+
+## Steps
+
+1. Give each preview deployment its own `baseURL`, `appURL`, and `trustedOrigins`, from the settings of that deployment.
+2. Choose path 1 or path 2 below for each provider.
+3. Path 1: make an OAuth app at the provider for each preview host. Register only the callback of that host. Put its client id and secret in the settings of that deployment.
+4. Path 2: use a provider that takes several callback URLs for one client. Register the callback of each preview host on the one client.
+5. Register the callback `<API origin>/auth/social/<provider>/callback`, or the path of `redirectURI` on that origin.
+6. Before you merge, remove the callback of a preview host that has gone.
+
+<Code code={config} lang="ts" title="The settings of one deployment" />
+
+<Code code={test} lang="ts" title="The callback of a preview host as a test" />
+
+## How it behaves
+
+- Core sends `redirect_uri` on the origin of the request where the sign-in started. With a `baseURL` list, that is the picked entry.
+- A `redirectURI` override is a path under `basePath` on the origin of an entry of `baseURL`. Core serves that path as the callback of the provider.
+- The binding cookie ties the callback to the browser that started the sign-in, on the same host. So the callback must come back to that host.
+- The state row, the PKCE verifier, and the binding cookie stay on one host for the whole flow.
+
+## Why core has no OAuth proxy
+
+Better Auth's `oauth-proxy` plugin lets a preview host use the callback of production. Production gets the callback, and sends the result on to the preview host. Core declines it, because it routes the state of a sign-in through a second host.
+
+- A proxy needs production to send a sign-in result to another host. Then a preview build, which runs code that nobody reviewed yet, can get it.
+- The binding cookie of a flow is on the host that started it. A callback on production cannot read it, so it cannot tie the callback to that browser.
+- Each path above keeps the whole flow on one host. A preview host then holds only its own sign-ins.
+
+## Residuals
+
+- Path 1 needs one OAuth app per preview host. A host with many previews needs many apps, or a small set of stable preview hosts.
+- Path 2 leaves the callbacks of old previews on the client until you remove them. A host that someone else takes later can then get a code for that client.
+- A passkey binds to its `rpID`. A preview host outside the domain of `rpID` cannot use the passkeys of production.
+
+## If it fails
+
+- The provider shows its own error page and does not come back: the callback of this host is not registered. Register it, as in path 1 or path 2.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the provider sent an error to the callback. Check the callback that the OAuth app of this host lists.
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the code exchange failed. Check that the client id and secret are those of the OAuth app of this host.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the callback came to another host than the start, so the binding cookie was absent. Start the sign-in on the host that gets the callback.
+- [`host_not_allowed`](/docs/reference/errors/#host_not_allowed): with a `baseURL` list, the preview host is not in the list. Add its origin.
+
+## Next
+
+- [Serve one deployment on several hosts](/docs/guides/base-url-list/)
+- [Sign in with Google and Apple](/docs/guides/social/)
+- [Social](/docs/reference/config/#social)

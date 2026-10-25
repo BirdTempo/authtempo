@@ -40,6 +40,10 @@ export const CLIENT_CALLS = [
   { operation: "magicLink.verify", method: "POST", path: "/magic-link/verify" },
   // A browser navigation, not a fetch: client.social builds its URL from this row.
   { operation: "social.start", method: "GET", path: "/social/:provider/start" },
+  // Plan 12i Task 10: the ID-token route of Google One Tap and the native Apple sheet.
+  // `social.oneTapNonce` calls the nonce row for google.
+  { operation: "social.idTokenNonce", method: "POST", path: "/social/:provider/id-token/nonce" },
+  { operation: "social.idToken", method: "POST", path: "/social/:provider/id-token" },
   { operation: "handoff.redeem", method: "POST", path: "/handoff/redeem" },
   { operation: "passkey.register.options", method: "POST", path: "/passkey/register/options" },
   {
@@ -50,13 +54,21 @@ export const CLIENT_CALLS = [
   },
   { operation: "passkey.signIn.options", method: "POST", path: "/passkey/authenticate/options" },
   { operation: "passkey.signIn.verify", method: "POST", path: "/passkey/authenticate/verify" },
+  // Plan 12i Task 8: the passkey-first sign-up, a ceremony of two calls.
+  { operation: "passkey.signUp.options", method: "POST", path: "/passkey/sign-up/options" },
+  { operation: "passkey.signUp.verify", method: "POST", path: "/passkey/sign-up/verify" },
   { operation: "passkeys.list", method: "GET", path: "/passkeys", select: "passkeys" },
+  // Plan 12i Task 9: the list gives the inputs of the Signal API to the two signal calls.
+  { operation: "passkeys.sync", method: "GET", path: "/passkeys" },
+  { operation: "passkeys.signalDetails", method: "GET", path: "/passkeys" },
   { operation: "passkeys.delete", method: "POST", path: "/passkeys/delete" },
   { operation: "passkeys.rename", method: "POST", path: "/passkeys/rename", select: "passkey" },
   { operation: "password.signUp", method: "POST", path: "/password/sign-up" },
   { operation: "password.signIn", method: "POST", path: "/password/sign-in" },
   { operation: "password.resendVerification", method: "POST", path: "/password/verify/resend" },
   { operation: "password.verifyEmail", method: "POST", path: "/password/verify" },
+  // Plan 12i Task 20: the sign-up code of password.verifyBy "code".
+  { operation: "password.verifyCode", method: "POST", path: "/password/verify/code" },
   { operation: "password.requestReset", method: "POST", path: "/password/reset/request" },
   { operation: "password.reset", method: "POST", path: "/password/reset" },
   { operation: "password.change", method: "POST", path: "/password/change" },
@@ -64,6 +76,19 @@ export const CLIENT_CALLS = [
   { operation: "emailOtp.verify", method: "POST", path: "/otp/verify" },
   { operation: "emailOtp.requestReset", method: "POST", path: "/otp/reset/request" },
   { operation: "emailOtp.reset", method: "POST", path: "/otp/reset" },
+  // Plan 12i Task 5: the phone code. The add, its verify, and the remove need a fresh session.
+  { operation: "phone.request", method: "POST", path: "/phone/request" },
+  { operation: "phone.verify", method: "POST", path: "/phone/verify" },
+  { operation: "phone.add", method: "POST", path: "/phone/add" },
+  { operation: "phone.verifyAdd", method: "POST", path: "/phone/add/verify" },
+  { operation: "phone.remove", method: "POST", path: "/phone/remove" },
+  // Plan 12i Task 6: the anonymous sign-in and its own delete.
+  { operation: "anonymous.signIn", method: "POST", path: "/anonymous/sign-in" },
+  { operation: "anonymous.delete", method: "POST", path: "/anonymous/delete" },
+  // Plan 12i Task 11: the sessions of the browser. The routes read the cookies only.
+  { operation: "multiSession.list", method: "GET", path: "/multi-session", select: "sessions" },
+  { operation: "multiSession.switch", method: "POST", path: "/multi-session/switch" },
+  { operation: "multiSession.signOut", method: "POST", path: "/multi-session/sign-out" },
   { operation: "organizations.create", method: "POST", path: "/organizations/create" },
   {
     operation: "organizations.list",
@@ -283,6 +308,9 @@ export const CLIENT_CALLS = [
   { operation: "user.verifyEmailChange", method: "POST", path: "/user/change-email/verify" },
   { operation: "user.delete", method: "POST", path: "/user/delete" },
   { operation: "user.confirmDelete", method: "POST", path: "/user/delete/confirm" },
+  // Plan 12i Task 2: the username. The check is public; the set needs a fresh session.
+  { operation: "username.available", method: "GET", path: "/username/available" },
+  { operation: "username.set", method: "POST", path: "/user/username" },
   { operation: "identities.list", method: "GET", path: "/identities" },
   { operation: "identities.unlink", method: "POST", path: "/identities/unlink" },
   // A POST, not a navigation: the start needs the session. client.identities.link

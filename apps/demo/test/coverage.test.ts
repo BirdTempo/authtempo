@@ -50,7 +50,8 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12k Task 7 added one tokens route: update.
       // Plan 12k Task 8 added five organizations routes: the organization tokens.
       // Plan 12h adds GET /health, so 86 became 87.
-      expect(served).toBe(87);
+      // Plan 12i Task 20 adds POST /password/verify/code of password, so 87 became 88.
+      expect(served).toBe(88);
     },
     LONG_TEST_MS,
   );
@@ -69,7 +70,7 @@ describe("the demo lists and the routes of core", () => {
         checked++;
       }
       expect(served).toEqual([]);
-      // Count what ran: the routes of the twelve exempt features. Plan 12e added
+      // Count what ran: the routes of the sixteen exempt features. Plan 12e added
       // three oauth routes (GET and POST /oauth/end-session, POST /oauth/introspect)
       // and the three routes of oauthDevice, so 24 became 30. Plan 12f adds the
       // eleven routes of operatorUsers and the two routes of
@@ -84,7 +85,13 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12d Task 8 adds the ACS and the SP metadata of sso, so 84 became 86.
       // Plan 12d Task 10 adds the six routes of the SCIM Users, so 86 became 92.
       // Plan 12d Task 11 adds the six routes of the SCIM Groups, so 92 became 98.
-      expect(checked).toBe(98);
+      // Plan 12i Task 9 adds GET /.well-known/webauthn of passkeyRelatedOrigins,
+      // so 98 became 99. Plan 12i Task 2 adds the two routes of username: 101.
+      // Plan 12i Task 5 adds the five routes of phone: 106. Task 6 adds the
+      // two routes of anonymous: 108. Task 11 adds the three routes of
+      // multiSession: 111. Plan 12i Task 10 adds the two routes of
+      // socialIdToken: 113. Task 8 adds the two routes of passkeySignUp: 115.
+      expect(checked).toBe(115);
     },
     LONG_TEST_MS,
   );

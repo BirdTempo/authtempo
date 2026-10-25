@@ -1,4 +1,4 @@
-// authtempo schema version 14, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 15, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
@@ -11,15 +11,22 @@ model TaUser {
   id String @id @map("id")
   createdAt DateTime @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
-  email String @map("email")
+  email String? @map("email")
   emailVerified Boolean @map("email_verified")
   name String? @map("name")
   image String? @map("image")
   bannedAt DateTime? @map("banned_at") @db.Timestamptz(6)
   banReason String? @map("ban_reason")
   banUntil DateTime? @map("ban_until") @db.Timestamptz(6)
+  username String? @map("username")
+  displayUsername String? @map("display_username")
+  phone String? @map("phone")
+  isAnonymous Boolean @map("is_anonymous")
 
   @@unique([email], map: "ux_ta_user__email")
+  @@unique([username], map: "ux_ta_user__username")
+  @@unique([phone], map: "ux_ta_user__phone")
+  @@index([isAnonymous, createdAt], map: "ix_ta_user__is_anonymous__created_at")
   @@map("ta_user")
 }
 
@@ -89,6 +96,9 @@ model TaPasskey {
   deviceType String @map("device_type")
   backedUp Boolean @map("backed_up")
   name String? @map("name")
+  discoverable Boolean? @map("discoverable")
+  prf Boolean @map("prf")
+  largeBlob Boolean @map("large_blob")
 
   @@unique([credentialId], map: "ux_ta_passkey__credential_id")
   @@index([userId], map: "ix_ta_passkey__user_id")
@@ -339,6 +349,7 @@ model TaOauthSessionClient {
   clientId String @map("client_id")
   userId String @map("user_id")
   sid String @map("sid")
+  issuer String? @map("issuer")
 
   @@unique([sessionId, clientId], map: "ux_ta_oauth_session_client__session_id__client_id")
   @@index([userId], map: "ix_ta_oauth_session_client__user_id")
@@ -355,6 +366,7 @@ model TaOauthLogout {
   sid String @map("sid")
   attempts Int @map("attempts")
   nextAttemptAt DateTime @map("next_attempt_at") @db.Timestamptz(6)
+  issuer String? @map("issuer")
 
   @@index([nextAttemptAt], map: "ix_ta_oauth_logout__next_attempt_at")
   @@index([userId], map: "ix_ta_oauth_logout__user_id")

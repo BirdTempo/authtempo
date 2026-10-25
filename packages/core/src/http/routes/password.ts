@@ -1,15 +1,19 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
+import { type LastMethod, passwordMethod } from "../../engine/last-method.js";
 import {
   changePassword,
   PASSWORD_RESET_TOKEN_RE,
   PASSWORD_VERIFY_TOKEN_RE,
   type PasswordSession,
+  passwordIdentifier,
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
   resendPasswordVerification,
   resetPassword,
+  verifyPasswordCode,
   verifyPasswordEmail,
 } from "../../engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
@@ -25,18 +29,20 @@ import {
   signInBody,
   signUpBody,
   tokenBody,
+  verifyCodeBody,
 } from "../contract/password.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
 import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
-import type { Route } from "../router.js";
+import type { Route, RouteContext } from "../router.js";
 import {
   challengePageUrl,
   sessionCookieFor,
   signedInResponse,
   trustTokenOf,
   twoFactorJson,
+  withLastMethod,
 } from "../session-answer.js";
 
 type PageError = NonNullable<ResetPageInput["error"]>;
@@ -55,11 +61,13 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const pw = config.password;
   const verifyPath = `${config.basePath}/password/verify`;
   const resetPath = `${config.basePath}/password/reset`;
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
   const cookieFor = (token: string) => sessionCookieFor(config, token);
-  const signedIn = (v: PasswordSession): Response => signedInResponse(config, v);
+  const signedIn = (v: PasswordSession, via?: LastMethod): Response =>
+    signedInResponse(config, v, via);
   return [
     {
       method: "POST",
@@ -68,21 +76,27 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, signUpBody);
         if (!body.ok) return respond(body);
-        const r = await passwordSignUp(ctx.config, {
-          email: body.value.email,
-          password: body.value.password,
-          name: body.value.name,
-          ip: ctx.ip,
-          userAgent: ctx.request.headers.get("user-agent"),
-          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
-        });
+        const r = await passwordSignUp(
+          ctx.config,
+          {
+            email: body.value.email,
+            password: body.value.password,
+            name: body.value.name,
+            username: body.value.username,
+            ip: ctx.ip,
+            userAgent: ctx.request.headers.get("user-agent"),
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
+          },
+          ctx.waitUntil,
+        );
         if (!r.ok) return respond(r);
         // The uniform answer (plan 12b): the same bytes for every address, no cookie.
         if ("sent" in r.value) return json({ sent: true });
         // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no cookie.
         if ("verifyRequired" in r.value)
           return json({ user: publicUser(r.value.user), verifyRequired: true });
-        return signedIn(r.value);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, "password"), "password");
       },
     },
     {
@@ -92,19 +106,24 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, signInBody);
         if (!body.ok) return respond(body);
+        const v = body.value;
+        const by = passwordIdentifier(v);
+        if (!by) return respond(fail("invalid_body"));
         const r = await passwordSignIn(ctx.config, {
-          email: body.value.email,
-          password: body.value.password,
+          ...by,
+          password: v.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
           next: body.value.next,
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
         if ("twoFactor" in r.value) return twoFactorJson(r.value);
-        return signedIn(r.value);
+        const method = passwordMethod(by);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, method), method);
       },
     },
     {
@@ -115,7 +134,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       key: "GET /password/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         return page(
           defaultPasswordVerifyPage({ action: verifyPath, token, appName: ctx.config.appName }),
         );
@@ -129,28 +148,67 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, tokenBody);
         // A form with no token is a client bug. The person sees the page for a bad link.
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const r = await verifyPasswordEmail(ctx.config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
-        if (!r.ok) return jsonCaller ? respond(r) : failed(r.code);
+        if (!r.ok) return jsonCaller ? respond(r) : failed(ctx, r.code);
         const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(ctx.config, "/"));
-        if (r.value.signedIn) res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
-        return res;
+        if (!r.value.signedIn) return res;
+        // The confirm of a password sign-up opens its session (plan 12b).
+        res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
+        return withLastMethod(ctx.config, ctx.request, res, "password");
       },
     },
     {
-      // A new verify link (plan 8b). No session: the person may have none.
+      // The sign-up code (plan 12i Task 20). JSON only: the person types the code.
+      method: "POST",
+      path: "/password/verify/code",
+      key: "POST /password/verify/code",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, verifyCodeBody);
+        if (!body.ok) return respond(body);
+        const r = await verifyPasswordCode(ctx.config, {
+          email: body.value.email,
+          code: body.value.code,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        });
+        if (!r.ok) return respond(r);
+        const s = r.value.signedIn;
+        if (!s) return json({ verified: true });
+        // The code opens the session of the sign-up, as the link's confirm does (plan 12b).
+        const res = signedIn(
+          { token: s.token, user: r.value.user, session: s.session },
+          "password",
+        );
+        return withLastMethod(ctx.config, ctx.request, res, "password");
+      },
+    },
+    {
+      // A new verify link or code (plan 8b). No session: the person may have none.
       method: "POST",
       path: "/password/verify/resend",
       key: "POST /password/verify/resend",
       async handler(ctx) {
         const body = await readJson(ctx.request, resendBody);
         if (!body.ok) return respond(body);
+        // With the code, the send runs after the answer (ruling 23 of plan 12i).
         return respond(
-          await resendPasswordVerification(ctx.config, { email: body.value.email, ip: ctx.ip }),
+          await resendPasswordVerification(
+            ctx.config,
+            {
+              email: body.value.email,
+              ip: ctx.ip,
+              anonymous: await anonymousCaller(ctx.config, ctx.request),
+            },
+            ctx.waitUntil,
+          ),
         );
       },
     },
@@ -178,7 +236,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       key: "GET /password/reset",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         const raw = ctx.url.searchParams.get("error");
         const error = isPageError(raw) ? raw : null;
         return page(
@@ -200,7 +258,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, resetBody);
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const r = await resetPassword(ctx.config, {
           token: body.value.token,
           password: body.value.password,
@@ -216,7 +275,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
               `${ctx.config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
               r.code,
             );
-          return failed(r.code);
+          return failed(ctx, r.code);
         }
         // The factor is on (plan 12c, owner decision 1 of 2026-10-14): no
         // cookie. JSON answers the challenge; a form goes to the challenge

@@ -1,0 +1,79 @@
+---
+title: Sign in with Google One Tap
+description: Take the ID token of Google One Tap with a nonce of one use, and open the session through the same account rules as the redirect flow.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 10"
+  - packages/core/src/engine/id-token.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/one-tap.ts?raw";
+import client from "../../../../../samples/guides/one-tap-client.ts?raw";
+import test from "../../../../../samples/guides/one-tap.test.ts?raw";
+
+**For:** an app developer who shows the One Tap prompt of Google Identity Services.
+
+**What it does:** One Tap gives the page an ID token in place of a code. `POST /social/google/id-token` verifies it and opens the session, as the Google callback does.
+
+## Before you start
+
+- Google sign-in, as in [Sign in with Google and Apple](/docs/guides/social/).
+- The web client id of your Google project, in `social.google.clientId`. [Social](/docs/reference/config/#social) lists the keys.
+
+## Steps
+
+1. Keep `social.idToken` on. It is on by default with `social.google`.
+2. Add the client id of each Android or iOS app to `social.google.audiences`.
+3. Post `{}` to `POST /social/google/id-token/nonce`. Keep `nonce` in the page.
+4. Give `providerNonce` to `google.accounts.id.initialize` as `nonce`. Never give Google the raw `nonce`.
+5. In the callback, post `{ idToken, nonce }` to `POST /social/google/id-token`.
+
+<Code code={config} lang="ts" title="Google with the ID-token route" />
+
+<Code code={client} lang="ts" title="The One Tap prompt in the page" />
+
+<Code code={test} lang="ts" title="The One Tap sign-in as a test" />
+
+## How it behaves
+
+- The nonce is 32 random bytes as base64url, and it lives 5 minutes. `providerNonce` is its lowercase SHA-256 hex. Core stores only that hex.
+- The token's `nonce` claim must equal the SHA-256 hex of the posted `nonce`. A party that holds only the token sees only the hash, so it cannot post the nonce.
+- The token must verify against Google's key set with RS256 or ES256. It needs Google's issuer, an `aud` of `clientId` or of `audiences`, and an `exp` not past.
+- Its `iat` is at most 60 seconds ahead, and its life is at most one day.
+- Core checks the token before it spends the nonce. So a bad token cannot use the nonce up. The nonce is spent once.
+- Each token signs in once, on every instance: core writes a row for it until its `exp`.
+- The account rules, the gate of the second factor, and the anonymous upgrade are those of the Google callback.
+- The route takes JSON only, under the `Origin` check. So core takes no form post of the redirect mode of One Tap.
+- The limits: `id-token-nonce:ip` 60 and `id-token:ip` 30, each per 15 minutes.
+- `social.idToken: false` removes both routes.
+
+## Residuals
+
+- With `social.idToken.requireNonce: false`, a token posted with no nonce skips the hash check. A party that holds only such a token can then sign in before the app. Only the one-use row of the token stops a second use. Keep `requireNonce` on.
+- The Google reference does not say that a One Tap token holds the nonce. Core's tests use test keys, not real tokens.
+
+## Before you go live
+
+Sign in once with One Tap on a real Google account. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
+
+## If it fails
+
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the token did not verify, its nonce does not match, the nonce is spent, or the token signed in before. Ask for a new nonce and a new token.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many nonces or sign-ins from the IP.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): an account with the address exists, and Google did not verify the address.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON, or a field has the wrong type.
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the subject (`sub`) of the token is empty, too long, or holds a control character. Core writes the line `social.bad_subject`.
+- [`email_required`](/docs/reference/errors/#email_required): the token holds no address.
+- [`sso_required`](/docs/reference/errors/#sso_required): the address is of a domain that signs in by SSO only. Send the browser to the start URL in `detail`.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the sign-in or threw.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the user at the same moment. Ask for a new nonce and a new token, and try again.
+
+## Next
+
+- [Sign in with the native Apple sheet](/docs/guides/native-apple/)
+- [Sign in with Google and Apple](/docs/guides/social/)
+- [The ID-token route](/docs/reference/routes/#post-social-provider-id-token)

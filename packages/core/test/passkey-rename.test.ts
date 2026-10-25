@@ -90,6 +90,9 @@ describe("POST /passkeys/rename (plan 12a Task 19)", () => {
         name: "Work laptop",
         deviceType: w.adaKey.deviceType,
         backedUp: w.adaKey.backedUp,
+        discoverable: w.adaKey.discoverable,
+        prf: w.adaKey.prf,
+        largeBlob: w.adaKey.largeBlob,
         createdAt: w.adaKey.createdAt.toISOString(),
       },
     });

@@ -1,5 +1,5 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { signInRedirect } from "@authtempo/core/bindings";
+import { type BindingWaitUntil, handleOptions, signInRedirect } from "@authtempo/core/bindings";
 import {
   readBearer,
   readSessionToken,
@@ -20,17 +20,35 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
+export interface RouteHandlerOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). A route handler of Next 16 gets the Request only, so the
+   * binding reads no platform. Pass `(p) => after(p)` with `after` of
+   * "next/server" (next 16.4.0, read 2026-10-25), or on Workers `waitUntil`
+   * of "cloudflare:workers".
+   */
+  waitUntil?: BindingWaitUntil<Request> | undefined;
+}
+
 /**
  * The handlers of `app/auth/[...path]/route.ts`:
  * `export const { GET, POST, OPTIONS } = authRouteHandlers(getAuth);`.
  * The folder `auth` is core's default `basePath`.
  */
-export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
+export function authRouteHandlers(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: RouteHandlerOptions = {},
+): {
   GET(request: Request): Promise<Response>;
   POST(request: Request): Promise<Response>;
   OPTIONS(request: Request): Promise<Response>;
 } {
-  const handle = (request: Request) => resolve(auth).handle(request);
+  const handle = (request: Request) =>
+    resolve(auth).handle(
+      request,
+      handleOptions(options.waitUntil, request, () => undefined),
+    );
   return { GET: handle, POST: handle, OPTIONS: handle };
 }
 

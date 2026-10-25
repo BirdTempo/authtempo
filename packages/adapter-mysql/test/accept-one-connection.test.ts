@@ -47,6 +47,10 @@ async function world(pool: Pool) {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });

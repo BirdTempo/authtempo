@@ -28,14 +28,23 @@ function setup(password: AuthConfig["password"] = { hash: FAST }, extra: Partial
   return { auth, storage, mail };
 }
 
-const signUp = (auth: ReturnType<typeof createAuth>, email: string, ip = "203.0.113.9") =>
-  auth.handle(
+/**
+ * A sign-up through `handle`, with a `waitUntil` that the call waits for:
+ * the rows and the mail run after the answer (final fix wave item 19).
+ */
+async function signUp(auth: ReturnType<typeof createAuth>, email: string, ip = "203.0.113.9") {
+  const after: Promise<unknown>[] = [];
+  const res = await auth.handle(
     new Request(`${BASE}/auth/password/sign-up`, {
       method: "POST",
       headers: { "content-type": "application/json", "cf-connecting-ip": ip },
       body: JSON.stringify({ email, password: PW }),
     }),
+    { waitUntil: (p) => void after.push(p) },
   );
+  await Promise.all(after);
+  return res;
+}
 
 async function seedUser(storage: StorageAdapter, email: string, verified: boolean) {
   const at = new Date();
@@ -48,6 +57,10 @@ async function seedUser(storage: StorageAdapter, email: string, verified: boolea
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: at,
     updatedAt: at,
   });

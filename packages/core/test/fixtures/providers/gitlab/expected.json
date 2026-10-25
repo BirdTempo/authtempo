@@ -1,0 +1,8 @@
+{
+  "source": "user.json has the fields of the GET /user example of https://docs.gitlab.com/api/users/, read 2026-10-22, with an https avatar host. The subject is Better Auth 1.7.2's accountSubject of gitlab: profile.id, the number 1, stored as the text 1 (@better-auth/core 1.7.2 dist/social-providers/gitlab.mjs). The page names no verified field, so the address is not verified.",
+  "subject": "1",
+  "email": "john@example.com",
+  "emailVerified": false,
+  "name": "John Smith",
+  "image": "https://gitlab.example.com/uploads/user/avatar/1/index.jpg"
+}

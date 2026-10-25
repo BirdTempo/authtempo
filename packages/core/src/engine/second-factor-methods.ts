@@ -8,6 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
+import { hasAddress, provedAccount } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -187,8 +188,9 @@ export async function enableMethod(
 }
 
 /**
- * Turns the passkey method on (plan 12c). Needs a verified address, the
- * password, and a sign-in assertion of one of the user's passkeys: the
+ * Turns the passkey method on (plan 12c). Needs a proved account (a verified
+ * address, or no address and not anonymous: `provedAccount`). Needs the
+ * password and a sign-in assertion of one of the user's passkeys. The
  * assertion proves that the person holds a passkey now.
  */
 export async function enablePasskeyMethod(
@@ -197,7 +199,8 @@ export async function enablePasskeyMethod(
 ): Promise<Result<MethodEnabled>> {
   if (!config.totp || !config.passkey) return fail("not_found");
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
+  if (!provedAccount(user)) return fail("email_unverified");
   // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
   // plan 12a). Before the password limit, so a stale session counts no try.
   const fresh = requireFresh(config, session);
@@ -351,6 +354,8 @@ export async function sendSecondFactorEmail(
     { field: "id", op: "eq", value: row.identifier },
   ]);
   if (!user) return fail("invalid_token");
+  // The email method needs a verified address to turn on, so a user with none never has it (plan 12i).
+  if (!hasAddress(user)) return fail("invalid_body");
   if (!(await limit(config, "second-factor-email:user", user.id, EMAIL_SENDS_PER_USER)))
     return fail("rate_limited");
   if (!(await limit(config, "totp:email-day", user.email, MAILED_CODES_PER_EMAIL_DAY)))
@@ -374,7 +379,9 @@ export async function sendSecondFactorEmail(
         emailSentAt: now.toISOString(),
       },
       updatedAt: later(now, row.updatedAt),
-      // The version that keys `emailCodeHash` (plan 12b). The challenge row holds no other keyed value.
+      // The version that keys `emailCodeHash` (plan 12b). A sealed app payload
+      // names its own version in `sealedDataVersion` (plan 12i Task 19), so
+      // this write never moves it. No send reaches a social challenge today.
       secretVersion: config.keyring.current,
     },
   );

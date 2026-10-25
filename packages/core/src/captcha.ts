@@ -11,7 +11,13 @@ export type CaptchaFlow =
   | "password-sign-in"
   | "magic-link-request"
   | "email-otp-request"
-  | "password-reset-request";
+  | "password-reset-request"
+  /** The phone code request (plan 12i). Not a default: the app names it. */
+  | "phone-request"
+  /** The anonymous sign-in (plan 12i Task 6). Not a default: the app names it. */
+  | "anonymous-sign-in"
+  /** The options of a passkey-first sign-up (plan 12i Task 8). Not a default: the app names it. */
+  | "passkey-sign-up";
 
 export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "password-sign-up",
@@ -19,9 +25,17 @@ export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "magic-link-request",
   "email-otp-request",
   "password-reset-request",
+  "phone-request",
+  "anonymous-sign-in",
+  "passkey-sign-up",
 ]);
 
-/** The flows that send mail or write rows, so a bot costs the app money. The sign-in is opt-in. */
+/**
+ * The default flows: the password sign-up and the three that send mail, so
+ * a bot costs the app money. The other flows are opt-in. The phone code, the
+ * anonymous sign-in, and the passkey-first sign-up also write rows or send.
+ * So each has a daily cap of the deployment instead (ruling 38 M3).
+ */
 export const DEFAULT_CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "password-sign-up",
   "magic-link-request",

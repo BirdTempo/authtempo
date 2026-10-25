@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { RouteKey } from "../route-list.js";
-import { SentAnswer, SignedInAnswer, TwoFactorChallenge } from "./shapes.js";
+import { SentAnswer, SignedInAnswer, SignInAnswer, TwoFactorChallenge } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const requestBody = z.object({ email: z.string().max(320) });
@@ -19,8 +19,12 @@ export const resetBody = z.object({
   trustDevice: z.string().max(64).optional(),
 });
 
-/** A verify and a reset answer the session, or the challenge of a user with the second factor on. */
-const signInAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
+/**
+ * A verify and a reset answer the session, or the challenge of a user with
+ * the second factor on. The verify carries `via` (plan 12i); the reset does not.
+ */
+const signInAnswer = z.union([SignInAnswer, TwoFactorChallenge]);
+const resetAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
 
 /** The contract of `routes/email-otp.ts` (plan 11g). */
 export const EMAIL_OTP_CONTRACT = {
@@ -38,6 +42,6 @@ export const EMAIL_OTP_CONTRACT = {
   },
   "POST /otp/reset": {
     body: { schema: resetBody, media: ["json"], parsedBy: "zod" },
-    answer: { kind: "json", schema: signInAnswer },
+    answer: { kind: "json", schema: resetAnswer },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

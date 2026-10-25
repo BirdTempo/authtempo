@@ -20,6 +20,10 @@ export type NoticeEvent =
   | "identity_linked"
   | "identity_unlinked"
   | "account_deleted"
+  // plan 12i: the username is a way in (spec 32 item 7).
+  | "username_changed"
+  // plan 12i: the phone is a way in (spec 32 item 5).
+  | "phone_changed"
   // plan 12f: a platform operator opened a session on the account, for support.
   | "impersonation_started";
 
@@ -50,6 +54,8 @@ const WHAT: Readonly<Record<Exclude<NoticeEvent, "impersonation_started">, strin
   identity_linked: "A sign-in provider was linked to your account.",
   identity_unlinked: "A sign-in provider was removed from your account.",
   account_deleted: "Your account was deleted.",
+  username_changed: "The username of your account was changed.",
+  phone_changed: "The phone number of your account was changed.",
 };
 
 /** The default notices. `account.notices.mail` replaces them. */
@@ -87,18 +93,25 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
  * A builder or a mail port that throws writes one line with the event and
  * the filtered error name. The flow then answers its success: the change is
  * committed, and a notice must not undo it. The line holds no address and
- * no error message, because app code sets both.
+ * no error message, because app code sets both. A user with no address
+ * (plan 12i) gets no notice, and the call writes no line.
  */
 export async function sendNotice(
   config: ResolvedConfig,
-  input: Omit<NoticeMailInput, "appName" | "at">,
+  input: Omit<NoticeMailInput, "appName" | "at" | "email"> & { email: string | null },
 ): Promise<void> {
   const notices = config.account.notices;
-  if (!notices) return;
+  const { email } = input;
+  if (!notices || email === null) return;
   try {
-    const message = notices.mail({ ...input, appName: config.appName, at: config.clock.now() });
+    const message = notices.mail({
+      ...input,
+      email,
+      appName: config.appName,
+      at: config.clock.now(),
+    });
     // To the user's address, whatever the builder wrote.
-    await config.mail.send({ ...message, to: input.email });
+    await config.mail.send({ ...message, to: email });
   } catch (e) {
     config.observe.emit({ name: "notice.mail_failed", event: input.event, errorName: e });
   }

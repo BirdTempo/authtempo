@@ -20,7 +20,8 @@
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run && node scripts/check-seam-dts.mjs"
+    "test": "vitest run && node scripts/check-seam-dts.mjs",
+    "measure": "vitest run --config vitest.measure.config.ts"
   },
   "dependencies": {
     "@authtempo/core": "workspace:*"

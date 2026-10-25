@@ -1,11 +1,13 @@
 import { CREDENTIAL_ID_MAX_BYTES } from "../bounds.js";
+import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import { fromBase64Url, randomBase64Url, sha256Hex, toBase64Url } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import type { PasskeyHint } from "../primitives/passkey-hints.js";
 import { fail, ok, type Result } from "../result.js";
-import type { PasskeyRow, SessionRow, UserRow } from "../schema.js";
+import type { PasskeyRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -13,16 +15,35 @@ import type {
   RegistrationResponseJSON,
 } from "../seams/webauthn.js";
 import { StorageError, type Where } from "../storage/port.js";
+import { passkeyUserName, provedAccount } from "./address.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeProof,
+  upgradeSteps,
+} from "./anonymous.js";
+import { createSteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
+import {
+  type PasskeySignInExtensions,
+  registrationExtensions,
+  signInExtensions,
+  storedFlags,
+  withExtensions,
+  withoutSecretOutputs,
+} from "./passkey-extensions.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
-import { openSession, sessionOpened } from "./sessions.js";
+import { prepareSession, sessionOpened, writeSession } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
-import { validShownName } from "./users.js";
+import { draftUserRow, mayCreateUser, validShownName } from "./users.js";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
 const SIGN_IN = "sign-in";
+/** The identifier of a sign-up challenge row: no user exists yet (plan 12i Task 8). */
+const SIGN_UP = "sign-up";
 const OPTIONS_LIMIT = { seconds: 15 * 60, max: 30 };
 const VERIFY_LIMIT = { seconds: 15 * 60, max: 20 };
 
@@ -33,6 +54,26 @@ const VERIFY_LIMIT = { seconds: 15 * 60, max: 20 };
  * state the same key, window, and count.
  */
 export const RENAME_PER_USER = { seconds: 900, max: 30 };
+
+/**
+ * The options of a passkey-first sign-up: 10 per hour on the key
+ * `passkey-sign-up:ip:<ip>` (plan 12i Task 8). Each call writes a challenge
+ * row, and its verify writes a user. The limits page states the same key,
+ * window, and count.
+ */
+export const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
+/** The window of the daily cap (ruling 38 M3). The max is `passkey.signUp.dailyCap`. */
+const SIGN_UP_CAP_WINDOW_SECONDS = 86_400;
+/** The subject of the daily cap: one count for the deployment. */
+const SIGN_UP_CAP_SUBJECT = "deployment";
+
+/**
+ * The longest name of a passkey-first sign-up, in UTF-16 code units (plan
+ * 12i Task 8). The name is the WebAuthn `user.name` and `displayName`. An
+ * authenticator may cut a long name, so the list of the device could show
+ * two accounts with one name.
+ */
+const SIGN_UP_NAME_MAX = 80;
 
 /** The longest passkey name, in UTF-16 code units: the bound of the registration since plan 4. */
 const PASSKEY_NAME_MAX = 64;
@@ -62,8 +103,9 @@ function registeredName(name: string | undefined): string | null {
 /**
  * `second-factor`: a ceremony bound to one `tf_` challenge (plan 12c).
  * `reauth`: a re-authentication of one signed-in user (plan 12a).
+ * `sign-up`: the registration of a passkey-first sign-up (plan 12i Task 8).
  */
-type Kind = "registration" | "authentication" | "second-factor" | "reauth";
+type Kind = "registration" | "authentication" | "second-factor" | "reauth" | "sign-up";
 
 export interface PasskeySummary {
   id: string;
@@ -71,6 +113,13 @@ export interface PasskeySummary {
   name: string | null;
   deviceType: string;
   backedUp: boolean;
+  /**
+   * The extension flags of the registration (plan 12i): advice for the
+   * app's own client from unsigned outputs. No check of core reads them.
+   */
+  discoverable: boolean | null;
+  prf: boolean;
+  largeBlob: boolean;
   createdAt: Date;
 }
 
@@ -81,8 +130,29 @@ function summary(row: PasskeyRow): PasskeySummary {
     name: row.name,
     deviceType: row.deviceType,
     backedUp: row.backedUp,
+    discoverable: row.discoverable,
+    prf: row.prf,
+    largeBlob: row.largeBlob,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * The user handle of a passkey: the bytes of the user id (plan 4). The
+ * registration options carry them, and `GET /passkeys` answers their
+ * base64url form for `signalAllAcceptedCredentials` (plan 12i).
+ */
+function userHandleOf(userId: string): Uint8Array {
+  return new TextEncoder().encode(userId);
+}
+
+/**
+ * The options with the hints of the ceremony (WebAuthn Level 3, plan 12i).
+ * The hints of the request replace the config's list. No hint leaves the
+ * library's own value, which is no key or an empty list.
+ */
+function withHints<T extends object>(options: T, hints: readonly PasskeyHint[]): T {
+  return hints.length === 0 ? options : { ...options, hints: [...hints] };
 }
 
 /** Writes the challenge row and returns the challenge bytes and their base64url form. `extra` joins `data`. */
@@ -138,7 +208,7 @@ async function consumeChallenge(
   identifier: string,
   kind: Kind,
   bind?: string,
-): Promise<Result<true>> {
+): Promise<Result<VerificationRow>> {
   const now = config.clock.now();
   const row = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: await sha256Hex(challenge) },
@@ -167,15 +237,15 @@ async function consumeChallenge(
   // A second-factor ceremony is bound to one `tf_` challenge (plan 12c, ASVS
   // 5.0 6.6.2): an assertion for one sign-in does not pass at another.
   if (bind !== undefined && data?.challengeId !== bind) return fail("invalid_token");
-  return ok(true);
+  return ok(row);
 }
 
 export async function passkeyRegistrationOptions(
   config: ResolvedConfig,
-  input: { user: UserRow },
+  input: { user: UserRow; hints?: PasskeyHint[] | undefined },
 ): Promise<Result<PublicKeyCredentialCreationOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(input.user)) return fail("email_unverified");
   const existing = await config.storage.findMany("passkey", [
     { field: "userId", op: "eq", value: input.user.id },
   ]);
@@ -183,16 +253,21 @@ export async function passkeyRegistrationOptions(
   const options = await config.webauthn.registrationOptions({
     rpID: config.passkey.rpID,
     rpName: config.passkey.rpName,
-    userID: new TextEncoder().encode(input.user.id),
-    userName: input.user.email,
-    userDisplayName: input.user.name ?? input.user.email,
+    userID: userHandleOf(input.user.id),
+    userName: passkeyUserName(config, input.user),
+    userDisplayName: input.user.name ?? passkeyUserName(config, input.user),
     challenge: bytes,
     excludeCredentials: existing.map((p) => ({
       id: p.credentialId,
       transports: p.transports ? p.transports.split(",") : null,
     })),
   });
-  return ok(options);
+  return ok(
+    withHints(
+      withExtensions(options, registrationExtensions(config.passkey)),
+      input.hints ?? config.passkey.hints.register,
+    ),
+  );
 }
 
 /** The bytes that a base64url text without padding decodes to. */
@@ -205,15 +280,17 @@ export async function verifyPasskeyRegistration(
   input: { user: UserRow; response: unknown; name?: string | undefined },
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
-  const challenge = challengeFromResponse(input.response);
+  // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
+  const response = withoutSecretOutputs(input.response);
+  if (!provedAccount(input.user)) return fail("email_unverified");
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
   if (!consumed.ok) return consumed;
   let registered: Awaited<ReturnType<typeof config.webauthn.verifyRegistration>>;
   try {
     registered = await config.webauthn.verifyRegistration({
-      response: input.response as RegistrationResponseJSON,
+      response: response as RegistrationResponseJSON,
       expectedChallenge: challenge,
       expectedOrigin: config.passkey.origins,
       expectedRPID: config.passkey.rpID,
@@ -242,6 +319,8 @@ export async function verifyPasskeyRegistration(
       deviceType: registered.deviceType,
       backedUp: registered.backedUp,
       name: registeredName(input.name),
+      // Advice from unsigned outputs (plan 12i): no check reads them.
+      ...storedFlags(config.passkey, response),
       createdAt: now,
       updatedAt: now,
     });
@@ -265,26 +344,250 @@ export async function verifyPasskeyRegistration(
   return ok(summary(row));
 }
 
+export interface PasskeySignUpOptions {
+  /** The name of the person: the WebAuthn `user.name` and `displayName`, and the user's name. */
+  name: string;
+  ip: string | null;
+  hints?: PasskeyHint[] | undefined;
+  /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
+  captchaToken?: string | null | undefined;
+  /** The live anonymous session of the request (plan 12i Task 7): the row records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
+}
+
+/**
+ * `POST /passkey/sign-up/options` (plan 12i Task 8, spec 32 item 2). The
+ * name rule, the sign-up rule, the per-IP limit, the captcha, and the
+ * daily cap of the deployment come first, in that order. A failed captcha
+ * does not count against the cap. Then the user id is minted, and a
+ * challenge row keeps it with the name for 5 minutes. No user row exists
+ * until the verify. The options carry no address and no data of another
+ * user: the user handle is the new id, and the user name is the name given.
+ */
+export async function passkeySignUpOptions(
+  config: ResolvedConfig,
+  input: PasskeySignUpOptions,
+): Promise<Result<PublicKeyCredentialCreationOptionsJSON>> {
+  const rp = config.passkey;
+  if (!rp?.signUp) return fail("not_found");
+  // Before the limit, so a refused body counts no try.
+  if (input.name.trim() === "" || !validShownName(input.name, SIGN_UP_NAME_MAX))
+    return fail("invalid_body");
+  // A user with no address passes only "open": an invitation names an address (plan 12b).
+  // The verify runs the rule again in its transaction. The config can change in between.
+  if (config.signUp !== "open") return fail("sign_up_closed");
+  if (!(await limit(config, "passkey-sign-up:ip", ipKey(input.ip), SIGN_UP_PER_IP)))
+    return fail("rate_limited");
+  const captcha = await checkCaptcha(config, "passkey-sign-up", input.captchaToken, input.ip);
+  if (captcha) return captcha;
+  // A software authenticator makes a user per verify. The cap bounds the
+  // users of a day (ruling 38 M3).
+  const cap = { seconds: SIGN_UP_CAP_WINDOW_SECONDS, max: rp.signUp.dailyCap };
+  if (!(await limit(config, "passkey-sign-up:all-day", SIGN_UP_CAP_SUBJECT, cap)))
+    return fail("rate_limited");
+  const userId = newId(config.clock.now());
+  const { bytes } = await issueChallenge(config, SIGN_UP, "sign-up", {
+    userId,
+    name: input.name,
+    ...anonymousData(input.anonymous),
+  });
+  const options = await config.webauthn.registrationOptions({
+    rpID: rp.rpID,
+    rpName: rp.rpName,
+    userID: userHandleOf(userId),
+    userName: input.name,
+    userDisplayName: input.name,
+    challenge: bytes,
+    excludeCredentials: [],
+  });
+  return ok(
+    withHints(
+      withExtensions(options, registrationExtensions(rp)),
+      input.hints ?? rp.hints.register,
+    ),
+  );
+}
+
+/** The user id and the name that the options kept in the challenge row, or null. */
+function signUpData(data: unknown): { userId: string; name: string } | null {
+  const d = data as { userId?: unknown; name?: unknown } | null;
+  return typeof d?.userId === "string" && typeof d.name === "string"
+    ? { userId: d.userId, name: d.name }
+    : null;
+}
+
+export interface PasskeySignUpVerify {
+  response: unknown;
+  ip: string | null;
+  userAgent: string | null;
+  /**
+   * The live anonymous session of the verify (plan 12i Task 7). The
+   * registration completes in this request, so the sign-up is bound: the
+   * row's anonymous user links, or with none, this one.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
+}
+
+/**
+ * `POST /passkey/sign-up/verify` (plan 12i Task 8, spec 32 item 2). The
+ * conditional consume of the challenge row, so a challenge makes one user.
+ * Then the check of the seam, with user verification required. Then one
+ * transaction: the sign-up rule for a null address, `user.beforeCreate`
+ * with `via: "passkey"`, the anonymous upgrade, and the session hook, all
+ * before the first write. Then the passkey row, the user row, the claim of
+ * the upgrade, and the session.
+ *
+ * The passkey row comes first. A credential id that exists answers
+ * `passkey_failed` by its unique key, and the transaction has written
+ * nothing. There is no gate (Review Focus 1): a new user has no factor,
+ * and a passkey with user verification is two factors. The new user has no
+ * address, so it can claim or link no user with an address. The only link
+ * is the upgrade of an anonymous user.
+ */
+export async function verifyPasskeySignUp(
+  config: ResolvedConfig,
+  input: PasskeySignUpVerify,
+): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
+  const rp = config.passkey;
+  if (!rp?.signUp) return fail("not_found");
+  // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
+  const response = withoutSecretOutputs(input.response);
+  if (!(await limit(config, "passkey-verify:ip", ipKey(input.ip), VERIFY_LIMIT)))
+    return fail("rate_limited");
+  const challenge = challengeFromResponse(response);
+  if (!challenge) return fail("invalid_token");
+  const consumed = await consumeChallenge(config, challenge, SIGN_UP, "sign-up");
+  if (!consumed.ok) return consumed;
+  const data = signUpData(consumed.value.data);
+  if (!data) return fail("invalid_token");
+  let registered: Awaited<ReturnType<typeof config.webauthn.verifyRegistration>>;
+  try {
+    registered = await config.webauthn.verifyRegistration({
+      response: response as RegistrationResponseJSON,
+      expectedChallenge: challenge,
+      expectedOrigin: rp.origins,
+      expectedRPID: rp.rpID,
+    });
+  } catch (e) {
+    config.observe.emit({ name: "passkey.registration_rejected", errorClass: e });
+    return fail("passkey_failed");
+  }
+  if (base64UrlBytes(registered.id) > CREDENTIAL_ID_MAX_BYTES) {
+    config.observe.emit({ name: "passkey.credential_id_too_long" });
+    return fail("passkey_failed");
+  }
+  const now = config.clock.now();
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(consumed.value.data),
+    "bound",
+  );
+  // No sign-up rule in the steps: the transaction runs `mayCreateUser` for the null address.
+  const made = createSteps(config, "passkey", { signUpRule: false });
+  let opened: Result<{ user: UserRow; token: string; session: SessionRow }>;
+  try {
+    opened = await hookGuard(async () =>
+      ok(
+        await config.storage.transaction(async (tx) => {
+          made.begin();
+          await mayCreateUser(config, tx, null);
+          const user = await made.user(
+            tx,
+            draftUserRow(
+              { id: data.userId, email: null, emailVerified: false, name: data.name },
+              now,
+            ),
+          );
+          // Every hook runs before the first write: the D1 undo (`BeforeResolveWrite` in users.ts).
+          await upgrade.before(tx, user, upgradeProof(user), "passkey");
+          const prepared = await prepareSession(
+            config,
+            { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" },
+            tx,
+          );
+          await tx.create("passkey", {
+            id: newId(now),
+            userId: user.id,
+            credentialId: registered.id,
+            publicKey: toBase64Url(registered.publicKey),
+            counter: registered.counter,
+            transports: registered.transports ? registered.transports.join(",") : null,
+            deviceType: registered.deviceType,
+            backedUp: registered.backedUp,
+            name: null,
+            // Advice from unsigned outputs (plan 12i): no check reads them.
+            ...storedFlags(rp, response),
+            createdAt: now,
+            updatedAt: now,
+          });
+          await tx.create("user", user);
+          await upgrade.claim(tx);
+          return { user, ...(await writeSession(config, prepared, tx)) };
+        }),
+      ),
+    );
+  } catch (e) {
+    // The credential id is unique across users: the authenticator holds a passkey of a user.
+    if (e instanceof StorageError && e.code === "unique_violation" && e.model === "passkey") {
+      config.observe.emit({ name: "passkey.already_registered" });
+      return fail("passkey_failed");
+    }
+    throw e;
+  }
+  if (!opened.ok) return opened;
+  const { user, token, session } = opened.value;
+  await made.after(user);
+  config.observe.emit({ name: "passkey.register", outcome: "success", userId: user.id });
+  await sessionOpened(config, session, user, "passkey");
+  await upgrade.after();
+  return ok({ token, user, session });
+}
+
 export async function passkeyAuthenticationOptions(
   config: ResolvedConfig,
-  input: { ip: string | null },
+  input: {
+    ip: string | null;
+    hints?: PasskeyHint[] | undefined;
+    extensions?: PasskeySignInExtensions | undefined;
+    /** The live anonymous session of the request (plan 12i Task 7): the row records its user. */
+    anonymous?: AnonymousCaller | null | undefined;
+  },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
+  // Before the limit, so a refused body counts no try.
+  const extensions = signInExtensions(config.passkey, input.extensions);
+  if (!extensions.ok) return extensions;
   if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
-  const { bytes } = await issueChallenge(config, SIGN_IN, "authentication");
+  const { bytes } = await issueChallenge(
+    config,
+    SIGN_IN,
+    "authentication",
+    anonymousData(input.anonymous),
+  );
+  const options = await config.webauthn.authenticationOptions({
+    rpID: config.passkey.rpID,
+    challenge: bytes,
+  });
   return ok(
-    await config.webauthn.authenticationOptions({ rpID: config.passkey.rpID, challenge: bytes }),
+    withHints(
+      withExtensions(options, extensions.value),
+      input.hints ?? config.passkey.hints.signIn,
+    ),
   );
 }
 
 /**
  * The assertion check of a sign-in and of the second factor (plan 12c): the
  * credential, the seam, and the counter compare-and-set. With `userId`, the
- * credential must be one of that user's passkeys. An unknown credential, a
- * credential of another user, and a bad signature answer the same code. The
- * caller has consumed the challenge row first.
+ * credential must be one of that user's passkeys. A credential with no row
+ * answers `passkey_unknown`, so the client can call `signalUnknownCredential`
+ * (WebAuthn Level 3, plan 12i, spec 32 item 3). Only the holder of the
+ * credential learns it: the id is random, and the person's own
+ * authenticator gives it. A credential of another user and a bad signature
+ * answer `passkey_failed`. The caller has consumed the challenge row first.
  */
 async function checkAssertion(
   config: ResolvedConfig,
@@ -299,7 +602,8 @@ async function checkAssertion(
   const passkey = await config.storage.findOne("passkey", [
     { field: "credentialId", op: "eq", value: credentialId },
   ]);
-  if (!passkey || (userId !== null && passkey.userId !== userId)) return fail("passkey_failed");
+  if (!passkey) return fail("passkey_unknown");
+  if (userId !== null && passkey.userId !== userId) return fail("passkey_failed");
   let verified: Awaited<ReturnType<typeof config.webauthn.verifyAuthentication>>;
   try {
     verified = await config.webauthn.verifyAuthentication({
@@ -337,17 +641,29 @@ async function checkAssertion(
 
 export async function verifyPasskeyAuthentication(
   config: ResolvedConfig,
-  input: { response: unknown; ip: string | null; userAgent: string | null },
+  input: {
+    response: unknown;
+    ip: string | null;
+    userAgent: string | null;
+    /**
+     * The live anonymous session of the verify (plan 12i Task 7). The
+     * assertion completes in this request, so the sign-in is bound: the
+     * row's anonymous user links, or with none, this one.
+     */
+    anonymous?: AnonymousCaller | null | undefined;
+  },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.passkey) return fail("not_found");
+  // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
+  const response = withoutSecretOutputs(input.response);
   if (!(await limit(config, "passkey-verify:ip", ipKey(input.ip), VERIFY_LIMIT))) {
     return fail("rate_limited");
   }
-  const challenge = challengeFromResponse(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, SIGN_IN, "authentication");
   if (!consumed.ok) return consumed;
-  const checked = await checkAssertion(config, input.response, challenge, null);
+  const checked = await checkAssertion(config, response, challenge, null);
   if (!checked.ok) return checked;
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: checked.value.userId },
@@ -356,17 +672,32 @@ export async function verifyPasskeyAuthentication(
   // Only SSO signs in an address of an enforced domain (plan 12d): the assertion names the user.
   const enforced = await enforcedAnswer(config, user.email);
   if (enforced) return enforced;
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(consumed.value.data),
+    "bound",
+  );
   // One transaction, so a session hook's membership check and the write read the same state.
   const opened = await hookGuard(async () =>
     ok(
-      await config.storage.transaction((tx) =>
-        openSession(config, { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" }, tx),
-      ),
+      await config.storage.transaction(async (tx) => {
+        // Before the session hook and its hold of the user row, as at the other pathways.
+        await upgrade.before(tx, user, upgradeProof(user), "passkey");
+        const prepared = await prepareSession(
+          config,
+          { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" },
+          tx,
+        );
+        await upgrade.claim(tx);
+        return writeSession(config, prepared, tx);
+      }),
     ),
   );
   if (!opened.ok) return opened;
   const { token, session } = opened.value;
   await sessionOpened(config, session, user, "passkey");
+  await upgrade.after();
   return ok({ token, user, session });
 }
 
@@ -411,11 +742,12 @@ export async function provePasskeyOf(
   input: { userId: string; response: unknown },
 ): Promise<Result<true>> {
   if (!config.passkey) return fail("not_found");
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.userId, "reauth");
   if (!consumed.ok) return consumed;
-  const checked = await checkAssertion(config, input.response, challenge, input.userId);
+  const checked = await checkAssertion(config, response, challenge, input.userId);
   return checked.ok ? ok(true) : fail("passkey_failed");
 }
 
@@ -456,7 +788,8 @@ export async function checkSecondFactorPasskey(
   config: ResolvedConfig,
   input: { userId: string; challengeId: string; response: unknown },
 ): Promise<boolean> {
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return false;
   const consumed = await consumeChallenge(
     config,
@@ -466,7 +799,7 @@ export async function checkSecondFactorPasskey(
     input.challengeId,
   );
   if (!consumed.ok) return false;
-  return (await checkAssertion(config, input.response, challenge, input.userId)).ok;
+  return (await checkAssertion(config, response, challenge, input.userId)).ok;
 }
 
 /**
@@ -478,11 +811,34 @@ export async function checkSignInAssertionOf(
   config: ResolvedConfig,
   input: { userId: string; response: unknown },
 ): Promise<boolean> {
-  const challenge = challengeFromResponse(input.response);
+  const response = withoutSecretOutputs(input.response);
+  const challenge = challengeFromResponse(response);
   if (!challenge) return false;
   const consumed = await consumeChallenge(config, challenge, SIGN_IN, "authentication");
   if (!consumed.ok) return false;
-  return (await checkAssertion(config, input.response, challenge, input.userId)).ok;
+  return (await checkAssertion(config, response, challenge, input.userId)).ok;
+}
+
+/**
+ * The inputs of the Signal API for the user (WebAuthn Level 3, plan 12i):
+ * the RP ID and the base64url user handle for
+ * `signalAllAcceptedCredentials`, and the names of the registration
+ * options for `signalCurrentUserDetails` (plan 12i Task 15). The names
+ * come from the one rule of the options, so the browser shows what a new
+ * registration would show.
+ */
+export function signalInputs(
+  config: ResolvedConfig,
+  user: UserRow,
+): Result<{ rpId: string; userHandle: string; userName: string; userDisplayName: string }> {
+  if (!config.passkey) return fail("not_found");
+  const userName = passkeyUserName(config, user);
+  return ok({
+    rpId: config.passkey.rpID,
+    userHandle: toBase64Url(userHandleOf(user.id)),
+    userName,
+    userDisplayName: user.name ?? userName,
+  });
 }
 
 export async function listPasskeys(

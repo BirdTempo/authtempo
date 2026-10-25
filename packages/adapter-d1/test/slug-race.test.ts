@@ -47,6 +47,10 @@ describe("organization slug races on D1 (plan 12k Task 6)", () => {
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: t0,
         updatedAt: t0,
       });

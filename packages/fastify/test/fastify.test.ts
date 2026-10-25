@@ -517,3 +517,38 @@ describe("@authtempo/fastify (plan 11d2)", () => {
     await app.close();
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  it("passes the option with the request, or none", async () => {
+    const s = waitSpy();
+    const seen: [Promise<unknown>, string][] = [];
+    const own = Fastify();
+    await own.register(
+      authRoutes({ auth: s.auth, waitUntil: (p, request) => void seen.push([p, request.url]) }),
+    );
+    await own.inject({ method: "GET", url: "/auth/x" });
+    expect(seen).toEqual([[s.work, "/auth/x"]]);
+    const plain = Fastify();
+    await plain.register(authRoutes({ auth: s.auth }));
+    await plain.inject({ method: "GET", url: "/auth/x" });
+    expect(s.got).toEqual(["options", "none"]);
+  });
+});

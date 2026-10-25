@@ -155,8 +155,8 @@ describe("authtempo secret status (plan 11c2)", () => {
     const { code, io } = await run(["status", BASE], f, auth);
     expect(code).toBe(0);
     expect(io.stdout).toEqual([
-      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
-      "version 1: old, configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0",
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 0",
+      "version 1: old, configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0, stateData 0",
     ]);
     expect(io.requests.map((r) => `${r.method} ${r.url}`)).toEqual([`GET ${STATUS}`]);
     expect(io.requests[0]?.headers.get("authorization")).toBe(`Operator ${SECRET}`);
@@ -176,6 +176,7 @@ describe("authtempo secret status (plan 11c2)", () => {
           signingKeys: 0,
           emailCodes: 0,
           ssoClientSecrets: 0,
+          stateData: 0,
         },
         {
           version: 1,
@@ -186,6 +187,7 @@ describe("authtempo secret status (plan 11c2)", () => {
           signingKeys: 1,
           emailCodes: 0,
           ssoClientSecrets: 0,
+          stateData: 0,
         },
       ],
       exit: 0,
@@ -199,8 +201,8 @@ describe("authtempo secret status (plan 11c2)", () => {
     const { code, io } = await run(["status", BASE], f, auth);
     expect(code).toBe(1);
     expect(io.stdout).toEqual([
-      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
-      "version 1: old, not configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0",
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 0",
+      "version 1: old, not configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0, stateData 0",
     ]);
     expect(io.stderr.at(-1)).toBe(
       "warning: version 1 is not in the config but has rows; add it back before you remove it (spec 22 item 9)",
@@ -254,8 +256,37 @@ describe("authtempo secret status (plan 11c2)", () => {
     const { code, io } = await run(["status", BASE], f, f.on(ONLY_TWO, true, sso));
     expect(code).toBe(1);
     expect(io.stdout).toEqual([
-      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
-      "version 1: old, not configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 1",
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 0",
+      "version 1: old, not configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 1, stateData 0",
+    ]);
+    expect(io.stderr.at(-1)).toBe(
+      "warning: version 1 is not in the config but has rows; add it back before you remove it (spec 22 item 9)",
+    );
+  });
+
+  it("exits 1 for a version out of the config with live state payloads only", async () => {
+    const f = await fixture();
+    const auth = f.on(ONE);
+    const zero = {
+      totpSecrets: 0,
+      backupCodes: 0,
+      signingKeys: 0,
+      emailCodes: 0,
+      ssoClientSecrets: 0,
+    };
+    const body = {
+      versions: [
+        { version: 2, configured: true, current: true, ...zero, stateData: 0 },
+        { version: 1, configured: false, current: false, ...zero, stateData: 2 },
+      ],
+    };
+    const { code, io } = await run(["status", BASE], f, auth, {
+      fetch: async () => Response.json(body),
+    });
+    expect(code).toBe(1);
+    expect(io.stdout).toEqual([
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 0",
+      "version 1: old, not configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 2",
     ]);
     expect(io.stderr.at(-1)).toBe(
       "warning: version 1 is not in the config but has rows; add it back before you remove it (spec 22 item 9)",
@@ -314,6 +345,7 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
       signingKeys: 0,
       emailCodes: 0,
       ssoClientSecrets: 0,
+      stateData: 0,
     });
   });
 

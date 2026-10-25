@@ -1222,4 +1222,40 @@ describe("the sso plugin (plan 12d Task 14)", () => {
       "NOT_FOUND",
     );
   });
+
+  it("starts a sign-in on the second entry of a baseURL list with its callback there", async () => {
+    // Plan 12i Task 18, review I2: the shim builds core's requests and URLs on the request's entry.
+    const B = "https://b.example.com";
+    const app = ssoApp(memory(), [sso({})], {
+      baseURL: { allowedHosts: ["api.example.com", "b.example.com"], protocol: "https" },
+    });
+    const owner = await app.manager("ann@acme.example");
+    const organizationId = await app.organizationOf(owner, "acme");
+    const reg = await app.callOn(
+      B,
+      "/sso/register",
+      {
+        organizationId,
+        providerId: "acme-oidc",
+        issuer: "https://idp.acme.example",
+        domain: "acme.example",
+        oidcConfig: OIDC,
+      },
+      owner.cookie,
+    );
+    expect(reg.status).toBe(200);
+    const made = (await reg.json()) as { redirectURI: string };
+    const id = /\/sso\/([^/]+)\/callback$/.exec(made.redirectURI)?.[1];
+    expect(made.redirectURI).toBe(`${B}/api/auth/sso/${id}/callback`);
+    const signIn = await app.callOn(B, "/sign-in/sso", {
+      providerId: "acme-oidc",
+      callbackURL: "/",
+    });
+    const { url } = (await signIn.json()) as { url: string };
+    expect(url).toBe(`${B}/api/auth/sso/${id}/start?next=%2F`);
+    const start = await app.auth.handler(new Request(url));
+    expect(start.status).toBe(302);
+    const idp = new URL(start.headers.get("location") ?? "");
+    expect(idp.searchParams.get("redirect_uri")).toBe(`${B}/api/auth/sso/${id}/callback`);
+  });
 });

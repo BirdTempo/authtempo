@@ -163,6 +163,34 @@ export const BETTER_AUTH_CODES = {
   sso_not_provisioned: "SSO_NOT_PROVISIONED",
   account_disabled: "ACCOUNT_DISABLED",
   role_not_found: "ROLE_NOT_FOUND",
+  // Plan 12i deviation 10: @better-auth/passkey 1.7.2's name for a sign-in by a
+  // credential with no row (dist/index.mjs:470, read 2026-10-22). The status stays core's.
+  passkey_unknown: "PASSKEY_NOT_FOUND",
+  // Plan 12i deviation 10: the names of Better Auth 1.7.2's username plugin
+  // (plugins/username/error-codes.mjs). The status stays core's.
+  username_taken: "USERNAME_IS_ALREADY_TAKEN",
+  username_invalid: "INVALID_USERNAME",
+  // Plan 12i deviation 10: Better Auth 1.7.2's phone-number plugin names a
+  // number that it refuses INVALID_PHONE_NUMBER (plugins/phone-number
+  // error-codes.mjs, read 2026-10-14). It has no region list, so a number
+  // outside the regions gets the same name. It has no name for an SMS
+  // outage: the shim answers SMS_UNAVAILABLE. The statuses stay core's.
+  phone_invalid: "INVALID_PHONE_NUMBER",
+  phone_region: "INVALID_PHONE_NUMBER",
+  sms_unavailable: "SMS_UNAVAILABLE",
+  // Plan 12i Task 18: Better Auth 1.7.2 throws at a host outside allowedHosts
+  // and names no code. The shim answers HOST_NOT_ALLOWED. The status stays core's.
+  host_not_allowed: "HOST_NOT_ALLOWED",
+  // Plan 12i Task 5: the phone-number plugin's name for a number that another
+  // user holds (plugins/phone-number/error-codes.mjs, read 2026-10-24).
+  phone_taken: "PHONE_NUMBER_EXIST",
+  // Plan 12i Task 6: an anonymous session at a route of ANONYMOUS_REFUSED, or
+  // another session at the anonymous delete. Better Auth 1.7.2 refuses no
+  // route to an anonymous user, and its USER_IS_NOT_ANONYMOUS names only the
+  // delete case (dist/plugins/anonymous/error-codes.mjs, read 2026-10-24).
+  // So the name is core's own. At /delete-anonymous-user the shim answers
+  // Better Auth's USER_IS_NOT_ANONYMOUS (plan 12i Task 16, ruling 42 L4).
+  anonymous_refused: "ANONYMOUS_REFUSED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

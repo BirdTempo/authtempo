@@ -20,8 +20,13 @@ export const LIMIT_FAMILIES = Object.freeze([
   "password-sign-up:email",
   "password:ip",
   "password:email",
+  "password:user",
   "password-resend:ip",
   "password-resend:email",
+  // Plan 12i Task 20: the sign-up code.
+  "password-verify-code:ip",
+  "password-verify-code:email",
+  "password-verify-code:email-day",
   "password-reset:ip",
   "password-reset:email",
   "password-reset-post:ip",
@@ -31,6 +36,16 @@ export const LIMIT_FAMILIES = Object.freeze([
   "otp:email-day",
   "otp-verify:ip",
   "otp-verify:email",
+  // Plan 12i: the phone code. all-day is the daily cap of the deployment.
+  "phone-otp:ip",
+  "phone-otp:phone",
+  "phone-otp:phone-day",
+  "phone-otp:all-day",
+  "phone-verify:ip",
+  "phone-verify:phone",
+  // Plan 12i Task 5: the codes and notes of /phone/add.
+  "phone-add:user",
+  "phone-add:phone",
   "totp-code:user",
   "totp-code:user-day",
   "totp-setup:user",
@@ -84,6 +99,26 @@ export const LIMIT_FAMILIES = Object.freeze([
   "sso-acs:ip",
   "scim-auth:ip",
   "scim:token",
+  // Plan 12i: the username set and the availability check.
+  "username:user",
+  "username-available:ip",
+  // Plan 12i Task 3: the password sign-in by username and by phone.
+  "password:username",
+  "password:phone",
+  // Plan 12i Task 6: the anonymous sign-in, and its own delete. all-day is
+  // the daily cap of the deployment.
+  "anonymous:ip",
+  "anonymous:all-day",
+  "anonymous-delete:user",
+  // Plan 12i Task 8: the options of a passkey-first sign-up. all-day is
+  // the daily cap of the deployment.
+  "passkey-sign-up:ip",
+  "passkey-sign-up:all-day",
+  // Plan 12i Task 11: the multi-session routes.
+  "multi-session:ip",
+  // Plan 12i Task 10: the ID-token nonce and the ID-token sign-in.
+  "id-token-nonce:ip",
+  "id-token:ip",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

@@ -1,6 +1,12 @@
 import { Readable } from "node:stream";
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+} from "@authtempo/core/bindings";
 import type {
   Request as ExpressRequest,
   Response as ExpressResponse,
@@ -129,13 +135,24 @@ export async function sendWebResponse(res: ExpressResponse, response: Response):
   res.end(Buffer.from(await response.arrayBuffer()));
 }
 
+export interface ExpressHandlerOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Node keeps a detached promise alive, so a plain server needs
+   * none. Set it on a host that stops the function after the answer.
+   */
+  waitUntil?: BindingWaitUntil<ExpressRequest> | undefined;
+}
+
 /** The handler of the routes of core: `app.use("/auth", authHandler(auth))`. */
 export function authHandler(
   auth: AuthSource<Pick<Auth, "handle"> & BaseURLSource>,
+  options: ExpressHandlerOptions = {},
 ): RequestHandler {
   return async (req, res) => {
     const instance = resolve(auth);
-    await sendWebResponse(res, await instance.handle(toWebRequest(req, instance)));
+    const wait = handleOptions(options.waitUntil, req, () => undefined);
+    await sendWebResponse(res, await instance.handle(toWebRequest(req, instance), wait));
   };
 }
 

@@ -4,6 +4,7 @@ import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/hand
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   changePassword,
+  type PasswordSignInFields,
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
@@ -252,7 +253,8 @@ function counting(inner: PasswordHashSeam, beforeHash: () => Promise<void> = asy
 
 function signIn(
   auth: ReturnType<typeof makeAuth>,
-  over: Partial<Parameters<typeof passwordSignIn>[1]> = {},
+  // The address form of the input (plan 12i Task 3 made the input a union).
+  over: Partial<PasswordSignInFields & { email: string }> = {},
 ) {
   return sessionOnly(
     passwordSignIn(auth.config, {
@@ -957,6 +959,9 @@ describe("requestPasswordReset and resetPassword", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       createdAt: now,
       updatedAt: now,
@@ -1455,6 +1460,9 @@ describe("fix round 1: the verify link of a verified user", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       createdAt: now,
       updatedAt: now,

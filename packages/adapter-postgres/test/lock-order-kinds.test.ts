@@ -280,6 +280,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
     },
     // Plan 12d Task 10: the SCIM Users of Acme. Task 11: each Group has a team and a role.
     scim: { groups: "both" },
+    // Plan 12i Task 6: the anonymous sign-in and its delete.
+    anonymous: { isolateLimiter: "allow" },
     jwt: {
       verifyIdToken: async (input) => {
         const claims = idTokens[input.token];
@@ -587,8 +589,15 @@ async function scene(w: World) {
   const scimToken = must(
     await scim.tokens.create({ actor: APP, organizationId: acme, name: "directory" }),
   ).token;
+  // Plan 12i Task 6: an anonymous session for the anonymous delete.
+  const anonymousApi = w.auth.api.anonymous;
+  if (!anonymousApi) throw new Error("no anonymous api");
+  const anonymousIn = must(await anonymousApi.signIn({ current: null, ip: null, userAgent: null }));
+  const anonymous = await w.auth.api.getSession(anonymousIn.token);
+  if (!anonymous) throw new Error("no anonymous session");
 
   return {
+    anonymous,
     scimToken,
     ada,
     bob: bobActive,
@@ -608,6 +617,13 @@ async function scene(w: World) {
 
 type Scene = Awaited<ReturnType<typeof scene>>;
 
+/** The anonymous api of the world (plan 12i Task 6). */
+function anonymousOf(w: World) {
+  const api = w.auth.api.anonymous;
+  if (!api) throw new Error("no anonymous api");
+  return api;
+}
+
 const reason = { reason: "Ticket 2", ip: null, userAgent: null } as const;
 
 /** The kinds of a SCIM group flow of plan 12d Task 11, with the create of its group. */
@@ -625,6 +641,9 @@ const GROUP_KINDS = [
 
 /** The kinds that each flow touches on the scene, so a flow that stops its writes fails here. */
 const TOUCHED: Record<string, string[]> = {
+  "an anonymous sign-in": ["user", "session"],
+  "an anonymous delete": ["user", "session"],
+  "an anonymous upgrade by an email claim": ["user", "session"],
   "a member removal": ["user", "session", "member", "team member"],
   "a leave": ["user", "session", "member", "team member"],
   "a member removal with revokeTokens": [
@@ -835,6 +854,35 @@ const scimPatch = (op: Record<string, unknown>) => ({
 
 /** Each flow of plans 12f and 12k that writes a kind of user-hold.ts, most of them two kinds or more. */
 const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
+  // Plan 12i Task 6: the anonymous sign-in writes the user row, then the session row.
+  "an anonymous sign-in": (w) =>
+    anonymousOf(w).signIn({ current: null, ip: null, userAgent: null }),
+  // The anonymous delete locks the user row, then ends the sessions.
+  "an anonymous delete": (w, s) => anonymousOf(w).delete({ session: s.anonymous }),
+  // Plan 12i Task 7: the claim of an unverified user writes its user row. Then the
+  // upgrade claims the anonymous sessions, right before the session write. After the
+  // commit, the anonymous sessions end, and the anonymous user goes.
+  "an anonymous upgrade by an email claim": async (w, s) => {
+    must(
+      await passwordApi(w).signUp({
+        email: "una@example.com",
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    await w.auth.api.requestMagicLink({
+      email: "una@example.com",
+      ip: null,
+      anonymous: s.anonymous,
+    });
+    return w.auth.api.verifyMagicLink({
+      token: w.lastToken("una@example.com"),
+      ip: null,
+      userAgent: null,
+      anonymous: s.anonymous,
+    });
+  },
   "a member removal": (w, s) =>
     w.auth.api.removeMember({ user: s.ada.user, organizationId: s.acme, userId: s.pat.user.id }),
   "a leave": (w, s) =>
@@ -1231,13 +1279,36 @@ const SITES: Record<string, readonly string[] | string> = {
     "a member removal with revokeTokens",
   ],
   "passkeys verifyPasskeyAuthentication": "a sign-in by a passkey",
-  "password insertSignUp": ["an email claim by a magic link", "an email claim by the sign-up link"],
+  // Plan 12i Task 8: the passkey row, then the new user row and the session, as a sign-in does.
+  "passkeys verifyPasskeySignUp": "a sign-up by a passkey: the passkey row, a new user, a sign-in",
+  "password insertSignUp": [
+    "an email claim by a magic link",
+    "an email claim by the sign-up link",
+    "an anonymous upgrade by an email claim",
+  ],
   "password insertUniform": "one kind: the create of a new user and its password row, no session",
   "password passwordSignIn": "a sign-in by a password",
-  "password verifyPasswordEmail": ["an email claim by the sign-up link"],
+  // Plan 12i Task 20: the confirm of the link and of the code, one transaction.
+  "password confirmSignUp": ["an email claim by the sign-up link"],
   "password applyReset": ["a password reset"],
   "password changePassword": ["a password set", "a password change", "a second factor enable"],
   "profile updateProfile": "one kind: the compare-and-set of the user row",
+  // Plan 12i Task 2: the set of a username, the compare-and-set of updateProfile.
+  "username setUsername": "one kind: the compare-and-set of the user row",
+  // Plan 12i Task 6: the anonymous sign-in, and the one delete of anonymous users.
+  "anonymous signInAnonymous": ["an anonymous sign-in"],
+  "anonymous deleteAnonymousRows": [
+    "an anonymous delete",
+    "an anonymous upgrade by an email claim",
+  ],
+  // Plan 12i Task 7: the end of the anonymous sessions after an upgrade, before the delete.
+  "anonymous upgradeSteps": ["an anonymous upgrade by an email claim"],
+  // Plan 12i Task 5: the phone sign-in reads the user, then spends the code. Then it
+  // creates the user and the session or the challenge, as the email code sign-in does.
+  "phone resolvePhoneUser":
+    "the user read, the spend of the code, then the new user row and the session or the challenge",
+  // Plan 12i Task 5: the set of a phone, the compare-and-set of updateProfile, then the spend.
+  "phone writePhone": "one kind: the compare-and-set of the user row, then the spend of the code",
   "roles createRole": ["a role create"],
   "roles deleteRole": "no kind: reads of member and invitation rows, then the role row",
   "second-factor-methods enableMethod":
@@ -1270,6 +1341,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "users createOrFindInTransaction": [
     "a sign-in",
     "an email claim by a magic link",
+    "an anonymous upgrade by an email claim",
     "a SCIM create that claims a user",
     "a SCIM update",
     "a SCIM deactivate",
@@ -1353,8 +1425,11 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
     // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
-    // Ruling 78 adds the one of organization-rest.ts.
-    expect(found.length).toBe(77);
+    // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
+    // one of username.ts, and Task 5 the two of phone.ts. Task 6 adds the two of
+    // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
+    // one of the passkey-first sign-up.
+    expect(found.length).toBe(84);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

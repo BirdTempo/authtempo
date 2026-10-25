@@ -14,8 +14,9 @@ import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 const BASE = ["id", "createdAt", "updatedAt"];
 
 describe("schema version 14 (plan 12d)", () => {
-  it("is schema version 14", () => {
-    expect(SCHEMA_VERSION).toBe(14);
+  it("is schema version 14 or a later version", () => {
+    // Plan 12i moves the version to 15: test/schema-v15.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
   });
 
   it("holds the six models with their keys", () => {

@@ -1,0 +1,9 @@
+{
+  "source": "token.json follows https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Wechat_Login.html, and userinfo.json and userinfo-error.json follow https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Authorized_Interface_Calling_UnionID.html, read 2026-10-24. The subject is unionid, else openid, as Better Auth 1.7.2 keeps profile.unionid || profile.openid. No answer has an address, so the entry is addressless.",
+  "subject": "o6_bmasdasdsad6_2sgVt7hMZOPfL",
+  "openidSubject": "o6_bmjrPTlm6_2sgVt7hMZOPfL2M",
+  "email": null,
+  "emailVerified": false,
+  "name": "NICKNAME",
+  "image": "https://thirdwx.qlogo.cn/mmopen/g3MonUZtNHkdmzicIlibx6iaFqAc56vxLSUfpb6n5WKSYVY0ChQKkiaJSgQ1dZuTOgvLLrhJbERQQ4eMsv84eavHiaiceqxibJxCfHe/0"
+}

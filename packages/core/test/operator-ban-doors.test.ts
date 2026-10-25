@@ -18,6 +18,7 @@ import {
   resetPassword,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
+import { addPhone, requestPhone, verifyAddPhone, verifyPhone } from "../src/engine/phone.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
@@ -28,6 +29,7 @@ import { verifyTwoFactor } from "../src/engine/totp.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { Result } from "../src/result.js";
 import type { UserRow } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
@@ -55,7 +57,10 @@ async function world(extra: Partial<AuthConfig> = {}) {
   const idp = fakeFetch((call) =>
     Response.json({ id_token: call.form.code, token_type: "Bearer" }),
   );
+  // The phone door (plan 12i Task 5) reads its codes from this port.
+  const sms = createRecordingSms();
   const auth = await operatorAuth({
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
     social: { google: GOOGLE, fetch: fetchFn },
     sso: { oidc: true, fetch: idp.fetchFn, dns: [fakeDns("a", txt), fakeDns("b", txt)] },
     jwt: fakeJwt(tokens),
@@ -70,7 +75,7 @@ async function world(extra: Partial<AuthConfig> = {}) {
     },
     ...extra,
   });
-  return { auth, tokens, before, txt };
+  return { auth, tokens, before, txt, sms };
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -183,6 +188,20 @@ async function ssoConnection(w: World): Promise<string> {
   return made.value.id;
 }
 
+const PHONE = "+14155550100";
+
+/** The code of the last SMS: the default text starts with it. */
+function lastSms(w: World): string {
+  return /^(\d+) /.exec(w.sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+}
+
+/** One sign-in by a phone code (plan 12i Task 5). */
+async function phoneCode(w: World): Promise<Answer> {
+  const sent = await requestPhone(w.auth.config, { phone: PHONE, ip: null });
+  if (!sent.ok) throw new Error(sent.code);
+  return verifyPhone(w.auth.config, { phone: PHONE, code: lastSms(w), ip: null, userAgent: null });
+}
+
 /** The session token of a sign-in that must open a session. */
 function tokenOf(r: Answer): string {
   if (!r.ok) throw new Error(r.code);
@@ -192,7 +211,8 @@ function tokenOf(r: Answer): string {
 }
 
 interface Door {
-  via: Exclude<SessionVia, "impersonation">;
+  // An anonymous sign-in opens a session only for a new user, so no ban stands before it (plan 12i Task 6).
+  via: Exclude<SessionVia, "impersonation" | "anonymous">;
   /** Signs the user up and in once through the flow, and answers the next try. */
   setup(w: World): Promise<() => Promise<Answer>>;
 }
@@ -294,6 +314,25 @@ const DOORS: Door[] = [
     },
   },
   {
+    via: "phone",
+    async setup(w) {
+      // The user adds a phone by a real code (plan 12i Task 5), then signs in by a phone code.
+      const session = await resolveSession(w.auth.config, tokenOf(await magicLink(w)));
+      if (!session) throw new Error("no session");
+      const sent = await addPhone(w.auth.config, { session, phone: PHONE, ip: null });
+      if (!sent.ok) throw new Error(sent.code);
+      const set = await verifyAddPhone(w.auth.config, {
+        session,
+        code: lastSms(w),
+        ip: null,
+        userAgent: null,
+      });
+      if (!set.ok) throw new Error(set.code);
+      tokenOf(await phoneCode(w));
+      return () => phoneCode(w);
+    },
+  },
+  {
     via: "sso",
     async setup(w) {
       // The first sign-in creates the user just in time (plan 12d Task 5).
@@ -307,10 +346,10 @@ const DOORS: Door[] = [
 const BANNED = { ok: false, code: "account_banned", status: 403 };
 
 describe("the ban at the session doors (plan 12f Task 6)", () => {
-  it("has one row per value of SessionVia but impersonation", () => {
+  it("has one row per value of SessionVia but impersonation and anonymous", () => {
     expect(DOORS.map((d) => d.via).sort()).toEqual(
       Object.keys(SESSION_VIA)
-        .filter((v) => v !== "impersonation")
+        .filter((v) => v !== "impersonation" && v !== "anonymous")
         .sort(),
     );
   });

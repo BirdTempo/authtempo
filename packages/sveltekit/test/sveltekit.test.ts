@@ -290,3 +290,67 @@ describe("@authtempo/sveltekit (plan 11d2)", () => {
     expect(() => authHandle({ auth, protect: () => true })).toThrow(/signInPath/);
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options. `Ctx` throws on an unbound call, as the ExecutionContext of Workers does.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+class Ctx {
+  held: Promise<unknown>[] = [];
+  props = {};
+  waitUntil(promise: Promise<unknown>): void {
+    if (!(this instanceof Ctx)) throw new TypeError("Illegal invocation");
+    this.held.push(promise);
+  }
+  passThroughOnException(): void {}
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  const event = (platform: object | undefined) => {
+    const request = new Request(`${BASE}/auth/x`);
+    return { request, url: new URL(request.url), platform, locals: {} } as unknown as RequestEvent;
+  };
+  const resolve = async () => new Response("page");
+
+  it("passes platform.context of the Cloudflare adapter, the option in its place, or none", async () => {
+    const s = waitSpy();
+    const ctx = new Ctx();
+    await authHandle({ auth: s.auth as never })({ event: event({ context: ctx }), resolve });
+    expect(ctx.held).toEqual([s.work]);
+    // Adapter 8 and Node set no platform: handle gets no options.
+    await authHandle({ auth: s.auth as never })({ event: event(undefined), resolve });
+    expect(s.got).toEqual(["options", "none"]);
+    // Adapter 7 sets ctx and the deprecated context to the same object; ctx comes first.
+    const first = new Ctx();
+    const deprecated = new Ctx();
+    await authHandle({ auth: s.auth as never })({
+      event: event({ ctx: first, context: deprecated }),
+      resolve,
+    });
+    expect(first.held).toEqual([s.work]);
+    expect(deprecated.held).toEqual([]);
+    const seen: [Promise<unknown>, unknown][] = [];
+    const unused = new Ctx();
+    const own = event({ context: unused });
+    await authHandle({ auth: s.auth as never, waitUntil: (p, e) => void seen.push([p, e]) })({
+      event: own,
+      resolve,
+    });
+    expect(seen).toEqual([[s.work, own]]);
+    expect(unused.held).toEqual([]);
+  });
+});

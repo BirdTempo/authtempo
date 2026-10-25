@@ -1,12 +1,18 @@
-import { type OidcProvider, stringClaim } from "./provider.js";
+import { type OidcProvider, type RedirectOverride, stringClaim } from "./provider.js";
 
-export interface AppleConfig {
+export interface AppleConfig extends RedirectOverride {
   /** The Services ID for web sign-in, for example `com.example.web`. */
   clientId: string;
   teamId: string;
   keyId: string;
   /** PKCS#8 PEM of the Sign in with Apple key. Rotate it in the developer portal; this config is the only copy. */
   privateKey: string;
+  /**
+   * The other client ids that an ID token of the ID-token route may name
+   * in `aud`: the bundle id of each native app (plan 12i Task 10). 1 to 10
+   * entries. The redirect flow takes `clientId` only.
+   */
+  audiences?: string[];
 }
 
 const APPLE_AUDIENCE = "https://appleid.apple.com";
@@ -42,6 +48,16 @@ export function appleProvider(c: AppleConfig): OidcProvider {
           exp: iat + CLIENT_SECRET_LIFE_SECONDS,
         },
       });
+    },
+    // Apple's nonce claim holds the value that the app passed to the sheet.
+    // The app passes `providerNonce`, the SHA-256 hex of core's nonce
+    // (ruling 37 I1). The id_token page says of `nonce_supported`: "If this
+    // claim returns true, treat nonce as mandatory and fail the
+    // transaction" (read 2026-10-25). It is a boolean or a string.
+    idToken: {
+      audiences: c.audiences ?? [],
+      nonceMandatory: (claims) =>
+        claims.nonce_supported === true || claims.nonce_supported === "true",
     },
     profile(claims, extra) {
       const verified = claims.email_verified;

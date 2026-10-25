@@ -791,11 +791,13 @@ describe("the demo page (plan 11b Task 12)", () => {
     expect(exempt.map((m) => / id="off-([^"]+)"/.exec(m[1] ?? "")?.[1])).toEqual(
       Object.keys(DEMO_EXEMPT),
     );
-    // The 15 exempt features, typed here, so a lost member fails this test too.
+    // The 22 exempt features, typed here, so a lost member fails this test too.
     // Plan 12e adds oauthDevice, plan 12f operatorUsers and operatorImpersonation,
     // plan 12k dynamicRoles and teams, plan 12h readiness, and plan 12d sso,
-    // operatorSso, and scim.
-    expect(exempt).toHaveLength(15);
+    // operatorSso, and scim, and plan 12i passkeyRelatedOrigins, username, and phone.
+    // Plan 12i Task 6 adds anonymous. Task 11 adds multiSession. Task 10 adds socialIdToken.
+    // Task 8 adds passkeySignUp.
+    expect(exempt).toHaveLength(22);
     for (const m of exempt) {
       const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
       expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({

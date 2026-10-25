@@ -6,6 +6,7 @@ import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
 import {
   constantTimeEqual,
+  fromBase64Url,
   randomBase64Url,
   randomToken,
   sha256Base64Url,
@@ -25,9 +26,15 @@ import {
   type Provider,
   type SocialProfile,
   stringClaim,
+  TOKEN_EXTRA_KEY_RE,
+  TOKEN_EXTRA_MAX,
+  TOKEN_EXTRA_VALUE_MAX,
+  TOKEN_REQUEST_ACCESS_MAX,
   type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
+import { type AnonymousCaller, type UpgradeSteps, upgradeSteps } from "./anonymous.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import {
@@ -38,6 +45,7 @@ import {
   runBefore,
   stopWith,
 } from "./hooks.js";
+import { socialMethod } from "./last-method.js";
 import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import {
@@ -49,11 +57,15 @@ import {
   sessionsEnded,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
+import { type OpenedStateData, openStateData, sealStateData } from "./state-data.js";
 import {
   type BeforeResolveWrite,
+  CLAIM_RUNS,
   ClaimLostError,
   ClaimRacedError,
   claimEmail,
+  claimedUser,
+  draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
   undoSessionIfIdentityGone,
@@ -80,7 +92,19 @@ const STATE_PURPOSES: readonly VerificationPurpose[] = ["oauth-state", LINK_STAT
 export interface SocialStart {
   provider: string;
   next?: string | undefined;
+  /**
+   * The app payload (plan 12i Task 19): the base64url of a UTF-8 JSON
+   * object. It needs `social.stateData`; else, or for a value that breaks
+   * the rule, the start answers `invalid_body` and writes no row.
+   */
+  data?: string | undefined;
   ip: string | null;
+  /**
+   * The live anonymous session of the start (plan 12i Task 7). The state
+   * row records its user, and the callback, bound to this browser by the
+   * binding cookie, replaces it.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface SocialStarted {
@@ -111,6 +135,12 @@ export interface SocialComplete {
    * not take the link. A sign-in callback does not read it.
    */
   sessionToken?: string | null | undefined;
+  /**
+   * The live anonymous session of the callback request (plan 12i Task 7).
+   * The callback links the anonymous user of the state row; with none, this
+   * one. Apple's cross-site form post carries no `Lax` cookie: the row links then.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 interface StateData {
@@ -120,6 +150,51 @@ interface StateData {
   next: string;
   /** Set by `startLink` (plan 12a): the callback links to this user and this session, and opens no session. */
   link?: LinkTarget;
+  /**
+   * The app payload, sealed under the row's secret version with the row id
+   * as AAD (plan 12i Task 19). The clear payload is never in the row.
+   */
+  sealedData?: string;
+  /** The anonymous user of the start's session (plan 12i Task 7). A link start records none. */
+  anonymousUserId?: string;
+}
+
+/** The depth of the payload: the object itself is 1. */
+const STATE_DATA_MAX_DEPTH = 4;
+
+/** True when `value` nests no deeper than `left` levels of objects and lists. */
+function depthWithin(value: unknown, left: number): boolean {
+  if (typeof value !== "object" || value === null) return true;
+  if (left === 0) return false;
+  return Object.values(value).every((v) => depthWithin(v, left - 1));
+}
+
+/**
+ * The UTF-8 JSON bytes of the payload, or `invalid_body` (plan 12i Task 19).
+ * The rule: `social.stateData` is on, the value is base64url, its bytes are
+ * at most `maxBytes` of valid UTF-8, and they parse to an object (not a
+ * list) with a depth of at most 4. The bytes, not a new form of them, are
+ * sealed, so the callback gives the hooks what the browser sent.
+ */
+function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array> {
+  const rule = config.social.stateData;
+  if (!rule) return fail("invalid_body");
+  // The bound before the decode: base64url of n bytes has ceil(4n / 3)
+  // characters, so a longer value cannot fit. A GET query has no schema.
+  if (raw.length > Math.ceil((rule.maxBytes * 4) / 3)) return fail("invalid_body");
+  let bytes: Uint8Array;
+  let value: unknown;
+  try {
+    bytes = fromBase64Url(raw);
+    if (bytes.length > rule.maxBytes) return fail("invalid_body");
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return fail("invalid_body");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return fail("invalid_body");
+  if (!depthWithin(value, STATE_DATA_MAX_DEPTH)) return fail("invalid_body");
+  return ok(bytes);
 }
 
 interface LinkTarget {
@@ -141,8 +216,24 @@ async function resolveProvider(
     : entry;
 }
 
-function callbackUrl(config: ResolvedConfig, provider: { name: string }): string {
-  return `${config.baseURL}${config.basePath}/social/${provider.name}/callback`;
+/**
+ * The `redirect_uri` of a provider, at the start and at the token exchange:
+ * the path of its `redirectURI` override, else the default callback (plan
+ * 12i Task 12). Pass the configured entry: a discovery entry keeps the
+ * override, and the provider that it resolves does not. The origin is the
+ * request's entry of `baseURL` (plan 12i Task 18, ruling 21). The binding
+ * cookie is host-only, so a sign-in ends on the host where it started.
+ * With one entry, the URL is the override as the config gives it.
+ */
+export function callbackUrl(
+  config: ResolvedConfig,
+  provider: { name: string; redirectURI?: string },
+): string {
+  const path =
+    provider.redirectURI === undefined
+      ? `${config.basePath}/social/${provider.name}/callback`
+      : new URL(provider.redirectURI).pathname;
+  return `${config.baseURL}${path}`;
 }
 
 /**
@@ -158,6 +249,9 @@ async function beginSocial(
 ): Promise<Result<SocialStarted>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
+  // Before the limits and before any row: a refused payload counts no try.
+  const payload = input.data === undefined ? null : stateDataBytes(config, input.data);
+  if (payload && !payload.ok) return payload;
   if (!(await limit(config, "social-start:ip", ipKey(input.ip), START_LIMIT))) {
     return fail("rate_limited");
   }
@@ -171,15 +265,18 @@ async function beginSocial(
   const verifier = randomBase64Url(32);
   const nonce = randomBase64Url(32);
   const bindToken = randomBase64Url(32);
+  const id = newId(now);
   const data: StateData = {
     verifier,
     nonceHash: await sha256Hex(nonce),
     bindHash: await sha256Hex(bindToken),
     next: safeNext(input.next),
     ...(link ? { link } : {}),
+    ...(payload ? { sealedData: (await sealStateData(config, payload.value, id)).sealed } : {}),
+    ...(input.anonymous && !link ? { anonymousUserId: input.anonymous.user.id } : {}),
   };
   await config.storage.create("verification", {
-    id: newId(now),
+    id,
     purpose: link ? LINK_STATE : "oauth-state",
     identifier: provider.name,
     valueHash: await sha256Hex(state),
@@ -190,19 +287,30 @@ async function beginSocial(
     updatedAt: now,
     secretVersion: config.keyring.current,
   });
+  // An oauth2 entry may name its client id parameter, turn PKCE off, and add a fragment (plan 12i Task 22).
+  const oauth2 = provider.kind === "oauth2" ? provider : null;
   const query = buildQuery({
-    client_id: provider.clientId,
-    redirect_uri: callbackUrl(config, provider),
+    [oauth2?.authorizeClientIdParam ?? "client_id"]: provider.clientId,
+    redirect_uri: callbackUrl(config, entry),
     response_type: "code",
     scope: provider.scope,
     state,
     // An oauth2 provider issues no ID token, so a nonce has nothing to bind (plan 9c).
     ...(provider.kind === "oidc" ? { nonce } : {}),
-    code_challenge: await sha256Base64Url(verifier),
-    code_challenge_method: "S256",
+    ...(usesPkce(provider)
+      ? { code_challenge: await sha256Base64Url(verifier), code_challenge_method: "S256" }
+      : {}),
     ...provider.authorizeParams,
   });
-  return ok({ location: `${provider.authorizeUrl}?${query}`, bindToken });
+  return ok({
+    location: `${provider.authorizeUrl}?${query}${oauth2?.authorizeSuffix ?? ""}`,
+    bindToken,
+  });
+}
+
+/** False only for an oauth2 entry with `pkce: false` (plan 12i Task 22). */
+function usesPkce(provider: Provider): boolean {
+  return provider.kind !== "oauth2" || provider.pkce !== false;
 }
 
 /** The start of a social sign-in. */
@@ -217,6 +325,8 @@ export interface SocialLinkStart {
   provider: string;
   session: ResolvedSession;
   next?: string | undefined;
+  /** The app payload, as `SocialStart.data` (plan 12i Task 19). */
+  data?: string | undefined;
   ip: string | null;
 }
 
@@ -237,7 +347,7 @@ export async function startLink(
   if (!fresh.ok) return fresh;
   return beginSocial(
     config,
-    { provider: input.provider, next: input.next, ip: input.ip },
+    { provider: input.provider, next: input.next, data: input.data, ip: input.ip },
     { userId: user.id, sessionId: session.id },
   );
 }
@@ -291,6 +401,11 @@ export async function completeSocial(
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
     return fail("invalid_token");
   }
+  // The state row names the version that sealed it.
+  const opened = await openStateData(config, data.sealedData, row.secretVersion, row.id);
+  if (!opened.ok) return opened;
+  // The payload goes to the two hook events only: never to a redirect, an answer, or a line.
+  const stateData = opened.value?.value ?? null;
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
   // A link checks its session before any network call (plan 12a).
@@ -300,26 +415,40 @@ export async function completeSocial(
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
-  const token = await exchangeProviderCode(
-    config,
-    provider,
-    input.code,
-    data.verifier,
-    now,
-    callbackUrl(config, provider),
-  );
-  if (token === null) return fail("oauth_failed");
+  // The hook runs here, after the state row and the binding cookie (plan 12i Task 22).
+  const verifier = usesPkce(provider) ? data.verifier : null;
+  const exchanged =
+    provider.kind === "oauth2" && provider.tokenRequest
+      ? await requestedToken(
+          config,
+          provider,
+          input.code,
+          verifier,
+          now,
+          callbackUrl(config, entry),
+        )
+      : await exchangeProviderCode(
+          config,
+          provider,
+          input.code,
+          verifier,
+          now,
+          callbackUrl(config, entry),
+        ).then((token) => (token === null ? null : { token, extra: {} }));
+  if (exchanged === null) return fail("oauth_failed");
+  const { token } = exchanged;
   const profile =
     provider.kind === "oidc"
       ? await idTokenProfile(config, provider, token, data.nonceHash, input.user ?? undefined, now)
-      : await userinfoProfile(config, provider, token);
-  const bounded = profile ? boundProfile(config.observe, profile, provider.name) : null;
-  if (!bounded) return fail("oauth_failed");
-  // Only SSO signs in an address of an enforced domain (plan 12d), by the profile address, before the resolution.
-  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
-  const enforced = link || address === null ? null : await enforcedAnswer(config, address);
-  if (enforced) return enforced;
-  // A link (plan 12a): no session opens, and no sign-in gate applies.
+      : await userinfoProfile(config, provider, token, exchanged.extra);
+  // An addressless entry proves no address, so core drops any address of its profile (plan 12i Task 22).
+  const addressless = provider.kind === "oauth2" && provider.addressless === true;
+  const checked = profile ? boundProfile(config.observe, profile, provider.name) : null;
+  if (!checked) return fail("oauth_failed");
+  const bounded: SocialProfile = addressless
+    ? { ...checked, email: null, emailVerified: false }
+    : checked;
+  // A link (plan 12a): no session opens, no sign-in gate applies, and no enforced domain refuses it.
   if (link)
     return completeLink(
       config,
@@ -329,12 +458,73 @@ export async function completeSocial(
       safeNext(data.next),
       input,
       now,
+      stateData,
     );
+  const signedIn = await signInByProfile(config, {
+    provider: provider.name,
+    profile: bounded,
+    addressless,
+    next: safeNext(data.next),
+    ip: input.ip,
+    userAgent: input.userAgent,
+    trustDevice: input.trustDevice,
+    // The binding cookie ties this callback to the browser of the start, so the row's anonymous user links.
+    upgrade: upgradeSteps(
+      config,
+      input.anonymous ?? null,
+      typeof data.anonymousUserId === "string" ? data.anonymousUserId : null,
+      "bound",
+    ),
+    ...(opened.value ? { opened: opened.value } : {}),
+    now,
+  });
+  if (!signedIn.ok || "twoFactor" in signedIn.value) return signedIn;
+  const { next, user } = signedIn.value;
+  return ok({ token: signedIn.value.token, next, user });
+}
+
+/** A social sign-in of a verified profile, before its session or its challenge. */
+export interface ProfileSignIn {
+  provider: string;
+  profile: SocialProfile;
+  addressless: boolean;
+  next: string;
+  ip: string | null;
+  userAgent: string | null;
+  trustDevice: string | undefined;
+  upgrade: UpgradeSteps;
+  /** The opened state payload of the social flow (plan 12i Task 19). */
+  opened?: OpenedStateData;
+  now: Date;
+}
+
+/** The session of a social sign-in, with its row for a JSON answer. */
+export interface ProfileSignedIn {
+  token: string;
+  session: SessionRow;
+  next: string;
+  user: UserRow;
+}
+
+/**
+ * The sign-in of a verified social profile, for the callback and for the
+ * ID-token route (plan 12i Task 10). One code for both pathways keeps one
+ * account rule (spec 8.3), one gate (12c), and one anonymous upgrade.
+ */
+export async function signInByProfile(
+  config: ResolvedConfig,
+  input: ProfileSignIn,
+): Promise<Result<ProfileSignedIn | SignInChallenge>> {
+  const { now, next, upgrade } = input;
+  const bounded = input.profile;
+  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
+  const enforced = address === null ? null : await enforcedAnswer(config, address);
+  if (enforced) return enforced;
+  const stateData = input.opened?.value ?? null;
 
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
-  const next = safeNext(data.next);
   // The hook runs before the resolution's first write, for the D1 undo (see
   // `insertSignUp` in password.ts). A user with the second factor on gets a
   // challenge in place of the session (plan 12c). A new identity of a
@@ -346,20 +536,27 @@ export async function completeSocial(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "social",
+      method: socialMethod(input.provider),
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.social ?? false,
+      // A challenge carries the opened bytes to `session.afterCreate` at its verify.
+      ...(input.opened ? { stateData: input.opened } : {}),
+      upgrade,
     },
     now,
   );
   // The user and identity hooks, with the sign-up rule first (plan 12a).
-  const made = createSteps(config, "social", { signUpRule: true });
+  const made = createSteps(config, "social", {
+    signUpRule: true,
+    ...(stateData ? { stateData } : {}),
+  });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "social");
   const resolved = await hookGuard(() =>
     resolveSocialUser(
       config.storage,
-      provider.name,
+      input.provider,
       bounded,
       now,
       verified,
@@ -373,6 +570,7 @@ export async function completeSocial(
         await steps.before(tx, user);
       },
       made,
+      input.addressless,
     ),
   );
   if (!resolved.ok) return resolved;
@@ -386,8 +584,9 @@ export async function completeSocial(
     return ok({ ...after.pending, next, user });
   }
   await touchTrust(config, steps.trustId(), now);
-  await sessionOpened(config, after.session, user, "social", provider.name);
-  return ok({ token: after.token, next, user });
+  await sessionOpened(config, after.session, user, "social", input.provider, stateData);
+  await upgrade.after();
+  return ok({ token: after.token, session: after.session, next, user });
 }
 
 /** The session of a link's start, as `linkSession` read it. */
@@ -442,6 +641,7 @@ async function completeLink(
   next: string,
   input: SocialComplete,
   now: Date,
+  stateData: Record<string, unknown> | null,
 ): Promise<Result<SocialLinked>> {
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: held.userId },
@@ -503,7 +703,7 @@ async function completeLink(
     config.observe,
     "identity.afterLink",
     config.hooks.identity.afterLink,
-    { user, identity, via: "link" },
+    { user, identity, via: "link", ...(stateData ? { stateData } : {}) },
     user.id,
   );
   // After the commit, never inside the transaction (plan 12a Task 6).
@@ -524,20 +724,22 @@ async function completeLink(
  * `redirectUri` is the callback of the start: a social provider's, or an
  * SSO connection's (plan 12d deviation 6). One exchange serves both.
  * `fetchFn` is `social.fetch` for a social provider and `sso.fetch` for a
- * connection (plan 12d Task 4). `method` is `client_secret_post` for a
- * social provider. An SSO connection names its own (12d fix wave item 18).
+ * connection (plan 12d Task 4). `method` is the provider's `tokenAuth`,
+ * else `client_secret_post` (plan 12i Task 14). An SSO connection names its
+ * own (12d fix wave item 18).
  * With `client_secret_basic` the body holds no client id and no secret:
- * RFC 6749 section 2.3 allows one method per request.
+ * RFC 6749 section 2.3 allows one method per request. A null `verifier`
+ * sends no `code_verifier` (plan 12i Task 22, `pkce: false`).
  */
 export async function exchangeProviderCode(
   config: ResolvedConfig,
   provider: Provider,
   code: string,
-  verifier: string,
+  verifier: string | null,
   now: Date,
   redirectUri: string,
   fetchFn: typeof fetch = config.social.fetch,
-  method: TokenEndpointAuthMethod = "client_secret_post",
+  method: TokenEndpointAuthMethod = provider.tokenAuth ?? "client_secret_post",
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -567,7 +769,8 @@ export async function exchangeProviderCode(
         code,
         redirect_uri: redirectUri,
         ...(basic ? {} : { client_id: provider.clientId, client_secret: clientSecret }),
-        code_verifier: verifier,
+        // Null for an oauth2 entry with pkce false (plan 12i Task 22).
+        ...(verifier === null ? {} : { code_verifier: verifier }),
       }),
     });
   } catch (e) {
@@ -592,12 +795,172 @@ export async function exchangeProviderCode(
   } catch {
     return null;
   }
+  const answer = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  // Slack answers an error with status 200 and ok false (plan 12i Task 14).
+  if (provider.tokenAnswerOk && !provider.tokenAnswerOk(answer)) {
+    config.observe.emit({ name: "social.token_refused", provider: provider.name });
+    return null;
+  }
   const field = provider.kind === "oidc" ? "id_token" : "access_token";
-  const token = (body as Record<string, unknown> | null)?.[field];
+  const token = answer[field];
   if (typeof token === "string" && token.length > 0) return token;
   // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
   config.observe.emit({ name: "social.token_missing", provider: provider.name });
   return null;
+}
+
+/**
+ * A call of the hook's fetch to another URL than the entry's `tokenUrl`
+ * (plan 12i Task 22). Its message names no URL: a WeChat URL holds the
+ * secret and the code.
+ */
+class TokenHostError extends Error {
+  constructor() {
+    super("authtempo: tokenRequest called another URL than tokenUrl");
+    this.name = "TokenHostError";
+  }
+}
+
+/** The origin and path of a URL text, or null when it is not a URL. */
+function originAndPath(text: string): string | null {
+  try {
+    const url = new URL(text);
+    return url.origin + url.pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The URL and the init of a hook's fetch call, read from the input one time
+ * into values that core owns (ruling 28 I1). A second read could answer
+ * another URL: a toString that changes, or a Request subclass whose url
+ * getter lies. A Request input is copied into a plain Request, which reads
+ * the fields of the input, not its getters. The call keeps the method, the
+ * headers, and the body of a Request input. Null when the input is not a URL.
+ */
+async function ownedCall(
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit | undefined,
+): Promise<{ url: URL; init: RequestInit } | null> {
+  try {
+    if (!(input instanceof Request)) return { url: new URL(String(input)), init: { ...init } };
+    const own = new Request(input, init);
+    const body =
+      own.method === "GET" || own.method === "HEAD" ? undefined : await own.arrayBuffer();
+    return {
+      url: new URL(own.url),
+      init: { method: own.method, headers: own.headers, ...(body ? { body } : {}) },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** True for a string of 1 to `max` characters with no control character. */
+function plainText(value: unknown, max: number): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && value.length <= max && !hasControlChar(value)
+  );
+}
+
+/**
+ * The token of an oauth2 entry's `tokenRequest` hook, or null on any
+ * failure (plan 12i Task 22). The engine calls it after the state row and
+ * the binding cookie, so the hook never sees a callback that core refused.
+ * The hook gets the engine's fetch: one deadline, no redirect follow, and
+ * only the origin and path of `tokenUrl`. So the hook cannot send the code
+ * to another host. The answer is app output: the engine checks its shape,
+ * and a failure logs the error class, never a message, the code, or the
+ * secret.
+ */
+async function requestedToken(
+  config: ResolvedConfig,
+  provider: OAuth2Provider,
+  code: string,
+  verifier: string | null,
+  now: Date,
+  redirectUri: string,
+): Promise<{ token: string; extra: Record<string, string> } | null> {
+  const hook = provider.tokenRequest;
+  if (!hook) return null;
+  let clientSecret: string;
+  try {
+    clientSecret = await provider.clientSecret({ jwt: config.jwt, now });
+  } catch (e) {
+    config.observe.emit({
+      name: "social.client_secret_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
+    return null;
+  }
+  const pinned = originAndPath(provider.tokenUrl);
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  // The pin checks the URL that core owns, and the call sends that same URL.
+  const boundFetch: typeof fetch = async (input, init) => {
+    const call = await ownedCall(input, init);
+    if (pinned === null || call === null || call.url.origin + call.url.pathname !== pinned)
+      throw new TokenHostError();
+    return config.social.fetch(call.url.href, { ...call.init, signal });
+  };
+  // Promise.race keeps a handler on this promise, so its late rejection is handled.
+  const deadline = new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  let answer: unknown;
+  try {
+    answer = await Promise.race([
+      hook({
+        code,
+        redirectUri,
+        clientId: provider.clientId,
+        clientSecret,
+        codeVerifier: verifier,
+        fetch: boundFetch,
+      }),
+      deadline,
+    ]);
+  } catch (e) {
+    config.observe.emit({
+      name: "social.token_request_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
+    return null;
+  }
+  const checked = tokenAnswer(answer);
+  if (checked === null) {
+    config.observe.emit({ name: "social.token_missing", provider: provider.name });
+    return null;
+  }
+  return checked;
+}
+
+/**
+ * The answer of a `tokenRequest` hook in its own plain object, or null when
+ * it breaks the shape. Each field is read once, inside the try, so a getter
+ * that throws or that answers twice changes nothing.
+ */
+function tokenAnswer(answer: unknown): { token: string; extra: Record<string, string> } | null {
+  try {
+    if (typeof answer !== "object" || answer === null) return null;
+    const a = answer as Record<string, unknown>;
+    const token = a.accessToken;
+    const extra = a.extra;
+    if (!plainText(token, TOKEN_REQUEST_ACCESS_MAX)) return null;
+    if (typeof extra !== "object" || extra === null || Array.isArray(extra)) return null;
+    const entries = Object.entries(extra);
+    if (entries.length > TOKEN_EXTRA_MAX) return null;
+    const out: Record<string, string> = {};
+    for (const [key, value] of entries) {
+      if (!TOKEN_EXTRA_KEY_RE.test(key) || !plainText(value, TOKEN_EXTRA_VALUE_MAX)) return null;
+      out[key] = value;
+    }
+    return { token, extra: out };
+  } catch {
+    return null;
+  }
 }
 
 /** The profile from a verified ID token whose nonce matches the row, or null. */
@@ -609,12 +972,18 @@ async function idTokenProfile(
   user: string | undefined,
   now: Date,
 ): Promise<SocialProfile | null> {
+  // A provider whose issuer names the person's tenant gives it per token (plan 12i Task 13).
+  const issuer = provider.issuerOf ? provider.issuerOf(idToken) : provider.issuer;
+  if (issuer === null) {
+    config.observe.emit({ name: "social.claims_refused", provider: provider.name });
+    return null;
+  }
   let claims: Record<string, unknown>;
   try {
     claims = await config.jwt.verifyIdToken({
       token: idToken,
       jwksUrl: provider.jwksUrl,
-      issuer: provider.issuer,
+      issuer,
       audience: provider.clientId,
       now,
     });
@@ -631,6 +1000,10 @@ async function idTokenProfile(
     config.observe.emit({ name: "social.nonce_mismatch", provider: provider.name });
     return null;
   }
+  if (provider.checkClaims && !provider.checkClaims(claims)) {
+    config.observe.emit({ name: "social.claims_refused", provider: provider.name });
+    return null;
+  }
   return provider.profile(claims, { user });
 }
 
@@ -645,6 +1018,7 @@ async function userinfoProfile(
   config: ResolvedConfig,
   provider: OAuth2Provider,
   accessToken: string,
+  extra: Record<string, string>,
 ): Promise<SocialProfile | null> {
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
   const timedFetch: typeof fetch = (input, init) => config.social.fetch(input, { ...init, signal });
@@ -654,7 +1028,8 @@ async function userinfoProfile(
   });
   try {
     const answer: unknown = await Promise.race([
-      provider.userinfo(accessToken, timedFetch),
+      // A copy: the function gets the extra of the hook, never the engine's own object.
+      provider.userinfo(accessToken, timedFetch, { ...extra }),
       deadline,
     ]);
     // The function is app code. Only a boolean true is a verified address, so
@@ -684,7 +1059,7 @@ async function userinfoProfile(
  * person can still sign in. The image must be an `https:` URL, so a
  * `javascript:` or `data:` value never reaches the user row.
  */
-function boundProfile(
+export function boundProfile(
   observe: Observer,
   profile: SocialProfile,
   providerName: string,
@@ -736,6 +1111,7 @@ export function resolveSocialUser<T extends AfterWrite>(
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
+  addressless?: boolean,
 ): Promise<Result<{ user: UserRow; after: T }>>;
 export async function resolveSocialUser<T extends AfterWrite>(
   storage: StorageAdapter,
@@ -747,6 +1123,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
   ended?: SessionRow[],
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
+  addressless = false,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -766,6 +1143,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
             ended,
             before ? (user, created) => before(tx, user, created) : undefined,
             steps,
+            addressless,
           );
           if (!linked.ok) return linked;
           const { user, trustedIdentityId, created } = linked.value;
@@ -806,8 +1184,9 @@ export async function resolveSocialUser<T extends AfterWrite>(
       // The claim won. The address is proved by its owner now.
       if (err instanceof ClaimRacedError) return fail<never>("email_taken_unverified");
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
-      // Another proof claimed the user first (review M1): the retry signs in the verified user.
-      if (attempt === 0 && err instanceof ClaimLostError) continue;
+      // Another proof claimed the user first (review M1): the retry signs in
+      // the verified user. Or a session race undid the claim: the retry claims again.
+      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
       throw err;
     }
   }
@@ -837,6 +1216,7 @@ async function linkInTransaction(
   ended: SessionRow[] | undefined,
   before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
   steps: CreateSteps | undefined,
+  addressless: boolean,
 ): Promise<Result<Linked>> {
   // Each branch calls `before` with the user it answers, after its checks and
   // before its first write: the D1 undo (see `insertSignUp` in password.ts).
@@ -854,8 +1234,9 @@ async function linkInTransaction(
       profile.emailVerified &&
       profile.email !== null &&
       normalizeEmail(profile.email) === user.email;
-    if (!user.emailVerified && proved) {
-      const claimed = { ...user, emailVerified: true, updatedAt: now };
+    // `proved` holds an address; `hasAddress` narrows the type for the identity write.
+    if (!user.emailVerified && proved && hasAddress(user)) {
+      const claimed = claimedUser(user, now);
       const filled = filledUser(claimed, profile, now);
       // `user.beforeVerify`, then the session hook, before the first write (plan 12a).
       await verified.before(user);
@@ -877,6 +1258,10 @@ async function linkInTransaction(
     await writeFill(tx, user, filled);
     return ok({ user: filled, trustedIdentityId: proved ? null : identity.id, created: false });
   }
+  // An addressless entry makes a user with no address and never reads a
+  // user by address (plan 12i Task 22). The sign-up rule of `steps.user`
+  // runs `mayCreateUser(null)`: "open" passes, and "invited" refuses.
+  if (addressless) return createdByIdentity(tx, provider, profile, now, before, steps);
   const email = profile.email ? normalizeEmail(profile.email) : null;
   if (!email) return fail("email_required");
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
@@ -884,9 +1269,7 @@ async function linkInTransaction(
     if (!profile.emailVerified) return fail("email_taken_unverified");
     // An unverified account is a claim. The proof revokes earlier claimants
     // before the new identity is linked.
-    const current = existing.emailVerified
-      ? existing
-      : { ...existing, emailVerified: true, updatedAt: now };
+    const current = existing.emailVerified ? existing : claimedUser(existing, now);
     const filled = filledUser(current, profile, now);
     const linking: IdentitySummary = { provider, subject: profile.subject };
     // `user.beforeVerify`, `identity.beforeLink`, then the session hook,
@@ -900,18 +1283,10 @@ async function linkInTransaction(
     await writeFill(tx, current, filled);
     return ok({ user: filled, trustedIdentityId: null, created: false });
   }
-  const drafted: UserRow = {
-    id: newId(now),
-    email,
-    emailVerified: profile.emailVerified,
-    name: profile.name,
-    image: profile.image,
-    bannedAt: null,
-    banReason: null,
-    banUntil: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const drafted = draftUserRow(
+    { email, emailVerified: profile.emailVerified, name: profile.name, image: profile.image },
+    now,
+  );
   const linking: IdentitySummary = { provider, subject: profile.subject };
   // The sign-up rule and `user.beforeCreate`, then `identity.beforeLink`, then
   // the session hook, all before the user create (plan 12a, spec 8.9).
@@ -933,6 +1308,31 @@ async function linkInTransaction(
   });
 }
 
+/**
+ * The new user of an addressless entry: no address, no email identity, and
+ * only the provider identity (plan 12i Task 22). The profile's address is
+ * never read here, so no address of such an entry reaches a row.
+ */
+async function createdByIdentity(
+  tx: StorageAdapter,
+  provider: string,
+  profile: SocialProfile,
+  now: Date,
+  before: ((user: UserRow, created: boolean) => Promise<void>) | undefined,
+  steps: CreateSteps | undefined,
+): Promise<Result<Linked>> {
+  const drafted = draftUserRow(
+    { email: null, emailVerified: false, name: profile.name, image: profile.image },
+    now,
+  );
+  const minted = steps ? await steps.user(tx, drafted) : drafted;
+  if (steps) await steps.identity(minted, { provider, subject: profile.subject });
+  if (before) await before(minted, true);
+  const user = await tx.create("user", minted);
+  await tx.create("identity", identityRow(user.id, provider, profile.subject, now));
+  return ok({ user, trustedIdentityId: null, created: true });
+}
+
 function identityRow(userId: string, provider: string, subject: string, now: Date) {
   return {
     id: newId(now),
@@ -952,7 +1352,9 @@ function identityRow(userId: string, provider: string, subject: string, now: Dat
  */
 function filledUser(user: UserRow, profile: SocialProfile, now: Date): UserRow {
   const patch: Partial<Pick<UserRow, "name" | "image">> = {};
-  if (user.name === null && profile.name) patch.name = profile.name;
+  // A name of the client, not of the provider, fills a new user only (plan 12i Task 10).
+  if (user.name === null && profile.name && profile.nameOnCreate !== true)
+    patch.name = profile.name;
   if (user.image === null && profile.image) patch.image = profile.image;
   if (Object.keys(patch).length === 0) return user;
   return { ...user, ...patch, updatedAt: now };

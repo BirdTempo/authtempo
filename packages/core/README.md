@@ -31,21 +31,27 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/social/google/callback` | `?code&state` | 302 to `next` with the session cookie; for a user with the second factor on, 302 to the challenge page with no cookie (plan 12c); 302 to `/?auth_error=<code>` on failure |
 | POST | `/social/apple/callback` | form `code, state, user?` from Apple | same as the Google callback. The Origin check is skipped here; the state row and the binding cookie bind the post |
 | GET | `/social/<name>/start`, `/social/<name>/callback` | `?next=`; `?code&state` | the same answers as the Google routes, for `github`, `linkedin`, and each `social.oidc` and `social.oauth2` entry |
+| POST | `/social/google/id-token/nonce`, `/social/apple/id-token/nonce` | JSON `{}` | `{ nonce, providerNonce, expiresAt }`: a nonce of one use that lives 5 minutes (plan 12i), and its SHA-256 hex for the provider. 429 `rate_limited` after 60 per IP per 15 minutes |
+| POST | `/social/google/id-token`, `/social/apple/id-token` | JSON `{ idToken, nonce?, name?, next?, trustDevice? }` | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }`. The ID token of Google One Tap or of the native Apple sheet, with the nonce of the route. 400 `invalid_token` for a bad, used, or replayed token or nonce; 429 after 30 per IP per 15 minutes; the codes of the callback |
 | GET | `/session` | cookie or `Authorization: Bearer` | `{ user, session }` or 401. With `session.deferRefresh` on, also `needsRefresh`, and no renewed cookie |
 | POST | `/session/refresh` | cookie or bearer | `{ user, session }`, and the renewed cookie when the refresh was due; 401 (plan 12a) |
-| POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie |
+| POST | `/sign-out` | cookie or bearer | `{ ok: true }` and clears the cookie. With `multiSession` on, every session of the bag cookie ends too, and the bag cookie is cleared (plan 12i) |
+| GET | `/multi-session` | session cookie only, no Bearer scheme | `{ sessions }`: the active session and each live session of the bag, each with `sessionId`, `active`, and `user`. No token. A bag session never slides. 401 to a Bearer request (plan 12i) |
+| POST | `/multi-session/switch` | session cookie, `{ sessionId }` | `{ user, session }` of the new active session; the old one moves into the bag. 404 `not_found` for an id outside the browser (plan 12i) |
+| POST | `/multi-session/sign-out` | session cookie, `{ sessionId }` | `{ ok: true }`; only that session ends. 404 `not_found` for an id outside the browser (plan 12i) |
 | POST | `/passkey/register/options` | session (fresh) | the creation options JSON for `navigator.credentials.create`; 401; 403 `email_unverified`, `session_not_fresh` |
 | POST | `/passkey/register/verify` | session, `{ response, name? }` | `{ passkey }`; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed`; 401; 403 `email_unverified`. A credential id that is already registered answers `passkey_failed`. A `name` that is blank after the trim, or that breaks the passkey name rule, is stored as no name (see "Passkeys") |
-| POST | `/passkey/authenticate/options` | `{}` | the request options JSON for `navigator.credentials.get`; 429 `rate_limited` |
+| POST | `/passkey/authenticate/options` | `{ hints?, extensions? }` | the request options JSON for `navigator.credentials.get`; 400 `invalid_body` (a PRF salt that is not 32 bytes, or an extension that `passkey.extensions` does not turn on); 429 `rate_limited` |
 | POST | `/passkey/authenticate/verify` | `{ response }` | `{ user, session }` with the session cookie; 400 `invalid_body`, `invalid_token`, `token_expired`, `passkey_failed` (an unknown credential or a bad signature); 429 `rate_limited` |
-| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }`; 401 |
+| GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle, userName, userDisplayName }`; 401 |
 | POST | `/passkeys/delete` | session (fresh), `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
 | POST | `/passkeys/rename` | session, `{ id, name }` | `{ passkey }` in the shape of `GET /passkeys` (plan 12a). No fresh rule: a name is no way in. 400 `invalid_body` (a `name` that breaks the passkey name rule, or any other field); 401; 404 `not_found` (an unknown id, or an id of another user); 429 `rate_limited` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
-| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
+| POST | `/password/verify/code` | `{ email, code }` | `{ token, user, session }` with the cookie when the address was unverified, or `{ verified: true }`; 400 `invalid_code`, `too_many_attempts`; 429 `rate_limited`. The code of `password.verifyBy: "code"` (see "The sign-up code") |
+| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link or code of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
 | POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy`, `password_breached`, or `breach_check_unavailable`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`, 503 `breach_check_unavailable`. A reset that answers the challenge still sets the password and ends every session |
@@ -80,7 +86,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
 | POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` and `jwtMint` |
-| GET | `/operator/secrets/status` | `Authorization: Operator <secret>` | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets`, as `api.secrets.status()`; 401 `unauthorized`; 429 `rate_limited` after 120 calls per IP per hour (`operator-secrets:ip:<ip>`), one count with rewrap and info, right or wrong. Only with `operator` |
+| GET | `/operator/secrets/status` | `Authorization: Operator <secret>` | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, `ssoClientSecrets`, and `stateData`, as `api.secrets.status()`; 401 `unauthorized`; 429 `rate_limited` after 120 calls per IP per hour (`operator-secrets:ip:<ip>`), one count with rewrap and info, right or wrong. Only with `operator` |
 | POST | `/operator/secrets/rewrap` | `Authorization: Operator <secret>`, `{ limit?, after?, callBudget? }` (`limit` 1 to 1000, default 100; `after` the `next` of the last answer; `callBudget` the storage calls of the call, 50 to 1000, default 50); an empty body is `{}` | `{ resealed, failed, skipped, more, next }`, as `api.secrets.rewrap({ limit, after })`; 400 `invalid_body` for another key, a limit outside the range, or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
 | GET | `/operator/info` | `Authorization: Operator <secret>` | `{ core, schemaVersion, configKeys }`: the version of core, its schema version, and the sorted key paths of the config, names only, never a value; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
 | GET | `/operator/users` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `?after=&limit=` | `{ users, next }`: the users by id, 1 to 100 per page; 401 `unauthorized`; 403 `operator_required`; 429 `rate_limited`. Only with `operator.users` |
@@ -252,6 +258,22 @@ multipart, `text/plain`, or no content type) needs `Sec-Fetch-Site` to be
 passes. A refusal answers 403 `origin_not_trusted`. Apple's callback skips
 both rules: Apple posts it from its own site.
 
+## A list of hosts
+
+`baseURL` takes a list of 1 to 20 exact origins (plan 12i Task 18). Each is
+`https:`, or `http:` on `localhost` or `127.0.0.1`, in the normal form of
+the URL parser. The router picks the entry equal to the origin of
+`request.url`, and answers 421 `host_not_allowed` to any other host before
+any handler. Core never reads `x-forwarded-host` or `forwarded`.
+
+The issuer, the metadata documents, the mail links, the social callback,
+the failure redirect, the default `appURL`, the `Origin` check, and the
+default `jwtMint.audience` follow the picked entry. A session JWT of any
+entry verifies on each entry. An OAuth code or a held authorize request
+answers `invalid_grant`, or is not found, on another entry. Outside a
+request, core uses the first entry. A `baseURL` string serves any host,
+as before.
+
 ## Handoff for native and desktop apps
 
 Set `handoff: { schemes: ["consumera://"] }`. The app makes a PKCE
@@ -338,8 +360,9 @@ LinkedIn using OpenID Connect" to the LinkedIn app.
 Any other provider is a list entry. `social.oidc` takes OpenID Connect
 providers, and `social.oauth2` takes providers that issue no ID token. A
 `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is
-not `google`, `apple`, `github`, `linkedin`, `email`, or `credential`. The
-`label` is the button text on the sign-in page. An `oidc` entry reads
+not a preset name, `email`, or `credential`. The preset names are `google`,
+`apple`, `github`, `linkedin`, `microsoft`, `discord`, `gitlab`, `slack`,
+`twitter`, and `facebook`. The `label` is the button text on the sign-in page. An `oidc` entry reads
 `<issuer>/.well-known/openid-configuration` on its first start and keeps the
 endpoints for the life of the `createAuth` instance. The document's `issuer`
 must equal `issuer` exactly. Set `endpoints` and core never reads the
@@ -351,7 +374,7 @@ social: {
   github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET },
   oidc: [
     {
-      name: "microsoft",
+      name: "entra",
       label: "Continue with Microsoft",
       issuer: `https://login.microsoftonline.com/${env.ENTRA_TENANT_ID}/v2.0`,
       clientId: env.ENTRA_CLIENT_ID,
@@ -360,7 +383,7 @@ social: {
   ],
   oauth2: [
     {
-      name: "discord",
+      name: "discord-app",
       label: "Continue with Discord",
       authorizeUrl: "https://discord.com/oauth2/authorize",
       tokenUrl: "https://discord.com/api/oauth2/token",
@@ -391,10 +414,22 @@ social: {
 },
 ```
 
-The Microsoft and Discord entries are examples. Core does not test them.
+The Entra and Discord entries are examples. Core does not test them. The
+names `microsoft` and `discord` belong to the presets `social.microsoft` and
+`social.discord`.
 Check each endpoint and claim in the provider's documentation on the day you
 configure it. Microsoft Entra ID sends no `email_verified` claim by default,
 so an Entra sign-in never links to an existing account by its address.
+
+An `oauth2` entry with a token exchange of its own sets `tokenRequest`.
+Core runs it after the state and binding checks, with a fetch that calls
+only `tokenUrl`, and checks its `{ accessToken, extra }` answer. `userinfo`
+gets `extra` as its third argument. `authorizeClientIdParam`,
+`authorizeSuffix`, and `pkce: false` shape the authorize URL. An entry
+with `addressless: true` gets no address from its profile: core finds or
+makes the user by the identity alone. `@authtempo/core/social-entries`
+gives two such entries, `tiktokEntry({ clientKey, clientSecret })` and
+`wechatEntry({ appId, appSecret })`.
 
 `userinfo` gets the access token and a fetch. Call the provider with that
 fetch: core puts a 10 s limit on it, and the whole step stops at 10 s.
@@ -405,6 +440,30 @@ its message.
 
 `social.fetch` and `jwt` exist for tests: inject a fetch for the token
 endpoint and a fake verifier, so no test reaches a provider.
+
+With `social.stateData: {}` (off by default), the start and the link start
+take `data`: the base64url of a UTF-8 JSON object of at most 1024 bytes and
+a depth of 4. The state row holds it sealed, and the callback gives it to
+`hooks.session.afterCreate` and `hooks.identity.afterLink` as `stateData`.
+The browser sent it, so never trust it.
+
+The ID-token route (plan 12i) serves Google One Tap and the native Apple
+sheet. It is on while `google` or `apple` is set; `social.idToken: false`
+turns it off. The app asks `POST /social/<provider>/id-token/nonce` for a
+nonce. It gives `providerNonce`, the SHA-256 hex of the nonce, to the
+provider, and keeps the raw `nonce`. Then it posts the ID token with the raw
+nonce to `POST /social/<provider>/id-token`. The token's `nonce` claim must
+be the hash of the posted nonce. While `requireNonce` is on, a party that
+holds only the token sees the hash, so it cannot post the nonce. With
+`social.idToken.requireNonce: false`, a token posted with no nonce skips
+the hash check, except an Apple token with `nonce_supported` true. So a
+party that holds only such a token can sign in before the app. Only the
+one-use row of the token then stops a second use. Core verifies the token
+against the provider's key set, and then spends the nonce once. The `aud`
+must be `clientId` or an entry of `audiences`, the list of the app's
+native client ids. A row for each token bars a second use on every
+instance. The account rules, the gate, and the anonymous upgrade are those
+of the callback.
 
 ## Passkeys
 
@@ -437,6 +496,15 @@ session. It sends no notice, because a name is not a credential. The id of
 another user's passkey answers `not_found`, as an unknown id does, by the
 same calls. Its limit is `passkey-rename:user:<userId>` (see "Account").
 
+The passkey extensions (plan 12i): `passkey.extensions` asks for
+`credProps`, `prf`, and `largeBlob` at the registration, and stores the
+flags `discoverable`, `prf`, and `largeBlob` on the passkey row. Each is
+off by default. The client outputs are not signed, so the flags are advice
+for the app's own client, and no check of core reads them. The sign-in
+options take PRF salts and a `largeBlob` read. Each verify keeps only the
+boolean outputs of `clientExtensionResults`, so a PRF output and a large
+blob never reach a read, a store, or a log of core.
+
 `webauthn` in the config replaces the seam. The default is
 @simplewebauthn/server 14.0.3, which runs on Workers without
 `nodejs_compat` (proved by the example Worker's spike test).
@@ -456,6 +524,9 @@ optional.
 | `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
 | `uniformSignUp` | `true` | Every sign-up answers `{ sent: true }` with no session. A known address gets a mail. False keeps a session at sign-up and `email_taken`. |
 | `existingAccountMail` | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address. |
+| `verifyBy` | `"link"` | The proof of the address at sign-up: a link, or `"code"` for a code (see "The sign-up code"). |
+| `verifyCodeMail` | `defaultVerifyCodeMail` | The mail of the sign-up code. Core sends it to the address. |
+| `verifyCode` | `{ length: 6, ttlMinutes: 10, maxAttempts: 5 }` | The sign-up code: `length` 6 to 10, `ttlMinutes` 1 to 30, `maxAttempts` 1 to 10. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -517,12 +588,53 @@ the verify link, and the link opens the session. A known address gets no
 row and one mail that points to the sign-in, and a claim race or a refusal
 by `signUp: "invited"` gets no row and no mail. Under `"invited"` the
 invitation check runs first, so a known address with no pending invitation
-gets no mail. The hash runs before the
-transaction on every path, but the transaction of a new address writes
-more than the read of a known one, so core does not claim 6.3.8 in full.
-Under `"invited"` only a new address with an invitation gets the rows and
-the verify mail, so the time of the answer can show that an invitation
+gets no mail. With the `waitUntil` of the request, the answer goes after
+the hash. The rows, `user.afterCreate`, and the mail then run after it,
+for the link and the code alike (final fix wave item 19). So a known and a
+new address do the same work before the answer. In process, with no
+`waitUntil`, the transaction of a new address writes more than the read of
+a known one. So core does not claim 6.3.8 in full there. Under `"invited"`
+only a new address with an invitation gets the rows and the verify mail.
+In process, the time of the answer can then show that an invitation
 exists. That tells less than whether an account exists.
+
+### The sign-up code
+
+`verifyBy: "code"` (plan 12i Task 20) mails a code in place of the verify
+link. It is for a device whose mailbox is elsewhere, or a mail client that
+strips links. By default, the code has 6 digits from
+`crypto.getRandomValues` and lives 10 minutes. `verifyCode` sets `length`
+(6 to 10), `ttlMinutes` (1 to 30), and `maxAttempts` (1 to 10, default
+5). A value outside its range stops `createAuth` (ruling 39). The row is
+`password-verify-otp`, keyed by the address. Its
+`valueHash` is HMAC-SHA256 under the current secret version, as the email
+code's is (spec 8.10 item 3). A new code spends the earlier live code of
+the address.
+
+`POST /password/verify/code { email, code }` checks the code. No row, an
+expired row, a spent row, and a wrong code run the same HMAC and compare,
+and each answers `invalid_code`. A wrong code counts one try by
+compare-and-set. The wrong try number `maxAttempts` spends the code and
+answers `too_many_attempts`. A right code is spent in one conditional update. Then
+the confirm of the link runs: the claim rule, and the session of an
+unverified user, with `via: "password"`. A user already verified gets
+`{ verified: true }` and no session, as at the link. So the code never
+opens a session past the second factor: an unverified user cannot turn
+the factor on. The confirm links an anonymous user only when the
+confirming request carries the anonymous session that asked for the code.
+
+With the `waitUntil` of the request, the uniform sign-up answers after the
+limits, the body checks, and the hash (ruling 39). The user rows,
+`user.afterCreate`, and the mail then run after the answer as one job. So
+a known and a new address do the same work before the answer. Each refusal
+of the job is quiet, and a throw becomes the line `error.internal`.
+`POST /password/verify/resend` reads the user and sends the code after the
+answer too (ruling 23). In process, `api.password.signUp` and
+`resendVerification` do the work in the call.
+
+The sign-up and each resend count `password-verify-code:email-day`, 10 code
+mails per address a day, before any read. So one address gets at most 10
+times `maxAttempts` guesses a day: 50 with the defaults.
 
 `breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
 core holds no list of breached passwords. An answer of `true` refuses the
@@ -555,11 +667,15 @@ The limits, in the same limiter as the other routes:
 | `password-sign-up:email:<email>` | 5 per hour |
 | `password:ip:<ip>` | 20 per 15 minutes |
 | `password:email:<email>` | 10 per 15 minutes |
+| `password:user:<userId>` | 10 per 15 minutes, the password check of a user with no address |
 | `password-reset:ip:<ip>` | 20 per 15 minutes |
 | `password-reset:email:<email>` | 5 per 15 minutes |
 | `password-reset-post:ip:<ip>` | 20 per 15 minutes |
 | `password-resend:ip:<ip>` | 20 per 15 minutes |
 | `password-resend:email:<email>` | 3 per 15 minutes |
+| `password-verify-code:ip:<ip>` | 30 per 15 minutes |
+| `password-verify-code:email:<email>` | 10 per 15 minutes |
+| `password-verify-code:email-day:<email>` | 10 per 24 hours |
 | `password-change:user:<userId>` | 10 per 15 minutes |
 
 `<ip>` is an IPv4 address, the IPv4 form of a mapped IPv6 address, or the
@@ -1074,6 +1190,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guessed password costs the owner's sign-in nothing. A wrong email code also counts on `otp-verify:ip` and `otp-verify:email`, the keys of the email code sign-in |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
+| `passkey-sign-up:ip:<ip>` | 1 hour | 10 | `POST /passkey/sign-up/options` (plan 12i Task 8), after the name rule and the sign-up rule. A refused body counts no try |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 | `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
 | `passkey-rename:user:<userId>` | 15 minutes | 30 | `POST /passkeys/rename`, also for an unknown id or another user's id. A refused name counts no try |
@@ -1256,7 +1373,9 @@ const auth = createAuth({
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
 | SCIM group write | `organization.beforeUpdateMemberRole` | the scimGroup row, first; the users of the added and removed members, and of each member whose role the write computes; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
+| Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
+| Anonymous delete | `user.beforeDelete` | the user's row |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 
@@ -1315,7 +1434,8 @@ const auth = createAuth({
   `password_reset`, `password_change`, `claim`, `expired`, `two_factor`,
   `revoked`, `email_change`, or `account_deleted` since plan 12a. Since
   plan 12e it can be `oidc_logout`, and since plan 12f `banned`,
-  `operator`, or `impersonation_end`. It fires once per ended row.
+  `operator`, or `impersonation_end`. Since plan 12i it can be
+  `anonymous_upgrade`. It fires once per ended row.
   `sweepExpired` deletes expired rows in bulk and fires no hook for them, so
   `expired` fires only when a request presents the token after its expiry.
   A claim ends a claimant's sessions with `claim` in every flow that
@@ -1353,6 +1473,23 @@ const auth = createAuth({
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A
   verify is not a change of a credential, so it sends no notice mail.
+- Anonymous points (plan 12i Task 7): `hooks.anonymous.beforeLink` and
+  `afterLink`. They need `anonymous`. A sign-in from a browser with a live
+  anonymous session replaces the anonymous user. An SSO sign-in, a
+  password reset that opens a session, and a handoff link nothing, and
+  nothing links with `anonymous` off. The event holds
+  `anonymousUser`, `user`, `proof`, and `via`. `beforeLink` runs in the
+  sign-in's transaction, before the session write, and a refusal answers
+  `hook_refused` with no session. `afterLink` runs after the commit. Then
+  the anonymous session ends with `anonymous_upgrade`, and the anonymous
+  user goes, with `user.afterDelete`. A throw of `afterLink` writes one
+  line that names the anonymous user, and keeps it. No later sign-in links
+  it, and the sweep deletes it, so act on the line. A failure of the end
+  or the delete after `afterLink` writes `anonymous.cleanup_failed` and
+  keeps the sign-in. On D1, the queries of `afterLink` count toward the
+  limit of the sign-in request. Move the app's data only when
+  `proof` is `verified`: an `unverified` user holds an address that its
+  owner can claim later.
 - SSO point (plan 12d): `hooks.sso.beforeSignIn`, with the connection,
   the IdP's profile, and the user that the sign-in answers, or null for a
   create. It needs `sso`. It runs in the sign-in's transaction before its
@@ -1513,6 +1650,7 @@ It answers one count for each kind of row:
 - `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
 - `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
 - `organizationRows`: organizations that an account delete took, whose other rows went now. The account delete takes an organization where the user is the only member: its row, its SSO connections and domains, its SCIM tokens, and its member rows. Its SCIM Users and Groups, teams, invitations, tokens, and roles wait for the sweep. So the delete fits the 50 queries of D1 Free. No flow reaches them in the meantime. The step runs before the pending sessions. A row of it with more than 50 SCIM Groups loses 50 of them in each sweep.
+- `anonymousUsers`: anonymous users past `anonymous.ttlDays` with no live session, at most `anonymous.sweepBatch` per sweep (default 100), oldest first by `createdAt`. An imported id has no time order, so the step does not sort by id. 0 while `anonymous` is off. The step runs last, in a share of the call budget that the steps before it leave free. Each deleted user gets `user.afterDelete`, and no `user.beforeDelete`. The call budget does not count the work of that hook, so an app whose hook sends queries or requests lowers `sweepBatch`.
 
 ```ts
 export default {
@@ -1549,7 +1687,7 @@ under that version.
 
 | Call | Answer |
 | --- | --- |
-| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets` (live codes only; the OIDC client secrets of the SSO connections). A version that a row names and the config lacks has `configured: false`. It reads every row of five tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
+| `auth.api.secrets.status()` | For each version: `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes` (live codes only), `ssoClientSecrets` (the OIDC client secrets of the SSO connections), and `stateData` (live sealed social payloads, which `rewrap` leaves). A version that a row names and the config lacks has `configured: false`. It reads every row of five tables: one query per 1000 rows of each table. With 100,000 TOTP users, a call makes more than 200 queries, so run it from a script, not from a request. |
 | `auth.api.secrets.rewrap({ limit, after })` | Reseals up to `limit` (1 to 1000, default 100) TOTP secrets, keys, and SSO client secrets under the current version. One call stays inside `callBudget` storage calls (50 to 1000, default 50 for D1 Free). A call that the budget stops answers `more: true` and `next`: call again with it. Answers `{ resealed, failed, skipped, more, next }`. `invalid_body` for a limit outside that range or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`. |
 
 One pass of the rewrap reads each row under a configured old version once,
@@ -1694,6 +1832,7 @@ writes each value under version 1.
 - Core at version 12 needs the `0012_schema_v12` migration in both adapters (plan 12f). Version 12 adds the three ban fields to `ta_user`, `actor_id` to `ta_session`, and the table `ta_operator_audit`. A row of an earlier version holds null: no ban and no impersonation. The compat package's migration is `0009_compat_schema_v12`.
 - Core at version 13 needs the `0013_schema_v13` migration in both adapters (plan 12k). Version 13 adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`. It adds the tables of stored roles, teams, team members, organization tokens, and moved keys. A row of an earlier version holds null in each new column. The compat package's migration is `0010_compat_schema_v13`.
 - Core at version 14 needs the `0014_schema_v14` migration in both adapters (plan 12d). Version 14 adds the tables of SSO connections, claimed domains, SCIM tokens, SCIM users, SCIM groups, and SCIM group members. It changes no earlier table. The compat package's migration is `0011_compat_schema_v14`.
+- Core at version 15 needs the `0015_schema_v15` migration in the D1 and Postgres adapters, and `0003_schema_v15` on MySQL (plan 12i). Version 15 makes `user.email` nullable: a user can have no address. It adds `username`, `displayUsername`, `phone`, and `isAnonymous` to `user`, and `discoverable`, `prf`, and `largeBlob` to `passkey`. A read of an address takes the guard `hasAddress`. A user with no address gets no mail and no notice, and a JWT, an ID token, and userinfo leave out `email` and `email_verified`. The compat package's migration is `0012_compat_schema_v15`.
 - Handoff start is limited to 30 per IP, and redeem to 20 per IP, per 15
   minutes, in the same per-isolate limiter.
 - The sign-in page needs a browser that keeps cookies between the start

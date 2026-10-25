@@ -1,0 +1,11 @@
+{
+  "ver": "2.0",
+  "iss": "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47/v2.0",
+  "tid": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+  "oid": "00000000-0000-0000-66f3-3332eca7ea81",
+  "sub": "AAAAAAAAAAAAAAAAAAAAAIkzqFVrSaSaFHy782bbtaQ",
+  "name": "Abe Lincoln",
+  "preferred_username": "AbeLi@microsoft.com",
+  "email": "abeli@microsoft.com",
+  "xms_edov": true
+}

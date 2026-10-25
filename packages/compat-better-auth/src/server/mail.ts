@@ -30,10 +30,14 @@ export const OTP_LINK_PREFIX = "tempo-compat-otp:";
  */
 export const DROP_LINK_PREFIX = "tempo-compat-drop:";
 
-/** The mail that core's `emailOtp.mail`, `emailOtp.resetMail`, and the change code answer here. */
+/**
+ * The mail that core's `emailOtp.mail`, `emailOtp.resetMail`, the change
+ * code, and the sign-up code (`password.verifyCodeMail`, plan 12i Task 20)
+ * answer here.
+ */
 export function otpMail(
   to: string,
-  type: "sign-in" | "forget-password" | "change-email",
+  type: "sign-in" | "forget-password" | "change-email" | "email-verification",
   code: string,
 ): MailMessage {
   return {
@@ -73,9 +77,12 @@ export function compatAccountMail(input: AccountMailInput): MailMessage {
 }
 
 export interface MailRoutes {
-  origin: string;
+  /** The origins of the links: each entry of a `baseURL` list, or the one origin. */
+  origins: readonly string[];
   basePath: string;
   storage: StorageAdapter;
+  /** The ids of the compat plugins in use: the user of each callback carries their fields. */
+  plugins: ReadonlySet<string>;
   sendResetPassword?: SendEmail | undefined;
   sendVerificationEmail?: SendEmail | undefined;
   sendMagicLink?: MagicLinkOptions["sendMagicLink"] | undefined;
@@ -100,10 +107,12 @@ export async function sha256Hex(text: string): Promise<string> {
  * an enabled feature, so that throw means a bug.
  */
 export function compatMail(routes: MailRoutes): MailPort {
-  const prefix = `${routes.origin}${routes.basePath}`;
+  const prefixes = routes.origins.map((o) => `${o}${routes.basePath}`);
+  /** True when `link` is the core path `path` on any origin of the list. */
+  const at = (link: string, path: string) => prefixes.some((p) => link.startsWith(`${p}${path}`));
   const userByEmail = async (email: string) => {
     const u = await routes.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    return u ? toUser(u) : null;
+    return u ? toUser(u, routes.plugins) : null;
   };
   // The verify mail follows a sign-up, so its user row exists; a missing row is a bug.
   const knownUser = async (email: string) => {
@@ -139,7 +148,7 @@ export function compatMail(routes: MailRoutes): MailPort {
           role: row.role,
           email: row.email,
           organization: toOrganization(org),
-          inviter: { user: toUser(inviter) },
+          inviter: { user: toUser(inviter, routes.plugins) },
           invitation,
         };
         await cb(data);
@@ -149,7 +158,13 @@ export function compatMail(routes: MailRoutes): MailPort {
         const cb = routes.sendVerificationOTP;
         if (!cb) throw new Error("authtempo compat: no sendVerificationOTP");
         const [type, otp] = link.slice(OTP_LINK_PREFIX.length).split(":");
-        if ((type !== "sign-in" && type !== "forget-password" && type !== "change-email") || !otp)
+        if (
+          (type !== "sign-in" &&
+            type !== "forget-password" &&
+            type !== "change-email" &&
+            type !== "email-verification") ||
+          !otp
+        )
           throw new Error("authtempo compat: the email code mail is malformed");
         // Better Auth sends a reset code only to an address with a user
         // (routes.mjs requestPasswordResetEmailOTP, read 2026-10-13). Send
@@ -161,7 +176,7 @@ export function compatMail(routes: MailRoutes): MailPort {
       }
       if (link.startsWith(DROP_LINK_PREFIX)) return;
       const token = new URL(link).searchParams.get("token") ?? "";
-      if (link.startsWith(`${prefix}/password/verify?`)) {
+      if (at(link, "/password/verify?")) {
         if (!routes.sendVerificationEmail)
           throw new Error("authtempo compat: no sendVerificationEmail");
         await routes.sendVerificationEmail({
@@ -171,7 +186,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         });
         return;
       }
-      if (link.startsWith(`${prefix}/password/reset?`)) {
+      if (at(link, "/password/reset?")) {
         if (!routes.sendResetPassword) throw new Error("authtempo compat: no sendResetPassword");
         // Core mails a reset link to every address and answers 200 for each,
         // so the answer tells no one which address has an account. With no
@@ -182,12 +197,12 @@ export function compatMail(routes: MailRoutes): MailPort {
         await routes.sendResetPassword({ user, url: link, token });
         return;
       }
-      if (link.startsWith(`${prefix}/magic-link/verify?`)) {
+      if (at(link, "/magic-link/verify?")) {
         if (!routes.sendMagicLink) throw new Error("authtempo compat: no sendMagicLink");
         await routes.sendMagicLink({ email: message.to, url: link, token });
         return;
       }
-      if (link.startsWith(`${prefix}/user/change-email/confirm?`)) {
+      if (at(link, "/user/change-email/confirm?")) {
         if (!routes.sendVerificationEmail)
           throw new Error("authtempo compat: no sendVerificationEmail");
         // Better Auth 1.7.2 sends the change link through sendVerificationEmail,
@@ -201,13 +216,13 @@ export function compatMail(routes: MailRoutes): MailPort {
           : null;
         if (!owner) throw new Error("authtempo compat: the user of this change is gone");
         await routes.sendVerificationEmail({
-          user: { ...toUser(owner), email: message.to },
+          user: { ...toUser(owner, routes.plugins), email: message.to },
           url: link,
           token,
         });
         return;
       }
-      if (link.startsWith(`${prefix}/user/delete/confirm?`)) {
+      if (at(link, "/user/delete/confirm?")) {
         const cb = routes.sendDeleteAccountVerification;
         if (!cb) throw new Error("authtempo compat: no sendDeleteAccountVerification");
         // Better Auth 1.7.2 passes the session's user (update-user.mjs:325 to :329).
@@ -220,7 +235,7 @@ export function compatMail(routes: MailRoutes): MailPort {
           ? await routes.storage.findOne("user", [{ field: "id", op: "eq", value: row.identifier }])
           : null;
         if (!owner) throw new Error("authtempo compat: the user of this delete is gone");
-        await cb({ user: toUser(owner), url: link, token });
+        await cb({ user: toUser(owner, routes.plugins), url: link, token });
         return;
       }
       throw new Error(

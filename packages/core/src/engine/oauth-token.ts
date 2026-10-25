@@ -21,7 +21,15 @@ import type {
   UserRow,
   VerificationRow,
 } from "../schema.js";
-import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
+import { hasAddress, provedAccount } from "./address.js";
+import {
+  entryOfIssuer,
+  issuerOf,
+  mintConfig,
+  primaryIssuer,
+  signToken,
+  verifyLocal,
+} from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
@@ -117,6 +125,8 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
   const dpopJkt = d.dpopJkt === undefined ? null : nullable(d.dpopJkt);
   // A code of a core before plan 12e Task 12 has no authTime: its ID token has no auth_time.
   const authTime = d.authTime ?? null;
+  // A code of a core before plan 12i Task 18 has no issuer: the primary minted it.
+  const issuer = d.issuer === undefined ? null : nullable(d.issuer);
   if (
     typeof clientId !== "string" ||
     typeof redirectUri !== "string" ||
@@ -127,6 +137,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     typeof sessionId !== "string" ||
     nonce === undefined ||
     dpopJkt === undefined ||
+    issuer === undefined ||
     (authTime !== null && !Number.isSafeInteger(authTime))
   )
     return null;
@@ -141,6 +152,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     sessionId,
     dpopJkt,
     authTime: authTime as number | null,
+    issuer,
   };
 }
 
@@ -167,7 +179,7 @@ export async function liveUser(
   issuedAt?: Date,
 ): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
+  if (!user || !provedAccount(user) || activeBan(user, config.clock.now())) return null;
   if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
 }
@@ -422,6 +434,9 @@ export async function exchangeCode(
   }
   const data = codeData(consumed.value);
   if (!data || data.clientId !== client.id || data.redirectUri !== input.redirectUri)
+    return oauthFail("invalid_grant");
+  // RFC 8414: a code of one entry of baseURL is no grant at another (plan 12i Task 18).
+  if ((data.issuer ?? primaryIssuer(config)) !== issuerOf(config))
     return oauthFail("invalid_grant");
   // A code with no challenge is a confidential client's (`pkceRequired`).
   // A metadata document can change its method between the authorize step
@@ -713,7 +728,11 @@ export async function resolveAccessToken(
   if (!d || d.header.typ !== ACCESS_TOKEN_TYPE) return null;
   const p = d.payload;
   const now = Math.floor(config.clock.now().getTime() / 1000);
-  if (p.iss !== issuerOf(config) || typeof p.aud !== "string" || !oauth.resources.includes(p.aud))
+  if (
+    entryOfIssuer(config, p.iss) === null ||
+    typeof p.aud !== "string" ||
+    !oauth.resources.includes(p.aud)
+  )
     return null;
   if (typeof p.exp !== "number" || p.exp <= now) return null;
   // The ban window reads the issue time (ruling 28). Core writes iat in each access token.
@@ -782,12 +801,17 @@ function cnfJkt(cnf: unknown): string | null | undefined {
 
 /**
  * The user claims of each scope (OIDC Core 1.0 section 5.4). The ID token,
- * userinfo, and `claims_supported` of the metadata read this one map.
+ * userinfo, and `claims_supported` of the metadata read this one map. A
+ * claim whose value is undefined is left out: a user with no address (plan
+ * 12i) gets neither `email` nor `email_verified`.
  */
 export const SCOPE_CLAIMS: Readonly<
   Record<string, Readonly<Record<string, (u: UserRow) => unknown>>>
 > = {
-  email: { email: (u) => u.email, email_verified: (u) => u.emailVerified },
+  email: {
+    email: (u) => (hasAddress(u) ? u.email : undefined),
+    email_verified: (u) => (hasAddress(u) ? u.emailVerified : undefined),
+  },
   profile: { name: (u) => u.name, picture: (u) => u.image },
 };
 
@@ -810,7 +834,10 @@ function scopeClaims(user: UserRow, scopes: readonly string[]): Record<string, u
   for (const scope of scopes) {
     // An own key only: a scope such as "constructor" names no claims.
     const named = Object.hasOwn(SCOPE_CLAIMS, scope) ? SCOPE_CLAIMS[scope] : undefined;
-    for (const [name, value] of Object.entries(named ?? {})) claims[name] = value(user);
+    for (const [name, value] of Object.entries(named ?? {})) {
+      const claim = value(user);
+      if (claim !== undefined) claims[name] = claim;
+    }
   }
   return claims;
 }

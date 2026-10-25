@@ -1,5 +1,12 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+  withSetCookie,
+} from "@authtempo/core/bindings";
 
 /**
  * The TanStack Start binding of authtempo (plan 11d2), for React and for
@@ -16,6 +23,16 @@ function resolve<A extends object>(source: AuthSource<A>): A {
 
 export type RouteHandler = (ctx: { request: Request }) => Promise<Response>;
 
+export interface RouteHandlerOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). A server handler of TanStack Start 1.169.1 gets no platform
+   * context, so the binding reads none. On Workers pass `waitUntil` of
+   * "cloudflare:workers".
+   */
+  waitUntil?: BindingWaitUntil<{ request: Request }> | undefined;
+}
+
 /**
  * The server handlers of the splat route `src/routes/auth.$.ts`:
  * `export const Route = createFileRoute("/auth/$")({ server: { handlers: authRouteHandlers(getAuth) } });`.
@@ -23,7 +40,10 @@ export type RouteHandler = (ctx: { request: Request }) => Promise<Response>;
  * missing method would fall through to a catch-all page with no gate.
  * TanStack answers HEAD with the GET handler.
  */
-export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
+export function authRouteHandlers(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: RouteHandlerOptions = {},
+): {
   GET: RouteHandler;
   POST: RouteHandler;
   PUT: RouteHandler;
@@ -31,7 +51,11 @@ export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
   DELETE: RouteHandler;
   OPTIONS: RouteHandler;
 } {
-  const handle: RouteHandler = ({ request }) => resolve(auth).handle(request);
+  const handle: RouteHandler = (ctx) =>
+    resolve(auth).handle(
+      ctx.request,
+      handleOptions(options.waitUntil, ctx, () => undefined),
+    );
   return { GET: handle, POST: handle, PUT: handle, PATCH: handle, DELETE: handle, OPTIONS: handle };
 }
 

@@ -49,6 +49,8 @@ const INTERNAL_ANSWERED: readonly RouteKey[] = [
 /** The routes on which a test causes not_found: a feature that is off, or an id that names no row. */
 const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /.well-known/openid-configuration",
+  // A request to a host other than the RP ID (plan 12i Task 9).
+  "GET /.well-known/webauthn",
   "GET /handoff/start",
   "GET /jwks",
   "GET /oauth/device",
@@ -79,6 +81,12 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /totp/challenge",
   "GET /user/delete/confirm",
   "POST /identities/unlink",
+  // Plan 12i Task 6: the anonymous routes with anonymous off.
+  "POST /anonymous/sign-in",
+  "POST /anonymous/delete",
+  // Plan 12i Task 10: the ID-token paths of a provider that has no such route.
+  "POST /social/:provider/id-token/nonce",
+  "POST /social/:provider/id-token",
   "POST /oauth/device",
   "POST /oauth/device_authorization",
   "POST /oauth/grants/revoke",
@@ -118,8 +126,13 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /otp/reset/request",
   "POST /otp/verify",
   "POST /passkey/authenticate/options",
+  // Plan 12i Task 8: the sign-up with passkey.signUp off, at the engine call.
+  "POST /passkey/sign-up/options",
+  "POST /passkey/sign-up/verify",
   "POST /passkeys/delete",
   "POST /passkeys/rename",
+  // Plan 12i Task 5: the remove of a user with no phone.
+  "POST /phone/remove",
   "POST /password/change",
   "POST /password/reset",
   "POST /password/reset/request",
@@ -167,6 +180,12 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /scim/v2/Groups/.search",
   "POST /scim/v2/Users",
   "POST /scim/v2/Users/.search",
+  // A check of a name on a deployment with the username off (plan 12i Task 2).
+  "GET /username/available",
+  // Plan 12i Task 11: the routes with multiSession off, and an id of no session of the browser.
+  "GET /multi-session",
+  "POST /multi-session/sign-out",
+  "POST /multi-session/switch",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -229,6 +248,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /passkey/authenticate/verify",
   "POST /passkey/register/options",
   "POST /passkey/register/verify",
+  // Plan 12i Task 8: the passkey-first sign-up.
+  "POST /passkey/sign-up/options",
+  "POST /passkey/sign-up/verify",
   "POST /passkeys/delete",
   "POST /passkeys/rename",
   "POST /password/change",
@@ -237,6 +259,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /password/sign-in",
   "POST /password/sign-up",
   "POST /password/verify",
+  "POST /password/verify/code",
   "POST /password/verify/resend",
   "POST /reauth",
   "POST /reauth/email",
@@ -278,6 +301,23 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/create",
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
+  // Plan 12i Task 2: the set of a username.
+  "POST /user/username",
+  // Plan 12i Task 5: the phone routes.
+  "POST /phone/request",
+  "POST /phone/verify",
+  "POST /phone/add",
+  "POST /phone/add/verify",
+  "POST /phone/remove",
+  // Plan 12i Task 6: the anonymous routes.
+  "POST /anonymous/sign-in",
+  "POST /anonymous/delete",
+  // Plan 12i Task 11: the cross-site switch, and the Fetch Metadata test of every POST.
+  "POST /multi-session/sign-out",
+  "POST /multi-session/switch",
+  // Plan 12i Task 10: the Fetch Metadata test of every POST.
+  "POST /social/:provider/id-token/nonce",
+  "POST /social/:provider/id-token",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",
@@ -312,6 +352,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "five lost rounds of the user hold at a sign-in; account-delete.test.ts proves the engine path",
     [
       ...CALLBACKS,
+      // Plan 12i Task 10: the ID-token route runs the social resolution of the callbacks.
+      "POST /social/:provider/id-token",
       "POST /handoff/redeem",
       "POST /magic-link/verify",
       "POST /otp/reset",
@@ -321,6 +363,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
       "POST /password/sign-in",
       "POST /password/sign-up",
       "POST /password/verify",
+      // Plan 12i Task 20: the sign-up code runs the confirm of the link.
+      "POST /password/verify/code",
       "POST /totp/challenge",
       "POST /totp/verify",
       "POST /organizations/create",
@@ -341,7 +385,7 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "conflict",
     "five lost rounds of the credential guard; identities.test.ts proves the engine path",
-    ["POST /identities/unlink", "POST /passkeys/delete"],
+    ["POST /identities/unlink", "POST /passkeys/delete", "POST /phone/remove"],
   ),
   ...rows(
     "conflict",
@@ -381,6 +425,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows("conflict", "five lost rounds of the user hold; profile.test.ts proves the engine path", [
     "POST /user/update",
   ]),
+  // Plan 12i Task 5: the set of a phone, the compare-and-set of the profile update.
+  ...rows(
+    "conflict",
+    "five lost rounds of the compare-and-set of the user row; default-lines.test.ts proves the engine path (phone.set_gave_up)",
+    ["POST /phone/add/verify"],
+  ),
   // Plan 12d: two adds of one domain at once, and an update that races another write of the row.
   ...rows(
     "conflict",
@@ -464,11 +514,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     ["POST /reauth"],
   ),
   ...rows(
-    "last_credential",
-    "the register ceremony refuses an unverified user, so no flow leaves a passkey as the one credential; identities.test.ts proves the guard on the engine",
-    ["POST /passkeys/delete"],
-  ),
-  ...rows(
     "invalid_client",
     "the consent re-checks the held request; a client that changed since the page answers it; oauth-authorize.test.ts proves checkAuthorize",
     ["POST /oauth/authorize"],
@@ -526,7 +571,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     "attestation",
     "authenticatorSelection",
     "excludeCredentials",
-    "extensions",
     "hints",
     "rp.id",
     "authenticatorSelection.residentKey",
@@ -534,6 +578,25 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     "authenticatorSelection.userVerification",
   ]),
   ...optionsRows("POST /passkey/authenticate/options", REQUEST_OPTION_KEYS),
+  // Plan 12i Task 8: the creation options of a passkey-first sign-up, as of a registration.
+  ...optionsRows("POST /passkey/sign-up/options", [
+    "timeout",
+    "attestation",
+    "authenticatorSelection",
+    "excludeCredentials",
+    "hints",
+    "rp.id",
+    "authenticatorSelection.residentKey",
+    "authenticatorSelection.requireResidentKey",
+    "authenticatorSelection.userVerification",
+  ]),
+  {
+    key: "POST /passkey/sign-up/options",
+    field: "excludeCredentials[].transports",
+    form: "absent",
+    reason:
+      "a new user has no passkey: passkeys.ts passkeySignUpOptions calls the seam with an empty excludeCredentials, so no item exists",
+  },
   {
     key: "POST /passkey/authenticate/options",
     field: "allowCredentials[].transports",
@@ -606,4 +669,59 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     reason:
       "the answer is the status after the write, where the key is set; GET /totp answers it null; totp.test.ts proves the enable",
   },
+  // Plan 12i Task 1: the address is nullable, and these routes answer the user of an address.
+  ...(
+    [
+      ["POST /magic-link/verify", "user.email"],
+      ["POST /otp/verify", "user.email"],
+      ["POST /otp/reset", "user.email"],
+      ["POST /password/reset", "user.email"],
+      ["POST /password/sign-up", "user.email"],
+      ["POST /password/verify/code", "user.email"],
+      ["POST /user/change-email/confirm", "user.email"],
+      ["POST /user/change-email/verify", "user.email"],
+    ] as const
+  ).map(
+    ([key, field]): AnswerShapeExempt => ({
+      key,
+      field,
+      form: "null",
+      reason:
+        "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
+    }),
+  ),
+  // Plan 12i Task 10: the ID-token route makes a user of a verified address
+  // or finds the user of its identity, and a link needs the user's own address.
+  {
+    key: "POST /social/:provider/id-token",
+    field: "user.email",
+    form: "null",
+    reason:
+      "a new user needs the token's address (email_required), and a link of google or apple needs the user's own verified address (email_mismatch), so no user of core with no address holds such an identity; address-less.test.ts proves the null rules",
+  },
+  // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
+  // has a verified address. The organization create, the member add, and the
+  // invitation accept each need one (`verified` in organizations.ts), and no
+  // route takes an address away. No task of plan 12i changes these gates.
+  ...(
+    [
+      ["POST /organizations/active", "user.email"],
+      ["POST /organizations/teams/active", "user.email"],
+      ["POST /organizations/create", "member.email"],
+      ["POST /organizations/invitations/accept", "member.email"],
+      ["POST /organizations/members/add", "member.email"],
+      ["POST /organizations/members/role", "member.email"],
+      ["POST /organizations/teams/members/add", "member.email"],
+      ["GET /organizations/members", "members[].email"],
+      ["GET /organizations/teams/members", "members[].email"],
+    ] as const
+  ).map(
+    ([key, field]): AnswerShapeExempt => ({
+      key,
+      field,
+      form: "null",
+      reason:
+        "every member has a verified address: the organization create, the member add, and the invitation accept need one, and no route takes an address away; address-less.test.ts proves the engine reads",
+    }),
+  ),
 ];

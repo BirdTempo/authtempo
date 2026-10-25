@@ -26,14 +26,14 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `basePath` | string | `"/auth"` | Starts with `/` and does not end with `/`. |
-| `baseURL` | string | required | The origin of the server that mounts `handle`: no path, no trailing slash. |
+| `baseURL` | string or string list | required | The origin of the server that mounts `handle`: no path, no trailing slash. A list holds 1 to 20 exact origins in the normal form of the URL parser, each `https:`, or `http:` on `localhost` or `127.0.0.1`, with no wildcard and no duplicate. The router picks the entry of the request's origin and answers 421 `host_not_allowed` to any other. The first entry is the primary. [Serve one deployment on several hosts](/docs/guides/base-url-list/). |
 | `secret` | string | `secrets` | Version 1 of the app secret. At least 32 characters. When it is the current version, it needs an estimate of 100 bits or more. It keys the stored codes and seals the factor secrets and the signing keys. |
 | `secrets` | list of `{ version, value }` | `[{ version: 1, value: secret }]` | The app secrets, the current version first. The current version seals and keys every new value. See [Secrets](/docs/operations/secrets/). |
 | `secrets[].version` | number | required | An integer from 1 to 999999. A row from before version 9 of the schema reads as version 1. |
 | `secrets[].value` | string | required | At least 32 characters. The first entry needs an estimate of 100 bits or more. An entry under 120 bits writes one warning line. |
-| `appName` | string | the host of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
+| `appName` | string | the host of the first entry of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
 | `trustedOrigins` | string list | required | Exact origins and app schemes. A `*` is refused. |
-| `appURL` | string | `baseURL` | An exact origin that is `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
+| `appURL` | string | the picked entry of `baseURL` | An exact origin that is the first entry of `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
 | `cookie` | object | `{ sameSite: "Lax" }` | See `cookie.sameSite`. |
 | `storage` | `StorageAdapter` | required | An adapter that passes the conformance suite. |
 | `mail` | `MailPort` | required | `{ send(message) }`. Core calls it once per mail. |
@@ -53,6 +53,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `signUp` | `"open"` \| `"invited"` \| `false` | `"open"` | Who may become a user. `"invited"` needs `organizations` and a pending invitation of the address. `false` lets nobody new in. |
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
+| `phone` | object or `false` | off | The phone code by SMS. An object needs `sms` and `regions`, and a limiter whose `scope` is `"shared"`. |
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
@@ -82,7 +83,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `magicLink.ttlMinutes` | number | 15 | The life of a link in minutes. |
-| `magicLink.linkBuilder` | function of the token and `next` | `<baseURL><basePath>/magic-link/verify?token=<token>` | The link in the mail. It must open the verify route with the token. |
+| `magicLink.linkBuilder` | function of the token and `next` | `<baseURL><basePath>/magic-link/verify?token=<token>`, on the picked entry | The link in the mail. It must open the verify route with the token. |
 | `magicLink.confirmPage` | function of `ConfirmPageInput` | `defaultConfirmPage` | Answers the markup of the confirm page. |
 
 ## Social
@@ -95,19 +96,55 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.apple` | `AppleConfig` | none | Apple sign-in. |
 | `social.github` | `GitHubConfig` | none | The GitHub preset, with the scope `read:user user:email`. |
 | `social.linkedin` | `LinkedInConfig` | none | The LinkedIn preset, on the user info endpoint, with the scope `openid profile email`. |
+| `social.microsoft` | `MicrosoftConfig` | none | The Microsoft Entra ID preset, with the scope `openid profile email`. The subject is `oid`. |
+| `social.discord` | `DiscordConfig` | none | The Discord preset, with the scope `identify email`. |
+| `social.gitlab` | `GitLabConfig` | none | The GitLab preset, with the scope `read_user`. A GitLab address is never verified. |
+| `social.slack` | `SlackConfig` | none | The Slack preset, on the user info endpoint, with the scope `openid profile email`. The subject is `<team_id>:<user_id>`, because Slack's user object page (read 2026-10-24) says a user id is unique only in its workspace. A user info answer with no team id answers `oauth_failed`. A token answer without `ok: true` answers `oauth_failed`. |
+| `social.twitter` | `TwitterConfig` | none | The X preset, with the scope `users.read tweet.read users.email`. Core sends the client secret to the token endpoint as HTTP Basic. Only `confirmed_email` gives an address, and it counts as verified. |
+| `social.facebook` | `FacebookConfig` | none | The Facebook preset on Graph API `v26.0`, with the scope `email public_profile`. A Facebook address is never verified. |
 | `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |
 | `social.oauth2` | `OAuth2Entry` list | empty | OAuth 2.0 providers that issue no ID token. |
 | `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
+| `social.stateData` | object or `false` | `false` | The app payload through the social flow. The start and the link start take `data`, and the hooks get `stateData`. [Carry app data through a social sign-in](/docs/guides/social-state-data/). |
+| `social.stateData.maxBytes` | number | `1024` | 1 to 1024. The most UTF-8 bytes of the JSON of `data`. |
+| `social.idToken` | object or `false` | on with `social.google` or `social.apple` | The ID-token route of Google One Tap and Apple's native sheet: `POST /social/<provider>/id-token/nonce` and `POST /social/<provider>/id-token`. `false` removes both routes. |
+| `social.idToken.requireNonce` | boolean | `true` | A sign-in needs a nonce of the nonce route. The token's `nonce` claim must be the SHA-256 hex of that nonce, for Google and Apple. With `false`, an Apple token with `nonce_supported` true still needs the nonce. Any other token posted with no nonce skips the hash check and signs in. So a party that holds only the token can sign in before the app. Only the one-use row of the token then stops a second use. |
 | `social.google.clientId` | string | required | The client id of the Google OAuth client. |
 | `social.google.clientSecret` | string | required | Core sends it in the token request body. |
+| `social.google.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.google.audiences` | string list | none | 1 to 10 other client ids, such as an Android or an iOS client id, that a token of the ID-token route may name in `aud`. The redirect flow takes `clientId` only. |
 | `social.apple.clientId` | string | required | The Services ID, such as `com.example.web`. |
 | `social.apple.teamId` | string | required | The team id of the Apple developer account. |
 | `social.apple.keyId` | string | required | The id of the Sign in with Apple key. |
 | `social.apple.privateKey` | string | required | The PKCS#8 PEM of the key. Core signs a client secret of five minutes for each exchange. |
+| `social.apple.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.apple.audiences` | string list | none | 1 to 10 bundle ids of the native apps that a token of the ID-token route may name in `aud`. The redirect flow takes `clientId` only. |
 | `social.github.clientId` | string | required | The client id of the GitHub OAuth app. |
 | `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
+| `social.github.redirectURI` | string | `<baseURL><basePath>/social/github/callback` | The callback URL that the provider has registered, for an app that cannot register the default. An `https:` URL in the normal form, on the origin of an entry of `baseURL`, with a path under `basePath`, and no query or fragment. Not the path of a route of core, nor of another provider. Core sends its path on the request's entry as `redirect_uri` and serves its path as the callback. Each preset and list entry takes this key. |
 | `social.linkedin.clientId` | string | required | The client id of the LinkedIn app. |
 | `social.linkedin.clientSecret` | string | required | The client secret of the LinkedIn app. |
+| `social.linkedin.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.microsoft.clientId` | string | required | The application (client) id of the Entra ID app registration. |
+| `social.microsoft.clientSecret` | string | required | The client secret of the app registration. |
+| `social.microsoft.tenant` | string | required | `common`, `organizations`, `consumers`, or a tenant GUID. A token must name its own tenant in `iss`. `organizations` refuses a personal account, and `consumers` takes only a personal account. An address is verified only with the optional claim `xms_edov: true`. |
+| `social.microsoft.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.discord.clientId` | string | required | The client id of the Discord app. |
+| `social.discord.clientSecret` | string | required | The client secret of the Discord app. |
+| `social.discord.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.gitlab.clientId` | string | required | The application id of the GitLab app. |
+| `social.gitlab.clientSecret` | string | required | The secret of the GitLab app. |
+| `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, no empty label, and not the host of `baseURL`. |
+| `social.gitlab.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.slack.clientId` | string | required | The client id of the Slack app. |
+| `social.slack.clientSecret` | string | required | The client secret of the Slack app. |
+| `social.slack.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.twitter.clientId` | string | required | The OAuth 2.0 client id of the X app. |
+| `social.twitter.clientSecret` | string | required | The OAuth 2.0 client secret of the X app, a confidential client. |
+| `social.twitter.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.facebook.clientId` | string | required | The app id of the Meta app. |
+| `social.facebook.clientSecret` | string | required | The app secret of the Meta app. |
+| `social.facebook.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. |
 | `social.oidc[].label` | string | required | The button text: 1 to 80 characters with no control character. |
 | `social.oidc[].issuer` | string | required | An `https:` URL with no query, fragment, or credentials. A path is allowed. |
@@ -118,6 +155,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oidc[].endpoints.authorizeUrl` | string | required in `endpoints` | An `https:` URL. |
 | `social.oidc[].endpoints.tokenUrl` | string | required in `endpoints` | An `https:` URL. |
 | `social.oidc[].endpoints.jwksUrl` | string | required in `endpoints` | An `https:` URL. |
+| `social.oidc[].redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.oauth2[].name` | string | required | The rule of `social.oidc[].name`. |
 | `social.oauth2[].label` | string | required | The rule of `social.oidc[].label`. |
 | `social.oauth2[].authorizeUrl` | string | required | An `https:` URL. |
@@ -126,15 +164,32 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oauth2[].clientSecret` | string | required | The client secret at the provider. |
 | `social.oauth2[].scope` | string | required | Not empty. No control character. |
 | `social.oauth2[].authorizeParams` | string map | none | Extra authorize parameters. A key that core sets is refused: `client_id`, `redirect_uri`, `response_type`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`. |
-| `social.oauth2[].userinfo` | function of the access token and a fetch | required | Answers a `SocialProfile`. It stops at 10 seconds. |
+| `social.oauth2[].authorizeClientIdParam` | string | `client_id` | The authorize parameter that carries `clientId`, such as `client_key`. A key that core sets or that `authorizeParams` holds is refused. |
+| `social.oauth2[].authorizeSuffix` | string | none | A fixed fragment after the authorize query, such as `#wechat_redirect`: `#` and 1 to 64 URL-safe characters. |
+| `social.oauth2[].pkce` | boolean | `true` | `false` sends no `code_challenge` and no `code_verifier`. Only for a provider whose docs name no PKCE. The state and the binding cookie still bind the callback. |
+| `social.oauth2[].addressless` | `true` | none | The provider proves no address. Core drops any address of the profile and finds or makes the user by the identity alone. Under `signUp: "invited"` it makes no user. |
+| `social.oauth2[].tokenRequest` | function of the code, the redirect URI, the client id and secret, the verifier, and a fetch | none | Runs in place of the standard token exchange, after the state and binding checks. Answers `{ accessToken, extra }`. Its fetch calls only the origin and path of `tokenUrl`, and stops at 10 seconds. A throw or a bad answer is `oauth_failed`. |
+| `social.oauth2[].userinfo` | function of the access token, a fetch, and the `extra` of `tokenRequest` | required | Answers a `SocialProfile`. It stops at 10 seconds. The third argument is `{}` with no `tokenRequest`. |
+| `social.oauth2[].redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 
 ## Passkeys
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. |
+| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. Write it in lowercase ASCII, with an internationalized domain in punycode, such as `xn--bcher-kva.example`. `createAuth` refuses another form. A value with a user part, a port, a path, a query, or a fragment is no host alone. For a host in another form, the message names the punycode form. |
 | `passkey.rpName` | string | required | The name that the device shows. Not empty. |
-| `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be `baseURL` or in `trustedOrigins`. |
+| `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be an entry of `baseURL` or in `trustedOrigins`. |
+| `passkey.relatedOrigins` | boolean | `false` | With `true`, `auth.wellKnown` serves `/.well-known/webauthn` on the `rpID` host, and `origins` may hold at most five origins outside `rpID` (WebAuthn Level 3). |
+| `passkey.hints` | object | none | The hints of each ceremony. |
+| `passkey.hints.register` | hint list | none | `security-key`, `client-device`, or `hybrid`, each once, in order of preference, for the registration. |
+| `passkey.hints.signIn` | hint list | none | The same, for the sign-in. |
+| `passkey.extensions` | object | none | The WebAuthn extensions that the registration asks for. Each is off by default. See [Use the passkey extensions](/docs/guides/passkey-extensions/). |
+| `passkey.extensions.prf` | boolean | `false` | Asks for PRF at the registration and stores the `prf` flag. The sign-in options take PRF salts. |
+| `passkey.extensions.largeBlob` | `"preferred"`, `"required"`, or `false` | `false` | The `largeBlob.support` value of the registration. Stores the `largeBlob` flag. The sign-in options take a `largeBlob` read. |
+| `passkey.extensions.credProps` | boolean | `false` | Asks for `credProps` at the registration and stores `rk` as the `discoverable` flag. |
+| `passkey.signUp` | boolean or object | `false` | With `true` or an object, `POST /passkey/sign-up/options` and `/verify` make a user with a passkey and no address. Only `signUp: "open"` lets such a user in. `true` is the object `{}`. |
+| `passkey.signUp.dailyCap` | number | 1000 | An integer from 1 to 100000. The sign-up options that the deployment answers per 24 hours. An options request over the cap answers 429 `rate_limited`, and `limit.hit` names the family `passkey-sign-up:all-day`. The cap is per deployment, so the sign-up needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. A script with a software authenticator makes a user at each verify. Turn on the captcha flow `passkey-sign-up` on a public site, so that a script cannot spend the cap. |
+| `passkey.signUp.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
 
 ## Handoff
 
@@ -191,6 +246,12 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `password.requireVerified` | boolean | `false` | True refuses the right password of an unverified address with `email_unverified` and mails a new link. A sign-up then opens no session. The default keeps the sign-in of an unverified user that core allows since plan 8. |
 | `password.uniformSignUp` | boolean | `true` | Every sign-up answers `{ sent: true }` with no session, and a known address gets a mail (ASVS 5.0.0 6.3.8). False keeps a session at sign-up and `email_taken`. `requireVerified` changes only the answer of `false`. |
 | `password.existingAccountMail` | function of `{ email, appName, appURL }` to a mail | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address, whatever `to` it answers. |
+| `password.verifyBy` | `"link"` or `"code"` | `"link"` | The proof of the address at sign-up. `"code"` mails a code for `POST /password/verify/code`, with the shape of `password.verifyCode`. See [Prove the address by a code](/docs/guides/verify-by-code/). |
+| `password.verifyCodeMail` | function of `{ email, code, appName, ttlMinutes }` to a mail | `defaultVerifyCodeMail` | The mail of the sign-up code. Core sends it to the address, whatever `to` it answers. |
+| `password.verifyCode` | `VerifyCodeConfig` | 6 digits, 10 minutes, 5 tries | The sign-up code of `verifyBy: "code"`. A value outside its range stops `createAuth`. |
+| `password.verifyCode.length` | number | 6 | The digits of the sign-up code, an integer from 6 to 10. |
+| `password.verifyCode.ttlMinutes` | number | 10 | The life of the sign-up code, an integer from 1 to 30. |
+| `password.verifyCode.maxAttempts` | number | 5 | The wrong tries that spend a sign-up code, an integer from 1 to 10. |
 
 ## Email codes
 
@@ -204,6 +265,22 @@ Another key of `emailOtp` is refused.
 | `emailOtp.mail` | function of `EmailOtpMailInput` | `defaultEmailOtpMail` | Answers the sign-in code mail. Core sends it to the code's address. |
 | `emailOtp.resetMail` | function of `EmailOtpMailInput` | `defaultResetOtpMail` | Answers the reset code mail, with the same rule. |
 
+## Phone codes
+
+Another key of `phone` is refused. Core makes each code, keys its hash, counts each guess, and counts every send against `dailyCap`. The SMS port only sends text. `POST /phone/request` sends its code after the answer, so on Workers pass `{ waitUntil: (p) => ctx.waitUntil(p) }` to `handle`.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `phone.sms` | `SmsPort` | required | An object with `send({ to, text })` that answers `"sent"` or `"unavailable"`. A throw counts as `"unavailable"`. |
+| `phone.regions` | `string[]` | required, no default | 1 to 50 calling-code prefixes, such as `"+1"` or `"+44"`: a plus sign and 1 to 4 digits. A number outside every prefix gets no SMS. |
+| `phone.signUp` | boolean | `false` | True lets a code to an unknown number make a user. |
+| `phone.ttlMinutes` | number | 5 | An integer from 1 to 10. |
+| `phone.length` | 6 or 8 | 6 | The digits of a code. |
+| `phone.maxAttempts` | number | 3 | An integer from 3 to 10. |
+| `phone.dailyCap` | number | 1000 | The codes of the deployment per 24 hours, an integer from 1 to 100000. A send over the cap makes no call to the port. The window is fixed: see [the limits](/docs/reference/limits/). |
+| `phone.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
+| `phone.message` | function of `{ code, appName, ttlMinutes }` to a string | `defaultPhoneMessage` | The text of the SMS. A throw counts as `"unavailable"`, as a throw of the port does. |
+
 ## Second factor
 
 Another key of `totp` is refused.
@@ -216,11 +293,12 @@ Another key of `totp` is refused.
 | `totp.trustDays` | number | 30 | An integer from 1 to 365. |
 | `totp.trustCookieName` | string | `"tempo_totp_trust"` | 1 to 64 letters, digits, `.`, `_`, or `-`, and not `cookieName` or `tempo_session`. |
 | `totp.challengePage` | function of `TotpChallengePageInput` | `defaultTotpPage` | Answers the markup of the challenge form. |
-| `totp.gate` | object | all three on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
+| `totp.gate` | object | each key on | The second factor's gate on the sign-in methods other than the password. Another key is refused. The handoff has no key: it continues a browser session that passed the gate. |
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
 | `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
 | `totp.gate.sso` | boolean | `true` | `false` lets every SSO connection open a session with no second factor. A connection's `mfa` list passes the gate when the provider asserts one of its values. |
+| `totp.gate.phone` | boolean | `true` | `false` lets the phone code sign-in open a session with no challenge. A challenge after a phone code offers no email method. |
 | `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting
@@ -230,7 +308,7 @@ Another key of `jwtMint` is refused.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `jwtMint.alg` | `"EdDSA"`, `"ES256"`, or `"RS256"` | `"EdDSA"` | Every JWT of the deployment signs with this alg. A change retires the signing key at the next signature. |
-| `jwtMint.audience` | string or string list | `[baseURL]` | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
+| `jwtMint.audience` | string or string list | `[baseURL]`, the picked entry | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
 | `jwtMint.ttlMinutes` | number | 15 | An integer from 1 to 60. |
 | `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
 | `jwtMint.rotateEvery` | number of days | none: no timer | A whole number from 1 to 365. The first signature with a key this old makes a new key. A JWKS read never rotates. |
@@ -321,6 +399,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`, `sso`, or `scim`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit, also the rows of SSO and SCIM; send the row to a separate system there. |
 | `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
 | `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
+| `hooks.anonymous` | `AnonymousHooks` | none | Needs `anonymous`. A sign-in from a browser with a live anonymous session replaces the anonymous user. `beforeLink` runs in the sign-in's transaction and can refuse it. `afterLink` runs after the commit, before the anonymous user goes. Move data only when `proof` is `verified`. |
 
 ## Captcha
 
@@ -331,7 +410,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | --- | --- | --- | --- |
 | `captcha` | object | off | Turns the check on for the flows in `captcha.flows`. |
 | `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
-| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` is the fifth flow, and it is off by default. `password-reset-request` covers the reset link and the reset code. |
+| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in`, `phone-request`, `anonymous-sign-in`, and `passkey-sign-up` are off by default. `password-reset-request` covers the reset link and the reset code. `phone-request` covers the phone code request. `passkey-sign-up` covers the options of the passkey sign-up. |
 | `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
 
 ## Account
@@ -345,6 +424,40 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.delete` | boolean | `true` | Turns on `POST /user/delete` and the two routes of its mailed confirm. The right to delete the account is the person's, so it is on by default. `false` removes the routes. |
 | `account.deleteConfirm` | `AccountDeleteConfirmConfig` or `false` | `false` | A mailed link before the delete. The default is off: the fresh session already proves the person (ASVS 5.0.0 7.5.1), and Better Auth deletes at once unless an app sets `sendDeleteAccountVerification`. The link adds a proof of the mailbox, for an app whose sessions live on shared devices. `{}` turns it on. |
 | `account.deleteConfirm.ttlMinutes` | number | 60 | An integer from 5 to 1440. A delete is not undone, and a short window lowers the risk of a link in an old mailbox. Better Auth's default is 24 hours. |
+
+## Username
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `username` | `UsernameConfig` or `false` | `false` | Turns on the username: `GET /username/available`, `POST /user/username`, and `username` at the password sign-up while `password.uniformSignUp` is false. With the uniform answer, the name of a sign-up would tell a known address from a new one. `{}` turns it on with the defaults. |
+| `username.minLength` | number | 3 | An integer from 3 to 30. The fewest characters of the name after NFKC. |
+| `username.maxLength` | number | 30 | An integer from `minLength` to 30. |
+| `username.reserved` | string array | none | More names in the stored form that no account may take. Core always reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while organizations are on, `root`, `support`, `security`, and `admin`. |
+
+## Last method
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `lastMethod` | `LastMethodConfig` or `false` | `false` | Each browser sign-in sets a cookie that a script can read, with the method: `password`, `username`, `phone`, `magic_link`, `email_otp`, `passkey`, or `social:<provider>`. Each JSON sign-in answer carries the same value as `via`. A request with the Bearer scheme gets no cookie; HTTP Basic does not count. The cookie is a hint for the sign-in page only. Core never stores the method. `{}` turns it on. |
+| `lastMethod.cookieName` | string | `"__Host-tempo_last_method"` | 1 to 64 token characters. Not the name of another cookie of core. |
+| `lastMethod.days` | number | 30 | An integer from 1 to 400. |
+
+## Anonymous
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `anonymous` | `AnonymousConfig` or `false` | `false` | Turns on `POST /anonymous/sign-in` and `POST /anonymous/delete`. An anonymous user has no address and no way in. The routes of `ANONYMOUS_REFUSED` refuse its session. `{}` turns it on with the defaults. |
+| `anonymous.ttlDays` | number | 30 | An integer from 1 to 365. The sweep deletes an anonymous user made more than this many days ago with no live session, at most `sweepBatch` per sweep. |
+| `anonymous.sweepBatch` | number | 100 | An integer from 1 to 100. The most anonymous users that one sweep deletes. Each deleted user gets `user.afterDelete`, outside the call budget of the sweep. Lower it when that hook sends queries or requests. |
+| `anonymous.dailyCap` | number | 1000 | An integer from 1 to 100000. The anonymous users that the deployment makes per 24 hours. A sign-in over the cap answers 429 `rate_limited`, and `limit.hit` names the family `anonymous:all-day`. The cap is per deployment, so `anonymous` needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. Turn on the captcha flow `anonymous-sign-in` on a public site, so that a script cannot spend the cap. |
+| `anonymous.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
+
+## Multi-session
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A request with the Bearer scheme has no bag; HTTP Basic does not count. A bag session never slides its expiry, so an idle one ends at its ttl. When the active session ends elsewhere, the bag stays out of reach until a new sign-in. An anonymous sign-in needs no credential and makes it reachable again, so on a shared computer use `POST /sign-out`. A SCIM-revoked session holds its bag place until the next list or switch. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
+| `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the session of the bag that the browser used least recently, never the active one. |
 
 ## Observability
 

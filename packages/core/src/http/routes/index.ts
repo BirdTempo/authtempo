@@ -1,17 +1,20 @@
 import type { ResolvedConfig } from "../../config.js";
 import { healthRoutes } from "../health.js";
 import type { Route } from "../router.js";
+import { anonymousRoutes } from "./anonymous.js";
 import { emailOtpRoutes } from "./email-otp.js";
 import { handoffRoutes } from "./handoff.js";
 import { identityRoutes } from "./identities.js";
 import { jwtRoutes } from "./jwt.js";
 import { magicLinkRoutes } from "./magic-link.js";
+import { multiSessionRoutes } from "./multi-session.js";
 import { oauthRoutes } from "./oauth.js";
 import { openApiRoutes } from "./openapi.js";
 import { operatorRoutes } from "./operator.js";
 import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { passwordRoutes } from "./password.js";
+import { phoneRoutes } from "./phone.js";
 import { reauthRoutes } from "./reauth.js";
 import { roleRoutes } from "./roles.js";
 import { scimRoutes } from "./scim.js";
@@ -23,6 +26,7 @@ import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
 import { userRoutes } from "./user.js";
+import { usernameRoutes } from "./username.js";
 
 /**
  * The name of one route module file under `src/http/routes/` (plan 11g).
@@ -32,6 +36,8 @@ export type RouteModule =
   | "sessions"
   | "reauth"
   | "user"
+  | "username"
+  | "multi-session"
   | "identities"
   | "magic-link"
   | "social"
@@ -40,6 +46,8 @@ export type RouteModule =
   | "totp"
   | "second-factor"
   | "email-otp"
+  | "phone"
+  | "anonymous"
   | "handoff"
   | "organizations"
   | "roles"
@@ -64,6 +72,8 @@ export function coreRouteModules(
     { module: "sessions", routes: sessionRoutes(config) },
     { module: "reauth", routes: reauthRoutes(config) },
     { module: "user", routes: userRoutes(config) },
+    { module: "username", routes: usernameRoutes(config) },
+    { module: "multi-session", routes: multiSessionRoutes(config) },
     { module: "identities", routes: identityRoutes(config) },
     { module: "magic-link", routes: magicLinkRoutes(config) },
     { module: "social", routes: socialRoutes(config) },
@@ -72,6 +82,8 @@ export function coreRouteModules(
     { module: "totp", routes: totpRoutes(config) },
     { module: "second-factor", routes: secondFactorRoutes(config) },
     { module: "email-otp", routes: emailOtpRoutes(config) },
+    { module: "phone", routes: phoneRoutes(config) },
+    { module: "anonymous", routes: anonymousRoutes(config) },
     { module: "handoff", routes: handoffRoutes(config) },
     { module: "organizations", routes: organizationRoutes(config) },
     { module: "roles", routes: roleRoutes(config) },

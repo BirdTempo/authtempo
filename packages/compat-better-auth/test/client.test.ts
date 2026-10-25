@@ -341,6 +341,28 @@ describe("createAuthClient", () => {
     expect(start.headers.get("location")?.startsWith("https://accounts.google.com/")).toBe(true);
   });
 
+  it("refuses additionalData at the social start, because no shim hook can read it", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    const r = await c.signIn.social({
+      provider: "google",
+      disableRedirect: true,
+      additionalData: { plan: "pro" },
+    });
+    expect(r).toEqual({
+      data: null,
+      error: expect.objectContaining({
+        code: "NOT_SUPPORTED",
+        message:
+          "core takes no additionalData through the shim: use social.stateData of core's createAuth, and read stateData in its hooks.session.afterCreate and hooks.identity.afterLink",
+      }),
+    });
+  });
+
   it("runs consumer-i's organization calls: create, setActive, inviteMember, getFullOrganization, acceptInvitation", async () => {
     const s = server();
     const owner = createAuthClient({

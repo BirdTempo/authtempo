@@ -13,6 +13,10 @@ const user = (id: string, email: string) => ({
   bannedAt: null,
   banReason: null,
   banUntil: null,
+  username: null,
+  displayUsername: null,
+  phone: null,
+  isAnonymous: false,
   createdAt: t0,
   updatedAt: t0,
 });

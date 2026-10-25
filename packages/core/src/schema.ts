@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export interface BaseRow {
   id: string;
@@ -7,7 +7,12 @@ export interface BaseRow {
 }
 
 export interface UserRow extends BaseRow {
-  email: string;
+  /**
+   * The address, in the form of `normalizeEmail`. Null from schema version 15
+   * (plan 12i): an account can have no address. A read takes the guard
+   * `hasAddress` (`engine/address.ts`), never an assertion.
+   */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   image: string | null;
@@ -17,6 +22,18 @@ export interface UserRow extends BaseRow {
   banReason: string | null;
   /** The end of the ban. Null with `bannedAt` set: the ban has no end. */
   banUntil: Date | null;
+  /** The stored username (plan 12i): NFKC, then lower case. Unique; null for none. */
+  username: string | null;
+  /** The username in the case that the person typed (plan 12i). */
+  displayUsername: string | null;
+  /**
+   * The phone number in E.164 (plan 12i). Unique. A stored phone is not
+   * always a proved phone: a Better Auth store can hold one that no code
+   * proved. It counts as a way in only with `config.phone` (`phoneSignsIn`).
+   */
+  phone: string | null;
+  /** True for an anonymous account (plan 12i). A sign-in replaces it. */
+  isAnonymous: boolean;
 }
 
 export interface IdentityRow extends BaseRow {
@@ -183,7 +200,38 @@ export type VerificationPurpose =
    * hex of `session-cap:<sessionId>`. The expiresAt is the cap, and the data
    * is null. The session ends at the cap, so the sweep deletes the row with it.
    */
-  | "session-cap";
+  | "session-cap"
+  /**
+   * A phone sign-in code (plan 12i). The identifier is the number in E.164.
+   * The valueHash is HMAC-SHA256 under the current secret version of
+   * `<row id>:<code>`, in hex. The data is { attempts }.
+   */
+  | "phone-otp"
+  /**
+   * A code that adds a phone to an account (plan 12i). The identifier is the
+   * user id. The data is { phone, attempts }, and the hash is as for `phone-otp`.
+   */
+  | "phone-add-otp"
+  /**
+   * A nonce for an ID-token sign-in (plan 12i). The identifier is the
+   * provider name. The valueHash is the SHA-256 hex of the nonce.
+   */
+  | "id-token-nonce"
+  /**
+   * A spent ID token (plan 12i). The identifier is the provider name. The
+   * valueHash is the SHA-256 hex of `id-token-used:<provider>:<payload>`,
+   * with the payload part of the token in the canonical base64url. A hash
+   * of the token text would miss a copy with other spare bits (Task 10).
+   * The row lives until the token's `exp`, so a replay fails while the
+   * token is valid.
+   */
+  | "id-token-used"
+  /**
+   * The address proof at sign-up by an email code (plan 12i). The
+   * identifier is the normalized address. The data is { passwordId,
+   * attempts, anonymousUserId }, and the hash is as for `email-otp`.
+   */
+  | "password-verify-otp";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -211,6 +259,16 @@ export interface PasskeyRow extends BaseRow {
   deviceType: string;
   backedUp: boolean;
   name: string | null;
+  /**
+   * The `credProps.rk` output of the registration (plan 12i): true for a
+   * discoverable credential. Null when the browser did not answer it. The
+   * three flags are advice of the client and decide nothing.
+   */
+  discoverable: boolean | null;
+  /** True when the authenticator said that it supports the PRF extension (plan 12i). */
+  prf: boolean;
+  /** True when the authenticator said that it supports the `largeBlob` extension (plan 12i). */
+  largeBlob: boolean;
 }
 
 export interface OrganizationRow extends BaseRow {
@@ -496,6 +554,12 @@ export interface OAuthSessionClientRow extends BaseRow {
    * The logout token sends it back, so a new secret version never changes it.
    */
   sid: string;
+  /**
+   * The issuer of the ID tokens of this link: the entry of a `baseURL` list
+   * where the client got them (plan 12i Task 18). The logout token names it.
+   * Null for a link of a core before this field.
+   */
+  issuer: string | null;
 }
 
 /** One back-channel logout to deliver (plan 12e): the outbox. The sweep retries a failed delivery. */
@@ -507,6 +571,8 @@ export interface OAuthLogoutRow extends BaseRow {
   sid: string;
   attempts: number;
   nextAttemptAt: Date;
+  /** The `issuer` of the link that this row replaced (plan 12i Task 18). Null: the primary. */
+  issuer: string | null;
 }
 
 /** The acts that write an operator audit row (plan 12f, spec 26 item 8). */
@@ -800,16 +866,21 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
   user: {
     fields: {
       ...base,
-      email: { type: "string" },
+      email: { type: "string", nullable: true },
       emailVerified: { type: "boolean" },
       name: { type: "string", nullable: true },
       image: { type: "string", nullable: true },
       bannedAt: { type: "date", nullable: true },
       banReason: { type: "string", nullable: true },
       banUntil: { type: "date", nullable: true },
+      username: { type: "string", nullable: true },
+      displayUsername: { type: "string", nullable: true },
+      phone: { type: "string", nullable: true },
+      isAnonymous: { type: "boolean" },
     },
-    unique: [["email"]],
-    indexes: [],
+    unique: [["email"], ["username"], ["phone"]],
+    // The anonymous step of the sweep reads by flag and age, oldest first (ruling 25 H1).
+    indexes: [["isAnonymous", "createdAt"]],
   },
   identity: {
     fields: {
@@ -864,6 +935,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       deviceType: { type: "string" },
       backedUp: { type: "boolean" },
       name: { type: "string", nullable: true },
+      discoverable: { type: "boolean", nullable: true },
+      prf: { type: "boolean" },
+      largeBlob: { type: "boolean" },
     },
     unique: [["credentialId"]],
     indexes: [["userId"]],
@@ -1087,6 +1161,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       clientId: { type: "string" },
       userId: { type: "string" },
       sid: { type: "string" },
+      issuer: { type: "string", nullable: true },
     },
     unique: [["sessionId", "clientId"]],
     // userId: the end of a user's sessions reads the user's links.
@@ -1102,6 +1177,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       sid: { type: "string" },
       attempts: { type: "integer" },
       nextAttemptAt: { type: "date" },
+      issuer: { type: "string", nullable: true },
     },
     unique: [],
     // nextAttemptAt: the sweep reads the due rows. userId: a flow delivers the user's due rows.

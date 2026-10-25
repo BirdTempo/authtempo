@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 197 keys, the nested ones by their path", () => {
+  it("lists 278 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -25,7 +25,50 @@ describe("checkConfig", () => {
     // keys of sso.limits.
     // Plan 12d Task 9b adds scim, scim.groups, and scim.defaultRole.
     // Plan 12d Task 5 adds totp.gate.sso and hooks.sso. Task 10 adds hooks.scim.
-    expect(keys.length).toBe(212);
+    // Plan 12i Task 13 adds social.microsoft, social.discord, social.gitlab, and their eight keys.
+    // Plan 12i Task 9 adds passkey.relatedOrigins, passkey.hints, and its two keys.
+    // Plan 12i Task 19 adds social.stateData and social.stateData.maxBytes.
+    // Plan 12i Task 2 adds username and its three keys.
+    // Plan 12i Task 4 adds phone and its nine keys.
+    // Plan 12i Task 12 adds lastMethod, its two keys, and redirectURI on the seven
+    // presets and the two lists.
+    // Plan 12i Task 14 adds social.slack, social.twitter, social.facebook, and their nine keys.
+    // Plan 12i Task 21 adds passkey.extensions and its three keys.
+    // Plan 12i Task 22 adds five keys of social.oauth2[]: authorizeClientIdParam,
+    // authorizeSuffix, pkce, addressless, and tokenRequest.
+    // Plan 12i Task 5 adds totp.gate.phone.
+    // Plan 12i Task 6 adds anonymous and anonymous.ttlDays. Ruling 25 adds
+    // anonymous.sweepBatch and anonymous.dailyCap. Ruling 27 adds
+    // anonymous.isolateLimiter.
+    // Plan 12i Task 11 adds multiSession and multiSession.max.
+    // Plan 12i Task 7 adds hooks.anonymous.
+    // Plan 12i Task 10 adds social.idToken, social.idToken.requireNonce, and
+    // audiences on social.google and social.apple.
+    // Plan 12i Task 20 adds password.verifyBy and password.verifyCodeMail.
+    // Ruling 39 adds password.verifyCode and its three keys.
+    // Plan 12i Task 8 adds passkey.signUp. Ruling 38 adds
+    // passkey.signUp.dailyCap and passkey.signUp.isolateLimiter.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3);
+    expect(keys).toContain("social.idToken.requireNonce");
+    expect(keys).toContain("social.apple.audiences");
+    expect(keys).toContain("password.verifyCode.maxAttempts");
+    expect(keys).toContain("passkey.signUp.dailyCap");
+    expect(keys).toContain("passkey.signUp.isolateLimiter");
+    expect(keys).toContain("multiSession.max");
+    expect(keys).toContain("passkey.extensions.largeBlob");
+    expect(keys).toContain("social.oauth2[].tokenRequest");
+    expect(keys).toContain("social.twitter.redirectURI");
+    expect(keys).toContain("lastMethod.days");
+    expect(keys).toContain("social.oauth2[].redirectURI");
+    expect(keys).toContain("anonymous.isolateLimiter");
+    expect(keys).toContain("anonymous.sweepBatch");
+    expect(keys).toContain("anonymous.dailyCap");
+    expect(keys).toContain("username.reserved");
+    expect(keys).toContain("phone.dailyCap");
+    expect(keys).toContain("social.microsoft.tenant");
+    expect(keys).toContain("social.stateData.maxBytes");
+    expect(keys).toContain("social.gitlab.issuer");
+    expect(keys).toContain("passkey.hints.signIn");
     expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");

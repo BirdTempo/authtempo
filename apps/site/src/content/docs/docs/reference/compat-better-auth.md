@@ -11,6 +11,7 @@ sources:
   - packages/compat-better-auth/README.md "The admin plugin"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - packages/compat-better-auth/README.md "API keys"
+  - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
 ---
 
@@ -55,7 +56,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations. `sendInvitationEmail` is required. |
-| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. |
+| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. `registration.requireSession: false`, `resolveUser`, and `afterVerification` are refused: core's `passkey.signUp` is the sign-up by passkey, and the shim does not map it. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. |
 | `emailOTP` | Core's email codes, for the sign-in and the reset. With `changeEmail: { enabled: true }`, also for the change of address. `sendVerificationOTP` is required. |
 | `bearer` | Adds `set-auth-token` to each answer that sets the session cookie. |
@@ -63,9 +64,17 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. Core's gate on the magic link, the email code, and social stays off. A reset by code of a user with the factor on opens no session. |
 | `admin` | Core's operator tools. Needs `organization` and `authtempo.platformOrganization`. See [The admin plugin](#the-admin-plugin). |
 | `apiKey` | Core's API tokens: `tk_` for `references: "user"`, `to_` for `"organization"`. `rateLimit` is the window of a new key. `enableSessionForAPIKeys: true`, `disableKeyHashing: true`, and a custom generator are refused. [Cutover of API tokens](/docs/migrate/better-auth/#cutover-of-api-tokens) moves the old keys. |
+| `anonymous` | Core's anonymous sign-in. `onLinkAccount` runs after the sign-in that replaces the anonymous user, with core's `proof`. `generateRandomEmail` and `disableDeleteAnonymousUser: true` are refused. |
+| `username` | Core's username and its password sign-in. Needs `emailAndPassword`. The validators and the normalization are refused: core stores NFKC in lower case. |
+| `phoneNumber` | Core's phone code. `sendOTP` delivers each code that core makes. Needs `authtempo.phone.regions`. `verifyOTP` and the reset by phone are refused. |
+| `oneTap` | Core's ID-token route for Google, with no nonce. Needs `socialProviders.google`. |
+| `multiSession` | Core's multi-session, 2 to 10 sessions in one browser. |
+| `lastLoginMethod` | Core's last method cookie under Better Auth's cookie name. `storeInDatabase: true` is refused. |
 | `jwt`, `mcp`, `cimd`, `oidc-provider`, `oauth-provider` | Refused at start. Move to core's `createAuth` with `jwtMint` and `oauth`. |
 
 Any other plugin is refused at start by its id.
+
+An anonymous user or a phone user has no address. Such a user holds Better Auth's placeholder address in `user.email`, because that column is NOT NULL. The storage reads each placeholder as no address, so core never mails one and never counts one as proved.
 
 ## The defaults
 
@@ -79,6 +88,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | The verify link lives 1 hour | It lives as long as the magic link. |
 | `requireEmailVerification: true` mails a new link at an unverified sign-in only with `sendOnSignIn: true` | It maps to `password.requireVerified`. The sign-in answers `EMAIL_NOT_VERIFIED` and always mails a new link, at most 3 per 15 minutes. `sendOnSignIn: false` is refused at start. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |
+| `baseURL` takes `{ allowedHosts, fallback, protocol }` with wildcard hosts, and `protocol: "auto"` reads `x-forwarded-proto` | Each host must be exact, and `protocol` must be `https` or `http`; a wildcard, `auto`, and no `protocol` are refused. The hosts map to core's `baseURL` list, and a `fallback` equal to one of them is the primary. Core picks the host from the request URL and reads no proxy header. The shim builds its own paths, SSO URLs, and mail links on that host. Each host is also a trusted origin, as in Better Auth, so a page on one host posts to another. A wildcard on a shared platform lets any customer of the platform own a host of the issuer. |
 | The session cookie `better-auth.session_token` | The session cookie `__Host-tempo_session`. For one release the shim also reads `tempo_session`, the name before plan 12b, and the handler moves it. |
 | `secrets: [{ version, value }]` accepts version 0 | It maps to core's `secrets`, one entry for one entry. Version 0 is refused: core reads a row from before plan 12b as version 1, so renumber from 1. With `secret`, version 1 must be the value of `secret`. |
 | `BETTER_AUTH_SECRETS` in the environment | Not read: the shim maps options only. Pass the list as `secrets`. |
@@ -88,6 +98,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | `disableSignUp` on each method and provider, and a provider's `disableImplicitSignUp` | Core has one sign-up rule. `true` on every method and social provider that creates a user maps to core's `signUp: false`. A mix is refused at start, with the methods of each group. `disableImplicitSignUp` is refused. `api.signUpEmail` then answers `EMAIL_PASSWORD_SIGN_UP_DISABLED` with 400. The client's `signUp.email` answers the same code with core's status, 403. |
 
 - `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with no `ipAddressHeaders` and no `disableIpTracking: true`.
+- `toNodeHandler(auth, { waitUntil })` and `toNextJsHandler(auth, { waitUntil })` take the host's `waitUntil` as a second argument, which Better Auth does not have. On Next, pass `(p) => after(p)` of `next/server`. Without it, a code mail or an SMS runs detached, and a host that stops the function after the answer can drop it.
 - A call argument that core cannot keep, such as `rememberMe: false`, answers `APIError` `NOT_SUPPORTED` with status 501.
 - `APIError` and the client's `error` carry Better Auth's code and core's HTTP status. `BETTER_AUTH_CODES` is the table.
 
@@ -119,6 +130,7 @@ The options of these operations:
 | `user.deleteUser` | `enabled` turns the delete on, off by default as in Better Auth. `beforeDelete` and `afterDelete` map. `sendDeleteAccountVerification` turns on core's `account.deleteConfirm`, and gets `{ user, url, token }`. `deleteTokenExpiresIn` is a whole number of minutes from 300 to 86400 seconds, default 86400 as in Better Auth. |
 | `account.accountLinking` | `enabled: true`, `allowDifferentEmails: false`, and `allowUnlinkingAll: false` are accepted. `trustedProviders`, `updateUserInfoOnLink`, and `disableImplicitLinking` are refused. |
 | `emailOTP({ changeEmail })` | `enabled` serves `/email-otp/request-email-change` and `/email-otp/change-email`. `verifyCurrentEmail: true` is refused. |
+| `emailOTP({ overrideDefaultEmailVerification })` | `true` is core's `password.verifyBy: "code"`. The sign-up mails a code through `sendVerificationOTP` with the type `email-verification`. `/email-otp/verify-email` and the `email-verification` resend map onto core's sign-up code. |
 | `databaseHooks.user`, `databaseHooks.account` | `create`, `update`, and `delete` of a user, and `create` and `delete` of an account, map onto core's hooks. |
 | `emailVerification.beforeEmailVerification`, `afterEmailVerification` | Map to `user.beforeVerify` and `user.afterVerify`. Core calls them on each path that proves an unverified address. A change of address calls them too, as in Better Auth 1.7.2. The change link calls the after hook only. The change by code calls the before hook before core's code check. |
 
@@ -145,6 +157,7 @@ Where the shim differs from Better Auth:
 | The credential account can be unlinked | Its unlink answers `NOT_SUPPORTED` with 501. Core has no password removal. |
 | No mail after a credential change | The same. The shim sets core's `account.notices: false`. Use core's `createAuth` for the notice mails. |
 | The user delete runs the account delete hooks | It runs none. A credential account fires no account hook, because core's password row is not an identity. |
+| `additionalData` of `signIn.social` and `/link-social` reaches `getOAuthState()` | It answers `NOT_SUPPORTED` with 501. The shim serves no `getOAuthState()`, so no shim hook could read the payload. Core's `social.stateData` takes its place: read `stateData` in core's `hooks.session.afterCreate` and `hooks.identity.afterLink`. |
 
 The shim's own codes `EMAIL_CAN_NOT_BE_UPDATED`, `FIELD_NOT_ALLOWED`, `ACCOUNT_NOT_FOUND`, and `CHANGE_EMAIL_DISABLED` answer 400, as on Better Auth.
 

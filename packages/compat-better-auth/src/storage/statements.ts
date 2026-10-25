@@ -23,6 +23,7 @@ import {
   SQLITE,
   type SqlStatements,
   type Statement,
+  sortsOf,
   TABLES,
   USER_CHILD_MODELS,
   undoCreateWhere,
@@ -33,6 +34,13 @@ import { fromStoredPermissions, toStoredPermissions } from "../role-map.js";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
 import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
+import {
+  hasTempForm,
+  isPlaceholder,
+  type PlaceholderRule,
+  placeholderFor,
+  placeholderSql,
+} from "./placeholder.js";
 
 type Row = Record<string, unknown>;
 type FieldType = "string" | "boolean" | "integer" | "date" | "json";
@@ -277,7 +285,12 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
  * every rule of the storage port (port.ts): the null rules, the sort rules,
  * the write rules, the argument rules. Core's conformance suite is the check.
  */
-export function compatStatements(dialect: "postgres" | "sqlite", names: Names): CompatStatements {
+export function compatStatements(
+  dialect: "postgres" | "sqlite",
+  names: Names,
+  // The placeholder domain of the anonymous plugin (plan 12i Task 16), read at each statement.
+  rule: PlaceholderRule = { domain: null },
+): CompatStatements {
   const d = dialect === "postgres" ? POSTGRES : SQLITE;
   const pg = dialect === "postgres";
   // One log line per storage for a null credential password: a hand-edited table can hold many.
@@ -308,6 +321,12 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
   const value = (model: ModelName, field: string) => {
     const c = column(model, field);
     const t = MAP[model].table;
+    // A Better Auth placeholder address reads as no address (plan 12i Task 16).
+    if (MAP[model].fields[field]?.codec === "placeholder")
+      return `CASE WHEN ${placeholderSql(c, rule.domain, column(model, "id"))} THEN NULL ELSE ${c} END`;
+    // A column that reads as null unless its gate column is true (ruling 15 of plan 12i).
+    const when = MAP[model].fields[field]?.onlyWhen;
+    if (when) return `CASE WHEN ${names.column(t, when)} THEN ${c} END`;
     // A nullable Better Auth column that core reads as another while it is null (plan 12k).
     const or = MAP[model].fields[field]?.orColumn;
     if (or) {
@@ -331,10 +350,27 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       : (TABLE_FIELDS[t].find((f) => names.rawColumn(t, f).toLowerCase() === raw.toLowerCase()) ??
         null));
   const quoteRaw = (c: string) => `"${c.replaceAll('"', '""')}"`;
+  /**
+   * The bound value of an extra column. A text that bypasses encode stores
+   * U+FFFD for a lone surrogate too (ruling 85). A boolean binds as 0 or 1
+   * on SQLite, as encodeValue writes it (ruling 15 of plan 12i).
+   */
+  const extra = (v: unknown): unknown =>
+    typeof v === "string" ? wellFormed(v) : typeof v === "boolean" && !pg ? (v ? 1 : 0) : v;
 
   function encode(model: ModelName, field: string, value: unknown): unknown {
     const { type } = def(model, field);
     const codec = MAP[model].fields[field]?.codec;
+    if (codec === "placeholder") {
+      // insertRows writes the placeholder of the row's id for a null. Core
+      // never clears an address by an update, so a null here has no id.
+      if (value === null || value === undefined)
+        throw invalid(model, field, "the Better Auth table needs a value here");
+      // It would read back as no address: a person's own address never takes this form.
+      // The temp- form needs the row id: insertRows and update check it (ownPlaceholder).
+      if (typeof value === "string" && isPlaceholder(value, rule.domain, null))
+        throw invalid(model, field, "an address on a placeholder domain reads back as no address");
+    }
     const given =
       codec === "nullAsEmpty" && (value === null || value === undefined)
         ? ""
@@ -406,6 +442,28 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     return v;
   }
 
+  /**
+   * Throws when a write gives a row its own placeholder, `temp-<id>@<domain>`
+   * (ruling 42 M1): it would read back as no address. `ids` holds the ids
+   * of the rows that the write reaches, or null when the where names none.
+   * With no ids, a value in the temp- form is refused: no row can be cleared.
+   */
+  function ownPlaceholder(model: ModelName, data: Row, ids: readonly unknown[] | null): void {
+    for (const [field, value] of Object.entries(data)) {
+      if (MAP[model].fields[field]?.codec !== "placeholder" || typeof value !== "string") continue;
+      if (!hasTempForm(value, rule.domain)) continue;
+      if (ids === null || ids.some((id) => isPlaceholder(value, rule.domain, String(id))))
+        throw invalid(model, field, "the temp- address of the row itself reads back as no address");
+    }
+  }
+
+  /** The ids that an eq or an in of `id` names, or null when no clause names them. */
+  function idsOf(where: readonly Where<ModelName>[]): unknown[] | null {
+    const w = where.find((x) => x.field === "id" && (x.op === "eq" || x.op === "in"));
+    if (!w) return null;
+    return Array.isArray(w.value) ? w.value : [w.value];
+  }
+
   function scope(model: ModelName): string | null {
     const s = MAP[model].scope;
     if (!s) return null;
@@ -446,11 +504,30 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // One text rule with core's builder: a NUL or a lone surrogate throws (ruling 17 of plan 12g).
       assertWhereText(model, w.field, w.value);
       const enc = (v: unknown) => p.add(encode(model, w.field, v), type);
+      // A placeholder address reads as null (plan 12i Task 16). An eq or an
+      // in of an address compares the raw column, so the unique index
+      // serves the lookup. A value that is no placeholder equals the raw
+      // column exactly where it equals the read. A value on a placeholder
+      // domain matches no row, because every row of one reads null. A value
+      // in the temp- form is a placeholder only on the row of its id, so
+      // that row is left out (ruling 42 M1).
+      const held = codec === "placeholder";
+      const real = (v: unknown) => !(typeof v === "string" && isPlaceholder(v, rule.domain, null));
+      const raw = held ? column(model, w.field) : c;
+      const notOwn = (vs: unknown[]) =>
+        held && vs.some((v) => typeof v === "string" && hasTempForm(v, rule.domain))
+          ? [`NOT ${placeholderSql(raw, rule.domain, column(model, "id"))}`]
+          : [];
       switch (w.op) {
         case "eq":
+          if (!isNull(w.value) && !real(w.value)) {
+            impossible = true;
+            break;
+          }
           parts.push(
-            isNull(w.value) ? (empty ? `${c} = ''` : `${c} IS NULL`) : `${c} = ${enc(w.value)}`,
+            isNull(w.value) ? (empty ? `${c} = ''` : `${c} IS NULL`) : `${raw} = ${enc(w.value)}`,
           );
+          if (!isNull(w.value)) parts.push(...notOwn([w.value]));
           break;
         case "ne":
           if (isNull(w.value)) parts.push(empty ? `${c} <> ''` : `${c} IS NOT NULL`);
@@ -461,7 +538,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           break;
         case "in": {
           if (!Array.isArray(w.value)) throw invalid(model, w.field, "in expects an array");
-          const vals = w.value.filter((v) => !isNull(v));
+          const vals = w.value.filter((v) => !isNull(v) && real(v));
           for (const v of vals) encode(model, w.field, v);
           if (vals.length === 0) {
             impossible = true;
@@ -471,9 +548,10 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           // plan 12d). The values stay bound, and none enters the SQL text.
           if (!pg && vals.length > IN_PARAMS_MAX)
             parts.push(
-              `${c} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map((v) => encode(model, w.field, v))))}))`,
+              `${raw} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map((v) => encode(model, w.field, v))))}))`,
             );
-          else parts.push(`${c} IN (${vals.map(enc).join(", ")})`);
+          else parts.push(`${raw} IN (${vals.map(enc).join(", ")})`);
+          parts.push(...notOwn(vals));
           break;
         }
         case "startsWith":
@@ -531,16 +609,21 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     let cols: string[] = [];
     const tuples = rows.map((data) => {
       assertFields(model, Object.keys(data));
+      ownPlaceholder(model, data, [data.id]);
       const own: string[] = [];
       const vals: string[] = [];
       for (const field of Object.keys(map.fields)) {
         own.push(column(model, field));
-        vals.push(p.add(encode(model, field, data[field]), def(model, field).type));
+        // A core null address is Better Auth's placeholder of the row (plan 12i Task 16).
+        const v =
+          map.fields[field]?.codec === "placeholder" && data[field] === null
+            ? encodeValue(d, "string", placeholderFor(String(data.id), rule.domain), model, field)
+            : encode(model, field, data[field]);
+        vals.push(p.add(v, def(model, field).type));
       }
       for (const [c, v] of Object.entries(map.insertExtras?.(data) ?? {})) {
         own.push(names.column(map.table, c));
-        // A text that bypasses encode stores U+FFFD for a lone surrogate too (ruling 85).
-        vals.push(p.add(typeof v === "string" ? wellFormed(v) : v));
+        vals.push(p.add(extra(v)));
       }
       // insertExtras names the same columns for every row of a model. A row with other
       // columns would shift its values into the wrong columns of the JSON form, so it throws.
@@ -596,7 +679,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     ];
     const written = [
       ...Object.keys(data).map((f) => encode(model, f, data[f])),
-      ...Object.values(extras),
+      ...Object.values(extras).map(extra),
     ];
     const cols = set.map((f) => {
       const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
@@ -625,12 +708,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     },
     select(model, where, opts = {}) {
       assertModel(model);
-      const sorts =
-        opts.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
-      assertFields(
-        model,
-        sorts.map((s) => s.field),
-      );
+      const sorts = sortsOf(model, opts);
       if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 0)) {
         throw invalid(model, "limit", "expected a non-negative integer");
       }
@@ -647,11 +725,19 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       if (sorts.length > 0) {
         const terms = sorts.map((s) => {
           // Qualified, so Postgres sorts by the column and not by the output alias of the same name.
-          const raw = pg ? qualified(model, s.field) : value(model, s.field);
+          // A gated read and a placeholder read name more than their alias, so they sort by the read value.
+          const field = MAP[model].fields[s.field];
+          const raw =
+            pg && !field?.onlyWhen && field?.codec !== "placeholder"
+              ? qualified(model, s.field)
+              : value(model, s.field);
           const e =
             MAP[model].fields[s.field]?.codec === "nullAsEmpty" ? `NULLIF(${raw}, '')` : raw;
           const dir = s.dir === "asc" ? "ASC" : "DESC";
-          return pg ? `${e} ${dir}` : `${e} IS NULL${dir === "DESC" ? " DESC" : ""}, ${e} ${dir}`;
+          // A notNull key names a column that holds no null, so an index gives the order.
+          return pg || s.notNull
+            ? `${e} ${dir}`
+            : `${e} IS NULL${dir === "DESC" ? " DESC" : ""}, ${e} ${dir}`;
         });
         sql += ` ORDER BY ${terms.join(", ")}`;
       }
@@ -665,6 +751,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       if (keys.includes("id")) throw new StorageError("unknown_field", model, ["id"]);
       assertFields(model, keys);
       if (keys.length === 0) throw invalid(model, "data", "update needs at least one field");
+      ownPlaceholder(model, data as Row, idsOf(where as Where<ModelName>[]));
       const map = MAP[model];
       const p = new Params();
       const sets = keys.map(
@@ -672,7 +759,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           `${column(model, f)} = ${p.add(encode(model, f, (data as Row)[f]), def(model, f).type)}`,
       );
       for (const [c, v] of Object.entries(map.updateExtras?.(data as Row) ?? {}))
-        sets.push(`${names.column(map.table, c)} = ${p.add(v)}`);
+        sets.push(`${names.column(map.table, c)} = ${p.add(extra(v))}`);
       const w = compileWhere(model, where as Where<ModelName>[], p);
       if (w.impossible) return null;
       return { sql: `UPDATE ${table(model)} SET ${sets.join(", ")}${w.clause}`, params: p.values };

@@ -135,7 +135,8 @@ interface CredentialRows {
  * plan 9b2 final review).
  */
 interface RepairRows extends CredentialRows {
-  seen: { email: string; emailVerified: boolean };
+  /** The address as the guard read it. A core user can have no address (plan 12i); an import never writes one. */
+  seen: { email: string | null; emailVerified: boolean };
 }
 
 /** The ids of the rows `writeCredentials` wrote, so a repair can delete exactly its own rows. */
@@ -583,6 +584,10 @@ async function writeCredentials(
       id,
       userId: c.userId,
       ...p,
+      // The extension flags of plan 12i: no export holds them.
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -678,6 +683,10 @@ async function writeUser(
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: r.createdAt ?? now,
     updatedAt: now,
   });

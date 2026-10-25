@@ -24,6 +24,7 @@ sidebar:
 2. Read the session: `src/start.ts` adds `createMiddleware({ type: "request" }).server(authRequestServer({ auth: getAuth }))` to `requestMiddleware`.
 3. Read the session in a handler: `getSession(context)`.
 4. Protect paths: `authRequestServer({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+5. On Workers, pass the hook of the runtime: `authRouteHandlers(getAuth, { waitUntil })`, with `import { waitUntil } from "cloudflare:workers"`.
 
 ## Exports
 
@@ -36,6 +37,7 @@ sidebar:
 | `RouteHandler` | The type of one server handler. |
 | `RequestServer` | The type that `authRequestServer` answers. |
 | `SessionContext` | The context that the middleware gives: `session`. |
+| `RouteHandlerOptions` | The options of `authRouteHandlers`: `waitUntil`, the hook that keeps work alive after the answer. It has no default. |
 | `StartAuthOptions` | The options of `authRequestServer`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## The paths that protect gets
@@ -53,6 +55,7 @@ sidebar:
 
 ## How it behaves
 
+- A server handler of TanStack Start gets no platform context, so the binding reads none. With no `waitUntil` option, the work after the answer runs detached. On Workers core then waits for the work before it answers (ruling 29 of plan 12i).
 - The package names no peer dependency, because it imports nothing of TanStack.
 - `createMiddleware` comes from `@tanstack/react-start` or `@tanstack/solid-start`.
 - A typings fixture compiles the binding against `@tanstack/react-start` 1.169.1 and `@tanstack/solid-start` 1.169.1.

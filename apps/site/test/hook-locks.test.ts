@@ -192,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the sixteen flows", () => {
+  it("names the eighteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -207,7 +207,9 @@ describe("the table of locks over a before hook", () => {
       "Team member removal",
       "SCIM group write",
       "Identity unlink",
+      "Phone remove",
       "Account delete",
+      "Anonymous delete",
       "Platform role revoke",
       "Impersonation start",
     ]);
@@ -252,6 +254,8 @@ describe("the table of locks over a before hook", () => {
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
+      // Plan 12i Task 6: the anonymous delete of the route holds the user row first.
+      ["Anonymous delete", "deleteAnonymousRows user.beforeDelete: holdUsers"],
       ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
       // A SCIM group delete holds the users of a mapped group first (ruling 59 M2 of plan 12d).
       [
@@ -272,6 +276,8 @@ describe("the table of locks over a before hook", () => {
         "Member removal or leave",
         "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
+      // Plan 12i Task 5: the phone remove runs the update hook under the guard of the user row.
+      ["Phone remove", "removePhone user.beforeUpdate: guardedRemove"],
       [
         "Team member removal",
         "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockOrganization, writeGroup > lockTeam",

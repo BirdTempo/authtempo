@@ -2,9 +2,9 @@ import type { Observer } from "../observe/observer.js";
 import type { JwtSeam } from "../seams/jwt.js";
 
 /**
- * A provider name: a preset (`google`, `apple`, `github`, `linkedin`) or the
- * name of an entry of `social.oidc` or `social.oauth2` (plan 9c). It is the
- * route segment and the `provider` of the identity row.
+ * A provider name: a preset (`PRESET_PROVIDER_NAMES`) or the name of an
+ * entry of `social.oidc` or `social.oauth2` (plan 9c). It is the route
+ * segment and the `provider` of the identity row.
  */
 export type SocialProviderName = string;
 
@@ -12,18 +12,43 @@ export type SocialProviderName = string;
 export const PROVIDER_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
 /**
- * Names a list entry must not take. The presets own the first four. `email`
- * is core's identity for a verified address: the engine finds an identity by
- * `(provider, subject)`, so a list provider named `email` could sign in as
- * the owner of any address that its user info answers as the subject.
- * `credential` is the Better Auth password row, which the compatibility
- * package refuses as an identity (plan 9c).
+ * The presets that exist, in the order that the config builds them. The
+ * compatibility package reads this list, so a preset added here changes its
+ * refusal text with no compat edit.
  */
-export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+export const PRESET_PROVIDER_NAMES: readonly string[] = Object.freeze([
   "google",
   "apple",
   "github",
   "linkedin",
+  "microsoft",
+  "discord",
+  "gitlab",
+  "slack",
+  "twitter",
+  "facebook",
+]);
+
+/**
+ * The names kept for presets that do not exist yet, so no list entry takes
+ * one. Plan 12i Task 13 kept `slack`, `twitter`, and `facebook`. Task 14
+ * moved them to `PRESET_PROVIDER_NAMES`, so the list is empty now. Both
+ * lists are frozen: `RESERVED_PROVIDER_NAMES` and compat read them, so a
+ * change at run time would open a reserved name.
+ */
+export const COMING_PRESET_NAMES: readonly string[] = Object.freeze([]);
+
+/**
+ * Names a list entry must not take: each preset, each coming preset, `email`,
+ * and `credential`. `email` is core's identity for a verified address. The
+ * engine finds an identity by `(provider, subject)`. So a list provider named
+ * `email` could sign in as the owner of any address that its user info
+ * answers as the subject. `credential` is the Better Auth password row, which
+ * the compatibility package refuses as an identity (plan 9c).
+ */
+export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+  ...PRESET_PROVIDER_NAMES,
+  ...COMING_PRESET_NAMES,
   "email",
   "credential",
 ]);
@@ -58,6 +83,24 @@ export interface SocialProfile {
   emailVerified: boolean;
   name: string | null;
   image: string | null;
+  /**
+   * True when `name` is the client's word, not a claim of the provider
+   * (plan 12i Task 10): the name that Apple's native sheet gives the app.
+   * Such a name fills a new user only, never an existing user.
+   */
+  nameOnCreate?: true;
+}
+
+/**
+ * The ID-token route of a provider (plan 12i Task 10, spec 32 item 10).
+ * `audiences` are the client ids beside `clientId` that a token may name,
+ * such as an iOS bundle id or an Android client id. The `nonce` claim is
+ * always the SHA-256 hex of core's nonce (ruling 37 I1). `nonceMandatory`
+ * is true when the token itself says that a nonce must be present.
+ */
+export interface IdTokenRoute {
+  audiences: readonly string[];
+  nonceMandatory?(claims: Record<string, unknown>): boolean;
 }
 
 export interface CallbackExtra {
@@ -88,6 +131,35 @@ export interface ProviderBase {
   authorizeParams: Record<string, string>;
   callbackMethod: "GET" | "POST";
   clientSecret(ctx: ProviderContext): Promise<string>;
+  /**
+   * How the token exchange proves the client secret (plan 12i Task 14).
+   * Absent: `client_secret_post`, the method of every preset before X.
+   */
+  tokenAuth?: TokenEndpointAuthMethod;
+  /**
+   * A check of the token answer before the engine reads its token (plan
+   * 12i Task 14). False refuses the sign-in with `oauth_failed`. Slack
+   * answers an error with status 200 and `ok: false`.
+   */
+  tokenAnswerOk?(body: Record<string, unknown>): boolean;
+  /**
+   * The callback URL that this provider has registered, in place of
+   * `<baseURL><basePath>/social/<name>/callback` (plan 12i Task 12).
+   * Construction checks it, and the router serves its path as an alias of
+   * the callback. Absent: the default callback.
+   */
+  redirectURI?: string;
+}
+
+/**
+ * The per-provider redirect override of each preset and list entry (plan
+ * 12i Task 12, spec 32 item 11). An `https:` URL on the origin of `baseURL`,
+ * with a path under `basePath`, no query, and no fragment. It must not be
+ * the path of a route of core, nor of another provider. The provider must
+ * have this exact URL registered.
+ */
+export interface RedirectOverride {
+  redirectURI?: string;
 }
 
 /** The provider issues an ID token. The engine verifies it through the jwt seam and maps its claims. */
@@ -96,17 +168,91 @@ export interface OidcProvider extends ProviderBase {
   jwksUrl: string;
   /** Every issuer value the provider puts in `iss`. */
   issuer: string[];
+  /**
+   * The issuers of one token, from its payload before the verify, or null
+   * to refuse it (plan 12i Task 13). Set by a provider whose issuer names
+   * the person's own tenant. The engine then verifies against this list in
+   * place of `issuer`, so `checkClaims` must bind it to a verified claim.
+   */
+  issuerOf?(idToken: string): string[] | null;
+  /**
+   * A last check of the verified claims (plan 12i Task 13). False refuses
+   * the sign-in with `oauth_failed`, for example a token of another tenant.
+   */
+  checkClaims?(claims: Record<string, unknown>): boolean;
   profile(claims: Record<string, unknown>, extra: CallbackExtra): SocialProfile;
+  /** Set on `google` and `apple` only: the provider serves the ID-token route (plan 12i Task 10). */
+  idToken?: IdTokenRoute;
 }
+
+/**
+ * The input of a `tokenRequest` hook (plan 12i Task 22). `fetch` is the
+ * engine's fetch: it carries the timeout, follows no redirect, and calls
+ * only the origin and path of the entry's `tokenUrl`. `codeVerifier` is
+ * null when the entry sets `pkce: false`.
+ */
+export interface TokenRequestInput {
+  code: string;
+  redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+  codeVerifier: string | null;
+  fetch: typeof globalThis.fetch;
+}
+
+/**
+ * The answer of a `tokenRequest` hook. The engine checks its shape and
+ * gives `extra` to `userinfo` as its third argument. `extra` holds at most
+ * `TOKEN_EXTRA_MAX` string values, such as WeChat's `openid`.
+ */
+export interface TokenRequestAnswer {
+  accessToken: string;
+  extra: Record<string, string>;
+}
+
+/** The longest access token of a `tokenRequest` answer. */
+export const TOKEN_REQUEST_ACCESS_MAX = 4096;
+/** The most keys of `extra`, and the longest value of one key. */
+export const TOKEN_EXTRA_MAX = 16;
+export const TOKEN_EXTRA_VALUE_MAX = 1024;
+/** The rule of an `extra` key. */
+export const TOKEN_EXTRA_KEY_RE = /^[A-Za-z0-9_]{1,64}$/;
 
 /**
  * The provider issues no ID token (plan 9c). After the code exchange the
  * engine calls `userinfo` with the access token and a fetch that carries
- * the timeout. The engine reads the answer as untrusted.
+ * the timeout. The engine reads the answer as untrusted. The third
+ * argument is the `extra` of `tokenRequest`, else `{}` (plan 12i Task 22).
  */
 export interface OAuth2Provider extends ProviderBase {
   kind: "oauth2";
-  userinfo(accessToken: string, fetch: typeof globalThis.fetch): Promise<SocialProfile>;
+  userinfo(
+    accessToken: string,
+    fetch: typeof globalThis.fetch,
+    extra: Record<string, string>,
+  ): Promise<SocialProfile>;
+  /**
+   * App code that runs in place of the standard token exchange (plan 12i
+   * Task 22). It runs only after the engine has spent the state row and
+   * checked the binding cookie. It answers a token or throws, and a throw
+   * is `oauth_failed`. It cannot open a session or pick a user.
+   */
+  tokenRequest?(input: TokenRequestInput): Promise<TokenRequestAnswer>;
+  /** The authorize parameter that carries `clientId`. Absent: `client_id`. */
+  authorizeClientIdParam?: string;
+  /** A fixed fragment after the authorize query, such as `#wechat_redirect`. */
+  authorizeSuffix?: string;
+  /**
+   * False: no `code_challenge` at the start and no `code_verifier` at the
+   * exchange. The state row and the binding cookie still bind the callback
+   * (spec 8.3). Absent: PKCE with S256.
+   */
+  pkce?: boolean;
+  /**
+   * The provider proves no address. The engine drops any address of the
+   * profile, and finds or makes the user by the identity alone.
+   */
+  addressless?: true;
 }
 
 export type Provider = OidcProvider | OAuth2Provider;

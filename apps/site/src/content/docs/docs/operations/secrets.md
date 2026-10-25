@@ -12,6 +12,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A sealed state payload through the social flow"
   - packages/core/README.md "Secrets"
 sidebar:
   order: 2
@@ -36,6 +37,7 @@ sidebar:
 | A private signing key | Sealed under a key from the secret | Opens under its version. It moves at its next signature, or by `rewrap`. |
 | A backup code | HMAC-SHA256 under the secret | Matches under its version until it is used or the list is replaced. |
 | A live email code | HMAC-SHA256 under the secret | Passes under its version for its life, at most 60 minutes. |
+| A social app payload of `social.stateData` | Sealed with AES-256-GCM under a key from the secret, in a state row or a challenge row | Opens under its version for its life, at most 10 minutes. `rewrap` does not move it. |
 | A session, an API token, a magic link, a reset link | SHA-256 with no key | No change. |
 
 Each such row names its version in the column `secret_version`. A read opens a value only under that version. A row from before schema version 9 reads as version 1.
@@ -79,12 +81,12 @@ The packages are not on a registry yet. In this repo, run each command below as 
 
    After 3 passes with the same `failed` count, stop and read the second warning below. Such a row fails on every pass.
 
-8. Wait for the life of the live email codes: `emailOtp.ttlMinutes`, 10 minutes by default.
+8. Wait for the life of the live email codes: `emailOtp.ttlMinutes`, 10 minutes by default. Wait at least 10 minutes, also with a shorter code life. A social app payload lives 10 minutes, and `rewrap` does not move it.
 9. Run `authtempo secret status <base url>`. Remove a version only when the command lists each of its counts as 0. [authtempo secret status](/docs/reference/cli/secret-status/) gives the flags.
 
-   In the API's process, run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
+   In the API's process, run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9. When `stateData` is above 0, wait 10 minutes, then repeat step 9.
 
-10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, `backupCodes`, and `ssoClientSecrets` are 0. A count of `ssoClientSecrets` above 0 means a sealed client secret of an SSO connection. Without the version, its sign-in fails. A SCIM token has no count. Core stores its SHA-256, not a sealed value, so a new app secret keeps it working. Make sure that the config has no key `secret`. Deploy.
+10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, `stateData`, `backupCodes`, and `ssoClientSecrets` are 0. A count of `ssoClientSecrets` above 0 means a sealed client secret of an SSO connection. Without the version, its sign-in fails. A SCIM token has no count. Core stores its SHA-256, not a sealed value, so a new app secret keeps it working. Make sure that the config has no key `secret`. Deploy.
 
    On Node and Bun, restart each process: it reads the environment only at start.
 
@@ -103,7 +105,8 @@ The packages are not on a registry yet. In this repo, run each command below as 
 - `more` is true while a row of a configured old version remains, also a row that failed or was skipped. A `limit` outside 1 to 1000, or a cursor that `rewrap` did not answer, answers `invalid_body`.
 - `skipped` counts a TOTP setup that is not confirmed, holds backup codes, and is less than 15 minutes old. A later pass reseals the expired setup and clears its codes.
 - `failed` counts a row that did not open under its version, or that a concurrent write changed first. The log names the table, the row, and the version. A later pass reads it again.
-- `status` reads every row of five tables, one query per 1000 rows. Run it from a script, not from a request.
+- `status` reads every row of five tables, one query per 1000 rows. It reads the live codes and the live social state rows the same way. Run it from a script, not from a request.
+- `stateData` counts the live sealed app payloads of `social.stateData`: state rows, and challenge rows of a social sign-in. A removed version fails each such sign-in with `invalid_token`, and the person starts again. `rewrap` leaves these rows, because each lives at most 10 minutes.
 - A backup code cannot move to a new version: core never sees the code again. `status` counts the unused codes under each version.
 - `rewrap` never reads a row of a version that the config does not hold. `status` lists that version with `configured: false`.
 - A signing key of a removed version does not open. It retires at the next signature, and a new key signs.

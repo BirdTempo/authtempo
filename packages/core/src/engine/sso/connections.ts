@@ -295,7 +295,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isPublicUrl(config: ResolvedConfig, value: unknown): value is string {
   if (!isHttpsUrl(value) || value.length > URL_MAX) return false;
   const u = new URL(value);
-  return u.username === "" && u.password === "" && isPublicHost(u.hostname, config.baseURL);
+  return u.username === "" && u.password === "" && isPublicHost(u.hostname, config.baseURLs);
 }
 
 /** The SSO config, or `not_found` while SSO is off. */
@@ -445,7 +445,7 @@ function checkFields(
         return refuse("issuer must be an https URL with no query, fragment, or credentials");
       // An organization owner writes this URL, and core fetches it. That is a server-side
       // request from a tenant's input (spec 8.13).
-      if (!isPublicHost(new URL(v.issuer).hostname, config.baseURL))
+      if (!isPublicHost(new URL(v.issuer).hostname, config.baseURLs))
         return refuse("issuer must name a public host");
       out.oidc.issuer = v.issuer;
     }

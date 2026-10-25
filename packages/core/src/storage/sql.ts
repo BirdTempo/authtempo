@@ -1,5 +1,12 @@
-import { type FieldType, type ModelName, type Models, SCHEMA_VERSION, schema } from "../schema.js";
-import { type FindManyOptions, StorageError, type Where } from "./port.js";
+import {
+  type FieldDef,
+  type FieldType,
+  type ModelName,
+  type Models,
+  SCHEMA_VERSION,
+  schema,
+} from "../schema.js";
+import { type FindManyOptions, type Sort, StorageError, type Where } from "./port.js";
 
 // The bounds that the importer shares with core (plan 12g fix wave).
 export { CREDENTIAL_ID_MAX_BYTES, SUBJECT_MAX } from "../bounds.js";
@@ -158,6 +165,26 @@ export function assertFields(model: ModelName, fields: Iterable<string>): void {
   for (const f of fields) {
     if (!Object.hasOwn(def.fields, f)) throw new StorageError("unknown_field", model, [f]);
   }
+}
+
+/**
+ * The sort keys of `opts` as a list. Each field must exist, and a key with
+ * `notNull` must name a field that the schema does not mark nullable: the
+ * key then drops the `IS NULL` term, which would sort a null wrong.
+ */
+export function sortsOf<M extends ModelName>(
+  model: M,
+  opts: FindManyOptions<M> | undefined,
+): Sort<M>[] {
+  const sorts = opts?.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
+  assertFields(
+    model,
+    sorts.map((x) => x.field),
+  );
+  for (const x of sorts)
+    if (x.notNull && (schema[model].fields as Record<string, FieldDef>)[x.field]?.nullable)
+      throw invalid(model, x.field, "notNull needs a field that is not nullable");
+  return sorts;
 }
 
 function fieldType(model: ModelName, field: string): FieldType {
@@ -763,11 +790,7 @@ export function selectStatement<M extends ModelName>(
   opts: FindManyOptions<M> = {},
 ): Statement | null {
   assertModel(model);
-  const sorts = opts.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
-  assertFields(
-    model,
-    sorts.map((x) => x.field),
-  );
+  const sorts = sortsOf(model, opts);
   validateLimit(model, opts.limit);
   const p = new Params(d);
   const w = compileWhere(d, model, where, p);
@@ -777,7 +800,7 @@ export function selectStatement<M extends ModelName>(
     const terms = sorts.map((x) => {
       const col = d.quote(columnName(x.field));
       const dir = x.dir === "asc" ? "ASC" : "DESC";
-      return d.nullsOrder === "explicit"
+      return d.nullsOrder === "explicit" && !x.notNull
         ? `${col} IS NULL${dir === "DESC" ? " DESC" : ""}, ${col} ${dir}`
         : `${col} ${dir}`;
     });

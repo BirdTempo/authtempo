@@ -108,8 +108,8 @@ and copies no compat file at or below that version. A file whose text the
 folder holds is not copied again. A copy above that version with another
 text stops the run with exit 2 before any write, and the line names the
 file. The copied files hold Better Auth's default table and column names.
-The shipped 0001, 0006, 0007, 0009, and 0010 fail on other names with
-`no such table`. An app with other names writes its own eleven files. It copies
+The shipped 0001, 0006, 0007, 0009, 0010, and 0012 fail on other names with
+`no such table`. An app with other names writes its own twelve files. It copies
 0002 to 0005, 0008, and 0011 as shipped. It writes 0001 from
 `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
 tables from before 1.7. It writes 0006 from
@@ -118,13 +118,17 @@ tables from before 1.7. It writes 0006 from
 `compatMigration0009Sql("sqlite", storage.names)`, and 0010 from
 `compatMigration0010Sql("sqlite", storage.names)`. For tables from before
 1.7, `compatMigration0010Sql` takes `"before-1.7"` as a third argument.
+It writes 0012 from `compatMigration0012Sql("sqlite", storage.names)`.
 Tables that hold `session.activeTeamId` and `invitation.teamId` already
 (Better Auth's `teams` option) need an own 0010, also with the default
 names. It is the 0010 text without its two `ADD COLUMN` lines of `session`
 and `invitation`. Without it, the 0010 fails with
-`duplicate column name: activeTeamId`. The
+`duplicate column name: activeTeamId`. Tables that hold the columns of
+Better Auth's username, phone number, or anonymous plugin need an own
+0012 without the `ADD COLUMN` line of each column that they hold, and
+without the unique key that they hold. The
 app applies its own files with `wrangler d1 migrations apply <database>`
-before this command. Then the compat version is 11, and the command copies
+before this command. Then the compat version is 12, and the command copies
 nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
 its table `d1_migrations` (`migrations_table`).

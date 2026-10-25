@@ -14,6 +14,13 @@ import {
   startAccountDelete,
 } from "./engine/account-delete.js";
 import {
+  type AnonymousDelete,
+  type AnonymousSession,
+  type AnonymousSignIn,
+  deleteAnonymous,
+  signInAnonymous,
+} from "./engine/anonymous.js";
+import {
   confirmEmailChange,
   type EmailChangeRequest,
   requestEmailChange,
@@ -105,6 +112,7 @@ import {
   updateMemberRole,
   updateOrganization,
 } from "./engine/organizations.js";
+import type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
 import {
   deletePasskey,
   listPasskeys,
@@ -128,6 +136,7 @@ import {
   type PasswordSignUpResult,
   type PasswordVerified,
   type PasswordVerify,
+  type PasswordVerifyCode,
   passwordSignIn,
   passwordSignUp,
   type ResetResult,
@@ -135,9 +144,23 @@ import {
   resendPasswordVerification,
   resetPassword,
   verifyPassword,
+  verifyPasswordCode,
   verifyPasswordEmail,
 } from "./engine/password.js";
 import { hasPermission, type PermissionInput, permissionsOf } from "./engine/permissions.js";
+import {
+  addPhone,
+  type PhoneAdd,
+  type PhoneAddVerify,
+  type PhoneRemove,
+  type PhoneRequest,
+  type PhoneSession,
+  type PhoneVerify,
+  removePhone,
+  requestPhone,
+  verifyAddPhone,
+  verifyPhone,
+} from "./engine/phone.js";
 import { type ProfileUpdate, updateProfile } from "./engine/profile.js";
 import {
   type ReauthInput,
@@ -275,6 +298,12 @@ import {
   totpUri,
   verifyTwoFactor,
 } from "./engine/totp.js";
+import {
+  setUsername,
+  type Username,
+  type UsernameSet,
+  usernameAvailable,
+} from "./engine/username.js";
 import { ERRORS } from "./errors.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
@@ -282,6 +311,7 @@ import { createWellKnownHandler } from "./http/well-known.js";
 import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
+import type { PasskeyHint } from "./primitives/passkey-hints.js";
 import { fail, type Result } from "./result.js";
 import type { ScimScope, SessionRow, UserRow } from "./schema.js";
 import type {
@@ -302,7 +332,12 @@ export interface PasswordApi {
   /** The password of a known user again, with the sign-in's limits (plan 9f). */
   verify(input: PasswordReauth): Promise<Result<{ verified: true }>>;
   verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
-  /** A new verify link for an unverified user with a password. Always `{ sent: true }`, except `rate_limited`. */
+  /** The sign-up code of `password.verifyBy: "code"` (plan 12i Task 20): the confirm of `verifyEmail`. */
+  verifyCode(input: PasswordVerifyCode): Promise<Result<PasswordVerified>>;
+  /**
+   * A new verify link or code for an unverified user with a password. Always
+   * `{ sent: true }`, except `rate_limited`. In process, the code goes in the call.
+   */
   resendVerification(input: PasswordResend): Promise<Result<{ sent: true }>>;
   requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
   reset(input: PasswordReset): Promise<Result<ResetResult>>;
@@ -664,6 +699,27 @@ export interface EmailOtpApi {
   reset(input: EmailOtpReset): Promise<Result<EmailOtpSession | TwoFactorPending>>;
 }
 
+/** Present on `api` while `phone` is on (plan 12i, spec 32 item 5). */
+export interface PhoneApi {
+  /** A sign-in code by SMS. `{ sent: true }` for a known and an unknown number. */
+  request(input: PhoneRequest): Promise<Result<{ sent: true }>>;
+  verify(input: PhoneVerify): Promise<Result<PhoneSession | TwoFactorPending>>;
+  /** A code to a new phone of the caller. Fresh rule, a proved handle. */
+  add(input: PhoneAdd): Promise<Result<{ sent: true }>>;
+  /** Sets the phone that `add` sent a code to. Fresh rule. `phone_taken` when another user holds it. */
+  verifyAdd(input: PhoneAddVerify): Promise<Result<{ phone: string }>>;
+  /** Removes the phone under the last-credential guard. Fresh rule. */
+  remove(input: PhoneRemove): Promise<Result<{ ok: true }>>;
+}
+
+/** Present on `api` while `anonymous` is on (plan 12i Task 6, spec 32 item 8). */
+export interface AnonymousApi {
+  /** A new anonymous user and session. A live anonymous session answers itself; another session answers `conflict`. */
+  signIn(input: AnonymousSignIn): Promise<Result<AnonymousSession>>;
+  /** Deletes the anonymous user of the session. Another session answers `anonymous_refused`. */
+  delete(input: AnonymousDelete): Promise<Result<{ ok: true }>>;
+}
+
 /**
  * The fresh rule and the session operations of a settings page (plan 12a).
  * Present in every deployment. An app's own sensitive change calls
@@ -728,6 +784,16 @@ export interface UserApi {
    * foreign link; `sole_owner` again.
    */
   confirmDelete(input: AccountDelete & { token: string }): Promise<Result<{ ok: true }>>;
+  /**
+   * Sets the username (plan 12i). Fresh rule, a proved handle. `not_found`
+   * with `username` off; `username_taken` when another user holds it.
+   */
+  setUsername(input: UsernameSet): Promise<Result<Username>>;
+  /** True when no user holds the name. Counts per IP. `not_found` with `username` off. */
+  usernameAvailable(input: {
+    username: string;
+    ip: string | null;
+  }): Promise<Result<{ available: boolean }>>;
 }
 
 /** The linked identities of a settings page (plan 12a). Present in every deployment. */
@@ -759,16 +825,25 @@ export interface AuthApi {
     Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
   >;
   /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
+  /** `hints` replaces `passkey.hints.register` for this ceremony (plan 12i). */
   passkeyRegistrationOptions(input: {
     user: UserRow;
+    hints?: PasskeyHint[] | undefined;
   }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
   verifyPasskeyRegistration(input: {
     user: UserRow;
     response: unknown;
     name?: string | undefined;
   }): Promise<Result<PasskeySummary>>;
+  /**
+   * `hints` replaces `passkey.hints.signIn` for this ceremony (plan 12i).
+   * `extensions` takes PRF salts (base64url of 32 bytes) and a `largeBlob`
+   * read; each needs its `passkey.extensions` key on, else `invalid_body`.
+   */
   passkeyAuthenticationOptions(input: {
     ip: string | null;
+    hints?: PasskeyHint[] | undefined;
+    extensions?: PasskeySignInExtensions | undefined;
   }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
   verifyPasskeyAuthentication(input: {
     response: unknown;
@@ -958,6 +1033,8 @@ export interface AuthApi {
   operator: OperatorApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
+  phone?: PhoneApi;
+  anonymous?: AnonymousApi;
   totp?: TotpApi;
   jwt?: JwtApi;
   oauth?: OAuthApi;
@@ -981,7 +1058,12 @@ export interface Auth {
   /**
    * Serves the auth routes under `basePath`. Mount it for any request whose
    * path starts with `basePath`. With `observe`, pass `{ waitUntil }`: the
-   * flush of the events then runs after the answer (plan 12h).
+   * flush of the events then runs after the answer (plan 12h). Some routes
+   * do work after the answer, such as the SMS of a phone code. That work
+   * runs under the same `waitUntil` (ruling 23 of plan 12i). With no
+   * `waitUntil`, that work runs detached. On Workers with no `waitUntil`,
+   * `handle` waits for that work before it answers, and writes one
+   * `observe.wait_until_missing` line (ruling 29 of plan 12i).
    */
   handle(request: Request, options?: HandleOptions): Promise<Response>;
   /**
@@ -1050,6 +1132,9 @@ export interface Auth {
    * OIDC Discovery for this issuer, and RFC 9728 for each `oauth.resources`
    * entry. Mount it for the paths that start with `/.well-known/`. 404 for
    * any other path and while `oauth` is off; 405 for a method other than GET.
+   * With `passkey.relatedOrigins` on, it also answers the related origins
+   * document of WebAuthn Level 3 at `/.well-known/webauthn` on the `rpID`
+   * host (plan 12i).
    */
   wellKnown(request: Request): Promise<Response>;
   /** The same operations, in-process. */
@@ -1193,6 +1278,16 @@ function scimApp(input: { actor: SsoAppActor; organizationId: string }) {
 /** The URL of a call of `api.scim.users` with no query. */
 const SCIM_NO_QUERY = new URL("https://scim.invalid/");
 
+/**
+ * True on Cloudflare Workers: workerd sets `navigator.userAgent` to
+ * "Cloudflare-Workers" (Workers runtime APIs, read 2026-10-25). The workerd
+ * test of examples/worker pins the value. Read at each call, so a test can
+ * set the global. The compat shim reads it too: one source for the check.
+ */
+export function onWorkers(): boolean {
+  return globalThis.navigator?.userAgent === "Cloudflare-Workers";
+}
+
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
   // The record of a compat package (withDomainRecord) reaches the routes and the sweep.
@@ -1213,19 +1308,39 @@ export function createAuth(input: AuthConfig): Auth {
     // The flush starts only after waitUntil takes the promise. A hook that
     // throws starts no flush, so no batch floats with no hook. The batch stays
     // in the buffer for the next flush (fix wave of plan 12h, Low 4).
+    // The work after the answer of a route (ruling 23 of plan 12i) runs
+    // under the same waitUntil. The flush waits for it, so its lines go out
+    // in the batch of the request. With no waitUntil, the work runs detached.
+    // Workers stops a detached promise at the answer, before its first I/O
+    // (probe of the Task 5 re-review). So on Workers with no waitUntil, handle
+    // waits for the work before it answers (ruling 29 of plan 12i).
     async handle(request, options) {
-      const res = await route(request);
-      if (options?.waitUntil) {
-        let start = () => {};
-        const started = new Promise<void>((resolve) => {
-          start = resolve;
-        });
-        try {
-          options.waitUntil(started.then(() => config.observe.flush()));
-          start();
-        } catch (e) {
-          config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
+      const after: Promise<unknown>[] = [];
+      const res = await route(request, { waitUntil: (work) => void after.push(work) });
+      if (!options?.waitUntil) {
+        if (after.length > 0 && onWorkers()) {
+          config.observe.emit({ name: "observe.wait_until_missing" });
+          // The router catches each rejection of the work, so `all` never throws.
+          await Promise.all(after);
         }
+        return res;
+      }
+      let start = () => {};
+      const started = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      try {
+        // The router catches each rejection of the work, so `all` waits for every one.
+        // With no work, the flush starts as before, with no extra wait.
+        const ready = after.length === 0 ? started : started.then(() => Promise.all(after));
+        options.waitUntil(ready.then(() => config.observe.flush()));
+        start();
+      } catch (e) {
+        config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
+        // A waitUntil that throws took no promise, so on Workers the work
+        // would stop at the answer. Wait for it, as with no waitUntil (final
+        // fix wave item 14).
+        if (after.length > 0 && onWorkers()) await Promise.all(after);
       }
       return res;
     },
@@ -1324,6 +1439,8 @@ export function createAuth(input: AuthConfig): Auth {
         verifyEmailChange: refusesImpersonation((i) => verifyEmailChange(config, i)),
         delete: refusesImpersonation((i) => startAccountDelete(config, i)),
         confirmDelete: refusesImpersonation((i) => confirmAccountDelete(config, i)),
+        setUsername: refusesImpersonation((i) => setUsername(config, i)),
+        usernameAvailable: (i) => usernameAvailable(config, i),
       },
       identities: {
         list: (i) => listIdentities(config, i),
@@ -1340,6 +1457,7 @@ export function createAuth(input: AuthConfig): Auth {
               signUp: (i) => passwordSignUp(config, i),
               signIn: (i) => passwordSignIn(config, i),
               verifyEmail: (i) => verifyPasswordEmail(config, i),
+              verifyCode: (i) => verifyPasswordCode(config, i),
               resendVerification: (i) => resendPasswordVerification(config, i),
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),
@@ -1355,6 +1473,25 @@ export function createAuth(input: AuthConfig): Auth {
               verify: (i) => verifyEmailOtp(config, i),
               requestReset: (i) => requestResetOtp(config, i),
               reset: (i) => resetPasswordWithOtp(config, i),
+            },
+          }
+        : {}),
+      ...(config.anonymous
+        ? {
+            anonymous: {
+              signIn: (i) => signInAnonymous(config, i),
+              delete: refusesImpersonation((i) => deleteAnonymous(config, i)),
+            },
+          }
+        : {}),
+      ...(config.phone
+        ? {
+            phone: {
+              request: (i) => requestPhone(config, i),
+              verify: (i) => verifyPhone(config, i),
+              add: refusesImpersonation((i) => addPhone(config, i)),
+              verifyAdd: refusesImpersonation((i) => verifyAddPhone(config, i)),
+              remove: refusesImpersonation((i) => removePhone(config, i)),
             },
           }
         : {}),

@@ -3,6 +3,7 @@ import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import type { Where } from "../storage/port.js";
+import { handleProved } from "./address.js";
 import { hookGuard, runAfter, runBefore, type UserPatch } from "./hooks.js";
 import { later, ROUNDS } from "./second-factor.js";
 import { type PublicUser, publicUser, type ResolvedSession } from "./sessions.js";
@@ -42,7 +43,8 @@ export function unchanged(previous: UserRow): Where<"user">[] {
 /**
  * Writes the given profile fields of the caller (plan 12a, spec 8.15). No
  * fresh rule: the name and the image do not affect authentication. A
- * verified email is needed. A claim keeps the user row and its name (spec 8.2
+ * verified email is needed, or for a user with no address a verified
+ * handle (ruling 15 of plan 12i). A claim keeps the user row and its name (spec 8.2
  * item 5), so a claimant must not set what the owner inherits.
  *
  * The write is a compare-and-set on the row that the round read. D1 has no
@@ -55,7 +57,8 @@ export async function updateProfile(
   input: ProfileUpdate,
 ): Promise<Result<{ user: PublicUser }>> {
   const { user } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address needs a verified handle (ruling 15 of plan 12i).
+  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
   const patch: Pick<UserPatch, "name" | "image"> = {};
   if (input.name !== undefined) {
     if (input.name !== null && !validUserName(input.name)) return fail("invalid_body");

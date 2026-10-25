@@ -11,6 +11,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { type ModelName, schema } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, sessionOf } from "./operator-helpers.js";
@@ -62,6 +63,14 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     sso: { dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes and the SCIM server of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: { isolateLimiter: "allow" },
+    // The multi-session routes of plan 12i Task 11.
+    multiSession: {},
   };
 }
 
@@ -205,6 +214,7 @@ describe("the impersonation lists (plan 12f Task 11)", () => {
       unlink: await api.identities.unlink({ session, id: "x", ...net }),
       startLink: await api.startLink({ provider: "google", session, ip: null }),
       passwordChange: await api.password.change({ session, newPassword: "a new password 1" }),
+      setUsername: await api.user.setUsername({ session, username: "ada", ...net }),
       impersonate: await api.operator.impersonate({
         operator: session,
         userId: w.operator.user.id,

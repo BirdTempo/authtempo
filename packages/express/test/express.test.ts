@@ -483,3 +483,42 @@ describe("@authtempo/express (plan 11d2)", () => {
     );
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  it("passes the option with the request, or none", async () => {
+    const s = waitSpy();
+    const seen: [Promise<unknown>, string][] = [];
+    const app = express();
+    app.use(
+      "/own",
+      authHandler(s.auth, { waitUntil: (p, req) => void seen.push([p, req.originalUrl]) }),
+    );
+    app.use("/auth", authHandler(s.auth));
+    const server = app.listen(0, "127.0.0.1");
+    stops.push(() => server.close());
+    await new Promise((r) => server.once("listening", r));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    await (await fetch(`${base}/own/x`)).text();
+    expect(seen).toEqual([[s.work, "/own/x"]]);
+    await (await fetch(`${base}/auth/x`)).text();
+    expect(s.got).toEqual(["options", "none"]);
+  });
+});

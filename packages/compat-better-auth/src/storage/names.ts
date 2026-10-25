@@ -85,6 +85,12 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taBannedAt",
     "taBanReason",
     "taBanUntil",
+    // Better Auth's plugin columns that migration 0012 adds when absent (plan 12i).
+    "username",
+    "displayUsername",
+    "phoneNumber",
+    "phoneNumberVerified",
+    "isAnonymous",
   ],
   session: [
     "id",
@@ -154,6 +160,9 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "createdAt",
     "aaguid",
     "taUpdatedAt",
+    "taDiscoverable",
+    "taPrf",
+    "taLargeBlob",
   ],
   // Better Auth 1.7.2's columns (organization.mjs, read 2026-10-21) and taRank of migration 0010.
   organizationRole: [

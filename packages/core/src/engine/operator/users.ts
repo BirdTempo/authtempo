@@ -20,8 +20,13 @@ import {
  */
 export interface OperatorUser {
   id: string;
-  email: string;
+  /** Null for a user with no address (plan 12i). */
+  email: string | null;
   emailVerified: boolean;
+  /** The stored form of the username, or null (plan 12i). */
+  username: string | null;
+  /** The phone in E.164, or null (plan 12i). A support person reads it as the address. */
+  phone: string | null;
   name: string | null;
   createdAt: string;
   /** The ban while it holds, else null. */
@@ -141,6 +146,8 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
       id: user.id,
       email: user.email,
       emailVerified: user.emailVerified,
+      username: user.username,
+      phone: user.phone,
       name: user.name,
       createdAt: user.createdAt.toISOString(),
       ban:
@@ -263,7 +270,7 @@ export async function searchUsers(
     ]);
     // A cursor user who moved out of the prefix would skip the rest of the
     // prefix and answer `next: null` (review 12f Task 5 L2).
-    if (!last?.email.startsWith(prefix)) return fail("invalid_body");
+    if (!last?.email?.startsWith(prefix)) return fail("invalid_body");
     where.push({ field: "email", op: "gt", value: last.email });
   }
   const rows = await config.storage.findMany("user", where, {

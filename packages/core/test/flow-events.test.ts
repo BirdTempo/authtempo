@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
+import { signInAnonymous } from "../src/engine/anonymous.js";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -20,6 +21,7 @@ import {
   requestPasswordReset,
   resetPassword,
 } from "../src/engine/password.js";
+import { requestPhone, verifyPhone } from "../src/engine/phone.js";
 import { reauthenticate } from "../src/engine/reauth.js";
 import { disableMethod, enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { revokeSession } from "../src/engine/session-list.js";
@@ -38,6 +40,7 @@ import type { AuthEvent } from "../src/observe/port.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
@@ -297,6 +300,32 @@ const SIGN_INS: Record<
     };
   },
   email_otp: async (w) => ({ act: () => emailCode(w), events: w.events }),
+  // The phone code of plan 12i Task 5: a sign-up by a code, then a sign-in by a new code.
+  phone: async () => {
+    const sms = createRecordingSms();
+    const w = world({}, { phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true } });
+    const phone = "+14155550100";
+    const code = async () => {
+      must(await requestPhone(w.auth.config, { phone, ip: null }));
+      return /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    };
+    must(
+      await verifyPhone(w.auth.config, { phone, code: await code(), ip: null, userAgent: null }),
+    );
+    const next = await code();
+    return {
+      act: () => verifyPhone(w.auth.config, { phone, code: next, ip: null, userAgent: null }),
+      events: w.events,
+    };
+  },
+  // The anonymous sign-in of plan 12i Task 6: a new user and session, with no gate.
+  anonymous: async () => {
+    const w = world({}, { anonymous: { isolateLimiter: "allow" } });
+    return {
+      act: () => signInAnonymous(w.auth.config, { current: null, ip: null, userAgent: null }),
+      events: w.events,
+    };
+  },
   // An SSO sign-in through the OIDC start and callback routes (plan 12d).
   sso: async () => {
     const batches: AuthEvent[][] = [];

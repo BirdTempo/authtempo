@@ -18,7 +18,7 @@ import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { sessionsEnded } from "../sessions.js";
 import { dropMemberTeams } from "../teams.js";
 import { holdUser, userStays } from "../user-hold.js";
-import { normalizeEmail, validUserName } from "../users.js";
+import { draftUserRow, normalizeEmail, validUserName } from "../users.js";
 import {
   ACCESS_END_KEEP,
   ACCESS_END_LEAST,
@@ -647,18 +647,13 @@ export async function createAdmin(
         // Every before hook runs before the first write: the D1 undo (plan 9d).
         const user =
           existing ??
-          (await steps.user(tx, {
-            id: userId,
-            email,
-            emailVerified: false,
-            name: input.name ?? null,
-            image: null,
-            bannedAt: null,
-            banReason: null,
-            banUntil: null,
-            createdAt: now,
-            updatedAt: now,
-          }));
+          (await steps.user(
+            tx,
+            draftUserRow(
+              { id: userId, email, emailVerified: false, name: input.name ?? null },
+              now,
+            ),
+          ));
         let change: PartChange;
         if (found) {
           const member = await memberOf(tx, organization.id, user.id);

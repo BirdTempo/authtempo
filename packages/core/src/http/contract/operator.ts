@@ -42,6 +42,7 @@ const SecretVersionCountJson = z.strictObject({
   signingKeys: z.number().int(),
   emailCodes: z.number().int(),
   ssoClientSecrets: z.number().int(),
+  stateData: z.number().int(),
 });
 
 /** A user id or a cursor. A core id has 26 characters; the compat package keeps longer ids, up to 64. */
@@ -116,8 +117,12 @@ export const endAllBody = z.strictObject({
 /** One user as `api.operator.users` answers it: no hash, no sealed value, no token, no subject. */
 const OperatorUserJson = z.strictObject({
   id: z.string(),
-  email: z.string(),
+  /** Null for a user with no address (plan 12i). */
+  email: z.string().nullable(),
   emailVerified: z.boolean(),
+  /** The username and the phone, or null (plan 12i). */
+  username: z.string().nullable(),
+  phone: z.string().nullable(),
   name: z.string().nullable(),
   createdAt: z.iso.datetime(),
   ban: z

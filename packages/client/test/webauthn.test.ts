@@ -6,6 +6,7 @@ import {
   browserWebAuthn,
   credentialToJSON,
   type PublicKeyCredentialLike,
+  splitExtensionResults,
   supportsPasskeys,
   toBinaryCreationOptions,
   toBinaryRequestOptions,
@@ -78,6 +79,84 @@ describe("conversions", () => {
     expect(new TextDecoder().decode(bin.challenge as ArrayBuffer)).toBe("challenge");
     expect(new TextDecoder().decode(bin.allowCredentials?.[0]?.id as ArrayBuffer)).toBe("cred");
     expect(bin.rpId).toBe(RP.id);
+  });
+
+  it("decodes the PRF salts and a large blob to write, and keeps the rest (plan 12i)", () => {
+    const salt = base64UrlEncode(new Uint8Array(32).fill(7));
+    const bin = toBinaryRequestOptions({
+      challenge: "Y2hhbGxlbmdl",
+      extensions: {
+        prf: {
+          eval: { first: salt, second: "AQID" },
+          evalByCredential: { Y3JlZA: { first: "BAUG" } },
+        },
+        largeBlob: { read: true },
+      } as never,
+    });
+    const ext = bin.extensions as unknown as {
+      prf: {
+        eval: { first: ArrayBuffer; second: ArrayBuffer };
+        evalByCredential: Record<string, { first: ArrayBuffer }>;
+      };
+      largeBlob: { read: boolean };
+    };
+    expect(new Uint8Array(ext.prf.eval.first)).toEqual(new Uint8Array(32).fill(7));
+    expect(new Uint8Array(ext.prf.eval.second)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(new Uint8Array(ext.prf.evalByCredential.Y3JlZA?.first ?? new ArrayBuffer(0))).toEqual(
+      new Uint8Array([4, 5, 6]),
+    );
+    expect(ext.largeBlob).toEqual({ read: true });
+    const created = toBinaryCreationOptions({
+      rp: RP,
+      user: { id: "dXNlcg", name: "ada", displayName: "ada" },
+      challenge: "Y2hhbGxlbmdl",
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      extensions: { credProps: true, prf: {}, largeBlob: { support: "preferred", write: "AQID" } },
+    } as never);
+    const cext = created.extensions as unknown as {
+      credProps: boolean;
+      prf: unknown;
+      largeBlob: { support: string; write: ArrayBuffer };
+    };
+    expect(cext.credProps).toBe(true);
+    expect(cext.prf).toEqual({});
+    expect(cext.largeBlob.support).toBe("preferred");
+    expect(new Uint8Array(cext.largeBlob.write)).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("writes the binary extension outputs as base64url, and splits off the two that stay in the browser (plan 12i)", async () => {
+    const soft = await SoftAuthenticator.create({ rpID: RP.id, origin: ORIGIN });
+    const auth = await soft.authenticate("Y2hhbGxlbmdl");
+    const outputs = {
+      prf: { enabled: true, results: { first: new Uint8Array([1, 2, 3]).buffer } },
+      largeBlob: { blob: new Uint8Array([9, 9]) },
+      credProps: { rk: true },
+    };
+    const cred = binaryCredential({ ...auth, clientExtensionResults: {} });
+    const json = credentialToJSON({ ...cred, getClientExtensionResults: () => outputs });
+    expect(json.clientExtensionResults).toEqual({
+      prf: { enabled: true, results: { first: "AQID" } },
+      largeBlob: { blob: "CQk" },
+      credProps: { rk: true },
+    });
+    const split = splitExtensionResults(json);
+    expect(split.results).toEqual({ prf: { first: "AQID" }, largeBlob: "CQk" });
+    expect(split.response.clientExtensionResults).toEqual({
+      prf: { enabled: true },
+      largeBlob: {},
+      credProps: { rk: true },
+    });
+    expect(JSON.stringify(split.response)).not.toContain("AQID");
+    expect(JSON.stringify(split.response)).not.toContain("CQk");
+    // The browser's own toJSON writes the same strings; a second value passes too.
+    const native = splitExtensionResults({
+      ...auth,
+      clientExtensionResults: { prf: { results: { first: "AQID", second: "BAUG" } } },
+    });
+    expect(native.results).toEqual({ prf: { first: "AQID", second: "BAUG" } });
+    expect(native.response.clientExtensionResults).toEqual({ prf: {} });
+    // A response with no output keeps its outputs and gives none.
+    expect(splitExtensionResults(auth)).toEqual({ response: auth, results: {} });
   });
 
   it("turns a binary credential back into the JSON the soft authenticator made", async () => {

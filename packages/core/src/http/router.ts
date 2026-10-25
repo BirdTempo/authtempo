@@ -1,15 +1,17 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
-import type { ResolvedConfig } from "../config.js";
+import { atBase, pickBase, type ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
+import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
-import { impersonationRefusal } from "./impersonation-rules.js";
+import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
-import type { RouteKey, RouterCode } from "./route-list.js";
+import { HOST_CODE, type RouteKey, type RouterCode } from "./route-list.js";
+import { withSessionBag } from "./session-answer.js";
 
 export interface RouteContext {
   request: Request;
@@ -27,6 +29,14 @@ export interface RouteContext {
    * empty object for a route with none.
    */
   params: Readonly<Record<string, string>>;
+  /**
+   * Keeps `work` alive after the answer (ruling 23 of plan 12i). A route
+   * whose slow work differs by whether an account exists starts it here and
+   * answers at once, so the answer time tells nothing. The router hands the
+   * work to the `waitUntil` of the call. With none, the work runs detached.
+   * A rejection never reaches the answer: it becomes one `error.internal` line.
+   */
+  waitUntil(work: Promise<unknown>): void;
 }
 
 /** What a route's preflight hook reads (plan 11d). */
@@ -53,6 +63,13 @@ export interface Route {
    * route sets it, and the route list test refuses a core route without it.
    */
   key?: RouteKey;
+  /**
+   * The path of the route that this one serves again (plan 12i Task 12):
+   * the callback of a provider with a `redirectURI`. Its `key` is that
+   * route's key. An alias is no entry of ROUTES, and the route list test
+   * holds each alias to the config.
+   */
+  aliasOf?: string;
   /**
    * Skip the Origin check on this POST. Only for a form that another site
    * posts: Apple's `response_mode=form_post`, and the end-session request of
@@ -111,8 +128,17 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
 }
 
 /** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
-function routerError(code: RouterCode): Response {
+function routerError(code: RouterCode | typeof HOST_CODE): Response {
   return json({ error: code }, ERRORS[code]);
+}
+
+/**
+ * The config of the request's host (plan 12i Task 18), or null for a host
+ * outside a `baseURL` list. Only `request.url` takes part, never a header.
+ */
+function hostConfig(config: ResolvedConfig, url: URL): ResolvedConfig | null {
+  const entry = pickBase(config, url);
+  return entry === null ? null : atBase(config, entry);
 }
 
 /**
@@ -304,6 +330,9 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * A path with no core route gets both rules. So a package that serves its
  * own POST paths beside core (the Better Auth shim) checks them as core
  * does, through `crossSiteRefusal` (plan 12a fix wave, final review F1).
+ * A host outside a `baseURL` list gets 421 `host_not_allowed` for each
+ * method, before the rules (plan 12i Task 18). The Origin rule reads the
+ * entry of the request's host.
  */
 export function createPostGate(
   config: ResolvedConfig,
@@ -311,12 +340,15 @@ export function createPostGate(
 ): (request: Request) => Response | null {
   const matchRoute = createRouteMatcher(config, routes);
   return (request) => {
+    const url = new URL(request.url);
+    const host = hostConfig(config, url);
+    if (host === null) return routerError(HOST_CODE);
     if (SAFE_METHODS.has(request.method)) return null;
-    const route = matchRoute(request.method, new URL(request.url).pathname)?.route;
+    const route = matchRoute(request.method, url.pathname)?.route;
     if (route?.allowCrossSiteForm) return null;
     const origin = request.headers.get("origin");
     if (route?.clientOrigin && origin !== null) return null;
-    const trusted = origin !== null && originTrusted(config, origin);
+    const trusted = origin !== null && originTrusted(host, origin);
     if (origin !== null && !trusted) return routerError("origin_not_trusted");
     if (fetchMetadataRefuses(request, trusted)) return routerError("origin_not_trusted");
     return null;
@@ -338,7 +370,9 @@ export function createPostGate(
  * rule covers `POST`, `PUT`, `PATCH`, and `DELETE`: a request whose Origin
  * header is present and not trusted gets 403 before any handler runs. One
  * with no Origin is a non-browser client and passes. One that
- * `fetchMetadataRefuses` names gets the same 403 (plan 12b). A route with `clientOrigin` checks a
+ * `fetchMetadataRefuses` names gets the same 403 (plan 12b). A host outside a
+ * `baseURL` list gets 421 `host_not_allowed` before any of this (plan 12i
+ * Task 18); the request's config holds the entry of its host. A route with `clientOrigin` checks a
  * foreign Origin itself, and a route with `preflight` answers a foreign
  * preflight itself (plan 11d). An impersonation session gets 403
  * `impersonation_session` at each route of `IMPERSONATION_REFUSED`, after
@@ -348,14 +382,14 @@ export function createRouter(
   config: ResolvedConfig,
   routes: Route[],
   gate: (request: Request) => Response | null = createPostGate(config, routes),
-): (request: Request) => Promise<Response> {
+): (request: Request, options?: HandleOptions) => Promise<Response> {
   const matchRoute = createRouteMatcher(config, routes);
   // The routes that answer a foreign origin's preflight themselves (plan 11d).
   const preflights = new Map(
     routes.filter((r) => r.preflight).map((r) => [`${config.basePath}${r.path}`, r]),
   );
   const trustTraceparent = config.observeConfig?.trustTraceparent === true;
-  return async (request) => {
+  return async (request, options) => {
     const started = config.clock.now().getTime();
     const url = new URL(request.url);
     // An OPTIONS request names the route at its path: the POST, else the GET.
@@ -374,8 +408,10 @@ export function createRouter(
     try {
       ip = config.clientIp(request);
     } catch {}
+    // The entry of the request's host (plan 12i Task 18). A host outside the list runs no handler.
+    const host = hostConfig(config, url);
     const scoped: ResolvedConfig = {
-      ...config,
+      ...(host ?? config),
       observe: config.observe.scope({
         traceId,
         spanId: minted.spanId,
@@ -385,7 +421,23 @@ export function createRouter(
         userAgent: request.headers.get("user-agent"),
       }),
     };
-    const res = await answer(scoped, request, url, match, traceId);
+    // The work after the answer (ruling 23 of plan 12i). Its rejection is caught
+    // here, so a detached promise never rejects with no handler.
+    const waitUntil = (work: Promise<unknown>): void => {
+      const kept = work.catch((e: unknown) => {
+        scoped.observe.emit({
+          name: "error.internal",
+          method: request.method,
+          route: routeKey,
+          errorName: e,
+        });
+      });
+      options?.waitUntil?.(kept);
+    };
+    const res =
+      host === null
+        ? withTrace(routerError(HOST_CODE), traceId)
+        : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
@@ -404,8 +456,10 @@ export function createRouter(
       scoped.observe.emit({
         name: "sign_in",
         method: via,
-        // The provider is the third part of the path of a social route.
-        ...(via === "social" && route ? { provider: route.path.split("/")[2] } : {}),
+        // The provider is the third part of the path of a social route, or of the route an alias serves.
+        ...(via === "social" && route
+          ? { provider: (route.aliasOf ?? route.path).split("/")[2] }
+          : {}),
         outcome: "failure",
         ...eventCode(code),
       });
@@ -419,9 +473,10 @@ export function createRouter(
     url: URL,
     match: RouteMatch | null,
     traceId: string,
+    waitUntil: RouteContext["waitUntil"],
   ): Promise<Response> {
     const origin = request.headers.get("origin");
-    const trusted = origin !== null && originTrusted(config, origin);
+    const trusted = origin !== null && originTrusted(scoped, origin);
     if (request.method === "OPTIONS") {
       // A browser on another origin asks before a credentialed request. Only
       // a trusted origin gets an answer it can use.
@@ -445,13 +500,19 @@ export function createRouter(
       return withTrace(preflight, traceId);
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
-    // of the cookie move, of the CORS write, or of the trace header answers
-    // `internal` with one log line.
+    // of the bag write, of the cookie move, of the CORS write, or of the
+    // trace header answers `internal` with one log line. The bag write of
+    // multi-session (plan 12i Task 11) runs after every handler, so no
+    // sign-in route can skip it.
     try {
       const res = await moveLegacyCookie(
         scoped,
         request,
-        await dispatch(scoped, request, url, match),
+        await withSessionBag(
+          scoped,
+          request,
+          await dispatch(scoped, request, url, match, waitUntil),
+        ),
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
@@ -507,6 +568,7 @@ export function createRouter(
     request: Request,
     url: URL,
     match: RouteMatch | null,
+    waitUntil: RouteContext["waitUntil"],
   ): Promise<Response> {
     if (!match) return routerError("not_found");
     const refusal = gate(request);
@@ -515,6 +577,9 @@ export function createRouter(
     const impersonated =
       match.route.key && (await impersonationRefusal(scoped, request, match.route.key));
     if (impersonated) return impersonated;
+    // The anonymous step (plan 12i Task 6): beside the impersonation step, in its form.
+    const anonymous = match.route.key && (await anonymousRefusal(scoped, request, match.route.key));
+    if (anonymous) return anonymous;
     return match.route.handler({
       request,
       url,
@@ -522,6 +587,7 @@ export function createRouter(
       ip: config.clientIp(request),
       now: config.clock.now(),
       params: match.params,
+      waitUntil,
     });
   }
 }

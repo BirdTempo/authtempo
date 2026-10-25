@@ -7,7 +7,19 @@ import {
 
 type Simple = Extract<
   ClientPlugin,
-  { id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" | "sso" }
+  {
+    id:
+      | "passkey"
+      | "magic-link"
+      | "email-otp"
+      | "admin"
+      | "api-key"
+      | "sso"
+      | "anonymous"
+      | "username"
+      | "phone-number"
+      | "multi-session";
+  }
 >;
 
 /** Better Auth's `organizationClient({ ac, roles })`: `checkRolePermission` reads the roles (plan 12k). */
@@ -49,4 +61,27 @@ export function apiKeyClient(): Simple {
  */
 export function ssoClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "sso" };
+}
+
+// The client plugins of plan 12i Task 16. Their calls are on the client with
+// or without them, and the server answers 404 for a plugin that is off.
+export function anonymousClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "anonymous" };
+}
+export function usernameClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "username" };
+}
+export function phoneNumberClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "phone-number" };
+}
+export function multiSessionClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "multi-session" };
+}
+/** Better Auth's `lastLoginMethodClient({ cookieName })`: the name of the server plugin's cookie. */
+export function lastLoginMethodClient(options?: {
+  cookieName?: string;
+}): Extract<ClientPlugin, { id: "last-login-method" }> {
+  return options
+    ? { kind: COMPAT_CLIENT_PLUGIN, id: "last-login-method", options }
+    : { kind: COMPAT_CLIENT_PLUGIN, id: "last-login-method" };
 }

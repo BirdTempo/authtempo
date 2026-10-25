@@ -315,6 +315,10 @@ describe("the repair on core's D1 adapter (plan 9b2 fix round 2)", () => {
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: AT,
         updatedAt: AT,
       });

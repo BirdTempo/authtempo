@@ -7,6 +7,7 @@
  */
 import { CAPTCHA_FLOWS } from "../captcha.js";
 import {
+  ANONYMOUS_HOOK_POINTS,
   type HookName,
   IDENTITY_HOOK_POINTS,
   OPERATOR_HOOK_POINTS,
@@ -118,7 +119,7 @@ const COUNT = { kind: "count" } as const;
 
 const enumOf = (values: readonly string[]) => ({ kind: "enum", values }) as const;
 
-/** Every hook name, read from the seven hook point constants (the last two of plan 12d). */
+/** Every hook name, read from the eight hook point constants (sso and scim of plan 12d, anonymous of plan 12i). */
 const HOOK_NAMES: readonly string[] = [
   ...Object.keys(ORGANIZATION_HOOK_POINTS).map((p) => `organization.${p}`),
   ...Object.keys(SESSION_HOOK_POINTS).map((p) => `session.${p}`),
@@ -127,6 +128,7 @@ const HOOK_NAMES: readonly string[] = [
   ...Object.keys(OPERATOR_HOOK_POINTS).map((p) => `operator.${p}`),
   ...Object.keys(SSO_HOOK_POINTS).map((p) => `sso.${p}`),
   ...Object.keys(SCIM_HOOK_POINTS).map((p) => `scim.${p}`),
+  ...Object.keys(ANONYMOUS_HOOK_POINTS).map((p) => `anonymous.${p}`),
 ];
 
 /** The key of each entry of ROUTES, `<method> <path>`. */
@@ -167,13 +169,23 @@ export type Outcome = (typeof OUTCOMES)[number];
  */
 export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /password/sign-in": "password",
+  // The sign-up code of plan 12i Task 20: a wrong guess is a sign-in failure.
+  "POST /password/verify/code": "password",
   "GET /magic-link/verify": "magic_link",
   "POST /magic-link/verify": "magic_link",
   "POST /otp/verify": "email_otp",
+  // The phone code of plan 12i Task 5.
+  "POST /phone/verify": "phone",
+  // The anonymous sign-in of plan 12i Task 6.
+  "POST /anonymous/sign-in": "anonymous",
   "POST /passkey/authenticate/verify": "passkey",
+  // The passkey-first sign-up of plan 12i Task 8.
+  "POST /passkey/sign-up/verify": "passkey",
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
   "POST /social/apple/callback": "social",
+  // The ID-token route of plan 12i Task 10.
+  "POST /social/:provider/id-token": "social",
   // The OIDC callback and the SAML ACS of plan 12d.
   "GET /sso/:connectionId/callback": "sso",
   "POST /sso/:connectionId/acs": "sso",
@@ -373,6 +385,12 @@ export const EVENTS = {
   "observe.wait_until_threw": fault("error", "authtempo: waitUntil threw; the flush has no hook", {
     errorName: ERROR_NAME,
   }),
+  // Ruling 29 of plan 12i: on Workers with no waitUntil, handle waits for the work after the answer.
+  "observe.wait_until_missing": fault(
+    "warn",
+    "authtempo: no waitUntil on Workers; the answer waited for the work after it",
+    {},
+  ),
   "secret.low_entropy": fault(
     "warn",
     `authtempo: <path> has an estimated <bits> bits of entropy; ${ENTROPY_WARN_BITS} or more is recommended`,
@@ -423,6 +441,12 @@ export const EVENTS = {
   "captcha.no_answer": fault("error", "authtempo: the captcha did not answer", {
     flow: enumOf(CAPTCHA_FLOWS),
   }),
+  // Plan 12i: never the number or the text, which holds the code.
+  "sms.port_threw": fault("error", "authtempo: the SMS port threw", { errorName: ERROR_NAME }),
+  // Ruling 23 of plan 12i: a send after the answer that the cap refused or the port did not make.
+  "sms.not_sent": fault("error", "authtempo: an SMS after the answer was not sent", {
+    reason: enumOf(["capped", "unavailable", "timeout"]),
+  }),
   "hook.copy_failed": fault("error", "authtempo: hook event copy failed", {
     hook: enumOf(HOOK_NAMES),
     errorName: ERROR_NAME,
@@ -464,6 +488,8 @@ export const EVENTS = {
   "profile.update_gave_up": fault("error", "authtempo: profile update gave up", {
     userId: ROW_ID,
   }),
+  "username.set_gave_up": fault("error", "authtempo: username set gave up", { userId: ROW_ID }),
+  "phone.set_gave_up": fault("error", "authtempo: phone set gave up", { userId: ROW_ID }),
   "notice.mail_failed": fault("error", "authtempo: notice mail failed", {
     event: { kind: "identifier" },
     errorName: ERROR_NAME,
@@ -550,11 +576,21 @@ export const EVENTS = {
   "social.token_missing": fault("error", "authtempo: social token answer has no token", {
     provider: PROVIDER,
   }),
+  "social.token_refused": fault("error", "authtempo: social token answer refused", {
+    provider: PROVIDER,
+  }),
   "social.id_token_rejected": fault("error", "authtempo: social id token rejected", {
     provider: PROVIDER,
     errorClass: ERROR_CLASS,
   }),
   "social.nonce_mismatch": fault("error", "authtempo: social nonce mismatch", {
+    provider: PROVIDER,
+  }),
+  // The second use of one ID token at the ID-token route (plan 12i Task 10).
+  "social.id_token_replayed": fault("error", "authtempo: social id token used again", {
+    provider: PROVIDER,
+  }),
+  "social.claims_refused": fault("error", "authtempo: social id token claims refused", {
     provider: PROVIDER,
   }),
   "social.user_info_failed": fault("error", "authtempo: social user info failed", {
@@ -681,6 +717,17 @@ export const EVENTS = {
     "authtempo: the sweep organization rest step stopped",
     SWEEP_STOP,
   ),
+  // The anonymous step of plan 12i Task 6.
+  "sweep.anonymous_stopped": fault(
+    "error",
+    "authtempo: the sweep anonymous step stopped",
+    SWEEP_STOP,
+  ),
+  // The clean-up of an anonymous upgrade after its commit (plan 12i Task 7, ruling 36 L2).
+  "anonymous.cleanup_failed": fault("error", "authtempo: the anonymous upgrade cleanup failed", {
+    rowId: ROW_ID,
+    errorName: ERROR_NAME,
+  }),
   // The lines of plan 12d (SSO and SCIM). The raw IP of a refused sign-in is
   // an address input: only the include rule writes it (spec 31 item 8).
   "sso.guard_refused": fault("error", "authtempo: sso guard refused", {
@@ -944,6 +991,9 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "operator.afterAction": "operator.action",
   "sso.beforeSignIn": REFUSAL_EXEMPT,
   "scim.afterChange": "scim.change",
+  "anonymous.beforeLink": REFUSAL_EXEMPT,
+  // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.
+  "anonymous.afterLink": "session.end",
 };
 
 /** The `organization.change` event of an `after` point, emitted beside its hook. */

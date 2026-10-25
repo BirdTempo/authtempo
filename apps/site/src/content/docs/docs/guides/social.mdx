@@ -33,7 +33,9 @@ import test from "../../../../../samples/guides/social.test.ts?raw";
 4. Link each button to `/auth/social/google/start?next=/home` or `/auth/social/apple/start?next=/home` on the API.
 5. Core's own sign-in page shows the buttons of every configured provider. A custom page must show them too.
 
-<Code code={test} lang="ts" title="The start of each flow as a test" />
+6. For Google One Tap or the native Apple sheet, ask `POST /auth/social/<provider>/id-token/nonce` for a nonce. Give `providerNonce` to the provider, and post the ID token with the raw `nonce` to `POST /auth/social/<provider>/id-token`. [Sign in with Google One Tap](/docs/guides/one-tap/) and [Sign in with the native Apple sheet](/docs/guides/native-apple/) give the steps.
+
+<Code code={test} lang="ts" title="The start of each flow and the nonce of One Tap as a test" />
 
 ## How it behaves
 

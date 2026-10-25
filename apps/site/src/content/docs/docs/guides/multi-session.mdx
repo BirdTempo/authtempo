@@ -1,0 +1,71 @@
+---
+title: Several accounts in one browser
+description: Keep the sessions of several users in one browser, list them, switch between them, and sign out of one.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 11"
+  - packages/core/src/engine/multi-session.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/multi-session.ts?raw";
+import test from "../../../../../samples/guides/multi-session.test.ts?raw";
+
+**For:** an app developer whose users have a work account and a home account, and switch between them.
+
+**What it does:** with `multiSession`, a sign-in of a second user keeps the first session in an HttpOnly bag cookie. `GET /multi-session` lists the sessions, and `POST /multi-session/switch` makes one active.
+
+## Before you start
+
+- A browser sign-in with the session cookie, as in [Sign in with a magic link](/docs/guides/magic-link/).
+- The cookie rules of [Cookies](/docs/reference/cookies/). The bag cookie follows them.
+
+## Steps
+
+1. Set `multiSession` to `{}`, or to `{ max }` from 2 to 10.
+2. Offer "Add an account": it runs a normal sign-in in the same browser.
+3. Call `GET /multi-session` with the cookies, and show each `user`.
+4. On a click, post `{ sessionId }` to `POST /multi-session/switch`.
+5. Offer "Sign out of this account": it posts `{ sessionId }` to `POST /multi-session/sign-out`.
+6. Offer "Sign out of all accounts": it posts to `POST /sign-out`.
+7. In a browser app, call `client.multiSession.list`, `client.multiSession.switch`, and `client.multiSession.signOut` of the [client package](/docs/reference/client/) in place of the calls.
+
+<Code code={config} lang="ts" title="Multi-session in the config" />
+
+<Code code={test} lang="ts" title="Two users in one browser as a test" />
+
+## How it behaves
+
+- The session cookie holds the active token. The bag cookie `__Host-tempo_sessions` holds the others, with `HttpOnly`, `Secure`, and `Path=/`.
+- A browser sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session, so each user has one session in the browser.
+- A sign-in past `max` (5 by default) ends the bag session that the browser used least recently, with the reason `displaced`. It never ends the active session.
+- No answer holds a token. `GET /multi-session` answers `sessionId`, `active`, and the `id`, `name`, `email`, `username`, and `image` of each user.
+- Each route resolves each token of the bag at each read. A revoked, expired, or banned session leaves the bag cookie in the same answer.
+- A read of a bag token never slides its expiry. So a list does not keep an idle session alive.
+- A switch is no sign-in. It makes no session fresh, and it links no anonymous user.
+- `POST /sign-out` ends every session of the browser and clears both cookies. `POST /multi-session/sign-out` ends one session.
+- A request with the Bearer scheme answers 401: a bearer client has no bag. Another scheme, such as HTTP Basic in front of the site, does not refuse a browser.
+- An anonymous session never enters the bag. A sign-in over it upgrades the anonymous user, as in [Anonymous sessions](/docs/guides/anonymous/).
+- An impersonation session gets `impersonation_session` at each route.
+- The limit `multi-session:ip` allows 60 calls per IP per 15 minutes, over the three routes.
+
+## Residuals
+
+- When the active session ends elsewhere, the three routes answer 401. The browser reaches its bag only after a new sign-in.
+- Such a stranded bag stays in the browser. An anonymous sign-in needs no credential, and it makes the bag reachable again. On a shared computer, sign out with `POST /sign-out`: it clears the bag.
+- A session that a SCIM deactivate revoked keeps its place in the bag until the next list or switch. Until then, a sign-in can displace a live session in its place.
+
+## If it fails
+
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the browser has no live active session, or the request has the Bearer scheme.
+- [`not_found`](/docs/reference/errors/#not_found): the `sessionId` names no live session of this browser.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body has no `sessionId`.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the IP made 60 calls in 15 minutes.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot use the bag.
+
+## Next
+
+- [Cookies](/docs/reference/cookies/)
+- [Multi-session routes](/docs/reference/routes/#multi-session)
+- [Multi-session](/docs/reference/config/#multi-session)

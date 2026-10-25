@@ -1,5 +1,6 @@
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
-import type { MailMessage } from "@authtempo/core";
+import { createPbkdf2PasswordHash, type MailMessage } from "@authtempo/core";
+import { createRecordingSms } from "@authtempo/core/testing";
 import postgres from "postgres";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import worker, { createWorker, type Env } from "../src/index";
@@ -105,4 +106,53 @@ it("answers 500 to a sign-in request until the app has a mail transport", async 
     ctx,
   );
   expect(res.status).toBe(500);
+});
+
+// The phone code request and the code-mode sign-up do their store work and
+// their send after the answer (ruling 23 of plan 12i). That work queries the
+// per-request client, so the Worker must end the client after it, not at once.
+it("sends the phone code and the sign-up code after the answer on the per-request client", async () => {
+  const sms = createRecordingSms();
+  const sent: MailMessage[] = [];
+  const app = createWorker(
+    {
+      async send(m) {
+        sent.push(m);
+      },
+    },
+    undefined,
+    () => ({
+      password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), verifyBy: "code" },
+      phone: { sms, regions: ["+1"], signUp: true },
+    }),
+  );
+
+  const phone = await app.fetch(json("/auth/phone/request", { phone: "+14155550100" }), env, ctx);
+  expect(phone.status).toBe(200);
+  const signUp = await app.fetch(
+    json("/auth/password/sign-up", {
+      email: "grace@example.com",
+      password: "correct horse battery",
+    }),
+    env,
+    ctx,
+  );
+  expect(signUp.status).toBe(200);
+  await Promise.all(pending);
+
+  expect(sms.sent).toHaveLength(1);
+  expect(sent.map((m) => m.to)).toEqual(["grace@example.com"]);
+  const sql = postgres(DB_URL, { max: 1, onnotice: () => {} });
+  try {
+    const users = await sql<
+      { n: number }[]
+    >`SELECT count(*)::int AS n FROM ta_user WHERE email = 'grace@example.com'`;
+    expect(users[0]?.n).toBe(1);
+    const codes = await sql<
+      { purpose: string }[]
+    >`SELECT purpose FROM ta_verification WHERE purpose IN ('phone-otp', 'password-verify-otp') ORDER BY purpose`;
+    expect(codes.map((c) => c.purpose)).toEqual(["password-verify-otp", "phone-otp"]);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 });

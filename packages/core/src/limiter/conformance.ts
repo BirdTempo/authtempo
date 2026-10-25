@@ -40,6 +40,11 @@ export function runLimiterConformance(
       return out;
     }
 
+    it("declares its scope: isolate or shared (plan 12i)", () => {
+      // A limiter with no scope counts as isolate, and createAuth then refuses `phone`.
+      expect(["isolate", "shared"]).toContain(limiter.scope);
+    });
+
     it("allows max calls in one window and refuses the next", async () => {
       expect(await calls("k", w.max + 1)).toEqual([true, true, true, false]);
       expect(await limiter.allow("k", w)).toBe(false);
@@ -108,3 +113,6 @@ export function runLimiterConformance(
     });
   });
 }
+
+/** The daily cap of the phone code on a shared limiter (plan 12i): each adapter package runs it. */
+export { type PhoneCapTarget, runPhoneCapConformance } from "./phone-cap.js";

@@ -37,7 +37,7 @@ async function takenBy(auth: Auth, email: string): Promise<void> {
   if (!up.ok) throw new Error(up.code);
 }
 
-async function addressOf(auth: Auth, id: string): Promise<string | undefined> {
+async function addressOf(auth: Auth, id: string): Promise<string | null | undefined> {
   return (await auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]))?.email;
 }
 

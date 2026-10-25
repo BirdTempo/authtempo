@@ -4,6 +4,7 @@ import type { ReauthEventMethod } from "../observe/events.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
+import { hasAddress } from "./address.js";
 import { checkCode, consumeCode, issueCode, REQUEST_PER_EMAIL, verifyGate } from "./email-otp.js";
 import { markFresh } from "./fresh.js";
 import { provePasskeyOf, reauthPasskeyChallenge } from "./passkeys.js";
@@ -54,6 +55,8 @@ export async function requestReauthCode(
   const { user } = input.session;
   if (!(await limit(config, "reauth-mail:user", user.id, REAUTH_MAIL_PER_USER)))
     return fail("rate_limited");
+  // A user with no address (plan 12i) gets no code and no mail; the answer is the same.
+  if (!hasAddress(user)) return ok({ sent: true });
   if (!(await limit(config, "otp:email", user.email, REQUEST_PER_EMAIL)))
     return fail("rate_limited");
   if (!(await limit(config, "otp:email-day", user.email, MAILED_CODES_PER_EMAIL_DAY)))
@@ -87,6 +90,8 @@ async function proveReauthCode(
   ip: string | null,
 ): Promise<Result<true>> {
   if (!config.emailOtp) return fail("not_found");
+  // No code goes to a user with no address (plan 12i), so no code matches.
+  if (!hasAddress(user)) return fail("invalid_code");
   const gate = await verifyGate(config, { email: user.email, ip });
   if (!gate.ok) return gate;
   const now = config.clock.now();

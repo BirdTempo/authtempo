@@ -93,7 +93,14 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
-    expect(keys.length).toBe(186);
+    // Plan 12i Task 9 adds GET /.well-known/webauthn.
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
+    // Plan 12i Task 11 adds the three multi-session routes.
+    // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
+    // Plan 12i Task 20 adds POST /password/verify/code.
+    // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
+    expect(keys.length).toBe(204);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -175,13 +182,16 @@ describe("openApiDocument (plan 11g)", () => {
 
   it("marks the rewrap body as not required, and every other body as required", () => {
     // The rewrap reads an empty body as `{}` (plan 11c2), and so does the stop of an
-    // impersonation (plan 12f). Their bodies are the ones that are not required.
+    // impersonation (plan 12f), and so do the two passkey options routes (plan 12i).
+    // Their bodies are the ones that are not required.
     const optional = operations(reference())
       .filter(({ op }) => op.requestBody?.required === false)
       .map(({ key }) => key);
     expect(optional.sort()).toEqual([
       "POST /operator/impersonate/stop",
       "POST /operator/secrets/rewrap",
+      "POST /passkey/authenticate/options",
+      "POST /passkey/register/options",
     ]);
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
     // Plan 12f adds the seven bodies of the operator writes, then the two of
@@ -189,8 +199,15 @@ describe("openApiDocument (plan 11g)", () => {
     // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
     // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
     // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99. Task 8
-    // adds the form of the SAML ACS: 100.
-    expect(bodies.length).toBe(100);
+    // adds the form of the SAML ACS: 100. Plan 12i Task 9 adds the two passkey
+    // options bodies: 102. Plan 12i Task 2 adds the body of POST
+    // /user/username: 103. Plan 12i Task 5 adds the five phone bodies: 108.
+    // Plan 12i Task 6 adds the two anonymous bodies: 110. Plan 12i Task 11
+    // adds the bodies of the multi-session switch and sign-out: 112. Plan 12i
+    // Task 10 adds the bodies of the ID-token nonce and sign-in: 114. Plan
+    // 12i Task 20 adds the body of the sign-up code: 115. Plan 12i Task 8
+    // adds the two bodies of the passkey-first sign-up: 117.
+    expect(bodies.length).toBe(117);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -244,6 +261,7 @@ describe("openApiDocument (plan 11g)", () => {
     const schemes: Record<string, string[]> = {
       none: [],
       session: ["sessionCookie", "sessionBearer"],
+      sessionCookie: ["sessionCookie"],
       apiToken: ["apiToken"],
       organizationToken: ["organizationToken"],
       sessionJwt: ["sessionJwt"],
@@ -265,6 +283,13 @@ describe("openApiDocument (plan 11g)", () => {
       );
       expect(op.security, key).toEqual(expected);
     }
+    // Plan 12i Task 11 (ruling 34 L4): the multi-session routes take the cookie only, no bearer.
+    for (const [path, method] of [
+      ["/multi-session", "get"],
+      ["/multi-session/switch", "post"],
+      ["/multi-session/sign-out", "post"],
+    ] as const)
+      expect(reference().paths[path]?.[method]?.security, path).toEqual([{ sessionCookie: [] }]);
     // Plan 12e: the token and revoke routes take no credential, or the client's Basic auth.
     const token = reference().paths["/oauth/token"]?.post;
     expect(token?.security).toEqual([{}, { clientSecretBasic: [] }]);
@@ -420,8 +445,26 @@ describe("openApiDocument (plan 11g)", () => {
     // Task 9b adds the 3 JSON answers, 2 bodies, and the query of the SCIM
     // token routes. Task 13 holds the SCIM answers of /scim/v2. Plan 12d
     // Task 8 adds the form of the SAML ACS; its answers are a redirect and
-    // the XML of the SP metadata.
-    expect([answers, bodies, queries]).toEqual([136, 100, 31]);
+    // the XML of the SP metadata. Plan 12i Task 9 adds the answer of
+    // GET /.well-known/webauthn and the 2 passkey options bodies.
+    // Plan 12i Task 2 adds the 2 answers of the username routes, the body
+    // of the set, and the query of the check. Plan 12i Task 5 adds the 5
+    // answers and the 5 bodies of the phone routes. Plan 12i Task 6 adds the
+    // 2 answers and the 2 bodies of the anonymous routes. Plan 12i Task 11
+    // adds the 3 answers and the 2 bodies of the multi-session routes. Plan
+    // 12i Task 10 adds the 2 answers and the 2 bodies of the ID-token route.
+    // Plan 12i Task 20 adds the answer and the body of the sign-up code.
+    // Plan 12i Task 8 adds the 2 answers and the 2 bodies of the sign-up.
+    expect([answers, bodies, queries]).toEqual([154, 117, 32]);
+  });
+
+  it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {
+    // `not_found` is a router code: no entry lists it in `codes`, and the
+    // document lists it for each entry. The route answers it on a host
+    // other than the RP ID (http/well-known.ts).
+    const responses = reference().paths["/.well-known/webauthn"]?.get?.responses ?? {};
+    expect(Object.keys(responses)).toContain("404");
+    expect(JSON.stringify(responses["404"])).toContain("not_found");
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -463,7 +506,8 @@ describe("openApiDocument (plan 11g)", () => {
 
   it("holds each provider path to the name rule", () => {
     const paths = Object.entries(reference().paths).filter(([p]) => p.includes("{provider}"));
-    expect(paths.length).toBe(3);
+    // The start, the link, the callback, and the two of the ID-token route (plan 12i Task 10).
+    expect(paths.length).toBe(5);
     for (const [path, item] of paths)
       for (const op of Object.values(item)) {
         const param = op.parameters?.find((p) => p.in === "path");

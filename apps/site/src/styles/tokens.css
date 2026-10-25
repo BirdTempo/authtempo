@@ -346,6 +346,27 @@
 .at-draw-list > :nth-child(28) .at-draw {
   animation-delay: 2.7s;
 }
+.at-draw-list > :nth-child(29) .at-draw {
+  animation-delay: 2.8s;
+}
+.at-draw-list > :nth-child(30) .at-draw {
+  animation-delay: 2.9s;
+}
+.at-draw-list > :nth-child(31) .at-draw {
+  animation-delay: 3s;
+}
+.at-draw-list > :nth-child(32) .at-draw {
+  animation-delay: 3.1s;
+}
+.at-draw-list > :nth-child(33) .at-draw {
+  animation-delay: 3.2s;
+}
+.at-draw-list > :nth-child(34) .at-draw {
+  animation-delay: 3.3s;
+}
+.at-draw-list > :nth-child(35) .at-draw {
+  animation-delay: 3.4s;
+}
 /* The hover lift of a card or a button. */
 .at-lift {
   transition:

@@ -10,6 +10,8 @@ sources:
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -33,15 +35,21 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `social-start:ip:<ip>` | 15 minutes | 30 | Social start and link start, for every provider |
 | `social-link:user:<userId>` | 15 minutes | 10 | Link start of a provider, after the start key |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
-| `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify |
+| `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify and passkey sign-up verify |
+| `passkey-sign-up:ip:<ip>` | 1 hour | 10 | Passkey sign-up options, after the name rule and the sign-up rule, before the captcha |
+| `passkey-sign-up:all-day:deployment` | 24 hours | `passkey.signUp.dailyCap`, default 1000 | Passkey sign-up options, after the per-IP limit and the captcha. It needs a shared limiter |
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |
 | `handoff-redeem:ip:<ip>` | 15 minutes | 20 | Handoff redeem |
 | `password-sign-up:ip:<ip>` | 1 hour | 10 | Password sign-up |
 | `password-sign-up:email:<email>` | 1 hour | 5 | Password sign-up |
 | `password:ip:<ip>` | 15 minutes | 20 | Password sign-in |
 | `password:email:<email>` | 15 minutes | 10 | Password sign-in |
+| `password:user:<userId>` | 15 minutes | 10 | Password check of a user with no address, in place of the address key |
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |
 | `password-resend:email:<email>` | 15 minutes | 3 | Verify mail resend |
+| `password-verify-code:ip:<ip>` | 15 minutes | 30 | Sign-up code verify, before the per-address limit |
+| `password-verify-code:email:<email>` | 15 minutes | 10 | Sign-up code verify. With `maxAttempts` wrong tries per code (5 by default), it bounds the guesses on one address |
+| `password-verify-code:email-day:<email>` | 24 hours | 10 | Sign-up code mails, at the sign-up and each resend, before any read. With `maxAttempts` tries per code, one address gets at most 10 times `maxAttempts` guesses a day |
 | `password-reset:ip:<ip>` | 15 minutes | 20 | Reset request |
 | `password-reset:email:<email>` | 15 minutes | 5 | Reset request |
 | `password-reset-post:ip:<ip>` | 15 minutes | 20 | Reset form post |
@@ -51,6 +59,17 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, re-authentication code, and change-of-address code |
+| `phone-otp:ip:<ip>` | 15 minutes | 10 | Phone code request and phone add, before the read of the number |
+| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request, after the form and region checks |
+| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request, after the form and region checks |
+| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every SMS of the deployment, each code and each note to a taken number, before the row and the send. It needs a shared limiter. For a phone code request, it counts after the answer |
+| `phone-verify:ip:<ip>` | 15 minutes | 30 | Every phone code check |
+| `phone-verify:phone:<phone>` | 15 minutes | 10 | Phone sign-in code check |
+| `phone-add:user:<userId>` | 15 minutes | 3 | Phone add, after the fresh rule and before the request limits. The note to a taken number counts too |
+| `phone-add:phone:<phone>` | 24 hours | 10 | Phone add, over every user, after the form and region checks. The note to a taken number counts too |
+| `anonymous:ip:<ip>` | 1 hour | 10 | Anonymous sign-in that makes a user, before the captcha. A live anonymous session answers itself and counts nothing |
+| `anonymous:all-day:deployment` | 24 hours | `anonymous.dailyCap`, default 1000 | Anonymous sign-in that makes a user, after the per-IP limit and the captcha. It needs a shared limiter |
+| `anonymous-delete:user:<userId>` | 1 hour | 5 | Anonymous delete, after the check that the user is anonymous |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
@@ -103,10 +122,27 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `sso-manage:user:<userId>` | 15 minutes | 30 | Each SSO domain, SSO connection, and SCIM token route, before the manager guard |
 | `scim-auth:ip:<ip>` | 15 minutes | 60 | Each failed SCIM token check: a missing, wrong, expired, or revoked token. A valid token never counts here |
 | `scim:token:<tokenId>` | 10 minutes | 1200 | Each call of one SCIM token, after the token check |
+| `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
+| `username-available:ip:<ip>` | 15 minutes | 30 | Username check, before the name rules |
+| `password:username:<username>` | 15 minutes | 10 | Password sign-in by username, on the stored form, after the name rules |
+| `password:phone:<phone>` | 15 minutes | 10 | Password sign-in by phone, after the E.164 check |
+| `multi-session:ip:<ip>` | 15 minutes | 60 | Each multi-session route: the list, the switch, and the sign-out of one session, before the session read |
+| `id-token-nonce:ip:<ip>` | 15 minutes | 60 | The nonce of the ID-token route, before the nonce write |
+| `id-token:ip:<ip>` | 15 minutes | 30 | The ID-token sign-in, before the nonce spend and the token verify |
 
 For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
 
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
+
+`password:email`, `password:username`, and `password:phone` count apart, one key for each kind of identifier. So from many IPs, one account with an address, a username, and a phone takes up to 30 guesses per 15 minutes. This is a known residual. A count per account would close it, but its 429 would tell that a phone and an address name one account. `password:ip` bounds each IP at 20 guesses.
+
+A phone code request and a phone add send their SMS after the answer. So a refusal of `phone-otp:all-day:deployment` at a request or an add gives no 429. The answer stays `{ sent: true }`, and core writes one `sms.not_sent` line with the reason `capped`. A 429 there would come only on the branch that sends, so its time and status would tell whether a number has an account. Watch the line: it is the only sign that the cap stops codes.
+
+The phone add counts on `phone-add:phone`, not on the two `phone-otp` keys of a number. So an add by another account spends no sign-in count of the person who holds the number.
+
+`phone-otp:all-day:deployment` counts in a fixed window that opens at the first send. The count starts again when the window ends. So up to 2 × `dailyCap` sends can go out in a short span across the end of a window. The stored key holds the maximum, so a new `dailyCap` starts a new count.
+
+The per-number phone keys read the number as given. Two E.164 forms can name one handset, such as `+4407700900123` and `+447700900123`. Each form then gets its own count. Core uses no phone library and does not rewrite a number. Give an SMS port that refuses a form that its supplier rewrites.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
 
@@ -130,6 +166,7 @@ These counts live in their rows, so they hold under every limiter.
 | Count | Maximum | The answer |
 | --- | --- | --- |
 | Wrong guesses of one email code | `emailOtp.maxAttempts`, 5 by default | `too_many_attempts` |
+| Wrong guesses of one phone code | `phone.maxAttempts`, 3 by default | `too_many_attempts` |
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
@@ -163,6 +200,7 @@ These counts live in their rows, so they hold under every limiter.
 | Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays`. With `session.absoluteDays`, at most that many days after the sign-in |
 | Magic link | `magicLink.ttlMinutes`, 15 minutes by default |
 | Email code | `emailOtp.ttlMinutes`, 10 minutes by default |
+| Phone code | `phone.ttlMinutes`, 5 minutes by default |
 | Reset link | `password.resetTtlMinutes`, 15 minutes by default |
 | Social state and binding cookie | 10 minutes |
 | Passkey challenge | 5 minutes |

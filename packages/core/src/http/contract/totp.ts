@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TWO_FACTOR_TOKEN_RE } from "../../engine/second-factor.js";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SessionJson, UserJson } from "./shapes.js";
+import { LastMethodJson, OkAnswer, SessionJson, UserJson } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const codeBody = z.object({ code: z.string().max(64) });
@@ -67,6 +67,8 @@ export const TwoFactorSessionAnswer = z.strictObject({
   next: z.string(),
   backupCodesLeft: z.number().int().min(0),
   trustDevice: z.strictObject({ token: z.string(), expiresAt: z.iso.datetime() }).nullable(),
+  /** The last method of the first factor while `lastMethod` is on (plan 12i). */
+  via: LastMethodJson.optional(),
 });
 
 const codeInput = { schema: codeBody, media: ["json"], parsedBy: "zod" } as const;

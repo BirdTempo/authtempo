@@ -1,0 +1,60 @@
+---
+title: Show the last sign-in method
+description: Set a readable cookie with the method of the last browser sign-in, so the sign-in page shows that method first.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 12"
+  - packages/core/src/engine/last-method.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/last-method.ts?raw";
+import test from "../../../../../samples/guides/last-method.test.ts?raw";
+
+**For:** an app developer whose sign-in page offers several methods, and who wants "Last time you used Google".
+
+**What it does:** with `lastMethod`, each browser sign-in sets the cookie `__Host-tempo_last_method` with one value of a closed set. A script of the sign-in page reads it. Core never stores the method.
+
+## Before you start
+
+- A sign-in page with more than one method, such as [Passwords](/docs/guides/password/) and [Sign in with a magic link](/docs/guides/magic-link/).
+- The cookie rules of [Cookies](/docs/reference/cookies/).
+
+## Steps
+
+1. Set `lastMethod` to `{}`, or to an object with `cookieName` and `days`.
+2. On the sign-in page, call `client.lastMethod()` of the [client package](/docs/reference/client/). It reads the cookie through `isLastMethod`, so a value outside the closed set reads as `null`. Without the client, read `document.cookie` and check the value with `isLastMethod` of `@authtempo/core/routes`.
+3. Show the button of that method first, or mark it.
+4. In a native app, read `via` from the JSON answer of the sign-in, and keep it yourself.
+
+<Code code={config} lang="ts" title="The last method in the config" />
+
+<Code code={test} lang="ts" title="The cookie as a test" />
+
+## How it behaves
+
+- The value is one of `password`, `username`, `phone`, `magic_link`, `email_otp`, `passkey`, or `social:<provider>`. A password sign-in by username gives `username`, and by phone gives `phone`.
+- The cookie is not `HttpOnly`, so a script reads it. It has `Secure`, `SameSite=Lax`, and `Path=/`, and lives `lastMethod.days` days (30 by default, 1 to 400).
+- It holds the method only. It names no account, and it signs no one in. No read of core trusts it.
+- Each JSON sign-in answer carries the same value as `via`.
+- A request with the Bearer scheme gets no cookie: a bearer client keeps `via`. HTTP Basic in front of the site does not count as a bearer.
+- A sign-in that answers a second factor challenge sets the cookie at the challenge verify.
+- An anonymous sign-in sets no cookie and gives no `via`.
+- `lastMethod.cookieName` renames the cookie, with 1 to 64 token characters. Core refuses a name of another cookie of core.
+
+## Residuals
+
+- The cookie tells anyone at the browser which method the last person used. It names no account, so use it as a hint only.
+- A person who clears the cookies of the site loses the hint. Core stores no copy, by design.
+
+## If it fails
+
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the sign-in failed, so no cookie was set.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the request had no session. The cookie stays from the last sign-in.
+
+## Next
+
+- [Cookies](/docs/reference/cookies/)
+- [Last method](/docs/reference/config/#last-method)
+- [Passwords](/docs/guides/password/)

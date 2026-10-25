@@ -1,6 +1,11 @@
-import { type OAuth2Provider, type SocialProfile, stringClaim } from "./provider.js";
+import {
+  type OAuth2Provider,
+  type RedirectOverride,
+  type SocialProfile,
+  stringClaim,
+} from "./provider.js";
 
-export interface GitHubConfig {
+export interface GitHubConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
 }
@@ -86,7 +91,7 @@ export async function githubUserinfo(
   );
   return {
     subject,
-    email: primary ? (primary.email as string) : stringClaim(user, "email"),
+    email: typeof primary?.email === "string" ? primary.email : stringClaim(user, "email"),
     emailVerified: primary?.verified === true,
     name: stringClaim(user, "name") ?? stringClaim(user, "login"),
     image: stringClaim(user, "avatar_url"),

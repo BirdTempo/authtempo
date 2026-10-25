@@ -1,0 +1,114 @@
+---
+title: Sign in with a phone code
+description: Send a sign-in code by SMS through a send-only port, with the code, the limits, and a daily cap that core owns.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 5"
+  - packages/core/src/engine/phone.ts
+  - packages/core/src/seams/sms.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/phone.ts?raw";
+import test from "../../../../../samples/guides/phone.test.ts?raw";
+
+:::danger
+Phone sign-in is one factor over the phone network. It is level 2 at best. A level 3 app must not turn it on. A passkey is the stronger method: offer it first, as in [Sign in with a passkey](/docs/guides/passkeys/).
+:::
+
+**For:** an app developer whose users expect a code by SMS, and who accepts ASVS 5.0.0 6.6.1 level 2.
+
+**What it does:** `phone` adds `POST /phone/request` and `POST /phone/verify`, and the routes that add or remove a number. Core makes and checks each code. Your SMS supplier only sends the text.
+
+## Before you start
+
+- A limiter that counts for the whole deployment: the D1, Postgres, or MySQL limiter. [Limits](/docs/reference/limits/) names each one.
+- An SMS port for your supplier: one call, `send({ to, text })`. [Phone codes](/docs/reference/config/#phone-codes) gives its shape.
+- The `waitUntil` of your host, passed to `auth.handle`, as in [Start on Workers with D1](/docs/start/workers-d1/).
+
+## Steps
+
+1. Write the SMS port. It answers `"sent"` or `"unavailable"`. Make it never make, check, or limit a code.
+2. Set `phone.sms` to the port and `phone.regions` to the calling-code prefixes that may get an SMS.
+3. Set `phone.signUp: true` if a code to an unknown number may make a user.
+4. Pass the limiter of your adapter as `limiter`.
+5. On Workers, pass `{ waitUntil: (p) => ctx.waitUntil(p) }` to `auth.handle`, or mount a binding that passes it.
+6. Post `{ phone }` to `POST /phone/request`. Then post `{ phone, code }` to `POST /phone/verify`.
+7. In a browser app, call `client.phone.request` and `client.phone.verify` of the [client package](/docs/reference/client/) in place of the posts.
+8. On a public site, add the captcha flow `phone-request` to `captcha.flows`.
+
+<Code code={config} lang="ts" title="Phone codes in the config" />
+
+<Code code={test} lang="ts" title="The phone code as a test" />
+
+## How it behaves
+
+- A number is E.164: a plus sign and 8 to 15 digits, the first not 0. A bad form answers `phone_invalid`. A number outside every prefix of `phone.regions` answers `phone_region`, and gets no SMS.
+- `phone.regions` is required and has no default. It holds 1 to 50 prefixes, each a plus sign and 1 to 4 digits.
+- A code has 6 digits by default (`phone.length`: 6 or 8) and lives 5 minutes by default (`phone.ttlMinutes`: 1 to 10).
+- Core keys the hash of each code under the current secret, and binds it to its number and its purpose. A wrong guess counts one try. Try number `phone.maxAttempts` (3 by default) spends the code.
+- `POST /phone/request` answers `{ sent: true }` for a known and an unknown number. A known number gets a code. An unknown number gets a code only with `phone.signUp`.
+- A number whose account has an address in a domain with SSO `enforce` on gets no code, and the same answer. `POST /phone/verify` answers `sso_required` for such an account.
+- The code goes out after the answer, under the `waitUntil` of the host. So the answer time does not tell whether a number has an account.
+- A send after the answer has a time limit of 10 seconds. A cap refusal, an outage, or a timeout then gives one `sms.not_sent` line with the reason `capped`, `unavailable`, or `timeout`. Watch that line: the person got `{ sent: true }` and no code.
+- With no `waitUntil` on Workers, `auth.handle` waits for the send before it answers, and writes one `observe.wait_until_missing` line. On other runtimes the work runs detached.
+- `POST /phone/verify` opens a session with `via: "phone"`. For a user with the second factor on, `totp.gate.phone` (on by default) answers a challenge with no email method.
+- With `phone.signUp`, a right code for a new number makes a user with no address. See [The account with no address](/docs/concepts/account-without-address/).
+- `phone.dailyCap` counts each SMS of the deployment for 24 hours, 1000 by default. A send over the cap makes no call to the port.
+- `createAuth` refuses `phone` with a limiter that counts per isolate, with the text "phone needs a shared limiter: the daily cap is per deployment". For tests only, set `phone.isolateLimiter: "allow"`. The cap is then per isolate.
+- `POST /phone/add` needs a fresh session and a proved handle. A free number gets a code. A number that another account holds gets a note with no code, and the same answer.
+- The code and the note of an add go out after the answer, as at `POST /phone/request`. So the answer time does not tell a number that another account holds.
+- `POST /phone/add/verify` stores the number and sends a notice to the address of the user. Of two users who add one number at the same time, one gets `phone_taken`.
+- `POST /phone/remove` needs a fresh session. It refuses the last way into the account with `last_credential`.
+- The password sign-in takes `{ phone, password }` too. See [Passwords](/docs/guides/password/).
+- A proof of the address on an unverified account clears its phone, also at the confirm of the sign-up. [The claim rule](/docs/concepts/claim-rule/) tells why.
+- A phone code from an anonymous session links that anonymous user only when the verify carries the same anonymous session.
+- The limits: `phone-otp:ip` 10, `phone-otp:phone` 3, `phone-verify:ip` 30, and `phone-verify:phone` 10, each per 15 minutes. Also `phone-otp:phone-day` 10 per 24 hours, and `phone-add:user` 3 per 15 minutes.
+
+## Residuals
+
+- Number recycling and SIM swap. A carrier gives the number to a new person, or an attacker moves it to a new SIM. The new holder of the number then signs in with a code.
+- For an account with an address, core sends no mail at a phone sign-in. The session is fresh, so the routes with the fresh rule open to the new holder. Turn on the second factor, and keep `totp.gate.phone` on.
+- A user with no address who moves to a new number gets no notice on any channel. The old number gets no text.
+- `api.phone.request` and `api.phone.add` in process send before they answer. Their time can tell an account. They answer 429 for the cap and 503 for an outage.
+- The work after the answer starts in the task of the answer. A known number answers about 0.3 to 0.8 ms later than an unknown one, in process on the memory store.
+- On Workers with no `waitUntil`, the answer waits for the cap, the code row, and the SMS of a known number. Its time then tells an account. Pass `waitUntil` to close it.
+- An outage of the supplier shows in no answer of `POST /phone/request` or `POST /phone/add`. The person gets `{ sent: true }` and no code. Only the `sms.not_sent` line shows it.
+- A region of one digit, such as `+1`, admits every country of that zone, with numbers of a high cost. List narrow prefixes.
+- The per-number limits read the number as given. Two E.164 forms of one handset, such as `+4407700900123` and `+447700900123`, each get their own count.
+- The daily cap counts in a fixed window. Up to 2 × `dailyCap` sends can go out in a short span across the end of a window. A new `dailyCap` starts a new count.
+- Each kind of identifier has its own password limit. One account with an address, a username, and a phone takes up to 30 password guesses per 15 minutes.
+
+## Before you go live
+
+Send one real SMS through the port of your supplier. Then sign in with its code. Core's tests use a recording port, not a supplier.
+
+## If it fails
+
+- [`phone_invalid`](/docs/reference/errors/#phone_invalid): the number is not E.164.
+- [`phone_region`](/docs/reference/errors/#phone_region): the number is outside every prefix of `phone.regions`.
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, expired, or spent. Ask for a new code.
+- [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): `phone.maxAttempts` wrong tries spent the code. Ask for a new code.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many requests from the IP or for the number. Wait 15 minutes, or a day after 10 codes to one number.
+- [`phone_taken`](/docs/reference/errors/#phone_taken): another account stored the number first.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user for an unknown number.
+- [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `phone-request` refused the request.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON, or a field has the wrong type.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account of the number.
+- [`sso_required`](/docs/reference/errors/#sso_required): the account of the number has an address of a domain that signs in by SSO only. Send the browser to the start URL in `detail`.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the sign-in or the change, or threw.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /phone/add`, `POST /phone/add/verify`, and `POST /phone/remove` need a session.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): at an add, the user has no proved handle. Confirm the address first.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): an add or a remove needs a fresh session. Sign in again, then send it again.
+- [`last_credential`](/docs/reference/errors/#last_credential): the number is the last way into the account. Add another way in first.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the user at the same moment. Send the request again.
+- [`anonymous_refused`](/docs/reference/errors/#anonymous_refused): an anonymous session tried to add a number. Sign in first.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot add or remove a number.
+
+## Next
+
+- [Sign in with a passkey](/docs/guides/passkeys/)
+- [Phone codes](/docs/reference/config/#phone-codes)
+- [The account with no address](/docs/concepts/account-without-address/)

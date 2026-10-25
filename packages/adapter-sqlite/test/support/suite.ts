@@ -5,7 +5,7 @@ import {
   runSecretRotationConformance,
   runStoredFormConformance,
 } from "@authtempo/core/conformance";
-import { runLimiterConformance } from "@authtempo/core/limiter-conformance";
+import { runLimiterConformance, runPhoneCapConformance } from "@authtempo/core/limiter-conformance";
 import { runShapeConformance, type ShapeSide } from "@authtempo/core/shape-conformance";
 import { SQLITE, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
@@ -140,6 +140,16 @@ export function runSqliteSuites(
     const d = await migratedDriver();
     const clock = manualClock();
     return { limiter: createSqliteLimiter(d.driver, clock), clock, close: async () => d.close() };
+  });
+
+  // The daily cap of the phone code under 40 parallel sends (plan 12i Task 4).
+  runPhoneCapConformance(run, async () => {
+    const d = await migratedDriver();
+    return {
+      limiter: createSqliteLimiter(d.driver),
+      storage: createSqliteAdapter(d.driver),
+      close: async () => d.close(),
+    };
   });
 
   runShapeConformance(run, async () => {

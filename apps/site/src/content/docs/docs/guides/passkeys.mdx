@@ -7,6 +7,7 @@ sources:
   - packages/core/README.md "Passkeys"
   - packages/client/README.md "Passkeys"
   - docs/superpowers/plans/2026-10-10-06c-device-proofs.md
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 9"
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -54,14 +55,36 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 - A passkey name has 1 to 64 characters, with no control or format character except the zero-width joiners. The rename refuses a name that breaks this rule. The register keeps the passkey and stores no name.
 - The rename has the [limit](/docs/reference/limits/) `passkey-rename:user:<userId>` 30 per 15 minutes. It sends no notice mail.
 
+## Related origins
+
+WebAuthn Level 3 lets a passkey of one RP ID work on other sites, such as `example.com` and `example.net`. [Use one passkey on related sites](/docs/guides/related-origins/) gives the steps.
+
+- Set `passkey.relatedOrigins: true`, and add each origin to `passkey.origins` and to `trustedOrigins`.
+- `passkey.origins` may then hold at most five origins outside the domain tree of `rpID`. A browser must accept at least five labels, such as `example` of `example.net`.
+- Core has no public suffix list, so it counts each origin outside the tree as one label. Two origins of one label count twice, so core can refuse a config that a browser accepts.
+- Mount [`auth.wellKnown`](/docs/reference/well-known/) at the origin root of the `rpID` host. It answers `GET /.well-known/webauthn` with `{ origins }` there, and 404 on any other host.
+- The document lists only the origins outside the domain tree of `rpID`, in config order. An origin on the tree needs no document, so it takes no label.
+- Each ceremony still checks the origin of the browser against `passkey.origins`. An origin outside the list never passes.
+
+## Hints and the Signal API
+
+- `passkey.hints.register` and `passkey.hints.signIn` give the browser a preference: `security-key`, `client-device`, or `hybrid`. A hint is advice and filters no authenticator.
+- A `hints` field in the body of an options request replaces the list for that ceremony.
+- A sign-in by a credential that the site does not store answers `passkey_unknown`. Call `PublicKeyCredential.signalUnknownCredential` with it, so the device removes the passkey. The client's `passkey.signIn` makes that call for you where the browser has it.
+- Only the passkey sign-in answers `passkey_unknown`. The re-authentication and the second factor keep their codes: `passkey_failed`, and `invalid_code` at the challenge verify.
+- `GET /passkeys` answers `rpId` and `userHandle`. Pass them with the credential ids to `PublicKeyCredential.signalAllAcceptedCredentials`. The client's `passkeys.sync()` does this.
+- `GET /passkeys` also answers `userName` and `userDisplayName`, the names of a new registration. Pass them to `PublicKeyCredential.signalCurrentUserDetails` after a change of name. The client's `passkeys.signalDetails()` does this.
+- Only the holder of the credential sees `passkey_unknown`: the credential id is random, and the person's own device gives it.
+
 ## If it fails
 
 - [`unauthorized`](/docs/reference/errors/#unauthorized): a registration needs a session.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): a registration needs a verified address.
-- [`passkey_failed`](/docs/reference/errors/#passkey_failed): an unknown passkey, a bad signature, or a passkey that is already registered.
+- [`passkey_failed`](/docs/reference/errors/#passkey_failed): a bad signature, an origin outside `passkey.origins`, or a passkey that is already registered.
+- [`passkey_unknown`](/docs/reference/errors/#passkey_unknown): the site stores no passkey with this credential id.
 - [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the challenge is spent or older than five minutes. Start again.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): too many ceremonies from the IP.
-- [`invalid_body`](/docs/reference/errors/#invalid_body): at the rename, a passkey name that breaks the name rule.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): at the rename, a passkey name that breaks the name rule. At an options request, a hint that is not known, or a hint twice.
 - [`not_found`](/docs/reference/errors/#not_found): the passkey to delete or to rename does not belong to the caller.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
 

@@ -102,6 +102,10 @@
     // that build deletes it. So each test waits for its own build too.
     // apps/site/test/clean-dist.test.ts holds this line.
     "test": { "dependsOn": ["^build", "build"], "cache": false },
+    // A named measure: a test whose time grows with the machine load, out of
+    // the default test gate (fix wave of plan 12i, item 3). Only a run by name
+    // starts it: pnpm turbo run measure --filter=<package> --force.
+    "measure": { "dependsOn": ["^build"], "cache": false },
     "//#typecheck:configs": { "cache": false }
   }
 }

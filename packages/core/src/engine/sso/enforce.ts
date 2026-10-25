@@ -19,10 +19,11 @@ import { claimingDomain } from "./domains.js";
  */
 export async function ssoRequiredFor(
   config: ResolvedConfig,
-  email: string,
+  email: string | null,
   storage: StorageAdapter = config.storage,
 ): Promise<{ start: string } | null> {
-  if (!config.sso) return null;
+  // A user with no address sits in no domain (ruling P9 of plan 12i).
+  if (!config.sso || email === null) return null;
   const domain = await claimingDomain(storage, email);
   if (!domain?.enforce || domain.connectionId === null) return null;
   return { start: ssoStartUrl(config, domain.connectionId, undefined) };
@@ -43,7 +44,7 @@ export function ssoRequired(start: string): SsoRequired {
  */
 export async function enforcedAnswer(
   config: ResolvedConfig,
-  email: string,
+  email: string | null,
   storage: StorageAdapter = config.storage,
 ): Promise<SsoRequired | null> {
   const required = await ssoRequiredFor(config, email, storage);

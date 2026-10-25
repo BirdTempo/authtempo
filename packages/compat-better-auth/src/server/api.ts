@@ -29,6 +29,7 @@ import {
   toSession,
   toUser,
 } from "./shapes.js";
+import { signInAdditionsCall } from "./sign-in-additions.js";
 import { cookieValue, TRUST_DEVICE_COOKIE } from "./two-factor.js";
 
 /** A request with the caller's headers, for core's session read and the client IP. */
@@ -102,6 +103,29 @@ export function profilePatch(body: Record<string, unknown>): {
     ...(name !== undefined ? { name: name === "" ? null : name } : {}),
     ...(image !== undefined ? { image } : {}),
   };
+}
+
+/**
+ * The username fields of Better Auth's sign-up and update-user bodies (plan
+ * 12i Task 16), apart from the rest. Core keeps the typed name as
+ * `displayUsername`, so a `displayUsername` that is not the typed username
+ * answers NOT_SUPPORTED. Without the username plugin, either field answers
+ * FIELD_NOT_ALLOWED, as an unknown field does.
+ */
+export function usernameOf(
+  body: Record<string, unknown>,
+  on: boolean,
+): { username: string | undefined; rest: Record<string, unknown> } {
+  const { username, displayUsername, ...rest } = body;
+  if (username === undefined && displayUsername === undefined) return { username: undefined, rest };
+  if (!on) throw compatApiError("FIELD_NOT_ALLOWED", "username needs the username plugin");
+  if (typeof username !== "string") throw apiError("invalid_body", 400);
+  if (displayUsername !== undefined && displayUsername !== username)
+    throw compatApiError(
+      "NOT_SUPPORTED",
+      "core keeps the typed username as displayUsername; send the same value or leave it out",
+    );
+  return { username, rest };
 }
 
 /**
@@ -185,12 +209,12 @@ export async function sessionAnswerOf(
   // With the admin plugin, Better Auth's user holds role and the ban fields (plan 12f, ruling 53).
   const adminFields =
     mapped.platformRole !== null
-      ? toAdminUser(s.user, await roleOf(mapped, s.user.id), new Date())
+      ? toAdminUser(s.user, mapped.plugins, await roleOf(mapped, s.user.id), new Date())
       : null;
   return {
     session: adminFields ? toAdminSession(s.session, token) : toSession(s.session, token),
     user: {
-      ...(adminFields ?? toUser(s.user)),
+      ...(adminFields ?? toUser(s.user, mapped.plugins)),
       ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
     },
     ...(s.needsRefresh !== undefined ? { needsRefresh: s.needsRefresh } : {}),
@@ -217,6 +241,12 @@ export function createApi(
   // serves them to a user actor only through its routes.
   const admin = <T>(method: "GET" | "POST", path: string, input: AdminCallInput) =>
     adminCall(auth, mapped, method, path, input) as Promise<T>;
+  // The calls of the sign-in plugins (plan 12i Task 16) run the handler's steps of their paths.
+  const additions = <T>(
+    method: "GET" | "POST",
+    path: string,
+    input: { body?: unknown; headers?: Headers | undefined },
+  ) => signInAdditionsCall(auth, mapped, method, path, input) as Promise<T>;
   return {
     // Plan 12k Task 12: the api-key calls, with the plugin only, as in Better Auth.
     ...apiKeyApi(auth, mapped, caller),
@@ -226,7 +256,10 @@ export function createApi(
       if (!s) return null;
       return sessionAnswerOf(auth, mapped, s, readToken(headers) ?? "");
     },
-    async signUpEmail({ body, headers }) {
+    async signUpEmail({ body: given, headers }) {
+      // Plan 12i Task 16: the username plugin's fields go to core's sign-up.
+      const { username, rest } = usernameOf(given, plugins.has("username"));
+      const body = rest as typeof given;
       if (body.image !== undefined)
         throw compatApiError("NOT_SUPPORTED", "core takes no image at sign-up");
       // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
@@ -237,6 +270,7 @@ export function createApi(
         email: body.email,
         password: body.password,
         ...(body.name !== "" ? { name: body.name } : {}),
+        ...(username !== undefined ? { username } : {}),
         ip: clientIp(req),
         userAgent: req.headers.get("user-agent"),
       });
@@ -258,21 +292,32 @@ export function createApi(
         mapped.config.password?.requireVerified === true
       ) {
         const now = new Date();
+        // The synthetic user holds the typed username as a new user's row
+        // would, so the answer does not tell a taken address. The two forms
+        // follow core's normalizeUsername: NFKC, then lower case for the stored form.
+        const typed = username?.normalize("NFKC") ?? null;
         return {
           token: null,
-          user: toUser({
-            id: newId(now),
-            // Core answered email_taken, so the address is well-formed.
-            email: normalizeEmail(body.email) ?? body.email,
-            emailVerified: false,
-            name: body.name !== "" ? body.name : null,
-            image: null,
-            bannedAt: null,
-            banReason: null,
-            banUntil: null,
-            createdAt: now,
-            updatedAt: now,
-          }),
+          user: toUser(
+            {
+              id: newId(now),
+              // Core answered email_taken, so the address is well-formed.
+              email: normalizeEmail(body.email) ?? body.email,
+              emailVerified: false,
+              name: body.name !== "" ? body.name : null,
+              image: null,
+              bannedAt: null,
+              banReason: null,
+              banUntil: null,
+              username: typed?.toLowerCase() ?? null,
+              displayUsername: typed,
+              phone: null,
+              isAnonymous: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+            mapped.plugins,
+          ),
         };
       }
       const v = unwrap(r);
@@ -283,8 +328,8 @@ export function createApi(
       // clear fault, not a wrong answer.
       if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
       // Core's answer while requireVerified is on: the user and no session.
-      if (!("token" in v)) return { token: null, user: toUser(v.user) };
-      return { token: v.token, user: toUser(v.user) };
+      if (!("token" in v)) return { token: null, user: toUser(v.user, mapped.plugins) };
+      return { token: v.token, user: toUser(v.user, mapped.plugins) };
     },
     async signInEmail({ body, headers }) {
       // Each would be dropped in silence: core answers a token, not a redirect,
@@ -323,7 +368,12 @@ export function createApi(
         ]);
         return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
       }
-      return { redirect: false, token: v.token, url: undefined, user: toUser(v.user) };
+      return {
+        redirect: false,
+        token: v.token,
+        url: undefined,
+        user: toUser(v.user, mapped.plugins),
+      };
     },
     async signOut({ headers }) {
       const token = readToken(headers);
@@ -430,7 +480,20 @@ export function createApi(
     },
     async updateUser({ body, headers }) {
       const s = await caller(headers);
-      unwrap(await auth.api.user.update({ session: s, ...profilePatch(body) }));
+      const { username, rest } = usernameOf(body, plugins.has("username"));
+      if (username !== undefined) {
+        const req = reqOf(headers);
+        unwrap(
+          await auth.api.user.setUsername({
+            session: s,
+            username,
+            ip: clientIp(req),
+            userAgent: req.headers.get("user-agent"),
+          }),
+        );
+        if (Object.keys(rest).length === 0) return { status: true };
+      }
+      unwrap(await auth.api.user.update({ session: s, ...profilePatch(rest) }));
       return { status: true };
     },
     async changeEmail({ body, headers }) {
@@ -515,5 +578,28 @@ export function createApi(
     impersonateUser: ({ body, headers }) =>
       admin("POST", "/admin/impersonate-user", { headers, body }),
     stopImpersonating: ({ headers }) => admin("POST", "/admin/stop-impersonating", { headers }),
+    signInAnonymous: (input) =>
+      additions("POST", "/sign-in/anonymous", { headers: input?.headers }),
+    deleteAnonymousUser: ({ headers }) =>
+      additions("POST", "/delete-anonymous-user", { headers, body: {} }),
+    signInUsername: ({ body, headers }) =>
+      additions("POST", "/sign-in/username", { body, headers }),
+    isUsernameAvailable: ({ body, headers }) =>
+      additions("POST", "/is-username-available", { body, headers }),
+    sendPhoneNumberOTP: ({ body, headers }) =>
+      additions("POST", "/phone-number/send-otp", { body, headers }),
+    verifyPhoneNumber: ({ body, headers }) =>
+      additions("POST", "/phone-number/verify", { body, headers }),
+    signInPhoneNumber: ({ body, headers }) =>
+      additions("POST", "/sign-in/phone-number", { body, headers }),
+    oneTapCallback: ({ body, headers }) =>
+      additions("POST", "/one-tap/callback", { body, headers }),
+    signInSocial: ({ body, headers }) => additions("POST", "/sign-in/social", { body, headers }),
+    listDeviceSessions: ({ headers }) =>
+      additions("GET", "/multi-session/list-device-sessions", { headers }),
+    setActiveSession: ({ body, headers }) =>
+      additions("POST", "/multi-session/set-active", { body, headers }),
+    revokeDeviceSession: ({ body, headers }) =>
+      additions("POST", "/multi-session/revoke", { body, headers }),
   };
 }

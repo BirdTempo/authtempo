@@ -1,5 +1,12 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  boundWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+} from "@authtempo/core/bindings";
 
 /**
  * The server of Solid Start (plan 11d2). An API route mounts core, and a
@@ -23,7 +30,28 @@ function resolve<A extends object>(source: AuthSource<A>): A {
   return typeof source === "function" ? (source as () => A)() : source;
 }
 
-type Handler = (event: { request: Request }) => Promise<Response>;
+/**
+ * The fields of the APIEvent of Solid Start 2.0.6 that the handlers read.
+ * `nativeEvent` is the H3Event of h3 2.0.2. Its `req` is the request of
+ * srvx 1.0.5, whose optional `waitUntil` holds the hook of the runtime
+ * (dist/_chunks/types.d.mts:589, read 2026-10-25).
+ */
+export interface StartApiEventLike {
+  request: Request;
+  nativeEvent?: { req?: unknown } | undefined;
+}
+
+type Handler = (event: StartApiEventLike) => Promise<Response>;
+
+export interface StartRouteOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). Default: the `waitUntil` of the srvx request, which srvx sets
+   * on Workers. The binding does not call `nativeEvent.waitUntil` of h3: it
+   * drops the promise when the request has no hook.
+   */
+  waitUntil?: BindingWaitUntil<StartApiEventLike> | undefined;
+}
 
 /**
  * The handlers of `src/routes/auth/[...path].ts`, one per method that the
@@ -33,7 +61,10 @@ type Handler = (event: { request: Request }) => Promise<Response>;
  * pages, past the middleware, which skips a path of core: so core gets every
  * method under its base path, and answers each one itself.
  */
-export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
+export function authRouteHandlers(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: StartRouteOptions = {},
+): {
   GET: Handler;
   POST: Handler;
   PUT: Handler;
@@ -41,7 +72,11 @@ export function authRouteHandlers(auth: AuthSource<Pick<Auth, "handle">>): {
   DELETE: Handler;
   OPTIONS: Handler;
 } {
-  const handle: Handler = ({ request }) => resolve(auth).handle(request);
+  const handle: Handler = (event) =>
+    resolve(auth).handle(
+      event.request,
+      handleOptions(options.waitUntil, event, () => boundWaitUntil(event.nativeEvent?.req)),
+    );
   return { GET: handle, POST: handle, PUT: handle, PATCH: handle, DELETE: handle, OPTIONS: handle };
 }
 

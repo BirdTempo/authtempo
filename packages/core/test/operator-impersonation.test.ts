@@ -13,7 +13,7 @@ import { destroySession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   operatorFixture,
@@ -210,6 +210,31 @@ describe("the impersonation (plan 12f Task 11)", () => {
     expect(sets).toContain(
       "__Host-tempo_session_actor=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     );
+  });
+
+  it("stops an impersonation for a post with an empty body", async () => {
+    // The stop body is optional (operator.ts readStopBody). A caller that
+    // posts no body gets the answer it got before plan 12i (ruling 10 of plan 12i).
+    const w = await world();
+    const token = await started(w);
+    const stop = await w.handle(
+      new Request(`${BASE_URL}/auth/operator/impersonate/stop`, {
+        method: "POST",
+        headers: {
+          origin: APP_ORIGIN,
+          cookie: `${sessionCookie(token)}; __Host-tempo_session_actor=${w.operator.token}`,
+        },
+      }),
+    );
+    expect(stop.status).toBe(200);
+    expect(((await stop.json()) as { restored: boolean }).restored).toBe(true);
+    expect(cookieOf(stop.headers.getSetCookie(), "__Host-tempo_session")).toBe(w.operator.token);
+    expect(await resolveSession(w.auth.config, token)).toBeNull();
+    const rows = await auditRows(w);
+    expect(rows.map((r) => [r.action, r.reason])).toEqual([
+      ["impersonation_start", REASON],
+      ["impersonation_stop", "The operator stopped the impersonation."],
+    ]);
   });
 
   it("answers not_found at the stop for a session that is not an impersonation", async () => {

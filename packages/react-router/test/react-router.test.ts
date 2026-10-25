@@ -1,6 +1,8 @@
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import {
+  type ActionFunctionArgs,
   createStaticHandler,
+  type LoaderFunctionArgs,
   type Path,
   type RouteObject,
   RouterContextProvider,
@@ -147,7 +149,7 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     const { signIn, args, middleware } = setup();
     const cookie = await signIn();
     const a = args(new Request(`${BASE}/`, { headers: { cookie } }));
-    let seen: string | undefined;
+    let seen: string | null | undefined;
     const res = await middleware(a, async () => {
       seen = getSession(a.context)?.user.email;
       return new Response("page");
@@ -439,5 +441,40 @@ describe("@authtempo/react-router (plan 11d2)", () => {
   it("refuses protect without signInPath at construction", () => {
     const { auth } = setup();
     expect(() => authMiddleware({ auth, protect: () => true })).toThrow(/signInPath/);
+  });
+});
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  it("passes the option with the loader and action arguments, or none", async () => {
+    const s = waitSpy();
+    const args = {
+      request: new Request(`${BASE}/auth/x`, { method: "POST" }),
+      context: new RouterContextProvider(),
+      params: {},
+    } as unknown as ActionFunctionArgs;
+    const seen: [Promise<unknown>, unknown][] = [];
+    await authRouteModule(s.auth, { waitUntil: (p, a) => void seen.push([p, a]) }).action(args);
+    expect(seen).toEqual([[s.work, args]]);
+    // React Router 8 gives no platform context: with no option, handle gets none.
+    await authRouteModule(s.auth).loader(args as unknown as LoaderFunctionArgs);
+    expect(s.got).toEqual(["options", "none"]);
   });
 });

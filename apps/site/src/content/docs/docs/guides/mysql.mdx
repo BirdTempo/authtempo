@@ -61,7 +61,7 @@ The adapter does not check the transport: the app opens the pool. For a host tha
 
 ## Migrations
 
-MySQL starts at one baseline migration, `0001_schema_v13`. `0002_schema_v14` adds the SSO and SCIM tables of schema version 14. MySQL commits each DDL statement at once. So the runner records each statement as a step in `ta_migrations`, and after a failure it resumes at the first step with no record.
+MySQL starts at one baseline migration, `0001_schema_v13`. `0002_schema_v14` adds the SSO and SCIM tables of schema version 14. `0003_schema_v15` makes the address nullable and adds the username, the phone, and the passkey flags of schema version 15. MySQL commits each DDL statement at once. So the runner records each statement as a step in `ta_migrations`, and after a failure it resumes at the first step with no record.
 
 - A stop between a step and its record leaves the object of the step. The next run makes the step again on a temporary copy of its table, and compares the two. When they are equal, it records the step and goes on. Else it stops with the step and the error.
 - The copy needs the `CREATE TEMPORARY TABLES` privilege on the database, beside the privileges of the steps. Without it, the runner stops with the step and MySQL error 1044.
@@ -80,6 +80,8 @@ The table holds `MYSQL_STRINGS` of `@authtempo/core/ddl`. A site test holds each
 | --- | --- | --- | --- |
 | `user.id` | 64 | ascii | none |
 | `user.email` | 254 | utf8mb4 | none |
+| `user.username` | 64 | ascii | none |
+| `user.phone` | 16 | ascii | none |
 | `identity.id` | 64 | ascii | none |
 | `identity.userId` | 64 | ascii | none |
 | `identity.provider` | 64 | utf8mb4 | none |

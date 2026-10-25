@@ -1,0 +1,66 @@
+---
+title: Serve one deployment on several hosts
+description: Give baseURL a list of exact origins, so that one deployment answers on each host with its own issuer, links, and cookies.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A base URL list chosen by the request's host"
+  - packages/core/README.md "A list of hosts"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/base-url-list.ts?raw";
+import test from "../../../../../samples/guides/base-url-list.test.ts?raw";
+
+**For:** an app developer who serves the auth routes of one deployment on two or more hosts, such as a staging and a production host.
+
+**What it does:** `baseURL` takes a list of exact origins. The router picks the entry equal to the origin of the request URL. Every URL that core builds follows that entry.
+
+## Before you start
+
+- A working deployment from [Start](/docs/start/).
+- The list of hosts, each an exact origin as [the `baseURL` row](/docs/reference/config/#top-level) states. Write it as the URL parser does: lower case, a host name in punycode, and no default port.
+
+## Steps
+
+1. Set `baseURL` to the list. The first entry is the primary.
+2. Register each host's callback at each social provider: `<entry><basePath>/social/<provider>/callback`.
+3. On Node, build `request.url` from the host that your proxy checked. Core reads the host from `request.url` only.
+4. Express reads the host from the Host header, and with `trust proxy` the scheme from `X-Forwarded-Proto`. So your proxy must pass the original Host header to Express. Fastify with `trustProxy` reads `X-Forwarded-Host` and `X-Forwarded-Proto`. Then your proxy must set both headers on each request and drop the client's values. A client can still pick only an entry of the list.
+
+<Code code={config} lang="ts" title="Two hosts in one config" />
+
+<Code code={test} lang="ts" title="The host pick as a test" />
+
+## How it behaves
+
+- Core compares the origin of `request.url` with each entry, exactly. The scheme, the host, and the port must each be equal. A host in upper case is the same host, because the URL parser lowers it.
+- Core never reads `x-forwarded-host`, `x-forwarded-proto`, or `forwarded`. A client sets each of them, so a header cannot pick a host.
+- A host outside the list gets 421 `host_not_allowed` before any handler. The answer holds the code only. `auth.wellKnown` answers the same, except for the WebAuthn related origins document.
+- These follow the picked entry: the OAuth issuer, the metadata documents, the mail links, and the social callback. So do the failure redirect, the default `appURL`, the `Origin` check, and the default `jwtMint.audience`.
+- A `redirectURI` override must be on an entry of the list. The start sends its path on the entry where the sign-in started, so the sign-in ends on that host.
+- The session cookie has the `__Host-` prefix and no `Domain`. Each host keeps its own session. The bag cookie of `multiSession` follows the same rule.
+- The Express, Fastify, and Hono bindings serve a request whose `Host` header does not parse as the primary entry. That is no way past the 421: such a client can send the primary host too.
+- A session JWT of any entry verifies on each entry, with the audience of the entry that minted it.
+- A back-channel sign-out message names the issuer of the entry where the client got its ID token. It keeps that issuer also when the entry left the list, because the client refuses any other issuer.
+- An OAuth code or a held authorize request of one entry answers `invalid_grant`, or is not found, on another entry. RFC 8414 binds an issuer to the host of its metadata.
+- Outside a request, core uses the primary: `auth.baseURL`, the sweep, and each `auth.api` call.
+- A `baseURL` string serves any host, as before. The 421 answer needs a list.
+- The Better Auth shim maps `{ allowedHosts, fallback, protocol }` to the list. It refuses a wildcard host, because any customer of a shared platform can own a matching host. It refuses `protocol: "auto"` and no `protocol`, because `auto` reads a proxy header.
+- The shim serves its own paths, the SSO URLs, and the mail links on the request's entry. A host outside the list gets 421 `HOST_NOT_ALLOWED` before any shim path, the SAML ACS too.
+- These stay on the primary: the default `appName`, the TOTP issuer label, and the OpenAPI `serverUrl`. Set `appName` to give each host one name.
+- A refresh token and a device code are not bound to an entry. A refresh on another entry gives no ID token.
+- Each host keeps its own session, but a device code flow can let one session get ID tokens on two entries. A client then sees two issuers, and the back-channel message names only the first.
+- An SSO provider must register the callback or ACS of each entry where a sign-in starts.
+
+## If it fails
+
+- [`host_not_allowed`](/docs/reference/errors/#host_not_allowed): the request URL has an origin that is not in the list. Add the origin, or fix the URL that the adapter builds.
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): a page on one entry posted to another entry. Each entry trusts its own origin only. Add the other entry to `trustedOrigins`.
+- [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant): an OAuth client sent a code to the token endpoint of another entry. Send it to the issuer that the client read.
+
+## Next
+
+- [Configuration](/docs/reference/config/)
+- [Cookies](/docs/reference/cookies/)
+- [OAuth provider](/docs/guides/oauth-provider/)

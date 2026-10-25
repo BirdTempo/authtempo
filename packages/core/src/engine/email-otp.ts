@@ -1,5 +1,5 @@
 import { checkCaptcha } from "../captcha.js";
-import type { ResolvedConfig, ResolvedEmailOtp } from "../config.js";
+import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
@@ -8,6 +8,12 @@ import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeSteps,
+} from "./anonymous.js";
 import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
@@ -34,6 +40,20 @@ export type EmailOtpPurpose = "email-otp" | "password-reset-otp";
  * identifier.
  */
 export type CodePurpose = EmailOtpPurpose | "reauth-otp" | "email-change-otp";
+
+/**
+ * Every purpose of a code that core draws: the mailed codes, the phone
+ * codes, and the sign-up code (plan 12i). One draw, one keyed hash, and one
+ * compare serve them all.
+ */
+export type DrawnPurpose = CodePurpose | "phone-otp" | "phone-add-otp" | "password-verify-otp";
+
+/** What a draw reads of a code config: the email code's, the phone code's, or the sign-up code's. */
+export interface CodeShape {
+  /** 6 or 8 for the email code; 6 to 10 for the sign-up code (`password.verifyCode`). */
+  length: number;
+  ttlMinutes: number;
+}
 
 // Per 15 minutes, for the sign-in code and the reset code together: one
 // budget per address and per IP for every mailed code. 3 per address is the
@@ -68,6 +88,8 @@ export interface EmailOtpRequest {
   ip: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /** The live anonymous session of the request (plan 12i Task 7): a sign-in code records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface EmailOtpVerify {
@@ -77,6 +99,8 @@ export interface EmailOtpVerify {
   userAgent: string | null;
   /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
   trustDevice?: string | undefined;
+  /** The live anonymous session of the completing request: a mailed proof (plan 12i Task 7). */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** A sign-in or a reset by code: the session token, the user, and the session row. */
@@ -102,8 +126,8 @@ export function codeHash(secret: string, rowId: string, code: string): Promise<s
  */
 export async function issueCode(
   config: ResolvedConfig,
-  otp: ResolvedEmailOtp,
-  purpose: CodePurpose,
+  otp: CodeShape,
+  purpose: DrawnPurpose,
   identifier: string,
   data: Record<string, unknown>,
 ): Promise<string> {
@@ -184,7 +208,9 @@ async function requestCode(
     return fail("rate_limited");
   // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
   if (await ssoRequiredFor(config, email)) return ok({ sent: true });
-  const code = await issueCode(config, otp, purpose, email, {});
+  // A sign-in code records the anonymous user of the request (plan 12i Task 7). A reset code links nothing.
+  const data = purpose === "email-otp" ? anonymousData(input.anonymous) : {};
+  const code = await issueCode(config, otp, purpose, email, data);
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
   // To the address the code belongs to, whatever the builder wrote.
@@ -227,7 +253,7 @@ export async function verifyGate(
  */
 export async function newestCode(
   storage: StorageAdapter,
-  purpose: CodePurpose,
+  purpose: DrawnPurpose,
   identifier: string,
 ): Promise<VerificationRow | null> {
   const where: Where<"verification">[] = [
@@ -263,6 +289,22 @@ export async function checkCode(
 ): Promise<Result<VerificationRow>> {
   const otp = config.emailOtp;
   if (!otp) return fail("not_found");
+  return compareCode(config, otp.maxAttempts, purpose, identifier, code, now);
+}
+
+/**
+ * The compare of `checkCode`, for every drawn code (plan 12i: the phone
+ * code reads it too). One copy of the check, so the mailed code and the
+ * phone code cannot drift apart. `maxAttempts` is the config of the code.
+ */
+export async function compareCode(
+  config: ResolvedConfig,
+  maxAttempts: number,
+  purpose: DrawnPurpose,
+  identifier: string | null,
+  code: string,
+  now: Date,
+): Promise<Result<VerificationRow>> {
   const row = identifier === null ? null : await newestCode(config.storage, purpose, identifier);
   // One HMAC and one compare on every path, against a fixed value when no row exists.
   // The row's version keys the HMAC (plan 12b). With no row, the current
@@ -274,10 +316,10 @@ export async function checkCode(
   const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH) && key.known;
   if (!row) return fail("invalid_code");
   if (row.consumedAt !== null)
-    return fail(attemptsOf(row) >= otp.maxAttempts ? "too_many_attempts" : "invalid_code");
+    return fail(attemptsOf(row) >= maxAttempts ? "too_many_attempts" : "invalid_code");
   if (row.expiresAt.getTime() <= now.getTime()) return fail("invalid_code");
   if (right) return ok(row);
-  return fail(await countAttempt(config.observe, config.storage, row, otp.maxAttempts, now));
+  return fail(await countAttempt(config.observe, config.storage, row, maxAttempts, now));
 }
 
 /**
@@ -326,6 +368,12 @@ export async function verifyEmailOtp(
   const consumed = await consumeCode(config.storage, checked.value, now);
   if (!consumed.ok) return consumed;
   const ended = endedList(config);
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(consumed.value.data),
+    "mailed",
+  );
   // The hook runs before the resolution's first write, for the D1 undo (see
   // `insertSignUp` in password.ts). A user with the second factor on gets a
   // challenge in place of the session (plan 12c). The code proves the
@@ -336,9 +384,11 @@ export async function verifyEmailOtp(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "email_otp",
+      method: "email_otp",
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.emailOtp ?? false,
+      upgrade,
     },
     now,
   );
@@ -372,6 +422,7 @@ export async function verifyEmailOtp(
   }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "email_otp");
+  await upgrade.after();
   return ok({ token: after.token, user, session: after.session });
 }
 

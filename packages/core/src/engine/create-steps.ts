@@ -76,7 +76,8 @@ export function patchedNewUser(observe: Observer, user: UserRow, patch: unknown)
 export function createSteps(
   config: ResolvedConfig,
   via: UserCreateVia,
-  options: { signUpRule: boolean },
+  // `stateData`: the app payload of a social sign-in, for `identity.afterLink` (plan 12i Task 19).
+  options: { signUpRule: boolean; stateData?: Record<string, unknown> },
 ): CreateSteps {
   const hooks = config.hooks;
   let minted: string | null = null;
@@ -127,7 +128,12 @@ export function createSteps(
           config.observe,
           "identity.afterLink",
           hooks.identity.afterLink,
-          { user, identity: linked.identity, via: "sign_in" },
+          {
+            user,
+            identity: linked.identity,
+            via: "sign_in",
+            ...(options.stateData ? { stateData: options.stateData } : {}),
+          },
           user.id,
         );
     },
@@ -158,6 +164,13 @@ export interface VerifySteps {
   /** The count of the sessions that this attempt's claim deleted (plan 12h Task 5). */
   endedCount(): number;
   /**
+   * Counts a session race that undid an attempt of the claim. `begin` keeps
+   * the count, so `claimEmail` can bound the runs (ruling 46 of plan 12i).
+   */
+  raced(): void;
+  /** The count of the session races of this flow. */
+  races(): number;
+  /**
    * The stop rows of the impersonation sessions that the claim ends (ruling
    * 43 of plan 12f), or null while the tool is off. `begin` empties it, so
    * a retry keeps no row of an attempt that rolled back.
@@ -173,6 +186,7 @@ export function verifySteps(
   let checked: string | null = null;
   let claimed: string | null = null;
   let ended = 0;
+  let races = 0;
   const stops = impersonationStops(config, "claim");
   return {
     stops,
@@ -212,5 +226,9 @@ export function verifySteps(
       ended = n;
     },
     endedCount: () => ended,
+    raced() {
+      races++;
+    },
+    races: () => races,
   };
 }

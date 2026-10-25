@@ -75,6 +75,10 @@
     "./observe": {
       "types": "./dist/observe/index.d.ts",
       "default": "./dist/observe/index.js"
+    },
+    "./social-entries": {
+      "types": "./dist/social/entries/index.d.ts",
+      "default": "./dist/social/entries/index.js"
     }
   },
   "files": [
@@ -83,7 +87,8 @@
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run && vitest run --config vitest.answers.config.ts && vitest run --config vitest.events.config.ts"
+    "test": "vitest run && vitest run --config vitest.answers.config.ts && vitest run --config vitest.events.config.ts",
+    "measure": "vitest run --config vitest.measure.config.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",

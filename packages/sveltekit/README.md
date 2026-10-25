@@ -11,6 +11,13 @@ in 3 as a peer dependency.
 - `getAuth` is a function that makes the auth instance at the first request,
   so `vite build` reads no secret.
 - Put other hooks beside it with `sequence` of `@sveltejs/kit/hooks`.
+- On Workers with `@sveltejs/adapter-cloudflare` 8, pass the hook of the
+  runtime: `authHandle({ auth: getAuth, waitUntil })`, with
+  `import { waitUntil } from "cloudflare:workers"`. Adapter 8 sets no
+  `event.platform`, so the default of the binding finds no `waitUntil`.
+  Without the option, core waits for the work after the answer, such as the
+  SMS of a phone code, before it answers. The answer time can then tell a
+  known number, and core writes `observe.wait_until_missing`.
 - The sign-in redirect takes the origin of `event.request.url`, which the
   adapter builds. adapter-node 6.0.0 reads no `ORIGIN` at run time. It writes
   `paths.origin` of the plugin config into the build.

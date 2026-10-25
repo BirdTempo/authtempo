@@ -75,6 +75,8 @@ Version 13 (plan 12k, 2026-10-20) is organizations and tokens, second version. I
 
 Version 14 (plan 12d, 2026-10-21) is enterprise SSO and SCIM. It adds the tables `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, and `ta_scim_group_member`. It changes no table of version 13: a row of version 13 reads as before. Apply `0014_schema_v14` before you deploy a core at version 14; the adapter refuses a database at version 13.
 
+Version 15 (plan 12i, 2026-10-24) is the account with no address. `ta_user.email` loses NOT NULL, so 0015 rebuilds `ta_user`: SQLite cannot drop NOT NULL, and no table refers to `ta_user`. `ta_user` gets `username`, `display_username`, `phone`, and `is_anonymous` (default 0), with a unique index on each of `username` and `phone`. `ta_passkey` gets `discoverable`, `prf`, and `large_blob`. `ta_oauth_session_client` and `ta_oauth_logout` get a nullable `issuer`: a logout token names the issuer that its client saw. A row of version 14 reads with no username, no phone, and not anonymous. Apply `0015_schema_v15` before you deploy a core at version 15; the adapter refuses a database at version 14.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

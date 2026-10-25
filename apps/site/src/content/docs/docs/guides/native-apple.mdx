@@ -1,0 +1,78 @@
+---
+title: Sign in with the native Apple sheet
+description: Take the ID token of the Sign in with Apple sheet of an iOS or macOS app, with a nonce of one use and the name that the sheet gives.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 10"
+  - packages/core/src/engine/id-token.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/native-apple.ts?raw";
+import test from "../../../../../samples/guides/native-apple.test.ts?raw";
+
+**For:** an app developer with an iOS or macOS app that shows the native Sign in with Apple sheet.
+
+**What it does:** the sheet gives the app an ID token. `POST /social/apple/id-token` verifies it and opens the session, as the Apple callback does.
+
+## Before you start
+
+- Apple sign-in, as in [Sign in with Google and Apple](/docs/guides/social/).
+- The bundle id of the app, for `social.apple.audiences`. [Social](/docs/reference/config/#social) lists the keys.
+
+## Steps
+
+1. Keep `social.idToken` on. It is on by default with `social.apple`.
+2. Add the bundle id of the app to `social.apple.audiences`.
+3. Post `{}` to `POST /social/apple/id-token/nonce`. Keep `nonce` in the app.
+4. Set `providerNonce` as the `nonce` of the Apple ID request of the sheet.
+5. Post `{ idToken, nonce, name }` to `POST /social/apple/id-token`. `name` is the name that the sheet gave.
+6. A native app reads `token` from the answer, and sends it as a bearer token.
+7. In a JavaScript app, call `client.social.idTokenNonce` and `client.social.idToken` of the [client package](/docs/reference/client/) in place of the posts.
+
+<Code code={config} lang="ts" title="Apple with the bundle id of the app" />
+
+<Code code={test} lang="ts" title="The sheet sign-in as a test" />
+
+## How it behaves
+
+- The nonce, the token checks, and the one use of each token are those of [Sign in with Google One Tap](/docs/guides/one-tap/).
+- The token must verify against Apple's key set, with Apple's issuer and an `aud` of `clientId` or of `audiences`.
+- The sheet gives the name to the app, not in the token. `name` fills a new user only. It never changes the name of a user that exists.
+- An Apple token with `nonce_supported: true` and no nonce is refused, also with `social.idToken.requireNonce: false`.
+- A token lives at most one day. Core refuses a token whose `exp` is more than 86400 seconds after its `iat`.
+- The account rules, the gate of the second factor, and the anonymous upgrade are those of the Apple callback.
+- The limits: `id-token-nonce:ip` 60 and `id-token:ip` 30, each per 15 minutes.
+
+## Residuals
+
+- With `requireNonce: false`, a token with no nonce and no `nonce_supported` skips the hash check. A party that holds only such a token can sign in. Keep `requireNonce` on.
+- Apple's page of the nonce did not load when the route was written. Core's tests use test keys, not real tokens.
+
+## Before you go live
+
+Run these checks on a real device:
+
+1. Sign in once with the native sheet. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
+2. On that token, confirm that `exp` minus `iat` is 86400 seconds or less. Core refuses a token with a longer life.
+
+## If it fails
+
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the token did not verify, its nonce does not match or is absent, the nonce is spent, or the token signed in before. Ask for a new nonce and a new token.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many nonces or sign-ins from the IP.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): an account with the address exists, and Apple did not verify the address.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON, or a field has the wrong type.
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the subject (`sub`) of the token is empty, too long, or holds a control character. Core writes the line `social.bad_subject`.
+- [`email_required`](/docs/reference/errors/#email_required): the token holds no address.
+- [`sso_required`](/docs/reference/errors/#sso_required): the address is of a domain that signs in by SSO only. Send the browser to the start URL in `detail`.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the sign-in or threw.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the user at the same moment. Ask for a new nonce and a new token, and try again.
+
+## Next
+
+- [Sign in with Google One Tap](/docs/guides/one-tap/)
+- [Sign in from a native or desktop app](/docs/guides/handoff/)
+- [The ID-token route](/docs/reference/routes/#post-social-provider-id-token)

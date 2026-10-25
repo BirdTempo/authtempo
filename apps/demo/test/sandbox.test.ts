@@ -212,6 +212,10 @@ describe("the demo Worker and its sandboxes", () => {
           bannedAt: null,
           banReason: null,
           banUntil: null,
+          username: null,
+          displayUsername: null,
+          phone: null,
+          isAnonymous: false,
         },
       ),
     );

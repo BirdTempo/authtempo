@@ -1,8 +1,21 @@
 import { BetterAuthCompatError } from "./compat-error.js";
 
+/**
+ * The host's options of one request (B L2 of the plan 12i final review).
+ * `waitUntil` keeps the work that core runs after the answer, such as an
+ * SMS or a code mail, alive on a host that freezes the function after the
+ * answer. On Next, pass `(p) => after(p)` from `next/server`.
+ */
+export interface HandlerOptions {
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
 export type HandlerLike =
-  | { handler(request: Request): Promise<Response>; options?: unknown }
-  | ((request: Request) => Promise<Response>);
+  | {
+      handler(request: Request, options?: HandlerOptions): Promise<Response>;
+      options?: unknown;
+    }
+  | ((request: Request, options?: HandlerOptions) => Promise<Response>);
 
 /**
  * Off Workers any caller sets `cf-connecting-ip`, core's default IP reader.
@@ -27,14 +40,21 @@ function checkIpSetting(auth: HandlerLike): void {
   ]);
 }
 
-const handlerOf = (auth: HandlerLike) => {
+/** The handler of one request. With a `waitUntil`, each request passes it on. */
+const handlerOf = (auth: HandlerLike, options: HandlerOptions = {}) => {
   checkIpSetting(auth);
-  return typeof auth === "function" ? auth : (r: Request) => auth.handler(r);
+  const handle = typeof auth === "function" ? auth : auth.handler.bind(auth);
+  const { waitUntil } = options;
+  return waitUntil ? (r: Request) => handle(r, { waitUntil }) : (r: Request) => handle(r);
 };
 
-/** Better Auth's `toNextJsHandler(auth)` for a route file `app/api/auth/[...all]/route.ts`. */
-export function toNextJsHandler(auth: HandlerLike) {
-  const h = handlerOf(auth);
+/**
+ * Better Auth's `toNextJsHandler(auth)` for a route file
+ * `app/api/auth/[...all]/route.ts`. The second argument is authtempo's:
+ * `{ waitUntil: (p) => after(p) }`.
+ */
+export function toNextJsHandler(auth: HandlerLike, options?: HandlerOptions) {
+  const h = handlerOf(auth, options);
   return { GET: h, POST: h, PATCH: h, PUT: h, DELETE: h };
 }
 

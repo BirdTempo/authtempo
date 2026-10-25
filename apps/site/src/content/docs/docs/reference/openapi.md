@@ -66,6 +66,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `magicLink` | always on | on |
 | `social` | `social` | off |
 | `passkey` | `passkey` | off |
+| `passkeyRelatedOrigins` | `passkey.relatedOrigins` | off |
 | `password` | `password` | off |
 | `totp` | `totp` | off |
 | `emailOtp` | `emailOtp` | on |
@@ -88,6 +89,12 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `openapi` | `openapi` | off |
 | `health` | always on | on |
 | `readiness` | `observe.readiness` | off |
+| `username` | `username` | off |
+| `phone` | `phone` | off |
+| `anonymous` | `anonymous` | off |
+| `passkeySignUp` | `passkey.signUp` | off |
+| `multiSession` | `multiSession` | off |
+| `socialIdToken` | `social.google or social.apple` | off |
 
 ## The error shape
 

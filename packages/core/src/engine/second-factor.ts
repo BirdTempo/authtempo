@@ -8,11 +8,14 @@ import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primi
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import { type CarriedUpgrade, type UpgradeSteps, upgradeProof } from "./anonymous.js";
 import { stopWith } from "./hooks.js";
+import type { LastMethod } from "./last-method.js";
 import type { ImpersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
+import { type OpenedStateData, sealStateData } from "./state-data.js";
 import { holdUser } from "./user-hold.js";
 
 /**
@@ -377,14 +380,18 @@ export type ChallengeMethod = SecondFactorMethod | "backup";
  */
 const PREFERENCE: readonly ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
 
-/** The first factors that a challenge can follow (plan 12c; `sso` since plan 12d). Each is a `SessionVia`. */
-export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso";
+/**
+ * The first factors that a challenge can follow (plan 12c; `sso` since plan
+ * 12d; `phone` since plan 12i). Each is a `SessionVia`.
+ */
+export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso" | "phone";
 const GATED_VIA: ReadonlySet<string> = new Set([
   "password",
   "magic_link",
   "email_otp",
   "social",
   "sso",
+  "phone",
 ]);
 
 /** How the person proved the first factor: the session's `via`, and `reset` for a password reset. */
@@ -443,6 +450,12 @@ export interface ChallengeInput extends ChallengeOrigin {
   next: string | undefined;
   /** The latest expiry of the session that the verify opens (plan 12d): a SAML `SessionNotOnOrAfter`. */
   notAfter?: Date | undefined;
+  /** The app payload of a social sign-in (plan 12i Task 19), sealed into the row for the verify. */
+  stateData?: OpenedStateData;
+  /** The last method of the sign-in (plan 12i Task 12): the verify sets its cookie. A reset has none. */
+  method?: LastMethod;
+  /** The anonymous user that the verify replaces (plan 12i Task 7), with the rule of its pathway. */
+  anonymous?: CarriedUpgrade | null;
 }
 
 /**
@@ -466,6 +479,9 @@ export async function writeChallenge(
   const challenge = randomToken(TWO_FACTOR_PREFIX);
   const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
   const id = newId(now);
+  // Sealed under this row's id, with its version in `data`: the email code
+  // send moves the row's `secretVersion` to the current one (plan 12i Task 19).
+  const payload = input.stateData ? await sealStateData(config, input.stateData.plain, id) : null;
   await storage.create("verification", {
     id,
     purpose: "two-factor",
@@ -481,6 +497,14 @@ export async function writeChallenge(
       next: safeNext(input.next),
       attempts: 0,
       ...(input.notAfter ? { notAfter: input.notAfter.toISOString() } : {}),
+      ...(payload ? { sealedData: payload.sealed, sealedDataVersion: payload.version } : {}),
+      ...(input.method ? { method: input.method } : {}),
+      ...(input.anonymous
+        ? {
+            anonymousUserId: input.anonymous.anonymousUserId,
+            anonymousKind: input.anonymous.kind,
+          }
+        : {}),
     },
     createdAt: now,
     updatedAt: now,
@@ -584,6 +608,16 @@ export function gatedSteps(
     notAfter?: Date | undefined;
     /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
     sameAddress?: boolean;
+    stateData?: OpenedStateData;
+    /** The last method of the sign-in (plan 12i Task 12), kept in a challenge for its verify. */
+    method?: LastMethod;
+    /**
+     * The anonymous upgrade of the sign-in (plan 12i Task 7). With a
+     * session, its `before` runs before the session hook, and its `claim`
+     * right before the session write. A challenge carries its anonymous
+     * user to the verify, which links.
+     */
+    upgrade?: UpgradeSteps;
   },
   now: Date,
 ): {
@@ -607,6 +641,8 @@ export function gatedSteps(
         return;
       }
       trustId = read.trustId;
+      // Before the session hook and its hold of the user row: no lock is held while it runs.
+      await open.upgrade?.before(tx, user, upgradeProof(user), open.via);
       prepared = await prepareSession(
         config,
         {
@@ -636,6 +672,9 @@ export function gatedSteps(
             userAgent: open.userAgent,
             next: open.next,
             notAfter: open.notAfter,
+            ...(open.stateData ? { stateData: open.stateData } : {}),
+            ...(open.method ? { method: open.method } : {}),
+            anonymous: open.upgrade?.carried() ?? null,
           },
           now,
         );
@@ -643,6 +682,7 @@ export function gatedSteps(
       }
       const p = prepared;
       if (!p) throw new Error("authtempo: the session hook step did not run");
+      await open.upgrade?.claim(tx);
       const s = await writeSession(config, p, tx);
       return { kind: "session", token: s.token, session: s.session };
     },

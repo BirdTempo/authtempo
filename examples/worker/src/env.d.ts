@@ -39,5 +39,7 @@ declare namespace Cloudflare {
     TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
     BA_DB: D1Database;
     COMPAT_MIGRATIONS: import("cloudflare:test").D1Migration[];
+    /** The workerd probe of ruling 29 of plan 12i (vitest.config.ts). */
+    DETACHED_PROBE: Fetcher;
   }
 }

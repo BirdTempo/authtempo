@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { requireFresh } from "../../engine/fresh.js";
 import { sendSecondFactorEmail } from "../../engine/second-factor-methods.js";
 import {
@@ -32,7 +33,7 @@ import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
-import { sessionCookieFor } from "../session-answer.js";
+import { sessionCookieFor, viaField, withLastMethod } from "../session-answer.js";
 
 /**
  * The TOTP routes (plan 9f, spec 8.11). Every route but the verify and the
@@ -62,8 +63,10 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
     res.headers.append("set-cookie", clearTrustCookie(totp.trustCookieName, trustPath, sameSite));
     return res;
   };
-  const withCookies = (res: Response, v: TwoFactorSession) => {
+  const withCookies = (ctx: RouteContext, res: Response, v: TwoFactorSession) => {
     res.headers.append("set-cookie", sessionCookieFor(config, v.token));
+    // The method of the first factor (plan 12i Task 12). A reset has none.
+    if (v.method) withLastMethod(ctx.config, ctx.request, res, v.method);
     if (v.trustDevice)
       res.headers.append(
         "set-cookie",
@@ -77,7 +80,8 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       );
     return res;
   };
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   return [
     {
       method: "POST",
@@ -182,10 +186,15 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
-        const r = await verifyTwoFactor(ctx.config, { ...body.value, ip: ctx.ip });
+        const r = await verifyTwoFactor(ctx.config, {
+          ...body.value,
+          ip: ctx.ip,
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        });
         if (!r.ok) return respond(r);
         const v = r.value;
         return withCookies(
+          ctx,
           json({
             token: v.token,
             ...publicSession({ user: v.user, session: v.session, refreshed: false }),
@@ -194,6 +203,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
             trustDevice: v.trustDevice
               ? { token: v.trustDevice.token, expiresAt: v.trustDevice.expiresAt.toISOString() }
               : null,
+            ...viaField(ctx.config, v.method ?? undefined),
           }),
           v,
         );
@@ -208,12 +218,12 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       key: "GET /totp/challenge",
       async handler(ctx) {
         const challenge = ctx.url.searchParams.get("challenge") ?? "";
-        if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
+        if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed(ctx, "invalid_token");
         const view = await challengeView(ctx.config, {
           challenge,
           trustToken: readCookie(ctx.request, totp.trustCookieName) ?? undefined,
         });
-        if (!view.ok) return failed(view.code);
+        if (!view.ok) return failed(ctx, view.code);
         const asked = ctx.url.searchParams.get("method");
         const wanted =
           ctx.url.searchParams.get("backup") === "1"
@@ -254,12 +264,12 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       key: "POST /totp/challenge",
       async handler(ctx) {
         const body = await readBody(ctx.request, pageBody);
-        if (!body.ok) return failed("invalid_token");
+        if (!body.ok) return failed(ctx, "invalid_token");
         const { challenge, code, backupCode, emailCode, action } = body.value;
         const page = `${ctx.config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}`;
         if (action === "send-email") {
           const sent = await sendSecondFactorEmail(ctx.config, { challenge });
-          return sent.ok ? redirect(`${page}&method=email`) : failed(sent.code);
+          return sent.ok ? redirect(`${page}&method=email`) : failed(ctx, sent.code);
         }
         const r = await verifyTwoFactor(ctx.config, {
           challenge,
@@ -272,15 +282,16 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
             : {}),
           trustDevice: body.value.trustDevice === "1",
           ip: ctx.ip,
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
-        if (r.ok) return withCookies(redirect(resolveNext(ctx.config, r.value.next)), r.value);
+        if (r.ok) return withCookies(ctx, redirect(resolveNext(ctx.config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
         if (r.code === CHALLENGE_PAGE_ERROR)
           return errorRedirect(
             `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=${CHALLENGE_PAGE_ERROR}`,
             CHALLENGE_PAGE_ERROR,
           );
-        return failed(r.code);
+        return failed(ctx, r.code);
       },
     },
   ];

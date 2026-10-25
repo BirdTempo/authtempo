@@ -304,8 +304,10 @@ export async function acceptInvitation(
   if (!live.ok) return live;
   const inv = live.value;
   // The same rule as a social claim: only the verified holder of the invited address may accept.
-  if (!input.user.emailVerified) return fail("email_unverified");
+  // The address compare comes first, so a user with no address answers
+  // email_mismatch (spec 32 item 1, ruling 15 of plan 12i).
   if (input.user.email !== inv.email) return fail("email_mismatch");
+  if (!input.user.emailVerified) return fail("email_unverified");
   const organizationRow = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: inv.organizationId },
   ]);

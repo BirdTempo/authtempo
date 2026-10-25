@@ -50,7 +50,8 @@ describe("compareShape (plan 11c2)", () => {
         liveWith("ta_user", (t) => ({
           ...t,
           columns: t.columns.filter((c) => c.name !== "email"),
-          unique: [],
+          // Only the index of the dropped column goes: version 15 (plan 12i) has two more.
+          unique: t.unique.filter((u) => u.name !== "ux_ta_user__email"),
         })),
       ),
     ).toEqual([
@@ -83,7 +84,10 @@ describe("compareShape (plan 11c2)", () => {
     expect(
       compareShape(
         EXPECTED,
-        liveWith("ta_user", (t) => ({ ...t, unique: [] })),
+        liveWith("ta_user", (t) => ({
+          ...t,
+          unique: t.unique.filter((u) => u.name !== "ux_ta_user__email"),
+        })),
       ),
     ).toEqual([
       { code: "schema_unique_missing", kind: "fail", table: "ta_user", index: "ux_ta_user__email" },
@@ -188,7 +192,8 @@ describe("compareShape (plan 11c2)", () => {
         liveWith("ta_user", (t) => ({
           ...t,
           columns: [...t.columns].reverse(),
-          indexes: [{ name: "ix_app_user_name", columns: ["name"] }],
+          // ta_user has an index of its own since ruling 25 H1 of plan 12i: keep it.
+          indexes: [...t.indexes, { name: "ix_app_user_name", columns: ["name"] }],
           unique: [...t.unique, { name: "ux_app_user_image", columns: ["image"] }],
         })),
       ),

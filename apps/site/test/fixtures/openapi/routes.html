@@ -2,6 +2,7 @@
 <h2 id="the-rules-of-every-route">The rules of every route</h2>
 <ul>
 <li>A route that a config key turns off answers 404 <code dir="auto">not_found</code>.</li>
+<li>With a <code dir="auto">baseURL</code> list, a request to an origin outside the list answers 421 <code dir="auto">host_not_allowed</code> before any route. In each rule, <code dir="auto">baseURL</code> is the entry of the request’s origin.</li>
 <li>A POST with an <code dir="auto">Origin</code> header that is not <code dir="auto">baseURL</code> and not in <code dir="auto">trustedOrigins</code> answers 403 <code dir="auto">origin_not_trusted</code>. Two routes are exceptions: Apple’s form post callback, and the token endpoint, which states its own rule.</li>
 <li>A failure answers <code dir="auto">{ "error": "&lt;code&gt;" }</code> with the status of the code. <code dir="auto">hook_refused</code> also carries <code dir="auto">message</code>, as does the <code dir="auto">invalid_body</code> of an SSO or SCIM manager write. <code dir="auto">not_ready</code> also carries <code dir="auto">reason</code>, and <code dir="auto">sso_required</code> carries <code dir="auto">detail</code>.</li>
 <li>An unhandled error answers 500 <a href="/docs/reference/errors/#internal"><code dir="auto">internal</code></a> and writes one log line.</li>
@@ -115,7 +116,7 @@
 </tr>
 <tr>
 <td>Errors</td>
-<td><a href="/docs/reference/errors/#unauthorized"><code dir="auto">unauthorized</code></a>, <a href="/docs/reference/errors/#session_not_fresh"><code dir="auto">session_not_fresh</code></a>, <a href="/docs/reference/errors/#invalid_body"><code dir="auto">invalid_body</code></a>, <a href="/docs/reference/errors/#email_unverified"><code dir="auto">email_unverified</code></a>, <a href="/docs/reference/errors/#rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#token_limit"><code dir="auto">token_limit</code></a>, <a href="/docs/reference/errors/#impersonation_session"><code dir="auto">impersonation_session</code></a>, <a href="/docs/reference/errors/#forbidden_rank"><code dir="auto">forbidden_rank</code></a></td>
+<td><a href="/docs/reference/errors/#unauthorized"><code dir="auto">unauthorized</code></a>, <a href="/docs/reference/errors/#session_not_fresh"><code dir="auto">session_not_fresh</code></a>, <a href="/docs/reference/errors/#invalid_body"><code dir="auto">invalid_body</code></a>, <a href="/docs/reference/errors/#email_unverified"><code dir="auto">email_unverified</code></a>, <a href="/docs/reference/errors/#rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#token_limit"><code dir="auto">token_limit</code></a>, <a href="/docs/reference/errors/#impersonation_session"><code dir="auto">impersonation_session</code></a>, <a href="/docs/reference/errors/#forbidden_rank"><code dir="auto">forbidden_rank</code></a>, <a href="/docs/reference/errors/#anonymous_refused"><code dir="auto">anonymous_refused</code></a></td>
 </tr>
 </tbody>
 </table>

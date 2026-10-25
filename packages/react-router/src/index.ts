@@ -1,5 +1,12 @@
 import type { Auth, ResolvedSession } from "@authtempo/core";
-import { checkGateOptions, type GateAuth, readGate, withSetCookie } from "@authtempo/core/bindings";
+import {
+  type BindingWaitUntil,
+  checkGateOptions,
+  type GateAuth,
+  handleOptions,
+  readGate,
+  withSetCookie,
+} from "@authtempo/core/bindings";
 import {
   type ActionFunctionArgs,
   createContext,
@@ -27,15 +34,33 @@ function resolve<A extends object>(source: AuthSource<A>): A {
 export const sessionContext: RouterContext<ResolvedSession | null> =
   createContext<ResolvedSession | null>(null);
 
+export interface RouteModuleOptions {
+  /**
+   * The host's hook that keeps work alive after the answer (ruling 29 of
+   * plan 12i). React Router 8.4.0 gives a loader a RouterContextProvider
+   * only, with the keys of the app (read 2026-10-25). So the binding cannot
+   * read the ExecutionContext of Workers: pass it here, such as
+   * `(p, { context }) => context.get(cloudflare).ctx.waitUntil(p)`.
+   */
+  waitUntil?: BindingWaitUntil<LoaderFunctionArgs | ActionFunctionArgs> | undefined;
+}
+
 /**
  * The route module of the splat `auth/*`, a resource route:
  * `export const { loader, action } = authRouteModule(getAuth);`.
  */
-export function authRouteModule(auth: AuthSource<Pick<Auth, "handle">>): {
+export function authRouteModule(
+  auth: AuthSource<Pick<Auth, "handle">>,
+  options: RouteModuleOptions = {},
+): {
   loader(args: LoaderFunctionArgs): Promise<Response>;
   action(args: ActionFunctionArgs): Promise<Response>;
 } {
-  const handle = ({ request }: { request: Request }) => resolve(auth).handle(request);
+  const handle = (args: LoaderFunctionArgs | ActionFunctionArgs) =>
+    resolve(auth).handle(
+      args.request,
+      handleOptions(options.waitUntil, args, () => undefined),
+    );
   return { loader: handle, action: handle };
 }
 

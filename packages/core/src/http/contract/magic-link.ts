@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MAGIC_LINK_TOKEN_RE } from "../../engine/magic-link.js";
 import type { RouteKey } from "../route-list.js";
-import { SentAnswer, SessionAnswer, TwoFactorChallenge } from "./shapes.js";
+import { SentAnswer, SessionSignInAnswer, TwoFactorChallenge } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const requestBody = z.object({
@@ -31,7 +31,7 @@ export const MAGIC_LINK_CONTRACT = {
   },
   "POST /magic-link/verify": {
     body: { schema: verifyBody, media: ["json", "form"], parsedBy: "zod" },
-    answer: { kind: "json", schema: z.union([SessionAnswer, TwoFactorChallenge]) },
+    answer: { kind: "json", schema: z.union([SessionSignInAnswer, TwoFactorChallenge]) },
     alt: { kind: "redirect", param: "auth_error" },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

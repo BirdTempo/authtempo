@@ -4,18 +4,22 @@ import {
   createAuth,
   crossSiteRefusal,
   type HandleOptions,
+  onWorkers,
 } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
+import { isPlaceholder, placeholderRuleOf } from "../storage/placeholder.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
-import { checkOptions } from "./check-options.js";
+import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
-import { type Mapped, mapOptions } from "./map-options.js";
+import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
+import { type Mapped, mapOptions, mappedFor } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
+import { signInAdditionsRoute } from "./sign-in-additions.js";
 import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
@@ -84,18 +88,30 @@ export async function withFreshCode(res: Response): Promise<Response> {
  */
 export function createHandler(
   auth: Auth,
-  mapped: Mapped,
+  base: Mapped,
 ): (request: Request, options?: HandleOptions) => Promise<Response> {
-  const { basePath, plugins } = mapped;
+  const { basePath, plugins } = base;
   // Core's own change routes follow Better Auth's option (plan 12a), as the
   // magic link does. The email code paths reach them through auth.handle.
   const changePath = `${basePath}/user/change-email`;
+  // Better Auth's own path of the change, which account.ts sends to core's route.
+  const betterAuthChangePath = `${basePath}/change-email`;
   // Better Auth has no re-authentication code, and the shim maps no mail for it.
   const reauthCodePath = `${basePath}/reauth/email`;
   const magicLinkPath = `${basePath}/magic-link/`;
   // Core's /tokens and /organizations/tokens routes pass through since plan
   // 12k Task 12: both token models keep core's own tables here.
-  const serve = async (request: Request): Promise<Response> => {
+  const serve = async (request: Request, options?: HandleOptions): Promise<Response> => {
+    // A host outside a baseURL list gets core's 421 before any route work,
+    // the SAML ACS too (plan 12i Task 18). Core's gate checks the host first,
+    // and 421 is its only answer of that rule.
+    const hostRefusal = crossSiteRefusal(auth, request);
+    if (hostRefusal?.status === 421) return hostNotAllowed(hostRefusal);
+    // The request's entry of the list: each inner request and URL is built on it.
+    // With the host's waitUntil, each inner auth.handle call passes it on
+    // (ruling 23 of plan 12i, Task 16): the request's mapping carries it.
+    const entry = mappedFor(base, request);
+    const mapped = options?.waitUntil ? { ...entry, handleOptions: options } : entry;
     const { pathname } = new URL(request.url);
     // Core answers 404 outside basePath: one source for that rule (Task 7 ruling).
     // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
@@ -103,7 +119,7 @@ export function createHandler(
       return Response.json({ error: "not_found" }, { status: 404 });
     }
     if (
-      (!mapped.account.changeEmail &&
+      (!base.account.changeEmail &&
         (pathname === changePath || pathname.startsWith(`${changePath}/`))) ||
       pathname === reauthCodePath
     )
@@ -128,6 +144,15 @@ export function createHandler(
     if (acs) return acs;
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
+    if (req.method === "POST" && pathname === changePath) {
+      const held = await placeholderChange(auth, base, req, false);
+      if (held) return held;
+    }
+    // With the option off, account.ts answers CHANGE_EMAIL_DISABLED first (ruling 44 L-A).
+    if (req.method === "POST" && pathname === betterAuthChangePath && base.account.changeEmail) {
+      const held = await placeholderChange(auth, base, req, true);
+      if (held) return held;
+    }
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
     if (sso) return sso;
@@ -141,14 +166,19 @@ export function createHandler(
     const account =
       admin ??
       (await getSessionRoute(auth, mapped, req)) ??
-      (await accountRoute(auth, mapped, req));
+      (await accountRoute(auth, mapped, req)) ??
+      // The paths of the sign-in plugins of plan 12i Task 16. Null for every other request.
+      (await signInAdditionsRoute(auth, mapped, req));
     // Better Auth's email OTP paths, in Better Auth's shapes (plan 9e). Null for every other request.
     const otp =
       account ?? (plugins.has("email-otp") ? await emailOtpRoute(auth, mapped, req) : null);
     // Better Auth's two-factor paths (plan 9f). Null for every other request.
     const tf = otp ?? (plugins.has("two-factor") ? await twoFactorRoute(auth, mapped, req) : null);
     let res =
-      tf ?? (await withFreshCode(await withPolicyCode(copy, await auth.handle(req), mapped)));
+      tf ??
+      (await withFreshCode(
+        await withPolicyCode(copy, await auth.handle(req, mapped.handleOptions), mapped),
+      ));
     if (!tf && plugins.has("two-factor")) res = await withTwoFactor(auth, mapped, req, res);
     if (!plugins.has("bearer")) return res;
     const token = sessionTokenOf(res.headers.getSetCookie());
@@ -158,23 +188,69 @@ export function createHandler(
     out.headers.append("access-control-expose-headers", "set-auth-token");
     return out;
   };
-  // The host gives waitUntil to this entry only (plan 12h ruling 3 q5). The
-  // inner auth.handle calls are parts of one request and pass nothing, so the
-  // flush starts once, after the answer, as auth.handle starts it.
+  // The host gives waitUntil to this entry (plan 12h ruling 3 q5). Each
+  // inner auth.handle call gets a waitUntil that keeps its work. That work
+  // is a code mail or an SMS that core sends after the answer, then core's
+  // flush of its lines (ruling 23 of plan 12i, carried to Task 16). The
+  // host gets one promise: the shim's flush and that work. With no waitUntil, the inner
+  // calls get none, as before: core then runs the work detached, or waits
+  // for it on Workers (ruling 29).
   return async (request, options) => {
-    const res = await serve(request);
-    if (options?.waitUntil) {
+    const host = options?.waitUntil;
+    const work: Promise<unknown>[] = [];
+    const res = await serve(request, host ? { waitUntil: (p) => void work.push(p) } : undefined);
+    if (host) {
       // The flush has started when a throwing waitUntil returns: the answer stays,
       // and the events reach the sink while the isolate lives.
       const flush = auth.observe.flush();
       try {
-        options.waitUntil(flush);
+        // The promise resolves to undefined, as core's handle gives its host.
+        host(Promise.allSettled([flush, ...work]).then(() => undefined));
       } catch {
         // An unbound ctx.waitUntil throws Illegal invocation. The answer is kept.
+        // The work took no promise, so on Workers it would stop at the answer.
+        // Wait for it, as core's handle does (final fix wave item 14).
+        if (work.length > 0 && onWorkers()) await Promise.allSettled(work);
       }
     }
     return res;
   };
+}
+
+/**
+ * A change of address to an address in a placeholder form answers
+ * `hook_refused` before core mails the confirm link (ruling 42 L1). Core's
+ * user `beforeUpdate` refuses it at the commit too (hooks.ts), but core
+ * mails the new address first. Better Auth's own path `/change-email` gets
+ * the refusal in Better Auth's shape (ruling 44 L-A). Null for any other change.
+ */
+async function placeholderChange(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+  betterAuthShape: boolean,
+): Promise<Response | null> {
+  const body: unknown = await request
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = (body as { newEmail?: unknown } | null)?.newEmail;
+  if (typeof email !== "string") return null;
+  const s = await auth.session(request, { refresh: false });
+  if (!isPlaceholder(email, mapped.emailDomainName, s?.user.id ?? null)) return null;
+  const refusal = betterAuthShape
+    ? { code: BETTER_AUTH_CODES.hook_refused, message: PLACEHOLDER_ADDRESS_TEXT }
+    : { error: "hook_refused", message: PLACEHOLDER_ADDRESS_TEXT };
+  return Response.json(refusal, { status: 403 });
+}
+
+/** Core's 421 of a host outside the `baseURL` list in Better Auth's shape, with core's headers. */
+function hostNotAllowed(refusal: Response): Response {
+  const code = BETTER_AUTH_CODES.host_not_allowed;
+  return new Response(JSON.stringify({ code, message: messageOf(code) }), {
+    status: refusal.status,
+    headers: refusal.headers,
+  });
 }
 
 /**
@@ -193,6 +269,18 @@ function invalidOrigin(refusal: Response): Response {
 export function betterAuth<O extends BetterAuthOptions>(options: O): BetterAuthInstance<O> {
   const check = checkOptions(options);
   if (check.refusals.length > 0) throw new BetterAuthCompatError(check.refusals);
+  // The storage reads `temp-<id>@<emailDomainName>` as no address (plan 12i
+  // Task 16). One storage holds one rule, so a second instance on it with
+  // another domain would read the first one's rows as real addresses.
+  const rule = options.database ? placeholderRuleOf(options.database) : undefined;
+  const domain = pluginOf(options, "anonymous")?.options.emailDomainName ?? null;
+  if (rule) {
+    if (rule.domain !== null && rule.domain !== domain)
+      throw new BetterAuthCompatError([
+        `plugins[anonymous].emailDomainName: another instance on this database reads ${rule.domain} as the placeholder domain; one database takes one`,
+      ]);
+    rule.domain = domain;
+  }
   for (const n of check.notes) console.info(`authtempo compat: ${n}`);
   const mapped = mapOptions(options);
   let auth: Auth;

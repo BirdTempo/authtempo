@@ -35,9 +35,10 @@ export function createProvidersAuth(
       // A preset. GitHub issues no ID token, so core reads its user API.
       github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET },
       // An OpenID Connect provider. The Entra entry is an example: core does not test it.
+      // The name `microsoft` belongs to the Entra ID preset `social.microsoft`.
       oidc: [
         {
-          name: "microsoft",
+          name: "entra",
           label: "Continue with Microsoft",
           issuer: `https://login.microsoftonline.com/${env.ENTRA_TENANT_ID}/v2.0`,
           clientId: env.ENTRA_CLIENT_ID,
@@ -51,9 +52,10 @@ export function createProvidersAuth(
         },
       ],
       // A provider that issues no ID token. The Discord entry is an example: core does not test it.
+      // The name `discord` belongs to the Discord preset `social.discord`.
       oauth2: [
         {
-          name: "discord",
+          name: "discord-app",
           label: "Continue with Discord",
           authorizeUrl: "https://discord.com/oauth2/authorize",
           tokenUrl: "https://discord.com/api/oauth2/token",

@@ -122,13 +122,20 @@ What changes at cutover:
 
 - The `session.token` column holds the SHA-256 hex of the token, never the raw token. Better Auth-era sessions end: every person signs in again once. App SQL that reads `session.token` reads a hash.
 - Better Auth-era verification rows and invitations stay in the table and core never reads them. Send pending invitations again.
-- Users, Google, Apple, GitHub, and LinkedIn accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
+- Users, Google, Apple, GitHub, LinkedIn, TikTok, WeChat, Microsoft, Discord, GitLab, X (`twitter`), and Facebook accounts, credential passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first sign-in.
 - The `ta_meta` and `ta_limit` tables go in the first schema of the search path, also when the Better Auth tables sit in another schema.
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
 - The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. For one release the shim also reads `tempo_session`, the name of plan 9, and moves it: the handler sets `__Host-tempo_session` with the same token and clears `tempo_session`. `api.getSession` reads the old name too, but sets no cookie. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
-- Better Auth-era `account` rows of providers that the package does not map (any provider other than Google, Apple, GitHub, and LinkedIn) stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one. The factory refuses such a provider in `socialProviders` with the reason `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in. A compat app that needs such a provider uses core's `createAuth` for it, because `betterAuth()` takes no list entry.
-- Register `<baseURL><basePath>/social/<provider>/callback` at each provider (Google, Apple, GitHub, LinkedIn) before cutover. Better Auth used `<baseURL>/api/auth/callback/<provider>`. A GitHub OAuth App has one callback URL, so change it at cutover, or use a GitHub App, which takes several. Google and LinkedIn take a list, so add the new URI before cutover.
+- `socialProviders.microsoft` (`clientId`, `clientSecret`, `tenantId`, default `common`), `discord`, `gitlab` (with `issuer`), `twitter`, and `facebook` map to core's presets (plan 12i Task 16). Each preset keeps the subject that Better Auth stored as `accountId`, so the rows link on the first sign-in. Every other key of these providers is refused.
+- Core trusts fewer provider addresses than Better Auth. A Microsoft address is verified only with the `xms_edov: true` claim, and Better Auth also counts `email_verified` and the `verified_*_email` lists. A GitLab address is never verified in core, and Better Auth counts `email_verified`. Take a person whose account has a password, at a first Microsoft or GitLab sign-in. Better Auth links by the address, and core answers `email_taken_unverified`. Rows that Better Auth linked before keep linking by subject.
+- Better Auth-era `account` rows of providers that the package does not map stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one. The factory refuses such a provider in `socialProviders`, and the reason depends on the provider id:
+  - `slack`: refused. Core's Slack subject is `<team_id>:<user_id>`, and a Better Auth Slack row holds the user id alone (ruling 22 of plan 12i). The row would not link at the first sign-in, and the person would get a second account, or `email_taken` for a verified address. Before you use core's `social.slack` through core's `createAuth`, rewrite each Slack `accountId` to `<team_id>:<user_id>`. The refusal text starts with `not mapped: core's Slack subject is team_id:user_id`.
+  - Any other id: `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in.
+
+  A compat app that needs such a provider uses core's `createAuth`, because `betterAuth()` takes no preset or list entry outside the ones it maps.
+- The callback stays Better Auth's: `<baseURL><basePath>/callback/<provider>`. On an https `baseURL`, the shim gives each provider that URI as core's `redirectURI` override (plan 12i Task 16), so nothing changes at the provider. A provider's own `redirectURI` option wins, and core checks that it has the origin of `baseURL`. Core takes an override on https only: on an http `baseURL` (local work), register `<baseURL><basePath>/social/<provider>/callback`.
 - GitHub and LinkedIn accounts link on the first sign-in by the id Better Auth stored: the numeric GitHub id, and LinkedIn's OpenID `sub`. LinkedIn's `sub` stays the same only while the client id stays the same.
+- `socialProviders.tiktok` (`clientKey`, `clientSecret`) and `socialProviders.wechat` (`clientId`, `clientSecret`) map to core's `tiktokEntry` and `wechatEntry` (plan 12i Task 22). Their accounts link by the id Better Auth stored: the TikTok `open_id`, and the WeChat `unionid`, else `openid`. The two entries have no address, so core keeps the placeholder address of a Better Auth-era user unverified and never links by it. WeChat's `lang` and `platformType` are refused. The TikTok callback stays Better Auth's (see above), and the API host stays the WeChat callback domain. The storage reads Better Auth's TikTok and WeChat placeholders (`<id>@tiktok.placeholder.invalid`) as no address, so they never count as proved (see "Sign-in plugins").
 - A credential row (`providerId` `credential`) with a null `account.password` answers `schema_mismatch`, so sign-in and reset for that address answer 500. Better Auth 1.7.2 never writes that row. Give the row a hash or delete it before cutover. A plan 9b input.
 
 On D1, `drizzleAdapter(db, { provider: "sqlite" })` needs `drizzle-orm/d1`, and
@@ -144,9 +151,10 @@ number lower than the Better Auth table migration makes every new database
 
 - Better Auth 1.7 tables: copy `node_modules/@authtempo/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
-- Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0011_compat_schema_v14.sql`), in order, and give each the next number.
-- Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table. Write the 0009 file from `compatMigration0009Sql("sqlite", storage.names)` for the same reason. The shipped 0009 adds the ban columns to the default `user` table and `taActorId` to the default `session` table. Write the 0010 file from `compatMigration0010Sql("sqlite", storage.names)` for the same reason, or from `compatMigration0010Sql("sqlite", storage.names, "before-1.7")` for tables from before 1.7. The shipped 0010 adds `activeTeamId` to the default `session` table and `teamId` to the default `invitation` table.
-- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file. It is the shipped file of its directory (`d1` or `d1-before-1.7`) without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. It applies the files to 0009, its own 0010, and the shipped 0011 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 11, and the command copies nothing.
+- Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0012_compat_schema_v15.sql`), in order, and give each the next number.
+- Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table. Write the 0009 file from `compatMigration0009Sql("sqlite", storage.names)` for the same reason. The shipped 0009 adds the ban columns to the default `user` table and `taActorId` to the default `session` table. Write the 0010 file from `compatMigration0010Sql("sqlite", storage.names)` for the same reason, or from `compatMigration0010Sql("sqlite", storage.names, "before-1.7")` for tables from before 1.7. The shipped 0010 adds `activeTeamId` to the default `session` table and `teamId` to the default `invitation` table. Write the 0012 file from `compatMigration0012Sql("sqlite", storage.names)` for the same reason. The shipped 0012 adds the plugin columns to the default `user` table and the flags to the default `passkey` table.
+- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file. It is the shipped file of its directory (`d1` or `d1-before-1.7`) without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. It applies the files to 0009, its own 0010, and the shipped 0011 and 0012 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 12, and the command copies nothing.
+- Tables that hold the columns of Better Auth's username, phone number, or anonymous plugin: the shipped 0012 adds these columns too, so on such tables it fails with `duplicate column name`. Such an app writes its own 0012 file without the `ADD COLUMN` line of each column that the table holds, and without the unique key that it holds.
 
 `wrangler d1 migrations apply` rolls back a file that fails (wrangler
 4.148.0, read 2026-10-10), so a refused file changes nothing. A runner that
@@ -216,10 +224,11 @@ Better Auth defaults that core does not keep:
 | Better Auth default | authtempo |
 | --- | --- |
 | The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. For a header with a list of values, such as `x-forwarded-for`, the shim takes the leftmost value, as Better Auth does. A client can write that value, so list only a header that your proxy sets in full. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
-| An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `authtempo.appURL` (default the origin of `baseURL`) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
+| An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `authtempo.appURL` (default the origin of `baseURL`, or of the request's entry of a list) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
+| `baseURL` takes `{ allowedHosts, fallback, protocol }` with wildcard hosts, and `protocol: "auto"` reads `x-forwarded-proto` | Each host must be exact, and `protocol` must be `https` or `http`; a wildcard, `auto`, and no `protocol` are refused. The hosts map to core's `baseURL` list, and a `fallback` equal to one of them is the primary. Core picks the host from the request URL and reads no proxy header. The shim builds its own paths, SSO URLs, and mail links on that host. Each host is also a trusted origin, as in Better Auth, so a page on one host posts to another. A wildcard on a shared platform lets any customer of the platform own a host of the issuer. |
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
 `callbackURL` or `image`, and `api.signInEmail` with `callbackURL` or
@@ -432,10 +441,14 @@ Auth request and answer shapes. It answers 404 for each, with two exceptions
 that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
-answers `invalid_token`. Without the plugin, it answers 404. The handler
+answers `invalid_token`. Without the plugin, it answers 404. Since plan 12i
+Task 16, two more paths of the list answer. `/callback/<provider>` is core's
+provider callback on an https `baseURL`, and it answers 404 on http.
+`/sign-in/social` with `idToken` is core's ID-token sign-in, and it answers
+404 without `idToken`. The handler
 serves `/get-session`, the eleven account paths of plan 12a, and
 `/passkey/update-passkey` in Better Auth's shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
-it either (see "Email codes").
+it either (see "Email codes"), nor the paths of the sign-in plugins (see "Sign-in plugins").
 
 - Core: `/account-info`, `/callback/:id`, `/change-password`, `/error`, `/get-access-token`, `/ok`,
   `/refresh-token`, `/request-password-reset`, `/reset-password`,
@@ -579,17 +592,23 @@ answer type holds `twoFactorRedirect` only when the client options name
 | Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations, mailed invitations, and Better Auth's roles: `ac`, `roles`, and `dynamicAccessControl` map onto core's statements, roles, and dynamic roles (see "Access control and roles"). `teams` maps onto core's teams (see "Teams"). With no `roles`, the roles are Better Auth's member < admin < owner. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
-| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. |
+| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. `registration.requireSession: true` maps. `requireSession: false`, `resolveUser`, and `afterVerification` are refused: core makes every user. Core's `passkey.signUp` is the sign-up by passkey, and the shim does not map it (deviation 6 of plan 12i). |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. Without the plugin the magic link paths answer 404. |
 | `emailOTP` | Core's email codes (plan 9e): the sign-in code and the reset code. `sendVerificationOTP` is required. It gets `type: "sign-in"` or `type: "forget-password"`, never another type, and a reset code goes only to an address with a user, as in Better Auth. Without the plugin core's code routes answer 404. See "Email codes". |
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
 | `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
 | `apiKey` | Core's API tokens (plan 12k Task 12): `references: "user"` gives user tokens (`tk_`), and `"organization"` gives organization tokens (`to_`). See "API keys". |
-| `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, and social stays off, as in Better Auth; a reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
+| `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, social, and the phone code stays off, as in Better Auth. A reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
 
 | `admin` | Core's operator tools (plan 12f). Needs `organization` and `authtempo.platformOrganization`. See "The admin plugin". |
 | `sso` | Core's OIDC and SAML connections and its domain proof (plan 12d). Needs `organization` and `authtempo.ssoDns`. See "SSO and SCIM". |
 | `scim` | Core's SCIM server (plan 12d). Needs `organization`. Each static credential acts on one organization. See "SSO and SCIM". |
+| `anonymous` | Core's anonymous sign-in (plan 12i Task 16). See "Sign-in plugins". |
+| `username` | Core's username and the password sign-in by username. Needs `emailAndPassword.enabled`. See "Sign-in plugins". |
+| `phoneNumber` | Core's phone code. `sendOTP` delivers each code that core makes. Needs `authtempo.phone.regions`. See "Sign-in plugins". |
+| `oneTap` | Core's ID-token route for Google, with no nonce. Needs `socialProviders.google`. See "Sign-in plugins". |
+| `multiSession` | Core's multi-session: `maximumSessions` (2 to 10, default 5) is core's `multiSession.max`. See "Sign-in plugins". |
+| `lastLoginMethod` | Core's last method cookie under Better Auth's cookie name. See "Sign-in plugins". |
 
 Give each plugin once. A second entry with the same id is refused at start, because the server reads only the first.
 
@@ -941,8 +960,23 @@ answers 400. A slug that core's slug rule refuses answers `VALIDATION_ERROR`
 - `changeEmail: { enabled: true }` serves the change of address by code
   (plan 12a). `verifyCurrentEmail: true` is refused: core proves the new
   address only.
-- Refused by name: `generateOTP`,
-  `overrideDefaultEmailVerification: true`, `sendVerificationOnSignUp: true`,
+- `overrideDefaultEmailVerification: true` is core's
+  `password.verifyBy: "code"` (plan 12i Task 20). The sign-up mails a code
+  through `sendVerificationOTP` with the type `email-verification`, and
+  `emailVerification.sendVerificationEmail` is then not required.
+  `otpLength`, `expiresIn`, and `allowedAttempts` set this code too, as in
+  Better Auth (`password.verifyCode`, ruling 39). Better Auth's defaults
+  apply: 6 digits, 300 seconds, and 3 tries. An `expiresIn` over 1800
+  seconds is refused with this option: core's sign-up code lives at most
+  30 minutes.
+- The shim sets `password.uniformSignUp: false`, as Better Auth does. So
+  the sign-up answer tells a known address. Core mails the resend code of
+  `email-verification` after the answer. On Workers, pass
+  `{ waitUntil: (p) => ctx.waitUntil(p) }` to `auth.handler`: the handler
+  passes it to core, and the mail goes out after the answer. Without it,
+  the handler waits for the mail on Workers. Then the answer time tells an
+  unverified user with a password (ruling 39 Info 5 of plan 12i).
+- Refused by name: `generateOTP`, `sendVerificationOnSignUp: true`,
   `resendStrategy: "reuse"`, and `rateLimit`.
 
 `auth.handler` serves these Better Auth paths in Better Auth's shapes,
@@ -951,19 +985,170 @@ authtempo's status.
 
 | Path | Body | Answer |
 | --- | --- | --- |
-| `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `email-verification` and `change-email` |
+| `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`, and for `email-verification` with `overrideDefaultEmailVerification`: a new sign-up code to an unverified user with a password, sent after the answer; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `change-email`, and for `email-verification` without the override |
+| `/email-otp/verify-email` | `{ email, otp }` | With `overrideDefaultEmailVerification`: `{ status: true, token, user }` with the session cookie, as Better Auth answers with `autoSignInAfterVerification`; `token: null` and no cookie for a user already verified; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`. Core runs its claim rule here, as at the verify link |
 | `/sign-in/email-otp` | `{ email, otp }` | `{ token, user }` with the session cookie; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`; 501 `NOT_SUPPORTED` for `name`, `image`, or another user field |
 | `/forget-password/email-otp`, `/email-otp/request-password-reset` | `{ email }` | `{ success: true }` |
 | `/email-otp/request-email-change` | `{ newEmail }` | With `changeEmail.enabled`: `{ success: true }`. The code goes to the new address with the type `change-email`. A taken address gets no code, as in Better Auth. A stale session answers 403 `SESSION_NOT_FRESH` |
 | `/email-otp/change-email` | `{ newEmail, otp }` | With `changeEmail.enabled`: `{ success: true }`, and the address moves; 400 `INVALID_OTP` for a wrong code or a `newEmail` that differs from the request |
 | `/email-otp/reset-password` | `{ email, otp, password }` | `{ success: true }` with the session cookie of the new session; for a user with the second factor on, `{ success: true }` with no cookie unless the device is trusted, as Better Auth answers every reset, and the next sign-in asks for the factor (plan 12c); 400 `PASSWORD_TOO_SHORT` and `PASSWORD_TOO_LONG` before the code check, so the code stays usable, as in Better Auth; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`, `INVALID_PASSWORD`, `PASSWORD_COMPROMISED` |
 
-`/email-otp/verify-email` and `/email-otp/check-verification-otp` answer 501
-`NOT_SUPPORTED`, and so do the two change paths without `changeEmail.enabled`. A wrong, expired, or spent code answers `INVALID_OTP`:
+`/email-otp/check-verification-otp` answers 501 `NOT_SUPPORTED`. So does
+`/email-otp/verify-email` without `overrideDefaultEmailVerification`, and so
+do the two change paths without `changeEmail.enabled`. A wrong, expired, or spent code answers `INVALID_OTP`:
 core does not tell expiry from a wrong code, so `OTP_EXPIRED` never
 appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; authtempo with
 400. A password that the policy refuses for another reason than its length
 spends the code: request a new one.
+
+## Sign-in plugins
+
+Plan 12i Task 16 maps six sign-in plugins of Better Auth 1.7.2 onto core
+(each read 2026-10-25 in `dist/plugins/<id>/`). Each option maps onto core
+or is refused at start with its Better Auth name. Import each plugin from
+`better-auth/plugins`, and each client plugin (`anonymousClient`,
+`usernameClient`, `phoneNumberClient`, `multiSessionClient`,
+`lastLoginMethodClient`) from `better-auth/client/plugins`. The client has
+the calls with or without them; the server answers 404 for a plugin that
+is off.
+
+| Plugin | Maps | Refused |
+| --- | --- | --- |
+| `anonymous` | `emailDomainName`; `onLinkAccount` runs from core's `hooks.anonymous.afterLink`; `generateName` names the user, else "Anonymous" | `generateRandomEmail`, `disableDeleteAnonymousUser: true`, `schema`, and the plugin when every method sets `disableSignUp` |
+| `username` | `minUsernameLength` and `maxUsernameLength`, 3 to 30 | `usernameValidator`, `displayUsernameValidator`, `usernameNormalization`, `displayUsernameNormalization`, `validationOrder`, `immutableUsername: true`, `displayUsername: false`, `schema` |
+| `phoneNumber` | `sendOTP` as core's SMS port; `expiresIn` (60 to 600 seconds, rounded up to whole minutes); `otpLength` (6 or 8); `allowedAttempts` (3 to 10); `requireVerification`; `signUpOnVerification` (core's `phone.signUp`) with `getTempName` | `verifyOTP`, `sendPasswordResetOTP`, `phoneNumberValidator`, `callbackOnVerification`, `schema` |
+| `oneTap` | Core's `social.idToken` with `requireNonce: false`; `clientId` only as `socialProviders.google.clientId`; `disableSignup` votes in core's one sign-up rule | Another `clientId` |
+| `multiSession` | `maximumSessions`, 2 to 10 | Another value |
+| `lastLoginMethod` | `cookieName` (default `better-auth.last_used_login_method`) and `maxAge` (whole days, 1 to 400) | `storeInDatabase: true`, `customResolveMethod`, `beforeStoreCookie`, `schema` |
+
+`auth.handler` serves these Better Auth paths in Better Auth's shapes. Each
+posts core's own route, so core's Origin rule, limits, gate, and cookies
+hold. An error answers `{ code, message }` with authtempo's status. `auth.api`
+has the same calls (`signInAnonymous`, `deleteAnonymousUser`,
+`signInUsername`, `isUsernameAvailable`, `sendPhoneNumberOTP`,
+`verifyPhoneNumber`, `signInPhoneNumber`, `oneTapCallback`, `signInSocial`,
+`listDeviceSessions`, `setActiveSession`, `revokeDeviceSession`), and each
+throws `APIError` on a refusal.
+
+| Path | Core route | Answer |
+| --- | --- | --- |
+| `POST /sign-in/anonymous` | `/anonymous/sign-in` | `{ token, user }`; 400 `ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY` for a browser with an anonymous session, as Better Auth does |
+| `POST /delete-anonymous-user` | `/anonymous/delete` | `{ success: true }`; 403 `USER_IS_NOT_ANONYMOUS` for a session that is not anonymous, as Better Auth does |
+| `POST /sign-in/username` | `/password/sign-in` | `{ token, user }`; with `twoFactor`, Better Auth's redirect answer. `callbackURL` and `rememberMe: false` answer `NOT_SUPPORTED` |
+| `POST /is-username-available` | `GET /username/available` | `{ available }` |
+| `POST /phone-number/send-otp` | `/phone/request` with no session or an anonymous one, else `/phone/add` | `{ message: "code sent" }` for a known and an unknown number. With a session that is not anonymous, core's add needs a fresh session (`session.freshAge`, one day by default). An older session gets 403 `SESSION_NOT_FRESH`. Better Auth needs no fresh session here |
+| `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session that is not anonymous verifies only with `updatePhoneNumber: true`. With an anonymous session, the verify signs in and upgrades the anonymous user, and `onLinkAccount` runs, as in Better Auth. With an anonymous session and `updatePhoneNumber: true`, the verify answers 403 `ANONYMOUS_REFUSED`: Better Auth sets the number on the anonymous user, and core refuses a phone on an anonymous user |
+| `POST /sign-in/phone-number` | `/password/sign-in` | As `/sign-in/username` |
+| `POST /one-tap/callback` | `/social/google/id-token` | `{ token, user }`; 400 `INVALID_TOKEN` |
+| `POST /sign-in/social` with `idToken` | `/social/<provider>/id-token` | `{ redirect: false, token, user }` for `google` and `apple`; `NOT_SUPPORTED` for another provider. `idToken.nonce` must come from core's `POST <basePath>/social/<provider>/id-token/nonce`, and the app gives its `providerNonce` to the provider. Without `oneTap`, a token with no nonce answers `INVALID_TOKEN`. Core keeps no provider token, so `accessToken`, `refreshToken`, and `expiresAt` are not stored |
+| `GET /multi-session/list-device-sessions` | `GET /multi-session` | `[{ session, user }]`, the active session first. `session.token` holds the session id: the shim never holds a clear token |
+| `POST /multi-session/set-active` | `/multi-session/switch` | `{ session, user }`. `sessionToken` is a `session.token` of the list |
+| `POST /multi-session/revoke` | `/multi-session/sign-out` | `{ status: true }` |
+| `POST /phone-number/request-password-reset`, `/phone-number/reset-password` | None | 501 `NOT_SUPPORTED`: core has no password reset by phone |
+
+`signUp.email` and `update-user` take `username`. `displayUsername` must be
+the typed username or absent: core keeps the typed case as
+`displayUsername`, and another value answers `NOT_SUPPORTED`.
+
+Each user that the server answers holds the fields of these plugins, as in
+Better Auth: `isAnonymous` with `anonymous`, `username` and
+`displayUsername` with `username`, and `phoneNumber` and
+`phoneNumberVerified` with `phoneNumber`. The hooks get them too.
+`phoneNumber` is the proved number or null, because core does not read a
+number that Better Auth stored with no proof. With `anonymousClient`,
+`usernameClient`, or `phoneNumberClient`, the client reads its session at
+the shim's `/get-session`, which holds the fields. An answer of a core
+route to the client, such as the email sign-in, holds the five user keys
+only. Read the session for the fields.
+
+The settings that Better Auth does not have:
+
+- `authtempo.phone.regions` is required with `phoneNumber`: the
+  calling-code prefixes that get an SMS, such as `["+1"]`. Core has no
+  default. `authtempo.phone.dailyCap` is the codes of the deployment per 24
+  hours, 1 to 100000, default 1000. Better Auth has no cap.
+- `authtempo.anonymousDailyCap` is the anonymous users of the deployment
+  per 24 hours, 1 to 100000, default 1000. Better Auth has no cap. A
+  sign-in over the cap answers 429.
+- Both caps need the shared limiter of the compat storage. The memory
+  limiter is refused.
+
+Behavior that differs from Better Auth:
+
+- The placeholder address. Better Auth's `user.email` is NOT NULL, and a
+  user of core can have no address. The storage writes
+  `<id>@anonymous.placeholder.invalid` for a user with no address, or
+  `temp-<id>@<emailDomainName>` with that option. It reads every address
+  on `placeholder.invalid`, or on a subdomain of it, as no address. With
+  `emailDomainName`, it reads `temp-<id>@<emailDomainName>` as no address
+  only on the row whose id is `<id>`. Any other address at the domain
+  stays an address, `temp-sales@<emailDomainName>` too. So a Better Auth
+  anonymous user has no address in core, and so do a phone user of
+  `getTempEmail` and a TikTok or WeChat user. Core never mails a
+  placeholder, never finds a user by one, and never counts one as proved.
+  A sign-up or a change of address to an address in a placeholder form
+  answers 403 `HOOK_REFUSED` before any write. At `/change-email` and at
+  core's `/user/change-email`, the refusal also comes before any mail.
+  Better Auth takes such an address. One database takes one
+  `emailDomainName`: a second instance on it with another domain is
+  refused at start.
+- A residual of the move: Better Auth 1.7.2 writes
+  `temp-<random id>@<emailDomainName>`, not the row id, and
+  `generateRandomEmail` writes any address. After the move, such an older
+  row reads as a real, unverified address, and core treats it as the
+  user's address. Before the move, rewrite each such row to
+  `<id>@anonymous.placeholder.invalid`, for example with
+  `UPDATE "user" SET email = id || '@anonymous.placeholder.invalid' WHERE "isAnonymous"`.
+- `getTempEmail` must answer an address on `placeholder.invalid`, such as
+  `<number>@phone.placeholder.invalid`. Another domain is refused at start,
+  because its rows would read back as real addresses.
+- `onLinkAccount` gets core's `proof`. Move the anonymous data only on
+  `"verified"`: an `"unverified"` sign-in is a claim, and the real owner of
+  the address can take the account later. Better Auth calls the hook for
+  both, so the shim does too, and `betterAuth` logs one start note that
+  says so. Each session is the newest row of its user, or null, and its
+  `token` holds the hash of the token.
+- `sendOTP` gets each code that core makes, keys, binds to its number, and
+  counts. It is the one place where app code sees a code. Core sends a
+  note to a number that another user holds. Better Auth has no sender for
+  that note, so the shim sends nothing, and the port answers `sent`. The
+  note counts against the daily cap. Core sends each code and note after
+  the answer, at a sign-in request and at an add. So the answer time tells
+  no account and no held number. A throw of `sendOTP` changes no answer,
+  and core writes the line `sms.port_threw`. On Workers, pass
+  `{ waitUntil }` to `auth.handler`. On Next, pass
+  `{ waitUntil: (p) => after(p) }` (`after` from `next/server`) as the
+  second argument of `toNextJsHandler`. On a serverless Node host, pass
+  the host's `waitUntil` to `toNodeHandler` the same way. Without it, the
+  send runs detached, and a host that freezes the function after the
+  answer can delay or drop it.
+- Core signs in by phone and password only with a number that its code
+  proved. A number that Better Auth stored with no proof does not sign in,
+  so `requireVerification` other than `true` logs a note.
+- A proof of the address clears the phone of an unverified user, by the
+  claim rule: a number on an unverified row can be a claimant's. Better
+  Auth 1.7.2 keeps the number at an email verify. So a moved user who
+  proved a number, but never the address, loses the phone sign-in at
+  their own verify link, magic link, email code, or social sign-in. They
+  add the number again with `/phone-number/send-otp` and
+  `updatePhoneNumber: true`.
+- The last method cookie holds core's values. The client maps them to
+  Better Auth's names: `password` is `email`, `social:<id>` is `<id>`,
+  `magic_link` is `magic-link`, `email_otp` is `email-otp`, and `phone` is
+  `phone-number`. Core also sets the cookie at the sign-in by username,
+  by phone, and by email code, where Better Auth sets none.
+- One Tap: the shim serves `POST /one-tap/callback` only. It has no Google
+  script loader, so the page calls Google's script and posts the token.
+- One Tap sets `social.idToken.requireNonce: false` for every ID-token
+  sign-in: Apple and `/sign-in/social` with `idToken` too, as in Better
+  Auth. A token posted with no nonce then skips the nonce check, so a
+  holder of a valid ID token for the app can sign in with it.
+- The ID-token audiences. A Google `clientId` list gives core its first id
+  as `clientId` and the rest as `social.google.audiences`. The Apple
+  `audience`, else `appBundleIdentifier`, maps to `social.apple.audiences`.
+  Core also takes an Apple token for `clientId` when `audience` is set,
+  where Better Auth does not. Core refuses more than ten ids besides
+  `clientId` at start.
 
 ## Hooks
 
@@ -1048,7 +1233,9 @@ README, "Hooks").
   reset, and a social sign-in with a verified provider address. Better Auth
   1.7.2 calls them at its verify link (`email-verification.mjs:294` and
   `:296`) and at `/email-otp/verify-email` (`routes.mjs:327` and `:332`).
-  The shim answers that path `NOT_SUPPORTED`. Better Auth also calls them at
+  The shim calls them there through core's sign-up code (plan 12i Task 20),
+  and answers that path `NOT_SUPPORTED` without
+  `overrideDefaultEmailVerification`. Better Auth also calls them at
   a change of address, and so does the shim. The change link calls the after
   hook only (`email-verification.mjs:229`). `/email-otp/change-email` calls
   both (`routes.mjs:736` and `:741`). The after hook gets the moved user,
@@ -1159,7 +1346,8 @@ The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugin
 
 The follow-ups of consumerd:
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
-- Anonymous sign-in, `$context`, `getOrgAdapter`, and the rate limit storage.
+- Anonymous sign-in: replace Better Auth's own plugin object with this package's `anonymous({ emailDomainName: "anon.consumerd.app" })`. The storage then reads `temp-<id>@anon.consumerd.app` as no address on the row of that id. Rewrite the older anonymous rows before the move (see "Sign-in plugins", the residual of the move).
+- `$context`, `getOrgAdapter`, and the rate limit storage.
 - `authtempo.roleRanks` from its ROLE_RANK (`ac` and `roles` map since plan 12k).
 - Its `packages/db/test/better-auth-schema.test.ts` calls `auth.api.createOrganization`, `createTeam`, and `addTeamMember`. The shim's `auth.api` has none of the three, so call `auth.tempo.api` with core's arguments. The same test expects `memberCount` 1 after a team member add. The shim writes 0 at the create and never updates it (deviation 11), so that expectation changes to 0.
 - `hooks`: wrap the handler (see "Request hooks").

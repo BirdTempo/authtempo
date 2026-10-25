@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANONYMOUS_HOOK_POINTS,
   IDENTITY_HOOK_POINTS,
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
@@ -10,9 +11,9 @@ import {
 } from "../src/engine/hooks.js";
 import { EVENTS, HOOK_EVENTS } from "../src/observe/events.js";
 
-// The seven hook point constants of src/engine/hooks.ts (plan 12h Task 6;
-// plan 12d adds sso and scim). A new constant joins this list and the hook
-// name union.
+// The eight hook point constants of src/engine/hooks.ts (plan 12h Task 6;
+// plan 12d adds sso and scim, plan 12i adds anonymous). A new constant
+// joins this list and the hook name union.
 const POINTS: readonly [string, Readonly<Record<string, true>>][] = [
   ["organization", ORGANIZATION_HOOK_POINTS],
   ["session", SESSION_HOOK_POINTS],
@@ -21,6 +22,7 @@ const POINTS: readonly [string, Readonly<Record<string, true>>][] = [
   ["operator", OPERATOR_HOOK_POINTS],
   ["sso", SSO_HOOK_POINTS],
   ["scim", SCIM_HOOK_POINTS],
+  ["anonymous", ANONYMOUS_HOOK_POINTS],
 ];
 const HOOK_NAMES = POINTS.flatMap(([group, points]) =>
   Object.keys(points).map((p) => `${group}.${p}`),
@@ -40,8 +42,9 @@ describe("the hook map", () => {
         expect(reason as string, name).toMatch(/^[A-Z].*\.$/);
       }
     }
-    // 44 of plan 12h, and sso.beforeSignIn and scim.afterChange of plan 12d.
-    expect(HOOK_NAMES).toHaveLength(46);
+    // 44 of plan 12h, sso.beforeSignIn and scim.afterChange of plan 12d, and
+    // the two anonymous points of plan 12i.
+    expect(HOOK_NAMES).toHaveLength(48);
   });
 
   it("has no row for a hook point that does not exist", () => {

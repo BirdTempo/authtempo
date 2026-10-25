@@ -38,6 +38,41 @@ export interface GateOptions {
   basePath?: string | undefined;
 }
 
+/**
+ * The `waitUntil` option of a binding (ruling 29 of plan 12i). It gets each
+ * promise that `handle` gives the host, with the context of the framework.
+ * On Workers, the work after the answer (the SMS of a phone code) and the
+ * flush of the events need it. Workers stops other work at the answer.
+ */
+export type BindingWaitUntil<C> = (promise: Promise<unknown>, context: C) => void;
+
+/**
+ * The `waitUntil` method of `owner`, bound to it, or undefined. `owner` is a
+ * platform object such as the ExecutionContext of Workers. An unbound
+ * `ctx.waitUntil` throws "Illegal invocation" on Workers.
+ */
+export function boundWaitUntil(owner: unknown): ((promise: Promise<unknown>) => void) | undefined {
+  if (typeof owner !== "object" || owner === null) return undefined;
+  const method: unknown = (owner as { waitUntil?: unknown }).waitUntil;
+  if (typeof method !== "function") return undefined;
+  return (promise) => void method.call(owner, promise);
+}
+
+/**
+ * The options of `handle` for one request: the option of the app first, then
+ * the `waitUntil` that the binding read from the platform. With neither, none:
+ * core then runs the work detached, or waits for it on Workers.
+ */
+export function handleOptions<C>(
+  option: BindingWaitUntil<C> | undefined,
+  context: C,
+  platform: () => ((promise: Promise<unknown>) => void) | undefined,
+): { waitUntil: (promise: Promise<unknown>) => void } | undefined {
+  if (option) return { waitUntil: (promise) => option(promise, context) };
+  const found = platform();
+  return found ? { waitUntil: found } : undefined;
+}
+
 export interface Gate {
   session: ResolvedSession | null;
   /** The redirect to the sign-in page, or null. Answer it and run no page code. */

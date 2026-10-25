@@ -16,10 +16,11 @@ import {
   isCredential,
   profilePatch,
   sessionIdOf,
+  usernameOf,
 } from "./api.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
-import { listedSession, toNext, toPasskey } from "./shapes.js";
+import { listedSession, STATE_DATA_REFUSAL, toNext, toPasskey } from "./shapes.js";
 
 /**
  * Better Auth 1.7.2's account paths (dist/api/routes/session.mjs,
@@ -52,11 +53,11 @@ const GET_PATHS: readonly string[] = ["/list-sessions", "/list-accounts", "/dele
  * Better Auth 1.7.2's link-social fields that core cannot keep
  * (account.mjs:77 to :133). Core starts a redirect link only, with its own
  * scopes and its own error page, so each would be dropped in silence.
+ * `additionalData` has its own refusal (STATE_DATA_REFUSAL).
  */
 const LINK_NOT_SUPPORTED = [
   "idToken",
   "scopes",
-  "additionalData",
   "additionalParams",
   "requestSignUp",
   "loginHint",
@@ -145,6 +146,7 @@ export async function accountRoute(
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
+      mapped.handleOptions,
     );
   };
   const status = () => ({ status: true });
@@ -197,8 +199,15 @@ export async function accountRoute(
         const own = (await caller()).session.id;
         return answer(await core("POST", "/sessions/revoke", { id: own }), status);
       }
-      case "/update-user":
-        return answer(await core("POST", "/user/update", profilePatch(body)), status);
+      case "/update-user": {
+        // Plan 12i Task 16: the username goes to core's own route first.
+        const { username, rest } = usernameOf(body, mapped.plugins.has("username"));
+        if (username !== undefined) {
+          const set = await core("POST", "/user/username", { username });
+          if (!set.ok || Object.keys(rest).length === 0) return answer(set, status);
+        }
+        return answer(await core("POST", "/user/update", profilePatch(rest)), status);
+      }
       case "/change-email": {
         const newEmail = required(body, "newEmail");
         // Better Auth 1.7.2's answer with the option off (update-user.mjs:440 to :443).
@@ -276,6 +285,8 @@ export async function accountRoute(
         const refused = LINK_NOT_SUPPORTED.filter((k) => body[k] !== undefined);
         if (refused.length > 0)
           throw compatApiError("NOT_SUPPORTED", `core takes no ${refused.join(", ")} at the link`);
+        if (body.additionalData !== undefined)
+          throw compatApiError("NOT_SUPPORTED", STATE_DATA_REFUSAL);
         const provider = required(body, "provider");
         const next = toNext(text(body, "callbackURL"), mapped.appOrigin);
         if (next === null) throw compatApiError("INVALID_CALLBACK_URL");

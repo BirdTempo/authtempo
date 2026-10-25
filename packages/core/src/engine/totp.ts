@@ -17,8 +17,17 @@ import type {
   UserRow,
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { passkeyUserName, provedAccount } from "./address.js";
+import {
+  type AnonymousCaller,
+  type CarriedUpgrade,
+  recordedAnonymous,
+  upgradeProof,
+  upgradeSteps,
+} from "./anonymous.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
+import { isLastMethod, type LastMethod } from "./last-method.js";
 import { sendNotice } from "./notices.js";
 import { impersonationStops } from "./operator/audit.js";
 import { checkUserPassword } from "./password.js";
@@ -47,12 +56,14 @@ import {
 import { acceptEmailCode, acceptPasskey, liveChallenge } from "./second-factor-methods.js";
 import {
   endedList,
-  openSession,
+  prepareSession,
   type ResolvedSession,
   sessionOpened,
   sessionsEnded,
+  writeSession,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
+import { openStateData } from "./state-data.js";
 import { holdUser } from "./user-hold.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -305,7 +316,8 @@ export interface TotpSetupInput {
 
 /**
  * The secret, the key URI, and the backup codes for a new factor (plan 9f).
- * Needs the user's password and a verified email. The password check is
+ * Needs the user's password and a proved account (a verified email, or no
+ * address and not anonymous: `provedAccount`). The password check is
  * `checkUserPassword` under its own key, `totp-setup:user` 5 per 15 minutes
  * (plan 9h), with the dummy verify, and `invalid_credentials` on a miss,
  * before any row write. A session alone
@@ -331,7 +343,8 @@ export async function setupTotp(
   ]);
   // checkUserPassword found the password row; a user deleted since then gets no factor.
   if (!user) return fail("invalid_credentials");
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
+  if (!provedAccount(user)) return fail("email_unverified");
   const now = config.clock.now();
   const existing = await config.storage.findOne("totp", [
     { field: "userId", op: "eq", value: user.id },
@@ -387,7 +400,11 @@ export async function setupTotp(
   }
   return ok({
     secret: base32Encode(secret),
-    uri: otpauthUri({ secret, issuer: input.issuer ?? totp.issuer, account: user.email }),
+    uri: otpauthUri({
+      secret,
+      issuer: input.issuer ?? totp.issuer,
+      account: passkeyUserName(config, user),
+    }),
     backupCodes: codes,
   });
 }
@@ -427,7 +444,7 @@ export async function enableTotp(
   const totp = config.totp;
   if (!totp) return fail("not_found");
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(user)) return fail("email_unverified");
   // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
   // plan 12a). Before the code limit, so a stale session counts no try.
   const fresh = requireFresh(config, session);
@@ -699,7 +716,9 @@ export async function totpUri(
   ]);
   const secret = await openSecret(config, row);
   if (!user || !secret) return fail("totp_not_enabled");
-  return ok({ uri: otpauthUri({ secret, issuer: totp.issuer, account: user.email }) });
+  return ok({
+    uri: otpauthUri({ secret, issuer: totp.issuer, account: passkeyUserName(config, user) }),
+  });
 }
 
 /** Deletes every trusted device of the user: each next password sign-in asks for the factor. */
@@ -741,6 +760,12 @@ export interface TwoFactorVerify {
   /** True: write a trusted device and answer its token. */
   trustDevice?: boolean | undefined;
   ip: string | null;
+  /**
+   * The live anonymous session of the verify request (plan 12i Task 7). The
+   * challenge row carries the anonymous user of the first factor and its
+   * rule. A mailed first factor links only when this is that session.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** The one proof of a verify (plan 12c). */
@@ -769,6 +794,8 @@ export interface TwoFactorSession {
   next: string;
   trustDevice: { token: string; expiresAt: Date } | null;
   backupCodesLeft: number;
+  /** The last method of the first factor (plan 12i Task 12), or null: a reset, or a row from before. */
+  method: LastMethod | null;
 }
 
 /**
@@ -791,6 +818,10 @@ export async function twoFactorGate(
     userAgent: string | null;
     next: string | undefined;
     trustDevice: string | undefined;
+    /** The last method of this sign-in (plan 12i Task 12). */
+    method: LastMethod;
+    /** The anonymous user that the verify replaces (plan 12i Task 7). */
+    anonymous: CarriedUpgrade | null;
   },
   now: Date,
 ): Promise<{ challenge: Result<TwoFactorPending> } | { trustId: string | null }> {
@@ -815,6 +846,8 @@ export async function twoFactorGate(
           ip: input.ip,
           userAgent: input.userAgent,
           next: input.next,
+          method: input.method,
+          anonymous: input.anonymous,
         },
         now,
       );
@@ -919,6 +952,19 @@ async function answerChallenge(
     !(await codeCheckAllowed(config, challenge.identifier))
   )
     return fail("rate_limited");
+  // The app payload of a social sign-in (plan 12i Task 19), opened before
+  // any proof spends a backup code. One that does not open fails closed.
+  // It opens under the version in `data`, not the row's: an email code send
+  // moves the row's version. No send reaches a social challenge today, so
+  // this is a guard for a later method rule.
+  const sealed = challenge.data as { sealedData?: unknown; sealedDataVersion?: unknown } | null;
+  const stateData = await openStateData(
+    config,
+    sealed?.sealedData,
+    typeof sealed?.sealedDataVersion === "number" ? sealed.sealedDataVersion : 0,
+    challenge.id,
+  );
+  if (!stateData.ok) return stateData;
   const miss = async (): Promise<Result<TwoFactorSession>> =>
     fail(
       await countAttempt(config.observe, config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now),
@@ -960,6 +1006,7 @@ async function answerChallenge(
     userAgent?: unknown;
     next?: unknown;
     notAfter?: unknown;
+    method?: unknown;
   } | null;
   // The first factor of the challenge: the session keeps its `via` (plan 12c).
   // A row of plan 9f holds `password`.
@@ -967,6 +1014,8 @@ async function answerChallenge(
   const ip = typeof data?.ip === "string" ? data.ip : null;
   const userAgent = typeof data?.userAgent === "string" ? data.userAgent : null;
   const next = safeNext(data?.next);
+  // A value outside the closed set sets no cookie (plan 12i Task 12).
+  const method = isLastMethod(data?.method) ? data.method : null;
   // The IdP's cap of an SSO sign-in (plan 12d): the session keeps it through the challenge.
   const notAfter = typeof data?.notAfter === "string" ? new Date(data.notAfter) : null;
   const trust = input.trustDevice
@@ -977,13 +1026,26 @@ async function answerChallenge(
       }
     : null;
   const trustHash = trust ? await sha256Hex(trust.token) : null;
+  // The anonymous upgrade of the first factor (plan 12i Task 7), by the rule the row keeps.
+  // The row decides: a challenge that carries no anonymous user links none. A mailed first
+  // factor needs the same session at the verify too; a bound one is the browser of the row.
+  const kind = (challenge.data as { anonymousKind?: unknown } | null)?.anonymousKind;
+  const upgrade = upgradeSteps(
+    config,
+    kind === "mailed" ? (input.anonymous ?? null) : null,
+    kind === "mailed" || kind === "bound" ? recordedAnonymous(challenge.data) : null,
+    kind === "mailed" ? "mailed" : "bound",
+  );
   const opened = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
-      const s = await openSession(
+      // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
+      await upgrade.before(tx, user, upgradeProof(user), via);
+      const prepared = await prepareSession(
         config,
         { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) },
         tx,
       );
+      const s = await writeSession(config, prepared, tx);
       if (trust && trustHash)
         await tx.create("trustedDevice", {
           id: trust.id,
@@ -1008,6 +1070,8 @@ async function answerChallenge(
         if (trust) await tx.delete("trustedDevice", [{ field: "id", op: "eq", value: trust.id }]);
         return fail("invalid_token");
       }
+      // The claim after the spend of the challenge, so no path commits a claim without its session.
+      await upgrade.claim(tx);
       return ok({
         token: s.token,
         user,
@@ -1015,13 +1079,22 @@ async function answerChallenge(
         next,
         trustDevice: trust ? { token: trust.token, expiresAt: trust.expiresAt } : null,
         backupCodesLeft,
+        method,
       });
     }),
   );
   // After the commit, as every flow does (plan 9d).
   if (opened.ok) {
     await touchTrust(config, trustId, now);
-    await sessionOpened(config, opened.value.session, opened.value.user, via);
+    await sessionOpened(
+      config,
+      opened.value.session,
+      opened.value.user,
+      via,
+      undefined,
+      stateData.value?.value ?? null,
+    );
+    await upgrade.after();
   }
   return opened;
 }

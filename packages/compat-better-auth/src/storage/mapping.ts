@@ -16,14 +16,32 @@ import type { BetterAuthTable } from "./names.js";
  * (`invitation.teamId`, plan 12k Task 11). An empty list and null are null.
  * Better Auth refuses a team id that holds "," (INVALID_TEAM_ID), so the
  * join loses nothing.
+ * `placeholder`: Better Auth's `user.email` is NOT NULL, and core's address
+ * is nullable from schema version 15 (plan 12i). An insert of null writes
+ * Better Auth's placeholder of the row's id, and every placeholder reads as
+ * null (placeholder.ts, plan 12i Task 16). A write of an address in a
+ * placeholder form, or an update to null, fails with `invalid_argument`
+ * before any statement runs.
  */
-export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission" | "commaList";
+export type Codec =
+  | "nullAsEmpty"
+  | "base64Std"
+  | "emptyAsNull"
+  | "permission"
+  | "commaList"
+  | "placeholder";
 
 export interface FieldMap {
   readonly column: string;
   readonly codec?: Codec;
   /** A column the read takes when this one is null (Better Auth's nullable `organizationRole.updatedAt`). */
   readonly orColumn?: string;
+  /**
+   * A boolean column that gates the read: the field reads as null unless it
+   * is true. A where and a sort see the same value (Better Auth's
+   * `phoneNumberVerified`, ruling 15 of plan 12i).
+   */
+  readonly onlyWhen?: string;
 }
 
 export interface Scope {
@@ -145,12 +163,28 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
   user: {
     table: "user",
     fields: {
-      ...same("id", "email", "emailVerified", "image", "createdAt", "updatedAt"),
+      ...same("id", "emailVerified", "image", "createdAt", "updatedAt"),
+      email: as("email", "placeholder"),
       name: as("name", "nullAsEmpty"),
       bannedAt: as("taBannedAt"),
       banReason: as("taBanReason"),
       banUntil: as("taBanUntil"),
+      // Better Auth's own columns of its username, phone number, and anonymous
+      // plugins (plan 12i). Migration 0012 adds each one that is absent.
+      username: as("username"),
+      displayUsername: as("displayUsername"),
+      // Better Auth stores a sign-up's phoneNumber before its code is proved,
+      // and sets phoneNumberVerified only at the verify. Core reads a phone
+      // only where it is proved (ruling 15 of plan 12i).
+      phone: { column: "phoneNumber", onlyWhen: "phoneNumberVerified" },
+      isAnonymous: as("isAnonymous"),
     },
+    // Core writes a phone only after its code (Task 4 of plan 12i), so a
+    // phone that core writes is proved. A Better Auth number with no proof
+    // reads as no phone (onlyWhen above).
+    insertExtras: (row) => ({ phoneNumberVerified: row.phone === null ? null : true }),
+    updateExtras: (data) =>
+      data.phone === undefined ? {} : { phoneNumberVerified: data.phone === null ? null : true },
   },
   identity: {
     table: "account",
@@ -221,6 +255,10 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       publicKey: as("publicKey", "base64Std"),
       transports: as("transports", "emptyAsNull"),
       updatedAt: as("taUpdatedAt"),
+      // The extension flags of plan 12i (migration 0012).
+      discoverable: as("taDiscoverable"),
+      prf: as("taPrf"),
+      largeBlob: as("taLargeBlob"),
     },
   },
   organization: {

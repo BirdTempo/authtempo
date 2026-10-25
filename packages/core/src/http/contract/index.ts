@@ -1,17 +1,20 @@
 import type { z } from "zod";
 import type { RouteKey } from "../route-list.js";
+import { ANONYMOUS_CONTRACT } from "./anonymous.js";
 import { EMAIL_OTP_CONTRACT } from "./email-otp.js";
 import { HANDOFF_CONTRACT } from "./handoff.js";
 import { HEALTH_CONTRACT } from "./health.js";
 import { IDENTITIES_CONTRACT } from "./identities.js";
 import { JWT_CONTRACT } from "./jwt.js";
 import { MAGIC_LINK_CONTRACT } from "./magic-link.js";
+import { MULTI_SESSION_CONTRACT } from "./multi-session.js";
 import { OAUTH_CONTRACT } from "./oauth.js";
 import { OPENAPI_CONTRACT } from "./openapi.js";
 import { OPERATOR_CONTRACT } from "./operator.js";
 import { ORGANIZATIONS_CONTRACT } from "./organizations.js";
 import { PASSKEYS_CONTRACT } from "./passkeys.js";
 import { PASSWORD_CONTRACT } from "./password.js";
+import { PHONE_CONTRACT } from "./phone.js";
 import { REAUTH_CONTRACT } from "./reauth.js";
 import { ROLES_CONTRACT } from "./roles.js";
 import { SCIM_CONTRACT } from "./scim.js";
@@ -24,6 +27,7 @@ import { TOKENS_CONTRACT } from "./tokens.js";
 import { TOTP_CONTRACT } from "./totp.js";
 import type { RouteContract } from "./types.js";
 import { USER_CONTRACT } from "./user.js";
+import { USERNAME_CONTRACT } from "./username.js";
 
 /**
  * The contract of every route of `ROUTES` (plan 11g), one module after
@@ -36,6 +40,8 @@ export const ROUTE_CONTRACT = {
   ...SESSIONS_CONTRACT,
   ...REAUTH_CONTRACT,
   ...USER_CONTRACT,
+  ...USERNAME_CONTRACT,
+  ...MULTI_SESSION_CONTRACT,
   ...IDENTITIES_CONTRACT,
   ...MAGIC_LINK_CONTRACT,
   ...SOCIAL_CONTRACT,
@@ -44,6 +50,8 @@ export const ROUTE_CONTRACT = {
   ...TOTP_CONTRACT,
   ...SECOND_FACTOR_CONTRACT,
   ...EMAIL_OTP_CONTRACT,
+  ...PHONE_CONTRACT,
+  ...ANONYMOUS_CONTRACT,
   ...HANDOFF_CONTRACT,
   ...ORGANIZATIONS_CONTRACT,
   ...ROLES_CONTRACT,

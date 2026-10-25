@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
+import { addPhone, verifyAddPhone } from "../src/engine/phone.js";
 import { createSession } from "../src/engine/sessions.js";
+import { setUsername } from "../src/engine/username.js";
 import { normalizeEmailPrefix } from "../src/engine/users.js";
 import type { OperatorUser } from "../src/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
@@ -294,6 +297,9 @@ describe("operator user reads (plan 12f Task 5)", () => {
       id: user.id,
       email: EMAIL,
       emailVerified: true,
+      // Plan 12i Task 5: the username and the phone show, null for this user.
+      username: null,
+      phone: null,
       name: "Ada",
       createdAt: user.createdAt.toISOString(),
       ban: null,
@@ -509,6 +515,35 @@ describe("operator user reads (plan 12f Task 5)", () => {
     const got = await api.users.get({ actor: support, userId: id ?? "" });
     expect(got.ok).toBe(true);
     expect(log.mock.calls).toEqual([["authtempo: operator read", "secret", "support", "getUser"]]);
+  });
+
+  it("shows the username and the phone of a user (plan 12i Task 5)", async () => {
+    const sms = createRecordingSms();
+    const auth = await operatorAuth({
+      username: {},
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+    });
+    const me = await verifiedSession(auth, EMAIL);
+    expect(
+      (await setUsername(auth.config, { session: me, username: "Ada", ip: null, userAgent: null }))
+        .ok,
+    ).toBe(true);
+    expect((await addPhone(auth.config, { session: me, phone: "+14155550100", ip: null })).ok).toBe(
+      true,
+    );
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    expect(
+      (await verifyAddPhone(auth.config, { session: me, code, ip: null, userAgent: null })).ok,
+    ).toBe(true);
+    const api = operatorApi(auth.config);
+    const got = await api.users.get({ actor: APP, userId: me.user.id });
+    expect(got).toMatchObject({ ok: true, value: { username: "ada", phone: "+14155550100" } });
+    const listed = await api.users.list({ actor: APP });
+    if (!listed.ok) throw new Error(listed.code);
+    expect(listed.value.users.find((u) => u.id === me.user.id)).toMatchObject({
+      username: "ada",
+      phone: "+14155550100",
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from "../config.js";
+import { type ResolvedConfig, sessionAudiences } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
@@ -7,7 +7,14 @@ import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
 import { clientRef } from "../redact.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import type { Meter } from "../storage/meter.js";
-import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
+import {
+  entryOfIssuer,
+  issuerOf,
+  mintConfig,
+  primaryIssuer,
+  signToken,
+  verifyLocal,
+} from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
 import { sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
@@ -75,8 +82,10 @@ export async function checkIdTokenHint(
   const decoded = await verifyLocal(config, hint);
   if (!decoded || decoded.header.typ !== SESSION_JWT_TYPE) return null;
   const p = decoded.payload;
-  if (p.iss !== issuerOf(config) || typeof p.sub !== "string") return null;
-  if (typeof p.aud !== "string" || mintConfig(config).audience.includes(p.aud)) return null;
+  if (entryOfIssuer(config, p.iss) === null || typeof p.sub !== "string") return null;
+  // The audience of a session JWT of any entry: a session JWT is no ID token.
+  const sessionAud = sessionAudiences(mintConfig(config), config.baseDefaults, config.baseURLs);
+  if (typeof p.aud !== "string" || sessionAud.includes(p.aud)) return null;
   if (p.sid !== undefined && typeof p.sid !== "string") return null;
   const client = await findClient(config, p.aud);
   if (!client) return null;
@@ -198,14 +207,16 @@ const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
  * 49). A second logout of one session is harmless (section 2.7).
  *
  * `sid` is the value for a new link. The call answers the `sid` of the link,
- * which the ID token must carry: the first one of the pair (ruling 57).
+ * which the ID token must carry: the first one of the pair (ruling 57). The
+ * link keeps the issuer of the request's entry of `baseURL`, which the ID
+ * token names (plan 12i Task 18).
  */
 export async function linkIdToken(
   config: ResolvedConfig,
   input: { sessionId: string; clientId: string; userId: string; sid: string },
 ): Promise<string> {
   const now = config.clock.now();
-  const sid = await linkSession(config.storage, input, now);
+  const sid = await linkSession(config.storage, { ...input, issuer: issuerOf(config) }, now);
   const session = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sessionId },
   ]);
@@ -220,7 +231,9 @@ export async function linkIdToken(
  * the values that the client knows. The row holds the `sid` of the ID
  * token, so a new secret version since then changes nothing (ruling 57). An
  * account delete removes a pairwise subject first. Then the token holds
- * `sid` alone, which section 2.4 allows. It never holds a nonce.
+ * `sid` alone, which section 2.4 allows. It never holds a nonce. `iss` is
+ * the issuer that the client saw in its ID token, kept on the row (plan 12i
+ * Task 18). Section 2.6 checks it as for the ID token.
  */
 export async function logoutToken(
   config: ResolvedConfig,
@@ -230,7 +243,7 @@ export async function logoutToken(
   const iat = Math.floor(config.clock.now().getTime() / 1000);
   const sub = await storedSubject(config, row.userId, client);
   return signToken(config, LOGOUT_TOKEN_TYP, {
-    iss: issuerOf(config),
+    iss: logoutIssuer(config, row),
     aud: client.id,
     iat,
     exp: iat + LOGOUT_TOKEN_LIFE_S,
@@ -239,6 +252,18 @@ export async function logoutToken(
     ...(sub !== null ? { sub } : {}),
     sid: row.sid,
   });
+}
+
+/**
+ * The `iss` of the logout token of `row`: the issuer that the row keeps. It
+ * stays also when its entry has left `baseURL`, because the client refuses
+ * any other `iss` (section 2.6, ruling 32 of plan 12i). The keys are the
+ * same, and the token only ends a session. A row of an older core keeps no
+ * issuer, so it names the primary. The delivery can run on any entry, so the
+ * request's own issuer takes no part.
+ */
+function logoutIssuer(config: ResolvedConfig, row: OAuthLogoutRow): string {
+  return row.issuer ?? primaryIssuer(config);
 }
 
 /** The wait after `attempts` failed attempts. */

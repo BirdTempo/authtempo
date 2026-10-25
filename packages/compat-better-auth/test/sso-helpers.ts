@@ -9,7 +9,7 @@ import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { organization, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
-import type { BetterAuthPlugin, CompatDatabase } from "../src/types.js";
+import type { BetterAuthOptions, BetterAuthPlugin, CompatDatabase } from "../src/types.js";
 import { cookieOf } from "./admin-helpers.js";
 
 // The app of the sso and scim tests of plan 12d Task 14, on any compat
@@ -51,14 +51,14 @@ export function fakeDns(name: string, answers: Map<string, string[]>) {
 export function ssoApp(
   database: CompatDatabase,
   extra: BetterAuthPlugin[],
-  options: { ssoDns?: boolean } = {},
+  options: { ssoDns?: boolean; baseURL?: BetterAuthOptions["baseURL"] } = {},
 ) {
   const links: string[] = [];
   const dns = new Map<string, string[]>();
   const a = fakeDns("a", dns);
   const b = fakeDns("b", dns);
   const auth = betterAuth({
-    baseURL: BASE,
+    baseURL: options.baseURL ?? BASE,
     secret: SECRET,
     database,
     authtempo: {
@@ -78,12 +78,13 @@ export function ssoApp(
       ...extra,
     ],
   });
-  const send = (method: string, path: string, body: unknown, cookie: string) =>
+  /** A request from the page of `host` to `host`: the primary by default. */
+  const send = (method: string, path: string, body: unknown, cookie: string, host = BASE) =>
     auth.handler(
-      new Request(`${BASE}/api/auth${path}`, {
+      new Request(`${host}/api/auth${path}`, {
         method,
         headers: {
-          origin: BASE,
+          origin: host,
           ...(body === undefined ? {} : { "content-type": "application/json" }),
           ...(cookie ? { cookie } : {}),
         },
@@ -91,6 +92,9 @@ export function ssoApp(
       }),
     );
   const call = (path: string, body: unknown, cookie = "") => send("POST", path, body, cookie);
+  /** A POST on another entry of a `baseURL` list (plan 12i Task 18). */
+  const callOn = (host: string, path: string, body: unknown, cookie = "") =>
+    send("POST", path, body, cookie, host);
   const read = (path: string, cookie = "") => send("GET", path, undefined, cookie);
   /** A verified user with a session, through the sign-up, the verify link, and the sign-in. */
   const person = async (email: string) => {
@@ -148,5 +152,5 @@ export function ssoApp(
     if (!made.ok) throw new Error(made.code);
     return made.value.organization.id;
   };
-  return { auth, database, call, read, send, person, manager, organizationOf, dns, a, b };
+  return { auth, database, call, callOn, read, send, person, manager, organizationOf, dns, a, b };
 }

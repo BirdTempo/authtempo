@@ -66,7 +66,9 @@ export interface ObserveStats {
 export interface HandleOptions {
   /**
    * The host's hook that keeps the flush alive after the answer. On Workers
-   * pass `(p) => ctx.waitUntil(p)`: an unbound `ctx.waitUntil` throws.
+   * pass `(p) => ctx.waitUntil(p)`: an unbound `ctx.waitUntil` throws. Some
+   * routes do work after the answer (ruling 23 of plan 12i). That work runs
+   * under this hook too. The SMS of a phone code is such work.
    */
   waitUntil?: (promise: Promise<unknown>) => void;
 }

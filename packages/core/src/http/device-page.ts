@@ -1,4 +1,4 @@
-import { escapeHtml } from "./confirm-page.js";
+import { escapeHtml, signedInAs } from "./confirm-page.js";
 
 /**
  * The line that the consent state of the device page shows (RFC 8628
@@ -19,8 +19,8 @@ export type DevicePageInput =
       /** Path the form posts to; same origin as the page. */
       action: string;
       appName: string;
-      /** The signed-in user's address. */
-      email: string;
+      /** The signed-in user's address. Null for a user with no address (plan 12i): the page names none. */
+      email: string | null;
       /** The code of `verification_uri_complete`, as `XXXX-XXXX`, or empty. The person still submits it (RFC 8628 section 3.3.1). */
       userCode: string;
       /** `invalid_code`: no live code matches. `unverified`: the user's address is not verified. */
@@ -30,7 +30,7 @@ export type DevicePageInput =
       step: "consent";
       action: string;
       appName: string;
-      email: string;
+      email: string | null;
       /** The client's own name, or its client id when it gave none. A claim of the client, not a fact. */
       clientName: string;
       clientId: string;
@@ -109,7 +109,7 @@ ${error}<form method="post" action="${escapeHtml(input.action)}">
 <input type="text" name="user_code" value="${escapeHtml(input.userCode)}" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
 <button type="submit">Continue</button>
 </form>
-<p class="small">Signed in as ${escapeHtml(input.email)}.</p>`,
+<p class="small">${signedInAs(input.email)}</p>`,
     );
   }
   const client = escapeHtml(input.clientName);
@@ -135,7 +135,7 @@ ${error}<form method="post" action="${escapeHtml(input.action)}">
 ${scopes}
 </ul>
 <p class="small">For <code>${escapeHtml(input.resource)}</code>.${others}</p>
-<p class="small">Signed in as ${escapeHtml(input.email)}. Client id: <code>${escapeHtml(input.clientId)}</code>.</p>
+<p class="small">${signedInAs(input.email)} Client id: <code>${escapeHtml(input.clientId)}</code>.</p>
 <form method="post" action="${escapeHtml(input.action)}">
 ${fields}
 <button type="submit" name="decision" value="allow">Allow</button>

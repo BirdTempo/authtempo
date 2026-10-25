@@ -109,6 +109,25 @@ export const ERRORS = {
   account_disabled: 403,
   // plan 12d ruling 25 N2: the connection's default role is gone from the organization.
   role_not_found: 409,
+  // plan 12i: an assertion of a credential with no row, for signalUnknownCredential (spec 32 item 3)
+  passkey_unknown: 400,
+  // plan 12i Task 2: the unique key of the username refused it (spec 32 item 7)
+  username_taken: 409,
+  // plan 12i Task 2: the form, the length bounds, or the reserved set refused the name
+  username_invalid: 400,
+  // plan 12i: the phone code (spec 32 item 4). A number that is not E.164, a
+  // number outside every region of `phone.regions`, and an SMS port that did
+  // not send.
+  phone_invalid: 400,
+  phone_region: 400,
+  sms_unavailable: 503,
+  // plan 12i Task 18: the request's host is not an entry of the baseURL list
+  // (spec 32 item 18). RFC 9110 section 15.5.20: 421 is the misdirected request.
+  host_not_allowed: 421,
+  // plan 12i Task 5: the unique key of the phone refused the number (spec 32 item 5)
+  phone_taken: 409,
+  // plan 12i Task 6: a route of ANONYMOUS_REFUSED and an anonymous session (spec 32 item 8)
+  anonymous_refused: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

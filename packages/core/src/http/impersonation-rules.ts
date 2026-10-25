@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
-import { peekRequestSession } from "../engine/sessions.js";
+import { ANONYMOUS_REFUSED } from "../engine/anonymous.js";
+import { peekRequestSession, peekRequestUser } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { json } from "./json.js";
 import type { RouteKey } from "./route-list.js";
@@ -61,6 +62,12 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
+  // Multi-session (plan 12i Task 11): the bag holds the operator's other
+  // sessions, not the user's. A switch or a list would act outside the
+  // impersonation, and a bag sign-out would end the operator's sessions.
+  "GET /multi-session",
+  "POST /multi-session/switch",
+  "POST /multi-session/sign-out",
   // The re-authentication and its helpers: the session never becomes fresh,
   // so every change behind the fresh rule of plan 12a refuses.
   "POST /reauth",
@@ -71,6 +78,14 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /user/change-email/verify",
   "POST /user/delete",
   "POST /user/delete/confirm",
+  // The username is a way in: the password sign-in takes it (plan 12i Task 3).
+  "POST /user/username",
+  // The phone is a way in: the phone code and the password sign-in take it (plan 12i Task 5).
+  "POST /phone/add",
+  "POST /phone/add/verify",
+  "POST /phone/remove",
+  // The anonymous delete is an account delete (plan 12i Task 6).
+  "POST /anonymous/delete",
   "POST /identities/unlink",
   "POST /social/:provider/link",
   "POST /passkey/register/options",
@@ -150,6 +165,11 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /user/change-email/confirm": NO_SESSION,
   "POST /user/change-email/confirm": NO_SESSION,
   "GET /user/delete/confirm": "It shows a page and writes nothing; its POST is refused.",
+  "GET /username/available": NO_SESSION,
+  "POST /phone/request": NO_SESSION,
+  "POST /phone/verify": NO_SESSION,
+  "POST /anonymous/sign-in":
+    "It answers a live session that is not anonymous with conflict, and an anonymous one with itself; it writes no row for either.",
   "GET /identities": READ,
   "POST /magic-link/request": NO_SESSION,
   "GET /magic-link/verify": NO_SESSION,
@@ -157,14 +177,21 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /social/:provider/start": NO_SESSION,
   "GET /social/:provider/callback": "It takes the state of a start; the link start is refused.",
   "POST /social/apple/callback": "It takes the state of a start; the link start is refused.",
+  // The ID-token route of plan 12i Task 10: the token is the credential.
+  "POST /social/:provider/id-token/nonce": NO_SESSION,
+  "POST /social/:provider/id-token": NO_SESSION,
   "POST /passkey/authenticate/options": NO_SESSION,
   "POST /passkey/authenticate/verify": NO_SESSION,
+  // A passkey-first sign-up makes a new user; it reads no session but an anonymous one (plan 12i Task 8).
+  "POST /passkey/sign-up/options": NO_SESSION,
+  "POST /passkey/sign-up/verify": NO_SESSION,
   "GET /passkeys": READ,
   "POST /passkeys/rename": "A name of a passkey is no way in.",
   "POST /password/sign-up": NO_SESSION,
   "POST /password/sign-in": NO_SESSION,
   "GET /password/verify": NO_SESSION,
   "POST /password/verify": NO_SESSION,
+  "POST /password/verify/code": NO_SESSION,
   "POST /password/verify/resend": NO_SESSION,
   "POST /password/reset/request": NO_SESSION,
   "GET /password/reset": NO_SESSION,
@@ -220,6 +247,7 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /oauth/grants": READ,
   "GET /.well-known/oauth-authorization-server": NO_SESSION,
   "GET /.well-known/openid-configuration": NO_SESSION,
+  "GET /.well-known/webauthn": NO_SESSION,
   "GET /openapi.json": NO_SESSION,
   "GET /health": NO_SESSION,
   "GET /ready": NO_SESSION,
@@ -281,4 +309,24 @@ export async function impersonationRefusal(
   const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
+}
+
+/**
+ * The anonymous step of the router (plan 12i Task 6, spec 32 item 8), after
+ * the impersonation step and in its form. A route of `ANONYMOUS_REFUSED`
+ * answers 403 `anonymous_refused` when the request's session is live and
+ * its user is anonymous. Other routes pay no read. The handler's session
+ * read takes the session row and the user row of this step, so a refused
+ * route sends no query more. The read writes nothing.
+ */
+export async function anonymousRefusal(
+  config: ResolvedConfig,
+  request: Request,
+  key: RouteKey,
+): Promise<Response | null> {
+  // With `anonymous` off too: an anonymous user of an earlier config keeps its live sessions.
+  if (!ANONYMOUS_REFUSED.has(key)) return null;
+  const user = await peekRequestUser(config, request);
+  if (user === null || !user.isAnonymous) return null;
+  return json({ error: "anonymous_refused" }, ERRORS.anonymous_refused);
 }

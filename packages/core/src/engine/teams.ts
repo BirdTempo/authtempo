@@ -6,6 +6,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRow, TeamMemberRow, TeamRow, UserRow } from "../schema.js";
 import { findManyIn, findManyList, insertRows, listChunks } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { byAddressThenId } from "./address.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
   type OrganizationSummary,
@@ -42,7 +43,8 @@ export interface TeamMemberSummary {
   id: string;
   teamId: string;
   userId: string;
-  email: string;
+  /** Null for a member with no address (plan 12i). */
+  email: string | null;
   name: string | null;
   createdAt: Date;
 }
@@ -533,7 +535,7 @@ export async function listTeamMembers(
         const u = byId.get(r.userId);
         return u ? [teamMemberSummary(r, u)] : [];
       })
-      .sort((a, b) => (a.email < b.email ? -1 : a.email > b.email ? 1 : a.id < b.id ? -1 : 1)),
+      .sort(byAddressThenId),
   );
 }
 

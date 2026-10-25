@@ -350,3 +350,59 @@ describe("@authtempo/vue/nuxt (plan 11d2)", () => {
     expect(() => authSessionHandler({ auth, protect: () => true })).toThrow(/signInPath/);
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options. `Ctx` throws on an unbound call, as the ExecutionContext of Workers does.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+class Ctx {
+  held: Promise<unknown>[] = [];
+  props = {};
+  waitUntil(promise: Promise<unknown>): void {
+    if (!(this instanceof Ctx)) throw new TypeError("Illegal invocation");
+    this.held.push(promise);
+  }
+  passThroughOnException(): void {}
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  const run = (handler: ReturnType<typeof authEventHandler>, context?: Record<string, unknown>) => {
+    const app = createApp();
+    app.use("/auth", handler);
+    return toWebHandler(app)(new Request(`${API}/auth/x`), context);
+  };
+
+  it("passes the hook that Nitro puts in the context, the option in its place, or none", async () => {
+    const s = waitSpy();
+    const nitro: Promise<unknown>[] = [];
+    await run(authEventHandler(s.auth), { waitUntil: (p: Promise<unknown>) => void nitro.push(p) });
+    expect(nitro).toEqual([s.work]);
+    const ctx = new Ctx();
+    await run(authEventHandler(s.auth), { cloudflare: { context: ctx } });
+    expect(ctx.held).toEqual([s.work]);
+    // Node: no hook in the context, so handle gets no options.
+    await run(authEventHandler(s.auth));
+    expect(s.got).toEqual(["options", "options", "none"]);
+    const seen: Promise<unknown>[] = [];
+    const unused = new Ctx();
+    await run(authEventHandler(s.auth, { waitUntil: (p) => void seen.push(p) }), {
+      cloudflare: { context: unused },
+    });
+    expect(seen).toEqual([s.work]);
+    expect(unused.held).toEqual([]);
+  });
+});

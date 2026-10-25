@@ -56,7 +56,7 @@ An adapter can leave these out. Core then takes a fixed worst case.
 - An `in` list of up to 1000 values is one statement on every store. On D1 and SQLite a list of more than 50 values binds as one JSON text, which `json_each` reads. No value enters the SQL text.
 - Two null values never conflict on a unique key.
 - Reads inside a transaction see the transaction's own writes.
-- A sort takes one key or a list of keys, each with its own direction.
+- A sort takes one key or a list of keys, each with its own direction. A key with `notNull: true` must name a field that is not nullable. The SQL then has no null term, so an index can give the order.
 - The field types are string, boolean, integer, date, and json.
 
 ## Why so narrow

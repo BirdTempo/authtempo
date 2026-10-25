@@ -107,6 +107,10 @@ it("lets a plan 9f backup code of 8 characters pass through the engine after the
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: at,
     updatedAt: at,
   });

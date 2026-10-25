@@ -13,7 +13,8 @@ describe("schema version 12 on D1 (plan 12f)", () => {
           dflt_value: unknown;
         }>()
       ).results.map(({ name, type, notnull, dflt_value }) => ({ name, type, notnull, dflt_value }));
-    expect((await columns("ta_user")).slice(-3)).toEqual([
+    // Plan 12i adds four columns after ban_until.
+    expect((await columns("ta_user")).slice(-7, -4)).toEqual([
       { name: "banned_at", type: "INTEGER", notnull: 0, dflt_value: null },
       { name: "ban_reason", type: "TEXT", notnull: 0, dflt_value: null },
       { name: "ban_until", type: "INTEGER", notnull: 0, dflt_value: null },

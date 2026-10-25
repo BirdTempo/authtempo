@@ -12,6 +12,7 @@ sources:
   - packages/compat-better-auth/README.md "The admin plugin"
   - packages/compat-better-auth/README.md "API keys"
   - packages/compat-better-auth/README.md "Cutover of API keys"
+  - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
   - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
@@ -151,12 +152,15 @@ The bans of the admin plugin need no step. Compat migration 0009 copies each ban
 | `0009_compat_schema_v12.sql` | Adds `taBannedAt`, `taBanReason`, and `taBanUntil` to `user` and `taActorId` to `session`, nullable, and adds `ta_operator_audit`. It copies each ban of the admin plugin into the three ban columns. Tables with other names take the text of `compatMigration0009Sql("sqlite", storage.names)`. |
 | `0010_compat_schema_v13.sql` | Adds `activeTeamId` to `session` and `teamId` to `invitation`, nullable, with no fill. Creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). Creates Better Auth's `team` and `teamMember` when they are absent. Adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). Adds core's `ta_api_token`, `ta_organization_token`, and `ta_moved_token`. The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. Tables with other names take the text of `compatMigration0010Sql("sqlite", storage.names)`, with `"before-1.7"` as the third argument for tables from before 1.7. |
 | `0011_compat_schema_v14.sql` | Adds `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, and `ta_scim_group_member`. It names `ta_` tables only. |
+| `0012_compat_schema_v15.sql` | Adds `username`, `displayUsername`, `phoneNumber`, `phoneNumberVerified`, and `isAnonymous` (default false) to `user`, with a unique key on `username` and on `phoneNumber`. Adds `taDiscoverable`, `taPrf`, and `taLargeBlob` to `passkey`. Tables with other names take the text of `compatMigration0012Sql("sqlite", storage.names)`. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 
 Better Auth's `teams` option adds `session.activeTeamId` and `invitation.teamId`. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. An app with these two columns writes its own 0010 file. It is the shipped file of its directory without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions.
 
-The app applies the files to 0009, its own 0010, and the shipped 0011 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 11, and the command copies nothing. On Postgres, the 0010 adds each column only when it is absent, so no own file is necessary.
+The app applies the files to 0009, its own 0010, and the shipped 0011 and 0012 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 12, and the command copies nothing. On Postgres, the 0010 adds each column only when it is absent, so no own file is necessary.
+
+Better Auth's username, phone number, and anonymous plugins add columns that the shipped 0012 adds too. On such tables the shipped 0012 fails with `duplicate column name`. An app with one of these plugins writes its own 0012 file. It is the shipped file without the `ADD COLUMN` line of each column that the table holds, and without the unique key that it holds. On Postgres, the 0012 adds each column and each key only when it is absent.
 
 The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
 
@@ -189,7 +193,15 @@ A moved key counts against the cap of 50 live tokens per owner, because it acts.
 - Core refuses a secret under 32 characters, and a current secret under an estimated 100 bits of entropy, at start. Better Auth only warns.
 - `disableSignUp` maps to core's `signUp: false` only when every method and social provider that creates a user sets it. A mix is refused at start. A provider's `disableImplicitSignUp` is refused.
 - Users, social accounts, passwords, organizations, members, and passkeys carry over. A password rehashes to PBKDF2 at its first right sign-in.
-- The callback URL at each provider is `<baseURL><basePath>/social/<provider>/callback`, not `/api/auth/callback/<provider>`.
+- On an https `baseURL`, the callback URL at each provider stays Better Auth's `<baseURL><basePath>/callback/<provider>`. On http, it is `<baseURL><basePath>/social/<provider>/callback`.
+- `socialProviders.slack` is refused at start. Core's Slack subject is `<team_id>:<user_id>`, and a Better Auth Slack row holds the user id alone, so the person would get a second account. Rewrite each Slack `accountId` first, then use core's `social.slack`.
+- Core trusts fewer provider addresses. A Microsoft address is verified only with the `xms_edov: true` claim, and a GitLab address never. At a first such sign-in of a person with a password, core answers `email_taken_unverified` where Better Auth links by address.
+- The ID-token audiences map. A Google `clientId` list gives core its first id as `clientId` and the rest as `social.google.audiences`. The Apple `audience`, else `appBundleIdentifier`, maps to `social.apple.audiences`.
+- Each user that the shim answers, such as at `/get-session`, holds the fields of the `anonymous`, `username`, and `phoneNumber` plugins, as in Better Auth. `phoneNumber` is the proved number or null. An answer of a core route, such as the email sign-in, holds the five user keys only. Read the session for the fields.
+- A user with no address holds Better Auth's placeholder address in `user.email`. The storage reads it as no address: core never mails it and never counts it as proved. A `getTempEmail` of the phone number plugin must answer an address on `placeholder.invalid`.
+- With `emailDomainName`, the storage reads `temp-<id>@<emailDomainName>` as no address only on the row with that id. Better Auth writes a random id there, so its older anonymous rows read as real addresses. Rewrite them to `<id>@anonymous.placeholder.invalid` before the move.
+- On Workers, pass `{ waitUntil: (p) => ctx.waitUntil(p) }` to `auth.handler`. A code mail or an SMS then goes out after the answer. Without it, the handler waits for the mail, and the answer time tells an unverified user with a password.
+- On Next, pass `{ waitUntil: (p) => after(p) }` as the second argument of `toNextJsHandler`. On a serverless Node host, pass the host's `waitUntil` to `toNodeHandler` the same way.
 - The plugins `jwt`, `mcp`, `cimd`, `oidc-provider`, and `oauth-provider` are refused. A JWT that Better Auth issued stops verifying at the cutover.
 - The user ids of Better Auth carry over. A user id must never be a `cl_` value or an https URL, because a client id has that form. `@authtempo/verify` reads an access token whose `sub` equals its `client_id` as a client with no person. Keep a custom Better Auth id generator to this rule before the app turns on core's provider.
 - A Better Auth path that the app calls with its own `fetch` answers 404. Call the client method instead. The account paths and the email code paths are served in Better Auth's shapes.
@@ -197,6 +209,7 @@ A moved key counts against the cap of 50 live tokens per owner, because it acts.
 - `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` need a fresh session too, checked before the password.
 - Better Auth's `list-sessions` needs a fresh session. On authtempo the list needs a session only, as core's `GET /sessions` does.
 - A social link needs the provider's verified address, equal to the account's. Better Auth also links an unverified address of a trusted provider, and a different address with `allowDifferentEmails`. On authtempo the callback answers `email_mismatch` for a different address, and both options are refused at start.
+- The shim refuses `additionalData` of the social start and of the link with `NOT_SUPPORTED`, because it serves no `getOAuthState()`. After the move to core's `createAuth`, use the [state payload](/docs/guides/social-state-data/) and read `stateData` in core's hooks.
 - `user.deleteUser.enabled` stays off by default, as in Better Auth. An organization where the user is the last owner and other members remain stops the delete with `SOLE_OWNER`.
 
 :::caution

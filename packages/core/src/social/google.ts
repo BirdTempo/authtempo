@@ -1,8 +1,14 @@
-import { type OidcProvider, stringClaim } from "./provider.js";
+import { type OidcProvider, type RedirectOverride, stringClaim } from "./provider.js";
 
-export interface GoogleConfig {
+export interface GoogleConfig extends RedirectOverride {
   clientId: string;
   clientSecret: string;
+  /**
+   * The other client ids that an ID token of the ID-token route may name
+   * in `aud`, such as an Android or an iOS client id (plan 12i Task 10).
+   * 1 to 10 entries. The redirect flow takes `clientId` only.
+   */
+  audiences?: string[];
 }
 
 /** Endpoints from Google's OpenID discovery document, checked 2026-10-09. */
@@ -21,6 +27,10 @@ export function googleProvider(c: GoogleConfig): OidcProvider {
     authorizeParams: {},
     callbackMethod: "GET",
     clientSecret: async () => c.clientSecret,
+    // The app gives `providerNonce` to `google.accounts.id.initialize`
+    // (ruling 37 I1). Google's reference calls the nonce an opaque string
+    // (js-reference, "Last updated 2026-09-01 UTC", read 2026-10-25).
+    idToken: { audiences: c.audiences ?? [] },
     profile(claims) {
       return {
         subject: stringClaim(claims, "sub") ?? "",

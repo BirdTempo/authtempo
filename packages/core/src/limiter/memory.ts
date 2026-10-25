@@ -50,6 +50,8 @@ export function createMemoryLimiter(clock: Clock): LimiterPort & { size(): numbe
     return dropped;
   }
   return {
+    // Each isolate has its own map, so a count here is never one count for the deployment.
+    scope: "isolate",
     size: () => buckets.size,
     async sweep(now) {
       return drop(now.getTime());

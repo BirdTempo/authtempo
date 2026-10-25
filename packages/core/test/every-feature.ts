@@ -1,5 +1,6 @@
 import { type AuthConfig, type ResolvedConfig, resolveConfig } from "../src/config.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 
 export const BASE = "https://api.example.com";
 export const base = {
@@ -55,7 +56,13 @@ export function everyFeature(): ResolvedConfig {
   return resolveConfig({
     ...base,
     social: SOCIAL,
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE],
+      relatedOrigins: true,
+      signUp: { isolateLimiter: "allow" },
+    },
     handoff: { schemes: ["example://"] },
     organizations: {
       platformRole: "owner",
@@ -86,6 +93,14 @@ export function everyFeature(): ResolvedConfig {
     // Plan 12d Task 9b: the SCIM token routes and the SCIM server.
     scim: {},
     openapi: true,
+    // Plan 12i Task 2: the two username routes.
+    username: {},
+    // Plan 12i Task 5: the five phone routes, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    // Plan 12i Task 6: the two anonymous routes.
+    anonymous: { isolateLimiter: "allow" },
+    // Plan 12i Task 11: the three multi-session routes.
+    multiSession: {},
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },
   });

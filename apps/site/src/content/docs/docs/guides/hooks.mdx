@@ -7,6 +7,7 @@ sources:
   - packages/core/README.md "Hooks"
   - packages/compat-better-auth/README.md "Hooks"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -24,7 +25,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## Steps
 
-1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, `hooks.identity`, `hooks.operator`, and `hooks.sso`.
+1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, `hooks.identity`, `hooks.operator`, `hooks.sso`, `hooks.scim`, and `hooks.anonymous`.
 2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
 3. To write the app's own row with each core row, write it in the before hook.
    - The app's row takes the id that core minted, so the two rows match.
@@ -45,13 +46,15 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `hooks.identity` | `beforeLink`, `afterLink`, `beforeUnlink`, `afterUnlink` |
 | `hooks.operator` | `beforeAction`, `afterAction` |
 | `hooks.sso` | `beforeSignIn` |
+| `hooks.scim` | `afterChange` |
+| `hooks.anonymous` | `beforeLink`, `afterLink` |
 | `via` of a member | `create`, `add`, `invitation`, `operator`, `sso`, `scim`; for a removal `remove`, `leave`, `operator`, or `scim` |
-| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso` |
+| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso`, `phone`, `anonymous` |
 | `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, `operator` for `createAdmin`, or `scim` for a create by the directory |
-| `via` of a user update | `profile`, `email_change`, `ban`, `unban` |
-| `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset` |
+| `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username`, `phone` |
+| `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade` |
 
 ## How it behaves
 
@@ -108,7 +111,31 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
   - the stop of an impersonation;
   - the loss of the platform role at a removal, a leave, or a role change of a platform operator's member row;
   - the door of a request: the operator of the impersonation session is banned, deleted, or without the platform role.
+- `displaced`: with `multiSession` on, a sign-in in a browser whose bag is full ends the oldest session of the bag. A sign-in of a user who has a session in the browser ends that session with `sign_out`.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
+- `anonymous_upgrade`: a sign-in replaced the anonymous user of the session. See [The anonymous upgrade](#the-anonymous-upgrade).
+
+## The anonymous upgrade
+
+A sign-in from a browser with a live anonymous session replaces the anonymous user. Core never changes the anonymous user into the user of the sign-in.
+
+- These sign-ins link: the password sign-in, the password sign-up and its confirm, the magic link, the email code, and the phone code. A social sign-in, a passkey sign-in, and the challenge verify of a gated sign-in also link.
+- An SSO sign-in, a password reset that opens a session, and a handoff link nothing. Their session replaces the cookie. The anonymous user stays with no hook, and the sweep deletes it and its data.
+- With `anonymous` off, nothing links. This includes a sign-in that started before the deployment turned `anonymous` off.
+- The event holds `anonymousUser`, `user`, `proof`, and `via`. `user` is the account that the person signed in to.
+- `beforeLink` runs in the sign-in's transaction, before the session write. A refusal answers `hook_refused`, and no session opens. The anonymous user and its session stay.
+- `afterLink` runs after the commit. Move the app's data here. Then the anonymous session ends with `anonymous_upgrade`, and the anonymous user goes. `user.afterDelete` runs for it, and `user.beforeDelete` does not.
+- A throw of `afterLink` writes the line `hook.after_failed`, with the anonymous user's id as `rowId`. The anonymous user and its session stay, but no later sign-in links them: the upgrade spent the claim. When the anonymous session expires and `anonymous.ttlDays` pass, the sweep deletes the user. Act on the line: move the data before that sweep. The sweep fires `user.afterDelete` for the user.
+- A failure after `afterLink`, at the session end or the delete, writes the line `anonymous.cleanup_failed`. The sign-in still answers with its session. The sweep deletes the anonymous user later.
+- `afterLink` runs in the request of the sign-in. On D1, its queries count toward the 50 queries of that invocation, with those of the sign-in. The worst request is an ID-token sign-in that claims an unverified account, over an anonymous session with a full `multiSession` bag. With every hook set, it uses 39 queries. A sign-up confirm by code with `uniformSignUp` on uses 38, and a password sign-in with a full bag uses 26. So on such a sign-in, hooks with more than 11 queries together can pass the D1 Free limit of 50. Then a step after them fails. The claimant's sessions end in one query per 50 sessions, so up to 50 of them add no query.
+- `proof` is `unverified` when `user` holds an address that no proof verified. The real owner of the address can claim that account later. Move data only when `proof` is `verified`.
+- A proof by mail or SMS links only when the completing request carries the anonymous session that asked for it. These proofs are the magic link, the email code, the confirm link of a sign-up, and the phone code. So a stranger cannot move data into your account with a link for your address.
+- A social sign-in links the anonymous user of its start: the binding cookie ties the callback to that browser. A password sign-in, a passkey sign-in, and an ID-token sign-in link the anonymous session of their own request. A passkey sign-up links the anonymous user of its options, or else the anonymous session of its verify.
+- A sign-in with the second factor links at the challenge verify. A challenge that expires links nothing.
+- With `multiSession` on, the anonymous session never enters the bag, so an upgrade displaces no bag session. A switch to a bag session is no sign-in and links nothing.
+- Two sign-ins from one anonymous session at once: each can run `beforeLink`, and one links. The other signs in with no `afterLink`. So move data in `afterLink` only. An impersonation session never links.
+- Residual: `POST /handoff/continue` is open to an anonymous session, so an anonymous user can hold more than one session. An upgrade ends all of them, and with an `afterEnd` hook each end adds queries.
+- Residual: a `POST /anonymous/delete` in parallel with an upgrade can delete the anonymous user before `afterLink` runs. Then `afterLink` runs after `user.afterDelete`. The same person does both, so no other person gains data.
 
 ## Locks over a before hook
 
@@ -129,13 +156,16 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
 | SCIM group write | `organization.beforeUpdateMemberRole` | the scimGroup row, first; the users of the added and removed members, and of each member whose role the write computes; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
+| Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
+| Anonymous delete | `user.beforeDelete` | the user's row |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 
 - A SCIM group write runs the member role hooks with `by: null`, and no team hook (plan 12d ruling 54). Its team create, rename, delete, and member changes are part of the group write, as a cascade is. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each group write after its commit.
 - On Postgres a slow before hook in one of these flows blocks every other write of its locked rows until the commit. A sign-in of a verified user writes its user row, so it waits too.
 - A passkey sign-in moves the passkey counter outside the transaction of the session. No lock of the passkey row holds while `session.beforeCreate` runs.
+- The sweep deletes anonymous users past `anonymous.ttlDays` with no `user.beforeDelete`: the user did not ask for the delete. It fires `user.afterDelete` once for each deleted user, outside the call budget of the sweep. See [the sweep](/docs/guides/sweep/).
 
 :::caution
 Warning: a before hook must not await a core write of a row that its flow locks, such as `auth.api.user.update` of the same user. On Postgres the request hangs with no error, with a pool of any size. Write from the after hook instead, or start the write with no `await` and catch its error. D1 has no row lock, so this hang cannot occur there.

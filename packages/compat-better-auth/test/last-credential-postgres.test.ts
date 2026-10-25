@@ -288,3 +288,84 @@ describe("the guard's lock on a Better Auth user with no name (plan 12a Task 9)"
     ).toEqual({ ok: true, value: { ok: true } });
   });
 });
+
+// Ruling 15 of plan 12i (review probe P1). Better Auth 1.7.5's phone-number
+// plugin takes phoneNumber as a sign-up input, and sets phoneNumberVerified
+// only at the code verify. Core has no phone config here, so no phone is a
+// way in, proved or not.
+describe("a Better Auth phone number with no phone config (plan 12i Task 1)", () => {
+  for (const verified of ["NULL", "true"] as const) {
+    it(`counts no phone as a way in, phoneNumberVerified ${verified}: the last passkey stays`, async () => {
+      const storage = await tables(eraUser("ph", { passkey: true }));
+      await pg.sql.unsafe(
+        `UPDATE "user" SET "phoneNumber" = '+14155550100', "phoneNumberVerified" = ${verified} WHERE id = 'ph'`,
+      );
+      const { auth, signIn } = authOn(storage);
+      const me = await signIn("ph");
+      // Core reads the phone only where Better Auth marks it proved.
+      expect(me.user.phone).toBe(verified === "true" ? "+14155550100" : null);
+      expect(
+        await auth.api.identities.unlink({
+          session: me,
+          id: await googleOf(storage, me.user.id),
+          ip: null,
+          userAgent: null,
+        }),
+      ).toEqual({ ok: true, value: { ok: true } });
+      expect(await auth.api.deletePasskey({ user: me.user, id: "ph-pk" })).toEqual({
+        ok: false,
+        code: "last_credential",
+        status: 409,
+      });
+      expect((await pg.sql`SELECT id FROM "passkey" WHERE "userId" = 'ph'`).length).toBe(1);
+    });
+  }
+});
+
+// Ruling 18 of plan 12i (m-B and L-A). Core writes a phone only after its
+// code (Task 4), so the update marks the Better Auth row proved. A sort by
+// the phone orders by the value that core reads, not by the raw column.
+describe("the phone column of a Better Auth row, as core writes and sorts it (plan 12i Task 1)", () => {
+  it("marks a phone that core writes as proved, and clears the mark with the phone", async () => {
+    const storage = await tables(eraUser("pw", {}));
+    // Better Auth's own state: a sign-up phone whose code is not proved.
+    await pg.sql.unsafe(
+      `UPDATE "user" SET "phoneNumber" = '+14155550100', "phoneNumberVerified" = false WHERE id = 'pw'`,
+    );
+    const byId = [{ field: "id" as const, op: "eq" as const, value: "pw" }];
+    const mark = async () =>
+      (await pg.sql`SELECT "phoneNumber", "phoneNumberVerified" FROM "user" WHERE id = 'pw'`)[0];
+    expect((await storage.findOne("user", byId))?.phone).toBeNull();
+    expect(await storage.update("user", byId, { phone: "+14155550101" })).toBe(1);
+    expect(await mark()).toEqual({ phoneNumber: "+14155550101", phoneNumberVerified: true });
+    expect((await storage.findOne("user", byId))?.phone).toBe("+14155550101");
+    expect(await storage.update("user", byId, { phone: null })).toBe(1);
+    expect(await mark()).toEqual({ phoneNumber: null, phoneNumberVerified: null });
+    // A write of other fields leaves the mark as it is.
+    await pg.sql.unsafe(
+      `UPDATE "user" SET "phoneNumber" = '+14155550102', "phoneNumberVerified" = false WHERE id = 'pw'`,
+    );
+    expect(await storage.update("user", byId, { name: "Bea B" })).toBe(1);
+    expect(await mark()).toEqual({ phoneNumber: "+14155550102", phoneNumberVerified: false });
+  });
+
+  it("sorts by the proved phone on Postgres, so an unproved phone sorts as no phone", async () => {
+    const storage = await tables(
+      [eraUser("pa", {}), eraUser("pb", {}), eraUser("pc", {})].join("\n"),
+    );
+    // The lowest number is not proved: core reads it as null, and null sorts last.
+    await pg.sql.unsafe(`
+      UPDATE "user" SET "phoneNumber" = '+14155550100', "phoneNumberVerified" = false WHERE id = 'pa';
+      UPDATE "user" SET "phoneNumber" = '+14155550101', "phoneNumberVerified" = true WHERE id = 'pb';
+      UPDATE "user" SET "phoneNumber" = '+14155550102', "phoneNumberVerified" = true WHERE id = 'pc';
+    `);
+    const asc = await storage.findMany("user", [], { sort: { field: "phone", dir: "asc" } });
+    expect(asc.map((u) => [u.id, u.phone])).toEqual([
+      ["pb", "+14155550101"],
+      ["pc", "+14155550102"],
+      ["pa", null],
+    ]);
+    const desc = await storage.findMany("user", [], { sort: { field: "phone", dir: "desc" } });
+    expect(desc.map((u) => u.id)).toEqual(["pa", "pc", "pb"]);
+  });
+});

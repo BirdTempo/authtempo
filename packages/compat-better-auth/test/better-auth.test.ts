@@ -136,6 +136,12 @@ describe("betterAuth", () => {
       freshAge: 86400,
       deleteTokenExpiresIn: 86400,
       basePath: "/api/auth",
+      phoneExpiresIn: 300,
+      phoneOtpLength: 6,
+      phoneAllowedAttempts: 3,
+      maximumSessions: 5,
+      lastLoginCookie: "better-auth.last_used_login_method",
+      lastLoginMaxAge: 2592000,
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1, freshMinutes: 1440 });
     expect(m.config.magicLink).toEqual({ ttlMinutes: 60 });
@@ -228,6 +234,14 @@ describe("betterAuth", () => {
     expect(await twice("password:ip:203.0.113.1")).toEqual([true, false]);
   });
 
+  it("keeps the scope of the limiter through the unknown-IP wrap (plan 12i Task 4)", () => {
+    // Without the scope, a shared limiter reads as isolate, and createAuth refuses `phone`.
+    const allow = async () => true;
+    expect(skipUnknownIp({ allow, scope: "shared" }).scope).toBe("shared");
+    expect(skipUnknownIp({ allow, scope: "isolate" }).scope).toBe("isolate");
+    expect("scope" in skipUnknownIp({ allow })).toBe(false);
+  });
+
   it("maps Google, Apple, the cookie's sameSite, and the cookie name onto core's config", () => {
     const privateKey = "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----";
     const m = mapOptions({
@@ -247,14 +261,44 @@ describe("betterAuth", () => {
       },
       advanced: { defaultCookieAttributes: { sameSite: "None" } },
     });
+    // Plan 12i Task 16: Better Auth's callback path stays each provider's redirect URI.
+    const cb = (id: string) => `${BASE}/api/auth/callback/${id}`;
     expect(m.config.social).toEqual({
-      google: { clientId: "g", clientSecret: "gs" },
-      apple: { clientId: "com.example.web", teamId: "TEAM123456", keyId: "KEY1234567", privateKey },
-      github: { clientId: "h", clientSecret: "hs" },
-      linkedin: { clientId: "l", clientSecret: "ls" },
+      google: { clientId: "g", clientSecret: "gs", redirectURI: cb("google") },
+      apple: {
+        clientId: "com.example.web",
+        teamId: "TEAM123456",
+        keyId: "KEY1234567",
+        privateKey,
+        redirectURI: cb("apple"),
+      },
+      github: { clientId: "h", clientSecret: "hs", redirectURI: cb("github") },
+      linkedin: { clientId: "l", clientSecret: "ls", redirectURI: cb("linkedin") },
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
     expect(m.config.cookieName).toBe("__Host-tempo_session");
+    // Plan 12i Task 22: TikTok and WeChat map to core's list entries, with Better Auth's provider ids.
+    const lists = mapOptions({
+      baseURL: BASE,
+      secret: TEST_SECRET,
+      database: memoryDatabase(),
+      socialProviders: {
+        tiktok: { clientKey: "tk", clientSecret: "tks" },
+        wechat: { clientId: "wx", clientSecret: "wxs" },
+      },
+    }).config.social?.oauth2;
+    expect(
+      lists?.map((e) => [
+        e.name,
+        e.clientId,
+        e.clientSecret,
+        e.authorizeClientIdParam,
+        e.addressless,
+      ]),
+    ).toEqual([
+      ["tiktok", "tk", "tks", "client_key", true],
+      ["wechat", "wx", "wxs", "appid", true],
+    ]);
     const lax = mapOptions({
       baseURL: BASE,
       secret: TEST_SECRET,

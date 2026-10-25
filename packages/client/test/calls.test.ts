@@ -30,10 +30,10 @@ function recording() {
   const seen: string[] = [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
-    // A link start names its provider in the path; the table writes the template.
+    // A link start and the ID-token calls name the provider in the path; the table writes the template.
     const path = new URL(req.url).pathname
       .replace(/^\/auth/, "")
-      .replace(/^\/social\/[^/]+\/link$/, "/social/:provider/link");
+      .replace(/^\/social\/[^/]+\/(link|id-token|id-token\/nonce)$/, "/social/:provider/$1");
     seen.push(`${req.method} ${path}`);
     return Response.json({});
   }) as typeof globalThis.fetch;
@@ -54,7 +54,11 @@ describe("the call table of the client (plan 11d)", () => {
     expect(new Set(operations).size).toBe(operations.length);
     // Plan 12k Task 8 adds the five organization token calls.
     // Plan 12d Task 13 adds the eleven SSO calls and the three SCIM token calls.
-    expect(CLIENT_CALLS).toHaveLength(112);
+    // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
+    // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
+    // Task 15 adds the two ID-token calls, the passkey-first sign-up, the two
+    // Signal API reads, and the three multi-session calls.
+    expect(CLIENT_CALLS).toHaveLength(131);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -80,16 +84,22 @@ describe("the call table of the client (plan 11d)", () => {
     await c.magicLink.request({ email: "a@b.c" });
     await c.magicLink.verify({ token: "t" });
     c.social.signIn({ provider: "google" });
+    await c.social.idTokenNonce({ provider: "google" });
+    await c.social.idToken({ provider: "google", idToken: "a.b.c" });
     await c.handoff.redeem({ code: "c", verifier: "v" });
     await c.passkey.register();
     await c.passkey.signIn();
+    await c.passkey.signUp({ name: "Ada" });
     await c.passkeys.list();
+    await c.passkeys.sync();
+    await c.passkeys.signalDetails();
     await c.passkeys.delete({ id: "p" });
     await c.passkeys.rename({ id: "p", name: "Phone" });
     await c.password.signUp({ email: "a@b.c", password: "p" });
     await c.password.signIn({ email: "a@b.c", password: "p" });
     await c.password.resendVerification({ email: "a@b.c" });
     await c.password.verifyEmail({ token: "t" });
+    await c.password.verifyCode({ email: "a@b.c", code: "1" });
     await c.password.requestReset({ email: "a@b.c" });
     await c.password.reset({ token: "t", password: "p" });
     await c.password.change({ newPassword: "p" });
@@ -97,6 +107,16 @@ describe("the call table of the client (plan 11d)", () => {
     await c.emailOtp.verify({ email: "a@b.c", code: "1" });
     await c.emailOtp.requestReset({ email: "a@b.c" });
     await c.emailOtp.reset({ email: "a@b.c", code: "1", password: "p" });
+    await c.phone.request({ phone: "+14155550100" });
+    await c.phone.verify({ phone: "+14155550100", code: "1" });
+    await c.phone.add({ phone: "+14155550100" });
+    await c.phone.verifyAdd({ code: "1" });
+    await c.phone.remove();
+    await c.anonymous.signIn();
+    await c.anonymous.delete();
+    await c.multiSession.list();
+    await c.multiSession.switch({ sessionId: "s" });
+    await c.multiSession.signOut({ sessionId: "s" });
     await c.organizations.create({ slug: "s", name: "n" });
     await c.organizations.list();
     await c.organizations.update(org);
@@ -164,6 +184,8 @@ describe("the call table of the client (plan 11d)", () => {
     await c.user.verifyEmailChange({ code: "1" });
     await c.user.delete();
     await c.user.confirmDelete({ token: "t" });
+    await c.username.available({ username: "ada" });
+    await c.username.set({ username: "ada" });
     await c.identities.list();
     await c.identities.unlink({ id: "i" });
     await c.identities.link({ provider: "google" });
@@ -208,11 +230,16 @@ describe("the call table of the client (plan 11d)", () => {
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
     // Plan 12d Task 13: thirteen compared rows, and the start link, which is not.
-    expect(COMPARED).toHaveLength(105);
-    expect(NOT_COMPARED).toHaveLength(7);
+    // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
+    // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
+    // Task 15 adds six compared rows and three that are not.
+    expect(COMPARED).toHaveLength(121);
+    expect(NOT_COMPARED).toHaveLength(10);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(62);
+    // Plan 12i Task 2 adds username.set. Task 5 adds phone.verify, phone.add, and phone.verifyAdd.
+    // Task 20 adds password.verifyCode. Task 15 adds the multi-session switch and sign-out.
+    expect(BODY_AS_INPUT).toHaveLength(69);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

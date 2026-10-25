@@ -1,0 +1,8 @@
+{
+  "source": "userinfo.json is the example answer of https://docs.slack.dev/reference/methods/openid.connect.userInfo, read 2026-10-24, with a full gravatar URL and without the image size keys. The subject is team_id:user_id, because the user object page (https://docs.slack.dev/reference/objects/user-object, read 2026-10-24) says a user id is unique only in its workspace. Better Auth 1.7.2 keeps profile[\"https://slack.com/user_id\"] alone (ruling 22 of plan 12i).",
+  "subject": "T0R7GR:U0R7JM",
+  "email": "krane@slack-corp.com",
+  "emailVerified": true,
+  "name": "krane",
+  "image": "https://secure.gravatar.com/avatar/krane.png"
+}

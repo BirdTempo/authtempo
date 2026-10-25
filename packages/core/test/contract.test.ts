@@ -21,6 +21,7 @@ import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRouteModules, coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { everyFeature, SOCIAL } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { basicHeader, pkce, requestIdOf } from "./oauth-helpers.js";
@@ -108,7 +109,12 @@ function postForm(
 function world(secretHash = "0".repeat(64)) {
   const auth = makeAuth({
     password: { hash: FAST, uniformSignUp: false },
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE_URL],
+      signUp: { isolateLimiter: "allow" },
+    },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     // The platform role turns on the impersonation routes (plan 12f).
@@ -132,6 +138,14 @@ function world(secretHash = "0".repeat(64)) {
     sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
+    // The username routes of plan 12i Task 2.
+    username: {},
+    // The phone routes of plan 12i Task 5, on the memory limiter.
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    // The anonymous routes of plan 12i Task 6.
+    anonymous: { isolateLimiter: "allow" },
+    // The multi-session routes of plan 12i Task 11.
+    multiSession: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -358,6 +372,21 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // Plan 12i Task 2: the set of a username.
+    { key: "POST /user/username", body: { username: "Ada" }, session: true, refused: INVALID_BODY },
+    // Plan 12i Task 11: an id of no session of the browser answers not_found.
+    {
+      key: "POST /multi-session/switch",
+      body: { sessionId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /multi-session/sign-out",
+      body: { sessionId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /user/change-email",
       body: { newEmail: "ada.other@example.com", method: "link", next: "/inbox" },
@@ -389,6 +418,31 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
     },
     { key: "POST /social/apple/callback", body: { code: "c", state: "s" } },
+    // Plan 12i Task 10: the ID-token route. The valid sign-in body has no live nonce: invalid_token.
+    {
+      key: "POST /social/:provider/id-token/nonce",
+      path: "/social/google/id-token/nonce",
+      body: {},
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /social/:provider/id-token",
+      path: "/social/apple/id-token",
+      body: { idToken: "a.b.c", nonce: "A".repeat(43) },
+      refused: INVALID_BODY,
+    },
+    // Plan 12i Task 9: the hints of one ceremony. The body is optional and strict.
+    {
+      key: "POST /passkey/register/options",
+      body: { hints: ["security-key"] },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /passkey/authenticate/options",
+      body: { hints: ["hybrid"] },
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /passkey/register/verify",
       body: { response: { id: "cred", response: { clientDataJSON: "data" } }, name: "Key" },
@@ -397,6 +451,17 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
     },
     {
       key: "POST /passkey/authenticate/verify",
+      body: { response: { id: "cred", response: { clientDataJSON: "data" } } },
+      refused: INVALID_BODY,
+    },
+    // Plan 12i Task 8: the passkey-first sign-up. The body is strict.
+    {
+      key: "POST /passkey/sign-up/options",
+      body: { name: "Ana", hints: ["client-device"] },
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /passkey/sign-up/verify",
       body: { response: { id: "cred", response: { clientDataJSON: "data" } } },
       refused: INVALID_BODY,
     },
@@ -418,6 +483,12 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /password/verify", body: { token: verifyToken }, refused: INVALID_TOKEN },
+    // Plan 12i Task 20: the sign-up code. No code row: the engine answers invalid_code.
+    {
+      key: "POST /password/verify/code",
+      body: { email: "bob2@example.com", code: "000000" },
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /password/verify/resend",
       body: { email: "bob2@example.com" },
@@ -487,6 +558,30 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /otp/reset/request", body: { email: "ada@example.com" }, refused: INVALID_BODY },
+    // Plan 12i Task 5: the phone routes.
+    { key: "POST /phone/request", body: { phone: "+14155550100" }, refused: INVALID_BODY },
+    {
+      key: "POST /phone/verify",
+      body: { phone: "+14155550100", code: "000000" },
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /phone/add",
+      body: { phone: "+14155550101" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /phone/add/verify",
+      body: { code: "000000" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /phone/remove", body: {}, session: true, refused: INVALID_BODY },
+    // Plan 12i Task 6: the anonymous routes. The session of the world is no
+    // anonymous session, so the valid delete body answers anonymous_refused.
+    { key: "POST /anonymous/sign-in", body: {}, refused: INVALID_BODY },
+    { key: "POST /anonymous/delete", body: {}, session: true, refused: INVALID_BODY },
     {
       key: "POST /otp/reset",
       body: { email: "ada@example.com", code: "000000", password: "another horse battery" },
@@ -777,7 +872,14 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
-    expect(keys.length).toBe(186);
+    // Plan 12i Task 9 adds GET /.well-known/webauthn.
+    // Plan 12i Task 2 adds GET /username/available and POST /user/username.
+    // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
+    // Plan 12i Task 11 adds the three multi-session routes.
+    // Plan 12i Task 10 adds the two routes of the ID-token sign-in.
+    // Plan 12i Task 20 adds POST /password/verify/code.
+    // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
+    expect(keys.length).toBe(204);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -790,8 +892,11 @@ describe("the route contract (plan 11g)", () => {
       }
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
     // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
-    // module scim, so 22 became 23.
-    expect(modules.length).toBe(23);
+    // module scim, so 22 became 23. Plan 12i Task 2 adds the module
+    // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
+    // Plan 12i Task 6 adds the module anonymous: 26. Plan 12i Task 11 adds
+    // the module multi-session: 27.
+    expect(modules.length).toBe(27);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1336,7 +1441,14 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 2b adds five: four domain writes and the override.
     // Plan 12d Task 3 adds the three connection writes. Task 4 adds the discovery.
     // Plan 12d Task 9b adds the two SCIM token writes.
-    expect(withBody.length).toBe(91);
+    // Plan 12i Task 9 adds the bodies of the two passkey options routes.
+    // Plan 12i Task 2 adds the body of POST /user/username.
+    // Plan 12i Task 5 adds the bodies of the five phone routes, and Task 6 the two anonymous bodies.
+    // Plan 12i Task 11 adds the bodies of the multi-session switch and sign-out.
+    // Plan 12i Task 10 adds the bodies of the ID-token nonce and sign-in.
+    // Plan 12i Task 20 adds the body of the sign-up code.
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up.
+    expect(withBody.length).toBe(108);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1362,7 +1474,10 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(89);
+    // The two strict bodies of the ID-token route refuse it (plan 12i Task 10).
+    // Plan 12i Task 20 adds the refusal of the sign-up code body.
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up: 106.
+    expect(refusals).toBe(106);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1382,7 +1497,14 @@ describe("the route contract (plan 11g)", () => {
     }
     // Plan 12d Task 4: the discovery reads JSON and a form. Task 9b: the two SCIM token writes.
     // Task 8: the SAML ACS reads a form.
-    expect(counts).toEqual({ json: 82, both: 10, form: 8 });
+    // Plan 12i Task 9 adds the two passkey options bodies to json.
+    // Plan 12i Task 2 adds the body of POST /user/username to json.
+    // Plan 12i Task 5 adds the five phone bodies to json, and Task 6 the two anonymous bodies.
+    // Plan 12i Task 11 adds the two multi-session bodies to json.
+    // Plan 12i Task 10 adds the two ID-token bodies to json.
+    // Plan 12i Task 20 adds the body of the sign-up code to json.
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up to json.
+    expect(counts).toEqual({ json: 99, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1434,6 +1556,24 @@ describe("the route contract (plan 11g)", () => {
     await check("POST /reauth", post("/auth/reauth", { password: PASSWORD }, cookie));
     await check("POST /reauth/email", post("/auth/reauth/email", {}, cookie));
     await check("POST /user/update", post("/auth/user/update", { name: "Ada" }, cookie));
+    // Plan 12i Task 2: the username routes.
+    await check("POST /user/username", post("/auth/user/username", { username: "Ada" }, cookie));
+    await check("GET /username/available", get("/auth/username/available?username=ada"));
+    // Plan 12i Task 11: the multi-session routes. A switch to the active session changes nothing.
+    await check("GET /multi-session", get("/auth/multi-session", cookie));
+    await check(
+      "POST /multi-session/switch",
+      post("/auth/multi-session/switch", { sessionId: me.session.id }, cookie),
+    );
+    const other = await verifiedSession(w.auth, "mia@example.com");
+    await check(
+      "POST /multi-session/sign-out",
+      post(
+        "/auth/multi-session/sign-out",
+        { sessionId: other.session.id },
+        w.cookieOf(other.token),
+      ),
+    );
     await check(
       "POST /user/change-email",
       post("/auth/user/change-email", { newEmail: "ada.new@example.com" }, cookie),

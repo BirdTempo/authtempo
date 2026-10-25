@@ -1,28 +1,38 @@
 import {
   type AuthConfig,
   defaultSignInPage,
+  type HandleOptions,
   isIpLiteral,
   type LimiterPort,
   normalizeSlug,
   SCIM_SCOPES,
   type SignInPageInput,
+  type SmsPort,
 } from "@authtempo/core";
 import { type DomainRecordOf, withDomainRecord } from "@authtempo/core/compat";
+import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
 import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
-import {
-  type ApiKeyOptions,
-  type BetterAuthOptions,
-  COMPAT_PLUGIN,
-  type CompatDatabase,
-  type CompatPlugin,
-  type OrganizationOptions,
-  type ScimScope,
-  type User,
+import type {
+  ApiKeyOptions,
+  BetterAuthOptions,
+  CompatDatabase,
+  EmailOtpOptions,
+  OrganizationOptions,
+  PhoneNumberOptions,
+  ScimScope,
+  User,
 } from "../types.js";
 import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
-import { appSchemes, DEFAULT_ROLE_RANKS, pluginOf, signUpClosed } from "./check-options.js";
+import {
+  appSchemes,
+  DEFAULT_ROLE_RANKS,
+  dynamicOrigins,
+  pluginIdsOf,
+  pluginOf,
+  signUpClosed,
+} from "./check-options.js";
 import { BETTER_AUTH_CLOCK_SKEW_MS, DEFAULT_TOKEN_PREFIX } from "./check-sso.js";
 import { compatHooks } from "./hooks.js";
 import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
@@ -56,19 +66,142 @@ export const BETTER_AUTH_DEFAULTS = {
   // dist/api/routes/update-user.mjs:322: `deleteTokenExpiresIn || 3600 * 24` (read 2026-10-17, plan 12a Task 20).
   deleteTokenExpiresIn: 86_400,
   basePath: "/api/auth",
+  // Plan 12i Task 16, each read 2026-10-25: phone-number/index.mjs:11 and
+  // :12 and routes.mjs:505; multi-session/index.mjs:15; and
+  // last-login-method/index.mjs (the cookie name and 3600 * 24 * 30).
+  phoneExpiresIn: 300,
+  phoneOtpLength: 6,
+  phoneAllowedAttempts: 3,
+  maximumSessions: 5,
+  lastLoginCookie: "better-auth.last_used_login_method",
+  lastLoginMaxAge: 2_592_000,
 } as const;
 
 const DAY = 86_400;
 
+/**
+ * The code options of the email-otp plugin in core's terms: the sign-in
+ * code, the reset code, and the sign-up code read them. Better Auth counts
+ * seconds and core whole minutes, rounded up, so a code never lives shorter
+ * than the app asked: 90 s is 2 minutes.
+ */
+function otpShape(o: EmailOtpOptions): { ttlMinutes: number; length: 6 | 8; maxAttempts: number } {
+  return {
+    ttlMinutes: Math.ceil((o.expiresIn ?? BETTER_AUTH_DEFAULTS.emailOtpExpiresIn) / 60),
+    length: o.otpLength === 8 ? 8 : 6,
+    maxAttempts: o.allowedAttempts ?? BETTER_AUTH_DEFAULTS.emailOtpAllowedAttempts,
+  };
+}
+
+/** The mark of a code in the SMS text that core builds for the shim (plan 12i Task 16). */
+const CODE_TEXT = /^authtempo-code:(\d{6,8})$/;
+
+/**
+ * The phone-number plugin's `sendOTP` as core's SMS port (plan 12i Task
+ * 16). Core makes, keys, binds, counts, and caps each code (spec 32 item
+ * 4). Better Auth's `sendOTP` takes the code, not a text. So the shim's
+ * text is the code with a mark, and this wrapper is the one place that
+ * passes a code to app code. A note to a taken number holds no code, and
+ * Better Auth has no sender for it: it is not sent. Core counted it against
+ * the daily cap already. The port still answers "sent" (ruling 42 L3): any
+ * other result gives a false `sms.not_sent` line, and `api.phone.add` would
+ * answer 503 for a held number only. Core's /phone/add sends after the
+ * answer (ruling 44), so the time of `sendOTP` tells no held number. Core
+ * catches a throw of `sendOTP` and writes the line `sms.port_threw`.
+ */
+export function phonePort(sendOTP: PhoneNumberOptions["sendOTP"]): SmsPort {
+  return {
+    async send({ to, text }) {
+      const code = CODE_TEXT.exec(text)?.[1];
+      if (code !== undefined) await sendOTP({ phoneNumber: to, code });
+      return "sent";
+    },
+  };
+}
+
+type SignInConfig = Pick<
+  AuthConfig,
+  "anonymous" | "username" | "phone" | "multiSession" | "lastMethod"
+>;
+
+/** The sign-in plugins of plan 12i Task 16 as core's config. checkOptions refused every other value. */
+function signInConfig(options: BetterAuthOptions): SignInConfig {
+  const out: SignInConfig = {};
+  if (pluginOf(options, "anonymous")) {
+    const cap = options.authtempo?.anonymousDailyCap;
+    out.anonymous = cap !== undefined ? { dailyCap: cap } : {};
+  }
+  const u = pluginOf(options, "username")?.options;
+  if (u)
+    out.username = {
+      ...(u.minUsernameLength !== undefined ? { minLength: u.minUsernameLength } : {}),
+      ...(u.maxUsernameLength !== undefined ? { maxLength: u.maxUsernameLength } : {}),
+    };
+  const p = pluginOf(options, "phone-number")?.options;
+  const settings = options.authtempo?.phone;
+  if (p && settings)
+    out.phone = {
+      sms: phonePort(p.sendOTP),
+      regions: [...settings.regions],
+      signUp: p.signUpOnVerification !== undefined,
+      // Seconds in Better Auth, whole minutes in core, rounded up.
+      ttlMinutes: Math.ceil((p.expiresIn ?? BETTER_AUTH_DEFAULTS.phoneExpiresIn) / 60),
+      length: (p.otpLength ?? BETTER_AUTH_DEFAULTS.phoneOtpLength) === 8 ? 8 : 6,
+      maxAttempts: p.allowedAttempts ?? BETTER_AUTH_DEFAULTS.phoneAllowedAttempts,
+      ...(settings.dailyCap !== undefined ? { dailyCap: settings.dailyCap } : {}),
+      message: ({ code }) => `authtempo-code:${code}`,
+    };
+  const m = pluginOf(options, "multi-session")?.options;
+  if (m) out.multiSession = { max: m.maximumSessions ?? BETTER_AUTH_DEFAULTS.maximumSessions };
+  const l = pluginOf(options, "last-login-method")?.options;
+  if (l)
+    out.lastMethod = {
+      // Better Auth's own name, so its client reads the cookie that core sets.
+      cookieName: l.cookieName ?? BETTER_AUTH_DEFAULTS.lastLoginCookie,
+      days: (l.maxAge ?? BETTER_AUTH_DEFAULTS.lastLoginMaxAge) / DAY,
+    };
+  return out;
+}
+
+/**
+ * Better Auth's callback of a provider, `<baseURL><basePath>/callback/<id>`,
+ * as core's `redirectURI` override (plan 12i Task 16). So the URI that the
+ * app registered at each provider for Better Auth stays. Core takes an
+ * https override only: on an http `baseURL` (local work) the callback is
+ * core's `/social/<id>/callback`. The app's own `redirectURI` wins.
+ */
+function callbackOf(
+  given: string | undefined,
+  origin: string,
+  basePath: string,
+  id: string,
+): { redirectURI?: string } {
+  if (given !== undefined) return { redirectURI: given };
+  return origin.startsWith("https:") ? { redirectURI: `${origin}${basePath}/callback/${id}` } : {};
+}
+
 export interface Mapped {
   config: AuthConfig;
+  /**
+   * The host's `{ waitUntil }` of one handler request (plan 12i Task 16).
+   * Each inner `auth.handle` call passes it, so a route's work after the
+   * answer runs under the host's waitUntil (ruling 23). Absent for `api`.
+   */
+  handleOptions?: HandleOptions;
+  /** The origin of inner requests: the primary, or the request's entry after `mappedFor`. */
   origin: string;
+  /** Every origin of a `baseURL` list, the primary first. Empty for a string (plan 12i Task 18). */
+  origins: readonly string[];
   basePath: string;
   /** The ids of the compat plugins in use. */
   plugins: Set<string>;
+  /** The anonymous plugin's `emailDomainName`, or null: the domain of the `temp-` placeholder. */
+  emailDomainName: string | null;
   clientIp: (request: Request) => string | null;
   /** Where core lands a sign-in: `authtempo.appURL`, else the origin of baseURL. */
   appOrigin: string;
+  /** True with no `authtempo.appURL`: core's default appURL follows the request's entry. */
+  appOriginFollows: boolean;
   /** `emailAndPassword.minPasswordLength` or Better Auth's default, for the length codes. */
   minPasswordLength: number;
   /** The account operations that the options turn on (plan 12a). */
@@ -184,6 +317,9 @@ export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
     allow: (key, window) =>
       NO_IP_KEY.test(key) ? Promise.resolve(true) : limiter.allow(key, window),
     ...(sweep ? { sweep } : {}),
+    // The wrap keeps the scope (plan 12i Task 4): without it a shared limiter
+    // reads as isolate, and createAuth refuses `phone`.
+    ...(limiter.scope ? { scope: limiter.scope } : {}),
   };
 }
 
@@ -426,18 +562,80 @@ export function ssoOf(options: BetterAuthOptions): MappedSso | null {
   };
 }
 
+/**
+ * Core's `audiences` key: each id of `ids` but `clientId`, which core takes
+ * already, once each (C L2 of the plan 12i final fix wave). Absent for none.
+ */
+function audiencesOf(clientId: string, ids: readonly string[]): { audiences?: string[] } {
+  const audiences = [...new Set(ids)].filter((id) => id !== clientId);
+  return audiences.length > 0 ? { audiences } : {};
+}
+
+/**
+ * The ID-token audiences of Better Auth 1.7.2's Apple provider: `audience`,
+ * else `appBundleIdentifier`, else none (social-providers/apple.mjs:50, read 2026-10-25).
+ */
+function appleAudiences(apple: { audience?: string | string[]; appBundleIdentifier?: string }) {
+  const listed = typeof apple.audience === "string" ? [apple.audience] : (apple.audience ?? []);
+  if (listed.length > 0) return listed;
+  // An empty id falls through to clientId, as in Better Auth.
+  return apple.appBundleIdentifier ? [apple.appBundleIdentifier] : [];
+}
+
+/**
+ * Core's Google provider of Better Auth's: a `clientId` list gives core its
+ * first id as `clientId` and the rest as `audiences` (google.mjs:59 and :113,
+ * read 2026-10-25).
+ */
+function googleOf(
+  google: { clientId: string | string[]; clientSecret: string },
+  redirect: { redirectURI?: string },
+) {
+  const ids = typeof google.clientId === "string" ? [google.clientId] : google.clientId;
+  const clientId = ids[0] ?? "";
+  return {
+    clientId,
+    clientSecret: google.clientSecret,
+    ...audiencesOf(clientId, ids),
+    ...redirect,
+  };
+}
+
+/**
+ * The origins of a dynamic base URL, `fallback` first when it is one of
+ * them (plan 12i Task 18): core's first entry is its primary. Empty for a
+ * string. checkOptions refused every other form.
+ */
+function baseOrigins(baseURL: BetterAuthOptions["baseURL"]): string[] {
+  if (typeof baseURL !== "object") return [];
+  const origins = dynamicOrigins({ ...baseURL }) ?? [];
+  const first = baseURL.fallback;
+  return first === undefined ? origins : [first, ...origins.filter((o) => o !== first)];
+}
+
+/**
+ * The mapping of one request (plan 12i Task 18). On a `baseURL` list, the
+ * shim builds each inner request, each SSO URL, and the default landing
+ * origin on the request's entry, as core does. Else core's Origin rule
+ * refuses a page of B, and a callback goes to A without B's binding cookie.
+ * The gate answered 421 to a host outside the list before this call.
+ */
+export function mappedFor(mapped: Mapped, request: Request): Mapped {
+  const origin = new URL(request.url).origin;
+  if (origin === mapped.origin || !mapped.origins.includes(origin)) return mapped;
+  return { ...mapped, origin, appOrigin: mapped.appOriginFollows ? origin : mapped.appOrigin };
+}
+
 /** Runs after checkOptions found no refusal, so every value here has its checked type. */
 export function mapOptions(options: BetterAuthOptions): Mapped {
-  const url = new URL(options.baseURL ?? "");
+  const origins = baseOrigins(options.baseURL);
+  const url = new URL(typeof options.baseURL === "string" ? options.baseURL : (origins[0] ?? ""));
   const path = url.pathname.replace(/\/+$/, "");
   const basePath = options.basePath ?? (path || BETTER_AUTH_DEFAULTS.basePath);
+  // The primary: core builds from it outside a request (plan 12i Task 18).
   const origin = url.origin;
   const database = options.database as CompatDatabase;
-  const plugins = new Set(
-    (options.plugins ?? [])
-      .filter((p) => (p as CompatPlugin).kind === COMPAT_PLUGIN)
-      .map((p) => p.id),
-  );
+  const plugins = pluginIdsOf(options);
   const magic = pluginOf(options, "magic-link");
   const org = pluginOf(options, "organization");
   const otp = pluginOf(options, "email-otp");
@@ -452,10 +650,28 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const apple = options.socialProviders?.apple;
   const github = options.socialProviders?.github;
   const linkedin = options.socialProviders?.linkedin;
+  const tiktok = options.socialProviders?.tiktok;
+  const wechat = options.socialProviders?.wechat;
+  // The presets of plan 12i Tasks 13 and 14 (Task 16). checkOptions refuses Slack (ruling 22).
+  const microsoft = options.socialProviders?.microsoft;
+  const discord = options.socialProviders?.discord;
+  const gitlab = options.socialProviders?.gitlab;
+  const twitter = options.socialProviders?.twitter;
+  const facebook = options.socialProviders?.facebook;
+  const presets = microsoft || discord || gitlab || twitter || facebook;
+  const back = (id: string, given: string | undefined) => callbackOf(given, origin, basePath, id);
+  const idSecret = (
+    id: string,
+    c: { clientId: string; clientSecret: string; redirectURI?: string },
+  ) => ({
+    clientId: c.clientId,
+    clientSecret: c.clientSecret,
+    ...back(id, c.redirectURI),
+  });
   const ep = options.emailAndPassword;
   const deleteUser = options.user?.deleteUser;
   const config: AuthConfig = {
-    baseURL: origin,
+    baseURL: typeof options.baseURL === "string" ? origin : origins,
     basePath,
     // Plan 12b: secrets map one entry for one entry. With neither key, core's
     // own refusal of an empty secret names the problem.
@@ -467,7 +683,15 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // Plan 12b: disableSignUp on every method that creates a user is core's
     // signUp false. checkOptions refuses a mix, so no other list reaches here.
     ...(signUpClosed(options) ? { signUp: false as const } : {}),
-    trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
+    // Better Auth 1.7.2 trusts each allowed host of a dynamic baseURL
+    // (dist/context/helpers.mjs:60-71, read 2026-10-25), so a page on one
+    // entry posts to another (C M2 of the plan 12i final fix wave).
+    trustedOrigins: [
+      ...new Set([
+        ...(Array.isArray(options.trustedOrigins) ? options.trustedOrigins : []),
+        ...origins,
+      ]),
+    ],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
     ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
     // One name in this package (shapes.ts), passed to core, so core and the shim read one cookie.
@@ -475,9 +699,11 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     storage: database.storage,
     limiter: skipUnknownIp(database.limiter),
     mail: compatMail({
-      origin,
+      // A mail link names the entry of its request (plan 12i Task 18).
+      origins: origins.length > 0 ? origins : [origin],
       basePath,
       storage: database.storage,
+      plugins,
       sendResetPassword: ep?.sendResetPassword,
       sendVerificationEmail: options.emailVerification?.sendVerificationEmail,
       sendMagicLink: magic?.options.sendMagicLink,
@@ -528,13 +754,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // its email-otp plugin (plan 9e).
     emailOtp: otp
       ? {
-          // Better Auth counts seconds and core whole minutes, rounded up, so
-          // a code never lives shorter than the app asked: 90 s is 2 minutes.
-          ttlMinutes: Math.ceil(
-            (otp.options.expiresIn ?? BETTER_AUTH_DEFAULTS.emailOtpExpiresIn) / 60,
-          ),
-          length: otp.options.otpLength === 8 ? 8 : 6,
-          maxAttempts: otp.options.allowedAttempts ?? BETTER_AUTH_DEFAULTS.emailOtpAllowedAttempts,
+          ...otpShape(otp.options),
           mail: ({ email, code }) => otpMail(email, "sign-in", code),
           resetMail: ({ email, code }) => otpMail(email, "forget-password", code),
         }
@@ -565,15 +785,15 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           // magic link, email code, and social sign-in open a session with no
           // second factor, so the shim keeps core's gate off on those three
           // (owner decision 2 of 2026-10-14). The reset gate has no key.
-          gate: { magicLink: false, emailOtp: false, social: false },
+          // Its phone-number plugin gates /sign-in/phone-number only, which
+          // is a password sign-in here: the phone code opens no gate either.
+          gate: { magicLink: false, emailOtp: false, social: false, phone: false },
         }
       : false,
-    ...(google || apple || github || linkedin
+    ...(google || apple || github || linkedin || tiktok || wechat || presets
       ? {
           social: {
-            ...(google
-              ? { google: { clientId: google.clientId, clientSecret: google.clientSecret } }
-              : {}),
+            ...(google ? { google: googleOf(google, back("google", google.redirectURI)) } : {}),
             ...(apple
               ? {
                   apple: {
@@ -581,15 +801,64 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
                     teamId: apple.teamId ?? "",
                     keyId: apple.keyId ?? "",
                     privateKey: apple.privateKey ?? "",
+                    ...audiencesOf(apple.clientId, appleAudiences(apple)),
+                    ...back("apple", apple.redirectURI),
                   },
                 }
               : {}),
-            ...(github
-              ? { github: { clientId: github.clientId, clientSecret: github.clientSecret } }
+            ...(github ? { github: idSecret("github", github) } : {}),
+            ...(linkedin ? { linkedin: idSecret("linkedin", linkedin) } : {}),
+            ...(microsoft
+              ? {
+                  microsoft: {
+                    ...idSecret("microsoft", microsoft),
+                    // Better Auth's default tenant (social-providers/microsoft-entra-id.mjs).
+                    tenant: microsoft.tenantId ?? "common",
+                  },
+                }
               : {}),
-            ...(linkedin
-              ? { linkedin: { clientId: linkedin.clientId, clientSecret: linkedin.clientSecret } }
+            ...(discord ? { discord: idSecret("discord", discord) } : {}),
+            ...(gitlab
+              ? {
+                  gitlab: {
+                    ...idSecret("gitlab", gitlab),
+                    ...(gitlab.issuer !== undefined ? { issuer: gitlab.issuer } : {}),
+                  },
+                }
               : {}),
+            ...(twitter ? { twitter: idSecret("twitter", twitter) } : {}),
+            ...(facebook ? { facebook: idSecret("facebook", facebook) } : {}),
+            // Better Auth's One Tap posts a token with no nonce (one-tap/index.mjs).
+            ...(pluginOf(options, "one-tap") ? { idToken: { requireNonce: false } } : {}),
+            // Plan 12i Task 22: core's list entries with Better Auth's provider
+            // ids and subjects (open_id; unionid, else openid), so a Better
+            // Auth-era account row links on the first sign-in.
+            ...(tiktok || wechat
+              ? {
+                  oauth2: [
+                    ...(tiktok
+                      ? [
+                          tiktokEntry({
+                            clientKey: tiktok.clientKey,
+                            clientSecret: tiktok.clientSecret,
+                            ...back("tiktok", tiktok.redirectURI),
+                          }),
+                        ]
+                      : []),
+                    ...(wechat
+                      ? [
+                          wechatEntry({
+                            appId: wechat.clientId,
+                            appSecret: wechat.clientSecret,
+                            ...back("wechat", wechat.redirectURI),
+                          }),
+                        ]
+                      : []),
+                  ],
+                }
+              : {}),
+            // No social.stateData (plan 12i ruling 5): no shim hook can read
+            // the payload, so the shim refuses additionalData (STATE_DATA_REFUSAL).
           },
         }
       : {}),
@@ -609,10 +878,23 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             // a taken address. The shim's signUp.email answers { token, user },
             // which the uniform answer cannot fill (plan 12b).
             uniformSignUp: false,
+            // Plan 12i Task 20: the email-otp plugin's overrideDefaultEmailVerification
+            // mails a code in place of the link, through sendVerificationOTP.
+            ...(otp?.options.overrideDefaultEmailVerification === true
+              ? {
+                  verifyBy: "code" as const,
+                  // Better Auth applies the plugin's code options to this code
+                  // too (ruling 39 M2 of plan 12i).
+                  verifyCode: otpShape(otp.options),
+                  verifyCodeMail: ({ email, code }: { email: string; code: string }) =>
+                    otpMail(email, "email-verification", code),
+                }
+              : {}),
           },
         }
       : {}),
     ...pluginConfig(options),
+    ...signInConfig(options),
     ...apiKeyTokens(options),
     ...ssoConfig(options),
     hooks: compatHooks(options),
@@ -622,10 +904,13 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // The Better Auth record of a domain proof reaches the verify and the recheck (ruling 61 F4).
     config: sso ? withDomainRecord(config, betterAuthRecord(sso.tokenPrefix)) : config,
     origin,
+    origins,
     basePath,
     plugins,
+    emailDomainName: pluginOf(options, "anonymous")?.options.emailDomainName ?? null,
     clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
     appOrigin: options.authtempo?.appURL ?? origin,
+    appOriginFollows: options.authtempo?.appURL === undefined,
     minPasswordLength: ep?.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
     account: {
       changeEmail: options.user?.changeEmail?.enabled === true,

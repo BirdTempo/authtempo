@@ -16,7 +16,8 @@ import { FAST, recordNextTransaction, sessionOnly, signUpAndVerify } from "./pas
 /**
  * The session delete of a reset, a change, a claim, and a TOTP enable
  * (plan 9h, index line 179; spec 8.9). With an `afterEnd` hook, each read row goes by id, so the hook fires
- * once per row the flow ended, then one delete by the flow's `where`. With no
+ * once per row the flow ended, then one delete by the flow's `where`. A claim
+ * deletes the read rows by one statement of their ids instead. With no
  * hook, no flow needs the rows, so one statement deletes them all.
  */
 
@@ -163,7 +164,8 @@ describe("the session delete of a reset, a change, a claim, and a TOTP enable (p
       });
       if (!v.ok) throw new Error(v.code);
       if (!("token" in v.value)) throw new Error("the sign-in answered a challenge");
-      expect(sessionDeletes(writes)).toBe(listen ? 3 : 1);
+      // A claim deletes the read rows by one statement of their ids (final review B M of plan 12i).
+      expect(sessionDeletes(writes)).toBe(listen ? 2 : 1);
       expect((await auth.storage.findMany("session", [])).map((s) => s.id)).toEqual([
         v.value.session.id,
       ]);

@@ -39,7 +39,7 @@ describe("authtempo generate (plan 12g Task 7)", () => {
   it("prints to stdout and writes no file", () => {
     const r = runBin(["generate", "--format", "sql", "--dialect", "sqlite"], { cwd: dir });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout.startsWith("-- authtempo schema version 14, dialect sqlite,")).toBe(true);
+    expect(r.stdout.startsWith("-- authtempo schema version 15, dialect sqlite,")).toBe(true);
     expect(r.stdout).toContain("CREATE TABLE ta_user (");
     expect(readdirSync(dir)).toEqual([]);
   });
@@ -52,7 +52,7 @@ describe("authtempo generate (plan 12g Task 7)", () => {
     const file = join(dir, "schema.sql");
     expect(linesOf(first.stderr)).toEqual([`wrote ${file}`]);
     const text = readFileSync(file, "utf8");
-    expect(text.startsWith("-- authtempo schema version 14, dialect postgres,")).toBe(true);
+    expect(text.startsWith("-- authtempo schema version 15, dialect postgres,")).toBe(true);
 
     const second = runBin(args, { cwd: dir });
     expect(second.status).toBe(2);
@@ -134,7 +134,7 @@ describe("authtempo generate (plan 12g Task 7)", () => {
       expect(await main(["generate", "--format", format, "--dialect", dialect], io)).toBe(0);
       const mark = format === "sql" ? "--" : "//";
       expect(io.stdout[0]).toBe(
-        `${mark} authtempo schema version 14, dialect ${dialect}, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with \`authtempo migrate\`. Write rows through the engine only.`,
+        `${mark} authtempo schema version 15, dialect ${dialect}, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with \`authtempo migrate\`. Write rows through the engine only.`,
       );
       expect(io.stdout[1]).toBe(
         `${mark} This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.`,
@@ -152,7 +152,7 @@ describe("authtempo generate (plan 12g Task 7)", () => {
     expect(doc).toMatchObject({
       format: "prisma",
       dialect: "sqlite",
-      schemaVersion: 14,
+      schemaVersion: 15,
       out: null,
       exit: 0,
       stopped: null,

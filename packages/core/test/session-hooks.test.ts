@@ -21,7 +21,8 @@ import {
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
-import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
+import { CLAIM_RUNS } from "../src/engine/users.js";
+import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { makeAuth, tokenFromMail } from "./helpers.js";
@@ -415,12 +416,22 @@ describe("session create hooks (plan 9d)", () => {
     );
     // The SSO resolution (plan 12d Task 5).
     expect(read("sso/resolve.ts")).toContain('via: "sso"');
-    expect(read("totp.ts").match(/sessionOpened\([^;]*?\bvia,?\s*\)/g)).toHaveLength(1);
+    // The verify also passes the state payload of a social sign-in (plan 12i Task 19).
+    expect(
+      read("totp.ts").match(
+        /sessionOpened\([^;]*?\bvia,?(?:\s*undefined,\s*stateData\.value\?\.value \?\? null,?)?\s*\)/g,
+      ),
+    ).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
-    // A social sign-in also passes its provider (plan 12h Task 5).
+    // A social sign-in also passes its provider (plan 12h Task 5) and its
+    // state payload (plan 12i Task 19). The callback and the ID-token route
+    // share one sign-in, which names the provider of its input (plan 12i Task 10).
     const opened = (file: string, via: string) =>
       read(file).match(
-        new RegExp(`sessionOpened\\([^;]*?"${via}"(?:, provider\\.name)?,?\\s*\\)`, "g"),
+        new RegExp(
+          `sessionOpened\\([^;]*?"${via}"(?:, (?:provider\\.name|input\\.provider)(?:, stateData)?)?,?\\s*\\)`,
+          "g",
+        ),
       )?.length ?? 0;
     expect({
       magicLink: opened("magic-link.ts", "magic_link"),
@@ -434,7 +445,8 @@ describe("session create hooks (plan 9d)", () => {
     }).toEqual({
       magicLink: 1,
       social: 1,
-      passkey: 1,
+      // The sign-in and the passkey-first sign-up (plan 12i Task 8).
+      passkey: 2,
       handoff: 1,
       password: 4,
       emailOtp: 1,
@@ -594,6 +606,178 @@ describe("session end hooks (plan 9d)", () => {
       ["afterEnd", { session: upSession(up.value).session, reason: "claim" }],
     ]);
   });
+
+  it("ends the claimant's sessions in one delete and fires afterEnd once for each, and never twice in a race (final review B M of plan 12i)", async () => {
+    const { auth, calls } = recorded();
+    /** The claimant's sessions: the sign-up's, then two password sign-ins. */
+    const claimant = async (email: string) => {
+      const up = await passwordSignUp(auth.config, {
+        email,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!up.ok) throw new Error(up.code);
+      const tokens = [upSession(up.value).token];
+      for (let i = 0; i < 2; i++) {
+        const s = await sessionOnly(
+          passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+        );
+        if (!s.ok) throw new Error(s.code);
+        tokens.push(s.value.token);
+      }
+      return tokens;
+    };
+    const ended = () =>
+      calls
+        .filter(([name]) => name === "afterEnd")
+        .map(([, e]) => e as { session: { id: string }; reason: string });
+    const deletes: string[] = [];
+    const original = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          delete: async (m, w) => {
+            if (m === "session") deletes.push(w.map((x) => `${x.field} ${x.op}`).join(", "));
+            return tx.delete(m, w);
+          },
+        }),
+      );
+
+    await claimant("ada@example.com");
+    const ada = await auth.storage.findMany("session", []);
+    calls.length = 0;
+    expect((await magicSignIn(auth, "ada@example.com")).ok).toBe(true);
+    // One delete of the read ids, and the last one by user id: none per row.
+    expect(deletes).toEqual(["userId eq, id in", "userId eq"]);
+    expect(
+      ended()
+        .map((e) => [e.session.id, e.reason])
+        .sort(),
+    ).toEqual(ada.map((r) => [r.id, "claim"]).sort());
+
+    // A sign-out of one claimant session between the claim's read and its delete.
+    const tokens = await claimant("bea@example.com");
+    const beaUser = await auth.storage.findOne("user", [
+      { field: "email", op: "eq", value: "bea@example.com" },
+    ]);
+    const bea = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: beaUser?.id },
+    ]);
+    expect(bea).toHaveLength(3);
+    const tokenHashes = await Promise.all(tokens.map((t) => sha256Hex(t)));
+    let armed = true;
+    const inner = auth.storage.transaction;
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      inner((tx) =>
+        fn({
+          ...tx,
+          findMany: async (m, w, o) => {
+            const rows = await tx.findMany(m, w, o);
+            if (armed && m === "session") {
+              armed = false;
+              await destroySession(auth.config, tokens[0] ?? "");
+            }
+            return rows;
+          },
+        }),
+      );
+    calls.length = 0;
+    expect((await magicSignIn(auth, "bea@example.com")).ok).toBe(true);
+    // The claim ran once more after the race: each row fires exactly once,
+    // the signed-out row with sign_out and the other two with claim.
+    const out = bea.find((r) => r.tokenHash === tokenHashes[0]);
+    expect(
+      ended()
+        .map((e) => [e.session.id, e.reason])
+        .sort(),
+    ).toEqual(bea.map((r) => [r.id, r.id === out?.id ? "sign_out" : "claim"]).sort());
+    // The claim ended the claimant's sessions; the magic link made one.
+    const left = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: beaUser?.id },
+    ]);
+    expect(left.filter((r) => bea.some((b) => b.id === r.id))).toEqual([]);
+    expect(left).toHaveLength(1);
+    expect(armed).toBe(false);
+  });
+
+  it.each(["magic link", "verify link"] as const)(
+    "keeps the owner's claim when a session race undoes each run, and fires afterEnd once for each row (ruling 46 of plan 12i, %s)",
+    async (proof) => {
+      const { auth, calls } = recorded();
+      const email = "cy@example.com";
+      const up = await passwordSignUp(auth.config, {
+        email,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!up.ok) throw new Error(up.code);
+      const tokens = [upSession(up.value).token];
+      for (let i = 0; i < 4; i++) {
+        const s = await sessionOnly(
+          passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+        );
+        if (!s.ok) throw new Error(s.code);
+        tokens.push(s.value.token);
+      }
+      const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
+      const rows = await auth.storage.findMany("session", [...byUser]);
+      expect(rows).toHaveLength(5);
+      // A sign-out of the next claimant session between each read of the
+      // claim and its delete: every run of the claim meets a race.
+      const outs: string[] = [];
+      let busy = false;
+      const original = auth.storage.transaction.bind(auth.storage);
+      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+        original((tx) =>
+          fn({
+            ...tx,
+            findMany: async (m, w, o) => {
+              const found = await tx.findMany(m, w, o);
+              const next = tokens[outs.length];
+              if (!busy && m === "session" && next !== undefined && outs.length < 4) {
+                busy = true;
+                outs.push(await sha256Hex(next));
+                await destroySession(auth.config, next);
+                busy = false;
+              }
+              return found;
+            },
+          }),
+        );
+      calls.length = 0;
+      const confirm = auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+      const signedIn =
+        proof === "magic link"
+          ? await magicSignIn(auth, email)
+          : await verifyPasswordEmail(auth.config, {
+              token: tokenFromMail(confirm?.text ?? ""),
+              ip: null,
+              userAgent: null,
+            });
+      expect(signedIn.ok).toBe(true);
+      // Two races undo a run each. The third run deletes each row by its id,
+      // so its race ends one row and keeps the claim.
+      expect(outs).toHaveLength(CLAIM_RUNS);
+      expect(
+        calls
+          .filter(([name]) => name === "afterEnd")
+          .map(([, e]) => e as { session: { id: string }; reason: string })
+          .map((e) => [e.session.id, e.reason])
+          .sort(),
+      ).toEqual(rows.map((r) => [r.id, outs.includes(r.tokenHash) ? "sign_out" : "claim"]).sort());
+      const left = await auth.storage.findMany("session", [...byUser]);
+      expect(left.filter((r) => rows.some((b) => b.id === r.id))).toEqual([]);
+      expect(left).toHaveLength(1);
+      const owner = await auth.storage.findOne("user", [
+        { field: "id", op: "eq", value: user?.id },
+      ]);
+      expect(owner?.emailVerified).toBe(true);
+    },
+  );
 
   it("fires afterEnd with claim for the claimant's session when the verify link proves the address", async () => {
     const { auth, calls } = recorded();

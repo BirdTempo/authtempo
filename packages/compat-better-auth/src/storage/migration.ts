@@ -1253,6 +1253,66 @@ export function compatMigration0011Sql(dialect: "postgres" | "sqlite"): string {
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0012_NAME = "0012_compat_schema_v15";
+
+/**
+ * Migration 0012 (plan 12i): core's schema version 15. Core 15 makes the
+ * address nullable and adds `username`, `displayUsername`, `phone`, and
+ * `isAnonymous` to `user`, and `discoverable`, `prf`, and `largeBlob` to
+ * `passkey`. Better Auth's `user` keeps the columns of its username, phone
+ * number, and anonymous plugins: `username`, `displayUsername`,
+ * `phoneNumber`, `phoneNumberVerified`, and `isAnonymous`. This migration
+ * adds each one. On Postgres it adds a column only when it is absent, so the
+ * table of an app with the plugin keeps its own. A SQLite file is static and
+ * cannot test, so the D1 text adds every column, as 0010 does. An app whose
+ * table holds them already runs the file without those lines.
+ *
+ * `isAnonymous` defaults to false, and the fill sets false in each row that
+ * holds null: core reads it as NOT NULL. The unique keys on `username` and
+ * `phoneNumber` give core's rule; a NULL never conflicts. The index on
+ * `isAnonymous` and `createdAt` serves the anonymous step of core's sweep
+ * (ruling 25 H1 of plan 12i, 2026-10-24). It was added before the file
+ * left the lane: no database outside the tests ran it. Better Auth's own
+ * `user.email` stays NOT NULL: the storage writes Better Auth's
+ * placeholder address for a null (`placeholder`, plan 12i Task 16).
+ * Better Auth's `passkey` gets `taDiscoverable`, `taPrf`, and `taLargeBlob`;
+ * the last two are NOT NULL with the default false, so a row that Better
+ * Auth writes reads false. Core's own `ta_oauth_session_client` and
+ * `ta_oauth_logout` get the nullable `issuer` of plan 12i Task 18. The
+ * columns take the app's naming, so the text depends on `names`. The D1
+ * files in this package are the text of the default naming. Append-only
+ * once it ships.
+ */
+export function compatMigration0012Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const pg = dialect === "postgres";
+  const absent = pg ? "IF NOT EXISTS " : "";
+  const text = pg ? "text" : "TEXT";
+  const bool = pg ? "boolean" : "INTEGER";
+  const no = pg ? "false" : "0";
+  const U = n.table("user");
+  const u = (field: string) => n.column("user", field);
+  const P = n.table("passkey");
+  const p = (field: string) => n.column("passkey", field);
+  return `${[
+    `ALTER TABLE ${U} ADD COLUMN ${absent}${u("username")} ${text};`,
+    `ALTER TABLE ${U} ADD COLUMN ${absent}${u("displayUsername")} ${text};`,
+    `ALTER TABLE ${U} ADD COLUMN ${absent}${u("phoneNumber")} ${text};`,
+    `ALTER TABLE ${U} ADD COLUMN ${absent}${u("phoneNumberVerified")} ${bool};`,
+    `ALTER TABLE ${U} ADD COLUMN ${absent}${u("isAnonymous")} ${bool} DEFAULT ${no};`,
+    `UPDATE ${U} SET ${u("isAnonymous")} = ${no} WHERE ${u("isAnonymous")} IS NULL;`,
+    `CREATE UNIQUE INDEX ${absent}ux_user__username ON ${U} (${u("username")});`,
+    `CREATE UNIQUE INDEX ${absent}ux_user__phone_number ON ${U} (${u("phoneNumber")});`,
+    `CREATE INDEX ${absent}ix_user__is_anonymous__created_at ON ${U} (${u("isAnonymous")}, ${u("createdAt")});`,
+    `ALTER TABLE ${P} ADD COLUMN ${p("taDiscoverable")} ${bool};`,
+    `ALTER TABLE ${P} ADD COLUMN ${p("taPrf")} ${bool} NOT NULL DEFAULT ${no};`,
+    `ALTER TABLE ${P} ADD COLUMN ${p("taLargeBlob")} ${bool} NOT NULL DEFAULT ${no};`,
+    `ALTER TABLE ta_oauth_session_client ADD COLUMN issuer ${text};`,
+    `ALTER TABLE ta_oauth_logout ADD COLUMN issuer ${text};`,
+    "UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '12' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /**
  * The names of the compat migrations, in order (plan 11c). Each name is the
  * file name, without `.sql`, under `migrations/d1/` and
@@ -1271,6 +1331,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0009_NAME,
   MIGRATION_0010_NAME,
   MIGRATION_0011_NAME,
+  MIGRATION_0012_NAME,
 ];
 
 /**
@@ -1291,6 +1352,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   (names) => compatMigration0009Sql("postgres", names),
   (names) => compatMigration0010Sql("postgres", names),
   () => compatMigration0011Sql("postgres"),
+  (names) => compatMigration0012Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(
@@ -1334,6 +1396,8 @@ const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[
   (names, variant) => compatMigration0010Sql("sqlite", names, variant),
   // Plan 12d: core's schema version 14, the same text for both variants.
   () => compatMigration0011Sql("sqlite"),
+  // Plan 12i: core's schema version 15, the same text for both variants.
+  (names) => compatMigration0012Sql("sqlite", names),
 ];
 if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

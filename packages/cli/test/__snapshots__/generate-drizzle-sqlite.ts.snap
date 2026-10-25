@@ -1,4 +1,4 @@
-// authtempo schema version 14, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 15, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -12,16 +12,23 @@ export const taUser = sqliteTable(
     id: text("id").primaryKey(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-    email: text("email").notNull(),
+    email: text("email"),
     emailVerified: integer("email_verified", { mode: "boolean" }).notNull(),
     name: text("name"),
     image: text("image"),
     bannedAt: integer("banned_at", { mode: "timestamp_ms" }),
     banReason: text("ban_reason"),
     banUntil: integer("ban_until", { mode: "timestamp_ms" }),
+    username: text("username"),
+    displayUsername: text("display_username"),
+    phone: text("phone"),
+    isAnonymous: integer("is_anonymous", { mode: "boolean" }).notNull(),
   },
   (t) => [
     uniqueIndex("ux_ta_user__email").on(t.email),
+    uniqueIndex("ux_ta_user__username").on(t.username),
+    uniqueIndex("ux_ta_user__phone").on(t.phone),
+    index("ix_ta_user__is_anonymous__created_at").on(t.isAnonymous, t.createdAt),
   ],
 );
 
@@ -100,6 +107,9 @@ export const taPasskey = sqliteTable(
     deviceType: text("device_type").notNull(),
     backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
     name: text("name"),
+    discoverable: integer("discoverable", { mode: "boolean" }),
+    prf: integer("prf", { mode: "boolean" }).notNull(),
+    largeBlob: integer("large_blob", { mode: "boolean" }).notNull(),
   },
   (t) => [
     uniqueIndex("ux_ta_passkey__credential_id").on(t.credentialId),
@@ -378,6 +388,7 @@ export const taOauthSessionClient = sqliteTable(
     clientId: text("client_id").notNull(),
     userId: text("user_id").notNull(),
     sid: text("sid").notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     uniqueIndex("ux_ta_oauth_session_client__session_id__client_id").on(t.sessionId, t.clientId),
@@ -397,6 +408,7 @@ export const taOauthLogout = sqliteTable(
     sid: text("sid").notNull(),
     attempts: integer("attempts").notNull(),
     nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }).notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     index("ix_ta_oauth_logout__next_attempt_at").on(t.nextAttemptAt),

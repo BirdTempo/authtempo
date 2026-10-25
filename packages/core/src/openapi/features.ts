@@ -13,6 +13,8 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   magicLink: { configKey: "always on", default: "on" },
   social: { configKey: "social", default: "off" },
   passkey: { configKey: "passkey", default: "off" },
+  passkeyRelatedOrigins: { configKey: "passkey.relatedOrigins", default: "off" },
+  passkeySignUp: { configKey: "passkey.signUp", default: "off" },
   password: { configKey: "password", default: "off" },
   totp: { configKey: "totp", default: "off" },
   emailOtp: { configKey: "emailOtp", default: "on" },
@@ -35,6 +37,11 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   openapi: { configKey: "openapi", default: "off" },
   health: { configKey: "always on", default: "on" },
   readiness: { configKey: "observe.readiness", default: "off" },
+  username: { configKey: "username", default: "off" },
+  phone: { configKey: "phone", default: "off" },
+  anonymous: { configKey: "anonymous", default: "off" },
+  multiSession: { configKey: "multiSession", default: "off" },
+  socialIdToken: { configKey: "social.google or social.apple", default: "off" },
 };
 
 const FEATURE_OF: ReadonlyMap<string, RouteFeature> = new Map(

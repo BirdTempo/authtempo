@@ -16,8 +16,31 @@ import type { AccessControl, Role } from "./access.js";
 // src/client/create-auth-client.ts build object literals under these types, so a
 // field added here and not filled there fails the compile (Review Focus 4).
 
+/**
+ * The user fields of Better Auth 1.7.2's sign-in plugins (final fix wave of
+ * plan 12i, C M1). Each schema marks them returned (anonymous/schema.mjs:2,
+ * username/schema.mjs:9, phone-number/schema.mjs:8 and :13, read
+ * 2026-10-25). A field is there only when its plugin is on.
+ */
+export interface PluginUserFields {
+  /** The anonymous plugin: true for an anonymous user. */
+  isAnonymous?: boolean;
+  /** The username plugin: the stored name, or null. */
+  username?: string | null;
+  /** The username plugin: the name in the case that the person typed, or null. */
+  displayUsername?: string | null;
+  /**
+   * The phone-number plugin: the proved number, or null. Core reads a
+   * number of a Better Auth row only with `phoneNumberVerified` true, so an
+   * unproved number reads as null.
+   */
+  phoneNumber?: string | null;
+  /** The phone-number plugin: true when `phoneNumber` holds a number. */
+  phoneNumberVerified?: boolean;
+}
+
 /** Better Auth's user as the server answers it. `name` is "" when core holds no name. */
-export interface User {
+export interface User extends PluginUserFields {
   id: string;
   name: string;
   email: string;
@@ -414,6 +437,121 @@ export interface PasskeyOptions {
   rpID?: string;
   rpName?: string;
   origin?: string | string[] | null;
+  /**
+   * `@better-auth/passkey` 1.7.2's sign-up keys (deviation 6 of plan 12i).
+   * Only `requireSession: true` maps: core makes every user, so app code
+   * that finds or makes the user is refused. Core's `passkey.signUp` (plan
+   * 12i Task 8) is the sign-up by passkey; the shim does not map it.
+   */
+  registration?: {
+    requireSession?: boolean;
+    resolveUser?: unknown;
+    afterVerification?: unknown;
+  };
+}
+
+/**
+ * Better Auth 1.7.2's anonymous plugin (dist/plugins/anonymous/types.d.mts,
+ * read 2026-10-25). Plan 12i Task 16 maps it onto core's `anonymous`.
+ */
+export interface AnonymousOptions {
+  /** The domain of the placeholder address: `temp-<id>@<emailDomainName>`. Default `<id>@anonymous.placeholder.invalid`. */
+  emailDomainName?: string;
+  /**
+   * Core's `hooks.anonymous.afterLink`: after the commit of a sign-in over
+   * an anonymous session. `proof` is core's: move data only on `"verified"`.
+   * The two sessions are the rows that core holds at that point, or null.
+   */
+  onLinkAccount?: (data: {
+    anonymousUser: { user: User & { isAnonymous: true }; session: Session | null };
+    newUser: { user: User; session: Session | null };
+    proof: "verified" | "unverified";
+  }) => HookResult<void>;
+  /** Refused with true: core deletes the anonymous user at each upgrade. */
+  disableDeleteAnonymousUser?: boolean;
+  /** The name of a new anonymous user. Default "Anonymous", as in Better Auth. Called with no argument. */
+  generateName?: () => HookResult<string>;
+  /** Refused: core writes the placeholder address itself. */
+  generateRandomEmail?: unknown;
+  /** Refused: core keeps `isAnonymous` in Better Auth's own column. */
+  schema?: unknown;
+}
+
+/**
+ * Better Auth 1.7.2's username plugin (dist/plugins/username/index.d.mts,
+ * read 2026-10-25). Core's stored form is NFKC in lower case and matches
+ * `^[a-z0-9_.]+$`; the typed case stays in `displayUsername`.
+ */
+export interface UsernameOptions {
+  /** 3 to 30, as core's `username.minLength`. */
+  minUsernameLength?: number;
+  /** 3 to 30, as core's `username.maxLength`. */
+  maxUsernameLength?: number;
+  usernameValidator?: unknown;
+  displayUsernameValidator?: unknown;
+  usernameNormalization?: unknown;
+  displayUsernameNormalization?: unknown;
+  validationOrder?: unknown;
+  immutableUsername?: boolean;
+  displayUsername?: boolean;
+  schema?: unknown;
+}
+
+/**
+ * Better Auth 1.7.2's phone-number plugin (dist/plugins/phone-number/types.d.mts,
+ * read 2026-10-25). `sendOTP` becomes core's SMS port: core makes, keys,
+ * binds, counts, and caps every code, and this callback only delivers it.
+ */
+export interface PhoneNumberOptions {
+  sendOTP: (data: { phoneNumber: string; code: string }) => HookResult<void>;
+  /** Seconds, 60 to 600. Core rounds up to whole minutes. Default 300. */
+  expiresIn?: number;
+  /** 6 or 8. Default 6. */
+  otpLength?: number;
+  /** 3 to 10. Default 3. */
+  allowedAttempts?: number;
+  /** Core signs in only by a number that its code proved. */
+  requireVerification?: boolean;
+  /**
+   * Core's `phone.signUp`. `getTempEmail` must answer an address on a
+   * placeholder domain: core keeps no address for a phone user.
+   * `getTempName` names the new user, as in Better Auth.
+   */
+  signUpOnVerification?: {
+    getTempEmail: (phoneNumber: string) => string;
+    getTempName?: (phoneNumber: string) => string;
+  };
+  verifyOTP?: unknown;
+  sendPasswordResetOTP?: unknown;
+  phoneNumberValidator?: unknown;
+  callbackOnVerification?: unknown;
+  schema?: unknown;
+}
+
+/** Better Auth 1.7.2's one-tap plugin (dist/plugins/one-tap/index.d.mts, read 2026-10-25). */
+export interface OneTapOptions {
+  /** Maps only when every sign-up method is closed: core's `signUp: false`. */
+  disableSignup?: boolean;
+  /** Core takes the client id of `socialProviders.google`. */
+  clientId?: string;
+}
+
+/** Better Auth 1.7.2's multi-session plugin (dist/plugins/multi-session/index.d.mts, read 2026-10-25). */
+export interface MultiSessionOptions {
+  /** 2 to 10, core's `multiSession.max`. Default 5. */
+  maximumSessions?: number;
+}
+
+/** Better Auth 1.7.2's last-login-method plugin (dist/plugins/last-login-method/index.d.mts, read 2026-10-25). */
+export interface LastLoginMethodOptions {
+  /** Core's `lastMethod.cookieName`. Default `better-auth.last_used_login_method`. */
+  cookieName?: string;
+  /** Seconds, whole days from 1 to 400, core's `lastMethod.days`. Default 30 days. */
+  maxAge?: number;
+  storeInDatabase?: boolean;
+  customResolveMethod?: unknown;
+  beforeStoreCookie?: unknown;
+  schema?: unknown;
 }
 
 export interface MagicLinkOptions {
@@ -687,7 +825,19 @@ export type ScimMarkerOptions = Omit<ScimOptions, "connections"> & {
   }[];
 };
 export type ScimPlugin = Marker<"scim", ScimMarkerOptions>;
+export type AnonymousPlugin = Marker<"anonymous", AnonymousOptions>;
+export type UsernamePlugin = Marker<"username", UsernameOptions>;
+export type PhoneNumberPlugin = Marker<"phone-number", PhoneNumberOptions>;
+export type OneTapPlugin = Marker<"one-tap", OneTapOptions>;
+export type MultiSessionPlugin = Marker<"multi-session", MultiSessionOptions>;
+export type LastLoginMethodPlugin = Marker<"last-login-method", LastLoginMethodOptions>;
 export type CompatPlugin =
+  | AnonymousPlugin
+  | UsernamePlugin
+  | PhoneNumberPlugin
+  | OneTapPlugin
+  | MultiSessionPlugin
+  | LastLoginMethodPlugin
   | SsoPlugin
   | ScimPlugin
   | AdminPlugin
@@ -715,6 +865,11 @@ export type BetterAuthPlugin = CompatPlugin | ForeignPlugin;
  */
 export interface ProviderSignUp {
   disableSignUp?: boolean;
+  /**
+   * Core's `redirectURI` override (plan 12i Task 16). Default on an https
+   * `baseURL`: Better Auth's own callback, `<baseURL><basePath>/callback/<id>`.
+   */
+  redirectURI?: string;
 }
 
 /**
@@ -731,9 +886,21 @@ export interface ProviderSignUp {
  * control, and it lists every refused key at construction. typetest/options.ts
  * pins both rules.
  */
+/**
+ * Better Auth's dynamic base URL (`@better-auth/core` 1.7.2
+ * `types/init-options.d.mts`, read 2026-10-14). The shim maps it to core's
+ * `baseURL` list (plan 12i Task 18): exact hosts only, and `protocol` must
+ * be `https` or `http`.
+ */
+export interface DynamicBaseURLConfig {
+  allowedHosts: string[];
+  fallback?: string | undefined;
+  protocol?: "http" | "https" | "auto" | undefined;
+}
+
 export interface BetterAuthOptions {
   appName?: string;
-  baseURL?: string;
+  baseURL?: string | DynamicBaseURLConfig;
   basePath?: string;
   secret?: string;
   /** The app secrets by version, the current first (Better Auth 1.7). Mapped to core's `secrets` (plan 12b). */
@@ -767,9 +934,17 @@ export interface BetterAuthOptions {
     afterEmailVerification?: (user: User, request?: Request) => HookResult<void>;
   };
   socialProviders?: {
-    google?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /**
+     * A list of client ids is Better Auth's form for more ID-token audiences:
+     * the first runs the redirect sign-in, and each id is an audience.
+     */
+    google?: { clientId: string | string[]; clientSecret: string } & ProviderSignUp;
     apple?: {
       clientId: string;
+      /** The audiences of an Apple ID token, as in Better Auth: core's `social.apple.audiences`. */
+      audience?: string | string[];
+      /** The bundle id of the app: an audience when `audience` is absent, as in Better Auth. */
+      appBundleIdentifier?: string;
       teamId?: string;
       keyId?: string;
       privateKey?: string;
@@ -779,6 +954,20 @@ export interface BetterAuthOptions {
     github?: { clientId: string; clientSecret: string } & ProviderSignUp;
     /** Core's LinkedIn preset (plan 9c). */
     linkedin?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /** Core's `tiktokEntry` (plan 12i Task 22): a list entry with no address. */
+    tiktok?: { clientKey: string; clientSecret: string } & ProviderSignUp;
+    /** Core's `wechatEntry` (plan 12i Task 22): the AppID and the AppSecret, with no address. */
+    wechat?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /** Core's Entra ID preset (plan 12i Task 16). `tenantId` is core's `tenant`, default `common`. */
+    microsoft?: { clientId: string; clientSecret: string; tenantId?: string } & ProviderSignUp;
+    /** Core's Discord preset (plan 12i Task 16). */
+    discord?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /** Core's GitLab preset (plan 12i Task 16). `issuer` is the origin of the instance. */
+    gitlab?: { clientId: string; clientSecret: string; issuer?: string } & ProviderSignUp;
+    /** Core's X preset (plan 12i Task 16). */
+    twitter?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /** Core's Facebook preset (plan 12i Task 16). */
+    facebook?: { clientId: string; clientSecret: string } & ProviderSignUp;
   };
   session?: {
     expiresIn?: number;
@@ -918,6 +1107,18 @@ export interface BetterAuthOptions {
      * `@authtempo/core`, or your own ports. Every resolver must give the record.
      */
     ssoDns?: DnsTxtPort[];
+    /**
+     * The phone-number plugin's core settings (plan 12i Task 16). Better
+     * Auth has none. `regions` lists the calling-code prefixes that get an
+     * SMS, such as "+1": core has no default. `dailyCap` is the codes of
+     * the deployment per 24 hours, 1 to 100000, default 1000.
+     */
+    phone?: { regions: string[]; dailyCap?: number };
+    /**
+     * The anonymous users that the deployment makes per 24 hours, 1 to
+     * 100000 (plan 12i Task 16). Default 1000. Better Auth has no cap.
+     */
+    anonymousDailyCap?: number;
   };
 }
 
@@ -1074,7 +1275,17 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
    * `token` is null with `emailAndPassword.requireEmailVerification` (plan 12b): no session opens.
    */
   signUpEmail(input: {
-    body: { email: string; password: string; name: string; image?: string; callbackURL?: string };
+    body: {
+      email: string;
+      password: string;
+      name: string;
+      image?: string;
+      callbackURL?: string;
+      /** With the username plugin (plan 12i Task 16). */
+      username?: string;
+      /** The typed username only: core keeps it as displayUsername. */
+      displayUsername?: string;
+    };
     headers?: Headers;
   }): Promise<{ token: SignUpTokenOf[`${RV}`]; user: User }>;
   /** `callbackURL` and `rememberMe: false` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
@@ -1176,6 +1387,60 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   stopImpersonating(input: {
     headers: Headers;
   }): Promise<{ session: AdminSession | null; user: AdminUser | null }>;
+  /**
+   * The calls of the sign-in plugins (plan 12i Task 16). Each runs the
+   * handler's steps of its path with the caller's headers. Without the
+   * plugin, each throws 404. A server caller has no cookie jar: a sign-in
+   * answers the token, and a multi-session call reads the cookies of `headers`.
+   */
+  signInAnonymous(input?: { headers?: Headers }): Promise<{ token: string; user: User }>;
+  deleteAnonymousUser(input: { headers: Headers }): Promise<{ success: true }>;
+  signInUsername(input: {
+    body: { username: string; password: string; rememberMe?: boolean; callbackURL?: string };
+    headers?: Headers;
+  }): Promise<{ token: string; user: User } | TwoFactorRedirect>;
+  isUsernameAvailable(input: {
+    body: { username: string };
+    headers?: Headers;
+  }): Promise<{ available: boolean }>;
+  /** With a session in `headers`, the code adds the number to that user; else it signs in. */
+  sendPhoneNumberOTP(input: {
+    body: { phoneNumber: string };
+    headers?: Headers;
+  }): Promise<{ message: "code sent" }>;
+  verifyPhoneNumber(input: {
+    body: {
+      phoneNumber: string;
+      code: string;
+      disableSession?: boolean;
+      updatePhoneNumber?: boolean;
+    };
+    headers?: Headers;
+  }): Promise<{ status: true; token: string | null; user: User }>;
+  signInPhoneNumber(input: {
+    body: { phoneNumber: string; password: string; rememberMe?: boolean };
+    headers?: Headers;
+  }): Promise<{ token: string; user: User } | TwoFactorRedirect>;
+  oneTapCallback(input: {
+    body: { idToken: string };
+    headers?: Headers;
+  }): Promise<{ token: string; user: User }>;
+  /** The ID token form only, for google and apple. `nonce` comes from core's nonce route. */
+  signInSocial(input: {
+    body: { provider: string; idToken: { token: string; nonce?: string } };
+    headers?: Headers;
+  }): Promise<{ redirect: false; token: string; user: User }>;
+  /** `session.token` holds the session id: the shim never holds a clear token. */
+  listDeviceSessions(input: { headers: Headers }): Promise<{ session: Session; user: User }[]>;
+  /** `sessionToken` is a `session.token` of the list. */
+  setActiveSession(input: {
+    body: { sessionToken: string };
+    headers: Headers;
+  }): Promise<{ session: Session; user: User }>;
+  revokeDeviceSession(input: {
+    body: { sessionToken: string };
+    headers: Headers;
+  }): Promise<{ status: true }>;
 }
 
 /** Better Auth's list-users query (dist/plugins/admin/routes.mjs, read 2026-10-21), and the shim's `after`. */
@@ -1237,7 +1502,11 @@ export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOpti
 
 // The client.
 
-export interface ClientUser {
+/**
+ * The user of the client. The fields of `PluginUserFields` are there with
+ * their client plugin, on each answer of a shim path and on the session read.
+ */
+export interface ClientUser extends PluginUserFields {
   id: string;
   name: string;
   email: string;
@@ -1362,7 +1631,22 @@ export interface OrganizationClientOptions {
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" | "sso";
+      readonly id:
+        | "passkey"
+        | "magic-link"
+        | "email-otp"
+        | "admin"
+        | "api-key"
+        | "sso"
+        | "anonymous"
+        | "username"
+        | "phone-number"
+        | "multi-session";
+    }
+  | {
+      readonly kind: typeof COMPAT_CLIENT_PLUGIN;
+      readonly id: "last-login-method";
+      readonly options?: { cookieName?: string };
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -1443,6 +1727,8 @@ export interface AuthClient<TF extends boolean = false> {
       provider: string;
       callbackURL?: string;
       disableRedirect?: boolean;
+      /** Answers NOT_SUPPORTED: no shim hook can read it. Core's `social.stateData` takes its place (plan 12i ruling 5). */
+      additionalData?: Record<string, unknown>;
     }): Promise<CompatClientResult<{ url: string; redirect: boolean }>>;
     magicLink(input: {
       email: string;
@@ -1479,7 +1765,64 @@ export interface AuthClient<TF extends boolean = false> {
       name?: string;
       image?: string;
     }): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+    /** The anonymous plugin (plan 12i Task 16): core's anonymous sign-in. */
+    anonymous(): Promise<CompatClientResult<{ token: string; user: ClientUser }>>;
+    /** The username plugin (plan 12i Task 16): core's password sign-in by username. */
+    username(input: {
+      username: string;
+      password: string;
+      rememberMe?: boolean;
+      callbackURL?: string;
+    }): Promise<
+      CompatClientResult<
+        { token: string; user: ClientUser } | (TF extends true ? TwoFactorRedirect : never)
+      >
+    >;
+    /** The phone-number plugin (plan 12i Task 16): core's password sign-in by phone. */
+    phoneNumber(input: {
+      phoneNumber: string;
+      password: string;
+      rememberMe?: boolean;
+    }): Promise<
+      CompatClientResult<
+        { token: string; user: ClientUser } | (TF extends true ? TwoFactorRedirect : never)
+      >
+    >;
   };
+  /** The anonymous plugin: core's delete of the caller's own anonymous user. */
+  deleteAnonymousUser(): Promise<CompatClientResult<{ success: true }>>;
+  /** The username plugin: true when no user holds the name. */
+  isUsernameAvailable(input: {
+    username: string;
+  }): Promise<CompatClientResult<{ available: boolean }>>;
+  /** The phone-number plugin. With a session, the code adds the number to the caller. */
+  phoneNumber: {
+    sendOtp(input: { phoneNumber: string }): Promise<CompatClientResult<{ message: string }>>;
+    verify(input: {
+      phoneNumber: string;
+      code: string;
+      disableSession?: boolean;
+      updatePhoneNumber?: boolean;
+    }): Promise<CompatClientResult<{ status: true; token: string | null; user: ClientUser }>>;
+  };
+  /** The multi-session plugin. `session.token` holds the session id: the client never sees a token. */
+  multiSession: {
+    listDeviceSessions(): Promise<
+      CompatClientResult<{ session: ClientSession; user: ClientUser }[]>
+    >;
+    setActive(input: {
+      sessionToken: string;
+    }): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser }>>;
+    revoke(input: { sessionToken: string }): Promise<CompatClientResult<{ status: true }>>;
+  };
+  /**
+   * The last-login-method plugin: the method of core's readable cookie in
+   * Better Auth's names (`email`, `magic-link`, `email-otp`, `passkey`, a
+   * provider id, `username`, `phone-number`), or null. A hint only.
+   */
+  getLastUsedLoginMethod(): string | null;
+  isLastUsedLoginMethod(method: string): boolean;
+  clearLastUsedLoginMethod(): void;
   signUp: {
     email(input: {
       email: string;
@@ -1487,6 +1830,10 @@ export interface AuthClient<TF extends boolean = false> {
       name: string;
       image?: string;
       callbackURL?: string;
+      /** With the username plugin (plan 12i Task 16). */
+      username?: string;
+      /** The typed username only: core keeps it as displayUsername. */
+      displayUsername?: string;
       // null while the server's requireEmailVerification is on (plan 12b): no session opens.
     }): Promise<CompatClientResult<{ token: string | null; user: ClientUser }>>;
   };

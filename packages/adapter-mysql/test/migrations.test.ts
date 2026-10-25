@@ -66,7 +66,7 @@ for (const server of MYSQL_SERVERS) {
       // The lock lets one runner apply every step; the other finds each step recorded.
       expect(results.flat()).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("14");
+      expect(await version(db)).toBe("15");
       expect(await applyMysqlMigrations(db.pool)).toEqual([]);
     });
 
@@ -84,7 +84,7 @@ for (const server of MYSQL_SERVERS) {
       expect(await version(db)).toBeNull();
       expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("14");
+      expect(await version(db)).toBe("15");
       // The third step made its table: a step recorded before it ran would leave it out.
       const tables = await db.q<RowDataPacket[]>`SELECT COUNT(*) AS n FROM information_schema.tables
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ta\\_%'`;
@@ -97,17 +97,21 @@ for (const server of MYSQL_SERVERS) {
       const cleanShape = await readMysqlShape(clean.pool);
       await clean.close();
       const last = ALL_STEPS.length;
-      // The version row of the baseline, and the version update of the last file.
-      for (const at of [2, baseline.length, last]) {
+      // The version row of the baseline, the ALTER of 0003 that adds the user columns and
+      // their unique keys (plan 12i), and the version update of the last file.
+      const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
+      expect(userColumns).toBeGreaterThan(baseline.length);
+      for (const at of [2, baseline.length, userColumns, last]) {
         db = await freshDatabase(server, { migrate: false });
         await stopAfter(db, at);
         // The step ran, and its record is missing.
         expect(await recorded(db)).toEqual(ALL_STEPS.slice(0, at - 1));
         // The run changes each file from the one of the step on.
-        const open = at <= baseline.length ? MYSQL_MIGRATIONS : MYSQL_MIGRATIONS.slice(1);
+        const file = (ALL_STEPS[at - 1] ?? "").split(":")[0];
+        const open = MYSQL_MIGRATIONS.slice(MYSQL_MIGRATIONS.findIndex((m) => m.name === file));
         expect(await applyMysqlMigrations(db.pool)).toEqual(open.map((m) => m.name));
         expect(await recorded(db)).toEqual(ALL_STEPS);
-        expect(await version(db)).toBe("14");
+        expect(await version(db)).toBe("15");
         expect(await readMysqlShape(db.pool)).toEqual(cleanShape);
         await db.close();
         db = null;
@@ -199,8 +203,12 @@ for (const server of MYSQL_SERVERS) {
       // live tables to the schema.
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
       expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
-      // Plan 12d appends the file of schema version 14 after it.
-      expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(["0001_schema_v13", "0002_schema_v14"]);
+      // Plan 12d appends the file of schema version 14 after it, and plan 12i the file of 15.
+      expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual([
+        "0001_schema_v13",
+        "0002_schema_v14",
+        "0003_schema_v15",
+      ]);
     });
 
     it("holds each shipped record to its digest (ruling 81 l3 of plan 12d)", () => {
@@ -213,6 +221,11 @@ for (const server of MYSQL_SERVERS) {
       expect(digests).toEqual([
         ["0001_schema_v13", "1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9"],
         ["0002_schema_v14", "35a0f032d884b2ff0f117fa6d4e2b46dbdf76324930afca6e9ba332b8761f03b"],
+        // Schema 15 exists only on the plan 12i lane, so its file can still change (ruling 25).
+        // Ruling 25 H1 of plan 12i (2026-10-24) added the key on (is_anonymous, created_at)
+        // before 0003 left the lane. No database outside the tests ran the old text.
+        // Plan 12i Task 18 added the issuer of the logout tables on 2026-10-25.
+        ["0003_schema_v15", "d08a803c1d282c2f512b9f0acc857baca8e63ea382d22a2460a1f61d8b48a59e"],
       ]);
     });
   });

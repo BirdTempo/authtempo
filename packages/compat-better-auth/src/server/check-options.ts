@@ -1,4 +1,10 @@
-import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme, normalizeSlug } from "@authtempo/core";
+import {
+  COMING_PRESET_NAMES,
+  DELETE_CONFIRM_TTL_MINUTES,
+  isAppScheme,
+  normalizeSlug,
+  PRESET_PROVIDER_NAMES,
+} from "@authtempo/core";
 import {
   CORE_STATEMENTS,
   NAME_RE,
@@ -16,6 +22,7 @@ import {
   toCoreNames,
 } from "../role-map.js";
 import { WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "../storage/api-keys.js";
+import { EMAIL_DOMAIN_RE, onPlaceholderDomain } from "../storage/placeholder.js";
 import {
   type BetterAuthOptions,
   COMPAT_PLUGIN,
@@ -36,8 +43,33 @@ export interface OptionCheck {
 
 type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 
-/** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
+/** Plan 9c maps google, apple, github, and linkedin, and plan 12i Task 22 maps tiktok and wechat. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
+/**
+ * Better Auth provider ids that a core preset serves, from core's preset
+ * list. The socialProviders rule maps google, apple, github, linkedin, tiktok, and wechat
+ * first, so only the other presets reach this map. Better Auth 1.7.x names
+ * its Entra ID provider `microsoft`, as core does.
+ */
+const CORE_PRESETS: Readonly<Record<string, string>> = Object.fromEntries(
+  PRESET_PROVIDER_NAMES.map((name) => [name, `social.${name}`]),
+);
+/**
+ * Names that core reserves for coming presets. Core moves a name to its
+ * preset list. The list is empty after plan 12i Task 14. The rule stays, so
+ * a name that core reserves later gets the right refusal with no edit here.
+ */
+const COMING_PRESETS: ReadonlySet<string> = new Set(COMING_PRESET_NAMES);
+const presetProvider = (preset: string) =>
+  `not mapped; use core's preset ${preset} through core's createAuth`;
+const COMING_PROVIDER =
+  "not mapped; core reserves the name for a coming preset, so a core social.oidc or social.oauth2 entry needs another name";
+/** The refusal of a Better Auth provider that the package does not map. */
+function otherProvider(name: string): string {
+  const preset = Object.hasOwn(CORE_PRESETS, name) ? CORE_PRESETS[name] : undefined;
+  if (preset !== undefined) return presetProvider(preset);
+  return COMING_PRESETS.has(name) ? COMING_PROVIDER : OTHER_PROVIDER;
+}
 const NO_REQUEST_HOOKS =
   "core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe";
 const noRowHook = (name: string) => `core has no row hook on ${name}; see the plan index`;
@@ -511,6 +543,20 @@ const apiKeyRule = object({
   schema: refused(`core keeps its own token tables ${ITEM_20}`),
 });
 
+/** Deviation 6 of plan 12i: `@better-auth/passkey` 1.7.2's sign-up keys. */
+const PASSKEY_SIGN_UP =
+  "core makes every user; the sign-up by passkey is core's passkey.signUp, which the shim does not map (deviation 6 of plan 12i)";
+/** Core's daily caps of the phone code and the anonymous sign-in take 1 to 100000. */
+const dailyCap: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 100_000)
+    refuse(out, p, "core takes 1 to 100000 a day");
+};
+/** Core's username.minLength and maxLength take 3 to 30. */
+const usernameLength: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 3 || v > 30)
+    refuse(out, p, "core takes 3 to 30");
+};
+
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
     {
@@ -553,6 +599,12 @@ const PLUGIN_RULES: Record<string, Rule> = {
     origin: (v, p, out) => {
       if (typeof v !== "string") stringList(v, p, out);
     },
+    // Deviation 6 of plan 12i: core makes every user, so app code that finds or makes one is refused.
+    registration: object({
+      requireSession: only(true, PASSKEY_SIGN_UP),
+      resolveUser: refused(PASSKEY_SIGN_UP),
+      afterVerification: refused(PASSKEY_SIGN_UP),
+    }),
   }),
   "magic-link": object({
     sendMagicLink: fn,
@@ -582,10 +634,8 @@ const PLUGIN_RULES: Record<string, Rule> = {
     // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
     disableSignUp: boolean,
     generateOTP: refused("core makes the code itself, from crypto.getRandomValues"),
-    overrideDefaultEmailVerification: only(
-      false,
-      "core's verify mail is a link; a code for it is a later input (see the plan index)",
-    ),
+    // Plan 12i Task 20: true is core's password.verifyBy "code".
+    overrideDefaultEmailVerification: boolean,
     sendVerificationOnSignUp: only(false, "core mails a verify link at sign-up, not a code"),
     resendStrategy: only("rotate", "core sends a new code at every request"),
     // Plan 12a: the two change paths of Better Auth 1.7.2 map onto core's change by code.
@@ -671,14 +721,97 @@ const PLUGIN_RULES: Record<string, Rule> = {
   },
 };
 
+/**
+ * The sign-in plugins of Better Auth 1.7.2 that plan 12i Task 16 maps (each
+ * options type read 2026-10-25 in dist/plugins/<id>/). Each key maps onto
+ * core, or is refused with the reason; `object` refuses every other key.
+ */
+const SIGN_IN_PLUGIN_RULES: Record<string, Rule> = {
+  anonymous: object({
+    emailDomainName: (v, p, out) => {
+      if (typeof v !== "string" || !EMAIL_DOMAIN_RE.test(v))
+        refuse(out, p, "expected a host in lower-case ASCII, such as example.com");
+    },
+    onLinkAccount: fn,
+    disableDeleteAnonymousUser: only(
+      false,
+      "core deletes the anonymous user at each upgrade, after hooks.anonymous.afterLink",
+    ),
+    generateName: fn,
+    generateRandomEmail: refused(
+      "core writes the placeholder address itself (<id>@anonymous.placeholder.invalid, or temp-<id>@<emailDomainName>), so it reads every one back as no address",
+    ),
+    schema: refused("core reads isAnonymous from Better Auth's own column"),
+  }),
+  username: object({
+    minUsernameLength: usernameLength,
+    maxUsernameLength: usernameLength,
+    usernameValidator: refused(
+      "core's stored form matches ^[a-z0-9_.]+$ after NFKC and lower case, so a username never reads as an address or a phone",
+    ),
+    displayUsernameValidator: refused("core keeps the typed name and checks only its stored form"),
+    usernameNormalization: refused("core stores the name in NFKC and lower case"),
+    displayUsernameNormalization: only(false, "core keeps the typed case in displayUsername"),
+    validationOrder: refused("core checks the stored form after NFKC"),
+    immutableUsername: only(false, "core lets a user change the username"),
+    displayUsername: only(true, "core keeps displayUsername"),
+    schema: refused("core reads username and displayUsername from Better Auth's own columns"),
+  }),
+  "phone-number": object({
+    sendOTP: fn,
+    // Core counts whole minutes from 1 to 10, rounded up.
+    expiresIn: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 60 || v > 600)
+        refuse(out, p, "core takes 60 to 600 seconds, rounded up to whole minutes");
+    },
+    otpLength: (v, p, out) => {
+      if (v !== 6 && v !== 8) refuse(out, p, "core makes 6 or 8 digits");
+    },
+    allowedAttempts: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 3 || v > 10)
+        refuse(out, p, "core takes 3 to 10");
+    },
+    requireVerification: boolean,
+    signUpOnVerification: object({ getTempEmail: fn, getTempName: fn }),
+    verifyOTP: refused(
+      "core checks every code itself: a keyed hash, one compare, and a count of each guess; a check of the app would keep that promise alone",
+    ),
+    sendPasswordResetOTP: refused(
+      "core has no password reset by phone; /phone-number/request-password-reset answers NOT_SUPPORTED",
+    ),
+    phoneNumberValidator: refused("core takes E.164 numbers under authtempo.phone.regions only"),
+    callbackOnVerification: refused(
+      "core has no hook at a phone proof; use databaseHooks.user or the session hooks",
+    ),
+    schema: refused(
+      "core reads phoneNumber and phoneNumberVerified from Better Auth's own columns",
+    ),
+  }),
+  // Core's ID-token route for google with requireNonce false (checkOptions holds the cross rules).
+  "one-tap": object({ disableSignup: boolean, clientId: string }),
+  "multi-session": object({
+    maximumSessions: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 2 || v > 10)
+        refuse(out, p, "core keeps 2 to 10 sessions in one browser");
+    },
+  }),
+  "last-login-method": object({
+    // Core checks the name: 1 to 64 token characters, and no other cookie of core.
+    cookieName: string,
+    maxAge: seconds(DAY, DAY, 400 * DAY, "core takes whole days from 1 to 400"),
+    storeInDatabase: only(false, "core never stores the method on the user: it is a hint only"),
+    customResolveMethod: refused("core sets the method of each sign-in itself"),
+    beforeStoreCookie: refused("core sets the cookie at each browser sign-in"),
+    schema: refused("core keeps no lastLoginMethod column"),
+  }),
+};
+
 const FOREIGN_PLUGINS: Record<string, string> = {
   jwt: JWT_NOT_MAPPED,
   mcp: PROVIDER_NOT_MAPPED,
   cimd: PROVIDER_NOT_MAPPED,
   "oidc-provider": PROVIDER_NOT_MAPPED,
   "oauth-provider": PROVIDER_NOT_MAPPED,
-  anonymous: "authtempo has no anonymous sign-in",
-  username: "authtempo has no username sign-in",
   // Better Auth 1.7.2 ids (dist/plugins/captcha and dist/plugins/haveibeenpwned, read 2026-10-15).
   // Core has both checks (plan 12b); the shim does not pass them, so name the core option.
   captcha:
@@ -702,7 +835,7 @@ const plugins: Rule = (v, p, out) => {
       continue;
     }
     seen.add(id);
-    const rule = PLUGIN_RULES[id];
+    const rule = PLUGIN_RULES[id] ?? SIGN_IN_PLUGIN_RULES[id];
     if (plugin?.kind === COMPAT_PLUGIN && rule) rule(plugin.options ?? {}, path, out);
     else refuse(out, path, FOREIGN_PLUGINS[id] ?? "authtempo has no such plugin");
   }
@@ -718,23 +851,88 @@ const plugins: Rule = (v, p, out) => {
 const PROVIDER_SIGN_UP: Record<string, Rule> = {
   disableSignUp: boolean,
   disableImplicitSignUp: refused("core's signUp rule covers every method; see disableSignUp"),
+  // Core's redirectURI override (plan 12i Task 16). Core checks the value at createAuth.
+  redirectURI: string,
 };
-/** google, github, and linkedin: core's presets take the id and the secret only. */
-const idAndSecretShape = object({ clientId: string, clientSecret: string, ...PROVIDER_SIGN_UP });
-/** Core refuses a missing or empty id or secret at createAuth; refuse it here with the option's path. */
-const idAndSecret: Rule = (v, p, out) => {
-  idAndSecretShape(v, p, out);
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return;
-  const o = v as Record<string, unknown>;
-  for (const key of ["clientId", "clientSecret"]) {
-    // Trim for this check only: a whitespace-only value is as empty as "".
-    const value = o[key];
-    if (value === undefined || (typeof value === "string" && value.trim() === ""))
-      refuse(out, `${p}.${key}`, "required");
+/** google, github, linkedin, wechat, and tiktok: core takes the id and the secret only. */
+/**
+ * The rule of a provider with an id key and a secret. Core refuses a missing
+ * or empty id or secret at createAuth; refuse it here with the option's path.
+ * TikTok names its id `clientKey` (plan 12i Task 22).
+ */
+function keyAndSecret(idKey: "clientId" | "clientKey"): Rule {
+  const shape = object({ [idKey]: string, clientSecret: string, ...PROVIDER_SIGN_UP });
+  return (v, p, out) => {
+    shape(v, p, out);
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return;
+    const o = v as Record<string, unknown>;
+    for (const key of [idKey, "clientSecret"]) {
+      // Trim for this check only: a whitespace-only value is as empty as "".
+      const value = o[key];
+      if (value === undefined || (typeof value === "string" && value.trim() === ""))
+        refuse(out, `${p}.${key}`, "required");
+    }
+  };
+}
+const idAndSecret = keyAndSecret("clientId");
+const tiktokKeys = keyAndSecret("clientKey");
+/**
+ * A preset of plan 12i Tasks 13 and 14 with one more key: Better Auth's
+ * `tenantId` (core's `tenant`) or GitLab's `issuer`. Every other key of
+ * Better Auth's provider options is refused by `object`.
+ */
+function withKey(key: string): Rule {
+  return (v, p, out) => {
+    if (!plainObject(v)) {
+      refuse(out, p, "expected an object");
+      return;
+    }
+    const { [key]: own, ...rest } = v;
+    idAndSecret(rest, p, out);
+    if (own !== undefined) string(own, `${p}.${key}`, out);
+  };
+}
+/**
+ * A list of client ids of an ID token (C L2 of the plan 12i final fix wave):
+ * non-empty strings. Core's `checkAudiences` refuses a long list and a
+ * repeated id at createAuth, with the count in its text.
+ */
+const idList: Rule = (v, p, out) => {
+  if (!Array.isArray(v) || v.length === 0 || v.some((x) => typeof x !== "string" || !x.trim()))
+    refuse(out, p, "expected a string or a non-empty list of non-empty strings");
+};
+/**
+ * Better Auth's Google `clientId` may be a list (social-providers/google.mjs:59
+ * and :113, read 2026-10-25). The first id runs the redirect sign-in, and
+ * each id is an audience of an ID token. Core takes the first as `clientId`
+ * and the rest as `social.google.audiences`.
+ */
+const google: Rule = (v, p, out) => {
+  if (!plainObject(v) || !Array.isArray(v.clientId)) {
+    idAndSecret(v, p, out);
+    return;
   }
+  idList(v.clientId, `${p}.clientId`, out);
+  // The list rule above names a bad list; the rest of the keys get the usual rule.
+  idAndSecret({ ...v, clientId: "list" }, p, out);
 };
+const microsoft = withKey("tenantId");
+const gitlab = withKey("issuer");
+/**
+ * Ruling 22 of plan 12i: core's Slack subject is `team_id:user_id`, and a
+ * Better Auth Slack account row holds the user_id alone. So a Better Auth-era
+ * row would not link at the first sign-in. The person would get a second
+ * account, or email_taken for a verified address.
+ */
+const SLACK_REFUSED =
+  "not mapped: core's Slack subject is team_id:user_id, and Better Auth's account rows hold the user_id alone, so a Better Auth-era Slack account would not link and its person would get a second account; use core's social.slack through createAuth after you rewrite each Slack accountId to <team_id>:<user_id>";
 const apple = object({
   clientId: string,
+  // Better Auth 1.7.2 checks an Apple ID token against `audience`, else
+  // `appBundleIdentifier`, else `clientId` (social-providers/apple.mjs:50,
+  // read 2026-10-25). Each maps onto core's `social.apple.audiences` (C L2).
+  audience: (v, p, out) => (typeof v === "string" ? string(v, p, out) : idList(v, p, out)),
+  appBundleIdentifier: string,
   teamId: string,
   keyId: string,
   privateKey: string,
@@ -744,9 +942,95 @@ const apple = object({
   ),
 });
 
+/**
+ * Better Auth's `DynamicBaseURLConfig` (plan 12i Task 18, spec 32 item 18).
+ * Core picks an entry by the exact origin of `request.url` and reads no
+ * proxy header. Each refusal names why a looser form would give a host of
+ * the issuer to someone else.
+ */
+const dynamicBaseURL: Rule = (v, p, out) => {
+  if (typeof v === "string") return;
+  object({
+    allowedHosts: (hosts, hp, o) => {
+      stringList(hosts, hp, o);
+      if (!Array.isArray(hosts)) return;
+      if (hosts.length === 0) refuse(o, hp, "expected at least one host");
+      hosts.forEach((h, i) => {
+        if (typeof h !== "string") return;
+        if (h.includes("*"))
+          refuse(
+            o,
+            `${hp}[${i}]`,
+            "a wildcard is refused: any customer of a shared platform can own a matching host and then holds a host of the issuer; list each exact host",
+          );
+        else if (!exactHost(h))
+          refuse(o, `${hp}[${i}]`, "expected an exact host, with no scheme, path, or user");
+      });
+    },
+    fallback: string,
+    protocol: (proto, pp, o) => {
+      if (proto === "auto")
+        refuse(
+          o,
+          pp,
+          'auto reads x-forwarded-proto, which a client sets; core reads no proxy header, so set "https" (or "http" on localhost)',
+        );
+      else if (proto !== "https" && proto !== "http") refuse(o, pp, 'expected "https" or "http"');
+    },
+  })(v, p, out);
+  if (!plainObject(v)) return;
+  // Better Auth's default protocol is auto, which reads a proxy header.
+  if (v.protocol === undefined)
+    refuse(
+      out,
+      `${p}.protocol`,
+      'required: Better Auth\'s default auto reads x-forwarded-proto, which a client sets; set "https" (or "http" on localhost)',
+    );
+  if (v.allowedHosts === undefined) refuse(out, `${p}.allowedHosts`, "required");
+  const origins = dynamicOrigins(v);
+  if (typeof v.fallback === "string" && origins !== null && !origins.includes(v.fallback))
+    refuse(
+      out,
+      `${p}.fallback`,
+      "must be one origin of allowedHosts: core answers 421 to any other host and builds no URL from it",
+    );
+};
+
+/** A host with an optional port and nothing else: `new URL` keeps it as the host. */
+function exactHost(h: string): boolean {
+  try {
+    const u = new URL(`https://${h}`);
+    return (
+      u.host === h.toLowerCase() &&
+      u.pathname === "/" &&
+      !u.username &&
+      !u.password &&
+      !u.search &&
+      !u.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The origins of a dynamic base URL, `<protocol>://<host>` per host, or null
+ * while a part is missing. `map-options.ts` reads it too: one rule.
+ */
+export function dynamicOrigins(v: Record<string, unknown>): string[] | null {
+  const { allowedHosts, protocol } = v;
+  if (!Array.isArray(allowedHosts) || (protocol !== "https" && protocol !== "http")) return null;
+  const hosts: string[] = [];
+  for (const h of allowedHosts) {
+    if (typeof h !== "string" || h.includes("*") || !exactHost(h)) return null;
+    hosts.push(h);
+  }
+  return hosts.map((h) => new URL(`${protocol}://${h}`).origin);
+}
+
 const TOP: Record<string, Rule> = {
   appName: string,
-  baseURL: string,
+  baseURL: dynamicBaseURL,
   basePath: string,
   secret: string,
   // Plan 12b: Better Auth's versioned secrets. Core reads a row of before
@@ -850,8 +1134,21 @@ const TOP: Record<string, Rule> = {
     }
     for (const [name, config] of Object.entries(v)) {
       if (config === undefined) continue;
-      if (name === "google" || name === "github" || name === "linkedin")
+      // WeChat maps to core's wechatEntry, and TikTok to tiktokEntry (plan 12i Task 22).
+      if (
+        name === "github" ||
+        name === "linkedin" ||
+        name === "wechat" ||
+        name === "discord" ||
+        name === "twitter" ||
+        name === "facebook"
+      )
         idAndSecret(config, `${p}.${name}`, out);
+      else if (name === "google") google(config, `${p}.google`, out);
+      else if (name === "tiktok") tiktokKeys(config, `${p}.tiktok`, out);
+      else if (name === "microsoft") microsoft(config, `${p}.microsoft`, out);
+      else if (name === "gitlab") gitlab(config, `${p}.gitlab`, out);
+      else if (name === "slack") refuse(out, `${p}.slack`, SLACK_REFUSED);
       else if (name === "apple") {
         apple(config, `${p}.apple`, out);
         // A null or non-object entry is refused above: read its keys only on an object.
@@ -859,7 +1156,7 @@ const TOP: Record<string, Rule> = {
         const a = config as Record<string, unknown>;
         if (!a.teamId || !a.keyId || !a.privateKey)
           refuse(out, `${p}.apple`, "needs teamId, keyId, and privateKey");
-      } else refuse(out, `${p}.${name}`, OTHER_PROVIDER);
+      } else refuse(out, `${p}.${name}`, otherProvider(name));
     }
   },
   session: object({
@@ -992,6 +1289,10 @@ const TOP: Record<string, Rule> = {
     },
     // Plan 12d Task 14: core's sso.dns; checkOptions ties it to plugins[sso].
     ssoDns: () => {},
+    // Plan 12i Task 16: core's phone.regions and phone.dailyCap. Core checks
+    // each region; checkOptions ties the block to plugins[phone-number].
+    phone: object({ regions: stringList, dailyCap: dailyCap }),
+    anonymousDailyCap: dailyCap,
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),
@@ -1014,6 +1315,15 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   return null;
 }
 
+/** The ids of the compat plugins in use: the one set that `mapOptions` and `compatHooks` read. */
+export function pluginIdsOf(options: BetterAuthOptions): Set<string> {
+  return new Set(
+    (options.plugins ?? [])
+      .filter((p) => (p as CompatPlugin).kind === COMPAT_PLUGIN)
+      .map((p) => p.id),
+  );
+}
+
 /**
  * The disableSignUp of each configured method that creates a user (plan 12b),
  * by its option path. `checkOptions` refuses a mixed list, and `mapOptions`
@@ -1031,6 +1341,12 @@ export function signUpVotes(options: BetterAuthOptions): { path: string; closed:
     votes.push({ path: "plugins[magic-link]", closed: magic.options.disableSignUp === true });
   const otp = pluginOf(options, "email-otp");
   if (otp) votes.push({ path: "plugins[email-otp]", closed: otp.options.disableSignUp === true });
+  // Plan 12i Task 16: One Tap signs up through Google, and a phone code
+  // through signUpOnVerification. Better Auth's phone plugin has no closed form.
+  const tap = pluginOf(options, "one-tap");
+  if (tap) votes.push({ path: "plugins[one-tap]", closed: tap.options.disableSignup === true });
+  if (pluginOf(options, "phone-number")?.options.signUpOnVerification !== undefined)
+    votes.push({ path: "plugins[phone-number].signUpOnVerification", closed: false });
   const social = options.socialProviders;
   if (typeof social === "object" && social !== null)
     for (const [name, p] of Object.entries(social))
@@ -1174,8 +1490,21 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       refuse(out, "baseURL", `its path ${path} differs from basePath ${options.basePath}`);
     }
   }
+  // Plan 12i Task 20: with overrideDefaultEmailVerification, the sign-up
+  // mails a code through sendVerificationOTP, as Better Auth does.
+  const codeProof =
+    pluginOf(options, "email-otp")?.options.overrideDefaultEmailVerification === true;
+  // The sign-up code lives at most 30 minutes in core (password.verifyCode,
+  // ruling 39 M2 of plan 12i). The sign-in code takes up to 60.
+  const codeLife = pluginOf(options, "email-otp")?.options.expiresIn;
+  if (codeProof && typeof codeLife === "number" && codeLife > 1800)
+    refuse(
+      out,
+      "plugins[email-otp].expiresIn",
+      "with overrideDefaultEmailVerification, core's sign-up code takes 60 to 1800 seconds",
+    );
   if (options.emailAndPassword?.enabled === true) {
-    if (typeof options.emailVerification?.sendVerificationEmail !== "function") {
+    if (!codeProof && typeof options.emailVerification?.sendVerificationEmail !== "function") {
       refuse(
         out,
         "emailVerification.sendVerificationEmail",
@@ -1360,6 +1689,13 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     options.socialProviders?.apple !== undefined ||
     options.socialProviders?.github !== undefined ||
     options.socialProviders?.linkedin !== undefined ||
+    options.socialProviders?.tiktok !== undefined ||
+    options.socialProviders?.wechat !== undefined ||
+    options.socialProviders?.microsoft !== undefined ||
+    options.socialProviders?.discord !== undefined ||
+    options.socialProviders?.gitlab !== undefined ||
+    options.socialProviders?.twitter !== undefined ||
+    options.socialProviders?.facebook !== undefined ||
     pluginOf(options, "passkey") !== null;
   if (pluginOf(options, "expo") && !pageHasMethod) {
     refuse(
@@ -1368,7 +1704,109 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       "the system-browser page has no sign-in method; add magicLink, emailAndPassword, a social provider, or passkey",
     );
   }
+  signInPluginChecks(options, out);
   out.refusals.sort();
   out.notes.sort();
   return out;
+}
+
+/** A number in E.164 for the probe of getTempEmail. It is never sent anywhere. */
+const PROBE_PHONE = "+15555550100";
+
+/**
+ * The checks of the sign-in plugins of plan 12i Task 16 that read two
+ * options. Each refusal names the Better Auth option.
+ */
+function signInPluginChecks(options: BetterAuthOptions, out: OptionCheck): void {
+  const phone = pluginOf(options, "phone-number")?.options;
+  const settings = options.authtempo?.phone;
+  if (phone) {
+    if (typeof phone.sendOTP !== "function")
+      refuse(
+        out,
+        "plugins[phone-number].sendOTP",
+        "required: it delivers each code that core makes",
+      );
+    if (settings === undefined)
+      refuse(
+        out,
+        "authtempo.phone.regions",
+        'required by plugins[phone-number]: the calling-code prefixes that get an SMS, such as ["+1"]; core has no default',
+      );
+    // Better Auth writes getTempEmail's answer into user.email. Core keeps no
+    // address for a phone user, so only a placeholder form reads back as none.
+    const make = phone.signUpOnVerification?.getTempEmail;
+    if (typeof make === "function") {
+      let probe: unknown;
+      try {
+        probe = make(PROBE_PHONE);
+      } catch {
+        probe = null;
+      }
+      if (typeof probe !== "string" || !onPlaceholderDomain(probe))
+        refuse(
+          out,
+          "plugins[phone-number].signUpOnVerification.getTempEmail",
+          "must answer an address on placeholder.invalid or a subdomain of it, such as <number>@phone.placeholder.invalid; core keeps no address for a phone user, and any other domain would read back as a real address",
+        );
+    }
+    if (phone.requireVerification !== true)
+      note(
+        out,
+        "plugins[phone-number].requireVerification",
+        "not true: core signs in by phone and password only with a number that its code proved; a number stored with no proof does not sign in",
+      );
+  } else if (settings !== undefined)
+    refuse(out, "authtempo.phone", "only with plugins[phone-number]");
+  if (phone && settings !== undefined && settings.regions === undefined)
+    refuse(out, "authtempo.phone.regions", "required: core has no default");
+  const anon = pluginOf(options, "anonymous");
+  if (anon && signUpClosed(options))
+    refuse(
+      out,
+      "plugins[anonymous]",
+      "core's signUp false closes the anonymous sign-in too; remove disableSignUp or the plugin",
+    );
+  // Ruling 42 I1: an app copies its Better Auth hook unchanged, and that
+  // hook moves the data on both proofs.
+  if (anon?.options.onLinkAccount !== undefined)
+    note(
+      out,
+      "plugins[anonymous].onLinkAccount",
+      'runs for both proofs; move the anonymous data only when its argument proof is "verified"',
+    );
+  if (!anon && options.authtempo?.anonymousDailyCap !== undefined)
+    refuse(out, "authtempo.anonymousDailyCap", "only with plugins[anonymous]");
+  if (pluginOf(options, "username") && options.emailAndPassword?.enabled !== true)
+    refuse(
+      out,
+      "plugins[username]",
+      "needs emailAndPassword.enabled: core's sign-in by username is a password sign-in",
+    );
+  const u = pluginOf(options, "username")?.options;
+  if (
+    typeof u?.minUsernameLength === "number" &&
+    typeof u.maxUsernameLength === "number" &&
+    u.minUsernameLength > u.maxUsernameLength
+  )
+    refuse(out, "plugins[username].maxUsernameLength", "must be minUsernameLength or more");
+  const tap = pluginOf(options, "one-tap")?.options;
+  if (tap) {
+    const google = options.socialProviders?.google;
+    if (!google)
+      refuse(
+        out,
+        "plugins[one-tap]",
+        "needs socialProviders.google: core verifies the ID token for its clientId",
+      );
+    else if (
+      tap.clientId !== undefined &&
+      tap.clientId !== (Array.isArray(google.clientId) ? google.clientId[0] : google.clientId)
+    )
+      refuse(
+        out,
+        "plugins[one-tap].clientId",
+        "core verifies the ID token for socialProviders.google.clientId; set the same value or leave it out",
+      );
+  }
 }

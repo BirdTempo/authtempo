@@ -25,6 +25,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { changePassword, passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { effectiveIn } from "../src/engine/permissions.js";
+import { addPhone, requestPhone, sendPhoneCode, verifyAddPhone } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { createRole, listRoles } from "../src/engine/roles.js";
 import { rewrapSecrets } from "../src/engine/secrets.js";
@@ -35,6 +36,7 @@ import { addDomain, verifyDomain } from "../src/engine/sso/domains.js";
 import { requireSsoManager } from "../src/engine/sso/guard.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { disableTotpWithCode, regenerateBackupCodes, verifyTwoFactor } from "../src/engine/totp.js";
+import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { EVENTS, type EventSpec } from "../src/observe/events.js";
@@ -46,6 +48,7 @@ import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webaut
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
@@ -171,6 +174,26 @@ describe("the observer lines (plan 12h)", () => {
     expect(log.mock.calls).toEqual([
       ["authtempo: waitUntil threw; the flush has no hook", "TypeError"],
     ]);
+  });
+
+  it("observe.wait_until_missing", async () => {
+    const log = warns();
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+    try {
+      const sms = createRecordingSms();
+      const auth = createAuth(
+        input({ phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true } }),
+      );
+      const res = await auth.handle(post("/auth/phone/request", { phone: "+14155550100" }));
+      expect(res.status).toBe(200);
+      // The code went out before the answer.
+      expect(sms.sent).toHaveLength(1);
+      expect(log.mock.calls).toEqual([
+        ["authtempo: no waitUntil on Workers; the answer waited for the work after it"],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -416,6 +439,44 @@ describe("the scrub sources (plan 12h)", () => {
       { social: { linkedin: { clientId: "l", clientSecret: "li-row-linkedin-0123456789abc" } } },
     ],
     [
+      "the microsoft client secret",
+      "ms-row-microsoft-0123456789ab",
+      {
+        social: {
+          microsoft: {
+            clientId: "m",
+            clientSecret: "ms-row-microsoft-0123456789ab",
+            tenant: "common",
+          },
+        },
+      },
+    ],
+    [
+      "the discord client secret",
+      "dc-row-discord-0123456789abcd",
+      { social: { discord: { clientId: "d", clientSecret: "dc-row-discord-0123456789abcd" } } },
+    ],
+    [
+      "the gitlab client secret",
+      "gl-row-gitlab-0123456789abcde",
+      { social: { gitlab: { clientId: "gl", clientSecret: "gl-row-gitlab-0123456789abcde" } } },
+    ],
+    [
+      "the slack client secret",
+      "sl-row-slack-0123456789abcdef",
+      { social: { slack: { clientId: "sl", clientSecret: "sl-row-slack-0123456789abcdef" } } },
+    ],
+    [
+      "the twitter client secret",
+      "x-row-twitter-0123456789abcde",
+      { social: { twitter: { clientId: "x", clientSecret: "x-row-twitter-0123456789abcde" } } },
+    ],
+    [
+      "the facebook client secret",
+      "fb-row-facebook-0123456789abc",
+      { social: { facebook: { clientId: "f", clientSecret: "fb-row-facebook-0123456789abc" } } },
+    ],
+    [
       "the apple private key",
       "apple-row-key-0123456789abcdef",
       {
@@ -482,6 +543,12 @@ describe("the scrub sources (plan 12h)", () => {
       google: { clientId: "g", clientSecret: "list-google-secret" },
       github: { clientId: "h", clientSecret: "list-github-secret" },
       linkedin: { clientId: "l", clientSecret: "list-linkedin-secret" },
+      microsoft: { clientId: "m", clientSecret: "list-microsoft-secret", tenant: "common" },
+      discord: { clientId: "d", clientSecret: "list-discord-secret" },
+      gitlab: { clientId: "gl", clientSecret: "list-gitlab-secret" },
+      slack: { clientId: "sl", clientSecret: "list-slack-secret" },
+      twitter: { clientId: "x", clientSecret: "list-twitter-secret" },
+      facebook: { clientId: "f", clientSecret: "list-facebook-secret" },
       apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "list-apple-key" },
       oidc: [oidcEntry("one", "list-oidc-one"), oidcEntry("two", "list-oidc-two")],
       oauth2: [oauth2Entry("three", "list-oauth2-one"), oauth2Entry("four", "list-oauth2-two")],
@@ -495,13 +562,19 @@ describe("the scrub sources (plan 12h)", () => {
       "0123456789abcdef0123456789abcdef",
       "fedcba9876543210fedcba9876543210",
       "list-apple-key",
+      "list-discord-secret",
+      "list-facebook-secret",
       "list-github-secret",
+      "list-gitlab-secret",
       "list-google-secret",
       "list-linkedin-secret",
+      "list-microsoft-secret",
       "list-oauth2-one",
       "list-oauth2-two",
       "list-oidc-one",
       "list-oidc-two",
+      "list-slack-secret",
+      "list-twitter-secret",
     ]);
   });
 });
@@ -540,6 +613,53 @@ describe("the captcha lines (plan 12b)", () => {
     expect((await ask({ port: port("unavailable") })).status).toBe(200);
     expect(log.mock.calls).toEqual([
       ["authtempo: the captcha did not answer", "magic-link-request"],
+    ]);
+  });
+});
+
+describe("the SMS lines (plan 12i)", () => {
+  it("sms.port_threw", async () => {
+    const log = errors();
+    const config = resolveConfig(
+      input({
+        phone: {
+          sms: {
+            send: async ({ to }) => {
+              throw new Error(`down for ${to}`);
+            },
+          },
+          regions: ["+1"],
+          isolateLimiter: "allow",
+        },
+      }),
+    );
+    const to = "+14155550100";
+    expect(
+      await sendPhoneCode(config, { purpose: "phone-otp", identifier: to, to, data: {} }),
+    ).toBe("unavailable");
+    expect(log.mock.calls).toEqual([["authtempo: the SMS port threw", "Error"]]);
+  });
+
+  it("sms.not_sent", async () => {
+    const log = errors();
+    const sms = { send: async () => "unavailable" as const };
+    const config = resolveConfig(
+      input({
+        phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true, dailyCap: 1 },
+      }),
+    );
+    // The route hands the send to `after`: the answer is sent, and the line tells what failed.
+    const ask = async (phone: string) => {
+      const after: Promise<unknown>[] = [];
+      const answer = await requestPhone(config, { phone, ip: null }, (w) => void after.push(w));
+      await Promise.all(after);
+      return answer;
+    };
+    expect(await ask("+14155550100")).toEqual({ ok: true, value: { sent: true } });
+    expect(await ask("+14155550101")).toEqual({ ok: true, value: { sent: true } });
+    expect(log.mock.calls).toEqual([
+      ["authtempo: an SMS after the answer was not sent", "unavailable"],
+      ["authtempo: an SMS after the answer was not sent", "capped"],
     ]);
   });
 });
@@ -876,6 +996,60 @@ describe("the gave-up lines (plans 12a and 12f)", () => {
       status: 409,
     });
     expect(log.mock.calls).toEqual([["authtempo: profile update gave up", me.user.id]]);
+  });
+
+  it("username.set_gave_up", async () => {
+    let auth: ReturnType<typeof totpAuth> | null = null;
+    auth = totpAuth({
+      username: {},
+      hooks: {
+        user: {
+          beforeUpdate: async (e) => {
+            if (!auth) return;
+            await auth.storage.update("user", [{ field: "id", op: "eq", value: e.user.id }], {
+              name: "Other",
+              updatedAt: new Date(e.user.updatedAt.getTime() + 1),
+            });
+          },
+        },
+      },
+    });
+    const me = await verifiedSession(auth);
+    const log = errors();
+    expect(
+      await setUsername(auth.config, { session: me, username: "ada", ip: null, userAgent: null }),
+    ).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(log.mock.calls).toEqual([["authtempo: username set gave up", me.user.id]]);
+  });
+
+  it("phone.set_gave_up", async () => {
+    // A write lands on the row between each read and its compare-and-set.
+    const sms = createRecordingSms();
+    let auth: ReturnType<typeof totpAuth> | null = null;
+    auth = totpAuth({
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+      hooks: {
+        user: {
+          beforeUpdate: async (e) => {
+            if (!auth || e.via !== "phone") return;
+            await auth.storage.update("user", [{ field: "id", op: "eq", value: e.user.id }], {
+              name: "Other",
+              updatedAt: new Date(e.user.updatedAt.getTime() + 1),
+            });
+          },
+        },
+      },
+    });
+    const me = await verifiedSession(auth);
+    expect((await addPhone(auth.config, { session: me, phone: "+14155550100", ip: null })).ok).toBe(
+      true,
+    );
+    const code = /^(\d+) /.exec(sms.sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const log = errors();
+    expect(
+      await verifyAddPhone(auth.config, { session: me, code, ip: null, userAgent: null }),
+    ).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(log.mock.calls).toEqual([["authtempo: phone set gave up", me.user.id]]);
   });
 
   it("operator.ban_write_gave_up", async () => {
@@ -1535,6 +1709,10 @@ describe("the back-channel logout lines (plan 12e)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: h.clock.now(),
       updatedAt: h.clock.now(),
     });
@@ -1547,6 +1725,7 @@ describe("the back-channel logout lines (plan 12e)", () => {
       sid: "sid-1",
       attempts,
       nextAttemptAt: h.clock.now(),
+      issuer: null,
       createdAt: h.clock.now(),
       updatedAt: h.clock.now(),
     });
@@ -1970,6 +2149,65 @@ describe("the SSO lines (plan 12d)", () => {
     const log = errors();
     await sweepExpired(w.config);
     expect(log.mock.calls).toEqual([["authtempo: the sweep sso recheck step stopped", "Error"]]);
+  });
+
+  it("sweep.anonymous_stopped", async () => {
+    const auth = makeAuth({ anonymous: { isolateLimiter: "allow" } });
+    const findMany = auth.storage.findMany.bind(auth.storage);
+    // The anonymous step reads the user rows first (plan 12i Task 6); no step before it does.
+    auth.storage.findMany = ((m, where, opts) =>
+      m === "user"
+        ? Promise.reject(new Error("too many queries"))
+        : findMany(m, where, opts)) as StorageAdapter["findMany"];
+    const log = errors();
+    const result = await sweepExpired(auth.config);
+    expect(result.anonymousUsers).toBe(0);
+    expect(log.mock.calls).toEqual([["authtempo: the sweep anonymous step stopped", "Error"]]);
+  });
+
+  it("anonymous.cleanup_failed", async () => {
+    let down = false;
+    const auth = makeAuth({
+      password: { hash: FAST, uniformSignUp: false },
+      anonymous: { isolateLimiter: "allow" },
+      hooks: {
+        anonymous: {
+          // The next transaction is the end of the anonymous session, after the commit.
+          afterLink: () => {
+            down = true;
+          },
+        },
+      },
+    });
+    await verifiedSession(auth, "ada@example.com");
+    const transaction = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = ((work) => {
+      if (!down) return transaction(work);
+      down = false;
+      return Promise.reject(new Error("too many queries"));
+    }) as StorageAdapter["transaction"];
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const signedIn = await handle(post("/auth/anonymous/sign-in", {}));
+    const name = `${auth.config.cookieName}=`;
+    const cookie = signedIn.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(name))
+      ?.split(";")[0];
+    const anonymous = await auth.storage.findOne("user", [
+      { field: "isAnonymous", op: "eq", value: true },
+    ]);
+    const log = errors();
+    const res = await handle(
+      post(
+        "/auth/password/sign-in",
+        { email: "ada@example.com", password: PASSWORD },
+        { cookie: cookie ?? "" },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(log.mock.calls).toEqual([
+      ["authtempo: the anonymous upgrade cleanup failed", anonymous?.id, "Error"],
+    ]);
   });
 
   it("sweep.organization_rest_stopped", async () => {

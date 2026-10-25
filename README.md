@@ -67,6 +67,7 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
 - A filtered run: `pnpm test --filter=@authtempo/cli`. Do not put `--` before the filter. pnpm passes the `--` on, and turbo then gives the filter to the test scripts and runs every package. `run` refuses this command.
 - A run with turbo flags or other tasks: `node scripts/test-servers.mjs run -- pnpm turbo run test typecheck --filter=@authtempo/cli --force`.
 - A run with a subset of the servers: `node scripts/test-servers.mjs run --only postgres -- pnpm turbo run test --filter=@authtempo/import --force`. `pnpm test` always starts all six.
+- A named measure runs only by name, never in `pnpm test`. It is a test whose time grows with the machine load, such as the SCIM Groups list at 10 000 member rows (D1) and the SCIM Users list at 10 000 users (core). Run them: `pnpm turbo run measure --filter=@authtempo/adapter-d1 --force` and `pnpm turbo run measure --filter=@authtempo/core --force`. The D1 and core measures need no test server.
 - A direct `pnpm turbo run test` or `vitest run` gets no server variables. Each test helper that needs a server then stops with a message that names `test-servers.mjs up`.
 - Turbo passes only the variables that `turbo.json` lists in `globalPassThroughEnv`.
 - Run `node scripts/test-servers.mjs down` in a linked worktree when its work ends. Else `reap` removes the set after 30 minutes with no use.
@@ -183,6 +184,12 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
   package decides who signs in.
 - A DNS proof that every configured resolver agrees on is the only proof of
   an enterprise address. An IdP's `email_verified` is never read.
+- An SMS supplier only sends text. Core makes and checks every code, and a
+  route sends each code after the answer. Core caps the sends per
+  deployment, and refuses the phone config without a shared limiter unless
+  the app writes `isolateLimiter: "allow"`.
+- A base URL list holds exact origins. Core picks one from the origin of
+  the request URL and never from a forwarded header.
 
 ## Owner-run items of the site and the demo
 

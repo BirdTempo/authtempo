@@ -17,6 +17,7 @@ import type {
   Member,
   Organization,
   Passkey,
+  PluginUserFields,
   Session,
   Team,
   TeamMember,
@@ -28,15 +29,48 @@ import type {
 // extra field fails it too (Review Focus 4). The key lists below feed the
 // runtime check in test/better-auth.test.ts.
 
-export function toUser(u: UserRow): User {
+/**
+ * The address that Better Auth's shapes show for a user with no address
+ * (plan 12i). Better Auth's own default form is `<id>@<namespace>.placeholder.invalid`
+ * (`createPlaceholderEmail` of @better-auth/core 1.7.2, deviation 7), and
+ * `.invalid` never resolves (RFC 6761 section 6.4). The storage of the
+ * Better Auth tables writes the same form for a null address, or
+ * `temp-<id>@<emailDomainName>` with that option (placeholder.ts, plan 12i
+ * Task 16). It reads each back as null.
+ */
+export function shownAddress(user: { id: string; email: string | null }): string {
+  return user.email ?? `${user.id}@anonymous.placeholder.invalid`;
+}
+
+/**
+ * The fields of the anonymous, username, and phone-number plugins of one
+ * row, each only with its plugin in `plugins` (C M1 of the plan 12i final
+ * fix wave). Better Auth answers them on each user, as the shim does with
+ * `twoFactorEnabled`.
+ */
+export function pluginUserFields(u: UserRow, plugins: ReadonlySet<string>): PluginUserFields {
+  return {
+    ...(plugins.has("anonymous") ? { isAnonymous: u.isAnonymous } : {}),
+    ...(plugins.has("username")
+      ? { username: u.username, displayUsername: u.displayUsername }
+      : {}),
+    ...(plugins.has("phone-number")
+      ? { phoneNumber: u.phone, phoneNumberVerified: u.phone !== null }
+      : {}),
+  };
+}
+
+/** Better Auth's user of one row. `plugins` holds the ids of the compat plugins in use. */
+export function toUser(u: UserRow, plugins: ReadonlySet<string>): User {
   return {
     id: u.id,
     name: u.name ?? "",
-    email: u.email,
+    email: shownAddress(u),
     emailVerified: u.emailVerified,
     image: u.image,
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
+    ...pluginUserFields(u, plugins),
   };
 }
 
@@ -111,7 +145,11 @@ export function toMember(organizationId: string, m: MemberSummary): Member {
     userId: m.userId,
     role: m.role,
     createdAt: m.createdAt,
-    user: { id: m.userId, email: m.email, name: m.name ?? "" },
+    user: {
+      id: m.userId,
+      email: shownAddress({ id: m.userId, email: m.email }),
+      name: m.name ?? "",
+    },
   };
 }
 
@@ -155,7 +193,8 @@ const keys =
   <T>() =>
   <const K extends readonly (keyof T)[]>(k: Exact<T, K>) =>
     k;
-export const USER_KEYS = keys<User>()([
+// The keys of every user. The plugin fields are there per plugin (pluginUserFields).
+export const USER_KEYS = keys<Omit<User, keyof PluginUserFields>>()([
   "id",
   "name",
   "email",
@@ -237,3 +276,11 @@ export function toNext(
   if (appOrigin === null || u.origin !== appOrigin) return null;
   return `${u.pathname}${u.search}${u.hash}`;
 }
+
+/**
+ * The refusal of Better Auth's `additionalData` (plan 12i ruling 5). A Better
+ * Auth app reads it with `getOAuthState()` in a database hook. The shim
+ * serves no `getOAuthState()`, so a mapped payload would reach no app code.
+ */
+export const STATE_DATA_REFUSAL =
+  "core takes no additionalData through the shim: use social.stateData of core's createAuth, and read stateData in its hooks.session.afterCreate and hooks.identity.afterLink";

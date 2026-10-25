@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { USERNAME_LENGTH } from "../src/engine/username.js";
 import { ipKey } from "../src/limiter/ip-key.js";
 import { LIMIT_FAMILIES } from "../src/limiter/limit.js";
 import { limiterKey } from "../src/limiter/memory.js";
@@ -63,8 +64,18 @@ function longestPart(expr: string): string {
   if (/(^|\.)(email|newEmail)$/.test(expr)) return "語".repeat(254);
   // A hash in hex.
   if (/CodeHash$/.test(expr)) return "f".repeat(64);
+  // A stored username: ASCII, at most USERNAME_LENGTH.max characters (plan 12i Task 3).
+  if (expr === "name.username") return "u".repeat(USERNAME_LENGTH.max);
+  // A phone that passed PHONE_RE: a plus and at most 15 digits (plan 12i Task 3).
+  if (expr === "input.phone") return `+${"9".repeat(15)}`;
   // The name of an operator secret: at most 32 characters (config.ts).
   if (expr === "entry.name") return "n".repeat(32);
+  // The identifier of a phone code after the PHONE_RE check: at most 16 characters (plan 12i Task 4).
+  if (expr === "input.identifier") return `+${"9".repeat(15)}`;
+  // The one subject of the daily SMS cap (plan 12i).
+  if (expr === "CAP_SUBJECT") return "deployment";
+  // The one subject of the daily cap of the passkey-first sign-up (ruling 38 M3).
+  if (expr === "SIGN_UP_CAP_SUBJECT") return "deployment";
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
 }
 
@@ -148,8 +159,9 @@ describe("the column map (plan 12g)", () => {
     for (const k of keyed) expect(MYSQL_STRINGS[k], k).toBeDefined();
     // Every row names a string field that a key or an index holds.
     for (const k of Object.keys(MYSQL_STRINGS)) expect(keyed.has(k), k).toBe(true);
-    // 81 of version 13, and 22 of the six models of version 14 (plan 12d).
-    expect(keyed.size).toBe(103);
+    // 81 of version 13, 22 of the six models of version 14 (plan 12d), and
+    // the username and the phone of version 15 (plan 12i).
+    expect(keyed.size).toBe(105);
   });
 
   it("keeps each MySQL key under the InnoDB limit", () => {
@@ -224,8 +236,29 @@ describe("the column map (plan 12g)", () => {
     expect(sites.length).toBe(calls);
     // The count of the call sites at the 12k merge, the same after plan 12h.
     // Plan 12d adds 8: the SSO manager, the domain verify, the discovery, the
-    // start, the ACS, and the three of the SCIM token check.
-    expect(sites.length).toBe(84);
+    // start, the ACS, and the three of the SCIM token check. Plan 12i adds 1:
+    // the password:user key of a check with no address (ruling 15). Plan 12i
+    // Task 2 adds 2: the username set and the availability check. Plan 12i
+    // Task 3 adds 2: the password sign-in by username and by phone. Plan 12i
+    // Task 4 adds 6: the three request keys, the daily cap, and the two
+    // verify keys of the phone code. Plan 12i Task 5 adds 1: the phone add
+    // per user. Its fix round adds 1: the phone add per number (ruling 23).
+    // Plan 12i Task 6 adds 3: the anonymous sign-in per IP, its daily cap
+    // (ruling 25 M4), and its delete per user. Plan 12i Task 11 adds 1: the
+    // per-IP key of the multi-session routes. Plan 12i Task 10 adds 2: the
+    // per-IP keys of the ID-token nonce and sign-in. Plan 12i Task 20 adds 2:
+    // the per-IP and the per-address keys of the sign-up code. Ruling 39 adds
+    // 1: the day cap of the sign-up code mails. Plan 12i Task 8 adds 2: the
+    // per-IP keys of the passkey-first sign-up options and its verify.
+    // Ruling 38 adds 1: the daily cap of the passkey-first sign-up.
+    expect(sites.length).toBe(109);
+    expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
+    expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
+    expect(sites).toContain('engine/passkeys.ts "passkey-sign-up:all-day" SIGN_UP_CAP_SUBJECT');
+    expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
+    expect(sites).toContain('http/routes/multi-session.ts "multi-session:ip" ipKey(ctx.ip)');
+    expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');
+    expect(sites).toContain('engine/anonymous.ts "anonymous:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(
       'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',

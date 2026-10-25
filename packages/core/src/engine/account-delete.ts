@@ -11,6 +11,7 @@ import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
 import { sendAccountMail } from "./account-mail.js";
+import { hasAddress } from "./address.js";
 import { CONFIRM_PER_IP } from "./email-change.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
@@ -169,12 +170,15 @@ export async function deleteAccount(
  * `POST /user/delete` and `api.user.delete` (plan 12a Task 20). With
  * `account.deleteConfirm` on, the request mails a link and deletes nothing.
  * Else the delete runs at once. This is the one place of that choice.
+ * A user with no address gets no mail (plan 12i, ruling 15 m3). Its proof
+ * is the fresh session: a sign-in by a phone code, or a passkey
+ * re-authentication, makes the session fresh. So its delete runs at once.
  */
 export function startAccountDelete(
   config: ResolvedConfig,
   input: AccountDelete,
 ): Promise<Result<{ ok: true } | { sent: true }>> {
-  return config.account.deleteConfirm
+  return config.account.deleteConfirm && hasAddress(input.session.user)
     ? requestAccountDelete(config, input)
     : deleteAccount(config, input);
 }
@@ -234,6 +238,8 @@ export async function requestAccountDelete(
   );
   if (!held.ok) return held;
   const user = held.value;
+  // Mail skips a user with no address (plan 12i): no link goes out, and the answer is the same.
+  if (!hasAddress(user)) return ok({ sent: true });
   const link = `${config.baseURL}${config.basePath}/user/delete/confirm?token=${encodeURIComponent(token)}`;
   await sendAccountMail(config, {
     kind: "delete_confirm",

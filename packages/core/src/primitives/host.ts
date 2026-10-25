@@ -59,9 +59,9 @@ export function isLocalHost(hostname: string): boolean {
  * No IP literal, no local name, no empty label, and not the host of this
  * instance. `hostname` is the parsed `URL.hostname`. Plan 12d moved the rule
  * here from `oauth-clients.ts`, so the client documents and the DNS proofs
- * share it.
+ * share it. A `baseURL` list (plan 12i Task 18) gives each entry's host.
  */
-export function isPublicHost(hostname: string, baseURL: string): boolean {
+export function isPublicHost(hostname: string, baseURL: string | readonly string[]): boolean {
   // A trailing dot names the same host: `localhost.` is `localhost`.
   const host = hostname.replace(/\.$/, "");
   // An empty label (`a.internal...`, `a..example`) is no DNS name. Without
@@ -75,6 +75,17 @@ export function isPublicHost(hostname: string, baseURL: string): boolean {
   // This instance's own host: a document there would make core fetch itself.
   // The compare is by `hostname`, with no port: a document on another port
   // of this host is refused too, which is stricter than the host and port.
-  if (host === new URL(baseURL).hostname) return false;
+  const own = typeof baseURL === "string" ? [baseURL] : baseURL;
+  if (own.some((b) => host === new URL(b).hostname)) return false;
   return true;
+}
+
+/**
+ * True for a host on the domain tree of `domain`: the domain itself or a
+ * subdomain of it. A WebAuthn RP ID covers these hosts (WebAuthn Level 3,
+ * read 2026-10-14). The config check and the related origins document of
+ * plan 12i read this one rule.
+ */
+export function onDomainTree(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
 }

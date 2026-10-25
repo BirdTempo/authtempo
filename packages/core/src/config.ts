@@ -22,9 +22,12 @@ import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
+  defaultVerifyCodeMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 import {
+  ANONYMOUS_HOOK_POINTS,
+  type AnonymousHooks,
   type HooksConfig,
   IDENTITY_HOOK_POINTS,
   type IdentityHooks,
@@ -57,9 +60,14 @@ import {
 } from "./engine/ranks.js";
 import type { DnsTxtPort } from "./engine/sso/dns.js";
 import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
+import { USERNAME_LENGTH, USERNAME_RE } from "./engine/username.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
-import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+import {
+  bindingCookieName,
+  DEFAULT_LAST_METHOD_COOKIE,
+  LEGACY_SESSION_COOKIE,
+} from "./http/cookies.js";
 import { type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 import { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 import {
@@ -67,6 +75,8 @@ import {
   type HandoffConfirmPageInput,
 } from "./http/handoff-confirm-page.js";
 import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
+import { PARAM_SEGMENT_RE } from "./http/route-key.js";
+import { ROUTES } from "./http/route-list.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
@@ -79,6 +89,7 @@ import { type Clock, systemClock } from "./primitives/clock.js";
 import { movedPrefixFault, sessionCookieNames } from "./primitives/credentials.js";
 import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
 import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
+import { onDomainTree } from "./primitives/host.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
@@ -90,27 +101,43 @@ import {
   SECRET_VERSION_MAX,
   type SecretVersion,
 } from "./primitives/keyring.js";
+import { PASSKEY_HINTS, type PasskeyHint } from "./primitives/passkey-hints.js";
 import { isResourceUrl } from "./primitives/resource.js";
 import { hasControlChar } from "./primitives/text.js";
 import { secretParts } from "./redact.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
+import type { SmsPort } from "./seams/sms.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
+import { type DiscordConfig, discordProvider } from "./social/discord.js";
+import { type FacebookConfig, facebookProvider } from "./social/facebook.js";
 import { type GitHubConfig, githubProvider } from "./social/github.js";
+import { type GitLabConfig, gitlabProvider, isGitlabIssuer } from "./social/gitlab.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
 import { type LinkedInConfig, linkedinProvider } from "./social/linkedin.js";
+import {
+  MICROSOFT_SHARED_TENANTS,
+  type MicrosoftConfig,
+  microsoftProvider,
+  TENANT_GUID_RE,
+} from "./social/microsoft.js";
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
 import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
 import {
+  COMING_PRESET_NAMES,
   CORE_AUTHORIZE_PARAMS,
   type ConfiguredProvider,
   isHttpsUrl,
+  PRESET_PROVIDER_NAMES,
   PROVIDER_NAME_RE,
   RESERVED_PROVIDER_NAMES,
+  type RedirectOverride,
 } from "./social/provider.js";
 import { providerFetch } from "./social/provider-fetch.js";
+import { type SlackConfig, slackProvider } from "./social/slack.js";
+import { type TwitterConfig, twitterProvider } from "./social/twitter.js";
 import type { StorageAdapter } from "./storage/port.js";
 
 export interface MailMessage {
@@ -191,8 +218,15 @@ export interface ResolvedAccount {
 export interface AuthConfig {
   /** Path prefix for the auth routes. Default "/auth". */
   basePath?: string;
-  /** Origin of the server that mounts `handle`, no path, no trailing slash. */
-  baseURL: string;
+  /**
+   * Origin of the server that mounts `handle`, no path, no trailing slash.
+   * A list (plan 12i Task 18) holds 1 to 20 exact origins, each `https:`, or
+   * `http:` on `localhost` or `127.0.0.1`. The router then picks the entry
+   * equal to the origin of `request.url` and answers 421 `host_not_allowed`
+   * to any other host. It never reads `x-forwarded-host` or `forwarded`.
+   * The first entry is the primary: core uses it outside a request.
+   */
+  baseURL: string | string[];
   /**
    * The app secret, read as version 1 (plan 12b). At least 32 characters and
    * an estimate of 100 bits or more: use 32 random bytes, for example
@@ -292,6 +326,41 @@ export interface AuthConfig {
      * `openid profile email` (plan 9c). It ignores LinkedIn's ID token.
      */
     linkedin?: LinkedInConfig;
+    // The presets of plan 12i Task 13, in one block.
+    /**
+     * Microsoft Entra ID, an oidc preset with scope `openid profile email`
+     * (plan 12i). `tenant` is `common`, `organizations`, `consumers`, or a
+     * tenant GUID. An address is verified only with the optional claim
+     * `xms_edov: true`, so add that claim to the app registration.
+     */
+    microsoft?: MicrosoftConfig;
+    /** Discord, an oauth2 preset with scope `identify email` (plan 12i). */
+    discord?: DiscordConfig;
+    /**
+     * GitLab, an oauth2 preset with scope `read_user` (plan 12i). `issuer`
+     * is the https origin of the instance, default `https://gitlab.com`.
+     * A GitLab address is never verified.
+     */
+    gitlab?: GitLabConfig;
+    // The presets of plan 12i Task 14, in one block.
+    /**
+     * Slack, an oauth2 preset with scope `openid profile email` on the user
+     * info endpoint (plan 12i). An address is verified with `email_verified`.
+     * The subject is `<team_id>:<user_id>`: a Slack user id is unique only in
+     * its workspace (Slack's user object page, read 2026-10-24).
+     */
+    slack?: SlackConfig;
+    /**
+     * X, an oauth2 preset with scope `users.read tweet.read users.email`
+     * (plan 12i). The token exchange sends HTTP Basic client auth. An
+     * address is verified only as `confirmed_email`.
+     */
+    twitter?: TwitterConfig;
+    /**
+     * Facebook, an oauth2 preset with scope `email public_profile` (plan
+     * 12i). A Facebook address is never verified.
+     */
+    facebook?: FacebookConfig;
     /**
      * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
      * `<issuer>/.well-known/openid-configuration` on its first start and
@@ -310,15 +379,33 @@ export interface AuthConfig {
      * inject one. Core wraps it: no redirect is followed.
      */
     fetch?: typeof fetch;
+    /**
+     * An app payload through the social flow (plan 12i Task 19). The start
+     * takes `data`, the base64url of a UTF-8 JSON object of at most
+     * `maxBytes` bytes (1 to 1024, default 1024) and a depth of at most 4.
+     * The state row holds it sealed. The callback gives it to
+     * `session.afterCreate` and `identity.afterLink` as `stateData`. The
+     * person's browser sent it, so it is never a secret and never a trust
+     * decision. Default false: a start with `data` answers `invalid_body`.
+     */
+    stateData?: { maxBytes?: number } | false;
+    /**
+     * The ID-token route of `google` and `apple` (plan 12i Task 10): Google
+     * One Tap and Apple's native sheet give the app an ID token, and the
+     * app posts it to `POST /social/<provider>/id-token`. On while `google`
+     * or `apple` is set; false turns it off. `requireNonce` (default true)
+     * refuses a token with no nonce of `POST /social/<provider>/id-token/nonce`.
+     */
+    idToken?: { requireNonce?: boolean } | false;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
   jwt?: JwtSeam;
   /**
    * Passkeys are on when set. `rpID` is the registrable domain the
-   * credentials bind to; every origin must be on that domain. Exact
-   * origins, no path.
+   * credentials bind to; every origin must be on that domain, unless
+   * `relatedOrigins` is on (plan 12i). Exact origins, no path.
    */
-  passkey?: { rpID: string; rpName: string; origins: string[] };
+  passkey?: PasskeyConfig;
   /** The WebAuthn ceremonies. Default: @simplewebauthn/server. Tests inject a fake. */
   webauthn?: WebAuthnSeam;
   /**
@@ -357,6 +444,12 @@ export interface AuthConfig {
    * and `api.emailOtp`. The two reset routes also need `password`.
    */
   emailOtp?: EmailOtpConfig | false;
+  /**
+   * The phone code (plan 12i, spec 32 items 4 and 5): a code by SMS through
+   * a send-only port. Off by default. `regions` has no default: the app
+   * picks each country on purpose.
+   */
+  phone?: PhoneConfig | false;
   /**
    * The TOTP second factor (plan 9f, spec 8.11). On by default when
    * `password` is set: a user turns it on for their own account. `false`
@@ -431,6 +524,243 @@ export interface AuthConfig {
    * each event, and the flush of `auth.observe` sends the batch after the answer.
    */
   observe?: ObserveConfig;
+  /**
+   * The username (plan 12i Task 2, spec 32 item 7). Off when absent or
+   * `false`. `{}` turns it on with the defaults. A username is public by
+   * design: `GET /username/available` answers for any name.
+   */
+  username?: UsernameConfig | false;
+  /**
+   * The last method cookie (plan 12i Task 12, spec 32 item 11). Off when
+   * absent or `false`. `{}` turns it on with the defaults. Each browser
+   * sign-in sets a readable cookie with the method, and each JSON sign-in
+   * answer carries it as `via`. Core never stores the method on the user.
+   */
+  lastMethod?: LastMethodConfig | false;
+  /**
+   * Anonymous sign-in (plan 12i Task 6, spec 32 item 8). Off when absent or
+   * `false`. `{}` turns it on with the defaults. An anonymous user has no
+   * way in, and `ANONYMOUS_REFUSED` keeps it out of each route that needs one.
+   */
+  anonymous?: AnonymousConfig | false;
+  /**
+   * Multi-session (plan 12i Task 11, spec 32 item 11). Off when absent or
+   * `false`. `{}` turns it on with the defaults. One browser keeps the
+   * sessions of several users: the other tokens live in one HttpOnly bag
+   * cookie, and `POST /sign-out` ends every session of the browser.
+   */
+  multiSession?: MultiSessionConfig | false;
+}
+
+/** Multi-session (plan 12i). A bearer client has no bag. */
+export interface MultiSessionConfig {
+  /**
+   * The most sessions of one browser, the active one included: 2 to 10.
+   * Default 5. A sign-in past it ends the oldest session of the bag.
+   */
+  max?: number;
+}
+
+/** The last method cookie (plan 12i). It is a hint for the sign-in page only. */
+export interface LastMethodConfig {
+  /** The cookie name. Default `__Host-tempo_last_method`. Not the name of another cookie of core. */
+  cookieName?: string;
+  /** The lifetime in days, 1 to 400 (the cap of RFC 6265bis). Default 30. */
+  days?: number;
+}
+
+/** The anonymous sign-in config (plan 12i Task 6). */
+export interface AnonymousConfig {
+  /**
+   * The days that an anonymous user with no live session stays, 1 to 365.
+   * Default 30. After them the sweep deletes the user.
+   */
+  ttlDays?: number;
+  /**
+   * The most anonymous users that one sweep deletes, 1 to 100. Default 100.
+   * The sweep runs `user.afterDelete` once per deleted user, outside the
+   * call budget. A hook that sends queries or requests should lower it.
+   */
+  sweepBatch?: number;
+  /**
+   * The anonymous users that the deployment makes per 24 hours, 1 to
+   * 100000. Default 1000. A sign-in over the cap answers 429. The cap is
+   * per deployment, so it needs a shared limiter (ruling 27 of plan 12i).
+   */
+  dailyCap?: number;
+  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  isolateLimiter?: "allow";
+}
+
+/**
+ * The username config (plan 12i). The stored form is NFKC in lower case and
+ * matches `^[a-z0-9_.]+$`. The typed case stays in `displayUsername`.
+ */
+export interface UsernameConfig {
+  /** The fewest characters, 3 to 30. Default 3. */
+  minLength?: number;
+  /** The most characters, `minLength` to 30. Default 30. */
+  maxLength?: number;
+  /**
+   * More names that no user may take, in the stored form. Core always
+   * reserves `DEFAULT_RESERVED_SLUGS`, the organization slugs while
+   * organizations are on, `root`, `support`, `security`, and `admin`.
+   */
+  reserved?: string[];
+}
+
+/**
+ * The passkey config (plans 4 and 12i). WebAuthn Level 3 (read 2026-10-14)
+ * adds related origins and hints.
+ */
+export interface PasskeyConfig {
+  /**
+   * A host in lowercase ASCII. Write an internationalized domain in its
+   * punycode form, such as `xn--bcher-kva.example` for `bücher.example`.
+   */
+  rpID: string;
+  rpName: string;
+  origins: string[];
+  /**
+   * Default false. With true, `auth.wellKnown` answers
+   * `GET /.well-known/webauthn` on the `rpID` host with `{ origins }`, and
+   * `origins` may hold origins outside the domain tree of `rpID`. A client
+   * must support at least five registrable origin labels (WebAuthn Level 3).
+   * Core cannot count labels without the Public Suffix List, so it counts
+   * origins: at most five outside `rpID`.
+   */
+  relatedOrigins?: boolean;
+  /**
+   * The hints of each ceremony, in order of preference: `security-key`,
+   * `client-device`, or `hybrid`. Default: none. A `hints` field of an
+   * options request replaces the list for that ceremony.
+   */
+  hints?: { register?: PasskeyHint[]; signIn?: PasskeyHint[] };
+  /**
+   * The WebAuthn extensions that the registration asks for (plan 12i). Each
+   * is off by default. `credProps`, `prf`, and `largeBlob` store the flags
+   * `discoverable`, `prf`, and `largeBlob` on the passkey row. The client
+   * outputs are not signed, so the flags are advice for the app's own
+   * client. No check of core reads them. With `prf` on, the sign-in options
+   * take PRF salts; with `largeBlob` on, they take a `largeBlob` read. A
+   * PRF output and a large blob stay in the browser.
+   */
+  extensions?: PasskeyExtensions;
+  /**
+   * Default false. With true or an object, `POST /passkey/sign-up/options`
+   * and `/verify` make a user with a passkey and no address (plan 12i). The
+   * user gives a name. The `signUp` rule of the deployment applies: only
+   * `"open"` lets a passkey-first user in, because an invitation names an
+   * address. `true` is `{}`: the daily cap of 1000 on a shared limiter.
+   */
+  signUp?: boolean | PasskeySignUpConfig;
+}
+
+/** The passkey-first sign-up (plan 12i Task 8, ruling 38 M3). */
+export interface PasskeySignUpConfig {
+  /**
+   * The sign-up options that the deployment answers per 24 hours, 1 to
+   * 100000. Default 1000. An options request over the cap answers 429. The
+   * cap is per deployment, so it needs a shared limiter, as `anonymous` does.
+   */
+  dailyCap?: number;
+  /**
+   * "allow" builds with a limiter that counts per isolate: the cap is then
+   * per isolate (tests and local dev).
+   */
+  isolateLimiter?: "allow";
+}
+
+/** The passkey extensions of the config (plan 12i). `largeBlob` is the `support` value of the registration. */
+export interface PasskeyExtensions {
+  prf?: boolean;
+  largeBlob?: "preferred" | "required" | false;
+  credProps?: boolean;
+}
+
+export interface ResolvedPasskey {
+  rpID: string;
+  rpName: string;
+  origins: string[];
+  relatedOrigins: boolean;
+  hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
+  extensions: Required<PasskeyExtensions>;
+  /** The passkey-first sign-up, or null while it is off. */
+  signUp: ResolvedPasskeySignUp | null;
+}
+
+/** The resolved `passkey.signUp` (plan 12i Task 8). */
+export interface ResolvedPasskeySignUp {
+  dailyCap: number;
+}
+
+/**
+ * The labels that a client must accept from a related origins document
+ * (WebAuthn Level 3 section 5.11.1, read 2026-10-22). A label is the
+ * registrable domain less its public suffix. Core has no public suffix
+ * list, so it counts each origin outside the domain tree of `rpID` as one
+ * label. The count is an upper bound: two origins of one label count twice,
+ * so core may refuse a config that a browser accepts. The document lists
+ * only these origins, so an origin on the tree takes no label slot.
+ */
+const RELATED_ORIGINS_MAX = 5;
+
+/**
+ * The RP ID in the form a browser compares: lowercase ASCII, with an
+ * internationalized label in punycode. The URL parser makes that form. A
+ * host in another form never equals the browser's RP ID, and the domain
+ * tree check of the origins and the related origins document compare
+ * strings. So core refuses it and names the form to write.
+ *
+ * An RP ID is a host alone. A user part, a port, a path, a query, or a
+ * fragment has no host form to name, so core refuses it with no form (final
+ * fix wave item 1). The parser would read `a@b.example` as the host
+ * `b.example`, another host than the app meant.
+ */
+function checkRpID(rpID: string): void {
+  let host: string | null = null;
+  // With none of these characters, the parser finds no user part, port,
+  // path, query, or fragment.
+  if (!/[@:/?#\\]/.test(rpID))
+    try {
+      // A scheme-relative URL on a reserved base: the parser reads `rpID` as the host.
+      host = new URL(`//${rpID}`, "https://rp.invalid").hostname;
+    } catch {
+      host = null;
+    }
+  if (host === null)
+    throw new ConfigError(
+      `passkey.rpID ${rpID} is not a host; write the host alone, with no user part, port, or path`,
+    );
+  if (host === rpID) return;
+  throw new ConfigError(
+    `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${host}`,
+  );
+}
+
+/** A hint list of the config: each value a WebAuthn hint, each value once. */
+function passkeyHints(path: string, list: readonly string[] | undefined): PasskeyHint[] {
+  if (list === undefined) return [];
+  const known: readonly string[] = PASSKEY_HINTS;
+  for (const h of list)
+    if (!known.includes(h))
+      throw new ConfigError(`${path} has ${h}; a hint is one of ${PASSKEY_HINTS.join(", ")}`);
+  if (new Set(list).size !== list.length) throw new ConfigError(`${path} has a value twice`);
+  return [...list] as PasskeyHint[];
+}
+
+/** The extensions of the passkey config, each off by default (plan 12i). */
+function passkeyExtensions(input: PasskeyExtensions | undefined): Required<PasskeyExtensions> {
+  const flag = (key: "prf" | "credProps"): boolean => {
+    const value: unknown = input?.[key];
+    if (value !== undefined && typeof value !== "boolean")
+      throw new ConfigError(`passkey.extensions.${key} must be a boolean`);
+    return value === true;
+  };
+  const largeBlob: unknown = input?.largeBlob ?? false;
+  if (largeBlob !== false && largeBlob !== "preferred" && largeBlob !== "required")
+    throw new ConfigError('passkey.extensions.largeBlob must be "preferred", "required", or false');
+  return { prf: flag("prf"), largeBlob, credProps: flag("credProps") };
 }
 
 export interface PasswordConfig {
@@ -478,6 +808,27 @@ export interface PasswordConfig {
   uniformSignUp?: boolean;
   /** The mail to an address that has an account, at a uniform sign-up. Core sends it to the address, whatever `to` it answers. Default `defaultExistingAccountMail`. */
   existingAccountMail?: (input: ExistingAccountMailInput) => MailMessage;
+  /**
+   * The proof of the address at sign-up (plan 12i Task 20). `"link"` (the
+   * default) mails a link. `"code"` mails a code, for a device whose mailbox
+   * is elsewhere. The person posts it to `POST /password/verify/code`. The
+   * shape of the code is `verifyCode`.
+   */
+  verifyBy?: "link" | "code";
+  /** The mail of the sign-up code. Core sends it to the address, whatever `to` it answers. Default `defaultVerifyCodeMail`. */
+  verifyCodeMail?: (input: EmailOtpMailInput) => MailMessage;
+  /** The sign-up code of `verifyBy: "code"` (ruling 39 of plan 12i). */
+  verifyCode?: VerifyCodeConfig;
+}
+
+/** The sign-up code. Each value must be a whole number in its range. */
+export interface VerifyCodeConfig {
+  /** The digits of the code, 6 to 10. Default 6. */
+  length?: number;
+  /** The life of the code, 1 to 30. Default 10. */
+  ttlMinutes?: number;
+  /** The wrong tries that spend the code, 1 to 10. Default 5. */
+  maxAttempts?: number;
 }
 
 export interface EmailOtpConfig {
@@ -499,6 +850,50 @@ export interface ResolvedEmailOtp {
   maxAttempts: number;
   mail: (input: EmailOtpMailInput) => MailMessage;
   resetMail: (input: EmailOtpMailInput) => MailMessage;
+}
+
+/** The input of the SMS text of a phone code. */
+export interface PhoneMessageInput {
+  code: string;
+  appName: string;
+  ttlMinutes: number;
+}
+
+export interface PhoneConfig {
+  /** The send-only port. Core makes, keys, binds, counts, and caps every code (spec 32 item 4). */
+  sms: SmsPort;
+  /** Calling-code prefixes such as "+1" or "+44": 1 to 50, required. A number outside every prefix gets no SMS. */
+  regions: string[];
+  /** A code to an unknown number makes a user at the verify. Default false. */
+  signUp?: boolean;
+  /** The life of a code, 1 to 10. Default 5. */
+  ttlMinutes?: number;
+  /** The digits of a code, 6 or 8. Default 6. */
+  length?: 6 | 8;
+  /** The wrong codes that spend a code, 3 to 10. Default 3. */
+  maxAttempts?: number;
+  /** The codes of the deployment per 24 hours, 1 to 100000. Default 1000. */
+  dailyCap?: number;
+  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  isolateLimiter?: "allow";
+  /** The SMS text. Default `defaultPhoneMessage`. */
+  message?: (input: PhoneMessageInput) => string;
+}
+
+export interface ResolvedPhone {
+  sms: SmsPort;
+  regions: readonly string[];
+  signUp: boolean;
+  ttlMinutes: number;
+  length: 6 | 8;
+  maxAttempts: number;
+  dailyCap: number;
+  message: (input: PhoneMessageInput) => string;
+}
+
+/** The default SMS text of a phone code. */
+export function defaultPhoneMessage(input: PhoneMessageInput): string {
+  return `${input.code} is your ${input.appName} code. It expires in ${input.ttlMinutes} minutes.`;
 }
 
 /**
@@ -523,6 +918,8 @@ export interface TotpGateConfig {
    * passes the gate when the IdP asserts one of its values.
    */
   sso?: boolean;
+  /** The phone code sign-in (plan 12i). Default true. */
+  phone?: boolean;
 }
 
 export interface TotpConfig {
@@ -565,7 +962,7 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
-  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean };
+  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean; phone: boolean };
   emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
@@ -962,7 +1359,17 @@ export interface ResolvedScim {
 
 export interface ResolvedConfig {
   basePath: string;
+  /** The entry of `baseURLs` that the request picked, or the primary outside a request (plan 12i Task 18). */
   baseURL: string;
+  /** Every origin of `baseURL`, the primary first. One entry for a `baseURL` string. */
+  baseURLs: readonly string[];
+  /**
+   * True for a `baseURL` list: the router and `auth.wellKnown` answer 421 to
+   * a host outside it. False for a string, which answers as before plan 12i.
+   */
+  hostPick: boolean;
+  /** The values that core builds from the picked entry because the app gave none (`atBase`). */
+  baseDefaults: BaseDefaults;
   appName: string;
   /** The app secrets by version (plan 12b). No code reads one secret string: each read names its version. */
   keyring: Keyring;
@@ -989,9 +1396,16 @@ export interface ResolvedConfig {
     linkBuilder: (token: string, next: string) => string;
     confirmPage: (input: ConfirmPageInput) => string;
   };
-  social: { providers: ConfiguredProvider[]; fetch: typeof fetch };
+  social: {
+    providers: ConfiguredProvider[];
+    fetch: typeof fetch;
+    /** Null while `social.stateData` is off. */
+    stateData: { maxBytes: number } | null;
+    /** Null while `social.idToken` is false (plan 12i Task 10). */
+    idToken: { requireNonce: boolean } | null;
+  };
   jwt: JwtSeam;
-  passkey: { rpID: string; rpName: string; origins: string[] } | null;
+  passkey: ResolvedPasskey | null;
   webauthn: WebAuthnSeam;
   handoff: {
     schemes: string[];
@@ -1029,8 +1443,13 @@ export interface ResolvedConfig {
     requireVerified: boolean;
     uniformSignUp: boolean;
     existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
+    verifyBy: "link" | "code";
+    verifyCodeMail: (input: EmailOtpMailInput) => MailMessage;
+    verifyCode: Required<VerifyCodeConfig>;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
+  /** Null: the phone code is off, and no stored phone signs in (plan 12i). */
+  phone: ResolvedPhone | null;
   totp: ResolvedTotp | null;
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
@@ -1042,6 +1461,14 @@ export interface ResolvedConfig {
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
+  /** Null: the username is off, and no username route is mounted (plan 12i). */
+  username: ResolvedUsername | null;
+  /** Null: no last method cookie and no `via` in a sign-in answer (plan 12i). */
+  lastMethod: ResolvedLastMethod | null;
+  /** Null: anonymous sign-in is off, and no anonymous route is mounted (plan 12i Task 6). */
+  anonymous: ResolvedAnonymous | null;
+  /** Null: no bag cookie and no multi-session route (plan 12i). */
+  multiSession: ResolvedMultiSession | null;
   captcha: ResolvedCaptcha | null;
   /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
   observe: Observer;
@@ -1175,21 +1602,144 @@ export class ConfigError extends Error {
   }
 }
 
+/** The values that follow the picked entry of `baseURL` because the app gave none (plan 12i Task 18). */
+export interface BaseDefaults {
+  /** No `appURL`: the default is the picked entry. */
+  appURL: boolean;
+  /** No `magicLink.linkBuilder`: the link is on the picked entry. */
+  linkBuilder: boolean;
+  /** No `appURL` and no `organizations.invitationLinkBuilder`: the link is on the picked entry. */
+  invitationLink: boolean;
+  /** No `jwtMint.audience`: a session JWT names the picked entry. */
+  audience: boolean;
+}
+
+/** The most entries of a `baseURL` list (spec 32 item 18). */
+const BASE_URLS_MAX = 20;
+
+/** The hosts on which a `baseURL` list takes `http:`: a local run only. */
+const HTTP_BASE_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1"]);
+
+/** One origin of `baseURL`, with the rules of a string `baseURL` before plan 12i. */
+function checkBaseOrigin(at: string, value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ConfigError(`${at} must be an absolute URL`);
+  }
+  if (url.pathname !== "/" || value.endsWith("/") || url.search || url.hash)
+    throw new ConfigError(`${at} must be an origin with no path and no trailing slash`);
+  // The public document of `GET /openapi.json` names this origin, so a password here would leak.
+  if (url.username || url.password)
+    throw new ConfigError(`${at} must have no user name and no password`);
+  return url;
+}
+
+/**
+ * The origins of `baseURL`, the primary first (plan 12i Task 18). A string
+ * keeps the rules of before. A list is 1 to 20 exact origins in the normal
+ * form of the URL parser, so the router can compare `request.url` by string.
+ * A wildcard is refused: on a shared platform, any customer can own a
+ * matching host and then holds a host of the issuer.
+ */
+function resolveBaseURLs(input: unknown): readonly [string, ...string[]] {
+  if (typeof input === "string") {
+    checkBaseOrigin("baseURL", input);
+    return [input];
+  }
+  if (!Array.isArray(input) || input.length < 1 || input.length > BASE_URLS_MAX)
+    throw new ConfigError(`baseURL must be an origin or a list of 1 to ${BASE_URLS_MAX} origins`);
+  const list: string[] = [];
+  input.forEach((entry: unknown, i) => {
+    const at = `baseURL[${i}]`;
+    if (typeof entry !== "string") throw new ConfigError(`${at} must be a string`);
+    if (entry.includes("*")) throw new ConfigError(`${at} has a wildcard: ${entry}`);
+    const url = checkBaseOrigin(at, entry);
+    // The parser lowers the case, writes an IDN host in punycode, and drops a default port.
+    if (url.origin !== entry)
+      throw new ConfigError(`${at} must be an exact origin in normal form: ${url.origin}`);
+    if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" && HTTP_BASE_HOSTS.has(url.hostname))
+    )
+      throw new ConfigError(`${at} must be https, or http on localhost or 127.0.0.1: ${entry}`);
+    if (list.includes(entry)) throw new ConfigError(`${at} repeats ${entry}`);
+    list.push(entry);
+  });
+  const [primary, ...rest] = list;
+  if (primary === undefined) throw new ConfigError("baseURL must not be empty");
+  return [primary, ...rest];
+}
+
+/** The default magic link: the verify route on `base`. */
+function defaultMagicLink(base: string, basePath: string): (token: string) => string {
+  return (token) => `${base}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`;
+}
+
+/** The default invitation link: the app's root on `appURL`. */
+function defaultInvitationLink(appURL: string): (token: string) => string {
+  return (token) => `${appURL}/?invitation=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Every `aud` that a session JWT of any entry can hold: each entry for a
+ * default audience, else `jwtMint.audience`. The verify reads it, and so do
+ * the checks that keep an access token and an ID token apart from it.
+ */
+export function sessionAudiences(
+  jwtMint: ResolvedJwtMint,
+  defaults: BaseDefaults,
+  baseURLs: readonly string[],
+): readonly string[] {
+  return defaults.audience ? baseURLs : jwtMint.audience;
+}
+
+/**
+ * The entry of `baseURLs` for the origin of `url`, or null for a host
+ * outside the list (plan 12i Task 18). The compare is exact, on the origin
+ * that the URL parser gives. No header takes part: a client sets
+ * `x-forwarded-host` and `forwarded` freely. A `baseURL` string picks its
+ * one entry for any host, as before.
+ */
+export function pickBase(config: ResolvedConfig, url: URL): string | null {
+  if (!config.hostPick) return config.baseURL;
+  return config.baseURLs.find((entry) => entry === url.origin) ?? null;
+}
+
+/**
+ * The config of a request on `entry` of `baseURLs`: `baseURL` and each
+ * default that `baseDefaults` names follow the entry. The app's own values
+ * stay. Answers `config` itself for the entry it already has.
+ */
+export function atBase(config: ResolvedConfig, entry: string): ResolvedConfig {
+  if (entry === config.baseURL) return config;
+  const d = config.baseDefaults;
+  const appURL = d.appURL ? entry : config.appURL;
+  const org = config.organizations;
+  const mint = config.jwtMint;
+  return {
+    ...config,
+    baseURL: entry,
+    appURL,
+    magicLink: d.linkBuilder
+      ? { ...config.magicLink, linkBuilder: defaultMagicLink(entry, config.basePath) }
+      : config.magicLink,
+    organizations:
+      org && d.invitationLink
+        ? { ...org, invitationLinkBuilder: defaultInvitationLink(appURL) }
+        : org,
+    jwtMint: mint && d.audience ? { ...mint, audience: [entry] } : mint,
+  };
+}
+
 /** Applies defaults and refuses a config that cannot keep the security rules. */
 export function resolveConfig(input: AuthConfig): ResolvedConfig {
   const keyring = resolveSecrets(input.secret, input.secrets);
-  let origin: URL;
-  try {
-    origin = new URL(input.baseURL);
-  } catch {
-    throw new ConfigError("baseURL must be an absolute URL");
-  }
-  if (origin.pathname !== "/" || input.baseURL.endsWith("/") || origin.search || origin.hash) {
-    throw new ConfigError("baseURL must be an origin with no path and no trailing slash");
-  }
-  // The public document of `GET /openapi.json` names this origin, so a password here would leak.
-  if (origin.username || origin.password)
-    throw new ConfigError("baseURL must have no user name and no password");
+  const baseURLs = resolveBaseURLs(input.baseURL);
+  // The primary: core builds from it outside a request (plan 12i Task 18).
+  const baseURL = baseURLs[0];
+  const origin = new URL(baseURL);
   const appName = input.appName ?? origin.host;
   // The name goes into a mail subject, so a CR or LF would inject a header.
   if (appName.length < 1 || appName.length > APP_NAME_MAX || hasControlChar(appName))
@@ -1199,8 +1749,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   for (const o of input.trustedOrigins) {
     if (o.includes("*")) throw new ConfigError(`trustedOrigins has a wildcard: ${o}`);
   }
-  const appURL = input.appURL ?? input.baseURL;
-  if (appURL !== input.baseURL) {
+  const appURL = input.appURL ?? baseURL;
+  if (appURL !== baseURL) {
     let app: URL;
     try {
       app = new URL(appURL);
@@ -1282,9 +1832,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       platformOrganization,
       platformRole,
       invitationTtlDays: ttl,
-      invitationLinkBuilder:
-        o.invitationLinkBuilder ??
-        ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
+      invitationLinkBuilder: o.invitationLinkBuilder ?? defaultInvitationLink(appURL),
       limits: resolveLimits(o.limits),
       dynamicRoles: resolveDynamicRoles(o.dynamicRoles),
       teams: resolveTeams(o.teams),
@@ -1299,7 +1847,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must not hold a segment that starts with :");
   }
   const clock = input.clock ?? systemClock;
-  const providers = socialProviders(input.social);
+  const providers = socialProviders(input.social, baseURLs, basePath);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   // Every provider call goes through providerFetch: no redirect is followed
   // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
@@ -1308,8 +1856,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   let passkey: ResolvedConfig["passkey"] = null;
   if (input.passkey) {
     requireFields("passkey", input.passkey, ["rpID", "rpName"]);
+    checkRpID(input.passkey.rpID);
     if (input.passkey.origins.length === 0)
       throw new ConfigError("passkey.origins must not be empty");
+    let outside = 0;
     for (const o of input.passkey.origins) {
       let u: URL;
       try {
@@ -1321,21 +1871,36 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         throw new ConfigError(`passkey.origins must hold exact origins, no path: ${o}`);
       const host = u.hostname;
       const rp = input.passkey.rpID;
-      if (host !== rp && !host.endsWith(`.${rp}`)) {
-        throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
+      if (!onDomainTree(host, rp)) {
+        // A related origin (plan 12i): the browser checks it against the
+        // document of `rpID`. Without the document, the origin cannot pass.
+        if (input.passkey.relatedOrigins !== true)
+          throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
+        outside++;
       }
       // The router answers 403 to a post from an origin that is not trusted, so an
       // origin the passkey config accepts but the router refuses is a silent break.
-      if (o !== input.baseURL && !input.trustedOrigins.includes(o)) {
+      if (!baseURLs.includes(o) && !input.trustedOrigins.includes(o)) {
         throw new ConfigError(
           `passkey.origins has ${o}, which is neither baseURL nor in trustedOrigins; add it to trustedOrigins or the router answers 403 to its posts`,
         );
       }
     }
+    if (outside > RELATED_ORIGINS_MAX)
+      throw new ConfigError(
+        `relatedOrigins: at most five origins outside ${input.passkey.rpID}, the minimum a client must support (WebAuthn Level 3)`,
+      );
     passkey = {
       rpID: input.passkey.rpID,
       rpName: input.passkey.rpName,
       origins: [...input.passkey.origins],
+      relatedOrigins: input.passkey.relatedOrigins === true,
+      hints: {
+        register: passkeyHints("passkey.hints.register", input.passkey.hints?.register),
+        signIn: passkeyHints("passkey.hints.signIn", input.passkey.hints?.signIn),
+      },
+      extensions: passkeyExtensions(input.passkey.extensions),
+      signUp: resolvePasskeySignUp(input.passkey.signUp, input.limiter),
     };
   }
   let password: ResolvedConfig["password"] = null;
@@ -1368,6 +1933,12 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       throw new ConfigError("password.uniformSignUp must be a boolean");
     if (p.existingAccountMail !== undefined && typeof p.existingAccountMail !== "function")
       throw new ConfigError("password.existingAccountMail must be a function");
+    const verifyBy: unknown = p.verifyBy ?? "link";
+    if (verifyBy !== "link" && verifyBy !== "code")
+      throw new ConfigError('password.verifyBy must be "link" or "code"');
+    if (p.verifyCodeMail !== undefined && typeof p.verifyCodeMail !== "function")
+      throw new ConfigError("password.verifyCodeMail must be a function");
+    const verifyCode = resolveVerifyCode(p.verifyCode);
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -1378,6 +1949,9 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       requireVerified,
       uniformSignUp: p.uniformSignUp ?? true,
       existingAccountMail: p.existingAccountMail ?? defaultExistingAccountMail,
+      verifyBy,
+      verifyCodeMail: p.verifyCodeMail ?? defaultVerifyCodeMail,
+      verifyCode,
     };
   }
   const signUp = input.signUp ?? "open";
@@ -1387,14 +1961,26 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
   const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
-  const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
+  const jwtMint = resolveJwtMint(input.jwtMint, baseURL);
+  // A default audience follows the picked entry, so a session JWT of each entry has its own (plan 12i Task 18).
+  const baseDefaults: BaseDefaults = {
+    appURL: input.appURL === undefined,
+    linkBuilder: input.magicLink?.linkBuilder === undefined,
+    invitationLink:
+      input.appURL === undefined &&
+      (input.organizations === false || input.organizations?.invitationLinkBuilder === undefined),
+    audience: input.jwtMint !== false && input.jwtMint?.audience === undefined,
+  };
   if (input.openapi !== undefined && typeof input.openapi !== "boolean")
     throw new ConfigError("openapi must be true or false");
   const openapi = input.openapi ?? false;
   const observeConfig = resolveObserve(input.observe);
   return {
     basePath,
-    baseURL: input.baseURL,
+    baseURL,
+    baseURLs,
+    hostPick: Array.isArray(input.baseURL),
+    baseDefaults,
     appName,
     keyring,
     trustedOrigins: new Set(input.trustedOrigins),
@@ -1410,13 +1996,15 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,
-      linkBuilder:
-        input.magicLink?.linkBuilder ??
-        ((token) =>
-          `${input.baseURL}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`),
+      linkBuilder: input.magicLink?.linkBuilder ?? defaultMagicLink(baseURL, basePath),
       confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
-    social: { providers, fetch: fetchFn },
+    social: {
+      providers,
+      fetch: fetchFn,
+      stateData: resolveStateData(input.social?.stateData),
+      idToken: resolveIdToken(input.social?.idToken),
+    },
     jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
     passkey,
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
@@ -1426,13 +2014,19 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     signUp,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
+    phone: resolvePhone(input.phone, input.limiter),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
-    oauth: resolveOAuth(input.oauth, jwtMint, {
-      baseURL: input.baseURL,
-      appURL,
-      trustedOrigins: input.trustedOrigins,
-    }),
+    // Every audience that a session JWT of any entry can hold: an access token must hold none.
+    oauth: resolveOAuth(
+      input.oauth,
+      jwtMint && { ...jwtMint, audience: [...sessionAudiences(jwtMint, baseDefaults, baseURLs)] },
+      {
+        baseURLs,
+        appURL,
+        trustedOrigins: input.trustedOrigins,
+      },
+    ),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
     sso: resolveSso(input.sso, organizations !== null),
     scim: resolveScim(input.scim, organizations),
@@ -1444,8 +2038,16 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       typeof input.operator === "object" && input.operator.users === true,
       input.sso !== undefined && input.sso !== false,
       input.scim !== undefined && input.scim !== false,
+      input.anonymous !== undefined && input.anonymous !== false,
     ),
     account: resolveAccount(input.account),
+    username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
+    lastMethod: resolveLastMethod(input.lastMethod, cookieName, totpTrustName(input.totp)),
+    anonymous: resolveAnonymous(input.anonymous, input.limiter),
+    multiSession: resolveMultiSession(input.multiSession, cookieName, [
+      totpTrustName(input.totp) ?? "tempo_totp_trust",
+      lastMethodName(input.lastMethod),
+    ]),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1465,6 +2067,278 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     instance: Object.freeze({}),
     configKeys: configKeyPaths(input),
   };
+}
+
+/** The resolved `anonymous` (plan 12i Task 6). */
+export interface ResolvedAnonymous {
+  ttlDays: number;
+  sweepBatch: number;
+  dailyCap: number;
+}
+
+/** The keys of `anonymous`. A Record, so a key added to `AnonymousConfig` and not listed here fails the compile. */
+const ANONYMOUS_KEYS: Readonly<Record<keyof AnonymousConfig, true>> = {
+  ttlDays: true,
+  sweepBatch: true,
+  dailyCap: true,
+  isolateLimiter: true,
+};
+
+/**
+ * `anonymous` (plan 12i Task 6). Absent or `false`: off. The daily cap is a
+ * promise per deployment, so a limiter that counts per isolate is refused
+ * unless the app writes `isolateLimiter: "allow"`, as for `phone`.
+ */
+function resolveAnonymous(
+  input: AnonymousConfig | false | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedAnonymous | null {
+  if (input === undefined || input === false) return null;
+  // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("anonymous must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(ANONYMOUS_KEYS, key))
+      throw new ConfigError(
+        `anonymous.${key} is not an option; core has ${Object.keys(ANONYMOUS_KEYS).join(", ")}`,
+      );
+  const ttlDays = input.ttlDays ?? 30;
+  if (!Number.isInteger(ttlDays) || ttlDays < 1 || ttlDays > 365)
+    throw new ConfigError("anonymous.ttlDays must be an integer from 1 to 365");
+  const sweepBatch = input.sweepBatch ?? 100;
+  if (!Number.isInteger(sweepBatch) || sweepBatch < 1 || sweepBatch > 100)
+    throw new ConfigError("anonymous.sweepBatch must be an integer from 1 to 100");
+  const dailyCap = input.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("anonymous.dailyCap must be an integer from 1 to 100000");
+  if (input.isolateLimiter !== undefined && input.isolateLimiter !== "allow")
+    throw new ConfigError('anonymous.isolateLimiter must be "allow" or absent');
+  // The cap counts every anonymous user of the deployment. An isolate count
+  // would let each isolate make `dailyCap` users, so the promise would not hold.
+  if (limiter?.scope !== "shared" && input.isolateLimiter !== "allow")
+    throw new ConfigError("anonymous needs a shared limiter: the daily cap is per deployment");
+  return { ttlDays, sweepBatch, dailyCap };
+}
+
+/**
+ * The keys of `passkey.signUp`. A Record, so a key added to
+ * `PasskeySignUpConfig` and not listed here fails the compile.
+ */
+const PASSKEY_SIGN_UP_KEYS: Readonly<Record<keyof PasskeySignUpConfig, true>> = {
+  dailyCap: true,
+  isolateLimiter: true,
+};
+
+/**
+ * `passkey.signUp` (plan 12i Task 8). Absent or `false`: off. Each options
+ * request can lead to a new user, so the daily cap is a promise per
+ * deployment, as for `anonymous` (ruling 38 M3). A limiter that counts per
+ * isolate is refused unless the app writes `isolateLimiter: "allow"`.
+ */
+function resolvePasskeySignUp(
+  input: boolean | PasskeySignUpConfig | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedPasskeySignUp | null {
+  if (input === undefined || input === false) return null;
+  if (input !== true && !isPlainObject(input as unknown))
+    throw new ConfigError("passkey.signUp must be true, false, or an object");
+  const given: PasskeySignUpConfig = input === true ? {} : input;
+  for (const [key, value] of Object.entries(given))
+    if (value !== undefined && !Object.hasOwn(PASSKEY_SIGN_UP_KEYS, key))
+      throw new ConfigError(
+        `passkey.signUp.${key} is not an option; core has ${Object.keys(PASSKEY_SIGN_UP_KEYS).join(", ")}`,
+      );
+  const dailyCap = given.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("passkey.signUp.dailyCap must be an integer from 1 to 100000");
+  if (given.isolateLimiter !== undefined && given.isolateLimiter !== "allow")
+    throw new ConfigError('passkey.signUp.isolateLimiter must be "allow" or absent');
+  // The cap counts every sign-up of the deployment. An isolate count would
+  // let each isolate answer `dailyCap` options, so the promise would not hold.
+  if (limiter?.scope !== "shared" && given.isolateLimiter !== "allow")
+    throw new ConfigError("passkey.signUp needs a shared limiter: the daily cap is per deployment");
+  return { dailyCap };
+}
+
+/** The resolved `username` (plan 12i). Each bound counts the characters of the typed name after NFKC. */
+export interface ResolvedUsername {
+  minLength: number;
+  maxLength: number;
+  /** Each name in the stored form that no user may take. */
+  reserved: ReadonlySet<string>;
+}
+
+/** The keys of `username`. A Record, so a key added to `UsernameConfig` and not listed here fails the compile. */
+const USERNAME_KEYS: Readonly<Record<keyof UsernameConfig, true>> = {
+  minLength: true,
+  maxLength: true,
+  reserved: true,
+};
+
+/**
+ * The names that core reserves beyond the slug list (spec 32 item 7). A
+ * person who sees one of them trusts it as the voice of the app.
+ */
+const USERNAME_RESERVED = ["root", "support", "security", "admin"] as const;
+
+/**
+ * `username` (plan 12i Task 2). Absent or `false`: off. The reserved set
+ * reads `DEFAULT_RESERVED_SLUGS` and the resolved slug list of
+ * organizations, never a copy, so the two lists cannot drift.
+ */
+function resolveUsername(
+  input: UsernameConfig | false | undefined,
+  organizationSlugs: ReadonlySet<string> | null,
+): ResolvedUsername | null {
+  if (input === undefined || input === false) return null;
+  // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("username must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(USERNAME_KEYS, key))
+      throw new ConfigError(
+        `username.${key} is not an option; core has ${Object.keys(USERNAME_KEYS).join(", ")}`,
+      );
+  const minLength = integerIn(
+    "username.minLength",
+    input.minLength ?? USERNAME_LENGTH.min,
+    USERNAME_LENGTH.min,
+    USERNAME_LENGTH.max,
+  );
+  const maxLength = integerIn(
+    "username.maxLength",
+    input.maxLength ?? USERNAME_LENGTH.max,
+    minLength,
+    USERNAME_LENGTH.max,
+  );
+  const reserved = new Set<string>([...DEFAULT_RESERVED_SLUGS, ...USERNAME_RESERVED]);
+  for (const slug of organizationSlugs ?? []) reserved.add(slug);
+  if (input.reserved !== undefined) {
+    if (!Array.isArray(input.reserved))
+      throw new ConfigError("username.reserved must be an array of names");
+    for (const name of input.reserved as unknown[]) {
+      if (typeof name !== "string" || !USERNAME_RE.test(name))
+        throw new ConfigError(
+          `username.reserved entry is not a username in the stored form: ${String(name)}`,
+        );
+      reserved.add(name);
+    }
+  }
+  return { minLength, maxLength, reserved };
+}
+
+/** The resolved `lastMethod` (plan 12i). */
+export interface ResolvedLastMethod {
+  cookieName: string;
+  days: number;
+}
+
+/** The keys of `lastMethod`. A Record, so a key added to `LastMethodConfig` and not listed here fails the compile. */
+const LAST_METHOD_KEYS: Readonly<Record<keyof LastMethodConfig, true>> = {
+  cookieName: true,
+  days: true,
+};
+
+/**
+ * A cookie name of RFC 6265 section 4.1.1: a token, with the `__Host-` or
+ * `__Secure-` prefix allowed. 1 to 64 characters, as the trust cookie.
+ */
+const LAST_METHOD_COOKIE_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/;
+
+/** The trust cookie's name when `totp` sets one, for the clash check of `lastMethod`. */
+function totpTrustName(input: AuthConfig["totp"]): string | null {
+  return typeof input === "object" ? (input.trustCookieName ?? null) : null;
+}
+
+/**
+ * `lastMethod` (plan 12i Task 12). Absent or `false`: off. The days stop at
+ * 400, the cap of RFC 6265bis section 5.6.2 on a cookie's lifetime. The name
+ * must not be a name of another cookie of core: a clash would let this
+ * readable cookie overwrite an HttpOnly one.
+ */
+function resolveLastMethod(
+  input: LastMethodConfig | false | undefined,
+  sessionCookie: string,
+  trustCookie: string | null,
+): ResolvedLastMethod | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("lastMethod must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(LAST_METHOD_KEYS, key))
+      throw new ConfigError(
+        `lastMethod.${key} is not an option; core has ${Object.keys(LAST_METHOD_KEYS).join(", ")}`,
+      );
+  const days = integerIn("lastMethod.days", input.days ?? 30, 1, 400);
+  const cookieName = input.cookieName ?? DEFAULT_LAST_METHOD_COOKIE;
+  const taken = new Set([
+    sessionCookie,
+    LEGACY_SESSION_COOKIE,
+    bindingCookieName(sessionCookie),
+    // The actor cookie of an impersonation (`actorCookieName`, plan 12f).
+    `${sessionCookie}_actor`,
+    trustCookie ?? "tempo_totp_trust",
+  ]);
+  if (
+    typeof cookieName !== "string" ||
+    !LAST_METHOD_COOKIE_RE.test(cookieName) ||
+    taken.has(cookieName)
+  )
+    throw new ConfigError(
+      "lastMethod.cookieName must be a cookie name of 1 to 64 token characters, and not the name of another cookie of core",
+    );
+  return { cookieName, days };
+}
+
+/** The resolved `multiSession` (plan 12i). */
+export interface ResolvedMultiSession {
+  /** The most sessions of one browser, the active one included. The bag holds one fewer. */
+  max: number;
+  /** The bag cookie: the session cookie name with `s` at the end. */
+  cookieName: string;
+}
+
+/** The keys of `multiSession`. A Record, so a key added to `MultiSessionConfig` and not listed here fails the compile. */
+const MULTI_SESSION_KEYS: Readonly<Record<keyof MultiSessionConfig, true>> = {
+  max: true,
+};
+
+/** The name of the last method cookie when `lastMethod` is on, else null. */
+function lastMethodName(input: AuthConfig["lastMethod"]): string | null {
+  if (input === undefined || input === false) return null;
+  return (
+    (isPlainObject(input as unknown) ? input.cookieName : undefined) ?? DEFAULT_LAST_METHOD_COOKIE
+  );
+}
+
+/**
+ * `multiSession` (plan 12i Task 11). Absent or `false`: off. The bag cookie
+ * takes the session cookie's name with `s` at the end, so `cookieName`
+ * renames both, and a `__Host-` session cookie gives a `__Host-` bag. Its
+ * name must not be the name of another cookie of core: a clash would let one
+ * cookie overwrite the other. Ten sessions keep the bag cookie under 600
+ * bytes.
+ */
+function resolveMultiSession(
+  input: MultiSessionConfig | false | undefined,
+  sessionCookie: string,
+  others: readonly (string | null)[],
+): ResolvedMultiSession | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("multiSession must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(MULTI_SESSION_KEYS, key))
+      throw new ConfigError(
+        `multiSession.${key} is not an option; core has ${Object.keys(MULTI_SESSION_KEYS).join(", ")}`,
+      );
+  const max = integerIn("multiSession.max", input.max ?? 5, 2, 10);
+  const cookieName = `${sessionCookie}s`;
+  if (cookieName === LEGACY_SESSION_COOKIE || others.includes(cookieName))
+    throw new ConfigError(
+      `multiSession needs the cookie name ${cookieName} for its bag, and another cookie of core has it`,
+    );
+  return { max, cookieName };
 }
 
 function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"] {
@@ -1494,6 +2368,10 @@ function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & 
 }
 
 const LABEL_MAX = 80;
+/** The rule of an oauth2 entry's `authorizeClientIdParam` (plan 12i Task 22). */
+const AUTHORIZE_PARAM_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+/** The rule of `authorizeSuffix`: a fragment of URL-safe characters, such as `#wechat_redirect`. */
+const AUTHORIZE_SUFFIX_RE = /^#[A-Za-z0-9_.~-]{1,64}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1530,6 +2408,12 @@ export function secretValues(keyring: Keyring, social: AuthConfig["social"]): Re
     social?.apple?.privateKey,
     social?.github?.clientSecret,
     social?.linkedin?.clientSecret,
+    social?.microsoft?.clientSecret,
+    social?.discord?.clientSecret,
+    social?.gitlab?.clientSecret,
+    social?.slack?.clientSecret,
+    social?.twitter?.clientSecret,
+    social?.facebook?.clientSecret,
     ...(social?.oidc ?? []).map((e) => e.clientSecret),
     ...(social?.oauth2 ?? []).map((e) => e.clientSecret),
   ];
@@ -1729,6 +2613,36 @@ const EMAIL_OTP_KEYS: Readonly<Record<keyof EmailOtpConfig, true>> = {
   resetMail: true,
 };
 
+const VERIFY_CODE_RANGES = {
+  length: { min: 6, max: 10, fallback: 6 },
+  ttlMinutes: { min: 1, max: 30, fallback: 10 },
+  maxAttempts: { min: 1, max: 10, fallback: 5 },
+} as const;
+
+/**
+ * `password.verifyCode` (ruling 39 of plan 12i). Absent: 6 digits, 10
+ * minutes, 5 wrong tries, the email code's defaults. The compat shim maps
+ * Better Auth's `otpLength`, `expiresIn`, and `allowedAttempts` onto it.
+ */
+function resolveVerifyCode(input: VerifyCodeConfig | undefined): Required<VerifyCodeConfig> {
+  const o: VerifyCodeConfig = input === undefined ? {} : input;
+  if (!isPlainObject(o as unknown)) throw new ConfigError("password.verifyCode must be an object");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(VERIFY_CODE_RANGES, key))
+      throw new ConfigError(
+        `password.verifyCode.${key} is not an option; core has length, ttlMinutes, and maxAttempts`,
+      );
+  const out: Record<keyof VerifyCodeConfig, number> = { length: 0, ttlMinutes: 0, maxAttempts: 0 };
+  for (const key of Object.keys(VERIFY_CODE_RANGES) as (keyof VerifyCodeConfig)[]) {
+    const { min, max, fallback } = VERIFY_CODE_RANGES[key];
+    const value = o[key] ?? fallback;
+    if (!Number.isSafeInteger(value) || value < min || value > max)
+      throw new ConfigError(`password.verifyCode.${key} must be an integer from ${min} to ${max}`);
+    out[key] = value;
+  }
+  return out;
+}
+
 /** `emailOtp` (plan 9e). Absent: on, with the defaults. `false`: off. */
 function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEmailOtp | null {
   if (input === false) return null;
@@ -1759,6 +2673,87 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
     maxAttempts,
     mail: o.mail ?? defaultEmailOtpMail,
     resetMail: o.resetMail ?? defaultResetOtpMail,
+  };
+}
+
+const PHONE_KEYS: Readonly<Record<keyof PhoneConfig, true>> = {
+  sms: true,
+  regions: true,
+  signUp: true,
+  ttlMinutes: true,
+  length: true,
+  maxAttempts: true,
+  dailyCap: true,
+  isolateLimiter: true,
+  message: true,
+};
+
+/**
+ * A calling-code prefix: a plus sign and 1 to 4 digits, with no leading
+ * zero. Four digits allow a part of a country, such as "+1416".
+ */
+const REGION_RE = /^\+[1-9][0-9]{0,3}$/;
+
+/**
+ * `phone` (plan 12i, spec 32 item 4). Absent or `false`: off. The daily cap
+ * is a promise per deployment, so a limiter that counts per isolate is
+ * refused unless the app writes `isolateLimiter: "allow"`. A limiter with
+ * no `scope` counts as isolate; the default is the memory limiter.
+ */
+function resolvePhone(
+  input: PhoneConfig | false | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedPhone | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("phone must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(PHONE_KEYS, key))
+      throw new ConfigError(
+        `phone.${key} is not an option; core has ${Object.keys(PHONE_KEYS).join(", ")}`,
+      );
+  const sms = input.sms as unknown;
+  if (typeof sms !== "object" || sms === null || typeof (sms as SmsPort).send !== "function")
+    throw new ConfigError("phone.sms must be an SmsPort with a send function");
+  const regions = input.regions as unknown;
+  if (!Array.isArray(regions) || regions.length < 1 || regions.length > 50)
+    throw new ConfigError(
+      "phone.regions must list 1 to 50 calling-code prefixes; it has no default",
+    );
+  for (const r of regions as unknown[])
+    if (typeof r !== "string" || !REGION_RE.test(r))
+      throw new ConfigError(
+        `phone.regions has ${String(r)}; a region is a calling-code prefix such as "+1" or "+44"`,
+      );
+  if (input.signUp !== undefined && typeof input.signUp !== "boolean")
+    throw new ConfigError("phone.signUp must be true or false");
+  const ttlMinutes = input.ttlMinutes ?? 5;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 10)
+    throw new ConfigError("phone.ttlMinutes must be an integer from 1 to 10");
+  const length = input.length ?? 6;
+  if (length !== 6 && length !== 8) throw new ConfigError("phone.length must be 6 or 8");
+  const maxAttempts = input.maxAttempts ?? 3;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 3 || maxAttempts > 10)
+    throw new ConfigError("phone.maxAttempts must be an integer from 3 to 10");
+  const dailyCap = input.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("phone.dailyCap must be an integer from 1 to 100000");
+  if (input.isolateLimiter !== undefined && input.isolateLimiter !== "allow")
+    throw new ConfigError('phone.isolateLimiter must be "allow" or absent');
+  if (input.message !== undefined && typeof input.message !== "function")
+    throw new ConfigError("phone.message must be a function");
+  // The cap counts every send of the deployment. An isolate count would let
+  // each isolate send `dailyCap` codes, so the promise would not hold.
+  if (limiter?.scope !== "shared" && input.isolateLimiter !== "allow")
+    throw new ConfigError("phone needs a shared limiter: the daily cap is per deployment");
+  return {
+    sms: input.sms,
+    regions: Object.freeze([...(regions as string[])]),
+    signUp: input.signUp ?? false,
+    ttlMinutes,
+    length,
+    maxAttempts,
+    dailyCap,
+    message: input.message ?? defaultPhoneMessage,
   };
 }
 
@@ -1863,19 +2858,20 @@ const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
   emailOtp: true,
   social: true,
   sso: true,
+  phone: true,
 };
 
 /** `totp.gate` (plan 12c): each method on unless the app sets it false. */
 function resolveGate(input: unknown): ResolvedTotp["gate"] {
-  const gate = { magicLink: true, emailOtp: true, social: true, sso: true };
+  const gate = { magicLink: true, emailOtp: true, social: true, sso: true, phone: true };
   if (input === undefined) return gate;
   if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
       throw new ConfigError(
-        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate`,
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, sso, and phone. The handoff has no key: it continues a browser session that passed the gate`,
       );
-  for (const key of ["magicLink", "emailOtp", "social", "sso"] as const) {
+  for (const key of ["magicLink", "emailOtp", "social", "sso", "phone"] as const) {
     const value = (input as TotpGateConfig)[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);
@@ -2421,7 +3417,7 @@ function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
  */
 function resolveSignInURL(
   input: unknown,
-  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
+  origins: { baseURLs: readonly string[]; appURL: string; trustedOrigins: readonly string[] },
 ): string | null {
   if (input === undefined) return null;
   const refuse = () =>
@@ -2437,7 +3433,7 @@ function resolveSignInURL(
   } catch {
     throw refuse();
   }
-  const owned = [origins.baseURL, origins.appURL, ...origins.trustedOrigins];
+  const owned = [...origins.baseURLs, origins.appURL, ...origins.trustedOrigins];
   if (
     (isPath ? url.origin !== origins.appURL : url.protocol !== "https:") ||
     !owned.includes(url.origin) ||
@@ -2498,7 +3494,7 @@ function integerIn(path: string, value: number, min: number, max: number): numbe
 function resolveOAuth(
   input: OAuthConfig | false | undefined,
   jwtMint: ResolvedJwtMint | null,
-  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
+  origins: { baseURLs: readonly string[]; appURL: string; trustedOrigins: readonly string[] },
 ): ResolvedOAuth | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("oauth must be an object or false");
@@ -2670,6 +3666,7 @@ const HOOK_GROUPS: readonly string[] = [
   "operator",
   "sso",
   "scim",
+  "anonymous",
 ];
 
 function resolveHooks(
@@ -2678,6 +3675,7 @@ function resolveHooks(
   operatorUsersOn: boolean,
   ssoOn: boolean,
   scimOn: boolean,
+  anonymousOn: boolean,
 ): ResolvedHooks {
   if (input === undefined)
     return {
@@ -2688,12 +3686,13 @@ function resolveHooks(
       operator: {},
       sso: {},
       scim: {},
+      anonymous: {},
     };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, and scim`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, scim, and anonymous`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -2733,7 +3732,15 @@ function resolveHooks(
   // Only a SCIM write runs this point (plan 12d Task 10).
   if (Object.keys(scim).length > 0 && !scimOn)
     throw new ConfigError("hooks.scim needs scim: the hooks would never run");
-  return { organization, session, user, identity, operator, sso, scim };
+  const anonymous = hookGroup(
+    "hooks.anonymous",
+    input.anonymous,
+    ANONYMOUS_HOOK_POINTS,
+  ) as unknown as AnonymousHooks;
+  // Only the upgrade of an anonymous session runs these points (plan 12i Task 7).
+  if (Object.keys(anonymous).length > 0 && !anonymousOn)
+    throw new ConfigError("hooks.anonymous needs anonymous: the hooks would never run");
+  return { organization, session, user, identity, operator, sso, scim, anonymous };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {
@@ -2828,36 +3835,218 @@ function resolveCaptcha(
   };
 }
 
+const listText = (names: readonly string[]) =>
+  new Intl.ListFormat("en", { type: "conjunction" }).format(names);
+/**
+ * Why a list entry name is reserved. It reads the preset lists of
+ * social/provider.ts, so a moved name changes the text with no edit here.
+ */
+const RESERVED_REASON = [
+  `${listText(PRESET_PROVIDER_NAMES)} are presets`,
+  ...(COMING_PRESET_NAMES.length > 0
+    ? [`${listText(COMING_PRESET_NAMES)} are kept for coming presets`]
+    : []),
+  "email and credential are identity kinds",
+].join("; ");
+
 /**
  * The configured providers: google, apple, then the list entries in order.
  * Refuses every entry that could break a flow rule (plan 9c).
  */
-function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
+/** The bound of `social.stateData.maxBytes` (plan 12i Task 19): the state payload of the Better Auth docs audit is 1 KB at most. */
+export const STATE_DATA_MAX_BYTES = 1024;
+
+/** The characters of a path that a cookie Path attribute holds as one value: no ";", no ",". */
+const REDIRECT_PATH_RE = /^[A-Za-z0-9._~!$&'()*+=:@%/-]+$/;
+
+/**
+ * The path of a provider's `redirectURI` (plan 12i Task 12), after the
+ * checks of spec 32 item 11. The router serves the path by exact match, so
+ * the value must be in the normal form of the URL parser. A path of a route
+ * of core is refused, a parameter segment too: an alias there would shadow
+ * the route.
+ */
+function redirectOverridePath(
+  at: string,
+  value: unknown,
+  baseURLs: readonly string[],
+  basePath: string,
+): string {
+  let url: URL;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new ConfigError(`${at} must be an absolute https URL`);
+  }
+  if (typeof value !== "string" || url.protocol !== "https:")
+    throw new ConfigError(`${at} must be an https URL`);
+  // An entry of a baseURL list (ruling 21 of plan 12i): the start sends the path on its own entry.
+  if (!baseURLs.includes(url.origin) || url.username !== "" || url.password !== "")
+    throw new ConfigError(`${at} must have the origin of baseURL and no credentials`);
+  if (value.includes("?") || value.includes("#"))
+    throw new ConfigError(`${at} must have no query and no fragment`);
+  if (url.href !== value)
+    throw new ConfigError(`${at} must be in the normal form of a URL: ${url.href}`);
+  // The path is the Path attribute of the binding cookie (social.ts). The
+  // URL parser keeps ";" and "," in a path, and each can end that attribute.
+  if (!REDIRECT_PATH_RE.test(url.pathname))
+    throw new ConfigError(
+      `${at} must have a path of the characters A-Z a-z 0-9 . _ ~ ! $ & ' ( ) * + = : @ % / - only`,
+    );
+  if (!url.pathname.startsWith(`${basePath}/`))
+    throw new ConfigError(`${at} must have a path under basePath ${basePath}`);
+  const segments = url.pathname.slice(basePath.length).split("/");
+  for (const route of ROUTES) {
+    if (routePathMatches(route.path.split("/"), segments))
+      throw new ConfigError(`${at} is the path of the route ${route.method} ${route.path}`);
+  }
+  return url.pathname;
+}
+
+/** A path fits a ROUTES path: each literal is equal, and each `:<name>` segment takes the path's segment. */
+function routePathMatches(template: readonly string[], segments: readonly string[]): boolean {
+  if (template.length !== segments.length) return false;
+  return template.every((want, i) => {
+    const got = segments[i] ?? "";
+    return want.startsWith(":") ? PARAM_SEGMENT_RE.test(got) : want === got;
+  });
+}
+
+function resolveStateData(
+  input: NonNullable<AuthConfig["social"]>["stateData"],
+): ResolvedConfig["social"]["stateData"] {
+  if (input === undefined || input === false) return null;
+  if (typeof input !== "object" || input === null)
+    throw new ConfigError("social.stateData must be an object or false");
+  for (const key of Object.keys(input))
+    if (key !== "maxBytes")
+      throw new ConfigError(`social.stateData.${key} is not an option; core has maxBytes`);
+  const maxBytes = input.maxBytes ?? STATE_DATA_MAX_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > STATE_DATA_MAX_BYTES)
+    throw new ConfigError(
+      `social.stateData.maxBytes must be a whole number from 1 to ${STATE_DATA_MAX_BYTES}`,
+    );
+  return { maxBytes };
+}
+
+/** The most entries of `audiences` on `google` and `apple` (plan 12i Task 10). */
+export const ID_TOKEN_AUDIENCES_MAX = 10;
+/** The longest audience: a client id of Google or a bundle id of Apple is far shorter. */
+const AUDIENCE_MAX = 255;
+
+function resolveIdToken(
+  input: NonNullable<AuthConfig["social"]>["idToken"],
+): ResolvedConfig["social"]["idToken"] {
+  if (input === false) return null;
+  if (input === undefined) return { requireNonce: true };
+  if (!isPlainObject(input)) throw new ConfigError("social.idToken must be an object or false");
+  for (const key of Object.keys(input))
+    if (key !== "requireNonce")
+      throw new ConfigError(`social.idToken.${key} is not an option; core has requireNonce`);
+  if (input.requireNonce !== undefined && typeof input.requireNonce !== "boolean")
+    throw new ConfigError("social.idToken.requireNonce must be a boolean");
+  return { requireNonce: input.requireNonce ?? true };
+}
+
+/**
+ * The `audiences` of `google` or `apple` (plan 12i Task 10): 1 to 10 client
+ * ids, each 1 to 255 characters with no control character, none twice, and
+ * none equal to `clientId`, which the route takes already.
+ */
+function checkAudiences(at: string, value: unknown, clientId: string): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length < 1 || value.length > ID_TOKEN_AUDIENCES_MAX)
+    throw new ConfigError(`${at} must be a list of 1 to ${ID_TOKEN_AUDIENCES_MAX} client ids`);
+  const seen = new Set<string>([clientId]);
+  for (const a of value) {
+    if (typeof a !== "string" || a.length < 1 || a.length > AUDIENCE_MAX || hasControlChar(a))
+      throw new ConfigError(
+        `${at} must hold strings of 1 to ${AUDIENCE_MAX} characters with no control character`,
+      );
+    if (seen.has(a)) throw new ConfigError(`${at} holds ${a} twice, or holds clientId`);
+    seen.add(a);
+  }
+}
+
+function socialProviders(
+  social: AuthConfig["social"],
+  baseURLs: readonly string[],
+  basePath: string,
+): ConfiguredProvider[] {
   const providers: ConfiguredProvider[] = [];
+  // The override paths so far, each with the config path that set it.
+  const overrides = new Map<string, string>();
+  const push = (path: string, input: RedirectOverride, provider: ConfiguredProvider) => {
+    if (input.redirectURI !== undefined) {
+      const at = `${path}.redirectURI`;
+      const pathname = redirectOverridePath(at, input.redirectURI, baseURLs, basePath);
+      const other = overrides.get(pathname);
+      if (other !== undefined)
+        throw new ConfigError(`${at} has the path of ${other}.redirectURI: one path, one provider`);
+      overrides.set(pathname, path);
+      provider.redirectURI = input.redirectURI;
+    }
+    providers.push(provider);
+  };
   if (social?.google) {
     requireFields("social.google", social.google, ["clientId", "clientSecret"]);
-    providers.push(googleProvider(social.google));
+    checkAudiences("social.google.audiences", social.google.audiences, social.google.clientId);
+    push("social.google", social.google, googleProvider(social.google));
   }
   if (social?.apple) {
     requireFields("social.apple", social.apple, ["clientId", "teamId", "keyId", "privateKey"]);
-    providers.push(appleProvider(social.apple));
+    checkAudiences("social.apple.audiences", social.apple.audiences, social.apple.clientId);
+    push("social.apple", social.apple, appleProvider(social.apple));
   }
   if (social?.github) {
     requireFields("social.github", social.github, ["clientId", "clientSecret"]);
-    providers.push(githubProvider(social.github));
+    push("social.github", social.github, githubProvider(social.github));
   }
   if (social?.linkedin) {
     requireFields("social.linkedin", social.linkedin, ["clientId", "clientSecret"]);
-    providers.push(linkedinProvider(social.linkedin));
+    push("social.linkedin", social.linkedin, linkedinProvider(social.linkedin));
+  }
+  // The presets of plan 12i Task 13, in one block.
+  if (social?.microsoft) {
+    requireFields("social.microsoft", social.microsoft, ["clientId", "clientSecret", "tenant"]);
+    const tenant = social.microsoft.tenant.toLowerCase();
+    if (!MICROSOFT_SHARED_TENANTS.has(tenant) && !TENANT_GUID_RE.test(tenant))
+      throw new ConfigError(
+        "social.microsoft.tenant must be common, organizations, consumers, or a tenant GUID",
+      );
+    push("social.microsoft", social.microsoft, microsoftProvider(social.microsoft));
+  }
+  if (social?.discord) {
+    requireFields("social.discord", social.discord, ["clientId", "clientSecret"]);
+    push("social.discord", social.discord, discordProvider(social.discord));
+  }
+  if (social?.gitlab) {
+    requireFields("social.gitlab", social.gitlab, ["clientId", "clientSecret"]);
+    if (social.gitlab.issuer !== undefined && !isGitlabIssuer(social.gitlab.issuer, baseURLs))
+      throw new ConfigError(
+        "social.gitlab.issuer must be an https origin with no path or trailing slash, on a public host that is not the host of baseURL",
+      );
+    push("social.gitlab", social.gitlab, gitlabProvider(social.gitlab));
+  }
+  // The presets of plan 12i Task 14, in one block.
+  if (social?.slack) {
+    requireFields("social.slack", social.slack, ["clientId", "clientSecret"]);
+    push("social.slack", social.slack, slackProvider(social.slack));
+  }
+  if (social?.twitter) {
+    requireFields("social.twitter", social.twitter, ["clientId", "clientSecret"]);
+    push("social.twitter", social.twitter, twitterProvider(social.twitter));
+  }
+  if (social?.facebook) {
+    requireFields("social.facebook", social.facebook, ["clientId", "clientSecret"]);
+    push("social.facebook", social.facebook, facebookProvider(social.facebook));
   }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {
     if (typeof name !== "string" || !PROVIDER_NAME_RE.test(name))
       throw new ConfigError(`${path}.name must match ${PROVIDER_NAME_RE.source}`);
     if (RESERVED_PROVIDER_NAMES.has(name))
-      throw new ConfigError(
-        `${path}.name ${name} is reserved: google, apple, github, and linkedin are presets, and email and credential are identity kinds`,
-      );
+      throw new ConfigError(`${path}.name ${name} is reserved: ${RESERVED_REASON}`);
     if (names.has(name)) throw new ConfigError(`${path}.name ${name} is given twice`);
     names.add(name);
   };
@@ -2899,7 +4088,7 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
       https(`${path}.endpoints.tokenUrl`, e.endpoints.tokenUrl);
       https(`${path}.endpoints.jwksUrl`, e.endpoints.jwksUrl);
     }
-    providers.push(oidcProvider(e));
+    push(path, e, oidcProvider(e));
   }
   for (const [i, e] of listOf("social.oauth2", social?.oauth2).entries()) {
     const path = `social.oauth2[${i}]`;
@@ -2922,7 +4111,33 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
           `${path}.authorizeParams.${key} must be a string with no control character`,
         );
     }
-    providers.push(oauth2Provider(e));
+    // The keys of plan 12i Task 22. The client id parameter must not take a
+    // key that core writes or that authorizeParams sets: either one would
+    // replace it, or it would replace the state or the PKCE challenge.
+    if (e.authorizeClientIdParam !== undefined) {
+      const key = e.authorizeClientIdParam;
+      if (
+        typeof key !== "string" ||
+        !AUTHORIZE_PARAM_RE.test(key) ||
+        CORE_AUTHORIZE_PARAMS.has(key) ||
+        Object.hasOwn(e.authorizeParams ?? {}, key)
+      )
+        throw new ConfigError(
+          `${path}.authorizeClientIdParam must match ${AUTHORIZE_PARAM_RE.source}, and be neither a key that core sets nor a key of authorizeParams`,
+        );
+    }
+    if (
+      e.authorizeSuffix !== undefined &&
+      (typeof e.authorizeSuffix !== "string" || !AUTHORIZE_SUFFIX_RE.test(e.authorizeSuffix))
+    )
+      throw new ConfigError(`${path}.authorizeSuffix must match ${AUTHORIZE_SUFFIX_RE.source}`);
+    if (e.pkce !== undefined && typeof e.pkce !== "boolean")
+      throw new ConfigError(`${path}.pkce must be a boolean`);
+    if (e.addressless !== undefined && e.addressless !== true)
+      throw new ConfigError(`${path}.addressless must be true or absent`);
+    if (e.tokenRequest !== undefined && typeof e.tokenRequest !== "function")
+      throw new ConfigError(`${path}.tokenRequest must be a function`);
+    push(path, e, oauth2Provider(e));
   }
   return providers;
 }

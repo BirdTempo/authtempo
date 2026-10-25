@@ -35,7 +35,7 @@ sidebar:
 | `toWebRequest` | Answers the web request of a Fastify request of the route plugin. |
 | `sendWebResponse` | Writes a web response to Fastify, with each `Set-Cookie` line. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
-| `FastifyRoutesOptions` | The options of `authRoutes`: `auth` and `basePath`. |
+| `FastifyRoutesOptions` | The options of `authRoutes`: `auth`, `basePath`, and `waitUntil`. `waitUntil` keeps work alive after the answer. It has no default. |
 | `FastifySessionOptions` | The options of `authSession`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## The paths that protect gets
@@ -55,6 +55,7 @@ sidebar:
 
 ## How it behaves
 
+- Node keeps a detached promise alive, so a plain server needs no `waitUntil`. On a host that stops the function after the answer, pass `waitUntil` in the options of `authRoutes`. The SMS of a phone code and the flush of the events run under it (ruling 29 of plan 12i).
 - The package takes `fastify` 5.12.5 or a later 5 release as a peer dependency.
 - The routes of core read the body as it came. A form post works with no `@fastify/formbody`.
 - The field is `request.authSession`, because `@fastify/session` owns `request.session`.

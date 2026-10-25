@@ -1,4 +1,4 @@
-import { type HandlerLike, handlerOf } from "./next-js.js";
+import { type HandlerLike, type HandlerOptions, handlerOf } from "./next-js.js";
 
 /** The parts of node:http's IncomingMessage and ServerResponse used here, typed by structure (no @types/node). */
 export interface NodeRequestLike extends AsyncIterable<Uint8Array> {
@@ -12,11 +12,16 @@ export interface NodeResponseLike {
   end(body?: Uint8Array): unknown;
 }
 
-/** Better Auth's `toNodeHandler(auth)`. The URL's origin comes from the Host and X-Forwarded-Proto headers; core reads only its path. */
+/**
+ * Better Auth's `toNodeHandler(auth)`. The URL's origin comes from the Host
+ * and X-Forwarded-Proto headers; core reads only its path. The second
+ * argument is authtempo's: the host's `waitUntil` on a serverless Node host.
+ */
 export function toNodeHandler(
   auth: HandlerLike,
+  options?: HandlerOptions,
 ): (req: NodeRequestLike, res: NodeResponseLike) => Promise<void> {
-  const h = handlerOf(auth);
+  const h = handlerOf(auth, options);
   return async (req, res) => {
     const headers = new Headers();
     for (const [k, v] of Object.entries(req.headers)) {

@@ -47,6 +47,25 @@ function recordRequest(headers: Record<string, string>, body?: unknown): void {
 export const APP_ORIGIN = "https://app.example.com";
 
 /**
+ * A router call that waits for the work after the answer (ruling 23 of plan
+ * 12i). So a test reads the SMS that a route sent. The router catches each
+ * rejection of that work, so the wait never throws.
+ */
+export function settled(
+  route: (
+    request: Request,
+    options?: { waitUntil?: (p: Promise<unknown>) => void },
+  ) => Promise<Response>,
+): (request: Request) => Promise<Response> {
+  return async (request) => {
+    const after: Promise<unknown>[] = [];
+    const res = await route(request, { waitUntil: (p) => void after.push(p) });
+    await Promise.all(after);
+    return res;
+  };
+}
+
+/**
  * The time limit of a core test that makes hundreds of rows or calls (review
  * m3 of plan 12d Task 4b). The default of 5 s is too short under load. The
  * test "keeps at most 500 discovery entries" took 288 ms alone. It timed out
@@ -90,11 +109,25 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
   }
   return { config, storage, mail: sent, clock, seedUser };
+}
+
+/**
+ * The address of a test user that has one. A user can have no address
+ * from schema version 15 (plan 12i), so a test reads it through this
+ * check, never an assertion. It throws for a user with no address.
+ */
+export function emailOf(user: { email: string | null }): string {
+  if (user.email === null) throw new Error("the test user has no address");
+  return user.email;
 }
 
 export function post(path: string, body: unknown, headers: Record<string, string> = {}): Request {
@@ -166,6 +199,7 @@ export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
         operator: {},
         sso: {},
         scim: {},
+        anonymous: {},
       },
       observe: DEFAULT_OBSERVE,
     },

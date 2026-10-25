@@ -30,7 +30,6 @@ import { fail, ok, type Result } from "../../result.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
 import { isJsonRequest } from "../body.js";
-import { holdsBadText } from "../body-text.js";
 import {
   auditQuery,
   banBody,
@@ -49,7 +48,7 @@ import {
 } from "../contract/operator.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "../cookies.js";
 import { actorCookieName } from "../impersonation-rules.js";
-import { json, readJson, respond } from "../json.js";
+import { json, readJson, readOptionalJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { unauthorized } from "../session-route.js";
@@ -96,24 +95,14 @@ async function operatorAuthorized(
 /**
  * The parsed body of a rewrap, or null for a body that is not a limit, a
  * cursor, and a call budget. A NUL or a lone surrogate is null too
- * (`holdsBadText`, ruling 26).
+ * (`holdsBadText` in readOptionalJson, ruling 26).
  */
 async function readRewrapBody(
   request: Request,
 ): Promise<{ limit?: number; after?: string; callBudget?: number } | null> {
-  const text = await request.text();
-  let raw: unknown = {};
-  if (text !== "") {
-    try {
-      raw = JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-  if (holdsBadText(raw)) return null;
-  const parsed = rewrapBody.safeParse(raw);
-  if (!parsed.success) return null;
-  const { limit, after, callBudget } = parsed.data;
+  const parsed = await readOptionalJson(request, rewrapBody);
+  if (!parsed.ok) return null;
+  const { limit, after, callBudget } = parsed.value;
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(after === undefined ? {} : { after }),
@@ -123,22 +112,13 @@ async function readRewrapBody(
 
 /**
  * The body of a stop: `{}` for an empty body, else the parsed JSON, or null
- * for a bad body. A NUL or a lone surrogate is a bad body (`holdsBadText`).
+ * for a bad body. A NUL or a lone surrogate is a bad body (`holdsBadText` in
+ * readOptionalJson).
  */
 async function readStopBody(request: Request): Promise<{ reason?: string } | null> {
-  const text = await request.text();
-  let raw: unknown = {};
-  if (text !== "") {
-    try {
-      raw = JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-  if (holdsBadText(raw)) return null;
-  const parsed = impersonateStopBody.safeParse(raw);
-  if (!parsed.success) return null;
-  return parsed.data.reason === undefined ? {} : { reason: parsed.data.reason };
+  const parsed = await readOptionalJson(request, impersonateStopBody);
+  if (!parsed.ok) return null;
+  return parsed.value.reason === undefined ? {} : { reason: parsed.value.reason };
 }
 
 /** Whole seconds from now to `at`, at least 0: the Max-Age of a cookie that ends at `at`. */

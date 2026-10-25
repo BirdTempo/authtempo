@@ -4,6 +4,7 @@ import { RETIRED_KEY_MS } from "../primitives/jwk.js";
 import type { VerificationRow } from "../schema.js";
 import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
+import { ANONYMOUS_PAGE_CALLS, sweepAnonymous } from "./anonymous.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
 import { endPendingRows, PENDING_PAGE_RESERVE, readPendingEnds } from "./operator/access-end.js";
@@ -61,6 +62,12 @@ export interface SweepResult {
    * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
    */
   organizationRows: number;
+  /**
+   * Anonymous users past `anonymous.ttlDays` with no live session, at most
+   * 100 per sweep, inside the call budget (plan 12i Task 6). 0 while
+   * `anonymous` is off.
+   */
+  anonymousUsers: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -281,6 +288,8 @@ const SOFT_STEPS = {
   // solo organization of an account delete leaves.
   "sso recheck": "sweep.sso_recheck_stopped",
   "organization rest": "sweep.organization_rest_stopped",
+  // The anonymous users of plan 12i Task 6.
+  anonymous: "sweep.anonymous_stopped",
 } as const;
 
 /**
@@ -441,6 +450,9 @@ export async function sweepExpired(
     ? await storage.delete("scimToken", [{ field: "expiresAt", op: "lt", value: now }])
     : 0;
   if (config.scim) meter.step(1);
+  // The share of the anonymous step (plan 12i Task 6, the lane ruling): one page. Each step
+  // before it stops that many calls earlier, so each share above stays as it was.
+  const anonymousShare = config.anonymous ? ANONYMOUS_PAGE_CALLS : 0;
   const recheckShare = config.sso ? RECHECK_SHARE : 0;
   // While a row waits, the outbox and the recheck leave the calls of one row for its step.
   const pendingReserve =
@@ -449,7 +461,7 @@ export async function sweepExpired(
     storage,
     now,
     meter,
-    budget - LINK_SHARE - OUTBOX_SHARE - recheckShare,
+    budget - LINK_SHARE - OUTBOX_SHARE - recheckShare - anonymousShare,
   );
   // Then the steps that may fail on a storage limit, so each count above is
   // done. The links of the sessions that ended become outbox rows, and the
@@ -458,12 +470,12 @@ export async function sweepExpired(
   const oauthSessionLinks = await softStep(
     config.observe,
     "link",
-    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE - recheckShare),
+    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE - recheckShare - anonymousShare),
   );
   const oauthLogouts = await softStep(
     config.observe,
     "outbox",
-    deliverDueLogouts(config, meter, budget - recheckShare - pendingReserve),
+    deliverDueLogouts(config, meter, budget - recheckShare - pendingReserve - anonymousShare),
   );
   // The recheck of the verified domains comes after the logouts, which
   // reach another party. It takes its share and every call that the links
@@ -473,7 +485,7 @@ export async function sweepExpired(
     ? await softStep(
         config.observe,
         "sso recheck",
-        recheckDomains(config, now, { meter, limit: budget - pendingReserve }),
+        recheckDomains(config, now, { meter, limit: budget - pendingReserve - anonymousShare }),
       )
     : 0;
   // The rows of the solo organizations of an account delete. No flow reaches them: each read
@@ -485,7 +497,7 @@ export async function sweepExpired(
       config,
       rests,
       meter,
-      budget - (ends.length > 0 ? PENDING_PAGE_RESERVE : 0),
+      budget - anonymousShare - (ends.length > 0 ? PENDING_PAGE_RESERVE : 0),
     ),
   );
   // Last, in the calls that stay. Every door already refuses such a
@@ -494,8 +506,13 @@ export async function sweepExpired(
   const pendingSessions = await softStep(
     config.observe,
     "pending end",
-    endPendingRows(config, ends, meter, budget),
+    endPendingRows(config, ends, meter, budget - anonymousShare),
   );
+  // Last, in its share and every call that the steps above left. An anonymous user past its
+  // days has no live session, so it waits for no other step.
+  const anonymousUsers = config.anonymous
+    ? await softStep(config.observe, "anonymous", sweepAnonymous(config, now, meter, budget))
+    : 0;
   const result: SweepResult = {
     verificationExpired,
     verificationConsumed,
@@ -518,6 +535,7 @@ export async function sweepExpired(
     ssoPendingDomains,
     scimTokens,
     organizationRows,
+    anonymousUsers,
   };
   // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
   config.observe.emit({

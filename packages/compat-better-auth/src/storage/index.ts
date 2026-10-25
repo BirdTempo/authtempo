@@ -18,6 +18,7 @@ import {
   type SqliteVariant,
 } from "./migration.js";
 import { type Names, type NamingOptions, resolveNames } from "./names.js";
+import { type PlaceholderRule, registerPlaceholderRule } from "./placeholder.js";
 import { registerRawRead } from "./raw.js";
 import { compatStatements } from "./statements.js";
 
@@ -86,6 +87,8 @@ export function betterAuthSchemaStorage(
   options: PostgresSchemaStorageOptions | D1SchemaStorageOptions | SqliteSchemaStorageOptions,
 ): PostgresSchemaStorage | D1SchemaStorage | SqliteSchemaStorage {
   const names = resolveNames(options);
+  // The anonymous plugin's emailDomainName, which betterAuth sets (plan 12i Task 16).
+  const rule: PlaceholderRule = { domain: null };
   if (options.dialect === "sqlite") {
     // The D1 code over the SQLite seam of plan 12g: the same statements, the
     // same undo log, the same readiness check. Before the check, the handle
@@ -94,7 +97,7 @@ export function betterAuthSchemaStorage(
     // over the seam (ruling 26).
     const { driver } = options;
     const variant = options.variant ?? "1.7";
-    const st = compatStatements("sqlite", names);
+    const st = compatStatements("sqlite", names, rule);
     const sent = { statements: 0, ready: 0 };
     const probe = integerProbe(driver.db, sent);
     const compatReady = d1CompatReady(driver.db, names, sent);
@@ -121,11 +124,12 @@ export function betterAuthSchemaStorage(
       migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),
       migrate: () => applyBetterAuthCompatSqliteMigrations(driver, names, variant),
     };
+    registerPlaceholderRule(sqlite, rule);
     registerRawRead(sqlite, async (q) => (await driver.db.prepare(q).all()).results);
     return sqlite;
   }
   if (options.dialect === "d1") {
-    const st = compatStatements("sqlite", names);
+    const st = compatStatements("sqlite", names, rule);
     const db = options.db as unknown as D1;
     // One count holds the statements and the ready check. So the call budget
     // of the operator session calls sees its queries (ruling 37 of plan 12f).
@@ -147,10 +151,11 @@ export function betterAuthSchemaStorage(
     const binding = options.db as unknown as {
       prepare(q: string): { all(): Promise<{ results: Record<string, unknown>[] }> };
     };
+    registerPlaceholderRule(d1, rule);
     registerRawRead(d1, async (q) => (await binding.prepare(q).all()).results);
     return d1;
   }
-  const st = compatStatements("postgres", names);
+  const st = compatStatements("postgres", names, rule);
   const sql = options.sql;
   const pg: PostgresSchemaStorage = {
     kind: "authtempo-compat-database",
@@ -166,6 +171,7 @@ export function betterAuthSchemaStorage(
     migrationSql: () => compatMigrationSql("postgres", names),
     migrate: () => applyBetterAuthCompatMigrations(sql, names),
   };
+  registerPlaceholderRule(pg, rule);
   registerRawRead(pg, async (q) => [...(await sql.unsafe(q))] as Record<string, unknown>[]);
   return pg;
 }

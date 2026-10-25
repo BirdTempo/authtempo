@@ -4,8 +4,8 @@ export interface HandoffConfirmPageInput {
   /** The path the form posts to. */
   action: string;
   handoffId: string;
-  /** The signed-in account, shown so the person can see whose session continues. */
-  email: string;
+  /** The signed-in account, shown so the person can see whose session continues. Null for a user with no address (plan 12i). */
+  email: string | null;
   /** Where the code goes: the app scheme, or the full dev redirect. */
   redirect: string;
   /** The app name from the config. Escaped in the title and the heading. */
@@ -20,7 +20,6 @@ export interface HandoffConfirmPageInput {
 export function defaultHandoffConfirmPage(input: HandoffConfirmPageInput): string {
   const action = escapeHtml(input.action);
   const handoffId = escapeHtml(input.handoffId);
-  const email = escapeHtml(input.email);
   const redirect = escapeHtml(input.redirect);
   const appName = escapeHtml(input.appName);
   return `<!doctype html>
@@ -40,7 +39,7 @@ button { font: inherit; padding: 0.75rem 1.5rem; border: 0; border-radius: 0.375
 <body>
 <main>
 <h1>Continue to ${appName}?</h1>
-<p>Signed in as <strong>${email}</strong>.</p>
+<p>${input.email === null ? "Signed in." : `Signed in as <strong>${escapeHtml(input.email)}</strong>.`}</p>
 <p>The app at <code>${redirect}</code> gets a one-time sign-in code.</p>
 <p>Continue only if you started a sign-in in that app just now.</p>
 <form method="post" action="${action}">

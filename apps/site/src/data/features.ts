@@ -22,8 +22,13 @@ export interface Feature {
  * adds `health`, the 24th, and `readiness`, the 25th. Plan 12d adds `sso`,
  * `operatorSso`, and `scim`. Plan 12d Task 13 points `sso` to the SSO guide,
  * `operatorSso` to the override section of that guide, and `scim` to the
- * SCIM guide. A Record over the union fails the site's typecheck when core
- * adds a member, so a new feature cannot
+ * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th,
+ * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd,
+ * `multiSession`, the 33rd, `socialIdToken`, the 34th, and `passkeySignUp`,
+ * the 35th. Plan 12i Task 17 points each of the seven to its own guide;
+ * `socialIdToken` points to the One Tap guide. A Record over
+ * the union fails the site's typecheck when core adds a member, so a new
+ * feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -77,7 +82,7 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
   },
   social: {
     title: "Social sign-in",
-    line: "Sign in with Google, Apple, GitHub, LinkedIn, or an OIDC provider.",
+    line: "Sign in with ten presets, from Google to Facebook, or any OIDC or OAuth 2 provider.",
     icon: "social",
     guide: "/docs/guides/social/",
   },
@@ -86,6 +91,18 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "Register a passkey, and sign in with a discoverable passkey.",
     icon: "passkey",
     guide: "/docs/guides/passkeys/",
+  },
+  passkeyRelatedOrigins: {
+    title: "Passkey related origins",
+    line: "Use one passkey on related sites, with the document of WebAuthn Level 3.",
+    icon: "passkey",
+    guide: "/docs/guides/related-origins/",
+  },
+  passkeySignUp: {
+    title: "Passkey sign-up",
+    line: "Make an account with a passkey and a name, and no address.",
+    icon: "passkey",
+    guide: "/docs/guides/passkey-sign-up/",
   },
   password: {
     title: "Passwords",
@@ -218,6 +235,36 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "A route that answers ready only when the store and its schema answer.",
     icon: "routes",
     guide: "/docs/reference/routes/#health-and-readiness",
+  },
+  username: {
+    title: "Username",
+    line: "A public username for each account, with a check that a name is free.",
+    icon: "password",
+    guide: "/docs/guides/username/",
+  },
+  phone: {
+    title: "Phone sign-in",
+    line: "A sign-in code by SMS through a send-only port, with a daily cap that core counts.",
+    icon: "routes",
+    guide: "/docs/guides/phone/",
+  },
+  anonymous: {
+    title: "Anonymous sign-in",
+    line: "A session for a guest with no address, kept out of each route that needs a way in.",
+    icon: "routes",
+    guide: "/docs/guides/anonymous/",
+  },
+  multiSession: {
+    title: "Multi-session",
+    line: "The sessions of several users in one browser, with a switch and a sign-out of one.",
+    icon: "session",
+    guide: "/docs/guides/multi-session/",
+  },
+  socialIdToken: {
+    title: "ID-token sign-in",
+    line: "Google One Tap and the native Apple sheet, with a nonce of one use and one sign-in per token.",
+    icon: "routes",
+    guide: "/docs/guides/one-tap/",
   },
 };
 

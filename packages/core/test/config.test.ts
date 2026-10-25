@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RESERVED_SLUGS, isAppScheme, resolveConfig } from "../src/config.js";
+import {
+  type AuthConfig,
+  DEFAULT_RESERVED_SLUGS,
+  isAppScheme,
+  resolveConfig,
+} from "../src/config.js";
 import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
@@ -9,8 +14,11 @@ import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultConsentPage } from "../src/http/consent-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import { defaultTotpPage } from "../src/http/totp-page.js";
+import { createMemoryLimiter, systemClock } from "../src/index.js";
+import type { LimiterPort } from "../src/limiter/port.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import type { OidcEntry } from "../src/social/oidc.js";
+import { COMING_PRESET_NAMES, PRESET_PROVIDER_NAMES } from "../src/social/provider.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 const base = {
@@ -136,6 +144,29 @@ describe("social config", () => {
       },
     });
     expect(c.social.providers.map((p) => p.name)).toEqual(["google", "apple"]);
+  });
+  it("lists each preset that the config builds in PRESET_PROVIDER_NAMES, in order", () => {
+    // Compat reads the list (plan 12i), so a preset missing from it gets the wrong refusal there.
+    // The type names no key by hand, so a new preset key fails the type check until it is here.
+    const presets: Required<
+      Omit<NonNullable<AuthConfig["social"]>, "oidc" | "oauth2" | "fetch" | "stateData" | "idToken">
+    > = {
+      google: { clientId: "g", clientSecret: "s" },
+      apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "pem" },
+      github: { clientId: "h", clientSecret: "s" },
+      linkedin: { clientId: "l", clientSecret: "s" },
+      microsoft: { clientId: "m", clientSecret: "s", tenant: "common" },
+      discord: { clientId: "d", clientSecret: "s" },
+      gitlab: { clientId: "gl", clientSecret: "s" },
+      slack: { clientId: "sl", clientSecret: "s" },
+      twitter: { clientId: "x", clientSecret: "s" },
+      facebook: { clientId: "f", clientSecret: "s" },
+    };
+    const c = resolveConfig({ ...base, social: presets });
+    expect(c.social.providers.map((p) => p.name)).toEqual(PRESET_PROVIDER_NAMES);
+    // The lists are frozen, so no code can open a reserved name at run time.
+    expect(Object.isFrozen(PRESET_PROVIDER_NAMES)).toBe(true);
+    expect(Object.isFrozen(COMING_PRESET_NAMES)).toBe(true);
   });
   it("refuses a provider with an empty field", () => {
     expect(() =>
@@ -353,11 +384,98 @@ describe("passkey config", () => {
         origins: ["https://example.com", "https://app.example.com:8443"],
       },
     });
+    // Plan 12i Task 9: related origins are off, and no ceremony has a hint, by default.
     expect(c.passkey).toEqual({
       rpID: "example.com",
       rpName: "Example",
       origins: ["https://example.com", "https://app.example.com:8443"],
+      relatedOrigins: false,
+      hints: { register: [], signIn: [] },
+      // Plan 12i Task 21: each passkey extension is off by default.
+      extensions: { prf: false, largeBlob: false, credProps: false },
+      // Plan 12i Task 8: the passkey-first sign-up is off by default.
+      signUp: null,
     });
+  });
+  it("refuses a passkey.signUp that is not a boolean or an object (plan 12i Task 8)", () => {
+    expect(() =>
+      resolveConfig({
+        ...base,
+        passkey: {
+          rpID: "example.com",
+          rpName: "Example",
+          origins: ["https://example.com"],
+          signUp: "yes" as never,
+        },
+        trustedOrigins: ["https://example.com"],
+      }),
+    ).toThrow("passkey.signUp must be true, false, or an object");
+  });
+  it("resolves passkey.signUp with a daily cap of 1000 by default (ruling 38 M3)", () => {
+    const pk = { rpID: "example.com", rpName: "Example", origins: ["https://example.com"] };
+    const signUp = (value: unknown) =>
+      resolveConfig({
+        ...base,
+        passkey: { ...pk, signUp: value as never },
+        trustedOrigins: ["https://example.com"],
+      }).passkey?.signUp;
+    expect(signUp(false)).toBeNull();
+    expect(signUp(undefined)).toBeNull();
+    expect(signUp({ isolateLimiter: "allow" })).toEqual({ dailyCap: 1000 });
+    expect(signUp({ isolateLimiter: "allow", dailyCap: 100_000 })).toEqual({ dailyCap: 100_000 });
+    expect(signUp({ isolateLimiter: "allow", dailyCap: 1 })).toEqual({ dailyCap: 1 });
+    for (const dailyCap of [0, 100_001, 2.5])
+      expect(() => signUp({ isolateLimiter: "allow", dailyCap })).toThrow(
+        "passkey.signUp.dailyCap must be an integer from 1 to 100000",
+      );
+    expect(() => signUp({ isolateLimiter: "allow", cap: 5 })).toThrow(
+      "passkey.signUp.cap is not an option; core has dailyCap, isolateLimiter",
+    );
+    expect(() => signUp({ isolateLimiter: "yes" })).toThrow(
+      'passkey.signUp.isolateLimiter must be "allow" or absent',
+    );
+  });
+  it("refuses passkey.signUp with an isolate limiter: the daily cap is per deployment (ruling 38 M3)", () => {
+    const message = "passkey.signUp needs a shared limiter: the daily cap is per deployment";
+    const pk = { rpID: "example.com", rpName: "Example", origins: ["https://example.com"] };
+    const withSignUp = (signUp: unknown, limiter?: LimiterPort) =>
+      resolveConfig({
+        ...base,
+        ...(limiter ? { limiter } : {}),
+        passkey: { ...pk, signUp: signUp as never },
+        trustedOrigins: ["https://example.com"],
+      });
+    const shared: LimiterPort = { scope: "shared", allow: async () => true };
+    // The default limiter is the memory limiter, which counts per isolate.
+    expect(() => withSignUp(true)).toThrow(message);
+    expect(() => withSignUp({})).toThrow(message);
+    expect(() => withSignUp(true, createMemoryLimiter(systemClock))).toThrow(message);
+    // A limiter of the app with no scope counts as isolate.
+    expect(() => withSignUp(true, { allow: async () => true })).toThrow(message);
+    expect(withSignUp(true, shared).passkey?.signUp).toEqual({ dailyCap: 1000 });
+    expect(withSignUp({ isolateLimiter: "allow" }).passkey?.signUp).toEqual({ dailyCap: 1000 });
+    // Off needs no shared limiter.
+    expect(withSignUp(false).passkey?.signUp).toBeNull();
+  });
+  it("refuses a passkey extension value of another type (plan 12i Task 21)", () => {
+    const pk = { rpID: "api.example.com", rpName: "Example", origins: ["https://api.example.com"] };
+    const withExtensions = (extensions: unknown) =>
+      resolveConfig({
+        ...base,
+        passkey: { ...pk, extensions: extensions as { prf?: boolean } },
+      });
+    expect(() => withExtensions({ prf: "yes" })).toThrow(
+      "passkey.extensions.prf must be a boolean",
+    );
+    expect(() => withExtensions({ credProps: 1 })).toThrow(
+      "passkey.extensions.credProps must be a boolean",
+    );
+    expect(() => withExtensions({ largeBlob: true })).toThrow(
+      'passkey.extensions.largeBlob must be "preferred", "required", or false',
+    );
+    expect(
+      withExtensions({ prf: true, largeBlob: "required", credProps: false }).passkey?.extensions,
+    ).toEqual({ prf: true, largeBlob: "required", credProps: false });
   });
   it("accepts the baseURL or a trusted origin and refuses any other passkey origin", () => {
     const pk = { rpID: "example.com", rpName: "Example" };
@@ -648,29 +766,42 @@ describe("totp (plan 9f)", () => {
   });
 
   it("turns the gate on for the magic link, the email code, and social by default, takes false per method, and refuses another key (plan 12c)", () => {
-    // Plan 12d Task 5 adds the key sso, on by default.
+    // Plan 12d Task 5 adds the key sso, on by default. Plan 12i Task 5 adds phone.
     expect(resolveConfig(pw).totp?.gate).toEqual({
       magicLink: true,
       emailOtp: true,
       social: true,
       sso: true,
+      phone: true,
     });
     expect(resolveConfig({ ...pw, totp: { gate: { social: false } } }).totp?.gate).toEqual({
       magicLink: true,
       emailOtp: true,
       social: false,
       sso: true,
+      phone: true,
     });
     expect(resolveConfig({ ...pw, totp: { gate: { sso: false } } }).totp?.gate).toEqual({
       magicLink: true,
       emailOtp: true,
       social: true,
       sso: false,
+      phone: true,
+    });
+    expect(resolveConfig({ ...pw, totp: { gate: { phone: false } } }).totp?.gate).toEqual({
+      magicLink: true,
+      emailOtp: true,
+      social: true,
+      sso: true,
+      phone: false,
     });
     expect(() =>
       resolveConfig({ ...pw, totp: { gate: { handoff: false } as never } }),
     ).toThrowError(
-      "totp.gate.handoff is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate",
+      "totp.gate.handoff is not an option; core has magicLink, emailOtp, social, sso, and phone. The handoff has no key: it continues a browser session that passed the gate",
+    );
+    expect(() => resolveConfig({ ...pw, totp: { gate: { phone: "no" } as never } })).toThrowError(
+      "totp.gate.phone must be true or false",
     );
     expect(() => resolveConfig({ ...pw, totp: { gate: { social: "no" } as never } })).toThrowError(
       "totp.gate.social must be true or false",

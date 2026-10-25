@@ -1,0 +1,8 @@
+{
+  "source": "token.json and token-error.json follow https://developers.tiktok.com/doc/oauth-user-access-token-management, and user.json and user-error.json follow https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info, read 2026-10-24. The subject is open_id, as Better Auth 1.7.2 keeps profile.data.user.open_id. The user object has no address, so the entry is addressless.",
+  "subject": "-000OaCkpTQ2VfaHgmXr0Ak1HVkdcE3ZZTyB",
+  "email": null,
+  "emailVerified": false,
+  "name": "Tik Toker",
+  "image": "https://p16-sign.tiktokcdn-us.com/tos-useast5-avt-0068-tx/avatar.jpeg"
+}

@@ -1,13 +1,18 @@
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { requireFresh } from "../../engine/fresh.js";
 import {
   deletePasskey,
   listPasskeys,
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  passkeySignUpOptions,
   renamePasskey,
+  signalInputs,
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
+  verifyPasskeySignUp,
 } from "../../engine/passkeys.js";
 import {
   publicSession,
@@ -15,15 +20,22 @@ import {
   sessionFromRequest,
   sessionMaxAgeSeconds,
 } from "../../engine/sessions.js";
+import type { SessionRow, UserRow } from "../../schema.js";
 import {
+  authenticateOptionsBody,
   authenticateVerifyBody,
   deleteBody,
+  optionsBody,
   registerVerifyBody,
   renameBody,
+  signUpOptionsBody,
+  signUpVerifyBody,
 } from "../contract/passkeys.js";
 import { sessionCookie } from "../cookies.js";
-import { json, readJson, respond } from "../json.js";
+import { json, readJson, readOptionalJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
+import { viaField, withLastMethod } from "../session-answer.js";
+import { relatedOriginsAnswer, WEBAUTHN_PATH } from "../well-known.js";
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
@@ -42,6 +54,28 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
+  /** The answer of a sign-in by a passkey: the session, its cookie, and the last method. */
+  const signedIn = (
+    ctx: RouteContext,
+    r: { user: UserRow; session: SessionRow; token: string },
+  ): Response => {
+    const res = json(
+      {
+        ...publicSession({ user: r.user, session: r.session, refreshed: false }),
+        ...viaField(ctx.config, "passkey"),
+      },
+      200,
+      {
+        "set-cookie": sessionCookie(
+          ctx.config.cookieName,
+          r.token,
+          sessionMaxAgeSeconds(ctx.config),
+          ctx.config.cookie.sameSite,
+        ),
+      },
+    );
+    return withLastMethod(ctx.config, ctx.request, res, "passkey");
+  };
   return [
     {
       method: "POST",
@@ -54,8 +88,15 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         // The engine takes a user, so the rule is here, before any write.
         const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
+        const body = await readOptionalJson(ctx.request, optionsBody);
+        if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await passkeyRegistrationOptions(ctx.config, { user: s.user })),
+          respond(
+            await passkeyRegistrationOptions(ctx.config, {
+              user: s.user,
+              hints: body.value.hints,
+            }),
+          ),
           s.renewed,
         );
       },
@@ -82,7 +123,16 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       path: "/passkey/authenticate/options",
       key: "POST /passkey/authenticate/options",
       async handler(ctx) {
-        return respond(await passkeyAuthenticationOptions(ctx.config, { ip: ctx.ip }));
+        const body = await readOptionalJson(ctx.request, authenticateOptionsBody);
+        if (!body.ok) return respond(body);
+        return respond(
+          await passkeyAuthenticationOptions(ctx.config, {
+            ip: ctx.ip,
+            hints: body.value.hints,
+            extensions: body.value.extensions,
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
+          }),
+        );
       },
     },
     {
@@ -96,23 +146,51 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
           response: body.value.response,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
-        if (!r.ok) return respond(r);
-        const maxAge = sessionMaxAgeSeconds(ctx.config);
-        return json(
-          publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
-          200,
-          {
-            "set-cookie": sessionCookie(
-              ctx.config.cookieName,
-              r.value.token,
-              maxAge,
-              ctx.config.cookie.sameSite,
-            ),
-          },
-        );
+        return r.ok ? signedIn(ctx, r.value) : respond(r);
       },
     },
+    // The passkey-first sign-up (plan 12i Task 8). It makes a user with no
+    // address. A live anonymous session of the request is replaced (Task 7).
+    ...(config.passkey.signUp
+      ? [
+          {
+            method: "POST",
+            path: "/passkey/sign-up/options",
+            key: "POST /passkey/sign-up/options",
+            async handler(ctx: RouteContext) {
+              const body = await readJson(ctx.request, signUpOptionsBody);
+              if (!body.ok) return respond(body);
+              return respond(
+                await passkeySignUpOptions(ctx.config, {
+                  name: body.value.name,
+                  ip: ctx.ip,
+                  hints: body.value.hints,
+                  captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+                  anonymous: await anonymousCaller(ctx.config, ctx.request),
+                }),
+              );
+            },
+          } satisfies Route,
+          {
+            method: "POST",
+            path: "/passkey/sign-up/verify",
+            key: "POST /passkey/sign-up/verify",
+            async handler(ctx: RouteContext) {
+              const body = await readJson(ctx.request, signUpVerifyBody);
+              if (!body.ok) return respond(body);
+              const r = await verifyPasskeySignUp(ctx.config, {
+                response: body.value.response,
+                ip: ctx.ip,
+                userAgent: ctx.request.headers.get("user-agent"),
+                anonymous: await anonymousCaller(ctx.config, ctx.request),
+              });
+              return r.ok ? signedIn(ctx, r.value) : respond(r);
+            },
+          } satisfies Route,
+        ]
+      : []),
     {
       method: "GET",
       path: "/passkeys",
@@ -121,7 +199,9 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
         const r = await listPasskeys(ctx.config, { user: s.user });
-        return send(r.ok ? json({ passkeys: r.value }) : respond(r), s.renewed);
+        const signal = signalInputs(ctx.config, s.user);
+        if (!r.ok || !signal.ok) return send(respond(r.ok ? signal : r), s.renewed);
+        return send(json({ passkeys: r.value, ...signal.value }), s.renewed);
       },
     },
     {
@@ -159,5 +239,19 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         );
       },
     },
+    // The related origins document (plan 12i). The browser reads it at the
+    // origin root of the rpID host, through auth.wellKnown; this route serves
+    // it when core is mounted there. Another host answers not_found.
+    ...(config.passkey.relatedOrigins
+      ? [
+          {
+            method: "GET",
+            path: WEBAUTHN_PATH,
+            key: "GET /.well-known/webauthn",
+            handler: async (ctx: RouteContext) =>
+              relatedOriginsAnswer(ctx.config, ctx.request) ?? json({ error: "not_found" }, 404),
+          } satisfies Route,
+        ]
+      : []),
   ];
 }

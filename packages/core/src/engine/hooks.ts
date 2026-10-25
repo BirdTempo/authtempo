@@ -40,6 +40,7 @@ export type RemoveVia = "remove" | "leave" | "operator" | "scim";
 /**
  * How a session came. `impersonation`: a platform operator opened it for the
  * user (plan 12f). `sso`: the IdP of an organization's connection (plan 12d).
+ * `phone`: a code by SMS (plan 12i).
  */
 export type SessionVia =
   | "password"
@@ -49,7 +50,9 @@ export type SessionVia =
   | "handoff"
   | "email_otp"
   | "impersonation"
-  | "sso";
+  | "sso"
+  | "phone"
+  | "anonymous";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -63,6 +66,8 @@ export const SESSION_VIA = {
   email_otp: true,
   impersonation: true,
   sso: true,
+  phone: true,
+  anonymous: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -92,7 +97,12 @@ export type SessionEndReason =
   // The operator stops it. A removal, a leave, or a role change takes the
   // platform role from its operator. Or a session read finds its operator
   // banned, deleted, or without the platform role.
-  | "impersonation_end";
+  | "impersonation_end"
+  // plan 12i: a sign-in in a browser whose bag of sessions is full ends the
+  // oldest session of the bag (multi-session).
+  | "displaced"
+  // plan 12i: a sign-in replaced the anonymous user of the session.
+  | "anonymous_upgrade";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event
  * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
@@ -112,6 +122,8 @@ export const SESSION_END_REASONS = {
   banned: true,
   operator: true,
   impersonation_end: true,
+  displaced: true,
+  anonymous_upgrade: true,
 } as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */
@@ -340,7 +352,17 @@ export interface SessionHooks {
     user: UserRow;
     via: SessionVia;
   }): Awaitable<SessionPatchAnswer>;
-  afterCreate?(e: { session: SessionRow; user: UserRow; via: SessionVia }): Awaitable<void>;
+  /**
+   * Once after the commit. `stateData` is the app payload of a social
+   * sign-in that started with `data` (plan 12i Task 19). The person's
+   * browser sent it: it is never a secret and never a trust decision.
+   */
+  afterCreate?(e: {
+    session: SessionRow;
+    user: UserRow;
+    via: SessionVia;
+    stateData?: Record<string, unknown>;
+  }): Awaitable<void>;
   /**
    * Once per session row that a flow deleted. The sweep fires it only for
    * a session that a ban or a revoke left for it (ruling 44 of plan 12f).
@@ -370,6 +392,8 @@ export const USER_CREATE_VIA = {
   handoff: true,
   email_otp: true,
   sso: true,
+  phone: true,
+  anonymous: true,
   password_reset: true,
   operator: true,
   scim: true,
@@ -377,9 +401,18 @@ export const USER_CREATE_VIA = {
 /**
  * The profile update, the change of address (plan 12a), or an operator's ban
  * and unban (plan 12f). `scim`: the organization's directory moves the
- * address of its staff (plan 12d).
+ * address of its staff (plan 12d). `username`: the person sets the
+ * username (plan 12i). `phone`: the person adds or removes the phone
+ * (plan 12i).
  */
-export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban" | "scim";
+export type UserUpdateVia =
+  | "profile"
+  | "email_change"
+  | "ban"
+  | "unban"
+  | "scim"
+  | "username"
+  | "phone";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
@@ -428,6 +461,11 @@ export interface UserPatch {
   bannedAt?: Date | null;
   banReason?: string | null;
   banUntil?: Date | null;
+  /** The set of a username writes both fields (plan 12i). */
+  username?: string;
+  displayUsername?: string;
+  /** The verify of an added phone writes the number; the remove writes null (plan 12i). */
+  phone?: string | null;
 }
 
 /**
@@ -487,13 +525,48 @@ export interface IdentityHooks {
     identity: IdentitySummary;
     via: IdentityLinkVia;
   }): Awaitable<void>;
+  /** `stateData` is the app payload of a social sign-in or link that started with `data` (plan 12i Task 19), as at `session.afterCreate`. */
   afterLink?(e: {
     user: UserRow;
     identity: IdentitySummary;
     via: IdentityLinkVia;
+    stateData?: Record<string, unknown>;
   }): Awaitable<void>;
   beforeUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
   afterUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
+}
+
+/**
+ * The anonymous upgrade (plan 12i Task 7, spec 32 item 9). A sign-in from
+ * a browser with a live anonymous session replaces the anonymous user with
+ * the user of the sign-in. `proof` is `"unverified"` when that user holds
+ * an address that no proof verified: the real owner of the address can
+ * claim the account later. So move the anonymous data only on
+ * `"verified"` (deviation 3).
+ */
+export interface AnonymousLinkEvent {
+  anonymousUser: UserRow;
+  user: UserRow;
+  proof: "verified" | "unverified";
+  via: SessionVia;
+}
+
+/** The anonymous points (plan 12i Task 7). They need `anonymous`. */
+export interface AnonymousHooks {
+  /**
+   * Inside the sign-in transaction, before the session write. A refusal
+   * answers `hook_refused`: no session opens, and the anonymous user and
+   * its session stay.
+   */
+  beforeLink?(e: AnonymousLinkEvent): Awaitable<void>;
+  /**
+   * After the commit, before the anonymous session ends and the anonymous
+   * user goes. Move the app data here. A throw writes one line that names
+   * the anonymous user, and keeps that user. No later sign-in links it, and
+   * the sweep deletes it after `anonymous.ttlDays`. So the app must act on
+   * the line. Its queries count toward the D1 limit of the sign-in request.
+   */
+  afterLink?(e: AnonymousLinkEvent): Awaitable<void>;
 }
 
 /**
@@ -557,6 +630,7 @@ export interface HooksConfig {
   operator?: OperatorHooks;
   sso?: SsoHooks;
   scim?: ScimHooks;
+  anonymous?: AnonymousHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -568,6 +642,7 @@ export interface ResolvedHooks {
   operator: OperatorHooks;
   sso: SsoHooks;
   scim: ScimHooks;
+  anonymous: AnonymousHooks;
 }
 
 /** The name in a log line. */
@@ -578,7 +653,8 @@ export type HookName =
   | `identity.${keyof IdentityHooks & string}`
   | `operator.${keyof OperatorHooks & string}`
   | `sso.${keyof SsoHooks & string}`
-  | `scim.${keyof ScimHooks & string}`;
+  | `scim.${keyof ScimHooks & string}`
+  | `anonymous.${keyof AnonymousHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -646,6 +722,11 @@ export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
 
 export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {
   afterChange: true,
+};
+
+export const ANONYMOUS_HOOK_POINTS: Readonly<Record<keyof AnonymousHooks, true>> = {
+  beforeLink: true,
+  afterLink: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */
@@ -818,13 +899,30 @@ export async function runAfter<E>(
   event: E,
   rowId: string,
 ): Promise<void> {
-  if (!hook) return;
+  await runAfterChecked(observe, name, hook, event, rowId);
+}
+
+/**
+ * `runAfter`, with the answer of the hook: false when it threw or its event
+ * could not be copied, after the same line. A flow whose next step needs
+ * the hook done skips that step then (plan 12i Task 7).
+ */
+export async function runAfterChecked<E>(
+  observe: Observer,
+  name: HookName,
+  hook: ((e: E) => unknown) | undefined,
+  event: E,
+  rowId: string,
+): Promise<boolean> {
+  if (!hook) return true;
   const copied = eventCopy(observe, name, event);
-  if (!copied) return;
+  if (!copied) return false;
   try {
     await hook(copied.copy);
+    return true;
   } catch (e) {
     observe.emit({ name: "hook.after_failed", hook: name, rowId, errorName: e });
+    return false;
   }
 }
 

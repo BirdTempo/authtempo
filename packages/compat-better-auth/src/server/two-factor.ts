@@ -121,7 +121,7 @@ export async function twoFactorRoute(
       if (!r.ok) return failure(codeFor(r.code, path), r.status);
       return Response.json({
         token: readToken(request.headers) ?? "",
-        user: { ...toUser(session.user), twoFactorEnabled: true },
+        user: { ...toUser(session.user, mapped.plugins), twoFactorEnabled: true },
       });
     }
     if (body.disableSession === true)
@@ -149,6 +149,7 @@ export async function twoFactorRoute(
           trustDevice: body.trustDevice === true,
         }),
       }),
+      mapped.handleOptions,
     );
     const out = (await res
       .clone()
@@ -165,7 +166,7 @@ export async function twoFactorRoute(
           : null;
       if (!row) throw new Error("authtempo compat: the signed-in user is gone");
       return Response.json(
-        { token: out.token, user: { ...toUser(row), twoFactorEnabled: true } },
+        { token: out.token, user: { ...toUser(row, mapped.plugins), twoFactorEnabled: true } },
         { status: 200, headers: answer },
       );
     }

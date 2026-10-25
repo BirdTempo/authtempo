@@ -99,6 +99,10 @@ describe("findOrCreateUserByEmail", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -138,6 +142,10 @@ describe("findOrCreateUserByEmail", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -180,6 +188,10 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -228,6 +240,10 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       ...row,
     });
     await storage.create("passkey", {
@@ -239,6 +255,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       ...row,
     });
@@ -251,6 +270,10 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       ...row,
     });
     await storage.create("passkey", {
@@ -262,6 +285,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       ...row,
     });
@@ -311,6 +337,10 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -363,6 +393,10 @@ describe("claimEmail and the password row (plan 8)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -444,12 +478,38 @@ describe("claimEmail and the password row (plan 8)", () => {
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
-    expect(order[0]).toBe(`update:user:["emailVerified","updatedAt"]`);
+    // The claim clears the username and the phone in the same statement (ruling 16 M2, final review A M2).
+    expect(order[0]).toBe(
+      `update:user:["emailVerified","username","displayUsername","phone","updatedAt"]`,
+    );
     expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
     const password = order.indexOf("delete:password");
     expect(password).toBeGreaterThan(0);
     expect(password).toBeLessThan(order.indexOf("delete:session"));
   });
+
+  it.each([
+    ["no keep", null],
+    ["keep.username", { username: true }],
+  ] as const)(
+    "clears the claimant's phone with %s (final review A M2 of plan 12i)",
+    async (_, keep) => {
+      // Core sets no phone on an unverified user. The compat store reads one
+      // from a Better Auth 1.7.2 row: a sign-up by address, then
+      // updatePhoneNumber with phoneNumberVerified true.
+      const { storage, now } = await unverifiedWithPassword();
+      await storage.update("user", [{ field: "id", op: "eq", value: "u1" }], {
+        phone: "+14155550177",
+      });
+      const verified = await checkedFor(storage, "u1");
+      await storage.transaction((tx) => claimEmail(tx, "u1", keep, now, verified));
+      const user = await storage.findOne("user", [{ field: "id", op: "eq", value: "u1" }]);
+      expect({ verified: user?.emailVerified, phone: user?.phone }).toEqual({
+        verified: true,
+        phone: null,
+      });
+    },
+  );
 });
 
 describe("validUserName (exported for the importer, plan 9b)", () => {
@@ -537,6 +597,10 @@ describe("claimEmail needs user.beforeVerify first (plan 12a, Task 18)", () => {
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: now,
         updatedAt: now,
       });

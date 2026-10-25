@@ -110,6 +110,10 @@ export function mappingCases(
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: at,
       updatedAt: at,
     });
@@ -121,7 +125,8 @@ export function mappingCases(
       return { adapter: db(), close: truncate };
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
-    // The D1 suite adds the ping row of plan 12h through `conformance`.
+    // The D1 suite adds the ping row of plan 12h through `conformance`. A null address
+    // is Better Auth's placeholder in the table since plan 12i Task 16, and reads back as null.
     { updateInTransaction: 2, ...conformance },
   );
 
@@ -136,6 +141,7 @@ export function mappingCases(
         close: truncate,
       };
     },
+    // A null address is Better Auth's placeholder in the table since plan 12i Task 16.
     { parents: ["user", "organization", "team"] },
   );
 
@@ -223,6 +229,10 @@ export function mappingCases(
             bannedAt: null,
             banReason: null,
             banUntil: null,
+            username: null,
+            displayUsername: null,
+            phone: null,
+            isAnonymous: false,
             createdAt: at,
             updatedAt: at,
           });
@@ -245,6 +255,10 @@ export function mappingCases(
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: at,
         updatedAt: at,
       });
@@ -275,6 +289,10 @@ export function mappingCases(
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: at,
         updatedAt: at,
       });
@@ -312,6 +330,10 @@ export function mappingCases(
             bannedAt: null,
             banReason: null,
             banUntil: null,
+            username: null,
+            displayUsername: null,
+            phone: null,
+            isAnonymous: false,
             createdAt: at,
             updatedAt: at,
           });
@@ -351,6 +373,10 @@ export function mappingCases(
             bannedAt: null,
             banReason: null,
             banUntil: null,
+            username: null,
+            displayUsername: null,
+            phone: null,
+            isAnonymous: false,
             createdAt: at,
             updatedAt: at,
           });
@@ -384,6 +410,10 @@ export function mappingCases(
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: at,
         updatedAt: at,
       });
@@ -412,6 +442,9 @@ export function mappingCases(
         transports: null,
         deviceType: "multiDevice",
         backedUp: true,
+        discoverable: null,
+        prf: false,
+        largeBlob: false,
         name: null,
         createdAt: at,
         updatedAt: at,

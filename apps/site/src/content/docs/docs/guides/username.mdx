@@ -1,0 +1,78 @@
+---
+title: Sign in with a username
+description: Give each account a public username, and let the password sign-in take it in place of the address.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 3"
+  - packages/core/src/engine/username.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/username.ts?raw";
+import test from "../../../../../samples/guides/username.test.ts?raw";
+
+**For:** an app developer whose users have a handle, such as a forum or a game.
+
+**What it does:** `username` adds `GET /username/available` and `POST /user/username`. `POST /password/sign-in` then takes `username` in place of `email`.
+
+## Before you start
+
+- Password sign-in, as in [Passwords](/docs/guides/password/).
+- A fresh session for the person who sets a name, as in [Fresh sessions](/docs/concepts/fresh-sessions/).
+
+## Steps
+
+1. Set `username` to `{}`, or to an object with `minLength`, `maxLength`, and `reserved`.
+2. On the sign-up form, call `GET /username/available?username=<name>` as the person types.
+3. After the confirm of the address, post `{ username }` to `POST /user/username`.
+4. On the sign-in form, post `{ username, password }` to `POST /password/sign-in`.
+5. Show the `displayUsername` of the answer. Store nothing of your own about the name.
+6. In a browser app, call `client.username.available` and `client.username.set` of the [client package](/docs/reference/client/).
+
+<Code code={config} lang="ts" title="The username in the config" />
+
+<Code code={test} lang="ts" title="The username as a test" />
+
+## How it behaves
+
+- The stored form is the NFKC form in lower case, and it matches `^[a-z0-9_.]+$`. `displayUsername` keeps the case that the person typed.
+- A username holds no `@` and no `+`. So the sign-in never reads a username as an address or a phone.
+- The length is 3 to 30 characters after NFKC by default. `minLength` and `maxLength` narrow it, each from 3 to 30.
+- Core always reserves the organization slugs, `root`, `support`, `security`, and `admin`. `reserved` adds your names. The check reads the stored form, so `Admin` is reserved too.
+- `POST /user/username` needs a fresh session and a proved handle: a verified address, a phone that signs in, or a passkey. A notice goes to the address of the user.
+- The old name is free at once. Of two people who set one name at the same time, one gets `username_taken`.
+- The sign-up takes `username` only with `password.uniformSignUp: false`. With the uniform answer, a name at sign-up would tell a known address from a new one. So the person sets the name after the confirm.
+- A proof of the address on an unverified account clears the username that a claimant chose. Only the confirm link of the sign-up that named the name keeps it.
+- The sign-in by username runs the dummy hash for an unknown name. An unknown name and a wrong password both answer `invalid_credentials`.
+- The limits: `username-available:ip` 30 per 15 minutes, `username:user` 5 per hour, and `password:username` 10 per 15 minutes on the stored form.
+- An anonymous session cannot set a username: `POST /user/username` answers `anonymous_refused`.
+
+## Residuals
+
+- A username is public by design. `GET /username/available` tells whether an account holds a name, and the name tells a guesser which account to try.
+- Each kind of identifier has its own limit, so the limits add up. One account takes up to 20 guesses per 15 minutes by address and username, and 30 with a phone. `password:ip` bounds each IP at 20.
+- An unknown name reads one store query less than a wrong password. On a slow store, the time can tell that a name exists. The name is public in any case.
+- A freed name has no hold period. Another person can take it at once, and old links to it then name that person.
+
+## If it fails
+
+- [`username_invalid`](/docs/reference/errors/#username_invalid): the name breaks the length, the character rule, or the reserved list.
+- [`username_taken`](/docs/reference/errors/#username_taken): another account holds the stored form of the name.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): the name or the password is wrong.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): the user has no proved handle. Confirm the address first.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): sign in again, then set the name.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the sign-in body has two identifiers or none, or the sign-up has a name under the uniform answer.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many checks from the IP, sets by the user, or tries for the name.
+- [`anonymous_refused`](/docs/reference/errors/#anonymous_refused): an anonymous session tried to set a name.
+- [`conflict`](/docs/reference/errors/#conflict): a parallel write won five rounds of the set. Core writes the line `username.set_gave_up`. Send the name again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the change or threw.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an operator who impersonates a user cannot set the name.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /user/username` needs a session.
+
+## Next
+
+- [Passwords](/docs/guides/password/)
+- [Username](/docs/reference/config/#username)
+- [Limits](/docs/reference/limits/)

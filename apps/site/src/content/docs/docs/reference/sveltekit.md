@@ -25,6 +25,7 @@ sidebar:
 2. Add no route file: the hook sends each request of core to core.
 3. Read the session in a load or an action: `locals.session`.
 4. Protect paths: `authHandle({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+5. On Workers with `@sveltejs/adapter-cloudflare` 8, pass the hook of the runtime: `authHandle({ auth: getAuth, waitUntil })`, with `import { waitUntil } from "cloudflare:workers"`. Adapter 8 sets no `event.platform`.
 
 ## Exports
 
@@ -34,7 +35,7 @@ sidebar:
 | --- | --- |
 | `authHandle` | Answers the `handle` hook: a request under the base path goes to core, and every other request gets `locals.session`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request, so `vite build` reads no secret. |
-| `SvelteKitAuthOptions` | The options of `authHandle`: `auth`, `protect`, `signInPath`, and `basePath`. |
+| `SvelteKitAuthOptions` | The options of `authHandle`: `auth`, `protect`, `signInPath`, `basePath`, and `waitUntil`. `waitUntil` keeps work alive after the answer. Default: the `waitUntil` of `event.platform.ctx`, then of the deprecated `event.platform.context`. Adapter 7 sets both, and adapter 8 sets neither. |
 
 ### The store entry
 
@@ -58,6 +59,8 @@ sidebar:
 
 ## How it behaves
 
+- A request of core gets the `waitUntil` of the option, else that of `event.platform.ctx`, else that of `event.platform.context`. The SMS of a phone code and the flush of the events run under it after the answer. With none, the work runs detached. On Workers core then waits for the work before it answers (ruling 29 of plan 12i).
+- `@sveltejs/adapter-cloudflare` 8, the adapter for Kit 3, sets no `event.platform`. On Workers with it, pass `authHandle({ auth: getAuth, waitUntil })`, with `waitUntil` of `cloudflare:workers`. Without the option, the answer time can tell a known number, and core writes `observe.wait_until_missing`.
 - The package takes `@sveltejs/kit` 3.0.1 or a later 3 release as a peer dependency.
 - `getAuth` is a function that makes the auth instance at the first request, so `vite build` reads no secret.
 - Put other hooks beside it with `sequence` of `@sveltejs/kit/hooks`.

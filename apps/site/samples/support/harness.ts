@@ -1,9 +1,12 @@
 import {
   type Auth,
   createMemoryAdapter,
+  createMemoryLimiter,
+  type LimiterPort,
   type MailMessage,
   type MailPort,
   type StorageAdapter,
+  systemClock,
 } from "@authtempo/core";
 
 // The test side of the samples. No page includes this file.
@@ -37,6 +40,15 @@ export function harness(): Harness {
   };
 }
 
+/**
+ * A memory limiter that says it is shared, for the construct check. It is a
+ * test of one process: the counts stay in this isolate. Never use it in an app.
+ */
+export function sharedTestLimiter(): LimiterPort {
+  const memory = createMemoryLimiter(systemClock);
+  return { allow: (key, window) => memory.allow(key, window), scope: "shared" };
+}
+
 export function lastMailTo(h: Harness, to: string): MailMessage {
   const m = h.sent.filter((x) => x.to === to).at(-1);
   if (!m) throw new Error(`no mail to ${to}`);
@@ -65,16 +77,38 @@ export function call(
   body?: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> {
-  return auth.handle(
-    new Request(`${API}${path}`, {
-      method,
-      headers: {
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
-        ...headers,
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    }),
-  );
+  return auth.handle(request(method, path, body, headers));
+}
+
+/**
+ * `call` with a `waitUntil` that the call waits for, as a host keeps that
+ * work alive. The work after the answer, such as the uniform sign-up mail,
+ * has then run. The flush of the observer runs under it too.
+ */
+export async function callSettled(
+  auth: Auth,
+  method: "GET" | "POST" | "OPTIONS",
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const after: Promise<unknown>[] = [];
+  const res = await auth.handle(request(method, path, body, headers), {
+    waitUntil: (work) => void after.push(work),
+  });
+  await Promise.all(after);
+  return res;
+}
+
+function request(method: string, path: string, body: unknown, headers: Record<string, string>) {
+  return new Request(`${API}${path}`, {
+    method,
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...headers,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
 }
 
 /** The `__Host-tempo_session=…` pair that a response sets, or "" when it sets none. */

@@ -1,5 +1,6 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
 import {
   publicSession,
@@ -14,12 +15,19 @@ import { sessionCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
-import type { Route } from "../router.js";
-import { challengePageUrl, trustTokenOf, twoFactorJson } from "../session-answer.js";
+import type { Route, RouteContext } from "../router.js";
+import {
+  challengePageUrl,
+  trustTokenOf,
+  twoFactorJson,
+  viaField,
+  withLastMethod,
+} from "../session-answer.js";
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   return [
     {
       method: "POST",
@@ -34,6 +42,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
             next: body.value.next,
             ip: ctx.ip,
             captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
           }),
         );
       },
@@ -47,7 +56,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       key: "GET /magic-link/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         const html = ctx.config.magicLink.confirmPage({
           action: verifyPath,
           token,
@@ -68,14 +77,16 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         const body = await readBody(ctx.request, verifyBody);
         // A form with no token is a client bug, not a user error. The
         // person sees the same page they see for a bad link.
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const result = await verifyMagicLink(ctx.config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
-        if (!result.ok) return jsonCaller ? respond(result) : failed(result.code);
+        if (!result.ok) return jsonCaller ? respond(result) : failed(ctx, result.code);
         // A user with the second factor on (plan 12c): no cookie. A form goes
         // to the challenge page, whose row holds the link's `next`.
         if ("twoFactor" in result.value)
@@ -98,11 +109,18 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
             readModeOf(ctx.config, ctx.request),
           );
           if (!resolved) return respond(fail("invalid_token"));
-          return json(publicSession(resolved), 200, { "set-cookie": cookie });
+          return withLastMethod(
+            ctx.config,
+            ctx.request,
+            json({ ...publicSession(resolved), ...viaField(ctx.config, "magic_link") }, 200, {
+              "set-cookie": cookie,
+            }),
+            "magic_link",
+          );
         }
         const res = redirect(resolveNext(ctx.config, result.value.next));
         res.headers.set("set-cookie", cookie);
-        return res;
+        return withLastMethod(ctx.config, ctx.request, res, "magic_link");
       },
     },
   ];

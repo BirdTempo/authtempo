@@ -11,14 +11,17 @@ import {
   type UserHooks,
   type UserRow,
 } from "@authtempo/core";
+import { isPlaceholder } from "../storage/placeholder.js";
 import type {
   AccountHookFields,
   BetterAuthOptions,
+  CompatDatabase,
   OrganizationHookOptions,
+  Session,
   SessionDraftFields,
   User,
 } from "../types.js";
-import { pluginOf } from "./check-options.js";
+import { pluginIdsOf, pluginOf } from "./check-options.js";
 import {
   toInvitation,
   toMember,
@@ -33,7 +36,8 @@ import {
  * Where Better Auth 1.7.2 calls `emailVerification.beforeEmailVerification`
  * and `afterEmailVerification` (read 2026-10-17). `null` is no call. The
  * shim calls them at core's claim points and at both changes of address. Better Auth's
- * `/email-otp/verify-email` answers NOT_SUPPORTED in the shim.
+ * `/email-otp/verify-email` is core's sign-up code with
+ * `overrideDefaultEmailVerification` (plan 12i Task 20), and NOT_SUPPORTED without it.
  */
 export const VERIFY_CALLBACK_PLACES = {
   verifyLink: { before: "dist/api/routes/email-verification.mjs:294", after: ":296" },
@@ -104,12 +108,13 @@ async function callHook(
 function organizationHooksOf(
   h: OrganizationHookOptions,
   limit: OrganizationLimitFn | null,
+  plugins: ReadonlySet<string>,
 ): OrganizationHooks {
   const out: OrganizationHooks = {};
   const beforeCreate = h.beforeCreateOrganization;
   if (beforeCreate || limit)
     out.beforeCreate = async (e) => {
-      const user = toUser(e.user);
+      const user = toUser(e.user, plugins);
       // Better Auth runs the function limit before beforeCreateOrganization, and a truthy
       // answer means the user is at the limit (crud-org.mjs:61-64, read 2026-10-13).
       if (limit && (await refusingApiErrors(() => limit(user))))
@@ -140,7 +145,7 @@ function organizationHooksOf(
         {
           organization: toOrganization(e.organization),
           member: toMember(e.organization.id, e.member),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
         },
         null,
       );
@@ -154,7 +159,7 @@ function organizationHooksOf(
         beforeUpdate,
         {
           organization,
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           member: toMember(e.organization.id, e.member),
         },
         organization,
@@ -168,7 +173,7 @@ function organizationHooksOf(
         afterUpdate,
         {
           organization: toOrganization(e.organization),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           member: toMember(e.organization.id, e.member),
         },
         null,
@@ -179,7 +184,7 @@ function organizationHooksOf(
       callHook(
         "beforeDeleteOrganization",
         beforeDelete,
-        { organization: toOrganization(e.organization), user: toUser(e.user) },
+        { organization: toOrganization(e.organization), user: toUser(e.user, plugins) },
         null,
       );
   const afterDelete = h.afterDeleteOrganization;
@@ -188,7 +193,7 @@ function organizationHooksOf(
       callHook(
         "afterDeleteOrganization",
         afterDelete,
-        { organization: toOrganization(e.organization), user: toUser(e.user) },
+        { organization: toOrganization(e.organization), user: toUser(e.user, plugins) },
         null,
       );
   const beforeAdd = h.beforeAddMember;
@@ -196,7 +201,7 @@ function organizationHooksOf(
   if (beforeAdd || beforeAccept)
     out.beforeAddMember = async (e) => {
       const organization = toOrganization(e.organization);
-      const user = toUser(e.memberUser);
+      const user = toUser(e.memberUser, plugins);
       // Better Auth runs beforeAcceptInvitation on an accept (crud-invites.mjs:280), and
       // beforeAddMember on a create or an add (crud-org.mjs:85, crud-members.mjs:75).
       if (e.via === "invitation") {
@@ -231,7 +236,7 @@ function organizationHooksOf(
         afterAdd,
         {
           member: toMember(e.organization.id, e.member),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -247,7 +252,7 @@ function organizationHooksOf(
         {
           member,
           newRole: e.role,
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         { ...member, role: e.role },
@@ -262,7 +267,7 @@ function organizationHooksOf(
         {
           member: toMember(e.organization.id, e.member),
           previousRole: e.previousRole,
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -275,7 +280,7 @@ function organizationHooksOf(
         beforeRemove,
         {
           member: toMember(e.organization.id, e.member),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -288,7 +293,7 @@ function organizationHooksOf(
         afterRemove,
         {
           member: toMember(e.organization.id, e.member),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -305,7 +310,11 @@ function organizationHooksOf(
       return callHook(
         "beforeCreateInvitation",
         beforeInvite,
-        { invitation, inviter: toUser(e.by), organization: toOrganization(e.organization) },
+        {
+          invitation,
+          inviter: toUser(e.by, plugins),
+          organization: toOrganization(e.organization),
+        },
         invitation,
       );
     };
@@ -317,7 +326,7 @@ function organizationHooksOf(
         afterInvite,
         {
           invitation: toInvitation(e.invitation, e.invitation.id, "pending"),
-          inviter: toUser(e.by),
+          inviter: toUser(e.by, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -331,7 +340,7 @@ function organizationHooksOf(
         {
           invitation: toInvitation(e.invitation, e.invitation.id, "accepted"),
           member: toMember(e.organization.id, e.member),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -344,7 +353,7 @@ function organizationHooksOf(
         afterReject,
         {
           invitation: toInvitation(e.invitation, e.invitation.id, "rejected"),
-          user: e.user ? toUser(e.user) : null,
+          user: e.user ? toUser(e.user, plugins) : null,
           organization: toOrganization(e.organization),
         },
         null,
@@ -357,12 +366,12 @@ function organizationHooksOf(
         afterCancel,
         {
           invitation: toInvitation(e.invitation, e.invitation.id, "canceled"),
-          cancelledBy: toUser(e.by),
+          cancelledBy: toUser(e.by, plugins),
           organization: toOrganization(e.organization),
         },
         null,
       );
-  teamHooksOf(h, out);
+  teamHooksOf(h, out, plugins);
   return out;
 }
 
@@ -375,7 +384,11 @@ function organizationHooksOf(
  * team hook for the default team of a create; Better Auth fires the two
  * create hooks there (routes/crud-org.mjs:112 and :131).
  */
-function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
+function teamHooksOf(
+  h: OrganizationHookOptions,
+  out: OrganizationHooks,
+  plugins: ReadonlySet<string>,
+): void {
   const beforeCreate = h.beforeCreateTeam;
   if (beforeCreate)
     out.beforeCreateTeam = (e) => {
@@ -383,7 +396,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
       return callHook(
         "beforeCreateTeam",
         beforeCreate,
-        { team, user: toUser(e.user), organization: toOrganization(e.organization) },
+        { team, user: toUser(e.user, plugins), organization: toOrganization(e.organization) },
         team,
       );
     };
@@ -395,7 +408,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         afterCreate,
         {
           team: toTeam(e.team),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -410,7 +423,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         {
           team: toTeam(e.team),
           updates,
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         updates,
@@ -424,7 +437,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         afterUpdate,
         {
           team: toTeam(e.team),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -437,7 +450,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         beforeDelete,
         {
           team: toTeam(e.team),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -450,7 +463,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         afterDelete,
         {
           team: toTeam(e.team),
-          user: toUser(e.user),
+          user: toUser(e.user, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -464,7 +477,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         {
           teamMember: { teamId: e.teamMember.teamId, userId: e.teamMember.userId },
           team: toTeam(e.team),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -478,7 +491,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         {
           teamMember: toTeamMember(e.teamMember),
           team: toTeam(e.team),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -492,7 +505,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         {
           teamMember: toTeamMember(e.teamMember),
           team: toTeam(e.team),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -506,7 +519,7 @@ function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
         {
           teamMember: toTeamMember(e.teamMember),
           team: toTeam(e.team),
-          user: toUser(e.memberUser),
+          user: toUser(e.memberUser, plugins),
           organization: toOrganization(e.organization),
         },
         null,
@@ -589,6 +602,7 @@ function sessionHooksOf(create: SessionCreateHooks | undefined): SessionHooks {
  * hook is logged, and the answer stands; Better Auth answers the error.
  */
 function userHooksOf(options: BetterAuthOptions): UserHooks {
+  const plugins = pluginIdsOf(options);
   const db = options.databaseHooks?.user;
   const del = options.user?.deleteUser;
   const out: UserHooks = {};
@@ -596,7 +610,7 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
   if (createBefore) {
     let warned = false;
     out.beforeCreate = async (e) => {
-      const given = toUser(e.user);
+      const given = toUser(e.user, plugins);
       const answer = await refusingApiErrors(() => createBefore({ ...given }, null));
       if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
       if (!isRecord(answer) || !isRecord(answer.data)) return undefined;
@@ -620,7 +634,7 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
     };
   }
   const createAfter = db?.create?.after;
-  if (createAfter) out.afterCreate = async (e) => createAfter(toUser(e.user), null);
+  if (createAfter) out.afterCreate = async (e) => createAfter(toUser(e.user, plugins), null);
   const updateBefore = db?.update?.before;
   if (updateBefore) {
     let warned = false;
@@ -645,21 +659,21 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
   if (updateAfter || changeAfter)
     out.afterUpdate = async (e) => {
       try {
-        await updateAfter?.(toUser(e.user), null);
+        await updateAfter?.(toUser(e.user, plugins), null);
       } finally {
         // Better Auth 1.7.2 calls it after each change of address (VERIFY_CALLBACK_PLACES).
-        if (changeAfter && e.via === "email_change") await changeAfter(toUser(e.user));
+        if (changeAfter && e.via === "email_change") await changeAfter(toUser(e.user, plugins));
       }
     };
   const verifyBefore = options.emailVerification?.beforeEmailVerification;
   if (verifyBefore)
     out.beforeVerify = async (e) => {
-      await refusingApiErrors(() => verifyBefore(toUser(e.user)));
+      await refusingApiErrors(() => verifyBefore(toUser(e.user, plugins)));
     };
   const verifyAfter = options.emailVerification?.afterEmailVerification;
   if (verifyAfter)
     out.afterVerify = async (e) => {
-      await verifyAfter(toUser(e.user));
+      await verifyAfter(toUser(e.user, plugins));
     };
   const beforeDeletes: ((u: User) => unknown)[] = [];
   const dbBefore = db?.delete?.before;
@@ -667,7 +681,7 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
   if (dbBefore) beforeDeletes.push((u) => dbBefore(u, null));
   if (beforeDeletes.length > 0)
     out.beforeDelete = async (e) => {
-      const user = toUser(e.user);
+      const user = toUser(e.user, plugins);
       for (const hook of beforeDeletes) {
         const answer = await refusingApiErrors(() => hook({ ...user }));
         if (answer === false) throw hookRefusal(HOOK_REFUSED_TEXT);
@@ -679,10 +693,42 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
   if (del?.afterDelete) afterDeletes.push(del.afterDelete);
   if (afterDeletes.length > 0)
     out.afterDelete = async (e) => {
-      const user = toUser(e.user);
+      const user = toUser(e.user, plugins);
       for (const hook of afterDeletes) await hook({ ...user });
     };
-  return out;
+  return withPlaceholderGuard(options, out);
+}
+
+/** The text of the refusal of an address in a placeholder form (ruling 42 L1). */
+export const PLACEHOLDER_ADDRESS_TEXT =
+  "This address has the form of a placeholder address, which reads as no address. Use another address.";
+
+/**
+ * Refuses a user create or a change of address to an address that the
+ * storage reads back as no address (ruling 42 L1). Without this, the
+ * storage throws at the write and core answers 500. Core runs these hooks
+ * before the first write of each flow, so the refusal is `hook_refused`
+ * (403) with no write. The check runs before the app's hook. Better Auth
+ * takes such an address; the README says so.
+ */
+function withPlaceholderGuard(options: BetterAuthOptions, hooks: UserHooks): UserHooks {
+  const domain = pluginOf(options, "anonymous")?.options.emailDomainName ?? null;
+  const refuse = (email: string | null | undefined, id: string) => {
+    if (typeof email === "string" && isPlaceholder(email, domain, id))
+      throw hookRefusal(PLACEHOLDER_ADDRESS_TEXT);
+  };
+  const { beforeCreate, beforeUpdate } = hooks;
+  return {
+    ...hooks,
+    beforeCreate: async (e) => {
+      refuse(e.user.email, e.user.id);
+      return beforeCreate?.(e);
+    },
+    beforeUpdate: async (e) => {
+      refuse(e.patch.email, e.user.id);
+      return beforeUpdate?.(e);
+    },
+  };
 }
 
 type AccountHook = (account: AccountHookFields, context: null) => unknown;
@@ -733,11 +779,85 @@ export function compatHooks(options: BetterAuthOptions): HooksConfig {
   const org = pluginOf(options, "organization")?.options;
   const limit = org && typeof org.organizationLimit === "function" ? org.organizationLimit : null;
   return {
-    ...(org ? { organization: organizationHooksOf(org.organizationHooks ?? {}, limit) } : {}),
+    ...(org
+      ? {
+          organization: organizationHooksOf(
+            org.organizationHooks ?? {},
+            limit,
+            pluginIdsOf(options),
+          ),
+        }
+      : {}),
     session: sessionHooksOf(options.databaseHooks?.session?.create),
-    user: userHooksOf(options),
+    user: withPluginNames(options, userHooksOf(options)),
     identity: identityHooksOf(options),
     ...ssoHooksOf(options),
+    ...anonymousHooksOf(options),
+  };
+}
+
+/**
+ * The name of a user that the anonymous or the phone-number plugin makes,
+ * as Better Auth 1.7.2 names it (plan 12i Task 16). The anonymous name is
+ * `generateName()`, else "Anonymous" (anonymous/index.mjs:97). The phone
+ * name is `getTempName(phone)`, else the number (phone-number/routes.mjs:367). The name is set before
+ * `databaseHooks.user.create.before` runs, and that hook may change it.
+ */
+function withPluginNames(options: BetterAuthOptions, hooks: UserHooks): UserHooks {
+  const anon = pluginOf(options, "anonymous")?.options;
+  const temp = pluginOf(options, "phone-number")?.options.signUpOnVerification;
+  if (!anon && !temp) return hooks;
+  const inner = hooks.beforeCreate;
+  const nameOf = async (e: { user: UserRow; via: string }): Promise<string | undefined> => {
+    if (e.via === "anonymous" && anon) return (await anon.generateName?.()) || "Anonymous";
+    if (e.via === "phone" && temp && e.user.phone !== null)
+      return temp.getTempName?.(e.user.phone) ?? e.user.phone;
+    return undefined;
+  };
+  return {
+    ...hooks,
+    async beforeCreate(e) {
+      const name = await refusingApiErrors(() => nameOf(e));
+      if (name === undefined) return inner?.(e);
+      const patch = await inner?.({ ...e, user: { ...e.user, name } });
+      return { name, ...(patch ?? {}) };
+    },
+  };
+}
+
+/**
+ * `onLinkAccount` of the anonymous plugin on core's
+ * `hooks.anonymous.afterLink` (plan 12i Task 16). It runs after the commit
+ * of a sign-in over an anonymous session, before core deletes the
+ * anonymous user. Better Auth calls it at the same point (anonymous/index.mjs:136).
+ * Core's event has no session, so the shim reads the newest session of
+ * each user: two reads. `proof` is core's: move the anonymous data only on
+ * `"verified"` (deviation 3). Better Auth calls the hook for both proofs, so
+ * the shim does too. A throw keeps the anonymous user, as core's hook does.
+ */
+function anonymousHooksOf(options: BetterAuthOptions): Pick<HooksConfig, "anonymous"> {
+  const link = pluginOf(options, "anonymous")?.options.onLinkAccount;
+  if (!link) return {};
+  const storage = (options.database as CompatDatabase).storage;
+  const plugins = pluginIdsOf(options);
+  const newest = async (userId: string): Promise<Session | null> => {
+    const rows = await storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]);
+    const row = rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    return row ? toSession(row, row.tokenHash) : null;
+  };
+  return {
+    anonymous: {
+      async afterLink(e) {
+        await link({
+          anonymousUser: {
+            user: { ...toUser(e.anonymousUser, plugins), isAnonymous: true },
+            session: await newest(e.anonymousUser.id),
+          },
+          newUser: { user: toUser(e.user, plugins), session: await newest(e.user.id) },
+          proof: e.proof,
+        });
+      },
+    },
   };
 }
 
@@ -754,13 +874,14 @@ function ssoHooksOf(options: BetterAuthOptions): Pick<HooksConfig, "sso"> {
   const provision = o?.provisionUser;
   if (!provision) return {};
   const everyLogin = o.provisionUserOnEveryLogin === true;
+  const plugins = pluginIdsOf(options);
   return {
     sso: {
       async beforeSignIn(e) {
         if (e.user !== null && !everyLogin) return;
         const { subject, email, name, image } = e.profile;
         await provision({
-          user: e.user === null ? null : toUser(e.user),
+          user: e.user === null ? null : toUser(e.user, plugins),
           userInfo: { id: subject, email, name, image },
           provider: { providerId: e.connection.label, organizationId: e.connection.organizationId },
         });

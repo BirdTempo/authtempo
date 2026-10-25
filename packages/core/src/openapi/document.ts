@@ -56,6 +56,7 @@ const RULES = [
   "The authtempo API: every route that core can serve under `basePath`. A deployment serves the operations of its features only.",
   "",
   "- A route that a config key turns off answers 404 `not_found`.",
+  "- With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.",
   "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
   '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.',
   "- An unhandled error answers 500 `internal` and writes one log line.",

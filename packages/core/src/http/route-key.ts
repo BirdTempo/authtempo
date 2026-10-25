@@ -15,15 +15,17 @@ export const PARAM_SEGMENT_RE = /^[A-Za-z0-9._:-]{1,128}$/;
  */
 export function routeKeyOf(method: string, path: string): string {
   const [head, social, provider, step, ...rest] = path.split("/");
+  const providerPath =
+    head === "" && social === "social" && provider !== undefined && PROVIDER_NAME_RE.test(provider);
   const providerStep =
+    providerPath &&
     rest.length === 0 &&
-    head === "" &&
-    social === "social" &&
-    provider !== undefined &&
-    PROVIDER_NAME_RE.test(provider) &&
-    (step === "start" || step === "callback" || step === "link");
+    (step === "start" || step === "callback" || step === "link" || step === "id-token");
   // Apple's POST callback is its own entry; its link is not.
   if (providerStep && !(method === "POST" && provider === "apple" && step === "callback"))
     return `${method} /social/:provider/${step}`;
+  // The nonce of the ID-token route (plan 12i Task 10).
+  if (providerPath && step === "id-token" && rest.length === 1 && rest[0] === "nonce")
+    return `${method} /social/:provider/id-token/nonce`;
   return `${method} ${path}`;
 }

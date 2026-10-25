@@ -23,10 +23,14 @@ export const SCHEME_NAMES = [
 ] as const;
 export type SchemeName = (typeof SCHEME_NAMES)[number];
 
-/** The schemes of each credential form. A session is the cookie or a bearer; `none` has no scheme. */
+/**
+ * The schemes of each credential form. A session is the cookie or a bearer;
+ * `sessionCookie` is the cookie only (plan 12i Task 11); `none` has no scheme.
+ */
 const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   none: [],
   session: ["sessionCookie", "sessionBearer"],
+  sessionCookie: ["sessionCookie"],
   apiToken: ["apiToken"],
   organizationToken: ["organizationToken"],
   sessionJwt: ["sessionJwt"],

@@ -98,6 +98,17 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   sso_not_provisioned: "Ask your organization to give you access first.",
   account_disabled: "Your organization turned off this account.",
   role_not_found: "The organization no longer has the role of this sign-in.",
+  passkey_unknown: "This site does not know this passkey. Use another passkey or another method.",
+  username_taken: "Another account has this username. Choose another username.",
+  username_invalid:
+    "Use letters, digits, the underscore, and the dot only. This username is not available.",
+  phone_invalid: "Enter the phone number with a plus sign and the country code.",
+  phone_region: "This app does not send codes to numbers of this country.",
+  sms_unavailable:
+    "The text message could not be sent now. Try again later, or use another method.",
+  host_not_allowed: "This server does not serve this address. Open the app at its usual address.",
+  phone_taken: "Another account has this phone number. Use another number.",
+  anonymous_refused: "A guest account cannot do this. Sign in or create an account first.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

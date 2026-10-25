@@ -79,6 +79,7 @@ function secretCodesOf(pick: (route: RouteEntry) => boolean): Set<string> {
 const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/operator\/(?!impersonate\/stop$)/, "each operator route but the stop"],
   [/^\/sign-out$/, "the sign-out"],
+  [/^\/multi-session(\/|$)/, "each multi-session route"],
   [/^\/reauth(\/|$)/, "the re-authentication"],
   [/^\/password\/change$/, "the password"],
   [/^\/passkey\/register\/|^\/passkeys\/delete$/, "a passkey"],
@@ -87,6 +88,11 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/social\/:provider\/link$/, "a social link"],
   [/^\/tokens$/, "a new API token"],
   [/^\/user\/delete(\/confirm)?$/, "the account delete"],
+  [/^\/user\/username$/, "the username"],
+  // Plan 12i Task 5: the add, its verify, and the remove of a phone.
+  [/^\/phone\/(add|add\/verify|remove)$/, "the phone"],
+  // Plan 12i Task 6: the delete of an anonymous user is an account delete.
+  [/^\/anonymous\/delete$/, "the delete of an anonymous user"],
   [/^\/totp(\/|$)|^\/second-factor\//, "each second-factor route"],
   [/^\/handoff\/start$/, "the handoff start"],
   [/^\/handoff\/continue$/, "the handoff continue"],

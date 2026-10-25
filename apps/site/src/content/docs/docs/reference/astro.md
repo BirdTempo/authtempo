@@ -24,6 +24,7 @@ sidebar:
 2. Read the session: `src/middleware.ts` holds `export const onRequest = authMiddleware({ auth: getAuth });`.
 3. Read the session in a page: `Astro.locals.session`.
 4. Protect paths: `authMiddleware({ auth: getAuth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
+5. On Workers with `@astrojs/cloudflare`, keep `authRoute(getAuth)`. The endpoint passes `locals.cfContext.waitUntil` to `handle` itself.
 
 ## Exports
 
@@ -32,6 +33,7 @@ sidebar:
 | `authRoute` | Answers the endpoint of the routes of core. |
 | `authMiddleware` | Answers the `onRequest` that sets `locals.session`, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request, so `astro build` reads no secret. |
+| `AstroRouteOptions` | The options of `authRoute`: `waitUntil`, the hook that keeps work alive after the answer. Default: `locals.cfContext.waitUntil` of the Cloudflare adapter. |
 | `AstroAuthOptions` | The options of `authMiddleware`: `auth`, `protect`, `signInPath`, and `basePath`. |
 
 ## The path that protect gets
@@ -45,6 +47,7 @@ sidebar:
 
 ## How it behaves
 
+- On Workers, `authRoute` gives `handle` the `waitUntil` of `locals.cfContext`, which `@astrojs/cloudflare` 14 sets. The SMS of a phone code and the flush of the events run under it after the answer. With no Cloudflare adapter, the work runs detached. Pass `authRoute(getAuth, { waitUntil })` to use another hook (ruling 29 of plan 12i).
 - The package takes `astro` 7.3.8 or a later 7 release as a peer dependency.
 - `getAuth` is a function that makes the auth instance at the first request, so `astro build` reads no secret.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.

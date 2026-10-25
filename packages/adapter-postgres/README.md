@@ -16,7 +16,24 @@ const auth = createAuth({ ...config, storage: createPostgresAdapter(sql) });
 
 Set `compatibility_flags: ["nodejs_compat"]` and connect through Hyperdrive
 with `max: 1`, `prepare: false`, and `fetch_types: false`. Create the
-client per request and call `sql.end({ timeout: 5 })` when the request ends.
+client per request. Call `sql.end({ timeout: 5 })` only after the work that
+`handle` passes to `waitUntil` settles. Some routes, such as the phone code
+request and the code-mode sign-up, write rows and send after the answer on
+this client. An end at once refuses those queries: the answer is 200, but no
+SMS, no mail, and no row go out. examples/worker-postgres shows the order:
+
+```ts
+const kept: Promise<unknown>[] = [];
+const waitUntil = (p: Promise<unknown>) => {
+  kept.push(p);
+  ctx.waitUntil(p);
+};
+try {
+  return await auth.handle(request, { waitUntil });
+} finally {
+  ctx.waitUntil(Promise.allSettled(kept).then(() => sql.end({ timeout: 5 })));
+}
+```
 
 With `max: 1`, a write outside an open transaction waits for that
 transaction's connection. The engine itself never does this. Since plan 9d
@@ -87,6 +104,8 @@ Version 12 (plan 12f, 2026-10-20) is the operator tools. It adds `banned_at`, `b
 Version 13 (plan 12k, 2026-10-20) is organizations and tokens, second version. It adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`: the scope, the window, the quota, and the retired mark. It adds the tables `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, and `ta_moved_token`, the record of each moved key. Each new column is nullable, with no default and no fill: a row of version 12 reads as before. Apply `0013_schema_v13` before you deploy a core at version 13; the adapter refuses a database at version 12.
 
 Version 14 (plan 12d, 2026-10-21) is enterprise SSO and SCIM. It adds the tables `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, and `ta_scim_group_member`. It changes no table of version 13: a row of version 13 reads as before. Apply `0014_schema_v14` before you deploy a core at version 14; the adapter refuses a database at version 13.
+
+Version 15 (plan 12i, 2026-10-24) is the account with no address. `ta_user.email` drops NOT NULL, and `ta_user` gets `username`, `display_username`, `phone`, and `is_anonymous` (default false), with a unique index on each of `username` and `phone`. `ta_passkey` gets `discoverable`, `prf`, and `large_blob`. `ta_oauth_session_client` and `ta_oauth_logout` get a nullable `issuer`: a logout token names the issuer that its client saw. A row of version 14 reads with no username, no phone, and not anonymous. Apply `0015_schema_v15` before you deploy a core at version 15; the adapter refuses a database at version 14.
 
 ## Limiter
 

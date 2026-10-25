@@ -302,3 +302,52 @@ describe("@authtempo/astro (plan 11d2)", () => {
     expect(() => authMiddleware({ auth, protect: () => true })).toThrow(/signInPath/);
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options. `Ctx` throws on an unbound call, as the ExecutionContext of Workers does.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+class Ctx {
+  held: Promise<unknown>[] = [];
+  props = {};
+  waitUntil(promise: Promise<unknown>): void {
+    if (!(this instanceof Ctx)) throw new TypeError("Illegal invocation");
+    this.held.push(promise);
+  }
+  passThroughOnException(): void {}
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  const at = (locals: object) =>
+    ({ request: new Request(`${BASE}/auth/x`), locals }) as unknown as APIContext;
+
+  it("passes locals.cfContext of Workers, the option in its place, or none", async () => {
+    const s = waitSpy();
+    const ctx = new Ctx();
+    await authRoute(s.auth)(at({ cfContext: ctx }));
+    expect(ctx.held).toEqual([s.work]);
+    // With no Cloudflare adapter, locals holds no cfContext: handle gets no options.
+    await authRoute(s.auth)(at({}));
+    expect(s.got).toEqual(["options", "none"]);
+    const seen: [Promise<unknown>, unknown][] = [];
+    const unused = new Ctx();
+    const context = at({ cfContext: unused });
+    await authRoute(s.auth, { waitUntil: (p, c) => void seen.push([p, c]) })(context);
+    expect(seen).toEqual([[s.work, context]]);
+    expect(unused.held).toEqual([]);
+  });
+});

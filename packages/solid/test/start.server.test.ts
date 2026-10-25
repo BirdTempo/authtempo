@@ -506,3 +506,50 @@ describe("@authtempo/solid/start (plan 11d2)", () => {
     expect(getSession({ locals: {} })).toBeNull();
   });
 });
+
+/**
+ * A stand-in for core whose `handle` gives one promise to the `waitUntil`
+ * it gets (ruling 29 of plan 12i). `got` holds "none" for a call with no
+ * options. `Ctx` throws on an unbound call, as the ExecutionContext of Workers does.
+ */
+function waitSpy() {
+  const work = Promise.resolve();
+  const got: string[] = [];
+  const auth = {
+    async handle(_request: Request, options?: { waitUntil?: (p: Promise<unknown>) => void }) {
+      got.push(options === undefined ? "none" : "options");
+      options?.waitUntil?.(work);
+      return new Response("ok");
+    },
+  };
+  return { auth, work, got };
+}
+
+class Ctx {
+  held: Promise<unknown>[] = [];
+  props = {};
+  waitUntil(promise: Promise<unknown>): void {
+    if (!(this instanceof Ctx)) throw new TypeError("Illegal invocation");
+    this.held.push(promise);
+  }
+  passThroughOnException(): void {}
+}
+
+describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
+  it("passes the waitUntil of the srvx request, the option in its place, or none", async () => {
+    const s = waitSpy();
+    const request = new Request(`${BASE}/auth/x`, { method: "POST" });
+    const req = new Ctx();
+    await authRouteHandlers(s.auth).POST({ request, nativeEvent: { req } });
+    expect(req.held).toEqual([s.work]);
+    // A request with no hook (srvx on Node may set none): handle gets no options.
+    await authRouteHandlers(s.auth).POST({ request, nativeEvent: { req: {} } });
+    expect(s.got).toEqual(["options", "none"]);
+    const seen: [Promise<unknown>, unknown][] = [];
+    const unused = new Ctx();
+    const event = { request, nativeEvent: { req: unused } };
+    await authRouteHandlers(s.auth, { waitUntil: (p, e) => void seen.push([p, e]) }).POST(event);
+    expect(seen).toEqual([[s.work, event]]);
+    expect(unused.held).toEqual([]);
+  });
+});

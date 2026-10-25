@@ -586,6 +586,25 @@ describe("the Better Auth account paths (plan 12a)", () => {
     });
   });
 
+  it("refuses additionalData at /link-social, because no shim hook can read it", async () => {
+    const t = instance({ socialProviders: { google: { clientId: "gid", clientSecret: "gs" } } });
+    const a = await t.signedIn("ada@example.com");
+    const res = await t.post(
+      "/link-social",
+      { provider: "google", additionalData: { plan: "pro" } },
+      a.cookie,
+    );
+    expect(res.status).toBe(501);
+    expect(await res.json()).toEqual({
+      code: "NOT_SUPPORTED",
+      message:
+        "core takes no additionalData through the shim: use social.stateData of core's createAuth, and read stateData in its hooks.session.afterCreate and hooks.identity.afterLink",
+    });
+    // A link with no payload still starts.
+    const ok = await t.post("/link-social", { provider: "google" }, a.cookie);
+    expect(ok.status).toBe(200);
+  });
+
   it("changes the address by an email code with emailOTP changeEmail on, and refuses a code for another address", async () => {
     const codes: { email: string; otp: string; type: string }[] = [];
     const t = instance({}, [

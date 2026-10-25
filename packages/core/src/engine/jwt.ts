@@ -22,6 +22,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { bannedFor } from "./operator/ban-rule.js";
 import { impersonationLoss, revokedFor } from "./operator/guards.js";
 import { sessionIsLive } from "./sessions.js";
@@ -75,8 +76,9 @@ export interface SessionJwtClaims {
   iat: number;
   exp: number;
   sid: string;
-  email: string;
-  email_verified: boolean;
+  /** Absent for a user with no address (plan 12i), with `email_verified`. */
+  email?: string;
+  email_verified?: boolean;
   name: string | null;
   org: string | null;
   /** The operator of an impersonation session (RFC 8693 section 4.1, plan 12f). Absent otherwise. */
@@ -92,6 +94,20 @@ export interface MintedJwt {
 /** `baseURL + basePath`: the `iss` of every token core signs, and the OAuth issuer. */
 export function issuerOf(config: ResolvedConfig): string {
   return `${config.baseURL}${config.basePath}`;
+}
+
+/** The issuer of the primary entry of `baseURL`: core's issuer outside a request. */
+export function primaryIssuer(config: ResolvedConfig): string {
+  return `${config.baseURLs[0] ?? config.baseURL}${config.basePath}`;
+}
+
+/**
+ * The entry of `baseURLs` whose issuer is `iss`, or null (plan 12i Task 18).
+ * A JWT verify takes the issuer of any entry: one key signs for all of them.
+ */
+export function entryOfIssuer(config: ResolvedConfig, iss: unknown): string | null {
+  if (typeof iss !== "string") return null;
+  return config.baseURLs.find((entry) => `${entry}${config.basePath}` === iss) ?? null;
 }
 
 /** The minting config. A route or an API call that reaches here exists only while it is on. */
@@ -390,8 +406,7 @@ export async function mintSessionJwt(
     iat,
     exp,
     sid: session.id,
-    email: user.email,
-    email_verified: user.emailVerified,
+    ...(hasAddress(user) ? { email: user.email, email_verified: user.emailVerified } : {}),
     name: user.name,
     org: session.activeOrganizationId,
     // RFC 8693 section 4.1: the actor who acts for the subject.
@@ -418,11 +433,13 @@ export async function verifySessionJwt(
   if (d?.header.typ !== SESSION_JWT_TYPE) return null;
   const p = d.payload;
   const now = Math.floor(config.clock.now().getTime() / 1000);
-  if (p.iss !== issuerOf(config) || typeof p.sub !== "string" || typeof p.sid !== "string")
-    return null;
+  const entry = entryOfIssuer(config, p.iss);
+  if (entry === null || typeof p.sub !== "string" || typeof p.sid !== "string") return null;
   if (typeof p.exp !== "number" || p.exp <= now) return null;
   const aud: unknown[] = typeof p.aud === "string" ? [p.aud] : Array.isArray(p.aud) ? p.aud : [];
-  if (!aud.some((a) => typeof a === "string" && mint.audience.includes(a))) return null;
+  // A default audience is the entry that minted the token, as the mint wrote it.
+  const accepted = config.baseDefaults.audience ? [entry] : mint.audience;
+  if (!aud.some((a) => typeof a === "string" && accepted.includes(a))) return null;
   return p as SessionJwtClaims;
 }
 

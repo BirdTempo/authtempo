@@ -39,6 +39,15 @@ export const DEMO_EXEMPT = {
   // Ruling 33 of the lane: the owner may move it later.
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
   readiness: "A probe for a host, not a sign-in method.",
+  passkeyRelatedOrigins: "The demo has one origin, so it has no related origin to list.",
+  username: "The demo signs in by a mailed link and a passkey, so it has no name to sign in with.",
+  phone:
+    "The demo sends no SMS: a supplier costs money per text, and the demo has no number to prove.",
+  anonymous: "A guest has no way back in, and the demo shows the ways in.",
+  multiSession:
+    "The demo shows one visitor's own account, so it keeps one session in each browser.",
+  socialIdToken: "The demo provider issues no ID token, and the demo has no Google or Apple app.",
+  passkeySignUp: "The demo signs up by a mailed link, so each account has an address to show.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

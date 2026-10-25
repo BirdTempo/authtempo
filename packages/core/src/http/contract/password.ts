@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { PASSWORD_RESET_TOKEN_RE, PASSWORD_VERIFY_TOKEN_RE } from "../../engine/password.js";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SentAnswer, SignedInAnswer, TwoFactorChallenge, UserJson } from "./shapes.js";
+import {
+  OkAnswer,
+  SentAnswer,
+  SignedInAnswer,
+  SignInAnswer,
+  TwoFactorChallenge,
+  UserJson,
+} from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const signUpBody = z.object({
@@ -9,10 +16,21 @@ export const signUpBody = z.object({
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
   name: z.string().max(200).optional(),
+  // Plan 12i Task 2: only with `username` on and `uniformSignUp` off (ruling
+  // 16 M1). The engine applies NFKC and the bounds.
+  username: z.string().max(256).optional(),
 });
 
+/**
+ * Plan 12i Task 3: exactly one of `email`, `username`, or `phone`. The
+ * route holds the body to one, as the reauth body holds its proofs, so the
+ * document keeps one object. The engine reads the form of a username and a
+ * phone.
+ */
 export const signInBody = z.object({
-  email: z.string().max(320),
+  email: z.string().max(320).optional(),
+  username: z.string().max(256).optional(),
+  phone: z.string().max(32).optional(),
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
   // Plan 9f: a native app's trust token (a browser sends the cookie), and the landing path after a challenge.
@@ -28,6 +46,12 @@ export const resetRequestBody = z.object({
 });
 
 export const resendBody = z.object({ email: z.string().max(320) });
+
+/** Plan 12i Task 20: the sign-up code. The engine compares any string, so a bad form answers `invalid_code`. */
+export const verifyCodeBody = z.object({
+  email: z.string().max(320),
+  code: z.string().max(16),
+});
 
 export const resetBody = z.object({
   token: z.string().max(64),
@@ -58,14 +82,19 @@ export const resetQuery = z.object({
   error: z.enum(RESET_PAGE_ERRORS).optional(),
 });
 
+/** The confirm of a sign-up that opened no session. */
+const verifiedAnswer = z.strictObject({ verified: z.literal(true) });
+
 /** The sign-up answer, as each password config answers it (plan 12b): uniform, pending, or signed in. */
 const signUpAnswer = z.union([
   SentAnswer,
   z.strictObject({ user: UserJson, verifyRequired: z.literal(true) }),
-  SignedInAnswer,
+  SignInAnswer,
 ]);
 
-const signInAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
+/** The sign-in carries `via` (plan 12i); the reset does not: it is no sign-in method. */
+const signInAnswer = z.union([SignInAnswer, TwoFactorChallenge]);
+const resetAnswer = z.union([SignedInAnswer, TwoFactorChallenge]);
 
 /** The contract of `routes/password.ts` (plan 11g). */
 export const PASSWORD_CONTRACT = {
@@ -84,8 +113,13 @@ export const PASSWORD_CONTRACT = {
   },
   "POST /password/verify": {
     body: { schema: tokenBody, media: ["json", "form"], parsedBy: "zod" },
-    answer: { kind: "json", schema: z.strictObject({ verified: z.literal(true) }) },
+    answer: { kind: "json", schema: verifiedAnswer },
     alt: { kind: "redirect", param: "auth_error" },
+  },
+  "POST /password/verify/code": {
+    body: { schema: verifyCodeBody, media: ["json"], parsedBy: "zod" },
+    // A session for an unverified user; a user already verified gets no session.
+    answer: { kind: "json", schema: z.union([SignInAnswer, verifiedAnswer]) },
   },
   "POST /password/verify/resend": {
     body: { schema: resendBody, media: ["json"], parsedBy: "zod" },
@@ -102,7 +136,7 @@ export const PASSWORD_CONTRACT = {
   },
   "POST /password/reset": {
     body: { schema: resetBody, media: ["json", "form"], parsedBy: "zod" },
-    answer: { kind: "json", schema: signInAnswer },
+    answer: { kind: "json", schema: resetAnswer },
     alt: { kind: "redirect", param: "auth_error" },
   },
   "POST /password/change": {

@@ -74,6 +74,7 @@ runAdapterConformance(
     await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
+  // A null address is Better Auth's placeholder in the table since plan 12i Task 16.
   { rowLocks: true, ping: true, oldStore: oldStore(BETTER_AUTH_PG) },
 );
 
@@ -117,6 +118,10 @@ const user = (id: string, email: string) => ({
   bannedAt: null,
   banReason: null,
   banUntil: null,
+  username: null,
+  displayUsername: null,
+  phone: null,
+  isAnonymous: false,
   createdAt: at,
   updatedAt: at,
 });
@@ -136,7 +141,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
 
   // The beforeEach of the mapping tests ran these two checks until ruling 53
   // of plan 12k moved it to the steps without the lock.
-  it("applies 0001 to 0011 on the Better Auth era rows, and a second run applies none", async () => {
+  it("applies 0001 to 0012 on the Better Auth era rows, and a second run applies none", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       await pg.sql.unsafe(BETTER_AUTH_ERA);
@@ -153,6 +158,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
         "0009_compat_schema_v12",
         "0010_compat_schema_v13",
         "0011_compat_schema_v14",
+        "0012_compat_schema_v15",
       ]);
       expect(await s.migrate()).toEqual([]);
     } finally {
@@ -204,8 +210,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 14; a new core version needs migration 0012 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(14);
+  it("serves core schema version 15; a new core version needs migration 0013 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(15);
   });
 
   it("names only columns the table field list knows", () => {
@@ -287,6 +293,9 @@ describe("the Better Auth mapping on postgres", () => {
       transports: null,
       deviceType: "multiDevice",
       backedUp: true,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       createdAt: at,
       updatedAt: at,
@@ -648,8 +657,8 @@ describe("the compat migration on postgres", () => {
         "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "11" },
-        { key: "schema_version", value: "14" },
+        { key: "compat_better_auth", value: "12" },
+        { key: "schema_version", value: "15" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -1336,6 +1345,111 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
         `SELECT "id" FROM "account" WHERE "providerId" IN ('github', 'linkedin') ORDER BY "id"`,
       );
       expect(accounts.map((a) => a.id)).toEqual(["ba-gh", "ba-li"]);
+    } finally {
+      vi.unstubAllGlobals();
+      await pg.close();
+    }
+  });
+});
+
+describe("Better Auth-era TikTok and WeChat accounts on postgres (plan 12i Task 22)", () => {
+  // Better Auth 1.7.2 keeps accountId = profile.data.user.open_id for tiktok and
+  // profile.unionid || profile.openid for wechat, and a placeholder address
+  // `<id>@<provider>.placeholder.invalid` that it never verifies
+  // (social-providers/tiktok.ts, wechat.ts, utils/email.ts, read 2026-10-24).
+  const BA_ROWS = `
+INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES
+  ('ba-tt-u','Tia','-000tt@tiktok.placeholder.invalid',false,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z'),
+  ('ba-wx-u','Wen','owxunion@wechat.placeholder.invalid',false,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z');
+INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdAt","updatedAt") VALUES
+  ('ba-tt','local:oauth:tiktok','-000tt','tiktok','ba-tt-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z'),
+  ('ba-wx','local:oauth:wechat','owxunion','wechat','ba-wx-u','2026-09-02T00:00:00.000Z','2026-09-02T00:00:00.000Z');
+`;
+  // Each answer by its URL with no query: the WeChat calls carry their values in the query.
+  const PROVIDER_ROUTES: Record<string, unknown> = {
+    "https://open.tiktokapis.com/v2/oauth/token/": {
+      access_token: "act.compat",
+      open_id: "-000tt",
+      token_type: "Bearer",
+    },
+    "https://open.tiktokapis.com/v2/user/info/": {
+      data: { user: { open_id: "-000tt", display_name: "Tia T" } },
+      error: { code: "ok", message: "", log_id: "1" },
+    },
+    "https://api.weixin.qq.com/sns/oauth2/access_token": {
+      access_token: "wx-compat",
+      openid: "owxopen",
+      unionid: "owxunion",
+      scope: "snsapi_login",
+    },
+    "https://api.weixin.qq.com/sns/userinfo": {
+      openid: "owxopen",
+      unionid: "owxunion",
+      nickname: "Wen W",
+    },
+  };
+  const fetchByPath: typeof fetch = async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = url.split("?")[0] ?? "";
+    return Object.hasOwn(PROVIDER_ROUTES, path)
+      ? Response.json(PROVIDER_ROUTES[path])
+      : new Response("not found", { status: 404 });
+  };
+
+  it("links each row through betterAuth() and its handler, with no second user or account", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    // Core binds globalThis.fetch when it builds the config: stub it first.
+    vi.stubGlobal("fetch", fetchByPath);
+    try {
+      await pg.sql.unsafe(BA_ROWS);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await migrateWithoutLock(pg.sql, s.names);
+      const auth = betterAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        database: s,
+        socialProviders: {
+          tiktok: { clientKey: "tt-key", clientSecret: "tt-secret" },
+          wechat: { clientId: "wx-app", clientSecret: "wx-secret" },
+        },
+      });
+      for (const provider of ["tiktok", "wechat"]) {
+        const start = await auth.handler(
+          new Request(`https://api.example.com/api/auth/social/${provider}/start`),
+        );
+        expect(start.status).toBe(302);
+        const state = new URL(start.headers.get("location") ?? "").searchParams.get("state");
+        const bind = (
+          start.headers.getSetCookie().find((c) => c.startsWith("__Secure-tempo_session_oauth=")) ??
+          ""
+        ).split(";")[0] as string;
+        expect(bind).not.toBe("");
+        const done = await auth.handler(
+          new Request(
+            `https://api.example.com/api/auth/social/${provider}/callback?code=c1&state=${state}`,
+            { headers: { cookie: bind } },
+          ),
+        );
+        expect(
+          done.headers
+            .getSetCookie()
+            .some(
+              (c) =>
+                c.startsWith("__Host-tempo_session=") && !c.startsWith("__Host-tempo_session=;"),
+            ),
+          provider,
+        ).toBe(true);
+      }
+      const sessions = await pg.sql.unsafe<{ userId: string }[]>(
+        'SELECT "userId" FROM "session" ORDER BY "userId"',
+      );
+      expect(sessions.map((r) => r.userId)).toEqual(["ba-tt-u", "ba-wx-u"]);
+      const users = await pg.sql.unsafe<{ id: string }[]>('SELECT "id" FROM "user" ORDER BY "id"');
+      expect(users.map((u) => u.id)).toEqual(["ba-tt-u", "ba-wx-u"]);
+      const accounts = await pg.sql.unsafe<{ id: string }[]>(
+        `SELECT "id" FROM "account" WHERE "providerId" IN ('tiktok', 'wechat') ORDER BY "id"`,
+      );
+      expect(accounts.map((a) => a.id)).toEqual(["ba-tt", "ba-wx"]);
     } finally {
       vi.unstubAllGlobals();
       await pg.close();

@@ -7,13 +7,24 @@ import { FIELD_KINDS } from "../src/redact.js";
  * From the grep of plan 12h Task 1 Step 1. A new line joins EVENTS and this list.
  * The list holds the 61 texts of the start list at 24c7237f. It also holds the
  * 2 texts of the 12k merge, read again at 91c26417. These are the waitUntil line
- * of 12h Task 2 and the role row line of 12k. A call that builds a text for each
- * value gives one text for each value. These are the email code and second-factor
- * counts, and the three sweep steps. A part that a field fills is written `<field>`.
+ * of 12h Task 2 and the role row line of 12k. Plan 12i Task 13 adds the
+ * claims line of the social flow. Plan 12i Task 2 adds the username set
+ * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the
+ * token answer refusal line, and Task 10 the line of an ID token used
+ * again. The Task 5 fix round adds the line of an SMS
+ * after the answer (ruling 23). The second fix round adds the line of a
+ * Worker with no waitUntil (ruling 29). Task 7 adds the line of the
+ * upgrade clean-up (ruling 36 L2). A call that builds a text for each
+ * value gives one text for each value. These are the email code and
+ * second-factor counts, and the three sweep steps. A part that a field
+ * fills is written `<field>`.
  */
 const START_LIST: readonly string[] = [
   "authtempo: the captcha port threw",
   "authtempo: the captcha did not answer",
+  "authtempo: the SMS port threw",
+  "authtempo: an SMS after the answer was not sent",
+  "authtempo: no waitUntil on Workers; the answer waited for the work after it",
   "authtempo: <path> has an estimated <bits> bits of entropy; 120 or more is recommended",
   "authtempo: account delete gave up",
   "authtempo: user patch refused",
@@ -46,6 +57,8 @@ const START_LIST: readonly string[] = [
   "authtempo: passkey authentication rejected",
   "authtempo: passkey counter moved",
   "authtempo: profile update gave up",
+  "authtempo: username set gave up",
+  "authtempo: phone set gave up",
   "authtempo: backup code spend gave up",
   "authtempo: backup code replacement gave up",
   "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
@@ -56,8 +69,11 @@ const START_LIST: readonly string[] = [
   "authtempo: social token answer has no token",
   "authtempo: social id token rejected",
   "authtempo: social nonce mismatch",
+  "authtempo: social id token used again",
   "authtempo: social user info failed",
   "authtempo: social user info has a bad subject",
+  "authtempo: social id token claims refused",
+  "authtempo: social token answer refused",
   "authtempo: the sweep link step stopped",
   "authtempo: the sweep outbox step stopped",
   "authtempo: the sweep pending end step stopped",
@@ -80,6 +96,10 @@ const START_LIST: readonly string[] = [
   // Plan 12d, read again at the move onto main: the SSO lines and the two sweep steps of 12d.
   "authtempo: the sweep sso recheck step stopped",
   "authtempo: the sweep organization rest step stopped",
+  // The anonymous step of the sweep (plan 12i Task 6).
+  "authtempo: the sweep anonymous step stopped",
+  // The clean-up after an anonymous upgrade (plan 12i Task 7, ruling 36 L2).
+  "authtempo: the anonymous upgrade cleanup failed",
   "authtempo: sso guard refused",
   "authtempo: sso failed",
   "authtempo: sso denied",
@@ -113,9 +133,10 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, and 10 of plan 12d.
-    expect(START_LIST).toHaveLength(74);
-    expect(texts).toHaveLength(74);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 + 1 + 1 of
+    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1).
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

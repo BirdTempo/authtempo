@@ -1,0 +1,64 @@
+---
+title: Sign in with Facebook
+description: Add the Facebook preset on a pinned Graph API version, with no address that counts as verified.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 14"
+  - packages/core/src/social/facebook.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/facebook.ts?raw";
+import test from "../../../../../../samples/guides/facebook.test.ts?raw";
+
+**For:** an app developer whose users have Facebook accounts.
+
+**What it does:** `social.facebook` adds a "Continue with Facebook" button. Core finds or makes the user by the app-scoped Facebook user id.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- A Meta app with the Facebook sign-in product and the permissions `email` and `public_profile`, for [`social.facebook`](/docs/reference/config/#social).
+
+## Steps
+
+1. Add `https://<your api host>/auth/social/facebook/callback` to the valid OAuth redirect URIs of the Facebook sign-in product.
+2. Copy the app id and the app secret to your secret store.
+3. Set `social.facebook` with `clientId` and `clientSecret`.
+4. Link to `/auth/social/facebook/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The Facebook preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- Each call uses the Graph API version `v26.0`. Meta says a call with no version uses the version of the app dashboard.
+- The scope is `email public_profile`. Core reads the profile from `GET /me`.
+- The subject is the app-scoped user `id`, the key that Better Auth keeps. A Better Auth `account` row of the provider `facebook` links with no change.
+- A Facebook address never counts as verified. The User reference names no field that proves the mailbox. So a Facebook address links no user that exists.
+- Core makes the code exchange itself with the app secret, so the token is bound to this app.
+
+## Residuals
+
+- A Facebook address can fill a new user, unverified. The user then proves the address by mail.
+- Meta's page of the manual sign-in flow names no PKCE, and core sends a PKCE challenge to each provider. Before you go live, confirm that Facebook accepts it.
+- Core posts the code exchange as a form. Before you go live, confirm that Facebook accepts the exchange as a POST.
+- Meta retires each Graph API version on its own date. A later release of core moves `v26.0` to a newer version.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the profile call failed. Check the app id, the secret, and the redirect URI.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at Facebook.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): another user holds the address.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Sign in with X](/docs/guides/providers/x/)
+- [Social](/docs/reference/config/#social)

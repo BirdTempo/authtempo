@@ -132,6 +132,26 @@ export interface ClaimKeep {
   identityId?: string;
   /** The password row that the proof confirms (the sign-up verify link). */
   passwordId?: string;
+  /**
+   * Keep the username. Only the sign-up's own confirm sets it: its proof is
+   * of the address that the sign-up named with that username.
+   */
+  username?: true;
+}
+
+/**
+ * The user row as `claimEmail` with no `keep.username` leaves it: verified,
+ * with no username and no phone.
+ */
+export function claimedUser(user: UserRow, now: Date): UserRow {
+  return {
+    ...user,
+    emailVerified: true,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    updatedAt: now,
+  };
 }
 
 /**
@@ -141,6 +161,8 @@ export interface ClaimKeep {
  * session, every password row (except the one `keep.passwordId` names),
  * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
+ * The username is cleared, except where `keep.username` says so. The phone
+ * is always cleared.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -164,7 +186,13 @@ export async function claimEmail(
       { field: "id", op: "eq", value: userId },
       { field: "emailVerified", op: "eq", value: false },
     ],
-    { emailVerified: true, updatedAt: now },
+    // A claimant chose the username, and the owner must not inherit it: a
+    // username is a way in and the name of each passkey (ruling 16 M2).
+    // A phone is a way in too. Core sets none on an unverified user, but a
+    // Better Auth store can hold one (final review A M2 of plan 12i).
+    keep?.username
+      ? { emailVerified: true, phone: null, updatedAt: now }
+      : { emailVerified: true, username: null, displayUsername: null, phone: null, updatedAt: now },
   );
   if (flipped === 0) {
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
@@ -185,9 +213,10 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
-  // With an `afterEnd` hook, each row by id; with none, one statement (plan 9h).
-  // The last delete is by user id, so a session that another request adds
-  // after the read goes too.
+  // With an `afterEnd` hook, one read and one delete of the read ids; with
+  // none, one statement (plan 9h). So the claimant's session count adds no
+  // query (final review B M of plan 12i). The last delete is by user id, so
+  // a session that another request adds after the read goes too.
   // The count goes to the event `session.end` of the claim (plan 12h Task 5).
   verified.sessionsEnded(
     await endSessions(
@@ -196,6 +225,17 @@ export async function claimEmail(
       ended ?? null,
       now,
       verified.stops,
+      // A session that another flow ended after the read: run the claim
+      // again. The last run deletes each row by its id, which no race undoes,
+      // so the owner's claim holds (ruling 46 of plan 12i).
+      verified.races() < CLAIM_RUNS - 1
+        ? {
+            raced: () => {
+              verified.raced();
+              throw new ClaimLostError();
+            },
+          }
+        : null,
     ),
   );
   // A claimant's passkeys would keep the account open after the claim.
@@ -234,11 +274,25 @@ export type BeforeResolveWrite = (
 ) => Promise<void>;
 
 /**
+ * The runs of one claim that a session race can undo (ruling 46 of plan
+ * 12i). A flow retries a `ClaimLostError` while its attempt is below this
+ * count. A claim throws on at most `CLAIM_RUNS - 1` races and on one lost
+ * flip, so the retries never run out.
+ */
+export const CLAIM_RUNS = 3;
+
+/**
  * Thrown by `claimEmail` when another flow verified the user after this
  * transaction read it as unverified (plan 12a Task 18, review M1). The throw
  * undoes this transaction. Each flow catches it outside and runs once more.
  * The retry finds a verified user and claims nothing. So the verify pair
  * fires once, for the flow that claimed.
+ *
+ * `claimEmail` also throws it when another flow ended a claimant session
+ * between the claim's read and its delete (final review B M of plan 12i).
+ * The retry then reads the sessions again and claims. The run after
+ * `CLAIM_RUNS - 1` races ends each session by its own delete and does not
+ * throw.
  */
 export class ClaimLostError extends Error {
   constructor() {
@@ -375,8 +429,9 @@ export async function findOrCreateUserByEmail<T>(
       ) {
         continue;
       }
-      // Another proof claimed the user first (review M1): the retry signs in the verified user.
-      if (attempt === 0 && err instanceof ClaimLostError) continue;
+      // Another proof claimed the user first (review M1): the retry signs in
+      // the verified user. Or a session race undid the claim: the retry claims again.
+      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
       throw err;
     }
   }
@@ -423,9 +478,7 @@ async function resolveInTransaction(
 ): Promise<{ user: UserRow; created: boolean }> {
   const existing = await tx.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (existing) {
-    const resolved = existing.emailVerified
-      ? existing
-      : { ...existing, emailVerified: true, updatedAt: now };
+    const resolved = existing.emailVerified ? existing : claimedUser(existing, now);
     // `user.beforeVerify`, then the session hook, before the identity repair
     // and the claim: the D1 undo (`BeforeResolveWrite`).
     if (!existing.emailVerified) await verified.before(existing);
@@ -440,18 +493,7 @@ async function resolveInTransaction(
     }
     return { user: resolved, created: false };
   }
-  const drafted: UserRow = {
-    id: newId(now),
-    email,
-    emailVerified: true,
-    name: null,
-    image: null,
-    bannedAt: null,
-    banReason: null,
-    banUntil: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const drafted = draftUserRow({ email, emailVerified: true, name: null }, now);
   // The sign-up rule and `user.beforeCreate`, then the session hook, all
   // before the user create (plan 12a, spec 8.9): the D1 undo (`BeforeResolveWrite`).
   const minted = steps ? await steps.user(tx, drafted) : drafted;
@@ -469,20 +511,55 @@ async function resolveInTransaction(
   return { user, created: true };
 }
 
+/** The fields of a new user row that a writer names; `draftUserRow` sets the rest. */
+export type UserDraftFields = Pick<UserRow, "email" | "emailVerified" | "name"> &
+  Partial<Pick<UserRow, "id" | "image" | "username" | "displayUsername" | "phone" | "isAnonymous">>;
+
+/**
+ * The one builder of a new user row (plan 12i Task 1). Each writer of a
+ * user row drafts it here, runs its sign-up rule and its hooks on the
+ * draft, and then creates it. So every new field of the row has one
+ * default: no ban, no username, no phone, not anonymous. Two writers
+ * build the row by hand: `writeUser` of the importer
+ * (packages/import/src/import.ts) and the compat sign-up answer
+ * (packages/compat-better-auth/src/server/api.ts). The type fails their
+ * compile when a field is new, so a new field needs a value there too.
+ */
+export function draftUserRow(fields: UserDraftFields, now: Date): UserRow {
+  return {
+    id: fields.id ?? newId(now),
+    email: fields.email,
+    emailVerified: fields.emailVerified,
+    name: fields.name,
+    image: fields.image ?? null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
+    username: fields.username ?? null,
+    displayUsername: fields.displayUsername ?? null,
+    phone: fields.phone ?? null,
+    isAnonymous: fields.isAnonymous ?? false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 /**
  * The sign-up rule at a create (plan 12b): stops the flow with
  * `sign_up_closed` unless `signUp` lets `email` become a user. It reads the
  * invitations and their organizations in the create's transaction. So an
  * invitation revoked before the commit refuses it, and so does an
- * invitation of a deleted organization.
+ * invitation of a deleted organization. A null address (plan 12i) passes
+ * `"open"` and stops under `"invited"`, because an invitation names an
+ * address.
  */
 export async function mayCreateUser(
   config: ResolvedConfig,
   tx: StorageAdapter,
-  email: string,
+  email: string | null,
 ): Promise<void> {
   if (config.signUp === "open") return;
-  if (config.signUp === "invited") {
+  if (config.signUp === "invited" && email !== null) {
     const pending = await tx.findMany(
       "invitation",
       [
