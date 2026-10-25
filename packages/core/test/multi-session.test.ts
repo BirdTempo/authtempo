@@ -314,7 +314,11 @@ describe("multi-session (plan 12i Task 11)", () => {
   it("writes one sign_out event for each session that ends with sign_out, on each end path (final fix wave item 15)", async () => {
     const events: { name: string; sessionId?: string }[] = [];
     const w = world({
-      observe: { sink: { write: (batch) => void events.push(...(batch as typeof events)) } },
+      observe: {
+        sink: {
+          write: (batch) => void events.push(...(batch as readonly (typeof events)[number][])),
+        },
+      },
     });
     const b = browser();
     const signOuts = async () => {
