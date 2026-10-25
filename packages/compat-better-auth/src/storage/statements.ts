@@ -35,6 +35,7 @@ import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
 import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
 import {
+  hasTempForm,
   isPlaceholder,
   type PlaceholderRule,
   placeholderFor,
@@ -322,7 +323,7 @@ export function compatStatements(
     const t = MAP[model].table;
     // A Better Auth placeholder address reads as no address (plan 12i Task 16).
     if (MAP[model].fields[field]?.codec === "placeholder")
-      return `CASE WHEN ${placeholderSql(c, rule.domain)} THEN NULL ELSE ${c} END`;
+      return `CASE WHEN ${placeholderSql(c, rule.domain, column(model, "id"))} THEN NULL ELSE ${c} END`;
     // A column that reads as null unless its gate column is true (ruling 15 of plan 12i).
     const when = MAP[model].fields[field]?.onlyWhen;
     if (when) return `CASE WHEN ${names.column(t, when)} THEN ${c} END`;
@@ -366,7 +367,8 @@ export function compatStatements(
       if (value === null || value === undefined)
         throw invalid(model, field, "the Better Auth table needs a value here");
       // It would read back as no address: a person's own address never takes this form.
-      if (typeof value === "string" && isPlaceholder(value, rule.domain))
+      // The temp- form needs the row id: insertRows and update check it (ownPlaceholder).
+      if (typeof value === "string" && isPlaceholder(value, rule.domain, null))
         throw invalid(model, field, "an address on a placeholder domain reads back as no address");
     }
     const given =
@@ -440,6 +442,28 @@ export function compatStatements(
     return v;
   }
 
+  /**
+   * Throws when a write gives a row its own placeholder, `temp-<id>@<domain>`
+   * (ruling 42 M1): it would read back as no address. `ids` holds the ids
+   * of the rows that the write reaches, or null when the where names none.
+   * With no ids, a value in the temp- form is refused: no row can be cleared.
+   */
+  function ownPlaceholder(model: ModelName, data: Row, ids: readonly unknown[] | null): void {
+    for (const [field, value] of Object.entries(data)) {
+      if (MAP[model].fields[field]?.codec !== "placeholder" || typeof value !== "string") continue;
+      if (!hasTempForm(value, rule.domain)) continue;
+      if (ids === null || ids.some((id) => isPlaceholder(value, rule.domain, String(id))))
+        throw invalid(model, field, "the temp- address of the row itself reads back as no address");
+    }
+  }
+
+  /** The ids that an eq or an in of `id` names, or null when no clause names them. */
+  function idsOf(where: readonly Where<ModelName>[]): unknown[] | null {
+    const w = where.find((x) => x.field === "id" && (x.op === "eq" || x.op === "in"));
+    if (!w) return null;
+    return Array.isArray(w.value) ? w.value : [w.value];
+  }
+
   function scope(model: ModelName): string | null {
     const s = MAP[model].scope;
     if (!s) return null;
@@ -483,11 +507,17 @@ export function compatStatements(
       // A placeholder address reads as null (plan 12i Task 16). An eq or an
       // in of an address compares the raw column, so the unique index
       // serves the lookup. A value that is no placeholder equals the raw
-      // column exactly where it equals the read. A placeholder value matches
-      // no row, because every row of one reads null.
+      // column exactly where it equals the read. A value on a placeholder
+      // domain matches no row, because every row of one reads null. A value
+      // in the temp- form is a placeholder only on the row of its id, so
+      // that row is left out (ruling 42 M1).
       const held = codec === "placeholder";
-      const real = (v: unknown) => !(typeof v === "string" && isPlaceholder(v, rule.domain));
+      const real = (v: unknown) => !(typeof v === "string" && isPlaceholder(v, rule.domain, null));
       const raw = held ? column(model, w.field) : c;
+      const notOwn = (vs: unknown[]) =>
+        held && vs.some((v) => typeof v === "string" && hasTempForm(v, rule.domain))
+          ? [`NOT ${placeholderSql(raw, rule.domain, column(model, "id"))}`]
+          : [];
       switch (w.op) {
         case "eq":
           if (!isNull(w.value) && !real(w.value)) {
@@ -497,6 +527,7 @@ export function compatStatements(
           parts.push(
             isNull(w.value) ? (empty ? `${c} = ''` : `${c} IS NULL`) : `${raw} = ${enc(w.value)}`,
           );
+          if (!isNull(w.value)) parts.push(...notOwn([w.value]));
           break;
         case "ne":
           if (isNull(w.value)) parts.push(empty ? `${c} <> ''` : `${c} IS NOT NULL`);
@@ -520,6 +551,7 @@ export function compatStatements(
               `${raw} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map((v) => encode(model, w.field, v))))}))`,
             );
           else parts.push(`${raw} IN (${vals.map(enc).join(", ")})`);
+          parts.push(...notOwn(vals));
           break;
         }
         case "startsWith":
@@ -577,6 +609,7 @@ export function compatStatements(
     let cols: string[] = [];
     const tuples = rows.map((data) => {
       assertFields(model, Object.keys(data));
+      ownPlaceholder(model, data, [data.id]);
       const own: string[] = [];
       const vals: string[] = [];
       for (const field of Object.keys(map.fields)) {
@@ -718,6 +751,7 @@ export function compatStatements(
       if (keys.includes("id")) throw new StorageError("unknown_field", model, ["id"]);
       assertFields(model, keys);
       if (keys.length === 0) throw invalid(model, "data", "update needs at least one field");
+      ownPlaceholder(model, data as Row, idsOf(where as Where<ModelName>[]));
       const map = MAP[model];
       const p = new Params();
       const sets = keys.map(

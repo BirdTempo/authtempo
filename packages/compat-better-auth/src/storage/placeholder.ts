@@ -9,9 +9,12 @@
  * (`createPlaceholderEmail` of @better-auth/core, read 2026-10-25): the
  * anonymous plugin with the namespace `anonymous`, TikTok and WeChat with
  * their own. `.invalid` never resolves (RFC 6761 section 6.4). With the
- * anonymous plugin's `emailDomainName`, it writes `temp-<id>@<domain>`.
- * That domain can be the app's own, where real people have addresses. So
- * only the `temp-` form on it is a placeholder, not every address there.
+ * anonymous plugin's `emailDomainName`, the shim writes
+ * `temp-<user id>@<domain>`. That domain can be the app's own, where real
+ * people have addresses, `temp-sales@<domain>` among them. So only the
+ * `temp-` form with the id of the same row is a placeholder (ruling 42 M1).
+ * Better Auth's own `temp-` rows hold a random id, not the row id. So they
+ * read as real unverified addresses after the move (README).
  */
 
 /** The domain of `createPlaceholderEmail`. */
@@ -29,12 +32,23 @@ export function onPlaceholderDomain(address: string): boolean {
 }
 
 /**
- * True for a placeholder: an address on a placeholder domain, or the
- * `temp-` form on `emailDomainName`. statements.ts holds the same rule in
- * SQL (`placeholderSql`), so a where and a read agree.
+ * True for a placeholder: an address on a placeholder domain, or
+ * `temp-<userId>@<emailDomainName>` with the id of the row that holds it.
+ * With no row id, only the placeholder domain counts. statements.ts holds
+ * the same rule in SQL (`placeholderSql`), so a where and a read agree.
  */
-export function isPlaceholder(address: string, emailDomainName: string | null): boolean {
+export function isPlaceholder(
+  address: string,
+  emailDomainName: string | null,
+  userId: string | null,
+): boolean {
   if (onPlaceholderDomain(address)) return true;
+  if (emailDomainName === null || userId === null) return false;
+  return address.toLowerCase() === `temp-${userId.toLowerCase()}@${emailDomainName}`;
+}
+
+/** True for the `temp-` form on `emailDomainName`: a placeholder only on the row of that id. */
+export function hasTempForm(address: string, emailDomainName: string | null): boolean {
   if (emailDomainName === null) return false;
   const a = address.toLowerCase();
   return a.startsWith("temp-") && a.endsWith(`@${emailDomainName}`);
@@ -48,17 +62,23 @@ export function placeholderFor(userId: string, emailDomainName: string | null): 
 }
 
 /**
- * The SQL test of `isPlaceholder` on a quoted column. Each pattern is a
- * literal. The domain matches EMAIL_DOMAIN_RE, which has no `%`, `_`, or
- * quote. So no LIKE wildcard and no SQL comes from a value.
+ * The SQL test of `isPlaceholder` on a quoted column of the user row and
+ * the quoted id column of the same row. Each pattern is a literal. The
+ * domain matches EMAIL_DOMAIN_RE, which has no `%`, `_`, or quote. So no
+ * LIKE wildcard and no SQL comes from a value. Postgres and SQLite both
+ * join text with `||`.
  */
-export function placeholderSql(column: string, emailDomainName: string | null): string {
+export function placeholderSql(
+  column: string,
+  emailDomainName: string | null,
+  idColumn: string,
+): string {
   const c = `lower(${column})`;
   const tests = [`${c} LIKE '%@${PLACEHOLDER_DOMAIN}'`, `${c} LIKE '%.${PLACEHOLDER_DOMAIN}'`];
   if (emailDomainName !== null) {
     if (!EMAIL_DOMAIN_RE.test(emailDomainName))
       throw new Error("authtempo compat: emailDomainName is not a lower-case host");
-    tests.push(`${c} LIKE 'temp-%@${emailDomainName}'`);
+    tests.push(`${c} = 'temp-' || lower(${idColumn}) || '@${emailDomainName}'`);
   }
   return `(${tests.join(" OR ")})`;
 }

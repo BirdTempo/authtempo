@@ -1,9 +1,10 @@
 import { StorageError } from "@authtempo/core";
 import { describe, expect, it, vi } from "vitest";
-import { anonymous, magicLink, phoneNumber } from "../src/plugins.js";
+import { anonymous, emailOTP, magicLink, phoneNumber } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
+import { PLACEHOLDER_ADDRESS_TEXT } from "../src/server/hooks.js";
 import { isPlaceholder, placeholderFor } from "../src/storage/placeholder.js";
-import type { BetterAuthOptions } from "../src/types.js";
+import type { BetterAuthOptions, EmailCallbackData } from "../src/types.js";
 import { at } from "./mapping-cases.js";
 import {
   BASE,
@@ -12,6 +13,7 @@ import {
   browser,
   fastHash,
   json,
+  PASSWORD,
   signInOptions,
 } from "./sign-in-helpers.js";
 
@@ -77,11 +79,133 @@ describe("the placeholder address", () => {
         .sort(),
     ).toEqual(["u-1", "u-3"]);
     expect([
-      isPlaceholder("temp-u-3@anon.example.com", "anon.example.com"),
-      isPlaceholder("staff@anon.example.com", "anon.example.com"),
-      isPlaceholder("x@tiktok.placeholder.invalid", null),
+      isPlaceholder("temp-u-3@anon.example.com", "anon.example.com", "u-3"),
+      isPlaceholder("temp-u-3@anon.example.com", "anon.example.com", "u-9"),
+      isPlaceholder("temp-sales@anon.example.com", "anon.example.com", "u-3"),
+      isPlaceholder("staff@anon.example.com", "anon.example.com", "u-3"),
+      isPlaceholder("x@tiktok.placeholder.invalid", null, null),
       placeholderFor("u-4", null),
-    ]).toEqual([true, false, true, "u-4@anonymous.placeholder.invalid"]);
+    ]).toEqual([true, false, false, false, true, "u-4@anonymous.placeholder.invalid"]);
+  });
+
+  it("reads temp-<id>@<emailDomainName> as no address only on the row of that id (ruling 42 M1)", async () => {
+    const t = await betterAuthTables();
+    const s = t.database.storage;
+    betterAuth(
+      signInOptions(t.database, { plugins: [anonymous({ emailDomainName: "anon.example.com" })] }),
+    );
+    // A person's own address of the temp- form, verified, as Better Auth stored it;
+    // a row with its own temp- form; a row with the temp- form of another row's id.
+    t.db.exec(`
+      INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt")
+        VALUES ('ba-sales','Sales','temp-sales@anon.example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z'),
+               ('u-7','Anon','temp-u-7@anon.example.com',0,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z'),
+               ('u-8','Other','TEMP-U-7@anon.example.com',0,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z');
+    `);
+    const byId = async (id: string) =>
+      (await s.findOne("user", [{ field: "id", op: "eq", value: id }]))?.email;
+    expect([await byId("ba-sales"), await byId("u-7"), await byId("u-8")]).toEqual([
+      "temp-sales@anon.example.com",
+      null,
+      "TEMP-U-7@anon.example.com",
+    ]);
+    expect(await s.findOne("user", [{ field: "id", op: "eq", value: "ba-sales" }])).toMatchObject({
+      emailVerified: true,
+    });
+    // A lookup by address finds the person, never the row whose own placeholder it is.
+    const byEmail = async (email: string) =>
+      (await s.findMany("user", [{ field: "email", op: "eq", value: email }])).map((u) => u.id);
+    expect(await byEmail("temp-sales@anon.example.com")).toEqual(["ba-sales"]);
+    expect(await byEmail("temp-u-7@anon.example.com")).toEqual([]);
+    expect(
+      (
+        await s.findMany("user", [
+          {
+            field: "email",
+            op: "in",
+            value: ["temp-u-7@anon.example.com", "TEMP-U-7@anon.example.com"],
+          },
+        ])
+      ).map((u) => u.id),
+    ).toEqual(["u-8"]);
+    // A write of a row's own temp- form fails; the temp- form of another id is an address.
+    await expect(
+      s.create("user", { ...userRow("u-5", "temp-u-5@anon.example.com"), isAnonymous: false }),
+    ).rejects.toMatchObject({ name: "StorageError", code: "invalid_argument", model: "user" });
+    await expect(
+      s.update("user", [{ field: "id", op: "eq", value: "u-8" }], {
+        email: "temp-u-8@anon.example.com",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(
+      s.update("user", [{ field: "name", op: "eq", value: "Other" }], {
+        email: "temp-x@anon.example.com",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    await s.update("user", [{ field: "id", op: "eq", value: "u-8" }], {
+      email: "temp-sales2@anon.example.com",
+    });
+    expect(await byId("u-8")).toBe("temp-sales2@anon.example.com");
+  });
+
+  it("refuses a sign-up and a change of address in a placeholder form with 403, not 500 (ruling 42 L1)", async () => {
+    const t = await betterAuthTables();
+    const errors = vi.spyOn(console, "error");
+    const verifies: EmailCallbackData[] = [];
+    const codes: { email: string; otp: string }[] = [];
+    const auth = betterAuth(
+      signInOptions(
+        t.database,
+        {
+          plugins: [
+            anonymous({ emailDomainName: "anon.example.com" }),
+            emailOTP({
+              sendVerificationOTP: async (d) => void codes.push(d),
+              changeEmail: { enabled: true },
+            }),
+          ],
+          user: { changeEmail: { enabled: true } },
+        },
+        verifies,
+      ),
+    );
+    const { send } = browser(auth.handler);
+    const refused = { error: "hook_refused", message: PLACEHOLDER_ADDRESS_TEXT };
+    for (const email of ["eve@x.placeholder.invalid", "eve@placeholder.invalid"]) {
+      const res = await send("/password/sign-up", { email, password: PASSWORD });
+      expect([res.status, await json(res)]).toEqual([403, refused]);
+    }
+    await expect(
+      auth.api.signUpEmail({
+        body: { email: "eve@x.placeholder.invalid", password: PASSWORD, name: "Eve" },
+      }),
+    ).rejects.toMatchObject({ status: "FORBIDDEN", body: { code: "HOOK_REFUSED" } });
+    expect(t.row('SELECT count(*) AS n FROM "user"')).toEqual({ n: 0 });
+    // temp-sales is a person's address at the domain: it signs up.
+    const ok = await send("/password/sign-up", {
+      email: "temp-sales@anon.example.com",
+      password: PASSWORD,
+    });
+    expect(ok.status).toBe(200);
+    const id = ((await json(ok)).user as { id: string }).id;
+    expect((await send("/password/verify", { token: verifies[0]?.token })).status).toBe(200);
+    // The link change: refused before core mails the new address.
+    const own = `temp-${id.toLowerCase()}@anon.example.com`;
+    for (const newEmail of [own, "eve@x.placeholder.invalid"]) {
+      const res = await send("/user/change-email", { newEmail });
+      expect([res.status, await json(res)]).toEqual([403, refused]);
+    }
+    expect(verifies).toHaveLength(1);
+    // The code change: the code goes out, and core's user hook refuses the commit.
+    await send("/email-otp/request-email-change", { newEmail: own });
+    const code = codes.find((c) => c.email === own)?.otp;
+    const res = await send("/email-otp/change-email", { newEmail: own, otp: code });
+    expect([res.status, (await json(res)).code]).toEqual([403, "HOOK_REFUSED"]);
+    expect(t.row('SELECT email FROM "user" WHERE id = ?', id)).toEqual({
+      email: "temp-sales@anon.example.com",
+    });
+    expect(errors.mock.calls.flat().join(" ")).not.toMatch(/unhandled error/);
+    errors.mockRestore();
   });
 
   it("reads a getTempEmail address back as null", async () => {

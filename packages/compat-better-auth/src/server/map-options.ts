@@ -104,7 +104,9 @@ const CODE_TEXT = /^authtempo-code:(\d{6,8})$/;
  * text is the code with a mark, and this wrapper is the one place that
  * passes a code to app code. A note to a taken number holds no code, and
  * Better Auth has no sender for it: it is not sent. Core counted it against
- * the daily cap already, and the answer stays the same for a free number.
+ * the daily cap already. The port still answers "sent" (ruling 42 L3,
+ * decided by fix-12i-task16): core's /phone/add answers 503 for any other
+ * result, and 200 for a free number, so that answer would tell a held number.
  * Core catches a throw of `sendOTP` and writes the line `sms.port_threw`.
  */
 export function phonePort(sendOTP: PhoneNumberOptions["sendOTP"]): SmsPort {
@@ -193,6 +195,8 @@ export interface Mapped {
   basePath: string;
   /** The ids of the compat plugins in use. */
   plugins: Set<string>;
+  /** The anonymous plugin's `emailDomainName`, or null: the domain of the `temp-` placeholder. */
+  emailDomainName: string | null;
   clientIp: (request: Request) => string | null;
   /** Where core lands a sign-in: `authtempo.appURL`, else the origin of baseURL. */
   appOrigin: string;
@@ -858,6 +862,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     origins,
     basePath,
     plugins,
+    emailDomainName: pluginOf(options, "anonymous")?.options.emailDomainName ?? null,
     clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
     appOrigin: options.authtempo?.appURL ?? origin,
     appOriginFollows: options.authtempo?.appURL === undefined,

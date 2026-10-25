@@ -11,6 +11,7 @@ import {
   type UserHooks,
   type UserRow,
 } from "@authtempo/core";
+import { isPlaceholder } from "../storage/placeholder.js";
 import type {
   AccountHookFields,
   BetterAuthOptions,
@@ -685,7 +686,39 @@ function userHooksOf(options: BetterAuthOptions): UserHooks {
       const user = toUser(e.user);
       for (const hook of afterDeletes) await hook({ ...user });
     };
-  return out;
+  return withPlaceholderGuard(options, out);
+}
+
+/** The text of the refusal of an address in a placeholder form (ruling 42 L1). */
+export const PLACEHOLDER_ADDRESS_TEXT =
+  "This address has the form of a placeholder address, which reads as no address. Use another address.";
+
+/**
+ * Refuses a user create or a change of address to an address that the
+ * storage reads back as no address (ruling 42 L1). Without this, the
+ * storage throws at the write and core answers 500. Core runs these hooks
+ * before the first write of each flow, so the refusal is `hook_refused`
+ * (403) with no write. The check runs before the app's hook. Better Auth
+ * takes such an address; the README says so.
+ */
+function withPlaceholderGuard(options: BetterAuthOptions, hooks: UserHooks): UserHooks {
+  const domain = pluginOf(options, "anonymous")?.options.emailDomainName ?? null;
+  const refuse = (email: string | null | undefined, id: string) => {
+    if (typeof email === "string" && isPlaceholder(email, domain, id))
+      throw hookRefusal(PLACEHOLDER_ADDRESS_TEXT);
+  };
+  const { beforeCreate, beforeUpdate } = hooks;
+  return {
+    ...hooks,
+    beforeCreate: async (e) => {
+      refuse(e.user.email, e.user.id);
+      return beforeCreate?.(e);
+    },
+    beforeUpdate: async (e) => {
+      refuse(e.patch.email, e.user.id);
+      return beforeUpdate?.(e);
+    },
+  };
 }
 
 type AccountHook = (account: AccountHookFields, context: null) => unknown;

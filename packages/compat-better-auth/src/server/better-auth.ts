@@ -7,13 +7,14 @@ import {
 } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
-import { placeholderRuleOf } from "../storage/placeholder.js";
+import { isPlaceholder, placeholderRuleOf } from "../storage/placeholder.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
 import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
+import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
 import { type Mapped, mapOptions, mappedFor } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
@@ -140,6 +141,10 @@ export function createHandler(
     if (acs) return acs;
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
+    if (req.method === "POST" && pathname === changePath) {
+      const held = await placeholderChange(auth, base, req);
+      if (held) return held;
+    }
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
     if (sso) return sso;
@@ -199,6 +204,31 @@ export function createHandler(
     }
     return res;
   };
+}
+
+/**
+ * A change of address to an address in a placeholder form answers core's
+ * `hook_refused` before core mails the confirm link (ruling 42 L1). Core's
+ * user `beforeUpdate` refuses it at the commit too (hooks.ts), but core
+ * mails the new address first. Null for any other change.
+ */
+async function placeholderChange(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+): Promise<Response | null> {
+  const body: unknown = await request
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = (body as { newEmail?: unknown } | null)?.newEmail;
+  if (typeof email !== "string") return null;
+  const s = await auth.session(request, { refresh: false });
+  if (!isPlaceholder(email, mapped.emailDomainName, s?.user.id ?? null)) return null;
+  return Response.json(
+    { error: "hook_refused", message: PLACEHOLDER_ADDRESS_TEXT },
+    { status: 403 },
+  );
 }
 
 /** Core's 421 of a host outside the `baseURL` list in Better Auth's shape, with core's headers. */
