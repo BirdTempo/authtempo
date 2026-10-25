@@ -344,6 +344,58 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     expect((await remove(lone.cookie)).body).toEqual({ error: "not_found" });
   });
 
+  it("counts a password only while an identifier reaches it (final review A M1)", async () => {
+    const w = world(
+      { signUp: true },
+      { password: { hash: FAST, uniformSignUp: false }, username: {} },
+    );
+    const remove = (cookie: string) =>
+      call(w, post("/auth/phone/remove", {}, { cookie, "cf-connecting-ip": w.ip() }));
+    /** A phone sign-up with a first password, and a fresh session of the password by phone. */
+    async function withPassword(phone: string) {
+      const up = await phoneSignUp(w, phone);
+      const set = await call(
+        w,
+        post("/auth/password/change", { newPassword: PASSWORD }, { cookie: up.cookie }),
+      );
+      expect(set.status).toBe(200);
+      const signIn = await call(w, post("/auth/password/sign-in", { phone, password: PASSWORD }));
+      expect(signIn.status).toBe(200);
+      return { ...up, cookie: `${w.config.cookieName}=${signIn.body.token as string}` };
+    }
+    // The phone is the only identifier: with it gone no sign-in reaches the password.
+    const lone = await withPassword(A);
+    expect(await remove(lone.cookie)).toMatchObject({
+      status: 409,
+      body: { error: "last_credential" },
+    });
+    expect((await userOf(w, lone.userId))?.phone).toBe(A);
+    // A username reaches the password, so the phone can go.
+    const named = await withPassword(B);
+    const username = await call(
+      w,
+      post("/auth/user/username", { username: "bea" }, { cookie: named.cookie }),
+    );
+    expect(username.status).toBe(200);
+    expect(await remove(named.cookie)).toMatchObject({ status: 200, body: { ok: true } });
+    const signIn = await call(
+      w,
+      post("/auth/password/sign-in", { username: "bea", password: PASSWORD }),
+    );
+    expect(signIn.status).toBe(200);
+    // With username turned off later, a username reaches nothing.
+    const cia = await withPassword("+14155550102");
+    const named2 = await call(
+      w,
+      post("/auth/user/username", { username: "cia" }, { cookie: cia.cookie }),
+    );
+    expect(named2.status).toBe(200);
+    const off = { ...w.config, username: null };
+    const offRoute = settled(createRouter(off, coreRoutes(off)));
+    const refused = await offRoute(post("/auth/phone/remove", {}, { cookie: cia.cookie }));
+    expect([refused.status, await refused.json()]).toEqual([409, { error: "last_credential" }]);
+  });
+
   /**
    * A port that waits up to 1 s, or until the test lets it go (probe P1 of
    * the Task 5 review waited 150 ms). A send before the answer waits the

@@ -237,6 +237,21 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("keeps the last passkey of a user whose password no identifier reaches (final review A M1)", async () => {
+    const w = world();
+    const { cookie } = await signUp(w);
+    // A first password on the fresh session of the sign-up: no address, username, or phone.
+    const set = await w.handle(
+      post("/auth/password/change", { newPassword: "correct horse battery" }, { cookie }),
+    );
+    expect(set.status).toBe(200);
+    const [passkey] = await w.storage.findMany("passkey", []);
+    if (!passkey) throw new Error("no passkey");
+    const res = await w.handle(post("/auth/passkeys/delete", { id: passkey.id }, { cookie }));
+    expect([res.status, await res.json()]).toEqual([409, { error: "last_credential" }]);
+    expect(await w.storage.findMany("passkey", [])).toHaveLength(1);
+  });
+
   it("never sends null as the user name", async () => {
     // A user with no address, no username, no phone, and no name: the hook clears the name.
     const w = world({

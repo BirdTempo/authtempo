@@ -28,6 +28,13 @@ export const UNLINK_PER_USER = { seconds: 900, max: 10 };
 export interface Credentials {
   /** An active password row, not the pending row of a sign-up. A legacy row counts: the legacy seam signs the person in. */
   password: boolean;
+  /**
+   * The password row is a way in: an identifier that the password sign-in
+   * takes reaches it. That is an address, a username with `config.username`
+   * on, or a phone that signs in (plan 12i, final review A M1). The guard
+   * counts this, not `password`.
+   */
+  passwordReached: boolean;
   passkeys: number;
   identities: IdentityRow[];
   /**
@@ -55,12 +62,16 @@ export async function credentialsOf(
   const passkeys = config.passkey
     ? (await storage.findMany("passkey", [{ field: "userId", op: "eq", value: user.id }])).length
     : 0;
+  const password = row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX);
+  const phone = phoneSignsIn(config, user);
+  const named = hasAddress(user) || (config.username !== null && user.username !== null) || phone;
   return {
-    password: row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX),
+    password,
+    passwordReached: password && named,
     passkeys,
     identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
     mailbox: hasAddress(user) && user.emailVerified,
-    phone: phoneSignsIn(config, user),
+    phone,
   };
 }
 
@@ -75,7 +86,7 @@ function signsIn(config: ResolvedConfig, identity: IdentityRow): boolean {
 
 function count(config: ResolvedConfig, c: Credentials): number {
   return (
-    (c.password ? 1 : 0) +
+    (c.passwordReached ? 1 : 0) +
     c.passkeys +
     c.identities.filter((i) => signsIn(config, i)).length +
     (c.mailbox ? 1 : 0) +
