@@ -161,8 +161,11 @@ async function memberChanged(
  * change is a new member row with `role` alone, or `role` added to the
  * parts of the row that exists. A row that holds the part already changes
  * nothing. A new row counts against `membersPerOrganization` (plan 9d).
- * The caller runs every before hook first (the D1 undo), then holds the
- * user row, then calls `writePart`.
+ * The grant holds the user row before it reads the member row (ruling 6 of
+ * plan 12f2), so its before hook runs after the hold. The hold writes no
+ * new value, so a refusal after it changes nothing. `create-admin` runs
+ * its before hooks first and then holds the user row. Each caller then
+ * calls `writePart`.
  */
 async function addRolePart(
   config: ResolvedConfig,

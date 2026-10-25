@@ -180,6 +180,25 @@ function inputOf(key: ToolKey, userId: string): Call {
   }
 }
 
+/**
+ * A valid input of each route of plan 12f2 Task 5 for a target user. The
+ * guard tests below send these routes too (review-12f2-task5 L1 and
+ * review-12f2-task5b L1).
+ */
+function input12f2(key: string, userId: string): Call {
+  if (key === "POST /operator/users/create")
+    return { body: { email: "new.user@example.com", firstSignIn: "none", reason: REASON } };
+  if (key === "POST /operator/users/update")
+    return { body: { userId, name: "Ada Lovelace", reason: REASON } };
+  return { body: { userId, reason: REASON } };
+}
+
+/** The key and the valid input of every route that the guard tests send. */
+const guarded = (userId: string): [string, Call][] => [
+  ...TOOL_ROUTES.map(({ key }): [string, Call] => [key, inputOf(key, userId)]),
+  ...PLAN_12F2_ROUTES.map((key): [string, Call] => [key, input12f2(key, userId)]),
+];
+
 /** A bad input of each route: a query or a body that the contract schema or the engine refuses. */
 function badInputsOf(key: ToolKey, userId: string): Call[] {
   switch (key) {
@@ -261,8 +280,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
   it("answers 401 to a wrong secret, to no credential, and to two credentials", async () => {
     const w = await world();
     const cookie = w.operator.cookie;
-    for (const { key } of TOOL_ROUTES) {
-      const input = inputOf(key, w.rootId);
+    for (const [key, input] of guarded(w.rootId)) {
       const both = { ...SUPPORT, ...sessionHeaders(key, cookie) };
       // The scheme with no secret still names the operator credential, so with a cookie it is two.
       const schemeOnly = { authorization: "Operator", ...sessionHeaders(key, cookie) };
@@ -374,9 +392,9 @@ describe("the operator routes (plan 12f Task 10)", () => {
       const rows = await audit();
       const before = await state();
       keys.length = 0;
-      for (const { key } of TOOL_ROUTES) {
+      for (const [key, input] of guarded(ada.user.id)) {
         const res = await w.handle(
-          request(key, { ...inputOf(key, ada.user.id), headers: sessionHeaders(key, cookie) }),
+          request(key, { ...input, headers: sessionHeaders(key, cookie) }),
         );
         expect(await answerOf(res), `${key}: ${label}`).toEqual({
           status: 403,

@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthConfig, ConfigError, type MailMessage } from "../src/config.js";
 import { appActor, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
-import { requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import { passwordSignIn, requestPasswordReset, resetPassword } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { AuthEvent } from "../src/observe/port.js";
@@ -11,7 +12,7 @@ import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import { BASE_URL, get, makeAuth, post, recordCredential, settled } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
-import { enrolled, PASSWORD } from "./totp-helpers.js";
+import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
 // The invitation link of a created user (plan 12f2 Task 3, spec 26). Every
 // user comes from the operator create; every invitation row from a create.
@@ -381,6 +382,47 @@ describe("the invitation link (plan 12f2 Task 3)", () => {
         expect(await sessionsOf(w, done.userId)).toHaveLength(before + 1);
       }
     }
+  });
+
+  it("opens a session at the gate for a trust token of the user (review-12f2-task3 L2)", async () => {
+    const w = await world();
+    const done = await invited(w);
+    const token = inviteOf(w.mail);
+    expect((await requestPasswordReset(w.config, { email: ADA, ip: "1.1.1.1" })).ok).toBe(true);
+    const reset = await resetPassword(w.config, {
+      token: linkTo(w.mail, ADA),
+      password: PASSWORD,
+      ip: "1.1.1.1",
+      userAgent: "ua",
+    });
+    expect(reset.ok).toBe(true);
+    const { secret } = await enrolled(w, ADA);
+    // A trust token of Ada: a password sign-in and its challenge with trustDevice.
+    const s = await passwordSignIn(w.config, {
+      email: ADA,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!s.ok || !("twoFactor" in s.value)) throw new Error("no challenge");
+    const v = await verifyTwoFactor(w.config, {
+      challenge: s.value.twoFactor.challenge,
+      code: await codeNow(w, secret),
+      trustDevice: true,
+      ip: null,
+    });
+    if (!v.ok || !v.value.trustDevice) throw new Error("no trust token");
+    const before = (await sessionsOf(w, done.userId)).length;
+    const res = await w.handle(
+      post(
+        CONFIRM,
+        { token, trustDevice: v.value.trustDevice.token },
+        { "cf-connecting-ip": "198.51.100.7" },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ user: { id: done.userId } });
+    expect(await sessionsOf(w, done.userId)).toHaveLength(before + 1);
   });
 
   it("takes the invitation with the account delete", async () => {
