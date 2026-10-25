@@ -164,6 +164,7 @@ describe("schema version 14 (plan 12d)", () => {
         action,
         count: 1,
       });
-    expect(OPERATOR_ACTIONS).toHaveLength(28);
+    // 10 of plan 12f, 18 of plan 12d, and 2 of plan 12f2 (user_update, user_delete).
+    expect(OPERATOR_ACTIONS).toHaveLength(30);
   });
 });
