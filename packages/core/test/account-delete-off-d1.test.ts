@@ -158,13 +158,13 @@ describe("the account delete with no per-invocation query limit (ruling 10 of pl
    * reads the member rows, and the meter counts them too. So the worst
    * count of the act's own statements decides, not the meter: the lock,
    * the spend of the link, the read of the proof session, the hold, and
-   * the organization rule. The count takes the hold at its worst, 3 calls
-   * (MySQL), and D1 sends 1. So the direct delete of an owner of 1 solo
-   * organization takes 1 shared organization here, 1 fewer than with no
-   * parallel invocation. The confirm takes 1 in both cases. A refusal
-   * writes nothing, so a stricter count is safe.
+   * the organization rule. Since verify-12f2-r10 Low B the count takes
+   * each read of the hold as it runs, and a lock only on a store that has
+   * one. Since Low A the reserve before the act keeps no route limiter. So
+   * the direct delete and the confirm of an owner of 1 solo organization
+   * each take 2 shared organizations here, as with no parallel invocation.
    */
-  const EDGE = { direct: 1, confirm: 1 } as const;
+  const EDGE = { direct: 2, confirm: 2 } as const;
   for (const scene of ["direct", "confirm"] as const)
     for (const shared of [EDGE[scene], EDGE[scene] + 1])
       it(`${shared > EDGE[scene] ? "refuses" : "deletes"} a co-owner of ${shared} organizations with a parallel invocation: ${scene}`, async () => {
