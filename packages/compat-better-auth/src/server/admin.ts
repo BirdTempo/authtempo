@@ -206,10 +206,24 @@ function updateFieldLine(key: string): string {
 }
 
 /**
+ * The keys of update-user `data` that Better Auth refuses with its own 403
+ * code when the caller lacks the right, in Better Auth's order: the role,
+ * the ban keys, then the address (routes.mjs adminUpdateUser, read
+ * 2026-10-25). Core lets no operator set them on this path, so the shim
+ * answers that code (review-12f2-task7 L1).
+ */
+const UPDATE_RIGHTS: readonly { keys: readonly string[]; code: string }[] = [
+  { keys: ["role"], code: "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE" },
+  { keys: ["banned", "banReason", "banExpires"], code: "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS" },
+  { keys: ["email", "emailVerified"], code: "YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL" },
+];
+
+/**
  * The shim's refusal of an update-user `data`, or null when core's update
- * takes it. Better Auth's order: no data, then the password
- * (routes.mjs adminUpdateUser, read 2026-10-24). Then each field that core
- * does not take. A field is never dropped in silence.
+ * takes it. Better Auth's order: no data, then the password, then the
+ * keys of `UPDATE_RIGHTS` (routes.mjs adminUpdateUser, read 2026-10-25).
+ * Then each other field that core does not take. A field is never dropped
+ * in silence.
  */
 function updateDataRefusal(data: Body): AdminAnswer | null {
   const keys = Object.keys(data);
@@ -220,6 +234,10 @@ function updateDataRefusal(data: Body): AdminAnswer | null {
       400,
       "core lets no operator set a password (spec section 26); the person resets it through the reset link",
     );
+  for (const right of UPDATE_RIGHTS) {
+    const key = right.keys.find((k) => Object.hasOwn(data, k));
+    if (key !== undefined) return failure(right.code, 403, updateFieldLine(key));
+  }
   const extra = keys.find((k) => !UPDATE_FIELDS.has(k));
   return extra === undefined ? null : failure(FIELD_NOT_ALLOWED, 400, updateFieldLine(extra));
 }
@@ -228,6 +246,7 @@ function updateDataRefusal(data: Body): AdminAnswer | null {
 const SET_PASSWORD = "YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD";
 const CHANGE_ROLE = "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE";
 const BAN_USERS = "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS";
+const INVALID_ROLE_TYPE = "INVALID_ROLE_TYPE";
 const USER_EXISTS = "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL";
 const INVALID_EMAIL = "INVALID_EMAIL";
 const BAN_KEYS = ["banned", "banReason", "banExpires"];
@@ -249,8 +268,26 @@ const CREATE_DATA_FIELDS = new Set(["emailVerified", "image", "role"]);
  * A body outside the object form answers null: the mapped route refuses it.
  */
 function createRefusal(body: Body, platformRole: string): AdminAnswer | null {
+  // Better Auth's schema takes a string or a list of strings as `role`, so
+  // a null or another form answers VALIDATION_ERROR before the handler
+  // (createUserBodySchema; review-12f2-task7b I2).
+  const role = body.role;
+  if (
+    role !== undefined &&
+    typeof role !== "string" &&
+    !(Array.isArray(role) && role.every((r) => typeof r === "string"))
+  )
+    return invalid();
   if (Object.hasOwn(body, "password")) return failure(SET_PASSWORD, 403, NO_PASSWORD_SET);
   const data = dataOf(body) ?? {};
+  // Better Auth reads `role`, else `data.role`, and answers INVALID_ROLE_TYPE
+  // for a role that is no string (routes.mjs createUser).
+  const requested = role ?? data.role;
+  if (
+    requested !== undefined &&
+    (Array.isArray(requested) ? requested : [requested]).some((r) => typeof r !== "string")
+  )
+    return failure(INVALID_ROLE_TYPE, 400, "Invalid role type");
   // Better Auth reads `role`, else `data.role` (routes.mjs createUser).
   for (const role of [body.role, data.role])
     if (role !== undefined && setRoleChange(role, platformRole) !== "revoke")
@@ -490,7 +527,10 @@ async function refusalOf(path: string, res: Response): Promise<AdminAnswer> {
               : BETTER_AUTH_CODES.unexpected;
   // A hook refusal carries the app's own text (plan 9d).
   const message = typeof body?.message === "string" ? body.message : messageOf(code);
-  return withHeaders({ code, message }, res.status, res);
+  // Better Auth answers a remove of the caller's own user with 400
+  // (routes.mjs removeUser, read 2026-10-25; final-12f2-A I1). Core's
+  // operator_self is 409.
+  return withHeaders({ code, message }, code === REMOVE_YOURSELF ? 400 : res.status, res);
 }
 
 /** A VALIDATION_ERROR of the shim's own, before any core route runs. */

@@ -1,5 +1,5 @@
 import { createMemoryAdapter, createMemoryLimiter, systemClock } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { adminClient, createAuthClient } from "../src/client/index.js";
 import { username } from "../src/plugins.js";
 import type { CompatDatabase } from "../src/types.js";
@@ -40,6 +40,11 @@ function countedDatabase() {
 }
 
 const json = async (res: Response) => ({ status: res.status, body: await res.json() });
+
+/** Better Auth's 403 codes of update-user (dist/plugins/admin/error-codes.mjs, read 2026-10-25). */
+const SET_EMAIL = "YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL";
+const CHANGE_ROLE = "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE";
+const BAN_USERS = "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS";
 
 const thrown = async (call: Promise<unknown>) => {
   try {
@@ -98,12 +103,23 @@ describe("the admin update and remove of a user (plan 12f2 Task 7)", () => {
         "PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER",
         /spec section 26/,
       ],
-      [{ email: "eve@example.com" }, 400, "FIELD_NOT_ALLOWED", /spec section 8\.15 item 5/],
-      [{ emailVerified: true }, 400, "FIELD_NOT_ALLOWED", /spec section 8\.15 item 5/],
-      [{ role: "admin" }, 400, "FIELD_NOT_ALLOWED", /\/admin\/set-role/],
-      [{ banned: true }, 400, "FIELD_NOT_ALLOWED", /\/admin\/ban-user/],
-      [{ banReason: "Spam" }, 400, "FIELD_NOT_ALLOWED", /\/admin\/ban-user/],
-      [{ banExpires: null }, 400, "FIELD_NOT_ALLOWED", /\/admin\/ban-user/],
+      // Better Auth's 403 codes, in its order: the role, the ban keys, the address
+      // (review-12f2-task7 L1).
+      [{ email: "eve@example.com" }, 403, SET_EMAIL, /spec section 8\.15 item 5/],
+      [{ emailVerified: true }, 403, SET_EMAIL, /spec section 8\.15 item 5/],
+      [{ role: "admin" }, 403, CHANGE_ROLE, /\/admin\/set-role/],
+      [{ banned: true }, 403, BAN_USERS, /\/admin\/ban-user/],
+      [{ banReason: "Spam" }, 403, BAN_USERS, /\/admin\/ban-user/],
+      [{ banExpires: null }, 403, BAN_USERS, /\/admin\/ban-user/],
+      [{ email: "eve@example.com", banned: true, role: "admin" }, 403, CHANGE_ROLE, /set-role/],
+      [{ emailVerified: true, banReason: "Spam" }, 403, BAN_USERS, /\/admin\/ban-user/],
+      [{ nickname: "eve", email: "eve@example.com" }, 403, SET_EMAIL, /8\.15 item 5/],
+      [
+        { role: "admin", password: "new password 1" },
+        400,
+        "PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER",
+        /reset/,
+      ],
       [{ name: "Eve", nickname: "eve" }, 400, "FIELD_NOT_ALLOWED", /nickname.*spec section 26/],
       [{}, 400, "NO_DATA_TO_UPDATE", /^No data to update$/],
     ];
@@ -170,6 +186,26 @@ describe("the admin update and remove of a user (plan 12f2 Task 7)", () => {
     ]);
   });
 
+  it("maps an empty name of update-user to no name (review-12f2-task7 L2)", async () => {
+    // Better Auth keeps an empty name; core keeps null for no name.
+    const { database } = countedDatabase();
+    const a = await adminApp(database);
+    const ann = await a.user("ann@example.com");
+    const named = await a.call(
+      "/admin/update-user",
+      { userId: ann.id, data: { name: "Ann" } },
+      a.op,
+    );
+    expect(named.status).toBe(200);
+    const unnamed = await json(
+      await a.call("/admin/update-user", { userId: ann.id, data: { name: "" } }, a.op),
+    );
+    expect(unnamed).toMatchObject({ status: 200, body: { name: "" } });
+    expect(
+      (await database.storage.findOne("user", [{ field: "id", op: "eq", value: ann.id }]))?.name,
+    ).toBeNull();
+  });
+
   it("maps remove-user, and refuses the caller's own id", async () => {
     const { database } = countedDatabase();
     const a = await adminApp(database);
@@ -193,9 +229,9 @@ describe("the admin update and remove of a user (plan 12f2 Task 7)", () => {
       },
     ]);
 
-    // Better Auth's own code for the caller's id; core's status stays, 409.
+    // Better Auth's own code and status for the caller's id (final-12f2-A I1).
     expect(await json(await a.call("/admin/remove-user", { userId: a.opId }, a.op))).toEqual({
-      status: 409,
+      status: 400,
       body: { code: "YOU_CANNOT_REMOVE_YOURSELF", message: "You cannot remove yourself" },
     });
     expect(await json(await a.call("/admin/remove-user", { userId: ann.id }, a.op))).toEqual({
@@ -330,7 +366,7 @@ describe("the admin update and remove of a user (plan 12f2 Task 7)", () => {
     const self = await admin.removeUser({ userId: a.opId });
     expect({ code: self.error?.code, status: self.error?.status }).toEqual({
       code: "YOU_CANNOT_REMOVE_YOURSELF",
-      status: 409,
+      status: 400,
     });
     expect(seen).toEqual([
       "POST /api/auth/admin/update-user",
@@ -465,6 +501,32 @@ describe("the admin create of a user (plan 12f2 Task 7, Wave B)", () => {
     ).toMatchObject({ status: 400, body: { code: "FIELD_NOT_ALLOWED" } });
   });
 
+  it("passes the host's waitUntil to core's create route (review-12f2-task7b I1)", async () => {
+    const { database } = countedDatabase();
+    const a = await adminApp(database);
+    const handle = vi.spyOn(a.auth.tempo, "handle");
+    const held: Promise<unknown>[] = [];
+    const res = await a.auth.handler(
+      new Request(`${BASE}/api/auth/admin/create-user`, {
+        method: "POST",
+        headers: { origin: BASE, "content-type": "application/json", cookie: a.op },
+        body: JSON.stringify({ email: "wu@example.com", name: "Wu" }),
+      }),
+      { waitUntil: (p: Promise<unknown>) => void held.push(p) },
+    );
+    expect(res.status).toBe(200);
+    // The inner call of core's route gets a waitUntil, so work that core
+    // posts after its answer reaches the host's one promise.
+    const inner = handle.mock.calls.filter(([r]) =>
+      new URL(r.url).pathname.endsWith("/operator/users/create"),
+    );
+    expect(inner).toHaveLength(1);
+    expect(typeof inner[0]?.[1]?.waitUntil).toBe("function");
+    expect(held).toHaveLength(1);
+    await Promise.all(held);
+    handle.mockRestore();
+  });
+
   it("refuses create-user with a password and writes nothing", async () => {
     const { database, counter } = countedDatabase();
     const a = await adminApp(database);
@@ -509,6 +571,12 @@ describe("the admin create of a user (plan 12f2 Task 7, Wave B)", () => {
         "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS",
         /\/admin\/ban-user/,
       ],
+      // Better Auth's schema and handler for a role of the wrong type (review-12f2-task7b I2).
+      [{ role: null }, 400, "VALIDATION_ERROR", /^Validation error$/],
+      [{ role: ["user", 1] }, 400, "VALIDATION_ERROR", /^Validation error$/],
+      [{ role: null, password: "x" }, 400, "VALIDATION_ERROR", /^Validation error$/],
+      [{ data: { role: null } }, 400, "INVALID_ROLE_TYPE", /^Invalid role type$/],
+      [{ data: { role: ["user", 2] } }, 400, "INVALID_ROLE_TYPE", /^Invalid role type$/],
       [{ data: { name: "Eve" } }, 400, "FIELD_NOT_ALLOWED", /name.*spec section 26/],
       [{ data: { email: "eve@example.com" } }, 400, "FIELD_NOT_ALLOWED", /email.*spec section 26/],
       [
