@@ -225,12 +225,17 @@ export async function claimEmail(
       ended ?? null,
       now,
       verified.stops,
-      // A session that another flow ended after the read: run the claim again.
-      {
-        raced: () => {
-          throw new ClaimLostError();
-        },
-      },
+      // A session that another flow ended after the read: run the claim
+      // again. The last run deletes each row by its id, which no race undoes,
+      // so the owner's claim holds (ruling 46 of plan 12i).
+      verified.races() < CLAIM_RUNS - 1
+        ? {
+            raced: () => {
+              verified.raced();
+              throw new ClaimLostError();
+            },
+          }
+        : null,
     ),
   );
   // A claimant's passkeys would keep the account open after the claim.
@@ -269,6 +274,14 @@ export type BeforeResolveWrite = (
 ) => Promise<void>;
 
 /**
+ * The runs of one claim that a session race can undo (ruling 46 of plan
+ * 12i). A flow retries a `ClaimLostError` while its attempt is below this
+ * count. A claim throws on at most `CLAIM_RUNS - 1` races and on one lost
+ * flip, so the retries never run out.
+ */
+export const CLAIM_RUNS = 3;
+
+/**
  * Thrown by `claimEmail` when another flow verified the user after this
  * transaction read it as unverified (plan 12a Task 18, review M1). The throw
  * undoes this transaction. Each flow catches it outside and runs once more.
@@ -277,7 +290,9 @@ export type BeforeResolveWrite = (
  *
  * `claimEmail` also throws it when another flow ended a claimant session
  * between the claim's read and its delete (final review B M of plan 12i).
- * The retry then reads the sessions again and claims.
+ * The retry then reads the sessions again and claims. The run after
+ * `CLAIM_RUNS - 1` races ends each session by its own delete and does not
+ * throw.
  */
 export class ClaimLostError extends Error {
   constructor() {
@@ -414,8 +429,9 @@ export async function findOrCreateUserByEmail<T>(
       ) {
         continue;
       }
-      // Another proof claimed the user first (review M1): the retry signs in the verified user.
-      if (attempt === 0 && err instanceof ClaimLostError) continue;
+      // Another proof claimed the user first (review M1): the retry signs in
+      // the verified user. Or a session race undid the claim: the retry claims again.
+      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
       throw err;
     }
   }

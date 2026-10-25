@@ -54,6 +54,7 @@ import {
 import { holdUser, userStays } from "./user-hold.js";
 import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
+  CLAIM_RUNS,
   ClaimLostError,
   claimEmail,
   claimedUser,
@@ -1323,14 +1324,16 @@ async function confirmSignUp(
         return ok({ user: claimed, signedIn: s });
       }),
     );
-  let verified: Result<PasswordVerified>;
-  try {
-    verified = await run();
-  } catch (err) {
-    // Another proof claimed the user first (review M1). The retry finds a
-    // verified user: it answers as for a verified user and fires no pair.
-    if (!(err instanceof ClaimLostError)) throw err;
-    verified = await run();
+  let verified: Result<PasswordVerified> | null = null;
+  for (let attempt = 0; verified === null; attempt++) {
+    try {
+      verified = await run();
+    } catch (err) {
+      // Another proof claimed the user first (review M1). The retry finds a
+      // verified user: it answers as for a verified user and fires no pair.
+      // Or a session race undid the claim: the retry claims again.
+      if (!(attempt < CLAIM_RUNS && err instanceof ClaimLostError)) throw err;
+    }
   }
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
@@ -1539,8 +1542,9 @@ export async function runReset(
       )
         continue;
       // Another proof claimed the user first (review M1). The rollback undid
-      // the consume, so the retry spends the link again and finds a verified user.
-      if (attempt === 0 && err instanceof ClaimLostError) continue;
+      // the consume, so the retry spends the link again and finds a verified
+      // user. Or a session race undid the claim: the retry claims again.
+      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
       throw err;
     }
   }

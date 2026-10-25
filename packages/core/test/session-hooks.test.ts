@@ -21,6 +21,7 @@ import {
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
+import { CLAIM_RUNS } from "../src/engine/users.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -700,6 +701,83 @@ describe("session end hooks (plan 9d)", () => {
     expect(left).toHaveLength(1);
     expect(armed).toBe(false);
   });
+
+  it.each(["magic link", "verify link"] as const)(
+    "keeps the owner's claim when a session race undoes each run, and fires afterEnd once for each row (ruling 46 of plan 12i, %s)",
+    async (proof) => {
+      const { auth, calls } = recorded();
+      const email = "cy@example.com";
+      const up = await passwordSignUp(auth.config, {
+        email,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!up.ok) throw new Error(up.code);
+      const tokens = [upSession(up.value).token];
+      for (let i = 0; i < 4; i++) {
+        const s = await sessionOnly(
+          passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+        );
+        if (!s.ok) throw new Error(s.code);
+        tokens.push(s.value.token);
+      }
+      const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
+      const rows = await auth.storage.findMany("session", [...byUser]);
+      expect(rows).toHaveLength(5);
+      // A sign-out of the next claimant session between each read of the
+      // claim and its delete: every run of the claim meets a race.
+      const outs: string[] = [];
+      let busy = false;
+      const original = auth.storage.transaction.bind(auth.storage);
+      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+        original((tx) =>
+          fn({
+            ...tx,
+            findMany: async (m, w, o) => {
+              const found = await tx.findMany(m, w, o);
+              const next = tokens[outs.length];
+              if (!busy && m === "session" && next !== undefined && outs.length < 4) {
+                busy = true;
+                outs.push(await sha256Hex(next));
+                await destroySession(auth.config, next);
+                busy = false;
+              }
+              return found;
+            },
+          }),
+        );
+      calls.length = 0;
+      const confirm = auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+      const signedIn =
+        proof === "magic link"
+          ? await magicSignIn(auth, email)
+          : await verifyPasswordEmail(auth.config, {
+              token: tokenFromMail(confirm?.text ?? ""),
+              ip: null,
+              userAgent: null,
+            });
+      expect(signedIn.ok).toBe(true);
+      // Two races undo a run each. The third run deletes each row by its id,
+      // so its race ends one row and keeps the claim.
+      expect(outs).toHaveLength(CLAIM_RUNS);
+      expect(
+        calls
+          .filter(([name]) => name === "afterEnd")
+          .map(([, e]) => e as { session: { id: string }; reason: string })
+          .map((e) => [e.session.id, e.reason])
+          .sort(),
+      ).toEqual(rows.map((r) => [r.id, outs.includes(r.tokenHash) ? "sign_out" : "claim"]).sort());
+      const left = await auth.storage.findMany("session", [...byUser]);
+      expect(left.filter((r) => rows.some((b) => b.id === r.id))).toEqual([]);
+      expect(left).toHaveLength(1);
+      const owner = await auth.storage.findOne("user", [
+        { field: "id", op: "eq", value: user?.id },
+      ]);
+      expect(owner?.emailVerified).toBe(true);
+    },
+  );
 
   it("fires afterEnd with claim for the claimant's session when the verify link proves the address", async () => {
     const { auth, calls } = recorded();
