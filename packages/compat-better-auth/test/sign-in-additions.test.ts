@@ -776,6 +776,40 @@ describe("the phone-number plugin", () => {
       expect([settled, sent]).toEqual([true, ["+14155550160"]]);
     },
   );
+
+  it("waits for the SMS before the answer on Workers when the host's waitUntil throws (final fix wave item 14)", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+    try {
+      const t = await betterAuthTables();
+      const sent: string[] = [];
+      const auth = betterAuth(
+        phoneOptions(t.database, [], {
+          sendOTP: async (d) => {
+            await new Promise((r) => setTimeout(r, 30));
+            sent.push(d.phoneNumber);
+          },
+        }),
+      );
+      // An unbound ctx.waitUntil throws: the shim's promise reaches no host.
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth/phone-number/send-otp`, {
+          method: "POST",
+          headers: { origin: BASE, "content-type": "application/json" },
+          body: JSON.stringify({ phoneNumber: "+14155550161" }),
+        }),
+        {
+          waitUntil: () => {
+            throw new TypeError("Illegal invocation");
+          },
+        },
+      );
+      expect(res.status).toBe(200);
+      // On Workers a detached send stops at the answer, so the shim waits for it.
+      expect(sent).toEqual(["+14155550161"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 /** Two tokens in the compact form: core keys its used-token row on the payload part. */

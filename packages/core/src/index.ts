@@ -65,6 +65,7 @@ export {
   type OAuthApi,
   type OAuthClientsApi,
   type OrganizationTokensApi,
+  onWorkers,
   type PasswordApi,
   type PhoneApi,
   type ScimApi,

@@ -86,6 +86,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `createMemoryLimiter` | A limiter in memory, per isolate, for tests. It is the default. |
 | `createPbkdf2PasswordHash` | The default password hash: PBKDF2-HMAC-SHA256, 100000 iterations. |
 | `crossSiteRefusal` | Takes an `Auth` and a request. It answers the 403 `origin_not_trusted` that `auth.handle` gives a `POST`, `PUT`, `PATCH`, or `DELETE` before any handler, or null. A `GET`, `HEAD`, or `OPTIONS` request always passes. A package that serves its own paths beside `auth.handle` calls it first. |
+| `onWorkers` | True on Cloudflare Workers, where workerd sets `navigator.userAgent` to "Cloudflare-Workers". A package that runs work after the answer reads it. On Workers, it waits for that work when the host gives no `waitUntil` that works. |
 | `createJoseJwtSeam` | The default JWT seam, on jose. |
 | `createSimpleWebAuthnSeam` | The default WebAuthn seam, on @simplewebauthn/server. |
 | `createDeriveGate`, `deriveGate` | A gate that lets at most two legacy password derives run at once per isolate, and the shared gate. |

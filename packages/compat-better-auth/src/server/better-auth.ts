@@ -4,6 +4,7 @@ import {
   createAuth,
   crossSiteRefusal,
   type HandleOptions,
+  onWorkers,
 } from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
@@ -207,6 +208,9 @@ export function createHandler(
         host(Promise.allSettled([flush, ...work]).then(() => undefined));
       } catch {
         // An unbound ctx.waitUntil throws Illegal invocation. The answer is kept.
+        // The work took no promise, so on Workers it would stop at the answer.
+        // Wait for it, as core's handle does (final fix wave item 14).
+        if (work.length > 0 && onWorkers()) await Promise.allSettled(work);
       }
     }
     return res;

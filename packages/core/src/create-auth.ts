@@ -1282,9 +1282,9 @@ const SCIM_NO_QUERY = new URL("https://scim.invalid/");
  * True on Cloudflare Workers: workerd sets `navigator.userAgent` to
  * "Cloudflare-Workers" (Workers runtime APIs, read 2026-10-25). The workerd
  * test of examples/worker pins the value. Read at each call, so a test can
- * set the global.
+ * set the global. The compat shim reads it too: one source for the check.
  */
-function onWorkers(): boolean {
+export function onWorkers(): boolean {
   return globalThis.navigator?.userAgent === "Cloudflare-Workers";
 }
 
