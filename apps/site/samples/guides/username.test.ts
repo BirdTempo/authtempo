@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { call, harness, linkIn, sessionCookieOf } from "../support/harness.ts";
+import { call, callSettled, harness, linkIn, sessionCookieOf } from "../support/harness.ts";
 import { createUsernameAuth } from "./username.ts";
 
 describe("sign in with a username", () => {
@@ -7,7 +7,10 @@ describe("sign in with a username", () => {
     const h = harness();
     const auth = createUsernameAuth(h);
     const password = "correct horse battery";
-    await call(auth, "POST", "/auth/password/sign-up", { email: "ada@example.com", password });
+    await callSettled(auth, "POST", "/auth/password/sign-up", {
+      email: "ada@example.com",
+      password,
+    });
     // The confirm link proves the address and opens a fresh session.
     const token = linkIn(h, "ada@example.com").searchParams.get("token") ?? "";
     const confirmed = await call(auth, "POST", "/auth/password/verify", { token });

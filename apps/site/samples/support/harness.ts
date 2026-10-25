@@ -70,29 +70,45 @@ export function codeIn(h: Harness, to: string): string {
 }
 
 /** One request to `auth.handle`, with a JSON body when one is given. No Origin header: a server caller. */
-export async function call(
+export function call(
   auth: Auth,
   method: "GET" | "POST" | "OPTIONS",
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> {
-  // The work after the answer, such as the sign-up mail, runs under the
-  // host's waitUntil. The harness waits for it, as a host keeps it alive.
+  return auth.handle(request(method, path, body, headers));
+}
+
+/**
+ * `call` with a `waitUntil` that the call waits for, as a host keeps that
+ * work alive. The work after the answer, such as the uniform sign-up mail,
+ * has then run. The flush of the observer runs under it too.
+ */
+export async function callSettled(
+  auth: Auth,
+  method: "GET" | "POST" | "OPTIONS",
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
   const after: Promise<unknown>[] = [];
-  const res = await auth.handle(
-    new Request(`${API}${path}`, {
-      method,
-      headers: {
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
-        ...headers,
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    }),
-    { waitUntil: (work) => void after.push(work) },
-  );
+  const res = await auth.handle(request(method, path, body, headers), {
+    waitUntil: (work) => void after.push(work),
+  });
   await Promise.all(after);
   return res;
+}
+
+function request(method: string, path: string, body: unknown, headers: Record<string, string>) {
+  return new Request(`${API}${path}`, {
+    method,
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...headers,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
 }
 
 /** The `__Host-tempo_session=…` pair that a response sets, or "" when it sets none. */

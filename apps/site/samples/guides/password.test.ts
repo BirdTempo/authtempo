@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { call, harness, lastMailTo } from "../support/harness.ts";
+import { call, callSettled, harness, lastMailTo } from "../support/harness.ts";
 import { createPasswordAuth } from "./password.ts";
 
 describe("sign in with a password", () => {
   it("signs up, mails the verify link, answers the same for every address, and signs in with the right password only", async () => {
     const h = harness();
     const auth = createPasswordAuth(h);
-    const up = await call(auth, "POST", "/auth/password/sign-up", {
+    const up = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "ada@example.com",
       password: "correct horse battery",
     });
@@ -14,7 +14,7 @@ describe("sign in with a password", () => {
     expect(await up.json()).toEqual({ sent: true });
     expect(lastMailTo(h, "ada@example.com").subject).toBe("Confirm your email for api.example.com");
     // A second sign-up of the address gets the same answer, and the owner gets a mail.
-    const again = await call(auth, "POST", "/auth/password/sign-up", {
+    const again = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "ada@example.com",
       password: "correct horse battery",
     });
@@ -36,12 +36,12 @@ describe("sign in with a password", () => {
 
   it("refuses a short password and a breached password", async () => {
     const auth = createPasswordAuth(harness());
-    const short = await call(auth, "POST", "/auth/password/sign-up", {
+    const short = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "bo@example.com",
       password: "short pw",
     });
     expect(await short.json()).toEqual({ error: "password_policy" });
-    const breached = await call(auth, "POST", "/auth/password/sign-up", {
+    const breached = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "bo@example.com",
       password: "password1234",
     });
