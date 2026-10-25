@@ -184,6 +184,12 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
   package decides who signs in.
 - A DNS proof that every configured resolver agrees on is the only proof of
   an enterprise address. An IdP's `email_verified` is never read.
+- An SMS supplier only sends text. Core makes and checks every code, and a
+  route sends each code after the answer. Core caps the sends per
+  deployment, and refuses the phone config without a shared limiter unless
+  the app writes `isolateLimiter: "allow"`.
+- A base URL list holds exact origins. Core picks one from the origin of
+  the request URL and never from a forwarded header.
 
 ## Owner-run items of the site and the demo
 
