@@ -157,8 +157,12 @@ export interface StorageAdapter {
   /**
    * Optional. True when the database caps the queries of one invocation.
    * D1 allows 50 queries per invocation on Workers Free (D1 limits page
-   * updated 21 April 2026, read 2026-10-21). Only on such a store does the
-   * operator delete answer `delete_too_large` (ruling 5 of plan 12f2).
+   * updated 21 April 2026, read 2026-10-21). Only on such a store does an
+   * account delete refuse with `delete_too_large` when its least work
+   * cannot fit 50. This holds for the self delete and the operator delete
+   * (rulings 5 and 10 of plan 12f2). The flag also keeps the page of the own
+   * sessions of an account delete inside the call budget. With no flag, the
+   * page ends up to 500 sessions in one act.
    * Postgres, MySQL, SQLite, and memory have no such cap and leave it out.
    */
   queryLimitPerInvocation?: boolean;

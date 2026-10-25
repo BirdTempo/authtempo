@@ -1018,6 +1018,166 @@ describe("the account delete of a solo organization's owner through the route on
 });
 
 /**
+ * The edge of the self delete on D1 for the organizations that the user
+ * owns with another owner (ruling 10 M1 of plan 12f2, ruling 1 Q3). Each
+ * costs 3 queries in the act: the owner lock, a batch of 2, and the
+ * recount. The size check of `deleteAccountRows` counts them, so a delete
+ * that cannot fit 50 answers `delete_too_large` before any delete. The
+ * worst scene: a due refresh with `sso.saml` on, the `session.afterEnd`
+ * hook, the impersonation tool on, one solo organization, and one scimUser
+ * row of the user, so the scimGroupMember delete runs. SCIM provisioning of
+ * a shared organization writes such a row (plan 12d Task 9b). With no
+ * check, the run of 2026-10-25 on the binding gave the direct delete 44,
+ * 47, 48, 51, 54, 57, and 60 queries for 0 to 6 shared organizations. That
+ * run had no scimUser row; the row adds 1. The confirm sent 1 more for its
+ * spend. With the row, 3 shared organizations sent 52 and the confirm of 2
+ * sent 50. So the direct delete fits 2 and refuses 3: the edge is exact.
+ * The confirm fits 1 and refuses 2, 1 call early. `DELETE_CALLS_BEFORE`
+ * keeps 1 call for a route limiter, and this route runs none. The pins are
+ * the queries of the act that fits.
+ */
+const OWNED_EDGE = { direct: 2, confirm: 1 } as const;
+const OWNED_COUNTS = { direct: 49, confirm: 49 } as const;
+
+describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  const dueWithSaml = async () =>
+    ({
+      ...(await on()),
+      session: { slidingRefreshDays: 0.05 },
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    }) satisfies Partial<AuthConfig>;
+
+  /**
+   * The owner of one solo organization who owns `shared` organizations with
+   * another user, and the call of the self delete in the worst scene. The
+   * clock moves 80 minutes before the call, so the refresh is due.
+   */
+  async function coOwner(scene: "direct" | "confirm" | "probe", shared: number) {
+    const sent: MailMessage[] = [];
+    const extra: Partial<AuthConfig> =
+      scene === "probe"
+        ? { hooks: {} }
+        : scene === "direct"
+          ? await dueWithSaml()
+          : { ...(await dueWithSaml()), account: { deleteConfirm: { ttlMinutes: 1440 } } };
+    const { token, userId, organizationId } = await soloOwner(sent, extra);
+    const { auth: setup } = await engine(env.DB, sent, undefined, extra);
+    const other = await signIns(setup, sent, "bob@example.com", 1);
+    const bob = await setup.api.getSession(other.token);
+    if (!bob) throw new Error("no session");
+    for (let i = 0; i < shared; i++) {
+      const made = await setup.api.createOrganization({
+        user: bob.user,
+        slug: `shared-${i}`,
+        name: "Shared",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const added = await setup.api.addMember({
+        user: bob.user,
+        organizationId: made.value.organization.id,
+        userId,
+        role: "owner",
+      });
+      if (!added.ok) throw new Error(added.code);
+    }
+    if (scene !== "probe")
+      await env.DB.prepare(
+        "INSERT INTO ta_scim_user (id, created_at, updated_at, organization_id, user_id, user_name, user_name_key, active, data, version) VALUES ('scim-solo', 0, 0, ?, ?, 'solo@example.com', 'solo@example.com', 1, '{}', 1)",
+      )
+        .bind(organizationId, userId)
+        .run();
+    let path = "/user/delete";
+    let body: Record<string, string> = {};
+    if (scene === "confirm") {
+      const asked = await invoke(sent, "/user/delete", asUser(token), {}, extra);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+      const text = sent.filter((m) => m.text.includes("/user/delete/confirm")).at(-1)?.text;
+      path = "/user/delete/confirm";
+      body = { token: decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text ?? "")?.[1] ?? "") };
+    }
+    current = new Date(current.getTime() + 80 * 60_000);
+    return {
+      sent,
+      extra,
+      token,
+      userId,
+      organizationId,
+      call: () => invoke(sent, path, asUser(token), body, extra),
+    };
+  }
+
+  /**
+   * Every row of every table but the limiter rows and the sessions, sorted:
+   * the store that the act may change. The route writes a limiter row and
+   * refreshes the caller's session before the act.
+   */
+  async function store() {
+    const all: Record<string, string[]> = {};
+    for (const t of Object.values(TABLES)) {
+      if (t === "ta_limit" || t === "ta_session") continue;
+      const rows = (await env.DB.prepare(`SELECT * FROM ${t}`).all()).results;
+      all[t] = rows.map((r) => JSON.stringify(r)).sort();
+    }
+    return all;
+  }
+
+  for (const scene of ["direct", "confirm"] as const) {
+    it(`deletes a co-owner of ${OWNED_EDGE[scene]} organizations at the edge in 50 queries: ${scene}`, async () => {
+      const w = await coOwner(scene, OWNED_EDGE[scene]);
+      const r = await w.call();
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(
+        await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(w.userId).first(),
+      ).toBe(null);
+      // The shared organizations stay with their other owner.
+      const kept = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM ta_organization WHERE slug LIKE 'shared-%'",
+      ).first<{ n: number }>();
+      expect(kept?.n).toBe(OWNED_EDGE[scene]);
+      const sweeps = await sweepAll(w.sent, w.extra);
+      expect(await restOf(w.organizationId)).toBe(0);
+      expect(r.queries).toBe(OWNED_COUNTS[scene]);
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
+
+    it(`refuses a co-owner of ${OWNED_EDGE[scene] + 1} organizations with delete_too_large in 50 queries, and changes nothing: ${scene}`, async () => {
+      const w = await coOwner(scene, OWNED_EDGE[scene] + 1);
+      const before = await store();
+      const r = await w.call();
+      expect([r.status, r.body.error]).toEqual([409, "delete_too_large"]);
+      expect(r.queries).toBeLessThanOrEqual(50);
+      expect(await store()).toEqual(before);
+      expect(endings).toEqual([]);
+      const { auth } = await engine(env.DB, w.sent, undefined, w.extra);
+      expect(await auth.api.getSession(w.token)).not.toBeNull();
+    });
+  }
+
+  /**
+   * The probe of review-12f2-rebase: 1 solo organization and 6 shared ones,
+   * with no session hook and no scimUser row. At a107e164 the act sent
+   * query 51 inside its transaction, so D1 Free failed the query and the
+   * undo, and left a half-deleted account. The size check counts the worst
+   * calls before the act, so this scene has the same edge as the worst one.
+   */
+  it("refuses a co-owner of 6 organizations with delete_too_large in 50 queries, and changes nothing: the probe", async () => {
+    const w = await coOwner("probe", 6);
+    const before = await store();
+    const r = await w.call();
+    expect([r.status, r.body.error]).toEqual([409, "delete_too_large"]);
+    expect(r.queries).toBeLessThanOrEqual(50);
+    expect(await store()).toEqual(before);
+    const { auth } = await engine(env.DB, w.sent, undefined, w.extra);
+    expect(await auth.api.getSession(w.token)).not.toBeNull();
+  });
+});
+
+/**
  * The counts of the writes that add the platform role part, on the binding
  * on 2026-10-24 (ruling 6 of plan 12f2): the grant by a secret and by a
  * user to a member of the platform organization, the same grant to a user

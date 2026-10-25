@@ -10,6 +10,7 @@ import {
   DELETE_KEEP,
   type DeletedAccount,
   deleteAccountRows,
+  ORGANIZATION_RULE_READS,
 } from "../account-delete.js";
 import { createSteps } from "../create-steps.js";
 import { runAfter, runBefore, type UserPatch } from "../hooks.js";
@@ -89,9 +90,6 @@ export interface OperatorDeleteUser {
  * fits when the route comes.
  */
 const ACT_LIMIT_CALLS = 1;
-
-/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
-const ORGANIZATION_RULE_READS = 3;
 
 /**
  * The least work of a delete, in storage calls at the worst. The delete

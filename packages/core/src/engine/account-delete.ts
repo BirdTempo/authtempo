@@ -68,6 +68,9 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  */
 const DELETE_CALLS_BEFORE = 7;
 
+/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
+export const ORGANIZATION_RULE_READS = 3;
+
 /**
  * The read of the user's scimUser rows and the delete of their
  * scimGroupMember rows (ruling 25 of plan 12d). A user has one scimUser row
@@ -115,6 +118,18 @@ const SCIM_GROUP_CALLS = 2;
  * deletes of `LAST_MODELS`. After the commit: the verification delete 1 and
  * the outbox read 1. The pins are in operator-loss-budget.test.ts of
  * adapter-d1.
+ *
+ * Plan 12f2 (ruling 1, B1) ends the own sessions in `endOwnSessionsPage`, not
+ * `endSessions`. With no hook the page sends 2 queries more than
+ * `endSessions`. Its calls are its read, its link read, its delete, and the
+ * last delete. The run of 2026-10-25 at the move of 12f2
+ * onto main: the scenes send 42, 44, 45, and 47, and the confirm of the
+ * operator scene 48, with no SCIM Group or with 3. In its list, the page of
+ * the own sessions takes the place of `endSessions` 4. Each organization
+ * that the user owns with another owner adds 3: the owner lock 2 and the
+ * recount 1. With no size check the self delete of a due refresh passed 50
+ * at 3 such organizations (51), so a size check refuses it (ruling 10 M1 of
+ * plan 12f2).
  */
 
 /**
@@ -361,11 +376,18 @@ async function runDelete(
   const memberships = await config.storage.findMany("member", [
     { field: "userId", op: "eq", value: userId },
   ]);
+  let checked = 1;
   if (memberships.length > IN_CHUNK) {
     const plan = await organizationsOfDelete(config, config.storage, userId);
     if (!plan.ok && plan.code === "delete_too_large") return plan;
+    checked += ORGANIZATION_RULE_READS;
   }
-  const before = DELETE_CALLS_BEFORE + 1 + ((await config.storage.readyStatements?.()) ?? 1);
+  const before = DELETE_CALLS_BEFORE + checked + ((await config.storage.readyStatements?.()) ?? 1);
+  // On a store with a per-invocation query limit (D1), a delete whose least
+  // work cannot fit the budget answers delete_too_large before any delete
+  // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
+  // user owns with another owner costs 3 calls, so the check counts them.
+  const sized = config.storage.queryLimitPerInvocation === true;
   // The count of the user's sessions that the delete ended (plan 12h Task 5).
   const counted = { sessions: 0 };
   const done = await hookGuard(() =>
@@ -379,19 +401,30 @@ async function runDelete(
       // reads it again.
       let seen: UserRow | null = input.session.user;
       let user: UserRow | null = null;
+      // The calls of the lock at the worst: an update in a transaction is 2
+      // statements on D1, the undo read and the update, and a lost round reads again.
+      let calls = 0;
       for (let round = 0; round < ROUNDS && !user; round++) {
         if (!seen) return fail("not_found");
         const updatedAt = later(now, seen.updatedAt);
+        calls += 2;
         if ((await tx.update("user", unchanged(seen), { updatedAt })) === 1)
           user = { ...seen, updatedAt };
         // A parallel write landed first. No write of this call has run.
-        else seen = await tx.findOne("user", byId);
+        else {
+          calls++;
+          seen = await tx.findOne("user", byId);
+        }
       }
       if (!user) {
         config.observe.emit({ name: "account.delete_gave_up", userId });
         return fail("conflict");
       }
-      if (spend) await spend(tx, user, now);
+      // The spend is one delete.
+      if (spend) {
+        await spend(tx, user, now);
+        calls++;
+      }
       const going = await deleteAccountRows(tx, config, user, now, {
         sessionId: input.session.session.id,
         ended: ended ?? null,
@@ -399,7 +432,7 @@ async function runDelete(
         meter,
         counted,
         budget: OPERATOR_CALL_BUDGET,
-        refuseAfter: null,
+        refuseAfter: sized ? before + calls : null,
         refusePlatform: false,
       });
       return ok({ user, going });
@@ -490,7 +523,9 @@ export async function accountDeleted(
  * `holdImpersonations` locks the sessions, as user-hold.ts states. Then
  * the organization rule runs. With `refuseAfter`, a delete whose least
  * work cannot fit `budget` answers `delete_too_large` here, before any
- * delete (ruling 1 of plan 12f2, Q3). Then the before hooks. The owner
+ * delete (ruling 1 of plan 12f2, Q3). The self delete and the operator
+ * delete pass it on a store with a per-invocation query limit (D1), and
+ * null elsewhere (ruling 10 M1 of plan 12f2). Then the before hooks. The owner
  * lock of each organization that keeps another owner comes next.
  *
  * The deletes come in this order. First the user row, the solo
@@ -531,9 +566,9 @@ export async function deleteAccountRows(
     /** The calls of `meter` that the invocation may make. */
     budget: number;
     /**
-     * Null: no size check (the self delete, and the operator delete on a
-     * store with no per-invocation query limit). A number: the calls of `meter`
-     * that the caller made before this call, at the worst. Then a delete
+     * Null: no size check (a store with no per-invocation query limit). A
+     * number: the calls of `meter` that the caller made before this call, at
+     * the worst. The read of the proof session comes on top. Then a delete
      * whose least work passes `budget` answers `delete_too_large`.
      */
     refuseAfter: number | null;
@@ -560,11 +595,11 @@ export async function deleteAccountRows(
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
   // The least calls after this point, at the worst: the owner lock (a batch
-  // of 2 on D1) and the recount of each owned organization, the user
-  // delete, the solo organizations, the deletes of the invitations and the
-  // member rows of the user, the least of each page of sessions, and
-  // `DELETE_KEEP`. The size check comes before the scimUser locks, which D1
-  // does not have.
+  // of 2 on D1) and the recount of each organization that the user owns
+  // with another owner, the user delete, the solo organizations, the deletes
+  // of the invitations and the member rows of the user, the least of each
+  // page of sessions, and `DELETE_KEEP`. The size check comes before the
+  // scimUser locks, which D1 does not have.
   const least =
     3 * owned.length +
     1 +
@@ -575,8 +610,10 @@ export async function deleteAccountRows(
   if (proof.refuseAfter !== null) {
     // The meter also counts the statements of a parallel invocation on the
     // same adapter, so it alone could refuse a delete that fits. The worst
-    // count of this call's own statements caps it.
-    const own = proof.refuseAfter + HOLD_CALLS + counted.reads();
+    // count of this call's own statements caps it. The read of the proof
+    // session is 1 more.
+    const own =
+      proof.refuseAfter + (proof.sessionId !== null ? 1 : 0) + HOLD_CALLS + counted.reads();
     if (Math.min(proof.meter.used, own) + least > proof.budget) stopWith("delete_too_large");
   }
   // The scimUser rows come after the sessions and before the owner locks (ruling 74 M3 of

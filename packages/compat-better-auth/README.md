@@ -751,7 +751,7 @@ no operator secret.
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
 | `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 409 `YOU_CANNOT_REMOVE_YOURSELF` on a remove, else 409 `FORBIDDEN`. |
 | `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
-| `delete_too_large` (a remove of a user who alone holds more than 50 organizations, or a remove on D1 whose least work does not fit the query limit of one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
+| `delete_too_large` (a `delete-user` or a remove of a user who alone holds more than 50 organizations, or either on D1 when its least work does not fit the query limit of one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
 | `email_taken` on a create | 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`, Better Auth's code and status. |
 | `invalid_body` on a create with a malformed address | 400 `INVALID_EMAIL`, Better Auth's code. |
 | `not_found` | 404 `USER_NOT_FOUND`. |
