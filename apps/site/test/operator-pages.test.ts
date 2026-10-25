@@ -178,6 +178,19 @@ describe("the operator pages", () => {
     expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
   });
 
+  it("links each code of the delete flow in the delete runbook", () => {
+    const codes = secretCodesOf(
+      keyed(
+        "GET /operator/users/search",
+        "GET /operator/users/get",
+        "POST /operator/users/delete",
+        "GET /operator/audit",
+      ),
+    );
+    const page = "operations/delete-an-account.mdx";
+    expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
+  });
+
   it("links each code of the factor disable in the dated note of the recovery runbook", () => {
     const codes = secretCodesOf(
       keyed("GET /operator/users/search", "POST /operator/users/second-factor/disable"),

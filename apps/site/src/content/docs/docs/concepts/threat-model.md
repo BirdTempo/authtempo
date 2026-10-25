@@ -14,6 +14,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 8"
 ---
 
 **For:** a security reviewer, or a developer who must explain the risks of authtempo to one.
@@ -72,6 +73,9 @@ sources:
 - **A client reference, not a URL.** An event names an OAuth client by its `cl_` id, or by `cimd:` and 32 hex of the SHA-256 of its metadata URL.
 - **Operator acts with a record.** Each operator act checks its actor, and writes its change and an audit row in one transaction. A named secret holds the scopes of its job only. [Run the operator tools](/docs/guides/operator-tools/) tells how.
 - **The operator user guard.** A platform operator acts only from a session that is no impersonation session. The user needs the platform role, a verified address, and a second factor, and the session needs a fresh time. Each failed step answers one code.
+- **No address oracle in the create.** A caller with no `users` scope gets one answer, `operator_required`, before any read. So a taken and a free address look the same to that caller. Only a caller with `users` learns of `email_taken`, and that caller can already search the users.
+- **An invitation token for the mailbox only.** The `ui_` token of an invitation leaves core in the mail alone. No answer, audit row, log line, hook event, or CLI output holds it. Core stores its SHA-256.
+- **No operator password.** No operator path sets, knows, or mails a password, and the update takes no credential. An operator who knows a password can sign in as the user outside the impersonation. That sign-in has no time limit, no mark, and no notice (spec 26).
 - **A ban at every door.** A ban ends the sessions, challenges, handoff codes, and OAuth refresh tokens and codes in its transaction. A session that the call leaves gets refused at each door until the sweep ends it.
 - **A bounded impersonation.** An impersonation session can never reach a route of `IMPERSONATION_REFUSED`. That list holds each operator route but the stop, the sign-out, and the re-authentication. It holds each change of a way in, each second-factor route, and the handoff start and continue. It also holds the OAuth authorize, sign-in, device approval, grant revoke, and end-session routes. The organization delete and each member write are in it too: the add, the role change, the removal, and the invitation. [The impersonation](/docs/guides/operator-tools/#the-impersonation) lists each part.
 - **An impersonation that the user sees.** The session ends at a fixed time of 5 to 240 minutes, and no refresh moves it. Its session JWT holds `act` with the operator's id. The user's session list marks it, and the user gets a notice mail at each start.
@@ -99,6 +103,8 @@ An email code of 8 digits divides each figure of its row by 100.
 - A ban does not end them either. A session JWT lives up to 15 minutes after a ban by default, and at most 60 with `jwtMint.ttlMinutes`. A resource server that checks the signature alone accepts it. [Ban a user](/docs/operations/ban-a-user/) gives the checks.
 - After `sessions.endAll`, the OAuth refresh tokens and the API tokens of every user stay. No tool ends every grant of every user after a breach.
 - An impersonation session acts as the user on each route that it can reach, until its fixed end. The app can turn the notice off with `operator.impersonation.notice: false` or `account.notices: false`.
+- An operator create with `emailVerified: true` states the address, and proves nothing. A wrong address gives the account to the owner of that address. The audit row records the flag.
+- A phone that an operator stored is not proved until the first phone sign-in. An in-process call of the app on that user before then is the decision of the app.
 - Core checks no proof of a factor disable. The audit row and `hooks.operator.beforeAction` are the controls.
 - Core trusts an app actor. A hole in the app's admin route acts with every scope, and an in-process call counts on no limiter.
 - A person with write access to the database can change an audit row. On D1 an act can stay with no row when the Worker stops inside it. `hooks.operator.afterAction` sends each row to a separate system.

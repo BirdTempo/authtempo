@@ -1,0 +1,87 @@
+---
+title: Delete an account on request
+description: Delete the account of a person on a request with authtempo users delete. Know what goes, what stays, and what your app removes.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.15
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 8"
+  - packages/core/src/engine/operator/accounts.ts
+sidebar:
+  order: 10
+---
+
+**For:** an operator who must delete an account on a request of the person, when the person cannot use the self delete.
+
+**What it does:** this runbook deletes the account with an audit row. It lists what goes, what stays, and what your app removes.
+
+## Before you start
+
+- The user tools on: `operator.users: true`. [Run the operator tools](/docs/guides/operator-tools/) tells how.
+- An operator secret with the scopes `users`, `delete`, and `audit`. [The first operator](/docs/operations/first-operator/) makes the entry.
+- The request in your own records, with its case id. [The audit table](/docs/guides/operator-tools/#the-audit-table) keeps that id after the delete.
+- A sweep that runs from a scheduler. [Delete expired rows (the sweep)](/docs/guides/sweep/) tells how.
+
+## Steps
+
+Do the steps in this order. Each step names what happens when you skip it.
+
+1. Check the request against your own records first.
+   - A delete cannot be undone. Core keeps no copy of the account.
+2. Run `authtempo users search <base url> --email <address>`. Copy the user id from the `ID` column.
+   - The delete takes a user id, not an address.
+3. Run `authtempo users get <base url> <user id>`. Make sure that it is the account of the request.
+   - The delete question shows the user id only. A wrong id deletes the wrong person.
+4. Use the secret that holds the `delete` scope.
+   - A secret with `users` only gets 403 `operator_required`, and the account stays.
+5. Run `authtempo users delete <base url> <user id> --reason "<case id>"`. Type the user id at the question.
+   - The reason stays in the audit row after the account is gone. Put the case id of your own system there.
+   - The command prints `deleted <user id>; audit row <id>`, then one line for each organization that went.
+6. On 409 `sole_owner`, make another member an owner of each organization of the user. Then run the delete again.
+   - The platform organization never goes. Its last owner cannot be deleted.
+7. On 409 `delete_too_large`, delete the organizations that the user alone holds first. Then run the delete again.
+   - On D1, the user can also leave each organization that the user owns with another owner.
+8. Run `authtempo audit list <base url> --user <user id>`. Find the row whose `ID` is the audit row id of step 5.
+   - The row has the action `user_delete`. It holds the organization ids that went, and no address.
+9. Remove the data of the user in your own app.
+   - Core deletes its own rows only. `user.afterDelete` runs after the commit, so your app can remove its rows there.
+
+## What goes and what stays
+
+The delete runs one transaction with its audit row. A refusal writes nothing and leaves no audit row.
+
+- The user row and every row of the user go: the identities, the passkeys, the tokens, the second factor, and the invitation rows.
+- Each organization where the user is the only member goes with the account. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep.
+- The act ends a page of the sessions. The sweep ends the rest with the reason `account_deleted`.
+- The user gets the notice mail `account_deleted` at the old address, unless `account.notices` is false. The notice holds no IP of the operator. A user with no address gets no notice.
+- The audit rows of the user stay. Each holds the user id, the reason, and `data`, and no address. Core has no retention rule for them, so your app sets one.
+- The controls of the self delete do not apply: `account.delete`, `account.deleteConfirm`, and the fresh rule of the person.
+
+## The limits
+
+- Each actor gets 100 deletes an hour, on `operator-delete:actor:<kind>:<id>`. A refused call counts too. A delete cannot be undone, so the count bounds what a leaked secret destroys.
+- Each call also counts on `operator-users:ip:<ip>`, 600 an hour, with every command of the user tools.
+- On every store, a user who alone holds more than 50 organizations gets `delete_too_large` before any write.
+- On D1, one invocation sends at most 50 queries on Workers Free. Each organization that the user owns with another owner costs 3 queries, and a plain membership costs none.
+- On D1, a secret deletes a user with 1 solo organization and at most 3 organizations that the user owns with another owner.
+- On D1, a platform operator deletes a user with 1 solo organization and none of those, or with no solo organization and at most 2.
+- Postgres, MySQL, SQLite, and memory have no query limit per invocation. There only the count of solo organizations refuses.
+
+## If it fails
+
+- [`not_found`](/docs/reference/errors/#not_found): no user has the id, or the user tools are off.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the secret is wrong, or its hash is not in `operator.secrets`.
+- [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope of the command: `users` for `users`, `delete` for `users delete`, or `audit` for `audit list`.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the 600 calls of this hour from this IP, or of this secret, are spent. Or the 100 deletes of this hour of the secret are spent.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the reason breaks its rule.
+- [`sole_owner`](/docs/reference/errors/#sole_owner): the user is the last owner of an organization with other members, or of the platform organization.
+- [`delete_too_large`](/docs/reference/errors/#delete_too_large): the user alone holds more than 50 organizations, or on D1 the delete cannot fit 50 queries.
+- [`conflict`](/docs/reference/errors/#conflict): another change of the user ran at the same time. Run the command again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): a before hook of your app refused the delete.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook of your app threw another error.
+
+## Next
+
+- [Run the operator tools](/docs/guides/operator-tools/)
+- [authtempo users delete](/docs/reference/cli/users-delete/)
+- [authtempo audit list](/docs/reference/cli/audit-list/)

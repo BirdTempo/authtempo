@@ -35,7 +35,7 @@ authtempo users create https://api.example.com --email ada@example.com --name "A
 | `--phone <E.164>` | The phone number of a new user with no address: a plus sign and 8 to 15 digits. The deployment needs the phone config. |
 | `--name <name>` | The name: 1 to 200 UTF-16 code units with no control or format character. |
 | `--image <url>` | The image: an https URL with a host, of at most 2048 characters, with no space. |
-| `--verified` | Marks the address as verified. Give it only when you checked the address yourself. |
+| `--verified` | Marks the address as verified. Give it only when you checked the address yourself. The deployment then takes the address as proved, and no later proof resets the account: a wrong address gives the account to the owner of that address. |
 | `--first-sign-in invite`, `--first-sign-in reset`, `--first-sign-in none` | How the person signs in first. `invite` mails an invitation link and is the default. `reset` mails a reset link. `none` mails nothing. |
 | `--reason <text>` | The audit row holds the reason of the act. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
@@ -54,6 +54,8 @@ authtempo users create https://api.example.com --email ada@example.com --name "A
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. A create also stops at the limit of 200 creates per actor per hour. |
 
 Give exactly one of `--email` and `--phone`. `--verified` and `--first-sign-in invite` or `reset` need `--email`. Else the command stops with a usage error and sends no request.
+
+The deployment takes an address and a phone number together only with `emailVerified: true`, because a later proof of the address clears an unproved phone. The command is stricter: it refuses `--email` with `--phone`, so each run has one first sign-in and one next step. A stricter command is safe: it refuses only inputs that the deployment could take. The person can add a phone number later, from a session.
 
 The command asks one question, such as `Create a user, and mail the invitation link to the address?` The question names no address and no phone number. With `--yes` it asks nothing.
 

@@ -45,7 +45,7 @@ authtempo users delete https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reas
 | Exit code | What it means |
 | --- | --- |
 | 0 | The deployment deleted the account. The command prints the audit row id and each organization that went with it. |
-| 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no delete scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. |
+| 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no delete scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. A delete also stops at the limit of 100 deletes per actor per hour. |
 
 Without `--yes`, the command asks one question and reads one line:
 

@@ -6,12 +6,19 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 14"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 8"
   - packages/core/README.md "Operator tools"
 ---
 
 import { Code } from "@astrojs/starlight/components";
 import sample from "../../../../../samples/guides/operator-tools.ts?raw";
 import test from "../../../../../samples/guides/operator-tools.test.ts?raw";
+import usersSample from "../../../../../samples/guides/operator-users.ts?raw";
+import inviteSample from "../../../../../samples/guides/operator-invite.ts?raw";
+import verifiedSample from "../../../../../samples/guides/operator-verified.ts?raw";
+import updateSample from "../../../../../samples/guides/operator-update.ts?raw";
+import phoneSample from "../../../../../samples/guides/operator-phone.ts?raw";
+import usersTest from "../../../../../samples/guides/operator-users.test.ts?raw";
 
 **For:** an operator or an app developer who does support work on the users of a deployment.
 
@@ -69,6 +76,81 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - Each write reads a JSON body only. Each write takes a `reason`. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D.
 - A secret call counts on `operator-users:ip:<ip>` before the compare, 600 an hour. A secret that matches also counts on `operator-users:secret:<name>`, 600 an hour from any IP.
 - A platform operator counts on `operator:user:<userId>`, 600 an hour. [Limits](/docs/reference/limits/) lists each key.
+
+## Create a user
+
+`users.create` makes an account for a person, with an address or with a phone number only. It needs the scope `users`. The route is [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create), and [`authtempo users create`](/docs/reference/cli/users-create/) wraps it.
+
+- `firstSignIn: "invite"` mails an invitation link. It is the default with an address.
+- `firstSignIn: "reset"` mails a reset link, so the person sets a password. It needs the `password` config.
+- `firstSignIn: "none"` mails nothing. The person signs in by any proof of the address, such as a magic link.
+- `email: null` with a `phone` in E.164 makes a user with no address. It needs the `phone` config, and allows `none` only.
+- The phone form sends no SMS at the create. The person asks for a phone code at the first sign-in.
+- A phone beside an address needs `emailVerified: true`, because a later proof of the address clears an unproved phone.
+- The create does not read `signUp`. It is the way in of an app whose self sign-up is closed: the operator, not a stranger, makes the user.
+- `user.beforeCreate` runs with `via: "operator"`, so a hook of the app can still refuse the user.
+- No operator path sets a password. The answer holds no token, no link, and no code.
+- A caller with no `users` scope gets `operator_required` before any read. So the create tells nothing about an address to that caller.
+- A taken address or number answers `email_taken` or `phone_taken`, writes nothing, and mails no one.
+- The mail goes after the commit. A mail that fails keeps the user, answers `mailed: null`, and emits the event `operator.create_mail_failed`.
+- The audit row `user_create` holds four flags: `emailVerified`, `firstSignIn`, `hasAddress`, and `hasPhone`. It never holds the address, the number, or the name.
+- Each actor gets 200 creates an hour through the route, on `operator-create:actor:<kind>:<id>`. A refused call counts too.
+
+<Code code={usersSample} lang="ts" title="An app with a closed sign-up, and the create of a ticket" />
+
+## The invitation link
+
+- The link lives `operator.invite.ttlHours`: 1 to 168 hours, 72 by default. Core stores the SHA-256 of the `ui_` token only.
+- The mail is the kind `user_invite` of `account.mail`. An app writes its own text, and core sends it to the address of the user.
+- `GET /user/invite/confirm` shows a page that reads nothing and spends nothing, because a mail scanner fetches links. Its button posts the token.
+- [`POST /user/invite/confirm`](/docs/reference/routes/#post-user-invite-confirm) spends the link once, in one conditional update. A second use answers `invalid_token`.
+- The link holds the address of the create. After a change of the address, the old link answers `invalid_token`.
+- A wrong, spent, or expired link answers the same `invalid_token`. The person signs in by a magic link at the address.
+- The link proves the address, and opens a session with the via `invite`.
+- `totp.gate.invite` is on by default. A user with the second factor on gets a challenge, not a session. A trusted device skips it.
+- An address of a domain that enforces SSO answers `sso_required`. The person signs in through the SSO connection.
+- Each POST counts on `user-invite-confirm:ip:<ip>`, 20 per 15 minutes, before the token check.
+- The operator never sees the link. It is not in an answer, an audit row, a log line, a hook event, or the CLI output.
+- An account delete removes the invitation row of the user.
+
+<Code code={inviteSample} lang="ts" title="The invitation mail in the words of the app" />
+
+## The verified flag
+
+`emailVerified: true` is a statement of the operator, not a proof. Give it only after your own check of the address.
+
+- It lets the app add the user to an organization before the first sign-in. A member add needs a verified address.
+- Core takes the address as proved. So no later proof resets the account, and the [claim rule](/docs/concepts/claim-rule/) never runs for it.
+- A wrong address gives the account to the owner of that address. That person can sign in by a magic link.
+- The audit row records the flag, so a later reader sees who stated it.
+- It needs an address. A user with a phone number only cannot have the flag.
+
+<Code code={verifiedSample} lang="ts" title="Add a created user to an organization" />
+
+## Update a name or an image
+
+`users.update` corrects the name or the image of a user. It needs the scope `users`.
+
+- Give `name`, `image`, or both. Null clears a field, and an absent field stays. With neither, the act answers `invalid_body`.
+- The name and the image follow the rules of the profile update of the user.
+- The act never changes the address, `emailVerified`, a password, a passkey, the username, the phone, the second factor, or a ban. Each has its own flow.
+- The route answers `invalid_body` for any other key, such as `password`, `email`, or `emailVerified`.
+- The act ends no session and sends no mail: a name and an image are not credentials.
+- `user.beforeUpdate` and `user.afterUpdate` run with `via: "operator"`. The audit row `user_update` names the changed fields, never a value.
+- A platform operator cannot update their own user (`operator_self`) or another platform operator (`operator_required`).
+
+<Code code={updateSample} lang="ts" title="Correct a profile from a ticket" />
+
+## The phone-only residual
+
+- With the `phone` config, core counts a stored phone as a proved handle (plan 12i). A proved handle opens the username, a phone add, and an API token.
+- A phone that an operator stored is not proved until the first phone sign-in. No code went to it at the create.
+- Every route that needs a proved handle also needs a session. The only session of that user is a phone session, and a phone session proves the number.
+- An in-process call of the app on that user, before the first phone sign-in, is the decision of the app. Wait for the first phone session.
+
+<Code code={phoneSample} lang="ts" title="Create a user with a phone number only" />
+
+<Code code={usersTest} lang="ts" title="The user acts as a test" />
 
 ## The ban
 

@@ -672,7 +672,11 @@ written. The shim never drops a key in silence:
 no name. The shim sends core's `firstSignIn: "none"`, because Better Auth
 mails nothing at create: core writes no invitation and mails no link. The
 person signs in by a path of the app, such as the reset link or a magic
-link. Each other key is refused before any read, and nothing is written.
+link. `data.emailVerified: true` makes core take the address as proved, and
+the audit row records the flag. No later proof of the address resets the
+account, so a wrong address gives the account to the owner of that
+address. Set it only after your own check of the address. Each other key
+is refused before any read, and nothing is written.
 The shim never drops a key in silence:
 
 | Key | Answer |

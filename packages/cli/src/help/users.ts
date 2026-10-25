@@ -358,7 +358,7 @@ export const USERS_CREATE_HELP: HelpText = {
     },
     {
       flag: "--verified",
-      says: "Mark the address as verified. Give it only when you checked the address yourself.",
+      says: "Mark the address as verified. Give it only when you checked the address yourself. The deployment then takes the address as proved, and no later proof resets the account.",
     },
     {
       flag: "--first-sign-in <invite|reset|none>",
@@ -384,6 +384,7 @@ export const USERS_CREATE_HELP: HelpText = {
   notes: [
     "Give exactly one of --email and --phone. A user with a phone number only signs in with a phone code, and no SMS goes out at the create.",
     "--verified and --first-sign-in invite or reset need --email. --first-sign-in reset needs the password config of the deployment.",
+    "The command refuses --email with --phone, so each run has one first sign-in. The person can add a phone number later, from a session.",
     "The answer holds no token and no link: the deployment mails them to the person only.",
   ],
 };
@@ -464,7 +465,10 @@ export const USERS_DELETE_HELP: HelpText = {
       code: 0,
       says: "The deployment deleted the account. The command prints the audit row id and each organization that went with it.",
     },
-    { code: 2, says: writeStop("delete") },
+    {
+      code: 2,
+      says: `${writeStop("delete")} A delete also stops at the limit of ${DELETES_PER_HOUR} deletes per actor per hour.`,
+    },
   ],
   notes: [
     "The secret needs the delete scope beside the users scope.",
