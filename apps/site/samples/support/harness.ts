@@ -70,14 +70,17 @@ export function codeIn(h: Harness, to: string): string {
 }
 
 /** One request to `auth.handle`, with a JSON body when one is given. No Origin header: a server caller. */
-export function call(
+export async function call(
   auth: Auth,
   method: "GET" | "POST" | "OPTIONS",
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> {
-  return auth.handle(
+  // The work after the answer, such as the sign-up mail, runs under the
+  // host's waitUntil. The harness waits for it, as a host keeps it alive.
+  const after: Promise<unknown>[] = [];
+  const res = await auth.handle(
     new Request(`${API}${path}`, {
       method,
       headers: {
@@ -86,7 +89,10 @@ export function call(
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     }),
+    { waitUntil: (work) => void after.push(work) },
   );
+  await Promise.all(after);
+  return res;
 }
 
 /** The `__Host-tempo_session=…` pair that a response sets, or "" when it sets none. */

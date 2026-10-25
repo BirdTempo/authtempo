@@ -95,6 +95,7 @@ Send one real SMS through the port of your supplier. Then sign in with its code.
 - [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `phone-request` refused the request.
 - [`invalid_body`](/docs/reference/errors/#invalid_body): the body is not JSON, or a field has the wrong type.
 - [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account of the number.
+- [`sso_required`](/docs/reference/errors/#sso_required): the account of the number has an address of a domain that signs in by SSO only. Send the browser to the start URL in `detail`.
 - [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a hook of your app refused the sign-in or the change, or threw.
 - [`unauthorized`](/docs/reference/errors/#unauthorized): `POST /phone/add`, `POST /phone/add/verify`, and `POST /phone/remove` need a session.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): at an add, the user has no proved handle. Confirm the address first.
