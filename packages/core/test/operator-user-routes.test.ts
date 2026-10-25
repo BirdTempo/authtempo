@@ -8,7 +8,8 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
-import { post, recordCredential } from "./helpers.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
+import { post, recordCredential, settled } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
@@ -388,6 +389,53 @@ describe("the operator update and delete routes (plan 12f2 Task 5)", () => {
     ]);
     for (const r of rows) expect([r.reason, r.ip, r.userAgent]).toEqual([REASON, IP, AGENT]);
     expect(JSON.stringify(rows)).not.toContain(ADA);
+  });
+
+  it("updates and deletes a user with no address: a phone sign-up (plan 12i Task 1)", async () => {
+    const sms = createRecordingSms();
+    const w = await world({
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+    });
+    const phone = "+14155550123";
+    const from = { "cf-connecting-ip": "203.0.113.71" };
+    // The router of the world sends the code after the answer (ruling 23 of plan 12i).
+    const handle = settled(w.handle);
+    expect((await handle(post("/auth/phone/request", { phone }, from))).status).toBe(200);
+    const code = /^(\d+) is your /.exec(sms.sent.findLast((m) => m.to === phone)?.text ?? "")?.[1];
+    if (!code) throw new Error("no code in the text");
+    const signedUp = await handle(
+      post("/auth/phone/verify", { phone, code: recordCredential(code) }, from),
+    );
+    expect(signedUp.status).toBe(200);
+    const id = ((await signedUp.json()) as { user: { id: string } }).user.id;
+    expect(await userOf(w, id)).toMatchObject({ email: null, emailVerified: false });
+    const erasure = operatorHeader(ERASURE);
+    // The update answers the user with a null address, under the contract.
+    const named = await fitted(
+      UPDATE,
+      await call(
+        w,
+        UPDATE,
+        { userId: id, name: "Pat", image: "https://cdn.example.com/p.png", reason: REASON },
+        erasure,
+      ),
+    );
+    expect(named).toMatchObject({ user: { id, email: null, name: "Pat" } });
+    expect(await userOf(w, id)).toMatchObject({
+      name: "Pat",
+      image: "https://cdn.example.com/p.png",
+    });
+    const cleared = await fitted(
+      UPDATE,
+      await call(w, UPDATE, { userId: id, name: null, image: null, reason: REASON }, erasure),
+    );
+    expect(cleared).toMatchObject({ user: { id, email: null, name: null } });
+    // The delete answers ok; the notice has no address to go to, so no mail goes.
+    const mails = w.auth.mail.length;
+    const gone = await fitted(DELETE, await call(w, DELETE, bodyOf(DELETE, id), erasure));
+    expect(gone).toEqual({ organizations: [], auditId: expect.any(String) });
+    expect(await userOf(w, id)).toBeNull();
+    expect(w.auth.mail.length).toBe(mails);
   });
 
   it("answers the refusals of each route through the router", async () => {

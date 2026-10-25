@@ -246,7 +246,8 @@ export function operatorUser(v: unknown): OperatorUserJson | null {
   const ban = u.ban as Record<string, unknown> | null | undefined;
   if (
     !isString(u.id) ||
-    !isString(u.email) ||
+    // A user may have no address (plan 12i Task 1): a phone or an anonymous sign-in.
+    !isNullableString(u.email) ||
     typeof u.emailVerified !== "boolean" ||
     !isNullableString(u.name) ||
     !isString(u.createdAt) ||
@@ -520,7 +521,7 @@ export function userRow(u: OperatorUserJson): string[] {
   const ban = u.ban === null ? "-" : (u.ban.until ?? "no-end");
   return [
     u.id,
-    u.email,
+    u.email ?? "-",
     u.emailVerified ? "yes" : "no",
     ban,
     u.platformOperator ? "yes" : "no",

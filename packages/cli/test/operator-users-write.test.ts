@@ -37,7 +37,7 @@ const hash = (s: string) => createHash("sha256").update(s, "utf8").digest("hex")
  * sends each request to the handle from one IP and counts the requests of
  * each path.
  */
-function fixture() {
+function fixture(extra: Partial<Parameters<typeof createAuth>[0]> = {}) {
   const current = new Date("2026-03-01T00:00:00.000Z");
   const clock = { now: () => current };
   const mails: MailMessage[] = [];
@@ -68,6 +68,7 @@ function fixture() {
       ],
       users: true,
     },
+    ...extra,
   });
   const paths: string[] = [];
   const fetch = async (url: string, init: RequestInit) => {
@@ -188,6 +189,62 @@ describe("users update and users delete (plan 12f2 Task 6)", () => {
     const rows = await auditOf(f, id);
     expect(rows.at(-1)).toMatchObject({ id: doc.auditId, data: { fields: ["name"] } });
     expect(await userRow(f, id)).toMatchObject({ name: "Bea", image: null });
+  });
+
+  it("updates, shows, and deletes a user with no address: a phone sign-up (plan 12i Task 1)", async () => {
+    const sent: { to: string; text: string }[] = [];
+    const sms = {
+      send: async (m: { to: string; text: string }) => {
+        sent.push({ to: m.to, text: m.text });
+        return "sent" as const;
+      },
+    };
+    const f = fixture({ phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true } });
+    const phone = "+14155550123";
+    const asked = await f.auth.api.phone?.request({ phone, ip: nextIp() });
+    expect(asked).toEqual({ ok: true, value: { sent: true } });
+    const code = /^(\d+) is your /.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const signedUp = await f.auth.api.phone?.verify({ phone, code, ip: nextIp(), userAgent: null });
+    if (!signedUp?.ok || !("user" in signedUp.value)) throw new Error("no phone user");
+    const id = signedUp.value.user.id;
+    expect(await userRow(f, id)).toMatchObject({ email: null });
+
+    const named = await run(
+      ["users", "update", BASE, id, "--name", "Pat", "--reason", "ticket 1", "--yes", "--json"],
+      f,
+    );
+    expect(named.code).toBe(0);
+    expect(docOf(named.io.stdout)).toMatchObject({ user: { id, email: null, name: "Pat" } });
+    const text = await run(
+      ["users", "update", BASE, id, "--no-name", "--reason", "ticket 2", "--yes"],
+      f,
+    );
+    expect(text.code).toBe(0);
+    expect(text.io.stdout[0]).toMatch(new RegExp(`^changed the name of ${id}; audit row \\S+$`));
+
+    // The table shows no address as "-".
+    const shown = await run(["users", "get", BASE, id], f, {}, SUPPORT);
+    expect(shown.code).toBe(0);
+    expect(shown.io.stdout.join("\n")).toMatch(new RegExp(`${id}\\s+-\\s+no\\s`));
+
+    // The confirmation question names the user id, not an address.
+    const questions: string[] = [];
+    const io = fakeIo({
+      env: { AUTHTEMPO_OPERATOR_SECRET: DELETER },
+      fetch: f.fetch,
+      stdinIsTTY: true,
+      typed: id,
+    });
+    const prompt = io.prompt.bind(io);
+    io.prompt = async (q: string) => {
+      questions.push(q);
+      return prompt(q);
+    };
+    expect(await main(["users", "delete", BASE, id, "--reason", "request 7"], io)).toBe(0);
+    expect(questions).toEqual([
+      `Delete the account ${id}? This cannot be undone. Type the user id to confirm:`,
+    ]);
+    expect(await userRow(f, id)).toBeNull();
   });
 
   it("asks one question that names the fields and the user id, and writes nothing on a no", async () => {

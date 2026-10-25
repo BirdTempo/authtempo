@@ -269,7 +269,8 @@ export const GROUP_JSON_KEYS = { exit: true, stopped: true } as const satisfies 
  */
 export interface OperatorUserJson {
   id: string;
-  email: string;
+  /** Null for a user with no address (plan 12i Task 1). */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   createdAt: string;
