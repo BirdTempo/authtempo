@@ -1,6 +1,6 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { createPbkdf2PasswordHash } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuthPasswordHash } from "../../src/hash.js";
 import { anonymous, multiSession, phoneNumber, username } from "../../src/plugins.js";
 import { betterAuth } from "../../src/server/better-auth.js";
@@ -15,6 +15,13 @@ import { execD1 } from "./schema.js";
 // updated 21 April 2026, read 2026-10-24). Each invocation is a new
 // storage and a new shim over the counting binding, so the ready check
 // counts too. The counts pin each path: a change shows here first.
+//
+// Core's revokedFor (engine/operator/guards.ts) reads the pending-end rows
+// of a user once (+1 query) when a session began at or before the user's
+// last write, in milliseconds. So the count of a path depended on the
+// clock: a fast machine made more ties (ruling 42 M2). The clock here stands
+// still, so every session ties its user's last write: each count is the
+// worst case, the same on every machine.
 
 await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
@@ -88,6 +95,14 @@ function browser() {
 }
 
 describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-25T00:00:00.000Z"));
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   it("sends 50 queries or fewer at each path", async () => {
     const counts: Record<string, [number, number]> = {};
     const take = (name: string, r: { status: number; queries: number }) => {
@@ -146,6 +161,17 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
         password: PASSWORD,
       }),
     );
+    // Phone over an anonymous session: the code signs in and upgrades it (ruling 42 H1).
+    const q = browser();
+    await q.setup("/sign-in/anonymous", {});
+    take(
+      "/phone-number/send-otp (anonymous)",
+      await q.call("/phone-number/send-otp", { phoneNumber: "+14155550103" }),
+    );
+    take(
+      "/phone-number/verify (anonymous)",
+      await q.call("/phone-number/verify", { phoneNumber: "+14155550103", code: codes.at(-1) }),
+    );
     // Multi-session with a full bag: five sessions of five users in one browser.
     const m = browser();
     for (const n of [1, 2, 3, 4, 5])
@@ -161,33 +187,31 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
       "/multi-session/revoke",
       await m.call("/multi-session/revoke", { sessionToken: sessions[2]?.session.token }),
     );
-    // The most queries of each path: the ready check of the new storage (4),
-    // the route, and the shim's reads for Better Auth's shapes. The sign-up
-    // over an anonymous session holds the two session reads of onLinkAccount.
-    // Measured 2026-10-25 on an idle machine (load under 6), over 16 runs.
-    // The three multi-session paths varied by up to two between runs (18 to
-    // 20, and 20 to 22). So each count is an upper bound: the most measured.
-    const most: Record<string, number> = {
+    // The queries of each path: the ready check of the new storage (4), the
+    // route, and the shim's reads for Better Auth's shapes. The sign-up and
+    // the phone verify over an anonymous session hold the two session reads
+    // of onLinkAccount. Each count holds one revokedFor read per session
+    // that the path checks, as every session ties (see the top).
+    const exact: Record<string, number> = {
       "/sign-in/anonymous": 10,
       "sign-up over anonymous": 31,
-      "/delete-anonymous-user": 12,
+      "/delete-anonymous-user": 13,
       "/is-username-available": 6,
       "/sign-in/username": 12,
       "/phone-number/send-otp": 12,
       "/phone-number/verify": 14,
-      "/phone-number/send-otp (add)": 16,
-      "/phone-number/verify (add)": 16,
+      "/phone-number/send-otp (add)": 18,
+      "/phone-number/verify (add)": 18,
       "/sign-in/phone-number": 15,
-      "/multi-session/list-device-sessions": 20,
-      "/multi-session/set-active": 22,
-      "/multi-session/revoke": 22,
+      "/phone-number/send-otp (anonymous)": 17,
+      "/phone-number/verify (anonymous)": 31,
+      "/multi-session/list-device-sessions": 22,
+      "/multi-session/set-active": 25,
+      "/multi-session/revoke": 24,
     };
-    expect(Object.keys(counts).sort()).toEqual(Object.keys(most).sort());
-    // Each path outside its bounds, with its status and count: none.
-    const outside = Object.entries(counts).filter(([path, [status, queries]]) => {
-      const bound = most[path] ?? 0;
-      return status !== 200 || queries > bound || queries > 50;
-    });
-    expect(outside).toEqual([]);
+    expect(counts).toEqual(
+      Object.fromEntries(Object.entries(exact).map(([path, n]) => [path, [200, n]])),
+    );
+    expect(Math.max(...Object.values(exact))).toBeLessThanOrEqual(50);
   });
 });
