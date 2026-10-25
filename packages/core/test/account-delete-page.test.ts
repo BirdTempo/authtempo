@@ -43,6 +43,9 @@ describe("the page of the own sessions of the self delete (ruling 1 of plan 12f2
       auth.storage.findMany("session", [{ field: "userId", op: "eq", value: me.user.id }]);
     // The sign-up link opened one more session.
     expect((await sessionsOf()).length).toBe(41);
+    // The page of the own sessions keeps to the budget only on a store with a
+    // per-invocation query limit (D1). This memory store claims one.
+    auth.storage.queryLimitPerInvocation = true;
     ended.length = 0;
     const sent = auth.storage.statementsSent?.() ?? 0;
     expect(await deleteAccount(auth.config, { session: me, ip: null, userAgent: null })).toEqual({
