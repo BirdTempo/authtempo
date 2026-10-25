@@ -6,7 +6,7 @@ import { operatorApi } from "../src/engine/operator/index.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import type { StorageAdapter } from "../src/storage/port.js";
+import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { makeAuth, post, settled } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorAuth, secretActor } from "./operator-helpers.js";
@@ -251,16 +251,11 @@ describe("the operator create (plan 12f2 Task 2)", () => {
     expect(
       await w.api.create({ actor: w.desk, email: null, phone: PHONE, ...REASON }),
     ).toMatchObject({ ok: true });
-    expect(
-      await w.api.create({
-        actor: w.desk,
-        email: "pat@example.com",
-        emailVerified: true,
-        phone: PHONE,
-        firstSignIn: "none",
-        ...REASON,
-      }),
-    ).toEqual({ ok: false, code: "phone_taken", status: 409 });
+    expect(await w.api.create({ actor: w.desk, email: null, phone: PHONE, ...REASON })).toEqual({
+      ok: false,
+      code: "phone_taken",
+      status: 409,
+    });
     expect(await users(w)).toHaveLength(1);
     expect(await auditRows(w)).toHaveLength(1);
   });
@@ -311,28 +306,72 @@ describe("the operator create (plan 12f2 Task 2)", () => {
     expect(await users(noPassword)).toEqual([]);
   });
 
-  it("refuses a phone on an unverified address", async () => {
-    // A proof of the address clears the phone (claimEmail, plan 12i), so the
-    // create sets a phone only beside a verified address (plan 12f2 Task 1).
+  it("refuses a phone beside an address, verified or not, before any read", async () => {
+    // Ruling 12 of plan 12f2 (final-12f2-A H1). With a verified address the
+    // operator would know a phone way in to the person's account. With an
+    // unverified one, a proof of the address clears the phone (claimEmail).
     const w = await world();
-    expect(await w.api.create({ actor: w.desk, email: ADA, phone: PHONE, ...REASON })).toEqual({
-      ok: false,
-      code: "invalid_body",
-      status: 400,
-    });
+    const calls = spyStorage(w.config.storage);
+    for (const emailVerified of [undefined, false, true])
+      expect(
+        await w.api.create({
+          actor: w.desk,
+          email: ADA,
+          ...(emailVerified === undefined ? {} : { emailVerified }),
+          phone: PHONE,
+          firstSignIn: "none",
+          ...REASON,
+        }),
+        String(emailVerified),
+      ).toEqual({ ok: false, code: "invalid_body", status: 400 });
+    expect(calls).toEqual([]);
+    vi.restoreAllMocks();
     expect(await users(w)).toEqual([]);
-    const done = await w.api.create({
-      actor: w.desk,
-      email: ADA,
-      emailVerified: true,
-      phone: PHONE,
-      firstSignIn: "none",
-      ...REASON,
-    });
+    expect(await auditRows(w)).toEqual([]);
+    expect(w.sms.sent).toEqual([]);
+  });
+
+  it("invites by default when the create names an address (review-12f2-task2 L2)", async () => {
+    const w = await world();
+    const done = await w.api.create({ actor: w.desk, email: ADA, ...REASON });
     if (!done.ok) throw new Error(done.code);
-    expect(await users(w)).toEqual([
-      expect.objectContaining({ email: ADA, emailVerified: true, phone: PHONE }),
+    expect(done.value.mailed).toBe("invite");
+    expect((await auditRows(w)).map((r) => r.data)).toEqual([
+      expect.objectContaining({ firstSignIn: "invite", hasAddress: true }),
     ]);
+    expect(w.mail.map((m) => m.to)).toEqual([ADA]);
+  });
+
+  it("throws a storage failure that is no taken handle, and keeps no row (review-12f2-task2 L2)", async () => {
+    // A failure of another kind on the email field: only unique_violation maps to email_taken.
+    const w = await world();
+    const storage = w.config.storage;
+    const real = storage.transaction.bind(storage);
+    vi.spyOn(storage, "transaction").mockImplementation(((
+      work: (tx: StorageAdapter) => Promise<unknown>,
+    ) =>
+      real((tx) =>
+        work(
+          new Proxy(tx, {
+            get(target, key) {
+              const value: unknown = Reflect.get(target, key);
+              if (key === "create")
+                return (model: string, row: unknown) =>
+                  model === "user"
+                    ? Promise.reject(new StorageError("invalid_argument", "user", ["email"]))
+                    : target.create(model as never, row as never);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }),
+        ),
+      )) as never);
+    await expect(
+      w.api.create({ actor: w.desk, email: ADA, firstSignIn: "none", ...REASON }),
+    ).rejects.toThrow(StorageError);
+    vi.restoreAllMocks();
+    expect(await users(w)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+    expect(w.mail).toEqual([]);
   });
 
   it("mails a reset link for firstSignIn reset", async () => {

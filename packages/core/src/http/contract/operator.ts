@@ -111,17 +111,11 @@ export const createAdminBody = z.strictObject({
 export const enforceOffBody = z.strictObject({ domainId: operatorId, reason });
 
 /**
- * The body of an operator update (plan 12f2 Task 5): the user, a name or an
- * image or both, and the reason. Null clears a field. The engine applies
- * the name and image rules of plan 12a; these caps bound the body. The
- * schema is strict, so `password`, `email`, `emailVerified`, `role`, and
- * the ban keys answer `invalid_body`: no operator path sets them here.
- */
-/**
  * The body of an operator create (plan 12f2 Task 5). `email` is required
  * and may be null, so a caller states the case of no address on purpose;
- * a null address needs `phone`. The engine applies the address, phone,
- * name, and image rules; these caps bound the body. The schema is strict,
+ * a null address needs `phone`, and an address takes no `phone` (ruling 12
+ * of plan 12f2). The engine applies the address, phone, name, and image
+ * rules; these caps bound the body. The schema is strict,
  * so `password`, `role`, the ban keys, and every other key answer
  * `invalid_body`: no operator path sets a credential.
  */
@@ -135,6 +129,13 @@ export const createUserBody = z.strictObject({
   reason,
 });
 
+/**
+ * The body of an operator update (plan 12f2 Task 5): the user, a name or an
+ * image or both, and the reason. Null clears a field. The engine applies
+ * the name and image rules of plan 12a; these caps bound the body. The
+ * schema is strict, so `password`, `email`, `emailVerified`, `role`, and
+ * the ban keys answer `invalid_body`: no operator path sets them here.
+ */
 export const updateUserBody = z.strictObject({
   userId: operatorId,
   name: z.string().max(400).nullable().optional(),

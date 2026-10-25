@@ -616,6 +616,33 @@ describe("the operator create route (plan 12f2 Task 5, second wave)", () => {
     expect(await usersAt(w, TAKEN)).toHaveLength(1);
   });
 
+  it("needs the email key in the create body, null or a string (review-12f2-task5b I2)", () => {
+    const schema = CONTRACT["POST /operator/users/create"]?.body?.schema;
+    if (!schema) throw new Error("no body schema");
+    expect(schema.safeParse({ firstSignIn: "none", reason: REASON }).success).toBe(false);
+    expect(schema.safeParse(createBody(null, { phone: "+14155550123" })).success).toBe(true);
+    expect(schema.safeParse(createBody(FREE)).success).toBe(true);
+  });
+
+  it("refuses a phone beside an address on the route (ruling 12)", async () => {
+    // The probe of final-12f2-A: an operator who chose the phone of a
+    // verified account could sign in to it by a phone code, unseen.
+    const sms = createRecordingSms();
+    const w = await world({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
+    const phone = "+15555550111";
+    for (const headers of [operatorHeader(ERASURE), w.operatorCookie])
+      for (const emailVerified of [true, false]) {
+        const res = await create(w, createBody(FREE, { emailVerified, phone }), headers);
+        expect(await answerOf(res), String(emailVerified)).toEqual({
+          status: 400,
+          code: "invalid_body",
+        });
+      }
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+    expect(sms.sent).toEqual([]);
+  });
+
   it("refuses unknown keys", async () => {
     const w = await world();
     const body = createBody(FREE);

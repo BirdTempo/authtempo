@@ -563,6 +563,42 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
     }
   });
 
+  it("creates an operator user of an enforced address with no link and no mail", async () => {
+    // review-12f2-task2 L1 and review-12f2-task3 L3: each link would answer
+    // sso_required at use. The user stays; the person signs in by SSO.
+    const door = DOORS.find((d) => d.name === "the invitation link") as Door;
+    const { w } = await scene(door, true);
+    const users = operatorApi(w.config).users;
+    const actor = { kind: "app", name: "support-tool" } as const;
+    const by = { reason: "Ticket 2", ip: null, userAgent: null };
+    const create = async (input: { email: string; firstSignIn?: "invite" | "reset" }) => {
+      const r = await users.create({ actor, ...input, ...by });
+      if (!r.ok) throw new Error(r.code);
+      return r.value;
+    };
+    w.mail.length = 0;
+    const invites = async () =>
+      (await w.storage.findMany("verification", [])).filter((v) => v.purpose === "user-invite");
+    const before = (await invites()).length;
+    for (const [email, firstSignIn] of [
+      ["cy@acme.example", "invite"],
+      ["di@acme.example", "reset"],
+    ] as const) {
+      const made = await create({ email, firstSignIn });
+      expect(made.mailed, email).toBeNull();
+      expect(await w.storage.findOne("user", [{ field: "email", op: "eq", value: email }])).toEqual(
+        expect.objectContaining({ id: made.userId }),
+      );
+    }
+    expect((await invites()).length).toBe(before);
+    expect(w.mail).toEqual([]);
+    // An address outside the domain gets its invitation: the check is of the domain.
+    const other = await create({ email: "eve@other.example" });
+    expect(other.mailed).toBe("invite");
+    expect(w.mail.map((m) => m.to)).toEqual(["eve@other.example"]);
+    expect((await invites()).length).toBe(before + 1);
+  });
+
   it("sends no phone code to a user of an enforced address", async () => {
     // Final review A H1 of plan 12i: in process, and on the route after the answer.
     const door = DOORS.find((d) => d.name === "the password sign-in by phone") as Door;

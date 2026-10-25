@@ -20,6 +20,7 @@ import { phoneRefusal } from "../phone.js";
 import { unchanged } from "../profile.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
+import { ssoRequiredFor } from "../sso/enforce.js";
 import { mailUserInvite, writeUserInvite } from "../user-invite.js";
 import { createUserIn, normalizeEmail, takenCode, validImageUrl, validUserName } from "../users.js";
 import { SESSIONS_PAGE_LEAST } from "./access-end.js";
@@ -120,9 +121,12 @@ function taken(err: unknown): Result<never> {
  * refusal answers `invalid_body`, `phone_invalid`, or `phone_region`.
  *
  * A user with no address needs a phone, and its first sign-in is the phone
- * code: no SMS goes out at create. A phone on an address needs
- * `emailVerified: true`, because a proof of the address clears the phone
- * (`claimEmail`, plan 12i). A user with neither has no way in.
+ * code: no SMS goes out at create. A user with neither has no way in. A
+ * phone beside an address answers `invalid_body` (ruling 12 of plan 12f2).
+ * With a verified address, the operator could sign in to the person's
+ * account by a phone code that it chose. That sign-in would have no
+ * impersonation mark, no time limit, and no audit row. With an unverified
+ * address, a proof of the address clears the phone (`claimEmail`, plan 12i).
  *
  * The create does not read `signUp` (plan 12b): it is the provisioning path
  * of an app whose self sign-up is closed. The operator, not a stranger,
@@ -135,6 +139,9 @@ function taken(err: unknown): Result<never> {
  * stays and no mail goes out, so an actor cannot mail any person.
  *
  * `invite` writes the invitation row in the same transaction (Task 3).
+ * For an address of a domain that enforces SSO, the create writes no
+ * invitation row, mails nothing, and answers `mailed: null`: the person
+ * signs in through the SSO connection.
  *
  * After the commit: `user.afterCreate`, then the mail. `invite` mails the
  * invitation link (`mailUserInvite`). `reset` mails a
@@ -174,8 +181,8 @@ export async function createUser(
   if (email === null && input.phone === undefined) return fail("invalid_body");
   if (email === null && (emailVerified || firstSignIn !== "none")) return fail("invalid_body");
   if (firstSignIn === "reset" && !config.password) return fail("invalid_body");
-  // A proof of the address clears the phone (`claimEmail`), so a phone needs a proved address.
-  if (input.phone !== undefined && email !== null && !emailVerified) return fail("invalid_body");
+  // No phone beside an address (ruling 12 of plan 12f2): the operator would know a way in.
+  if (input.phone !== undefined && email !== null) return fail("invalid_body");
   const now = config.clock.now();
   const userId = newId(now);
   const drafted = auditDraft(input.actor, {
@@ -196,12 +203,16 @@ export async function createUser(
   // The clear invitation token, kept out of the work's value: that value
   // reaches the steps of the act, and the token leaves core only in the mail.
   let invite: string | null = null;
+  // An address of a domain that enforces SSO gets no link (review-12f2-task2
+  // L1, review-12f2-task3 L3): each link would answer `sso_required` at use.
+  let enforced = false;
   const done = await operatorAct(
     config,
     drafted.value,
     async (tx) => {
       steps.begin();
       invite = null;
+      enforced = false;
       const made = await createUserIn(
         tx,
         steps,
@@ -217,8 +228,11 @@ export async function createUser(
       );
       if (!made.ok) return made;
       const user = made.value;
+      // With `sso` off the check reads nothing.
+      if (firstSignIn !== "none")
+        enforced = (await ssoRequiredFor(config, user.email, tx)) !== null;
       // The invitation row commits with the user and the audit row (plan 12f2 Task 3).
-      if (firstSignIn === "invite" && user.email !== null)
+      if (firstSignIn === "invite" && user.email !== null && !enforced)
         invite = await writeUserInvite(tx, config, { ...user, email: user.email }, now);
       return ok({ user });
     },
@@ -228,7 +242,7 @@ export async function createUser(
   const { user, auditId } = done.value;
   let mailed: "invite" | "reset" | null = null;
   const token: string | null = invite;
-  if (user.email !== null && (firstSignIn === "reset" || token !== null)) {
+  if (user.email !== null && !enforced && (firstSignIn === "reset" || token !== null)) {
     try {
       if (token !== null) {
         await mailUserInvite(config, user.email, token);
