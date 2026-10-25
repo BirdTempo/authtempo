@@ -334,6 +334,15 @@ describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
     // Adapter 8 and Node set no platform: handle gets no options.
     await authHandle({ auth: s.auth as never })({ event: event(undefined), resolve });
     expect(s.got).toEqual(["options", "none"]);
+    // Adapter 7 sets ctx and the deprecated context to the same object; ctx comes first.
+    const first = new Ctx();
+    const deprecated = new Ctx();
+    await authHandle({ auth: s.auth as never })({
+      event: event({ ctx: first, context: deprecated }),
+      resolve,
+    });
+    expect(first.held).toEqual([s.work]);
+    expect(deprecated.held).toEqual([]);
     const seen: [Promise<unknown>, unknown][] = [];
     const unused = new Ctx();
     const own = event({ context: unused });

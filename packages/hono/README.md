@@ -8,9 +8,10 @@ and Deno. It takes `hono` 4.13.13 or newer in 4 as a peer dependency.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
 - On Workers, pass a function of the context: `authHandler((c) => getAuth(c.env))`.
-- On Workers, `authHandler` passes `c.executionCtx.waitUntil` to `handle`. The SMS of a phone code runs under it after the answer.
   A function given to both `authSession` and `authHandler` runs twice for a
   request to core, so make it return one instance per environment.
+- On Workers, `authHandler` passes `c.executionCtx.waitUntil` to `handle`.
+  The SMS of a phone code runs under it after the answer.
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
 - `protect` gets the path exactly as Hono matched it, `c.req.path`: decoded

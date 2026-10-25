@@ -64,17 +64,25 @@ export interface SvelteKitAuthOptions {
   basePath?: string | undefined;
   /**
    * The host's hook that keeps work alive after the answer (ruling 29 of
-   * plan 12i). Default: `event.platform.context.waitUntil`, which
-   * @sveltejs/adapter-cloudflare 7.2.9 sets (ambient.d.ts:14, read
-   * 2026-10-25). Adapter 8.0.1 sets no platform: there pass `waitUntil` of
-   * "cloudflare:workers".
+   * plan 12i). Default: the `waitUntil` of `event.platform.ctx`, then of
+   * `event.platform.context`. @sveltejs/adapter-cloudflare 7.2.9 sets both
+   * and marks `context` deprecated (ambient.d.ts:14, read 2026-10-25). But
+   * adapter 7 takes Kit 2, and this binding takes Kit 3. Adapter 8.0.1, the
+   * one for Kit 3, sets no platform (files/worker.js:90-93). So on Workers
+   * with Kit 3, pass `waitUntil` of "cloudflare:workers". Without it, core
+   * waits for the work before it answers and writes
+   * `observe.wait_until_missing`, so the answer time can tell a known number.
    */
   waitUntil?: BindingWaitUntil<RequestEvent> | undefined;
 }
 
-/** The ExecutionContext of the Cloudflare adapter in `event.platform.context`, or undefined. */
+/**
+ * The ExecutionContext that a Cloudflare adapter puts in `event.platform`, or
+ * undefined: `ctx` first, then the deprecated `context`.
+ */
 function platformContext(event: RequestEvent): unknown {
-  return (event.platform as { context?: unknown } | undefined)?.context;
+  const platform = event.platform as { ctx?: unknown; context?: unknown } | undefined;
+  return platform?.ctx ?? platform?.context;
 }
 
 /**
