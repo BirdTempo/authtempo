@@ -524,11 +524,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     ["POST /reauth"],
   ),
   ...rows(
-    "last_credential",
-    "the register ceremony refuses an unverified user, so no flow leaves a passkey as the one credential; identities.test.ts proves the guard on the engine",
-    ["POST /passkeys/delete"],
-  ),
-  ...rows(
     "invalid_client",
     "the consent re-checks the held request; a client that changed since the page answers it; oauth-authorize.test.ts proves checkAuthorize",
     ["POST /oauth/authorize"],
