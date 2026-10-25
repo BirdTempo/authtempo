@@ -1110,7 +1110,12 @@ Behavior that differs from Better Auth:
   the answer, at a sign-in request and at an add. So the answer time tells
   no account and no held number. A throw of `sendOTP` changes no answer,
   and core writes the line `sms.port_threw`. On Workers, pass
-  `{ waitUntil }` to `auth.handler`.
+  `{ waitUntil }` to `auth.handler`. On Next, pass
+  `{ waitUntil: (p) => after(p) }` (`after` from `next/server`) as the
+  second argument of `toNextJsHandler`. On a serverless Node host, pass
+  the host's `waitUntil` to `toNodeHandler` the same way. Without it, the
+  send runs detached, and a host that freezes the function after the
+  answer can delay or drop it.
 - Core signs in by phone and password only with a number that its code
   proved. A number that Better Auth stored with no proof does not sign in,
   so `requireVerification` other than `true` logs a note.

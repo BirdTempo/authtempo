@@ -67,6 +67,58 @@ describe("toNodeHandler", () => {
   });
 });
 
+// B L2 of the plan 12i final review: a serverless host keeps the work after
+// the answer only through its waitUntil, so both handlers pass it on.
+describe("the host's waitUntil", () => {
+  const nodeRes = () => ({
+    statusCode: 0,
+    setHeader() {},
+    end() {},
+  });
+  const nodeReq = () =>
+    Object.assign((async function* () {})(), {
+      method: "GET",
+      url: "/api/auth/ok",
+      headers: { host: "api.example.com" },
+    });
+
+  it("passes it to each request of toNextJsHandler and toNodeHandler, and passes none without it", async () => {
+    const seen: unknown[] = [];
+    const recorder = async (_r: Request, options?: unknown) => {
+      seen.push(options);
+      return new Response(null, { status: 204 });
+    };
+    const kept: Promise<unknown>[] = [];
+    const waitUntil = (p: Promise<unknown>) => void kept.push(p);
+    await toNextJsHandler(recorder, { waitUntil }).GET(new Request("https://x.test/api/auth/ok"));
+    await toNodeHandler(recorder, { waitUntil })(nodeReq(), nodeRes());
+    await toNextJsHandler(recorder).POST(
+      new Request("https://x.test/api/auth/ok", { method: "POST" }),
+    );
+    await toNodeHandler(recorder)(nodeReq(), nodeRes());
+    expect(seen).toEqual([{ waitUntil }, { waitUntil }, undefined, undefined]);
+  });
+
+  it("keeps the instance as this for an object's handler", async () => {
+    const seen: unknown[] = [];
+    const instance = {
+      options: { advanced: { ipAddress: { disableIpTracking: true } } },
+      label: "own",
+      async handler(this: { label: string }, _r: Request, options?: unknown) {
+        seen.push([this.label, options]);
+        return new Response(null, { status: 204 });
+      },
+    };
+    const waitUntil = () => {};
+    await toNextJsHandler(instance, { waitUntil }).GET(new Request("https://x.test/api/auth/ok"));
+    await toNodeHandler(instance)(nodeReq(), nodeRes());
+    expect(seen).toEqual([
+      ["own", { waitUntil }],
+      ["own", undefined],
+    ]);
+  });
+});
+
 describe("the IP setting off Workers (plan 9 final review M-2)", () => {
   const instance = (options: object) => ({ ...echo, options });
   const make = { toNextJsHandler, toNodeHandler };
