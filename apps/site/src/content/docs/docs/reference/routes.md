@@ -410,7 +410,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email, password, name?, username? }`. `username` needs the `username` config and `password.uniformSignUp: false`. With the uniform answer, a name at sign-up would tell a known address from a new one. So the sign-up refuses it with `invalid_body`, and the person sets the name with `POST /user/username` after the confirm. The sign-up checks the name before any read by address |
-| Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With `password.verifyBy: "code"` and a `waitUntil`, the user rows, `user.afterCreate`, and the mail run after the answer. A known and a new address do the same work before it. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
+| Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With a `waitUntil`, the user rows, `user.afterCreate`, and the mail run after the answer, for `password.verifyBy` `"link"` and `"code"` alike. A known and a new address do the same work before it. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sso_required`](/docs/reference/errors/#sso_required), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
 
@@ -457,7 +457,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email }` |
-| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`) |
+| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`). With the link, the new link goes before the answer, so the answer time can tell an unverified user with a password |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-password-reset-request"><code>POST /password/reset/request</code></h3>
@@ -677,7 +677,7 @@ The limits and the number checks run before the read of the number. So a 429 and
 
 `POST /phone/request` sends its code after the answer, and `POST /phone/add` sends its code or note after the answer. The daily cap, the code row, and the SMS run under the `waitUntil` that the host passes to `handle`. With no `waitUntil`, that work runs detached. So the answer time does not tell whether a number has an account: the supplier time is not in the answer. For the same reason, a cap refusal or an outage of the SMS port no longer shows in the answer. Core writes one `sms.not_sent` line with the reason, `capped` or `unavailable`. Watch that line, because the person who asked gets `{ sent: true }` and no code. A send after the answer has a time limit of 10 seconds. A hung SMS port then gives the reason `timeout`, and the flush of the events of the request still runs.
 
-On Workers, pass `(p) => ctx.waitUntil(p)`, or mount a binding that passes it. Workers stops detached work at the answer, before its first I/O step. So on Workers with no `waitUntil`, `handle` waits for the work before it answers, and the code goes out. Core then writes one `observe.wait_until_missing` line. On other runtimes the work runs detached.
+On Workers, pass `(p) => ctx.waitUntil(p)`, or mount a binding that passes it. Workers stops detached work at the answer, before its first I/O step. So on Workers with no `waitUntil`, or with one that throws, `handle` waits for the work before it answers, and the code goes out. Core then writes one `observe.wait_until_missing` line. On other runtimes the work runs detached.
 
 Some residuals stay:
 
@@ -694,7 +694,7 @@ Some residuals stay:
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ phone }` |
-| Answer | `{ sent: true }` for a known and an unknown number. A known number gets a code. An unknown number gets a code only with `phone.signUp`. The code goes out after the answer, so a cap refusal or an outage gives an `sms.not_sent` line and no error |
+| Answer | `{ sent: true }` for a known and an unknown number. A known number gets a code, unless its account has an address in a domain with SSO `enforce` on. An unknown number gets a code only with `phone.signUp`. The code goes out after the answer, so a cap refusal or an outage gives an `sms.not_sent` line and no error. The SSO check runs after the answer too |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region) |
 | Captcha | With `captcha` and the flow `phone-request`: the header `x-captcha-response`, after the per-IP limit and before the per-number limits |
 
@@ -2009,7 +2009,7 @@ These routes exist when the config sets `username`. A username is public by desi
 
 These routes exist when the config sets `multiSession`. One browser keeps the sessions of several users. The session cookie holds the active token, and the HttpOnly bag cookie `__Host-tempo_sessions` holds the others. A browser sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. An anonymous session never enters the bag, and these routes serve it. A sign-in over it upgrades the anonymous user, and the anonymous session ends with `anonymous_upgrade`, never `displaced`. A switch is no sign-in: it links nothing, and the anonymous session stays until it expires. Each route resolves each token of the bag, so a revoked, expired, or banned session leaves the bag cookie in the same answer. The read of a bag token never slides its expiry: a list does not keep an idle session alive. A switch reads the new active session as any request does. A token of the bag signs no request in. A request with the Bearer scheme answers 401: a bearer client has no bag. Another scheme, such as HTTP Basic in front of the site, does not refuse a browser. No answer holds a token.
 
-Two limits remain. When the active session ends elsewhere, these routes answer 401, and the browser reaches its bag only after a new sign-in. A session that a SCIM deactivate revoked keeps its place in the bag until the next list or switch. Until then, a sign-in can displace a live session in its place.
+Two limits remain. When the active session ends elsewhere, these routes answer 401, and the browser reaches its bag only after a new sign-in. An anonymous sign-in needs no credential, and it makes such a stranded bag reachable again. On a shared computer, `POST /sign-out` clears the bag. A session that a SCIM deactivate revoked keeps its place in the bag until the next list or switch. Until then, a sign-in can displace a live session in its place.
 
 <h3 id="get-multi-session"><code>GET /multi-session</code></h3>
 

@@ -41,8 +41,9 @@ import test from "../../../../../samples/guides/related-origins.test.ts?raw";
 - Core has no public suffix list, so it counts each origin outside the tree as one label. Two origins of one label count twice. So core can refuse a config that a browser accepts.
 - Each ceremony still checks the origin of the browser against `passkey.origins`. An origin outside the list never passes.
 - `passkey.hints.register` and `passkey.hints.signIn` give the browser a preference: `security-key`, `client-device`, or `hybrid`. A `hints` field of an options body replaces the list for that ceremony.
-- A sign-in with a credential that the site does not store answers `passkey_unknown`. Call `PublicKeyCredential.signalUnknownCredential`, so the device removes the passkey.
-- `GET /passkeys` answers `rpId` and `userHandle`. Pass them with the credential ids to `PublicKeyCredential.signalAllAcceptedCredentials`.
+- A sign-in by a credential that the site does not store answers `passkey_unknown`. Call `PublicKeyCredential.signalUnknownCredential` with it, so the device removes the passkey. The client's `passkey.signIn` makes that call for you where the browser has it.
+- `GET /passkeys` answers `rpId` and `userHandle`. Pass them with the credential ids to `PublicKeyCredential.signalAllAcceptedCredentials`. The client's `passkeys.sync()` does this.
+- `GET /passkeys` also answers `userName` and `userDisplayName`, the names of a new registration. Pass them to `PublicKeyCredential.signalCurrentUserDetails` after a change of name. The client's `passkeys.signalDetails()` does this.
 
 ## Residuals
 

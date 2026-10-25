@@ -515,12 +515,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="last_credential"><code>last_credential</code> 409</h3>
 
-- **Meaning:** The removal would leave the account with no way to sign in.
-- **Do:** Add another way in first: a passkey, a password, a provider, or a verified address. Then remove this one.
+- **Meaning:** The removal would leave the account with no way to sign in. A password counts only while a sign-in reaches it. That is by an address, by a username while `username` is on, or by a phone that signs in.
+- **Do:** Add another way in first: a passkey, a provider, a verified address, a phone, or a password with one of those identifiers. Then remove this one.
 
 | Routes |
 | --- |
-| [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete). |
+| [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /phone/remove`](/docs/reference/routes/#post-phone-remove). |
 
 <h3 id="identity_taken"><code>identity_taken</code> 409</h3>
 
@@ -660,11 +660,11 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="sso_required"><code>sso_required</code> 403</h3>
 
 - **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start URL: an absolute URL on the origin of `baseURL`. A social callback carries the code in the `auth_error` query parameter of the redirect.
-- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual. A link, a code, or a second factor challenge from before `enforce` went on opens no session either.
+- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual. A phone code request for the number of such an account sends no SMS and answers as usual. A link, a code, or a second factor challenge from before `enforce` went on opens no session either.
 
 | Routes |
 | --- |
-| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), and [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge). |
+| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /social/:provider/id-token`](/docs/reference/routes/#post-social-provider-id-token), [`POST /password/verify/code`](/docs/reference/routes/#post-password-verify-code), and [`POST /phone/verify`](/docs/reference/routes/#post-phone-verify). |
 
 <h3 id="sso_domain_mismatch"><code>sso_domain_mismatch</code> 403</h3>
 

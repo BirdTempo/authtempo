@@ -50,18 +50,20 @@ Phone sign-in is one factor over the phone network. It is level 2 at best. A lev
 - A code has 6 digits by default (`phone.length`: 6 or 8) and lives 5 minutes by default (`phone.ttlMinutes`: 1 to 10).
 - Core keys the hash of each code under the current secret, and binds it to its number and its purpose. A wrong guess counts one try. Try number `phone.maxAttempts` (3 by default) spends the code.
 - `POST /phone/request` answers `{ sent: true }` for a known and an unknown number. A known number gets a code. An unknown number gets a code only with `phone.signUp`.
+- A number whose account has an address in a domain with SSO `enforce` on gets no code, and the same answer. `POST /phone/verify` answers `sso_required` for such an account.
 - The code goes out after the answer, under the `waitUntil` of the host. So the answer time does not tell whether a number has an account.
 - A send after the answer has a time limit of 10 seconds. A cap refusal, an outage, or a timeout then gives one `sms.not_sent` line with the reason `capped`, `unavailable`, or `timeout`. Watch that line: the person got `{ sent: true }` and no code.
 - With no `waitUntil` on Workers, `auth.handle` waits for the send before it answers, and writes one `observe.wait_until_missing` line. On other runtimes the work runs detached.
 - `POST /phone/verify` opens a session with `via: "phone"`. For a user with the second factor on, `totp.gate.phone` (on by default) answers a challenge with no email method.
 - With `phone.signUp`, a right code for a new number makes a user with no address. See [The account with no address](/docs/concepts/account-without-address/).
 - `phone.dailyCap` counts each SMS of the deployment for 24 hours, 1000 by default. A send over the cap makes no call to the port.
-- `createAuth` refuses `phone` with a limiter that counts per isolate, with the text "phone needs a shared limiter: the daily cap is per deployment". For tests and local development, set `phone.isolateLimiter: "allow"`. The cap is then per isolate.
+- `createAuth` refuses `phone` with a limiter that counts per isolate, with the text "phone needs a shared limiter: the daily cap is per deployment". For tests only, set `phone.isolateLimiter: "allow"`. The cap is then per isolate.
 - `POST /phone/add` needs a fresh session and a proved handle. A free number gets a code. A number that another account holds gets a note with no code, and the same answer.
 - The code and the note of an add go out after the answer, as at `POST /phone/request`. So the answer time does not tell a number that another account holds.
 - `POST /phone/add/verify` stores the number and sends a notice to the address of the user. Of two users who add one number at the same time, one gets `phone_taken`.
 - `POST /phone/remove` needs a fresh session. It refuses the last way into the account with `last_credential`.
 - The password sign-in takes `{ phone, password }` too. See [Passwords](/docs/guides/password/).
+- A proof of the address on an unverified account clears its phone, also at the confirm of the sign-up. [The claim rule](/docs/concepts/claim-rule/) tells why.
 - A phone code from an anonymous session links that anonymous user only when the verify carries the same anonymous session.
 - The limits: `phone-otp:ip` 10, `phone-otp:phone` 3, `phone-verify:ip` 30, and `phone-verify:phone` 10, each per 15 minutes. Also `phone-otp:phone-day` 10 per 24 hours, and `phone-add:user` 3 per 15 minutes.
 

@@ -35,7 +35,7 @@ import test from "../../../../../samples/guides/verify-by-code.test.ts?raw";
 
 ## How it behaves
 
-- The code has 6 digits from `crypto.getRandomValues` and lives 10 minutes. Core stores HMAC-SHA256 of the row id and the code under the app secret, never the code.
+- By default, the code has 6 digits from `crypto.getRandomValues` and lives 10 minutes. Core stores HMAC-SHA256 of the row id and the code under the app secret, never the code.
 - `password.verifyCode` changes the code: `length` 6 to 10 digits, `ttlMinutes` 1 to 30, and `maxAttempts` 1 to 10 (default 5). A value outside its range stops `createAuth`.
 - One code is live per address. A resend spends the earlier code.
 - A wrong code counts one try. The wrong try number `maxAttempts` spends the code and answers `too_many_attempts`. Then the person asks for a new code.

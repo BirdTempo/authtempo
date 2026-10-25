@@ -29,6 +29,7 @@ import test from "../../../../../samples/guides/multi-session.test.ts?raw";
 4. On a click, post `{ sessionId }` to `POST /multi-session/switch`.
 5. Offer "Sign out of this account": it posts `{ sessionId }` to `POST /multi-session/sign-out`.
 6. Offer "Sign out of all accounts": it posts to `POST /sign-out`.
+7. In a browser app, call `client.multiSession.list`, `client.multiSession.switch`, and `client.multiSession.signOut` of the [client package](/docs/reference/client/) in place of the calls.
 
 <Code code={config} lang="ts" title="Multi-session in the config" />
 

@@ -109,7 +109,7 @@ Version 15 comes from the `0015_schema_v15` migration of D1 and Postgres, from `
 
 | Field | Column | Type | What it holds |
 | --- | --- | --- | --- |
-| `user.email` | `email` | string, nullable | The address. Null for an account with no address: an anonymous account, a phone account, or an account of a passkey sign-up. Still unique: a null never conflicts (plan 12i). |
+| `user.email` | `email` | string, nullable | The address. Null for an account with no address: an anonymous account, a phone account, an account of a passkey sign-up, or an account of an `addressless` social entry. Still unique: a null never conflicts (plan 12i). |
 | `user.username` | `username` | string, nullable | The username in its stored form: NFKC, then lower case. Unique (plan 12i). |
 | `user.displayUsername` | `display_username` | string, nullable | The username in the case that the person typed (plan 12i). |
 | `user.phone` | `phone` | string, nullable | The phone number in E.164. Unique. Core stores a phone only after a code proved it (plan 12i). |

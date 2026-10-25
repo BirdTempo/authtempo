@@ -26,7 +26,7 @@ import test from "../../../../../samples/guides/base-url-list.test.ts?raw";
 1. Set `baseURL` to the list. The first entry is the primary.
 2. Register each host's callback at each social provider: `<entry><basePath>/social/<provider>/callback`.
 3. On Node, build `request.url` from the host that your proxy checked. Core reads the host from `request.url` only.
-4. With Express `trust proxy` or Fastify `trustProxy`, the binding reads `X-Forwarded-Host` and `X-Forwarded-Proto`. Then your proxy must set both headers on each request and drop the client's values. A client can still pick only an entry of the list.
+4. Express reads the host from the Host header, and with `trust proxy` the scheme from `X-Forwarded-Proto`. So your proxy must pass the original Host header to Express. Fastify with `trustProxy` reads `X-Forwarded-Host` and `X-Forwarded-Proto`. Then your proxy must set both headers on each request and drop the client's values. A client can still pick only an entry of the list.
 
 <Code code={config} lang="ts" title="Two hosts in one config" />
 

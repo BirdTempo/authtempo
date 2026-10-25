@@ -38,7 +38,7 @@ Before you rely on this preset, sign in once with a real account.
 ## How it behaves
 
 - `issuer` is `https://gitlab.com` by default. Another value is an `https:` origin with no path and no trailing slash.
-- Core posts the client secret to the issuer. So `createAuth` refuses an IP address, a local name, or the host of `baseURL`.
+- Core posts the client secret to the issuer. So `createAuth` refuses an IP address, a local name, a host with an empty label such as `a..example.com`, or the host of `baseURL`. Core uses this one host rule for each URL that it fetches or posts to.
 - The scope is `read_user`. Core reads the profile from `GET /api/v4/user`.
 - The subject is the numeric `id`, the key that Better Auth keeps. A Better Auth `account` row of the provider `gitlab` links with no change.
 - A user whose `state` is not `active`, or who is `locked`, answers `oauth_failed`.

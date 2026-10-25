@@ -29,7 +29,8 @@ import test from "../../../../../samples/guides/passkey-sign-up.test.ts?raw";
 3. Ask the person for a name. Post `{ name }` to `POST /passkey/sign-up/options`.
 4. Give the answer to `navigator.credentials.create`.
 5. Post `{ response }` to `POST /passkey/sign-up/verify`. A browser gets the session cookie.
-6. On a public site, add the captcha flow `passkey-sign-up` to `captcha.flows`.
+6. In a browser app, call `client.passkey.signUp` of the [client package](/docs/reference/client/) in place of steps 3 to 5.
+7. On a public site, add the captcha flow `passkey-sign-up` to `captcha.flows`.
 
 <Code code={config} lang="ts" title="Passkey sign-up in the config" />
 
@@ -47,7 +48,7 @@ import test from "../../../../../samples/guides/passkey-sign-up.test.ts?raw";
 - A live anonymous session of the browser is replaced, as at each sign-in. See [Anonymous sessions](/docs/guides/anonymous/).
 - The limit `passkey-sign-up:ip` allows 10 options per IP per hour. The cap `passkey-sign-up:all-day` allows `dailyCap` options per deployment per 24 hours, 1000 by default.
 - With the captcha flow on, the captcha runs after the per-IP limit and before the cap. A failed captcha does not count against the cap.
-- `createAuth` refuses `passkey.signUp` with a limiter that counts per isolate. For tests and local development, set `passkey.signUp.isolateLimiter: "allow"`. The cap is then per isolate.
+- `createAuth` refuses `passkey.signUp` with a limiter that counts per isolate. For tests only, set `passkey.signUp.isolateLimiter: "allow"`. The cap is then per isolate.
 - The user has a proved handle: its passkey. So it can register a second passkey, set a username, and add an address. See [The account with no address](/docs/concepts/account-without-address/).
 
 ## Residuals

@@ -59,7 +59,7 @@ With `uniformSignUp: true`, the default, the session of a password sign-up opens
 - An SSO sign-in, a password reset that opens a session, and a handoff link nothing. The sweep deletes that anonymous user later.
 - The sweep deletes an anonymous user made more than `ttlDays` ago (30 by default) with no live session, at most `anonymous.sweepBatch` per run.
 - The limits: `anonymous:ip` 10 per hour, the cap `anonymous:all-day` of `anonymous.dailyCap` (1000 by default) per 24 hours, and `anonymous-delete:user` 5 per hour.
-- `createAuth` refuses `anonymous` with a limiter that counts per isolate. For tests and local development, set `anonymous.isolateLimiter: "allow"`.
+- `createAuth` refuses `anonymous` with a limiter that counts per isolate. For tests only, set `anonymous.isolateLimiter: "allow"`.
 
 ## Residuals
 

@@ -40,7 +40,7 @@ An account that a person made with an address that nobody proved is a claim, not
 
 When a proof arrives for an unverified user, core runs the claim in the same transaction as the sign-in:
 
-1. It marks the address verified first. A sign-in of the claimant that runs at the same moment then sees the flag.
+1. It marks the address verified first. A sign-in of the claimant that runs at the same moment then sees the flag. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it (plan 12i).
 2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
 3. It deletes the password row, except the row that a verify link confirms.
 4. It deletes every session.

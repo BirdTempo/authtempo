@@ -29,6 +29,7 @@ import test from "../../../../../samples/guides/native-apple.test.ts?raw";
 4. Set `providerNonce` as the `nonce` of the Apple ID request of the sheet.
 5. Post `{ idToken, nonce, name }` to `POST /social/apple/id-token`. `name` is the name that the sheet gave.
 6. A native app reads `token` from the answer, and sends it as a bearer token.
+7. In a JavaScript app, call `client.social.idTokenNonce` and `client.social.idToken` of the [client package](/docs/reference/client/) in place of the posts.
 
 <Code code={config} lang="ts" title="Apple with the bundle id of the app" />
 

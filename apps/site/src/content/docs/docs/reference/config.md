@@ -134,7 +134,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.discord.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.gitlab.clientId` | string | required | The application id of the GitLab app. |
 | `social.gitlab.clientSecret` | string | required | The secret of the GitLab app. |
-| `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, and not the host of `baseURL`. |
+| `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, no empty label, and not the host of `baseURL`. |
 | `social.gitlab.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.slack.clientId` | string | required | The client id of the Slack app. |
 | `social.slack.clientSecret` | string | required | The client secret of the Slack app. |
@@ -176,7 +176,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. Write it in lowercase ASCII, with an internationalized domain in punycode, such as `xn--bcher-kva.example`. `createAuth` refuses another form and names the punycode form. |
+| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. Write it in lowercase ASCII, with an internationalized domain in punycode, such as `xn--bcher-kva.example`. `createAuth` refuses another form. A value with a user part, a port, a path, a query, or a fragment is no host alone. For a host in another form, the message names the punycode form. |
 | `passkey.rpName` | string | required | The name that the device shows. Not empty. |
 | `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be an entry of `baseURL` or in `trustedOrigins`. |
 | `passkey.relatedOrigins` | boolean | `false` | With `true`, `auth.wellKnown` serves `/.well-known/webauthn` on the `rpID` host, and `origins` may hold at most five origins outside `rpID` (WebAuthn Level 3). |
@@ -189,7 +189,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `passkey.extensions.credProps` | boolean | `false` | Asks for `credProps` at the registration and stores `rk` as the `discoverable` flag. |
 | `passkey.signUp` | boolean or object | `false` | With `true` or an object, `POST /passkey/sign-up/options` and `/verify` make a user with a passkey and no address. Only `signUp: "open"` lets such a user in. `true` is the object `{}`. |
 | `passkey.signUp.dailyCap` | number | 1000 | An integer from 1 to 100000. The sign-up options that the deployment answers per 24 hours. An options request over the cap answers 429 `rate_limited`, and `limit.hit` names the family `passkey-sign-up:all-day`. The cap is per deployment, so the sign-up needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. A script with a software authenticator makes a user at each verify. Turn on the captcha flow `passkey-sign-up` on a public site, so that a script cannot spend the cap. |
-| `passkey.signUp.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
+| `passkey.signUp.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
 
 ## Handoff
 
@@ -278,7 +278,7 @@ Another key of `phone` is refused. Core makes each code, keys its hash, counts e
 | `phone.length` | 6 or 8 | 6 | The digits of a code. |
 | `phone.maxAttempts` | number | 3 | An integer from 3 to 10. |
 | `phone.dailyCap` | number | 1000 | The codes of the deployment per 24 hours, an integer from 1 to 100000. A send over the cap makes no call to the port. The window is fixed: see [the limits](/docs/reference/limits/). |
-| `phone.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
+| `phone.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
 | `phone.message` | function of `{ code, appName, ttlMinutes }` to a string | `defaultPhoneMessage` | The text of the SMS. A throw counts as `"unavailable"`, as a throw of the port does. |
 
 ## Second factor
@@ -450,13 +450,13 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `anonymous.ttlDays` | number | 30 | An integer from 1 to 365. The sweep deletes an anonymous user made more than this many days ago with no live session, at most `sweepBatch` per sweep. |
 | `anonymous.sweepBatch` | number | 100 | An integer from 1 to 100. The most anonymous users that one sweep deletes. Each deleted user gets `user.afterDelete`, outside the call budget of the sweep. Lower it when that hook sends queries or requests. |
 | `anonymous.dailyCap` | number | 1000 | An integer from 1 to 100000. The anonymous users that the deployment makes per 24 hours. A sign-in over the cap answers 429 `rate_limited`, and `limit.hit` names the family `anonymous:all-day`. The cap is per deployment, so `anonymous` needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. Turn on the captcha flow `anonymous-sign-in` on a public site, so that a script cannot spend the cap. |
-| `anonymous.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
+| `anonymous.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests only. The cap is then per isolate. |
 
 ## Multi-session
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A request with the Bearer scheme has no bag; HTTP Basic does not count. A bag session never slides its expiry, so an idle one ends at its ttl. When the active session ends elsewhere, the bag stays out of reach until a new sign-in. A SCIM-revoked session holds its bag place until the next list or switch. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
+| `multiSession` | `MultiSessionConfig` or `false` | `false` | One browser keeps the sessions of several users. The other tokens live in the HttpOnly bag cookie, the session cookie name with `s` at the end. A sign-in of another user moves the old session into the bag. A sign-in of the same user ends the old session. `POST /sign-out` ends every session of the browser. A request with the Bearer scheme has no bag; HTTP Basic does not count. A bag session never slides its expiry, so an idle one ends at its ttl. When the active session ends elsewhere, the bag stays out of reach until a new sign-in. An anonymous sign-in needs no credential and makes it reachable again, so on a shared computer use `POST /sign-out`. A SCIM-revoked session holds its bag place until the next list or switch. `{}` turns it on. Core refuses it when another cookie of core has the bag cookie's name. |
 | `multiSession.max` | number | 5 | The most sessions of one browser, the active one included. An integer from 2 to 10. A sign-in past it ends the session of the bag that the browser used least recently, never the active one. |
 
 ## Observability

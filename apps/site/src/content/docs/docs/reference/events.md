@@ -39,7 +39,7 @@ Each event has these fields too:
 | `request` | info | `method: method`, `status: status`, `outcome: enum`, `code?: code`, `durationMs: durationMs` | Once for each answer of `handle`. The router stamps the route key, or `unmatched`. |
 | `sign_in` | info | `method: enum`, `provider?: name`, `outcome: enum`, `code?: code`, `userId?: id`, `sessionId?: id` | A session opens, a second factor is due, or a route of a sign-in answers a failure code. |
 | `sign_up` | info | `method: enum`, `outcome: enum`, `code?: code`, `userId?: id` | A user row is created, by any way in. |
-| `sign_out` | info | `sessionId?: id`, `outcome: enum`, `code?: code`, `userId?: id` | A sign-out ends its session. |
+| `sign_out` | info | `sessionId?: id`, `outcome: enum`, `code?: code`, `userId?: id` | A sign-out ends its session. With `multiSession`, each bag session that ends with the reason `sign_out` gets one, also at a sign-in of the same user. |
 | `session.end` | info | `reason: enum`, `count: count` | An act ends sessions. `count` is the count of rows that the deletes answered. |
 
 ### The factors and the account

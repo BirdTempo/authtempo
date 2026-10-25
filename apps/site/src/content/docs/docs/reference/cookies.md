@@ -27,7 +27,7 @@ sources:
 | Name | Path | SameSite | Life | Set by |
 | --- | --- | --- | --- | --- |
 | `__Host-tempo_session` | `/` | `cookie.sameSite`, `Lax` by default | `session.ttlDays`, at most `session.absoluteDays` | Every sign-in in a browser |
-| `__Secure-tempo_session_oauth` | `<basePath>/social`, or the path of the provider's `redirectURI` | `None` | 10 minutes | The social start |
+| `__Secure-tempo_session_oauth` | `<basePath>/social`, or the path of the provider's `redirectURI`; `<basePath>/sso` for an SSO sign-in | `None` | 10 minutes | The social start and the SSO start |
 | `tempo_totp_trust` | `<basePath>/` | `cookie.sameSite` | `totp.trustDays` | A second factor verify with `trustDevice` |
 | `__Host-tempo_session_actor` | `/` | `cookie.sameSite`, `Lax` by default | `operator.impersonation.ttlMinutes` | The start of an [impersonation](/docs/reference/routes/#impersonation) |
 | `__Host-tempo_last_method` | `/` | `Lax` | `lastMethod.days`, 30 by default | A browser sign-in while `lastMethod` is on |

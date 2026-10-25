@@ -24,7 +24,7 @@ import test from "../../../../../samples/guides/last-method.test.ts?raw";
 ## Steps
 
 1. Set `lastMethod` to `{}`, or to an object with `cookieName` and `days`.
-2. On the sign-in page, read the cookie with `document.cookie`.
+2. On the sign-in page, call `client.lastMethod()` of the [client package](/docs/reference/client/). It reads the cookie through `isLastMethod`, so a value outside the closed set reads as `null`. Without the client, read `document.cookie` and check the value with `isLastMethod` of `@authtempo/core/routes`.
 3. Show the button of that method first, or mark it.
 4. In a native app, read `via` from the JSON answer of the sign-in, and keep it yourself.
 

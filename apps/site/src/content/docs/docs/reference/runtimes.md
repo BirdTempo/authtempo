@@ -49,9 +49,10 @@ Workers turn Node.js compatibility on by default from compatibility date 2026-08
 ## What each runtime needs
 
 - **Workers:** the default `clientIp` reads `cf-connecting-ip`, which Cloudflare sets. A password hash needs Workers Paid, because one hash needs more CPU than Workers Free gives one request.
-- **Workers with Hyperdrive:** make one postgres.js client for each request with `max: 1`, `prepare: false`, and `fetch_types: false`. End it in `ctx.waitUntil`.
+- **Workers with Hyperdrive:** make one postgres.js client for each request with `max: 1`, `prepare: false`, and `fetch_types: false`. End it in `ctx.waitUntil`, but only after the work that `handle` passes to `waitUntil` settles. The phone code request and the code-mode sign-up query that client after the answer. An end at once makes them fail with no SMS and no mail. `examples/worker-postgres` shows the order.
 - **Node and Bun:** pass `clientIp`. Without it, a caller sets `cf-connecting-ip` and passes any per-IP limit.
 - **Node and Bun:** core uses Web Crypto and the Fetch API of the runtime. Serve `auth.handle` from a server that gives it a `Request`.
+- **Serverless Node hosts:** a host that stops the function after the answer also stops the work after the answer. An example is the SMS of a phone code. Pass the host's `waitUntil` to `handle`, or to the binding. The Better Auth shim takes it as the second argument: `toNodeHandler(auth, { waitUntil })` and `toNextJsHandler(auth, { waitUntil })`. On Next, pass `(p) => after(p)` of `next/server`.
 
 ## Next
 

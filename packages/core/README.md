@@ -588,21 +588,25 @@ the verify link, and the link opens the session. A known address gets no
 row and one mail that points to the sign-in, and a claim race or a refusal
 by `signUp: "invited"` gets no row and no mail. Under `"invited"` the
 invitation check runs first, so a known address with no pending invitation
-gets no mail. The hash runs before the
-transaction on every path, but the transaction of a new address writes
-more than the read of a known one, so core does not claim 6.3.8 in full.
-Under `"invited"` only a new address with an invitation gets the rows and
-the verify mail, so the time of the answer can show that an invitation
+gets no mail. With the `waitUntil` of the request, the answer goes after
+the hash. The rows, `user.afterCreate`, and the mail then run after it,
+for the link and the code alike (final fix wave item 19). So a known and a
+new address do the same work before the answer. In process, with no
+`waitUntil`, the transaction of a new address writes more than the read of
+a known one. So core does not claim 6.3.8 in full there. Under `"invited"`
+only a new address with an invitation gets the rows and the verify mail.
+In process, the time of the answer can then show that an invitation
 exists. That tells less than whether an account exists.
 
 ### The sign-up code
 
 `verifyBy: "code"` (plan 12i Task 20) mails a code in place of the verify
 link. It is for a device whose mailbox is elsewhere, or a mail client that
-strips links. The code has 6 digits from `crypto.getRandomValues` and lives
-10 minutes. `verifyCode` sets `length` (6 to 10), `ttlMinutes` (1 to 30),
-and `maxAttempts` (1 to 10, default 5). A value outside its range stops
-`createAuth` (ruling 39). The row is `password-verify-otp`, keyed by the address. Its
+strips links. By default, the code has 6 digits from
+`crypto.getRandomValues` and lives 10 minutes. `verifyCode` sets `length`
+(6 to 10), `ttlMinutes` (1 to 30), and `maxAttempts` (1 to 10, default
+5). A value outside its range stops `createAuth` (ruling 39). The row is
+`password-verify-otp`, keyed by the address. Its
 `valueHash` is HMAC-SHA256 under the current secret version, as the email
 code's is (spec 8.10 item 3). A new code spends the earlier live code of
 the address.
