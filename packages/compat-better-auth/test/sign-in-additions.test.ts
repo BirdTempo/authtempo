@@ -789,6 +789,98 @@ describe("the one-tap plugin and /sign-in/social with idToken", () => {
   });
 });
 
+// C L2 of the plan 12i final fix wave (probe C3 of final-12i-C). Better Auth
+// 1.7.2 checks an Apple ID token against audience, else appBundleIdentifier,
+// else clientId (apple.mjs:50), and takes a Google clientId list as audiences
+// (google.mjs:59, :113); read 2026-10-25.
+describe("the ID-token audiences of Better Auth's apple and google options", () => {
+  const providers = (
+    google: { clientId: string | string[] },
+    apple: { audience?: string | string[]; appBundleIdentifier?: string },
+  ) =>
+    ({
+      google: { ...google, clientSecret: "g-secret" },
+      apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "P", ...apple },
+    }) as NonNullable<BetterAuthOptions["socialProviders"]>;
+
+  it("maps them onto core's audiences, with no refusal", async () => {
+    const socialOf = (o: Partial<BetterAuthOptions>) => {
+      expect(refusalsOf(o)).toEqual([]);
+      const database: CompatDatabase = {
+        kind: "authtempo-compat-database",
+        dialect: "postgres",
+        storage: createMemoryAdapter(),
+        limiter: createMemoryLimiter(systemClock),
+      };
+      const social = mapOptions(signInOptions(database, o)).config.social;
+      return { google: social?.google, apple: social?.apple };
+    };
+    const listed = socialOf({
+      socialProviders: providers(
+        { clientId: ["web-id", "ios-id", "android-id", "ios-id"] },
+        { audience: ["com.x.app", "com.x.web"], appBundleIdentifier: "com.x.other" },
+      ),
+    });
+    expect(listed.google).toMatchObject({
+      clientId: "web-id",
+      audiences: ["ios-id", "android-id"],
+    });
+    expect(listed.apple).toMatchObject({ clientId: "com.x.web", audiences: ["com.x.app"] });
+    const bundle = socialOf({
+      socialProviders: providers({ clientId: ["web-id"] }, { appBundleIdentifier: "com.x.app" }),
+    });
+    expect(bundle.google).toMatchObject({ clientId: "web-id" });
+    expect(bundle.google).not.toHaveProperty("audiences");
+    expect(bundle.apple).toMatchObject({ audiences: ["com.x.app"] });
+    expect(
+      socialOf({ socialProviders: providers({ clientId: "web-id" }, {}) }).apple,
+    ).not.toHaveProperty("audiences");
+    expect(
+      refusalsOf({
+        socialProviders: providers({ clientId: [] }, { audience: [""], appBundleIdentifier: "" }),
+      }),
+    ).toEqual([
+      "socialProviders.apple.audience: expected a string or a non-empty list of non-empty strings",
+      "socialProviders.google.clientId: expected a string or a non-empty list of non-empty strings",
+    ]);
+  });
+
+  it("signs in with an ID token of the second Google client id", async () => {
+    const t = await betterAuthTables();
+    const options = signInOptions(t.database, {
+      socialProviders: { google: { clientId: ["g-client", "g-ios"], clientSecret: "g-secret" } },
+    });
+    const mapped = mapOptions(options);
+    const claims: Record<string, Record<string, unknown>> = {};
+    const seen: unknown[] = [];
+    const jwt = fakeJwt(claims);
+    const auth = createAuth({
+      ...mapped.config,
+      jwt: {
+        ...jwt,
+        async verifyIdToken(input) {
+          seen.push(input.audience);
+          const c = await jwt.verifyIdToken(input);
+          const audiences = ([] as unknown[]).concat(input.audience);
+          if (!audiences.includes(c.aud)) throw new Error("audience");
+          return c;
+        },
+      },
+    });
+    const { send } = browser(createHandler(auth, mapped));
+    const n = await json(await send("/social/google/id-token/nonce", {}));
+    claims[TOK1] = {
+      ...googleClaims("g-ios-1", "ios@example.com", String(n.providerNonce)),
+      aud: "g-ios",
+    };
+    const res = await send("/sign-in/social", {
+      provider: "google",
+      idToken: { token: TOK1, nonce: n.nonce },
+    });
+    expect([res.status, seen]).toEqual([200, [["g-client", "g-ios"]]]);
+  });
+});
+
 describe("the multi-session plugin", () => {
   it("lists, switches, and revokes the sessions of one browser in Better Auth's shapes", async () => {
     const t = await betterAuthTables();

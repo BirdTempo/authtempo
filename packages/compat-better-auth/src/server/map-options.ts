@@ -563,6 +563,45 @@ export function ssoOf(options: BetterAuthOptions): MappedSso | null {
 }
 
 /**
+ * Core's `audiences` key: each id of `ids` but `clientId`, which core takes
+ * already, once each (C L2 of the plan 12i final fix wave). Absent for none.
+ */
+function audiencesOf(clientId: string, ids: readonly string[]): { audiences?: string[] } {
+  const audiences = [...new Set(ids)].filter((id) => id !== clientId);
+  return audiences.length > 0 ? { audiences } : {};
+}
+
+/**
+ * The ID-token audiences of Better Auth 1.7.2's Apple provider: `audience`,
+ * else `appBundleIdentifier`, else none (social-providers/apple.mjs:50, read 2026-10-25).
+ */
+function appleAudiences(apple: { audience?: string | string[]; appBundleIdentifier?: string }) {
+  const listed = typeof apple.audience === "string" ? [apple.audience] : (apple.audience ?? []);
+  if (listed.length > 0) return listed;
+  // An empty id falls through to clientId, as in Better Auth.
+  return apple.appBundleIdentifier ? [apple.appBundleIdentifier] : [];
+}
+
+/**
+ * Core's Google provider of Better Auth's: a `clientId` list gives core its
+ * first id as `clientId` and the rest as `audiences` (google.mjs:59 and :113,
+ * read 2026-10-25).
+ */
+function googleOf(
+  google: { clientId: string | string[]; clientSecret: string },
+  redirect: { redirectURI?: string },
+) {
+  const ids = typeof google.clientId === "string" ? [google.clientId] : google.clientId;
+  const clientId = ids[0] ?? "";
+  return {
+    clientId,
+    clientSecret: google.clientSecret,
+    ...audiencesOf(clientId, ids),
+    ...redirect,
+  };
+}
+
+/**
  * The origins of a dynamic base URL, `fallback` first when it is one of
  * them (plan 12i Task 18): core's first entry is its primary. Empty for a
  * string. checkOptions refused every other form.
@@ -754,7 +793,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     ...(google || apple || github || linkedin || tiktok || wechat || presets
       ? {
           social: {
-            ...(google ? { google: idSecret("google", google) } : {}),
+            ...(google ? { google: googleOf(google, back("google", google.redirectURI)) } : {}),
             ...(apple
               ? {
                   apple: {
@@ -762,6 +801,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
                     teamId: apple.teamId ?? "",
                     keyId: apple.keyId ?? "",
                     privateKey: apple.privateKey ?? "",
+                    ...audiencesOf(apple.clientId, appleAudiences(apple)),
                     ...back("apple", apple.redirectURI),
                   },
                 }

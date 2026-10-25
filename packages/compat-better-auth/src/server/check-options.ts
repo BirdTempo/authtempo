@@ -892,6 +892,30 @@ function withKey(key: string): Rule {
     if (own !== undefined) string(own, `${p}.${key}`, out);
   };
 }
+/**
+ * A list of client ids of an ID token (C L2 of the plan 12i final fix wave):
+ * non-empty strings. Core's `checkAudiences` refuses a long list and a
+ * repeated id at createAuth, with the count in its text.
+ */
+const idList: Rule = (v, p, out) => {
+  if (!Array.isArray(v) || v.length === 0 || v.some((x) => typeof x !== "string" || !x.trim()))
+    refuse(out, p, "expected a string or a non-empty list of non-empty strings");
+};
+/**
+ * Better Auth's Google `clientId` may be a list (social-providers/google.mjs:59
+ * and :113, read 2026-10-25). The first id runs the redirect sign-in, and
+ * each id is an audience of an ID token. Core takes the first as `clientId`
+ * and the rest as `social.google.audiences`.
+ */
+const google: Rule = (v, p, out) => {
+  if (!plainObject(v) || !Array.isArray(v.clientId)) {
+    idAndSecret(v, p, out);
+    return;
+  }
+  idList(v.clientId, `${p}.clientId`, out);
+  // The list rule above names a bad list; the rest of the keys get the usual rule.
+  idAndSecret({ ...v, clientId: "list" }, p, out);
+};
 const microsoft = withKey("tenantId");
 const gitlab = withKey("issuer");
 /**
@@ -904,6 +928,11 @@ const SLACK_REFUSED =
   "not mapped: core's Slack subject is team_id:user_id, and Better Auth's account rows hold the user_id alone, so a Better Auth-era Slack account would not link and its person would get a second account; use core's social.slack through createAuth after you rewrite each Slack accountId to <team_id>:<user_id>";
 const apple = object({
   clientId: string,
+  // Better Auth 1.7.2 checks an Apple ID token against `audience`, else
+  // `appBundleIdentifier`, else `clientId` (social-providers/apple.mjs:50,
+  // read 2026-10-25). Each maps onto core's `social.apple.audiences` (C L2).
+  audience: (v, p, out) => (typeof v === "string" ? string(v, p, out) : idList(v, p, out)),
+  appBundleIdentifier: string,
   teamId: string,
   keyId: string,
   privateKey: string,
@@ -1107,7 +1136,6 @@ const TOP: Record<string, Rule> = {
       if (config === undefined) continue;
       // WeChat maps to core's wechatEntry, and TikTok to tiktokEntry (plan 12i Task 22).
       if (
-        name === "google" ||
         name === "github" ||
         name === "linkedin" ||
         name === "wechat" ||
@@ -1116,6 +1144,7 @@ const TOP: Record<string, Rule> = {
         name === "facebook"
       )
         idAndSecret(config, `${p}.${name}`, out);
+      else if (name === "google") google(config, `${p}.google`, out);
       else if (name === "tiktok") tiktokKeys(config, `${p}.tiktok`, out);
       else if (name === "microsoft") microsoft(config, `${p}.microsoft`, out);
       else if (name === "gitlab") gitlab(config, `${p}.gitlab`, out);
@@ -1770,7 +1799,10 @@ function signInPluginChecks(options: BetterAuthOptions, out: OptionCheck): void 
         "plugins[one-tap]",
         "needs socialProviders.google: core verifies the ID token for its clientId",
       );
-    else if (tap.clientId !== undefined && tap.clientId !== google.clientId)
+    else if (
+      tap.clientId !== undefined &&
+      tap.clientId !== (Array.isArray(google.clientId) ? google.clientId[0] : google.clientId)
+    )
       refuse(
         out,
         "plugins[one-tap].clientId",

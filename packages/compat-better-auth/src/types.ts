@@ -934,9 +934,17 @@ export interface BetterAuthOptions {
     afterEmailVerification?: (user: User, request?: Request) => HookResult<void>;
   };
   socialProviders?: {
-    google?: { clientId: string; clientSecret: string } & ProviderSignUp;
+    /**
+     * A list of client ids is Better Auth's form for more ID-token audiences:
+     * the first runs the redirect sign-in, and each id is an audience.
+     */
+    google?: { clientId: string | string[]; clientSecret: string } & ProviderSignUp;
     apple?: {
       clientId: string;
+      /** The audiences of an Apple ID token, as in Better Auth: core's `social.apple.audiences`. */
+      audience?: string | string[];
+      /** The bundle id of the app: an audience when `audience` is absent, as in Better Auth. */
+      appBundleIdentifier?: string;
       teamId?: string;
       keyId?: string;
       privateKey?: string;

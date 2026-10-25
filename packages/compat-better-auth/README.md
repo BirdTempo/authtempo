@@ -1125,6 +1125,12 @@ Behavior that differs from Better Auth:
   sign-in: Apple and `/sign-in/social` with `idToken` too, as in Better
   Auth. A token posted with no nonce then skips the nonce check, so a
   holder of a valid ID token for the app can sign in with it.
+- The ID-token audiences. A Google `clientId` list gives core its first id
+  as `clientId` and the rest as `social.google.audiences`. The Apple
+  `audience`, else `appBundleIdentifier`, maps to `social.apple.audiences`.
+  Core also takes an Apple token for `clientId` when `audience` is set,
+  where Better Auth does not. Core refuses more than ten ids besides
+  `clientId` at start.
 
 ## Hooks
 
