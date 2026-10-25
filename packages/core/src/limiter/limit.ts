@@ -105,11 +105,13 @@ export const LIMIT_FAMILIES = Object.freeze([
   // Plan 12i Task 3: the password sign-in by username and by phone.
   "password:username",
   "password:phone",
-  // Plan 12i Task 6: the anonymous sign-in, and its own delete. all-day is the daily cap of the deployment.
+  // Plan 12i Task 6: the anonymous sign-in, and its own delete. all-day is
+  // the daily cap of the deployment.
   "anonymous:ip",
   "anonymous:all-day",
   "anonymous-delete:user",
-  // Plan 12i Task 8: the options of a passkey-first sign-up. all-day is the daily cap of the deployment.
+  // Plan 12i Task 8: the options of a passkey-first sign-up. all-day is
+  // the daily cap of the deployment.
   "passkey-sign-up:ip",
   "passkey-sign-up:all-day",
   // Plan 12i Task 11: the multi-session routes.

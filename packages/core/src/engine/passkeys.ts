@@ -380,7 +380,8 @@ export async function passkeySignUpOptions(
     return fail("rate_limited");
   const captcha = await checkCaptcha(config, "passkey-sign-up", input.captchaToken, input.ip);
   if (captcha) return captcha;
-  // A software authenticator makes a user per verify. The cap bounds the users of a day (ruling 38 M3).
+  // A software authenticator makes a user per verify. The cap bounds the
+  // users of a day (ruling 38 M3).
   const cap = { seconds: SIGN_UP_CAP_WINDOW_SECONDS, max: rp.signUp.dailyCap };
   if (!(await limit(config, "passkey-sign-up:all-day", SIGN_UP_CAP_SUBJECT, cap)))
     return fail("rate_limited");

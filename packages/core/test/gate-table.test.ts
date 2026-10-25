@@ -58,9 +58,15 @@ const BEA = "bea@example.com";
 const NEW = "a new correct horse staple";
 const RP = { rpID: "example.com", rpName: "Example", origins: [APP_ORIGIN] };
 
-/** The methods of a challenge after a password sign-in: the email code passes there only (12c decision 4). */
+/**
+ * The methods of a challenge after a password sign-in: the email code
+ * passes there only (12c decision 4).
+ */
 const PASSWORD_METHODS: ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
-/** The methods of a challenge after any other first factor, and after a reset: it proves the mailbox. */
+/**
+ * The methods of a challenge after any other first factor, and after a
+ * reset: it proves the mailbox.
+ */
 const OTHER_METHODS: ChallengeMethod[] = ["passkey", "totp", "backup"];
 
 type Outcome =
@@ -875,6 +881,16 @@ async function challengeOf(w: World): Promise<string> {
 }
 
 /**
+ * The guess routes that answer a wrong code in a page, so they declare no
+ * `invalid_code`, each with the test that holds its limits (final fix wave
+ * item 31). The device page checks an RFC 8628 user code of 8 letters.
+ */
+const PAGE_GUESSES: Partial<Record<RouteKey, string>> = {
+  "POST /oauth/device":
+    "oauth-device.test.ts: the code form counts 20 per IP and 10 per found code in 15 minutes",
+};
+
+/**
  * A wrong guess at each route that checks a secret short enough to guess.
  * The setup runs first, then the returned guess goes out alone, so the
  * limiter calls are the guess's own. `b` holds the factor user's session.
@@ -1034,10 +1050,31 @@ describe("the gate table (plan 12i Task 15, Review Focus 1)", () => {
         expect(row.limited, row.key).toBe(true);
   });
 
+  it("names each guess route that answers its wrong code in a page, with the test of its limits", () => {
+    // Such a route declares no invalid_code, so the declared codes do not
+    // find it (final fix wave item 31). A route here that declares one
+    // belongs in GUESSES instead.
+    for (const [key, test] of Object.entries(PAGE_GUESSES)) {
+      const route = ROUTES.find((r) => `${r.method} ${r.path}` === key);
+      const codes: readonly string[] = route?.codes ?? [];
+      expect({ key, route: route !== undefined, test: test.length > 0 }).toEqual({
+        key,
+        route: true,
+        test: true,
+      });
+      expect(
+        codes.filter((c) => c === "invalid_code" || c === "invalid_credentials"),
+        key,
+      ).toEqual([]);
+      expect(Object.keys(GUESSES), key).not.toContain(key);
+    }
+  });
+
   it("counts a wrong guess at each guess route on the limiter, per IP where no session bounds it", async () => {
     // ASVS 6.6.3: each guess costs a count of an owned limit. A route with
     // no session counts per IP, so one client cannot spread its guesses
-    // over many addresses. The list comes from the declared codes.
+    // over many addresses. The list comes from the declared codes, and
+    // PAGE_GUESSES names the routes that answer a wrong code in a page.
     const keys = ROUTES.filter((r) => {
       const codes: readonly string[] = (r as { codes?: readonly string[] }).codes ?? [];
       return codes.includes("invalid_code") || codes.includes("invalid_credentials");

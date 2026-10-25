@@ -458,6 +458,15 @@ describe("openApiDocument (plan 11g)", () => {
     expect([answers, bodies, queries]).toEqual([154, 117, 32]);
   });
 
+  it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {
+    // `not_found` is a router code: no entry lists it in `codes`, and the
+    // document lists it for each entry. The route answers it on a host
+    // other than the RP ID (http/well-known.ts).
+    const responses = reference().paths["/.well-known/webauthn"]?.get?.responses ?? {};
+    expect(Object.keys(responses)).toContain("404");
+    expect(JSON.stringify(responses["404"])).toContain("not_found");
+  });
+
   it("takes the request_id form of the authorize query", () => {
     const params = reference().paths["/oauth/authorize"]?.get?.parameters ?? [];
     // The return step after the sign-in sends request_id alone (oauth-authorize.ts, authorizeStep).

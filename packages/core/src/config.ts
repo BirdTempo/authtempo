@@ -664,7 +664,10 @@ export interface PasskeySignUpConfig {
    * cap is per deployment, so it needs a shared limiter, as `anonymous` does.
    */
   dailyCap?: number;
-  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  /**
+   * "allow" builds with a limiter that counts per isolate: the cap is then
+   * per isolate (tests and local dev).
+   */
   isolateLimiter?: "allow";
 }
 
@@ -2116,7 +2119,10 @@ function resolveAnonymous(
   return { ttlDays, sweepBatch, dailyCap };
 }
 
-/** The keys of `passkey.signUp`. A Record, so a key added to `PasskeySignUpConfig` and not listed here fails the compile. */
+/**
+ * The keys of `passkey.signUp`. A Record, so a key added to
+ * `PasskeySignUpConfig` and not listed here fails the compile.
+ */
 const PASSKEY_SIGN_UP_KEYS: Readonly<Record<keyof PasskeySignUpConfig, true>> = {
   dailyCap: true,
   isolateLimiter: true,

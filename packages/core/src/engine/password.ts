@@ -1205,8 +1205,9 @@ export interface PasswordVerifyCode {
  * limits, then the compare of the email code (spec 8.10 items 3 and 5). No
  * row, an expired row, a spent row, and a wrong code run the same HMAC and
  * compare, and each answers `invalid_code`. A wrong code counts one try by
- * compare-and-set; the fifth spends the row and answers
- * `too_many_attempts`. A right code is spent in one conditional update.
+ * compare-and-set; the try number `password.verifyCode.maxAttempts` (5 by
+ * default) spends the row and answers `too_many_attempts`. A right code is
+ * spent in one conditional update.
  * Then the link's confirm runs (`confirmSignUp`): the claim rule, and the
  * session of an unverified user. A refusal after the spend answers
  * `invalid_code`, as the link answers `invalid_token`.

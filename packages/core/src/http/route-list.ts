@@ -93,7 +93,8 @@ export interface RouteEntry {
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
-   * `passkeySignUp` (plan 12i Task 8) needs `passkey` with `signUp: true`.
+   * `passkeySignUp` (plan 12i Task 8) needs `passkey` with `signUp` on:
+   * `true`, or an object with `dailyCap` or `isolateLimiter`.
    * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
    * `anonymous` (plan 12i Task 6) needs `anonymous`.
    * `multiSession` (plan 12i) needs `multiSession`.
@@ -2807,6 +2808,8 @@ export const ROUTES = Object.freeze([
     path: "/.well-known/webauthn",
     feature: "passkeyRelatedOrigins",
     auth: ["none"],
+    // A host other than the RP ID answers `not_found`. It is a router code,
+    // so it stays out of `codes`; the OpenAPI document lists it (item 29).
     codes: [],
     oauthCodes: [],
   },
