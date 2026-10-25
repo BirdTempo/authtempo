@@ -56,7 +56,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations. `sendInvitationEmail` is required. |
-| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. `registration.requireSession: false`, `resolveUser`, and `afterVerification` are refused: use core's `passkey.signUp`. |
+| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. `registration.requireSession: false`, `resolveUser`, and `afterVerification` are refused: core's `passkey.signUp` is the sign-up by passkey, and the shim does not map it. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. |
 | `emailOTP` | Core's email codes, for the sign-in and the reset. With `changeEmail: { enabled: true }`, also for the change of address. `sendVerificationOTP` is required. |
 | `bearer` | Adds `set-auth-token` to each answer that sets the session cookie. |

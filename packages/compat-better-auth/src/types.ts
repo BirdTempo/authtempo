@@ -417,7 +417,8 @@ export interface PasskeyOptions {
   /**
    * `@better-auth/passkey` 1.7.2's sign-up keys (deviation 6 of plan 12i).
    * Only `requireSession: true` maps: core makes every user, so app code
-   * that finds or makes the user is refused. Use core's `passkey.signUp`.
+   * that finds or makes the user is refused. Core's `passkey.signUp` (plan
+   * 12i Task 8) is the sign-up by passkey; the shim does not map it.
    */
   registration?: {
     requireSession?: boolean;

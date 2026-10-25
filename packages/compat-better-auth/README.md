@@ -587,7 +587,7 @@ answer type holds `twoFactorRedirect` only when the client options name
 | Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations, mailed invitations, and Better Auth's roles: `ac`, `roles`, and `dynamicAccessControl` map onto core's statements, roles, and dynamic roles (see "Access control and roles"). `teams` maps onto core's teams (see "Teams"). With no `roles`, the roles are Better Auth's member < admin < owner. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
-| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. `registration.requireSession: true` maps. `requireSession: false`, `resolveUser`, and `afterVerification` are refused: core makes every user, so use core's `passkey.signUp` (deviation 6 of plan 12i). |
+| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. `registration.requireSession: true` maps. `requireSession: false`, `resolveUser`, and `afterVerification` are refused: core makes every user. Core's `passkey.signUp` is the sign-up by passkey, and the shim does not map it (deviation 6 of plan 12i). |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. Without the plugin the magic link paths answer 404. |
 | `emailOTP` | Core's email codes (plan 9e): the sign-in code and the reset code. `sendVerificationOTP` is required. It gets `type: "sign-in"` or `type: "forget-password"`, never another type, and a reset code goes only to an address with a user, as in Better Auth. Without the plugin core's code routes answer 404. See "Email codes". |
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
@@ -1028,11 +1028,11 @@ throws `APIError` on a refusal.
 | Path | Core route | Answer |
 | --- | --- | --- |
 | `POST /sign-in/anonymous` | `/anonymous/sign-in` | `{ token, user }`; 400 `ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY` for a browser with an anonymous session, as Better Auth does |
-| `POST /delete-anonymous-user` | `/anonymous/delete` | `{ success: true }`; 403 `ANONYMOUS_REFUSED` for a session that is not anonymous |
+| `POST /delete-anonymous-user` | `/anonymous/delete` | `{ success: true }`; 403 `USER_IS_NOT_ANONYMOUS` for a session that is not anonymous, as Better Auth does |
 | `POST /sign-in/username` | `/password/sign-in` | `{ token, user }`; with `twoFactor`, Better Auth's redirect answer. `callbackURL` and `rememberMe: false` answer `NOT_SUPPORTED` |
 | `POST /is-username-available` | `GET /username/available` | `{ available }` |
-| `POST /phone-number/send-otp` | `/phone/request`, or `/phone/add` with a session | `{ message: "code sent" }` for a known and an unknown number |
-| `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session verifies only with `updatePhoneNumber: true` |
+| `POST /phone-number/send-otp` | `/phone/request` with no session or an anonymous one, else `/phone/add` | `{ message: "code sent" }` for a known and an unknown number |
+| `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session that is not anonymous verifies only with `updatePhoneNumber: true`. With an anonymous session, the verify signs in and upgrades the anonymous user, and `onLinkAccount` runs, as in Better Auth |
 | `POST /sign-in/phone-number` | `/password/sign-in` | As `/sign-in/username` |
 | `POST /one-tap/callback` | `/social/google/id-token` | `{ token, user }`; 400 `INVALID_TOKEN` |
 | `POST /sign-in/social` with `idToken` | `/social/<provider>/id-token` | `{ redirect: false, token, user }` for `google` and `apple`; `NOT_SUPPORTED` for another provider. `idToken.nonce` must come from core's `POST <basePath>/social/<provider>/id-token/nonce`, and the app gives its `providerNonce` to the provider. Without `oneTap`, a token with no nonce answers `INVALID_TOKEN`. Core keeps no provider token, so `accessToken`, `refreshToken`, and `expiresAt` are not stored |
@@ -1064,26 +1064,39 @@ Behavior that differs from Better Auth:
   `<id>@anonymous.placeholder.invalid` for a user with no address, or
   `temp-<id>@<emailDomainName>` with that option. It reads every address
   on `placeholder.invalid`, or on a subdomain of it, as no address. With
-  `emailDomainName`, it reads the `temp-` form on that domain as no
-  address too. Only that form: a person's own address at the domain stays
-  an address. So a Better Auth anonymous user has no address in core, and
-  so do a phone user of `getTempEmail` and a TikTok or WeChat user. Core
-  never mails a placeholder, never finds a user by one, and never counts
-  one as proved. A write of an address in a placeholder form fails
-  with `invalid_argument`. One database takes one `emailDomainName`: a
-  second instance on it with another domain is refused at start.
+  `emailDomainName`, it reads `temp-<id>@<emailDomainName>` as no address
+  only on the row whose id is `<id>`. Any other address at the domain
+  stays an address, `temp-sales@<emailDomainName>` too. So a Better Auth
+  anonymous user has no address in core, and so do a phone user of
+  `getTempEmail` and a TikTok or WeChat user. Core never mails a
+  placeholder, never finds a user by one, and never counts one as proved.
+  A sign-up or a change of address to an address in a placeholder form
+  answers 403 `HOOK_REFUSED` before any write. Better Auth takes such an
+  address. One database takes one `emailDomainName`: a second instance on
+  it with another domain is refused at start.
+- A residual of the move: Better Auth 1.7.2 writes
+  `temp-<random id>@<emailDomainName>`, not the row id, and
+  `generateRandomEmail` writes any address. After the move, such an older
+  row reads as a real, unverified address, and core treats it as the
+  user's address. Before the move, rewrite each such row to
+  `<id>@anonymous.placeholder.invalid`, for example with
+  `UPDATE "user" SET email = id || '@anonymous.placeholder.invalid' WHERE "isAnonymous"`.
 - `getTempEmail` must answer an address on `placeholder.invalid`, such as
   `<number>@phone.placeholder.invalid`. Another domain is refused at start,
   because its rows would read back as real addresses.
 - `onLinkAccount` gets core's `proof`. Move the anonymous data only on
   `"verified"`: an `"unverified"` sign-in is a claim, and the real owner of
   the address can take the account later. Better Auth calls the hook for
-  both, so the shim does too. Each session is the newest row of its user,
-  or null, and its `token` holds the hash of the token.
+  both, so the shim does too, and `betterAuth` logs one start note that
+  says so. Each session is the newest row of its user, or null, and its
+  `token` holds the hash of the token.
 - `sendOTP` gets each code that core makes, keys, binds to its number, and
   counts. It is the one place where app code sees a code. Core sends a
   note to a number that another user holds. Better Auth has no sender for
-  that note, so the shim sends nothing, and the answer stays the same. Core sends
+  that note, so the shim sends nothing. The port still answers `sent`:
+  core answers 503 for a send that is not `sent`, and a free number gets
+  200, so another answer would tell a held number. The note counts against
+  the daily cap. Core sends
   the code after the answer, so the answer time tells no account. A throw
   of `sendOTP` changes no answer, and core writes the line
   `sms.port_threw`. On Workers, pass `{ waitUntil }` to `auth.handler`.
@@ -1097,6 +1110,10 @@ Behavior that differs from Better Auth:
   by phone, and by email code, where Better Auth sets none.
 - One Tap: the shim serves `POST /one-tap/callback` only. It has no Google
   script loader, so the page calls Google's script and posts the token.
+- One Tap sets `social.idToken.requireNonce: false` for every ID-token
+  sign-in: Apple and `/sign-in/social` with `idToken` too, as in Better
+  Auth. A token posted with no nonce then skips the nonce check, so a
+  holder of a valid ID token for the app can sign in with it.
 
 ## Hooks
 
@@ -1294,7 +1311,7 @@ The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugin
 
 The follow-ups of consumerd:
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
-- Anonymous sign-in: replace Better Auth's own plugin object with this package's `anonymous({ emailDomainName: "anon.consumerd.app" })`. The storage then reads `temp-<id>@anon.consumerd.app` as no address (see "Sign-in plugins").
+- Anonymous sign-in: replace Better Auth's own plugin object with this package's `anonymous({ emailDomainName: "anon.consumerd.app" })`. The storage then reads `temp-<id>@anon.consumerd.app` as no address on the row of that id. Rewrite the older anonymous rows before the move (see "Sign-in plugins", the residual of the move).
 - `$context`, `getOrgAdapter`, and the rate limit storage.
 - `authtempo.roleRanks` from its ROLE_RANK (`ac` and `roles` map since plan 12k).
 - Its `packages/db/test/better-auth-schema.test.ts` calls `auth.api.createOrganization`, `createTeam`, and `addTeamMember`. The shim's `auth.api` has none of the three, so call `auth.tempo.api` with core's arguments. The same test expects `memberCount` 1 after a team member add. The shim writes 0 at the create and never updates it (deviation 11), so that expectation changes to 0.

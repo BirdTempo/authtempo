@@ -545,7 +545,7 @@ const apiKeyRule = object({
 
 /** Deviation 6 of plan 12i: `@better-auth/passkey` 1.7.2's sign-up keys. */
 const PASSKEY_SIGN_UP =
-  "core makes every user; use core's passkey.signUp for a sign-up by passkey (deviation 6 of plan 12i)";
+  "core makes every user; the sign-up by passkey is core's passkey.signUp, which the shim does not map (deviation 6 of plan 12i)";
 /** Core's daily caps of the phone code and the anonymous sign-in take 1 to 100000. */
 const dailyCap: Rule = (v, p, out) => {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 100_000)
@@ -1728,6 +1728,14 @@ function signInPluginChecks(options: BetterAuthOptions, out: OptionCheck): void 
       out,
       "plugins[anonymous]",
       "core's signUp false closes the anonymous sign-in too; remove disableSignUp or the plugin",
+    );
+  // Ruling 42 I1: an app copies its Better Auth hook unchanged, and that
+  // hook moves the data on both proofs.
+  if (anon?.options.onLinkAccount !== undefined)
+    note(
+      out,
+      "plugins[anonymous].onLinkAccount",
+      'runs for both proofs; move the anonymous data only when its argument proof is "verified"',
     );
   if (!anon && options.authtempo?.anonymousDailyCap !== undefined)
     refuse(out, "authtempo.anonymousDailyCap", "only with plugins[anonymous]");

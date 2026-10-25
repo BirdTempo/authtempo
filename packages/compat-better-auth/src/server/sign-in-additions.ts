@@ -146,10 +146,18 @@ export async function signInAdditionsRoute(
         return failure("ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY", 400);
       return translate((await core("POST", "/anonymous/sign-in", {})).res, signedIn);
     }
-    case ANONYMOUS_DELETE:
-      return translate((await core("POST", "/anonymous/delete", {})).res, () => ({
+    case ANONYMOUS_DELETE: {
+      const res = await translate((await core("POST", "/anonymous/delete", {})).res, () => ({
         success: true,
       }));
+      // Core names a session that is not anonymous ANONYMOUS_REFUSED. At this
+      // path Better Auth 1.7.2 names it USER_IS_NOT_ANONYMOUS, 403
+      // (anonymous/index.mjs:140, read 2026-10-25), so the shim does too.
+      const body = (await res.clone().json()) as { code?: unknown };
+      if (res.status === 403 && body.code === "ANONYMOUS_REFUSED")
+        return failure("USER_IS_NOT_ANONYMOUS", 403);
+      return res;
+    }
     case USERNAME_SIGN_IN:
     case PHONE_SIGN_IN: {
       const key = path === USERNAME_SIGN_IN ? "username" : "phoneNumber";
@@ -184,8 +192,11 @@ export async function signInAdditionsRoute(
       if (typeof body.phoneNumber !== "string") return failure(BETTER_AUTH_CODES.invalid_body, 400);
       // With a session, the code adds the number to the caller (Better Auth's
       // updatePhoneNumber); with none, it signs in. Core keys the two apart.
+      // An anonymous session signs in too: core refuses /phone/add to it, and
+      // its verify upgrades the anonymous user, as Better Auth's does
+      // (anonymous/index.mjs after hook of /phone-number/verify; ruling 42 H1).
       const s = await auth.session(request, { refresh: false });
-      const to = s ? "/phone/add" : "/phone/request";
+      const to = s && !s.user.isAnonymous ? "/phone/add" : "/phone/request";
       return translate((await core("POST", to, { phone: body.phoneNumber })).res, () => ({
         message: "code sent",
       }));
@@ -319,7 +330,8 @@ async function phoneVerify(
       }),
     );
   }
-  // A send-otp with a session went to core's add route, so its code verifies there only.
+  // A send-otp with a session that is not anonymous went to core's add route,
+  // so its code verifies there only.
   const { res } = await core("POST", "/phone/verify", { phone: body.phoneNumber, code: body.code });
   return translate(res, async (b) => {
     // The shim sets totp.gate.phone false, as Better Auth gates no phone code.

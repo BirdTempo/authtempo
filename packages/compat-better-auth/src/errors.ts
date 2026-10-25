@@ -188,7 +188,8 @@ export const BETTER_AUTH_CODES = {
   // another session at the anonymous delete. Better Auth 1.7.2 refuses no
   // route to an anonymous user, and its USER_IS_NOT_ANONYMOUS names only the
   // delete case (dist/plugins/anonymous/error-codes.mjs, read 2026-10-24).
-  // So the name is core's own. Task 16 maps the anonymous plugin.
+  // So the name is core's own. At /delete-anonymous-user the shim answers
+  // Better Auth's USER_IS_NOT_ANONYMOUS (plan 12i Task 16, ruling 42 L4).
   anonymous_refused: "ANONYMOUS_REFUSED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",

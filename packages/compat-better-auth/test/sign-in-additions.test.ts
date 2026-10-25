@@ -148,6 +148,60 @@ describe("the anonymous plugin", () => {
     expect(t.row('SELECT id FROM "user" WHERE id = ?', anon.id)).toBeUndefined();
   });
 
+  it("answers USER_IS_NOT_ANONYMOUS at the anonymous delete of another user, as Better Auth does (ruling 42 L4)", async () => {
+    const t = await betterAuthTables();
+    const auth = betterAuth(signInOptions(t.database, { plugins: [anonymous()] }));
+    const { send } = browser(auth.handler);
+    const up = await send("/password/sign-up", { email: "ann@example.com", password: PASSWORD });
+    const id = ((await json(up)).user as { id: string }).id;
+    const res = await send("/delete-anonymous-user", {});
+    expect([res.status, await json(res)]).toEqual([
+      403,
+      { code: "USER_IS_NOT_ANONYMOUS", message: "User is not anonymous" },
+    ]);
+    expect(t.row('SELECT id FROM "user" WHERE id = ?', id)).toEqual({ id });
+  });
+
+  it("logs one start note when onLinkAccount is set, naming the proof field (ruling 42 I1)", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const note =
+      'authtempo compat: plugins[anonymous].onLinkAccount: runs for both proofs; move the anonymous data only when its argument proof is "verified"';
+    const notesOf = async (o: Parameters<typeof anonymous>[0]) => {
+      const t = await betterAuthTables();
+      info.mockClear();
+      betterAuth(signInOptions(t.database, { plugins: [anonymous(o)] }));
+      return info.mock.calls.map((c) => c[0]).filter((l) => String(l).includes("onLinkAccount"));
+    };
+    expect(await notesOf({ onLinkAccount: () => {} })).toEqual([note]);
+    expect(await notesOf({})).toEqual([]);
+    info.mockRestore();
+  });
+
+  it("gives onLinkAccount the session of the sign-in, not an older session of the same user (ruling 42 I2)", async () => {
+    const t = await betterAuthTables();
+    const links: { newUser: { session: { id: string } | null } }[] = [];
+    const auth = betterAuth(
+      signInOptions(t.database, {
+        plugins: [anonymous({ onLinkAccount: (d) => void links.push(d as never) })],
+      }),
+    );
+    // The user's first session, in another browser.
+    const first = browser(auth.handler);
+    const up = await first.send("/password/sign-up", {
+      email: "ida@example.com",
+      password: PASSWORD,
+    });
+    const older = ((await json(up)).session as { id: string }).id;
+    await new Promise((r) => setTimeout(r, 5));
+    const b = browser(auth.handler);
+    await b.send("/sign-in/anonymous", {});
+    const res = await b.send("/password/sign-in", { email: "ida@example.com", password: PASSWORD });
+    expect(res.status).toBe(200);
+    const newer = ((await json(res)).session as { id: string }).id;
+    expect(newer).not.toBe(older);
+    expect(links.map((l) => l.newUser.session?.id)).toEqual([newer]);
+  });
+
   it("refuses generateRandomEmail, disableDeleteAnonymousUser, schema, a bad emailDomainName, and a closed sign-up", () => {
     expect(
       refusalsOf({
@@ -444,6 +498,59 @@ describe("the phone-number plugin", () => {
     ).toEqual(["authtempo.phone.regions: required: core has no default"]);
   });
 
+  it("signs in by code over an anonymous session and upgrades it: onLinkAccount runs (ruling 42 H1)", async () => {
+    const t = await betterAuthTables();
+    const sent: { phoneNumber: string; code: string }[] = [];
+    const links: { proof: string; anonymousUser: { user: { id: string } } }[] = [];
+    const options = phoneOptions(t.database, sent);
+    const auth = betterAuth({
+      ...options,
+      plugins: [
+        ...(options.plugins ?? []),
+        anonymous({ onLinkAccount: (d) => void links.push(d as never) }),
+      ],
+    });
+    const { send } = browser(auth.handler);
+    const anon = (await json(await send("/sign-in/anonymous", {}))).user as { id: string };
+    const asked = await send("/phone-number/send-otp", { phoneNumber: "+14155550170" });
+    expect([asked.status, await json(asked)]).toEqual([200, { message: "code sent" }]);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    const verified = await send("/phone-number/verify", {
+      phoneNumber: "+14155550170",
+      code: sent[0]?.code,
+    });
+    expect(verified.status).toBe(200);
+    const user = (await json(verified)).user as { id: string };
+    expect(user.id).not.toBe(anon.id);
+    expect(links.map((l) => [l.proof, l.anonymousUser.user.id])).toEqual([["verified", anon.id]]);
+    expect(t.row('SELECT id FROM "user" WHERE id = ?', anon.id)).toBeUndefined();
+    expect(t.row('SELECT phoneNumber FROM "user" WHERE id = ?', user.id)).toEqual({
+      phoneNumber: "+14155550170",
+    });
+  });
+
+  it("sends no note to a number that another user holds, and answers as for a free number (ruling 42 L3)", async () => {
+    const t = await betterAuthTables();
+    const sent: { phoneNumber: string; code: string }[] = [];
+    const verifies: EmailCallbackData[] = [];
+    const auth = betterAuth(phoneOptions(t.database, sent, {}, verifies));
+    // The holder signs up by code.
+    const holder = browser(auth.handler);
+    await holder.send("/phone-number/send-otp", { phoneNumber: "+14155550180" });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    await holder.send("/phone-number/verify", { phoneNumber: "+14155550180", code: sent[0]?.code });
+    // A proved account asks to add the taken number, then a free one.
+    const { send } = browser(auth.handler);
+    await send("/password/sign-up", { email: "tom@example.com", password: PASSWORD });
+    expect((await send("/password/verify", { token: verifies[0]?.token })).status).toBe(200);
+    const taken = await send("/phone-number/send-otp", { phoneNumber: "+14155550180" });
+    const free = await send("/phone-number/send-otp", { phoneNumber: "+14155550181" });
+    expect([taken.status, await json(taken)]).toEqual([free.status, await json(free)]);
+    expect(free.status).toBe(200);
+    // The add sends before its answer: the free number got its code, and the taken one nothing.
+    expect(sent.map((x) => x.phoneNumber)).toEqual(["+14155550180", "+14155550181"]);
+  });
+
   it("passes the host's waitUntil to core, so the SMS goes out under it after the answer (ruling 23)", async () => {
     const t = await betterAuthTables();
     let release = () => {};
@@ -487,6 +594,7 @@ describe("the phone-number plugin", () => {
 /** Two tokens in the compact form: core keys its used-token row on the payload part. */
 const TOK1 = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJnLTEifQ.c2lnMQ";
 const TOK2 = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJnLTIifQ.c2lnMg";
+const TOK3 = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJnLTMifQ.c2lnMw";
 
 /** A fake ID token verifier: the claims of each token, as Google would sign them. */
 function fakeJwt(claims: Record<string, Record<string, unknown>>): JwtSeam {
@@ -581,8 +689,10 @@ describe("the one-tap plugin and /sign-in/social with idToken", () => {
     });
     const github = await send("/sign-in/social", { provider: "github", idToken: { token: "x" } });
     expect([github.status, (await json(github)).code]).toEqual([501, "NOT_SUPPORTED"]);
-    // Without one-tap, core needs its own nonce: a token with none answers INVALID_TOKEN.
-    const none = await send("/sign-in/social", { provider: "google", idToken: { token: TOK2 } });
+    // Without one-tap, core needs its own nonce: a token that has no nonce claim,
+    // posted with no nonce, answers INVALID_TOKEN (ruling 42 L2).
+    claims[TOK3] = googleClaims("g-3", "bare@example.com");
+    const none = await send("/sign-in/social", { provider: "google", idToken: { token: TOK3 } });
     expect([none.status, (await json(none)).code]).toEqual([400, "INVALID_TOKEN"]);
   });
 });
@@ -759,7 +869,7 @@ describe("the passkey plugin's registration", () => {
       refusalsOf({ plugins: [passkey({ ...pk, registration: { requireSession: true } })] }),
     ).toEqual([]);
     const why =
-      "core makes every user; use core's passkey.signUp for a sign-up by passkey (deviation 6 of plan 12i)";
+      "core makes every user; the sign-up by passkey is core's passkey.signUp, which the shim does not map (deviation 6 of plan 12i)";
     expect(
       refusalsOf({
         plugins: [
