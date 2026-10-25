@@ -78,6 +78,12 @@ export const LIMIT_FAMILIES = Object.freeze([
   "operator-users:secret",
   "operator:user",
   "operator-impersonate:user",
+  // A delete cannot be undone: the count bounds what a leaked credential destroys (plan 12f2).
+  "operator-delete:actor",
+  // Each create can send one mail: a leaked credential must not become a mail cannon (plan 12f2).
+  "operator-create:actor",
+  // The confirm of an invitation link: each POST spends a hash and a read (plan 12f2 Task 3).
+  "user-invite-confirm:ip",
   "oauth-register:ip",
   "oauth-authorize:ip",
   "oauth-token:ip",

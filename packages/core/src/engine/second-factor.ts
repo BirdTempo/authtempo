@@ -382,9 +382,16 @@ const PREFERENCE: readonly ChallengeMethod[] = ["passkey", "totp", "email", "bac
 
 /**
  * The first factors that a challenge can follow (plan 12c; `sso` since plan
- * 12d; `phone` since plan 12i). Each is a `SessionVia`.
+ * 12d; `phone` since plan 12i; `invite` since plan 12f2). Each is a `SessionVia`.
  */
-export type GatedVia = "password" | "magic_link" | "email_otp" | "social" | "sso" | "phone";
+export type GatedVia =
+  | "password"
+  | "magic_link"
+  | "email_otp"
+  | "social"
+  | "sso"
+  | "phone"
+  | "invite";
 const GATED_VIA: ReadonlySet<string> = new Set([
   "password",
   "magic_link",
@@ -392,6 +399,7 @@ const GATED_VIA: ReadonlySet<string> = new Set([
   "social",
   "sso",
   "phone",
+  "invite",
 ]);
 
 /** How the person proved the first factor: the session's `via`, and `reset` for a password reset. */

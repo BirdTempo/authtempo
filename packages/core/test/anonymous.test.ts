@@ -10,6 +10,7 @@ import {
 } from "../src/engine/anonymous.js";
 import { requestEmailChange } from "../src/engine/email-change.js";
 import { decideDevice } from "../src/engine/oauth-device.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import { passkeyRegistrationOptions, verifyPasskeyRegistration } from "../src/engine/passkeys.js";
 import { changePassword } from "../src/engine/password.js";
 import { addPhone, verifyAddPhone } from "../src/engine/phone.js";
@@ -29,7 +30,7 @@ import type { LimiterPort } from "../src/limiter/port.js";
 import { type ModelName, schema } from "../src/schema.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled, tokenFromMail } from "./helpers.js";
 import { authorizeGet, oauthHandle, pkce, REDIRECT, registered } from "./oauth-helpers.js";
 import { observed } from "./observe-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
@@ -491,6 +492,73 @@ describe("ANONYMOUS_REFUSED (plan 12i Task 6)", () => {
     // The phone sign-in of Task 5 is a sign-in, not a change of this user: not listed.
     const request = await w.handle(post("/auth/phone/request", { phone: "+14155550100" }, cookie));
     expect(await request.json()).toEqual({ sent: true });
+  });
+
+  it("decides the operator user routes of plan 12f2: not listed, the operator guard refuses them (the move onto main)", async () => {
+    const w = world({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+      operator: { users: true },
+    });
+    const a = await anonymous(w);
+    const before = await dump(w);
+    // A session needs the platform role, a second factor, and a verified address: an
+    // anonymous user has none, so the guard answers operator_required before the body.
+    // Plan 12f2 Task 5 adds the create of the second wave: the same guard refuses it.
+    for (const path of [
+      "/auth/operator/users/update",
+      "/auth/operator/users/delete",
+      "/auth/operator/users/create",
+    ]) {
+      const res = await w.handle(
+        post(
+          path,
+          { userId: a.resolved.user.id, name: "Pat", reason: "Ticket 1" },
+          { cookie: a.cookie },
+        ),
+      );
+      expect([path, res.status, await res.json()]).toEqual([
+        path,
+        403,
+        { error: "operator_required" },
+      ]);
+    }
+    expect(await dump(w)).toEqual(before);
+  });
+
+  it("decides the invitation confirm of plan 12f2 Task 3: not listed, a sign-in that links nothing", async () => {
+    const w = world({
+      operator: {
+        users: true,
+        secrets: [{ name: "support", secretHash: "e".repeat(64), scopes: ["users"] }],
+      },
+    });
+    const made = await operatorApi(w.auth.config).users.create({
+      actor: { kind: "app", name: "support-tool" },
+      email: "ivy@example.com",
+      reason: "Ticket 1",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+    const a = await anonymous(w);
+    const res = await w.handle(post("/auth/user/invite/confirm", { token }, { cookie: a.cookie }));
+    expect(res.status).toBe(200);
+    // The session of the invited user, and the anonymous user stays as it was: no upgrade.
+    expect(await resolveSession(w.auth.config, cookieToken(res))).toMatchObject({
+      user: { id: made.value.userId },
+    });
+    expect((await users(w)).map((u) => [u.id, u.isAnonymous]).sort()).toEqual(
+      [
+        [made.value.userId, false],
+        [a.resolved.user.id, true],
+      ].sort(),
+    );
+    expect(await resolveSession(w.auth.config, a.token)).not.toBeNull();
   });
 
   it("refuses a listed route to an anonymous user with anonymous off since", async () => {

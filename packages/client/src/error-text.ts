@@ -88,7 +88,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   domain_taken: "Another organization holds this domain.",
   domain_limit: "The organization holds the most domains it can have.",
   delete_too_large:
-    "The delete is too large for one request. Delete some organizations or SCIM groups first.",
+    "The delete is too large for one request. Delete or leave some organizations, or delete some SCIM groups, first.",
   connection_limit: "The organization holds the most SSO connections it can have.",
   second_factor_required: "Turn on a second factor first, then try again.",
   sso_failed: "The single sign-on did not complete. Try again.",

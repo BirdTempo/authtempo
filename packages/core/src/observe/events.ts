@@ -173,6 +173,9 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /password/verify/code": "password",
   "GET /magic-link/verify": "magic_link",
   "POST /magic-link/verify": "magic_link",
+  // The invitation link of plan 12f2 Task 3.
+  "GET /user/invite/confirm": "invite",
+  "POST /user/invite/confirm": "invite",
   "POST /otp/verify": "email_otp",
   // The phone code of plan 12i Task 5.
   "POST /phone/verify": "phone",
@@ -680,6 +683,14 @@ export const EVENTS = {
   }),
   "operator.ban_write_gave_up": fault("error", "authtempo: operator ban write gave up", {
     userId: ROW_ID,
+  }),
+  "operator.update_gave_up": fault("error", "authtempo: operator update gave up", {
+    userId: ROW_ID,
+  }),
+  // The mail of an operator create threw; the user stays (plan 12f2 Task 2). No address.
+  "operator.create_mail_failed": fault("error", "authtempo: operator create mail failed", {
+    userId: ROW_ID,
+    errorName: ERROR_NAME,
   }),
   // The route keys and `api`, the name of an engine call (ruling 1 point 18 of plan 12h).
   "operator.guard_refused": fault("error", "authtempo: operator guard refused", {

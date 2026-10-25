@@ -48,7 +48,10 @@ describe("checkConfig", () => {
     // Ruling 39 adds password.verifyCode and its three keys.
     // Plan 12i Task 8 adds passkey.signUp. Ruling 38 adds
     // passkey.signUp.dailyCap and passkey.signUp.isolateLimiter.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3);
+    // Plan 12f2 Task 3 adds operator.invite, operator.invite.ttlHours, and totp.gate.invite.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3 + 3);
+    expect(keys).toContain("operator.invite.ttlHours");
+    expect(keys).toContain("totp.gate.invite");
     expect(keys).toContain("social.idToken.requireNonce");
     expect(keys).toContain("social.apple.audiences");
     expect(keys).toContain("password.verifyCode.maxAttempts");

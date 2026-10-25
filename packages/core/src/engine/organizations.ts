@@ -20,7 +20,7 @@ import {
 } from "./hooks.js";
 import { endImpersonationsPage } from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
-import { writesPlatformRole } from "./operator/guards.js";
+import { holdsPlatformRole, writesPlatformRole } from "./operator/guards.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
 import {
@@ -760,13 +760,21 @@ export async function organizationGroups(
  * order (`lockInOrder`), in the step of the organization row. The account
  * delete takes these rows and the member rows in its act. A flow that comes
  * later finds no organization, no domain claim, and no SCIM token.
+ * `locked` is true when the caller took the scimUser and organization locks
+ * already (the account delete on a store whose user delete cascades).
  */
-export async function deleteOrganizationsHead(tx: StorageAdapter, list: string[]): Promise<void> {
+export async function deleteOrganizationsHead(
+  tx: StorageAdapter,
+  list: string[],
+  locked = false,
+): Promise<void> {
   // The scimUser rows come before the organization row (ruling 74 M3): a SCIM deactivate holds
   // its scimUser row and then takes the organization lock. On Postgres this lock costs one
   // statement; D1 has no row lock.
-  await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
-  await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  if (!locked) {
+    await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
+    await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  }
   await tx.delete("organization", [{ field: "id", op: "in", value: list }]);
   // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
   // organization row. A kept domain row would hold its claim forever, so no
@@ -840,11 +848,22 @@ export interface AccountOrganizations {
  * So its last owner answers `sole_owner`, also as its only member. Any other
  * membership goes with no check. It reads through `storage`, the delete's
  * transaction, after the lock of the user row.
+ *
+ * With `refusePlatform`, a user who holds the platform role answers
+ * `operator_required` before any other answer (ruling 5 of plan 12f2,
+ * L1). A user actor does not delete a platform operator. The rule reads
+ * the member rows and the organizations anyway, so the check costs no
+ * call. It reads them after the user hold. The grant and a role change
+ * that add the platform role part hold the user row first too (ruling 6
+ * of plan 12f2), so the two run one at a time on Postgres and MySQL. D1
+ * has no lock: a grant that lands after this read and before the member
+ * delete loses its row with the account.
  */
 export async function organizationsOfDelete(
   config: ResolvedConfig,
   storage: StorageAdapter,
   userId: string,
+  refusePlatform = false,
 ): Promise<Result<AccountOrganizations>> {
   const plan: AccountOrganizations = { going: [], owned: [] };
   const o = on(config);
@@ -864,6 +883,17 @@ export async function organizationsOfDelete(
       )
     ).map((x) => [x.id, x]),
   );
+  if (
+    refusePlatform &&
+    mine.some((m) => {
+      const organization = organizations.get(m.organizationId);
+      return (
+        organization?.slug === o.platformOrganization &&
+        holdsPlatformRole(config, organization.id, m)
+      );
+    })
+  )
+    return fail("operator_required");
   const all = await findManyIn(storage, "member", "organizationId", [...organizations.keys()]);
   for (const m of mine) {
     const organization = organizations.get(m.organizationId);
@@ -1194,13 +1224,31 @@ export async function updateMemberRole(
     target.member,
     s.value.reads + g.value.reads + targetStanding.reads,
   );
+  // A change that adds the platform role part holds the member's user row
+  // first, in the order of user-hold.ts (ruling 6 of plan 12f2). The
+  // operator delete holds the same row before it reads the platform role,
+  // so the two run one at a time on Postgres and MySQL.
+  const gain =
+    writesPlatformRole(config, s.value.organization, input.role) &&
+    !writesPlatformRole(config, s.value.organization, target.member.role)
+      ? input.userId
+      : null;
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value.rank))
-      return ownerWrite(config, o, s.value.organization, setRole, loss);
+      return ownerWrite(config, o, s.value.organization, setRole, loss, gain);
     // A zero-row update writes nothing, so the commit changes nothing.
     const n = await config.storage.transaction((tx) =>
-      withRoleLoss(tx, loss, now, setRole, (rows) => rows > 0),
+      withRoleLoss(
+        tx,
+        loss,
+        now,
+        async (t) => {
+          if (gain !== null) await holdUser(config.observe, t, gain);
+          return setRole(t);
+        },
+        (rows) => rows > 0,
+      ),
     );
     return n === 0 ? fail("conflict") : ok(true);
   });

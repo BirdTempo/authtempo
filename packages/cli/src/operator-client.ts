@@ -33,6 +33,12 @@ export interface OperatorCall {
    * `OPERATOR_USERS_PER_IP.max` for the user tools of 12f.
    */
   perHour: number;
+  /**
+   * The text of a 429 for a route with a limit beside the limit per IP
+   * (plan 12f2 Task 6): the delete counts each actor too. Without it, the
+   * text names `perHour` per IP.
+   */
+  limits?: string;
   /** The scope that the route needs (spec 26 item 3). The 403 text names it. */
   scope?: OperatorScope;
   /**
@@ -46,11 +52,11 @@ export interface OperatorCall {
 }
 
 /** The scopes of a named operator secret (spec 26 item 3). */
-export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "delete";
 
 /**
- * The text of each refusal code that a write of plan 12f can answer to a
- * secret caller, by its cause. `operator_required` and `invalid_body` have
+ * The text of each refusal code that a write of plans 12f and 12f2 can
+ * answer to a secret caller, by its cause. `operator_required` and `invalid_body` have
  * their own texts in `operatorCall`; 401, 404, and 429 have theirs by
  * status. The codes of `USER_ACTOR_CODES` are not here: core answers them
  * to a request with a session only, and the CLI always calls with a
@@ -66,6 +72,15 @@ export const REFUSALS: Readonly<Record<string, string>> = {
   totp_not_enabled: "the user has no second factor on",
   hook_refused: "a hook of the deployment refused the act (hooks.operator.beforeAction)",
   hook_failed: "a hook of the deployment failed; read the log of the deployment",
+  sole_owner:
+    "the user is the last owner of an organization with other members, or of the platform organization; make another member an owner first",
+  // The create of plan 12f2 Task 5: a caller with the scope users may learn that an account exists.
+  email_taken: "an account holds this address; find it with users search",
+  phone_taken: "an account holds this phone number",
+  phone_invalid: "the phone number is not in E.164 form: a plus sign and 8 to 15 digits",
+  phone_region: "the phone number is outside the regions of the phone config of the deployment",
+  delete_too_large:
+    "the account holds too many organizations to delete in one call; delete the organizations that the user alone holds, or let the user leave the organizations that the user owns with another owner, first",
 };
 
 /** The parsed values of the four operator flags of `OPERATOR_FLAGS`. */
@@ -158,7 +173,7 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
   }
   if (res.status === 401) throw new OperatorStop(401, "the deployment refused the operator secret");
   if (res.status === 429) {
-    const why = `the operator routes allow ${call.perHour} calls per IP per hour`;
+    const why = call.limits ?? `the operator routes allow ${call.perHour} calls per IP per hour`;
     throw new OperatorStop(429, why, `${why}; wait, then run it again`);
   }
   // The capped reader of the checks: it cancels the stream at the cap, so a

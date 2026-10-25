@@ -55,6 +55,9 @@ const SSO_ON: Partial<AuthConfig> = {
  * that mounts the route. A key of SIGN_IN_ROUTES with no row here fails the
  * test.
  */
+/** An operator secret with the user tools, so the invitation routes exist (plan 12f2 Task 3). */
+const INVITE_SECRET = { name: "support", secretHash: "a".repeat(64), scopes: ["users" as const] };
+
 const FAILING: Readonly<
   Record<
     string,
@@ -86,6 +89,17 @@ const FAILING: Readonly<
   "POST /magic-link/verify": {
     via: "magic_link",
     make: async (s) => formPost("/auth/magic-link/verify", { token: await spentLink(s) }),
+  },
+  // Plan 12f2 Task 3: a malformed and a wrong invitation link.
+  "GET /user/invite/confirm": {
+    via: "invite",
+    over: { operator: { users: true, secrets: [INVITE_SECRET] } },
+    make: async () => get("/auth/user/invite/confirm?token=short"),
+  },
+  "POST /user/invite/confirm": {
+    via: "invite",
+    over: { operator: { users: true, secrets: [INVITE_SECRET] } },
+    make: async () => post("/auth/user/invite/confirm", { token: `ui_${"A".repeat(43)}` }),
   },
   "POST /otp/verify": {
     via: "email_otp",

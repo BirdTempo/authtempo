@@ -64,6 +64,11 @@ export interface Io {
     options: { cwd: string; env?: Readonly<Record<string, string>> },
   ): Promise<RunResult>;
   confirm(question: string): Promise<boolean>;
+  /**
+   * One line that a person types after the question (plan 12f2 Task 6):
+   * the user id that `users delete` asks for. The question goes to stderr.
+   */
+  prompt(question: string): Promise<string>;
 }
 
 /**
@@ -165,6 +170,14 @@ export function nodeIo(): Io {
       const rl = createInterface({ input: process.stdin, output: process.stderr });
       try {
         return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim());
+      } finally {
+        rl.close();
+      }
+    },
+    async prompt(question) {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await rl.question(`${question} `);
       } finally {
         rl.close();
       }

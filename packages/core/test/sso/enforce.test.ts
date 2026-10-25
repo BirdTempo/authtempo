@@ -3,6 +3,7 @@ import type { AuthConfig } from "../../src/config.js";
 import { requestEmailOtp, requestResetOtp } from "../../src/engine/email-otp.js";
 import { SESSION_VIA, type SessionVia } from "../../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
+import { operatorApi } from "../../src/engine/operator/index.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
@@ -150,6 +151,31 @@ const DOORS: Door[] = [
       must(await setUsername(w.config, { session, username: "Ada", ip: null, userAgent: null }));
       return () =>
         w.handle(post("/auth/password/sign-in", { username: "ada", password: PASSWORD }));
+    },
+  },
+  {
+    // Plan 12f2 Task 3: an invitation mailed before enforce went on. Bea of
+    // the same domain, because Ada exists: the operator creates Bea.
+    name: "the invitation link",
+    json: true,
+    extra: {
+      operator: {
+        users: true,
+        secrets: [{ name: "support", secretHash: "c".repeat(64), scopes: ["users"] }],
+      },
+    },
+    async prepare(w) {
+      must(
+        await operatorApi(w.config).users.create({
+          actor: { kind: "app", name: "support-tool" },
+          email: "bea@acme.example",
+          reason: "Ticket 1",
+          ip: null,
+          userAgent: null,
+        }),
+      );
+      const token = tokenFromMail(w.mail.findLast((m) => m.to === "bea@acme.example")?.text ?? "");
+      return () => w.handle(post("/auth/user/invite/confirm", { token }));
     },
   },
   {
@@ -535,6 +561,42 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
       expect(await request()).toEqual({ ok: true, value: { sent: true } });
       expect(w.mail.length - sent).toBe(1);
     }
+  });
+
+  it("creates an operator user of an enforced address with no link and no mail", async () => {
+    // review-12f2-task2 L1 and review-12f2-task3 L3: each link would answer
+    // sso_required at use. The user stays; the person signs in by SSO.
+    const door = DOORS.find((d) => d.name === "the invitation link") as Door;
+    const { w } = await scene(door, true);
+    const users = operatorApi(w.config).users;
+    const actor = { kind: "app", name: "support-tool" } as const;
+    const by = { reason: "Ticket 2", ip: null, userAgent: null };
+    const create = async (input: { email: string; firstSignIn?: "invite" | "reset" }) => {
+      const r = await users.create({ actor, ...input, ...by });
+      if (!r.ok) throw new Error(r.code);
+      return r.value;
+    };
+    w.mail.length = 0;
+    const invites = async () =>
+      (await w.storage.findMany("verification", [])).filter((v) => v.purpose === "user-invite");
+    const before = (await invites()).length;
+    for (const [email, firstSignIn] of [
+      ["cy@acme.example", "invite"],
+      ["di@acme.example", "reset"],
+    ] as const) {
+      const made = await create({ email, firstSignIn });
+      expect(made.mailed, email).toBeNull();
+      expect(await w.storage.findOne("user", [{ field: "email", op: "eq", value: email }])).toEqual(
+        expect.objectContaining({ id: made.userId }),
+      );
+    }
+    expect((await invites()).length).toBe(before);
+    expect(w.mail).toEqual([]);
+    // An address outside the domain gets its invitation: the check is of the domain.
+    const other = await create({ email: "eve@other.example" });
+    expect(other.mailed).toBe("invite");
+    expect(w.mail.map((m) => m.to)).toEqual(["eve@other.example"]);
+    expect((await invites()).length).toBe(before + 1);
   });
 
   it("sends no phone code to a user of an enforced address", async () => {

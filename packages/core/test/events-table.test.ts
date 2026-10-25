@@ -108,6 +108,10 @@ const START_LIST: readonly string[] = [
   "authtempo: an sso client secret did not open",
   "authtempo: sso domain unverified",
   "authtempo: sso domain lost",
+  // Plan 12f2 Task 4: an operator update of a name or an image that lost its race 5 times.
+  "authtempo: operator update gave up",
+  // Plan 12f2 Task 2: the mail of an operator create threw; the user stays.
+  "authtempo: operator create mail failed",
 ];
 
 /** Field names that can hold a secret, a credential, or free text (spec 31 item 8). */
@@ -133,10 +137,11 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 + 1 + 1 of
-    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1).
-    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
-    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, 3 + 1 + 3 + 1 + 1 + 1 of
+    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1), and 1 + 1 of
+    // plan 12f2 (Task 4: 1, Task 2: 1).
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

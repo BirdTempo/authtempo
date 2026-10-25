@@ -51,6 +51,18 @@ const TOOL_ROUTES = [
   { key: "GET /operator/audit", scope: "audit" },
 ] as const;
 
+/** The routes of plan 12f2 Task 5 under the same feature: operator-user-routes.test.ts covers them. */
+const PLAN_12F2_ROUTES = [
+  "POST /operator/users/create",
+  "POST /operator/users/update",
+  "POST /operator/users/delete",
+];
+/**
+ * The invitation link of plan 12f2 Task 3: the feature operatorUsers, but
+ * no operator credential. The person who got the mail calls it.
+ */
+const INVITE_ROUTES = ["GET /user/invite/confirm", "POST /user/invite/confirm"];
+
 type ToolKey = (typeof TOOL_ROUTES)[number]["key"];
 type WriteKey = Extract<ToolKey, `POST ${string}`>;
 const WRITES = TOOL_ROUTES.map((r) => r.key).filter((k): k is WriteKey => k.startsWith("POST "));
@@ -168,6 +180,25 @@ function inputOf(key: ToolKey, userId: string): Call {
   }
 }
 
+/**
+ * A valid input of each route of plan 12f2 Task 5 for a target user. The
+ * guard tests below send these routes too (review-12f2-task5 L1 and
+ * review-12f2-task5b L1).
+ */
+function input12f2(key: string, userId: string): Call {
+  if (key === "POST /operator/users/create")
+    return { body: { email: "new.user@example.com", firstSignIn: "none", reason: REASON } };
+  if (key === "POST /operator/users/update")
+    return { body: { userId, name: "Ada Lovelace", reason: REASON } };
+  return { body: { userId, reason: REASON } };
+}
+
+/** The key and the valid input of every route that the guard tests send. */
+const guarded = (userId: string): [string, Call][] => [
+  ...TOOL_ROUTES.map(({ key }): [string, Call] => [key, inputOf(key, userId)]),
+  ...PLAN_12F2_ROUTES.map((key): [string, Call] => [key, input12f2(key, userId)]),
+];
+
 /** A bad input of each route: a query or a body that the contract schema or the engine refuses. */
 function badInputsOf(key: ToolKey, userId: string): Call[] {
   switch (key) {
@@ -211,9 +242,14 @@ async function fitted(key: ToolKey, res: Response): Promise<Record<string, unkno
 
 describe("the operator routes (plan 12f Task 10)", () => {
   it("lists the 12f routes in ROUTES with the feature operatorUsers and both credential forms", () => {
-    const tagged = ROUTES.filter((r) => r.feature === "operatorUsers");
+    const all = ROUTES.filter((r) => r.feature === "operatorUsers");
+    const invite = all.filter((r) => INVITE_ROUTES.includes(`${r.method} ${r.path}`));
+    expect(invite.map((r) => [`${r.method} ${r.path}`, r.auth])).toEqual(
+      INVITE_ROUTES.map((key) => [key, ["none"]]),
+    );
+    const tagged = all.filter((r) => !invite.includes(r));
     expect(tagged.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
-      TOOL_ROUTES.map((r) => r.key).sort(),
+      [...TOOL_ROUTES.map((r) => r.key), ...PLAN_12F2_ROUTES].sort(),
     );
     for (const r of tagged)
       expect(r.auth, `${r.method} ${r.path}`).toEqual(["operator", "session"]);
@@ -244,8 +280,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
   it("answers 401 to a wrong secret, to no credential, and to two credentials", async () => {
     const w = await world();
     const cookie = w.operator.cookie;
-    for (const { key } of TOOL_ROUTES) {
-      const input = inputOf(key, w.rootId);
+    for (const [key, input] of guarded(w.rootId)) {
       const both = { ...SUPPORT, ...sessionHeaders(key, cookie) };
       // The scheme with no secret still names the operator credential, so with a cookie it is two.
       const schemeOnly = { authorization: "Operator", ...sessionHeaders(key, cookie) };
@@ -357,9 +392,9 @@ describe("the operator routes (plan 12f Task 10)", () => {
       const rows = await audit();
       const before = await state();
       keys.length = 0;
-      for (const { key } of TOOL_ROUTES) {
+      for (const [key, input] of guarded(ada.user.id)) {
         const res = await w.handle(
-          request(key, { ...inputOf(key, ada.user.id), headers: sessionHeaders(key, cookie) }),
+          request(key, { ...input, headers: sessionHeaders(key, cookie) }),
         );
         expect(await answerOf(res), `${key}: ${label}`).toEqual({
           status: 403,

@@ -1,5 +1,7 @@
 import {
   isOperatorReason,
+  OPERATOR_CREATE_PER_ACTOR,
+  OPERATOR_DELETE_PER_ACTOR,
   OPERATOR_USERS_PER_IP,
   REASON_MAX,
 } from "@authtempo/core/operator-secret";
@@ -45,6 +47,24 @@ export const WRITE_OPTIONS = {
  * and the help print the number that core counts.
  */
 export const TOOL_CALLS_PER_HOUR = OPERATOR_USERS_PER_IP.max;
+
+/**
+ * The deletes of one actor in an hour: 100 (plan 12f2 Task 5, ruling 7).
+ * Core's limiter reads the same value. Each call counts, also a refused one.
+ */
+export const DELETES_PER_HOUR = OPERATOR_DELETE_PER_ACTOR.max;
+
+/** The 429 text of `users delete`: the route counts each IP and each actor. */
+export const DELETE_LIMITS = `the operator routes allow ${TOOL_CALLS_PER_HOUR} calls per IP per hour, and ${DELETES_PER_HOUR} deletes per actor per hour`;
+
+/**
+ * The creates of one actor in an hour: 200 (plan 12f2 Task 5, second wave).
+ * Core's limiter reads the same value. Each call counts, also a refused one.
+ */
+export const CREATES_PER_HOUR = OPERATOR_CREATE_PER_ACTOR.max;
+
+/** The 429 text of `users create`: the route counts each IP and each actor. */
+export const CREATE_LIMITS = `the operator routes allow ${TOOL_CALLS_PER_HOUR} calls per IP per hour, and ${CREATES_PER_HOUR} creates per actor per hour`;
 
 // The reason rule and the proof rules come from core (ruling 40 of plan 12f): one source.
 export {
@@ -107,10 +127,25 @@ export function toolTarget(target: string | undefined, values: OperatorValues): 
   };
 }
 
-/** The user id of a command that acts on one user: the positional after the base URL. */
+/**
+ * The usage error of a positional after the last place of a command. It
+ * names the place, never the value: a misplaced value can be an address or
+ * a phone number, and a CI log keeps stderr.
+ */
+export function noExtra(extra: readonly string[], place: string): void {
+  if (extra.length > 0)
+    throw new UsageError(`unexpected argument after ${place}: give each value with its flag`);
+}
+
+/**
+ * The user id of a command that acts on one user: the positional after the
+ * base URL. An empty id stops here, before the question: the typed answer
+ * of an empty line would match it.
+ */
 export function userIdOf(id: string | undefined, extra: readonly string[]): string {
-  if (id === undefined) throw new UsageError("name the user id after the base URL");
-  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  if (id === undefined || id.trim() === "")
+    throw new UsageError("name the user id after the base URL");
+  noExtra(extra, "the user id");
   return id;
 }
 
@@ -157,6 +192,23 @@ export async function ask(
   if (!(await ctx.confirm(question))) throw new Stop(`no ${act}: the answer was not yes`);
 }
 
+/**
+ * The typed question of an act that cannot be undone, unless `--yes`
+ * (plan 12f2 Task 6). The answer must equal `expected`, the user id, so a
+ * yes by habit does not act. `needYes` ran before, so a person can answer.
+ */
+export async function askTyped(
+  ctx: Ctx,
+  values: ConfirmValues,
+  question: string,
+  expected: string,
+  act: string,
+): Promise<void> {
+  if (values.yes === true) return;
+  if ((await ctx.prompt(question)).trim() !== expected)
+    throw new Stop(`no ${act}: the answer was not the user id`);
+}
+
 /** One call of a route of the user tools. */
 export interface ToolCall {
   path: string;
@@ -168,6 +220,8 @@ export interface ToolCall {
   invalid?: string;
   /** The user id of a command that acts on one user. A 404 then has two causes. */
   userId?: string;
+  /** The 429 text of a route with a limit beside the limit per IP. */
+  limits?: string;
 }
 
 /**
@@ -217,7 +271,8 @@ export function operatorUser(v: unknown): OperatorUserJson | null {
   const ban = u.ban as Record<string, unknown> | null | undefined;
   if (
     !isString(u.id) ||
-    !isString(u.email) ||
+    // A user may have no address (plan 12i Task 1): a phone or an anonymous sign-in.
+    !isNullableString(u.email) ||
     typeof u.emailVerified !== "boolean" ||
     !isNullableString(u.name) ||
     !isString(u.createdAt) ||
@@ -491,7 +546,7 @@ export function userRow(u: OperatorUserJson): string[] {
   const ban = u.ban === null ? "-" : (u.ban.until ?? "no-end");
   return [
     u.id,
-    u.email,
+    u.email ?? "-",
     u.emailVerified ? "yes" : "no",
     ban,
     u.platformOperator ? "yes" : "no",

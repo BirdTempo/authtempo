@@ -1,5 +1,5 @@
 import { createAuth, type MailMessage, type StorageAdapter } from "@authtempo/core";
-import { SoftAuthenticator } from "@authtempo/core/testing";
+import { createRecordingSms, SoftAuthenticator } from "@authtempo/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
@@ -189,6 +189,12 @@ describe("account races on Postgres (plan 12a)", () => {
       ]);
       // The delete holds the user row as the change does: the later one waits, then reads the row again.
       expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      // Ruling 1 of plan 12f2 (B1, Q4): a session past the page of the delete ends at the sweep.
+      // The meter of the delete also counts the statements of the parallel confirm on this
+      // adapter, so in some rounds the page ends no session. The door refuses that session
+      // at once, before the sweep (ruling 3 of plan 12f2): the user row is gone.
+      expect(await w.auth.api.getSession(me.token)).toBeNull();
+      await w.auth.api.sweepExpired();
       const left = await db.sql`SELECT id FROM ta_user WHERE id = ${me.user.id}`;
       expect(left).toHaveLength(0);
       for (const table of ["ta_identity", "ta_session", "ta_member"]) {
@@ -202,6 +208,26 @@ describe("account races on Postgres (plan 12a)", () => {
       expect(deletedNotice.map((m) => m.to)).toEqual([moved.ok ? target : email]);
       if (!moved.ok) expect(["invalid_token", "token_expired"]).toContain(moved.code);
     }
+  }, 60_000);
+});
+
+describe("the own sessions of an account delete on Postgres (plan 12f2, the move onto main)", () => {
+  it("ends every own session in the act: the page keeps to the call budget only on D1", async () => {
+    const w = world();
+    const me = await w.signIn("pages@example.com");
+    for (let i = 0; i < 39; i++) await w.signIn("pages@example.com");
+    const own = await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`;
+    expect(own).toHaveLength(40);
+    w.ended.length = 0;
+    const done = await w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    // Each session ended in the act, with its hook, and no pending-end row waits for the sweep.
+    expect(await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`).toHaveLength(0);
+    expect(
+      await db.sql`SELECT id FROM ta_verification WHERE purpose = 'session-end' AND identifier = ${me.user.id}`,
+    ).toHaveLength(0);
+    expect(w.ended.map((e) => e.split(":")[0]).sort()).toEqual(own.map((r) => r.id).sort());
+    expect(new Set(w.ended.map((e) => e.split(":")[1]))).toEqual(new Set(["account_deleted"]));
   }, 60_000);
 });
 
@@ -2031,5 +2057,368 @@ describe("the social fill beside a profile update on Postgres (plan 12a fix wave
       expect(updated.ok, `delay ${delay}`).toBe(true);
       expect(await w.row(me.user.id), `delay ${delay}`).toEqual(UPDATE);
     }
+  }, 60_000);
+});
+
+describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
+  const APP = { kind: "app", name: "support-tool" } as const;
+  const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
+
+  /**
+   * The world of plan 12a with organizations and the operator user tools. The
+   * app acts. `beforeDelete` runs in the transaction of the account delete,
+   * after its read of the member rows and before its member delete.
+   */
+  function operatorWorld(beforeDelete?: () => Promise<void>) {
+    const sent: MailMessage[] = [];
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+      operator: { users: true },
+      ...(beforeDelete ? { hooks: { user: { beforeDelete } } } : {}),
+    });
+    const tokenOf = (m: MailMessage | undefined) => {
+      const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
+      if (!token) throw new Error("no link");
+      return decodeURIComponent(token);
+    };
+    async function signIn(email: string) {
+      await auth.api.requestMagicLink({ email, ip: null });
+      const r = await auth.api.verifyMagicLink({
+        token: tokenOf([...sent].reverse().find((x) => x.to === email)),
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the link answered a challenge");
+      const s = await auth.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return { ...s, token: r.value.token };
+    }
+    return { auth, sent, tokenOf, signIn };
+  }
+
+  /** The rows that name the user in the tables of the race. */
+  async function rowsOf(userId: string): Promise<number> {
+    let n = (await db.sql`SELECT id FROM ta_user WHERE id = ${userId}`).length;
+    for (const table of ["ta_identity", "ta_session", "ta_member"])
+      n += (await db.sql`SELECT id FROM ${db.sql(table)} WHERE user_id = ${userId}`).length;
+    return n;
+  }
+
+  it("an operator delete beside a change of address: the delete wins, no deadlock, and no row of the user stays", async () => {
+    const w = operatorWorld();
+    for (let round = 0; round < 8; round++) {
+      const email = `op-del-${round}@example.com`;
+      const target = `op-moved-${round}@example.com`;
+      const me = await w.signIn(email);
+      expect((await w.auth.api.user.changeEmail({ session: me, newEmail: target })).ok).toBe(true);
+      const token = w.tokenOf([...w.sent].reverse().find((m) => m.to === target));
+      const before = w.sent.length;
+      const [deleted, moved] = await Promise.all([
+        w.auth.api.operator.users.delete({ actor: APP, userId: me.user.id, ...REASON }),
+        w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null }),
+      ]);
+      // The delete holds the user row as the change does: the later one waits, then reads the row again.
+      expect(deleted).toMatchObject({ ok: true });
+      // A session past the page of the delete ends at the sweep (ruling 1 of plan 12f2, B1).
+      // The door refuses it at once, before the sweep: the user row is gone.
+      expect(await w.auth.api.getSession(me.token)).toBeNull();
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(me.user.id)).toBe(0);
+      const notice = w.sent
+        .slice(before)
+        .filter((m) => m.text.startsWith("Your account was deleted."));
+      // The move committed first: the delete read the moved row, and its notice goes to the new address.
+      expect(notice.map((m) => m.to)).toEqual([moved.ok ? target : email]);
+      if (!moved.ok) expect(["invalid_token", "token_expired"]).toContain(moved.code);
+    }
+  }, 60_000);
+
+  it("an operator delete beside a removal of the user from a shared organization, a delay sweep: no deadlock, and the organization keeps its owner", async () => {
+    const w = operatorWorld();
+    const ada = await w.signIn("ada@example.com");
+    // The removal reads before its transaction, so the delete starts 0 to 11 ms
+    // after it. The two transactions then overlap in some rounds.
+    for (let round = 0; round < 12; round++) {
+      const pat = await w.signIn(`pat-${round}@example.com`);
+      const made = await w.auth.api.createOrganization({
+        user: ada.user,
+        slug: `acme-${round}`,
+        name: "Acme",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const organizationId = made.value.organization.id;
+      const added = await w.auth.api.addMember({
+        user: ada.user,
+        organizationId,
+        userId: pat.user.id,
+        role: "member",
+      });
+      if (!added.ok) throw new Error(added.code);
+      const [removed, deleted] = await Promise.all([
+        w.auth.api.removeMember({ user: ada.user, organizationId, userId: pat.user.id }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, round));
+          return w.auth.api.operator.users.delete({ actor: APP, userId: pat.user.id, ...REASON });
+        })(),
+      ]);
+      // Both hold the user row first: the later one waits, then reads the rows again.
+      expect(deleted).toMatchObject({ ok: true, value: { organizations: [] } });
+      if (!removed.ok) expect(["not_found", "conflict"]).toContain(removed.code);
+      // A session past the page of the delete ends at the sweep (ruling 1 of plan 12f2, B1).
+      // The door refuses it at once, before the sweep: the user row is gone.
+      expect(await w.auth.api.getSession(pat.token)).toBeNull();
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(pat.user.id)).toBe(0);
+      const members = await db.sql<{ user_id: string }[]>`
+        SELECT user_id FROM ta_member WHERE organization_id = ${organizationId}`;
+      expect(members.map((m) => m.user_id)).toEqual([ada.user.id]);
+    }
+  }, 60_000);
+
+  /** A platform operator through `createAdmin` and a sign-in, as the actor of an act. */
+  async function platformOperator(w: ReturnType<typeof operatorWorld>, email: string) {
+    const made = await w.auth.api.operator.createAdmin({
+      actor: APP,
+      email,
+      reason: "First operator",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const s = await w.signIn(email);
+    return { kind: "user", user: s.user, session: s.session } as const;
+  }
+
+  it("a platform operator deletes a user with 1 solo organization and 3 that the user owns with another owner: Postgres has no per-invocation query limit, so no size check (ruling 5 of plan 12f2)", async () => {
+    const w = operatorWorld();
+    const actor = await platformOperator(w, "op@example.com");
+    const ada = await w.signIn("ada@example.com");
+    const solo = await w.auth.api.createOrganization({
+      user: ada.user,
+      slug: "solo-0",
+      name: "Solo",
+    });
+    if (!solo.ok) throw new Error(solo.code);
+    const ids = [solo.value.organization.id];
+    // On D1 a user actor fits 1 solo organization and no organization that the user owns
+    // with another owner (the move of 12f2 onto main, 2026-10-25). Here 3 pass.
+    const bob = await w.signIn("bob@example.com");
+    for (let i = 0; i < 3; i++) {
+      const made = await w.auth.api.createOrganization({
+        user: bob.user,
+        slug: `shared-${i}`,
+        name: "Shared",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const joined = await w.auth.api.addMember({
+        user: bob.user,
+        organizationId: made.value.organization.id,
+        userId: ada.user.id,
+        role: "owner",
+      });
+      if (!joined.ok) throw new Error(joined.code);
+    }
+    const deleted = await w.auth.api.operator.users.delete({
+      actor,
+      userId: ada.user.id,
+      ...REASON,
+    });
+    expect(deleted).toEqual({
+      ok: true,
+      value: { organizations: ids, auditId: expect.any(String) },
+    });
+    await w.auth.api.sweepExpired();
+    expect(await rowsOf(ada.user.id)).toBe(0);
+  }, 60_000);
+
+  it("a platform operator deletes a user beside a grant of the platform role, a delay sweep: never both, and no platform operator goes (ruling 5 of plan 12f2, L1)", async () => {
+    const w = operatorWorld();
+    const actor = await platformOperator(w, "op@example.com");
+    // The grant reads its target before its transaction, so the delete starts
+    // 0 to 11 ms after it. The two transactions then overlap in some rounds.
+    for (let round = 0; round < 12; round++) {
+      const target = await w.signIn(`target-${round}@example.com`);
+      const [granted, deleted] = await Promise.all([
+        w.auth.api.operator.platformRole.grant({ actor: APP, userId: target.user.id, ...REASON }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, round));
+          return w.auth.api.operator.users.delete({ actor, userId: target.user.id, ...REASON });
+        })(),
+      ]);
+      // Both hold the user row: the later one waits, then reads the rows again.
+      expect([granted.ok, deleted.ok]).not.toEqual([true, true]);
+      if (deleted.ok) {
+        if (!granted.ok) expect(["not_found", "conflict"]).toContain(granted.code);
+        await w.auth.api.sweepExpired();
+        expect(await rowsOf(target.user.id)).toBe(0);
+      } else {
+        expect(deleted).toEqual({ ok: false, code: "operator_required", status: 403 });
+        expect(granted.ok).toBe(true);
+        expect(await w.auth.api.getSession(target.token)).not.toBeNull();
+      }
+    }
+  }, 60_000);
+
+  for (const write of ["a grant of the platform role", "a role change"] as const)
+    it(`a platform operator deletes a member of the platform organization while ${write} adds the role part to its row: the write waits on the user row, so no platform operator goes (ruling 6 of plan 12f2)`, async () => {
+      let during: (() => Promise<void>) | null = null;
+      const w = operatorWorld(async () => {
+        await during?.();
+      });
+      const actor = await platformOperator(w, "op@example.com");
+      const rows = await db.sql<
+        { id: string }[]
+      >`SELECT id FROM ta_organization WHERE slug = 'platform-co'`;
+      const organizationId = rows[0]?.id ?? "";
+      const target = await w.signIn("member@example.com");
+      const added = await w.auth.api.addMember({
+        user: actor.user,
+        organizationId,
+        userId: target.user.id,
+        role: "member",
+      });
+      expect(added.ok).toBe(true);
+      let racer: Promise<{ ok: boolean }> | null = null;
+      // The delete read the member row with no role part. The write starts
+      // now. With no hold of the user row it commits in the pause, and then
+      // the delete removes a platform operator.
+      during = async () => {
+        during = null;
+        racer =
+          write === "a role change"
+            ? w.auth.api.updateMemberRole({
+                user: actor.user,
+                organizationId,
+                userId: target.user.id,
+                role: "member,operator",
+              })
+            : w.auth.api.operator.platformRole.grant({
+                actor: APP,
+                userId: target.user.id,
+                ...REASON,
+              });
+        await Promise.race([racer, new Promise((r) => setTimeout(r, HOLD_MS))]);
+      };
+      const deleted = await w.auth.api.operator.users.delete({
+        actor,
+        userId: target.user.id,
+        ...REASON,
+      });
+      expect(deleted).toMatchObject({ ok: true });
+      expect(racer).not.toBeNull();
+      // The write waited for the commit of the delete, then matched no row.
+      expect(await racer).toMatchObject({ ok: false, code: "conflict" });
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(target.user.id)).toBe(0);
+    }, 60_000);
+});
+
+describe("two operator creates at once on Postgres (plan 12f2 Task 2)", () => {
+  const APP = { kind: "app", name: "support-tool" } as const;
+  const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
+  const PHONE = "+15555550100";
+
+  /**
+   * The user tools and the phone of plan 12i. `user.beforeCreate` runs
+   * after the address and phone reads of `createUserIn` and before its
+   * first write. It holds each create there until both have read, so both
+   * find no user, and each round meets the unique-key race.
+   */
+  function createWorld() {
+    const sent: MailMessage[] = [];
+    let waiting: (() => void)[] = [];
+    const storage = createPostgresAdapter(db.sql);
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage,
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      password: {},
+      phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+      operator: {
+        users: true,
+        secrets: [{ name: "support", secretHash: "0".repeat(64), scopes: ["users"] }],
+      },
+      hooks: {
+        user: {
+          beforeCreate: () =>
+            new Promise<void>((resolve) => {
+              waiting.push(resolve);
+              if (waiting.length < 2) return;
+              for (const go of waiting) go();
+              waiting = [];
+            }),
+        },
+      },
+    });
+    return { auth, sent, storage };
+  }
+
+  it("answers one user and one email_taken or phone_taken, with one audit row and one mail", async () => {
+    const w = createWorld();
+    for (let round = 0; round < 3; round++) {
+      const email = `twice-${round}@example.com`;
+      const before = w.sent.length;
+      const answers = await Promise.all(
+        [0, 1].map(() =>
+          w.auth.api.operator.users.create({
+            actor: APP,
+            email,
+            firstSignIn: "reset",
+            ...REASON,
+          }),
+        ),
+      );
+      // The loser threw unique_violation in its insert, and the create mapped it after the transaction.
+      expect(answers.map((a) => (a.ok ? "ok" : a.code)).sort()).toEqual(["email_taken", "ok"]);
+      const winner = answers.find((a) => a.ok);
+      if (!winner?.ok) throw new Error("no winner");
+      expect(
+        (await w.storage.findMany("user", [{ field: "email", op: "eq", value: email }])).map(
+          (u) => u.id,
+        ),
+      ).toEqual([winner.value.userId]);
+      expect(
+        await w.storage.findMany("operatorAudit", [
+          { field: "targetUserId", op: "eq", value: winner.value.userId },
+        ]),
+      ).toHaveLength(1);
+      expect(w.sent.slice(before).map((m) => m.to)).toEqual([email]);
+    }
+    const phoned = await Promise.all(
+      [0, 1].map(() =>
+        w.auth.api.operator.users.create({ actor: APP, email: null, phone: PHONE, ...REASON }),
+      ),
+    );
+    expect(phoned.map((a) => (a.ok ? "ok" : a.code)).sort()).toEqual(["ok", "phone_taken"]);
+    expect(
+      await w.storage.findMany("user", [{ field: "phone", op: "eq", value: PHONE }]),
+    ).toHaveLength(1);
+    expect(
+      await w.storage.findMany("operatorAudit", [
+        { field: "action", op: "eq", value: "user_create" },
+      ]),
+    ).toHaveLength(4);
   }, 60_000);
 });

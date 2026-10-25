@@ -6,6 +6,8 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - packages/observe/README.md "What a sink never gets"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
 ---
 
 **For:** an operator who reads the events of authtempo in a sink, or a developer who writes a sink.
@@ -156,6 +158,8 @@ Each event has these fields too:
 | `operator.step_failed` | error | `rowId: id`, `errorName: errorName` | `authtempo: operator step failed` |
 | `operator.family_end_failed` | error | `rowId: id`, `errorName: errorName` | `authtempo: operator family end failed` |
 | `operator.ban_write_gave_up` | error | `userId: id` | `authtempo: operator ban write gave up` |
+| `operator.update_gave_up` | error | `userId: id` | `authtempo: operator update gave up` |
+| `operator.create_mail_failed` | error | `userId: id`, `errorName: errorName` | `authtempo: operator create mail failed` |
 | `operator.guard_refused` | error | `route: enum` | `authtempo: operator guard refused` |
 | `operator.read` | error | `actor: enum`, `actorId: id`, `fn: identifier` | `authtempo: operator read` |
 | `operator.route_unauthorized` | error | `route: route`, `reason: enum` | `authtempo: operator route unauthorized` |
@@ -183,7 +187,7 @@ An enum field takes only the values of its list. A long list names its count and
 | Field | Values |
 | --- | --- |
 | `request.outcome` | `ok`, `redirect`, `client_error`, `denied`, `limited`, `server_error` |
-| `sign_in.method` | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso`, `phone`, `anonymous` |
+| `sign_in.method` | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso`, `phone`, `anonymous`, `invite` |
 | `sign_in.outcome` | `success`, `failure`, `second_factor_required` |
 | `sign_up.method` | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `sso`, `phone`, `anonymous`, `password_reset`, `operator`, `scim` |
 | `sign_up.outcome` | `success`, `failure` |
@@ -201,7 +205,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `password.reset_request.outcome` | `success`, `failure` |
 | `password.reset.outcome` | `success`, `failure` |
 | `password.change.outcome` | `success`, `failure` |
-| `email.verify.method` | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim` |
+| `email.verify.method` | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim`, `invite` |
 | `email.verify.outcome` | `success`, `failure` |
 | `reauth.method` | `password`, `email_otp`, `passkey` |
 | `reauth.outcome` | `success`, `failure` |
@@ -215,7 +219,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `session.patch_refused.what` | `a value that is not an object`, `a value that cannot be read`, `a value that is not a plain object`, `an ip that is not a string or null`, `a userAgent that is not a string or null`, `an activeOrganizationId that is not a string or null`, `field` |
 | `oauth.client_metadata_refused.why` | 28 values: the fetch guards, `status`, the type and size rules, and each rule of a member. |
 | `oauth.client_key_set_refused.why` | `no fetch`, `the fetch failed or timed out`, `not JSON`, `not a JSON object`, `status`, `not application/json or application/jwk-set+json`, `larger than 65536 bytes, not UTF-8, or not in time`, `no keys array`, `no public signing key` |
-| `operator.guard_refused.route` | 205 values: each route key of [Routes](/docs/reference/routes/), and `api` for a call of `auth.api`. |
+| `operator.guard_refused.route` | 210 values: each route key of [Routes](/docs/reference/routes/), and `api` for a call of `auth.api`. |
 | `operator.read.actor` | `secret`, `user`, `app` |
 | `operator.route_unauthorized.reason` | `secret_mismatch`, `secret_and_session`, `secret_not_accepted`, `no_session` |
 | `api_token.create.kind` | `tk`, `to` |
@@ -233,11 +237,11 @@ An enum field takes only the values of its list. A long list names its count and
 | `oauth.client_register.outcome` | `success`, `failure` |
 | `organization.change.action` | `create`, `update`, `delete`, `addMember`, `updateMemberRole`, `removeMember`, `invite`, `acceptInvitation`, `declineInvitation`, `revokeInvitation`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember` |
 | `organization.role_change.action` | `create`, `update`, `delete` |
-| `operator.action.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
+| `operator.action.action` | 31 values, the action of each audit row: `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete` |
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
-| `operator.refused.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
+| `operator.refused.action` | 31 values, the action of each audit row: `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete` |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 99 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 102 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

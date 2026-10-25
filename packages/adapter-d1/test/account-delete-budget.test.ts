@@ -115,7 +115,11 @@ describe("the account delete of solo organizations on D1 (rulings 29 and 30 of p
     // session (1), the outbox update goes (2), and the client link delete
     // goes (1). The solo organizations keep 6 calls of 15 in the act, and one
     // pending row leaves the rest to the sweep: 27, 35, 35, 35.
-    expect(runs.map((r) => r.queries)).toEqual([27, 35, 35, 35]);
+    // Plan 12f2 ends the own sessions in a page (ruling 1 of plan 12f2, B1). With no
+    // session.afterEnd hook the page sends 2 queries more than endSessions: its read, its
+    // link read, its delete, and the last delete. The run of 2026-10-25 at the move of 12f2
+    // onto main gives 29, 37, 37, 37.
+    expect(runs.map((r) => r.queries)).toEqual([29, 37, 37, 37]);
     for (const r of runs) expect([r.queries <= 50, r.left]).toEqual([true, 0]);
   }, 120_000);
 

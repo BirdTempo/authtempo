@@ -2,6 +2,14 @@ import type { ResolvedConfig } from "../../config.js";
 import type { Result } from "../../result.js";
 import type { OperatorAuditRow, SessionRow } from "../../schema.js";
 import { enforceOff, type SsoDomainSummary } from "../sso/domains.js";
+import {
+  createUser,
+  deleteUser,
+  type OperatorCreateUser,
+  type OperatorDeleteUser,
+  type OperatorUpdateUser,
+  updateUser,
+} from "./accounts.js";
 import { listAudit } from "./audit.js";
 import { type BanInput, banUser, type UnbanInput, unbanUser } from "./ban.js";
 import { checkActor, type OperatorActor } from "./guards.js";
@@ -71,6 +79,27 @@ export interface OperatorApi {
     ban(input: BanInput): Promise<Result<{ auditId: string; familyEndFailed?: true }>>;
     /** Lifts a ban. It restores no session. Needs the scope `users`. */
     unban(input: UnbanInput): Promise<Result<{ auditId: string }>>;
+    /**
+     * Creates a user with an address, or with a phone number and no
+     * address (plan 12f2 Task 2). It writes no credential, reads no
+     * `signUp` rule, and answers no token. Needs the scope `users`.
+     */
+    create(
+      input: OperatorCreateUser,
+    ): Promise<Result<{ userId: string; mailed: "invite" | "reset" | null; auditId: string }>>;
+    /**
+     * Corrects the name or the image of a user (plan 12f2 Task 4). No
+     * other field changes. Needs the scope `users`.
+     */
+    update(input: OperatorUpdateUser): Promise<Result<{ user: OperatorUser; auditId: string }>>;
+    /**
+     * Deletes an account and its solo organizations (plan 12f2 Task 4). The
+     * sessions past the call budget go at the next sweeps. Needs the scope
+     * `delete`.
+     */
+    delete(
+      input: OperatorDeleteUser,
+    ): Promise<Result<{ organizations: string[]; auditId: string }>>;
   };
   platformRole: {
     /** Grants the platform role to a verified user with no active ban (plan 12f Task 8). Needs the scope `users`. */
@@ -164,6 +193,9 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
       get: entry((i) => getUser(config, i)),
       ban: entry((i) => banUser(config, i)),
       unban: entry((i) => unbanUser(config, i)),
+      create: entry((i) => createUser(config, i)),
+      update: entry((i) => updateUser(config, i)),
+      delete: entry((i) => deleteUser(config, i)),
     },
     platformRole: {
       grant: entry((i) => grantPlatformRole(config, i)),

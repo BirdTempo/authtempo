@@ -5,6 +5,7 @@ import type { AuthConfig } from "../src/config.js";
 import { ANONYMOUS_REFUSED } from "../src/engine/anonymous.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
 import { SESSION_VIA, type SessionVia } from "../src/engine/hooks.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
@@ -374,7 +375,7 @@ const smsCode = (w: World) =>
 const mailCode = (w: World) =>
   recordCredential(/\b(\d{6})\b/.exec(w.mail.at(-1)?.text ?? "")?.[1] ?? "");
 /** The token of the last mailed link. */
-const mailToken = (w: World) => {
+const mailToken = (w: Pick<World, "mail">) => {
   const m = /token=([A-Za-z0-9_%-]+)/.exec(w.mail.at(-1)?.text ?? "");
   return recordCredential(decodeURIComponent(m?.[1] ?? ""));
 };
@@ -647,6 +648,43 @@ const ROWS: GateRow[] = [
       const b = browser(w.handle);
       expect((await b.post("/magic-link/request", { email: EMAIL })).status).toBe(200);
       return outcomeOf(w, await b.post("/magic-link/verify", { token: mailToken(w) }));
+    },
+  },
+  {
+    // Plan 12f2 Task 3: the operator creates Ada with an invitation. Ada
+    // sets a password by a reset link and turns every method on before she
+    // opens the old invitation.
+    pathway: "invitation link",
+    via: "invite",
+    gate: "totp.gate.invite",
+    expect: { kind: "challenge", methods: OTHER_METHODS },
+    off: { totp: { gate: { invite: false } } },
+    async run(extra) {
+      const w = bareWorld({
+        operator: {
+          users: true,
+          secrets: [{ name: "support", secretHash: "b".repeat(64), scopes: ["users"] }],
+        },
+        ...extra,
+      });
+      const made = await operatorApi(w.config).users.create({
+        actor: { kind: "app", name: "support-tool" },
+        email: EMAIL,
+        reason: "Ticket 1",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const invite = mailToken(w);
+      const b = browser(w.handle);
+      expect((await b.post("/password/reset/request", { email: EMAIL })).status).toBe(200);
+      const reset = await b.post("/password/reset", {
+        token: mailToken(w),
+        password: PASSWORD,
+      });
+      expect(reset.status).toBe(200);
+      await factorUser(w);
+      return outcomeOf(w, await browser(w.handle).post("/user/invite/confirm", { token: invite }));
     },
   },
   {

@@ -49,6 +49,16 @@ async function ready(options: { readBigInts: boolean; migrate?: "all" | "before-
 }
 
 describe("GET /ready on the compat SQLite storage (ruling 27 of the 12g lane)", () => {
+  it("claims no per-invocation query limit, so the operator delete never refuses on size (ruling 5 of plan 12f2)", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const compat = betterAuthSchemaStorage({ dialect: "sqlite", driver: nodeSqlite(db) });
+      expect(compat.storage.queryLimitPerInvocation).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("answers ready on a migrated store", async () => {
     expect(await ready({ readBigInts: false })).toEqual({
       status: 200,

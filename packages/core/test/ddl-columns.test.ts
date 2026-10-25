@@ -76,6 +76,8 @@ function longestPart(expr: string): string {
   if (expr === "CAP_SUBJECT") return "deployment";
   // The one subject of the daily cap of the passkey-first sign-up (ruling 38 M3).
   if (expr === "SIGN_UP_CAP_SUBJECT") return "deployment";
+  // The actor of an operator route: `secret:` and a name of 32, or `user:` and an id of 64.
+  if (expr === "actorSubject(actor)") return `user:${"i".repeat(64)}`;
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
 }
 
@@ -250,8 +252,13 @@ describe("the column map (plan 12g)", () => {
     // the per-IP and the per-address keys of the sign-up code. Ruling 39 adds
     // 1: the day cap of the sign-up code mails. Plan 12i Task 8 adds 2: the
     // per-IP keys of the passkey-first sign-up options and its verify.
-    // Ruling 38 adds 1: the daily cap of the passkey-first sign-up.
-    expect(sites.length).toBe(109);
+    // Ruling 38 adds 1: the daily cap of the passkey-first sign-up. Plan 12f2
+    // Task 5 adds 1: the per-actor count of the operator delete. Plan 12f2
+    // Task 3 adds 1: the per-IP count of the invitation confirm. Plan 12f2
+    // Task 5 adds 1: the per-actor count of the operator create.
+    expect(sites.length).toBe(112);
+    expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
+    expect(sites).toContain('http/routes/operator.ts "operator-create:actor" actorSubject(actor)');
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
     expect(sites).toContain('engine/passkeys.ts "passkey-sign-up:all-day" SIGN_UP_CAP_SUBJECT');

@@ -12,6 +12,8 @@ sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md
   - packages/core/src/http/health.ts
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -193,7 +195,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted. More than 50 solo organizations answer `delete_too_large`. On D1, a delete that cannot fit 50 queries answers it too. With 1 to 50 solo organizations, the user can own at most 2 organizations with another owner, and with none at most 4. A refusal changes nothing |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
@@ -211,7 +213,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is of the user who asked for the link. It need not be fresh |
 | Input | JSON or form `{ token }` |
-| Answer | A form: 302 to the app, or to `?auth_error=<code>` on a failure. JSON: `{ ok: true }`. Both clear the session cookie. The delete of `POST /user/delete` runs |
+| Answer | A form: 302 to the app, or to `?auth_error=<code>` on a failure. JSON: `{ ok: true }`. Both clear the session cookie. The delete of `POST /user/delete` runs. On D1 the spend of the link costs 1 more query, and the confirm still fits the edge of `POST /user/delete`. With 1 to 50 solo organizations, the user can own at most 2 organizations with another owner, and with none at most 4 |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 ## Magic link
@@ -1357,6 +1359,33 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Answer | `{ userId, created, auditId }`. It creates the platform organization when absent, the user when no user holds the address (not verified, no password), and the member row. The new operator has no power before a proof of the mailbox and a second factor |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
+<h3 id="post-operator-users-create"><code>POST /operator/users/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session. Each call of an actor counts on `operator-create:actor:<kind>:<id>`, 200 per hour, before the body and the scope check |
+| Input | JSON { email, phone?, emailVerified?, name?, image?, firstSignIn?, reason }. `email` is required and may be null; a null address needs `phone` in E.164 form under the `phone` config. `firstSignIn` is `invite` (the default with an address), `reset` (needs the `password` config), or `none` (the only value with no address). `emailVerified: true` needs an address. A `phone` with a non-null `email` answers `invalid_body` (ruling 12 of plan 12f2). An operator who chose the number could sign in by a phone code. A name and an image follow the rules of [`POST /user/update`](#post-user-update). `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. Any other key, such as `password` or `role`, answers `invalid_body` |
+| Answer | `{ userId, mailed, auditId }`. `mailed` is `invite`, `reset`, or null: what went to the person. Null also comes when the mail fails. An address of a domain that enforces SSO gets null too, with no invitation row and no mail. The answer holds no token and no link. The create writes no credential, reads no `signUp` rule, and sends no SMS. The audit row holds flags only, never the address, the phone, or the name. A refusal writes nothing and mails no one |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`phone_invalid`](/docs/reference/errors/#phone_invalid), [`phone_region`](/docs/reference/errors/#phone_region), [`email_taken`](/docs/reference/errors/#email_taken), [`phone_taken`](/docs/reference/errors/#phone_taken), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-operator-users-update"><code>POST /operator/users/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
+| Input | JSON { userId, name?, image?, reason }. At least one of `name` and `image`. Null clears a field. A name and an image follow the rules of [`POST /user/update`](#post-user-update). `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. Any other key, such as `password`, `email`, or `emailVerified`, answers `invalid_body` |
+| Answer | `{ user, auditId }`: the user as `GET /operator/users` gives it. The audit row names the changed fields, never a value. The act sends no mail. A user id that names no user answers 404 `not_found` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-operator-users-delete"><code>POST /operator/users/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `delete`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session. Each call of an actor counts on `operator-delete:actor:<kind>:<id>`, 100 per hour, before the body and the scope check |
+| Input | JSON { userId, reason }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
+| Answer | `{ organizations, auditId }`: the ids of the solo organizations that went with the account. The delete ends every session, and mails the notice `account_deleted` with no IP. The last owner of an organization with other members answers `sole_owner`. On D1, a delete that cannot fit 50 queries answers `delete_too_large`. A refusal changes nothing. A user id that names no user answers 404 `not_found` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`sole_owner`](/docs/reference/errors/#sole_owner), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
 <h3 id="post-operator-sessions-end-user"><code>POST /operator/sessions/end-user</code></h3>
 
 | Field | Value |
@@ -1392,6 +1421,24 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Input | Query { targetUserId?, after?, limit? }. `targetUserId` reads one user's rows. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
 | Answer | `{ rows, next }`: the audit rows by `id` ascending, oldest first. A row has `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`. `actorId` names a secret by its name, never by the secret. `next` is the last id of a full page, else null |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-user-invite-confirm"><code>GET /user/invite/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists with `operator.users` |
+| Input | Query `{ token }` |
+| Answer | 200, the confirm page with a form that posts the token; no storage read, no limiter call, no side effect. The `ui_` token comes in the invitation mail of a user created with `firstSignIn: "invite"`. A malformed token redirects to `/?auth_error=invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token) |
+
+<h3 id="post-user-invite-confirm"><code>POST /user/invite/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists with `operator.users`. Each POST counts on `user-invite-confirm:ip:<ip>`, 20 per 15 minutes, before the token check |
+| Input | JSON or form `{ token, trustDevice? }`. `trustDevice` is JSON only: the `td_` token of a trusted device. A browser sends the trust cookie |
+| Answer | The link is spent once, lives `operator.invite.ttlHours`, and holds the address of the create. It proves the address and opens a session with the via `invite`. A form: 302 to `appURL` with the cookie. JSON: `{ user, session }` with the cookie. For a user with the second factor on, no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` (`totp.gate.invite`). A wrong, spent, or expired link, and a link of a user whose address changed, answer `invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## OAuth provider
 

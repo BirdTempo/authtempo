@@ -5,7 +5,7 @@ import { admin, organization, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { COOKIE_NAME } from "../src/server/shapes.js";
 import { issuerFor } from "../src/storage/mapping.js";
-import type { CompatDatabase } from "../src/types.js";
+import type { BetterAuthPlugin, CompatDatabase } from "../src/types.js";
 
 // The app of the admin plugin tests of plan 12f Task 13, on any compat
 // database: the memory adapter, Postgres, and D1.
@@ -26,9 +26,14 @@ export const cookieOf = (res: Response) =>
  * makes the first operator in process (createAdmin, spec 26 item 11). The
  * operator then signs in, after the grant (ruling 50), and turns TOTP on
  * through Better Auth's two paths unless `factor` is false. `slug` is
- * the platform organization as the app writes it.
+ * the platform organization as the app writes it. `extra` adds plugins.
  */
-export function adminShim(database: CompatDatabase, links: string[] = [], slug = "platform-co") {
+export function adminShim(
+  database: CompatDatabase,
+  links: string[] = [],
+  slug = "platform-co",
+  extra: readonly BetterAuthPlugin[] = [],
+) {
   return betterAuth({
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
@@ -44,6 +49,7 @@ export function adminShim(database: CompatDatabase, links: string[] = [], slug =
       organization({ sendInvitationEmail: async () => {} }),
       twoFactor({ accountLockout: { enabled: false } }),
       admin({}),
+      ...extra,
     ],
   });
 }
@@ -62,10 +68,10 @@ export function plainShim(database: CompatDatabase) {
 
 export async function adminApp(
   database: CompatDatabase,
-  opts: { factor?: boolean; slug?: string } = {},
+  opts: { factor?: boolean; slug?: string; plugins?: readonly BetterAuthPlugin[] } = {},
 ) {
   const links: string[] = [];
-  const auth = adminShim(database, links, opts.slug);
+  const auth = adminShim(database, links, opts.slug, opts.plugins);
   const send = (method: string, path: string, body: unknown, cookie: string) =>
     auth.handler(
       new Request(`${BASE}/api/auth${path}`, {
@@ -129,7 +135,7 @@ export async function adminApp(
       reason: r.reason,
     }));
   };
-  return { auth, call, read, user, op, opId: opRow.id, audit };
+  return { auth, call, read, user, op, opId: opRow.id, audit, links };
 }
 
 // A Better Auth scrypt hash of PASSWORD (the vector of hash.test.ts).

@@ -26,6 +26,7 @@ import { createConnection } from "../src/engine/sso/connections.js";
 import { addDomain, verifyDomain } from "../src/engine/sso/domains.js";
 import { completeSsoOidc, startSso } from "../src/engine/sso/oidc.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
+import { confirmUserInvite } from "../src/engine/user-invite.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { Result } from "../src/result.js";
 import type { UserRow } from "../src/schema.js";
@@ -330,6 +331,24 @@ const DOORS: Door[] = [
       if (!set.ok) throw new Error(set.code);
       tokenOf(await phoneCode(w));
       return () => phoneCode(w);
+    },
+  },
+  {
+    via: "invite",
+    async setup(w) {
+      // The operator creates the user with an invitation (plan 12f2 Task 3).
+      // The link is spent once, so the setup opens no session: the ban
+      // refuses the first use, and the refusal leaves the link unspent.
+      const made = await operatorApi(w.auth.config).users.create({
+        actor: APP,
+        email: EMAIL,
+        reason: "Ticket 1",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+      return () => confirmUserInvite(w.auth.config, { token, ip: null, userAgent: null });
     },
   },
   {

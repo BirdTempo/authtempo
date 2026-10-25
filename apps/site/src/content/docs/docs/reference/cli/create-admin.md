@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/create-admin.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
-  order: 25
+  order: 28
 ---
 
 **For:** an operator who sets up the first platform operator of a new deployment.

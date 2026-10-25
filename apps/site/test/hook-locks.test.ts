@@ -192,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the eighteen flows", () => {
+  it("names the nineteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -210,6 +210,7 @@ describe("the table of locks over a before hook", () => {
       "Phone remove",
       "Account delete",
       "Anonymous delete",
+      "Platform role grant",
       "Platform role revoke",
       "Impersonation start",
     ]);
@@ -233,6 +234,14 @@ describe("the table of locks over a before hook", () => {
       [
         "Member add",
         "addMemberIn organization.beforeAddMember: holdUser, lockOrganization, joinWrite > scimCreateUser > holdUser, joinWrite > writeChange > holdUser, joinWrite > writeChange > lockOrganization",
+      ],
+      [
+        "Platform role grant",
+        "addRolePart organization.beforeAddMember: grantPlatformRole > holdUser",
+      ],
+      [
+        "Platform role grant",
+        "addRolePart organization.beforeUpdateMemberRole: grantPlatformRole > holdUser",
       ],
       // The team writes of ruling 25 N3 of plan 12d: the user-caller functions call the
       // tx-level forms after their checks, and take no lock before the call.
@@ -293,7 +302,7 @@ describe("the table of locks over a before hook", () => {
       ["Identity unlink", "unlinkIdentity identity.beforeUnlink: guardedRemove"],
       [
         "Member role change",
-        "updateMemberRole organization.beforeUpdateMemberRole: ownerWrite, withRoleLoss",
+        "updateMemberRole organization.beforeUpdateMemberRole: ownerWrite, withRoleLoss, holdUser",
       ],
     ];
     expect(lockScan()).toEqual(expected.map(([, line]) => line));

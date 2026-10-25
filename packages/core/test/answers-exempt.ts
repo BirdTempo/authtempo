@@ -98,10 +98,13 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /operator/sessions/end-all",
   "POST /operator/sessions/end-user",
   "POST /operator/users/ban",
+  "POST /operator/users/create",
   "POST /operator/users/create-admin",
+  "POST /operator/users/delete",
   "POST /operator/users/platform-role",
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/unban",
+  "POST /operator/users/update",
   "POST /organizations/create",
   "POST /organizations/delete",
   "POST /organizations/invitations/revoke",
@@ -186,10 +189,14 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /multi-session",
   "POST /multi-session/sign-out",
   "POST /multi-session/switch",
+  // Plan 12f2 Task 3: the invitation confirm with operator.users off.
+  "POST /user/invite/confirm",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
 const ORIGIN_ANSWERED: readonly RouteKey[] = [
+  // Plan 12f2 Task 3: the form post of the invitation page.
+  "POST /user/invite/confirm",
   "POST /handoff/continue",
   "POST /handoff/redeem",
   "POST /identities/unlink",
@@ -211,10 +218,13 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /operator/sessions/end-all",
   "POST /operator/sessions/end-user",
   "POST /operator/users/ban",
+  "POST /operator/users/create",
   "POST /operator/users/create-admin",
+  "POST /operator/users/delete",
   "POST /operator/users/platform-role",
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/unban",
+  "POST /operator/users/update",
   "POST /organizations/active",
   "POST /organizations/check-slug",
   "POST /organizations/create",
@@ -356,6 +366,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
       "POST /social/:provider/id-token",
       "POST /handoff/redeem",
       "POST /magic-link/verify",
+      // Plan 12f2 Task 3: the invitation confirm holds the user row and claims it, as the magic link.
+      "POST /user/invite/confirm",
       "POST /otp/reset",
       "POST /otp/verify",
       "POST /passkey/authenticate/verify",
@@ -462,6 +474,21 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "conflict",
     "an organization or a user that a parallel act writes between the read and the transaction; operator-create-admin.test.ts proves the engine path",
     ["POST /operator/users/create-admin"],
+  ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the compare-and-set of the user row; operator-update-delete.test.ts proves the engine path",
+    ["POST /operator/users/update"],
+  ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the user hold (lockUser); the operator delete races of account-races.test.ts of adapter-postgres and adapter-mysql let the loser answer it",
+    ["POST /operator/users/delete"],
+  ),
+  ...rows(
+    "delete_too_large",
+    "only a store with a per-invocation query limit (D1) refuses on size; operator-delete-budget.test.ts of adapter-d1 proves the edge, and operator-update-delete.test.ts the engine path",
+    ["POST /operator/users/delete"],
   ),
 
   // A code that only a race, or a state that no flow reaches, answers.
@@ -617,6 +644,13 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     }),
   ),
   {
+    key: "POST /operator/users/update",
+    field: "user.ban.reason",
+    form: "null",
+    reason:
+      "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
+  },
+  {
     key: "GET /operator/users/get",
     field: "user.ban.reason",
     form: "null",
@@ -680,6 +714,8 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       ["POST /password/verify/code", "user.email"],
       ["POST /user/change-email/confirm", "user.email"],
       ["POST /user/change-email/verify", "user.email"],
+      // Plan 12f2 Task 3: an invitation exists only for a user with an address.
+      ["POST /user/invite/confirm", "user.email"],
     ] as const
   ).map(
     ([key, field]): AnswerShapeExempt => ({

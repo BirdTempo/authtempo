@@ -11,7 +11,7 @@ sources:
   - packages/cli/src/generate/prisma.ts
   - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 7"
 sidebar:
-  order: 26
+  order: 29
 ---
 
 **For:** a developer whose app reads the authtempo tables through an ORM, or who reviews the tables before the first migration.

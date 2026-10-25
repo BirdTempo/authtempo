@@ -148,6 +148,13 @@ export type VerificationPurpose =
    */
   | "account-delete"
   /**
+   * The invitation link of a created user (plan 12f2 Task 3). identifier:
+   * the user id, so the account delete takes it; valueHash: the SHA-256 hex
+   * of the `ui_` token; data: { email }, the address at the create. The
+   * confirm refuses the row when the user's address is not that address.
+   */
+  | "user-invite"
+  /**
    * The sessions that an act left for the sweep (rulings 44 and 63 of plan
    * 12f). Four acts write it: a ban, a revoke of the platform role, an
    * account delete, and a role loss. A role loss is a removal, a leave, or a
@@ -587,6 +594,9 @@ export type OperatorAction =
   | "impersonation_start"
   | "impersonation_stop"
   | "create_admin"
+  | "user_create"
+  | "user_update"
+  | "user_delete"
   | (typeof SSO_AUDIT_ACTIONS)[number];
 
 /** The audit actions of plan 12d (spec 30 item 22). 12f's `OperatorAction` is their union with its own. */

@@ -11,6 +11,8 @@ sources:
   - examples/worker-d1/wrangler.jsonc
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
 sidebar:
   order: 6
 ---
@@ -204,6 +206,8 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: operator step failed` | `operator.step_failed` | Act. One step of an operator act failed. Read the audit row of the act. |
 | `authtempo: operator family end failed` | `operator.family_end_failed` | Act. An operator act could not end a token family. |
 | `authtempo: operator ban write gave up` | `operator.ban_write_gave_up` | Act. A ban write lost its race too often. Run the ban again. |
+| `authtempo: operator update gave up` | `operator.update_gave_up` | Act. An operator update of a name or an image lost its race too often. Run the update again. |
+| `authtempo: operator create mail failed` | `operator.create_mail_failed` | Act when it repeats. The mail port threw on the invitation link or the reset link of an operator create. The user stays, and the answer says `mailed: null`. Ask the person to request a reset link or a magic link. |
 | `authtempo: operator guard refused` | `operator.guard_refused` | Act when no operator acted. The operator guard refused a caller. |
 | `authtempo: operator read` | `operator.read` | Watch. An operator read user data. This line is the record of the read. |
 | `authtempo: operator route unauthorized` | `operator.route_unauthorized` | Act when no operator acted. An operator route refused a caller. |

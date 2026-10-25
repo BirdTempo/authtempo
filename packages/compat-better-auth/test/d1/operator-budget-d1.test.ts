@@ -58,6 +58,10 @@ async function sixtySessions(email: string): Promise<string> {
 }
 
 describe("the operator session calls on the compat D1 storage (ruling 37 of plan 12f)", () => {
+  it("claims the per-invocation query limit of D1, so the operator delete checks its size (ruling 5 of plan 12f2)", () => {
+    expect(engine(env.DB).storage.queryLimitPerInvocation).toBe(true);
+  });
+
   it("an endAll of the app with a hook on a new storage sends 50 queries or fewer, the ready check too", async () => {
     await sixtySessions("ada@example.com");
     const { db, count } = counting(env.DB);

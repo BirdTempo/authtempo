@@ -7,6 +7,7 @@ import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { SESSION_VIA, type SessionVia } from "../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
   deletePasskey,
   passkeyAuthenticationOptions,
@@ -34,6 +35,7 @@ import {
   regenerateBackupCodesWithCode,
   verifyTwoFactor,
 } from "../src/engine/totp.js";
+import { confirmUserInvite } from "../src/engine/user-invite.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { AuthEvent } from "../src/observe/port.js";
@@ -323,6 +325,32 @@ const SIGN_INS: Record<
     const w = world({}, { anonymous: { isolateLimiter: "allow" } });
     return {
       act: () => signInAnonymous(w.auth.config, { current: null, ip: null, userAgent: null }),
+      events: w.events,
+    };
+  },
+  // The invitation link of a user that the app created (plan 12f2 Task 3).
+  invite: async () => {
+    const w = world(
+      {},
+      {
+        operator: {
+          users: true,
+          secrets: [{ name: "support", secretHash: await sha256Hex("support"), scopes: ["users"] }],
+        },
+      },
+    );
+    must(
+      await operatorApi(w.auth.config).users.create({
+        actor: { kind: "app", name: "support-tool" },
+        email: EMAIL,
+        reason: "Ticket 1",
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+    return {
+      act: () => confirmUserInvite(w.auth.config, { token, ip: null, userAgent: null }),
       events: w.events,
     };
   },

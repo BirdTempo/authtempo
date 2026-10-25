@@ -3,6 +3,7 @@ import type { AuthConfig } from "../src/config.js";
 import { requestEmailOtp } from "../src/engine/email-otp.js";
 import { passwordMethod } from "../src/engine/last-method.js";
 import { requestMagicLink } from "../src/engine/magic-link.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
@@ -71,6 +72,11 @@ function world(extra: Partial<AuthConfig> = {}) {
     // The passkey-first sign-up of plan 12i Task 8 sets the value passkey too.
     passkey: { ...RP, signUp: { isolateLimiter: "allow" } },
     lastMethod: {},
+    // The user tools, for the invitation link of plan 12f2 Task 3.
+    operator: {
+      users: true,
+      secrets: [{ name: "support", secretHash: "d".repeat(64), scopes: ["users"] }],
+    },
     ...extra,
   });
   // The phone code goes out after the answer: `settled` waits for that work.
@@ -243,6 +249,47 @@ const MORE: [
   string,
   (w: World, headers?: Record<string, string>) => Promise<{ res: Response; json: boolean }>,
 ][] = [
+  [
+    // A mailed link that proves the mailbox: the sign-in page then offers the magic link.
+    "the invitation link of a created user (plan 12f2 Task 3)",
+    "magic_link",
+    async (w) => {
+      const made = await operatorApi(w.auth.config).users.create({
+        actor: { kind: "app", name: "support-tool" },
+        email: EMAIL,
+        reason: "Ticket 1",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+      return { res: await w.handle(post("/auth/user/invite/confirm", { token })), json: true };
+    },
+  ],
+  [
+    "the invitation link of a created user, form (plan 12f2 Task 3)",
+    "magic_link",
+    async (w) => {
+      const made = await operatorApi(w.auth.config).users.create({
+        actor: { kind: "app", name: "support-tool" },
+        email: EMAIL,
+        reason: "Ticket 1",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+      const res = await w.handle(
+        new Request(`${BASE_URL}/auth/user/invite/confirm`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE_URL },
+          body: new URLSearchParams({ token }).toString(),
+        }),
+      );
+      expect(res.status).toBe(302);
+      return { res, json: false };
+    },
+  ],
   [
     "the passkey-first sign-up (plan 12i Task 8)",
     "passkey",

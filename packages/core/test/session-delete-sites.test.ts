@@ -84,14 +84,6 @@ const SITES: Site[] = [
     kind: "sign-out",
     reason: "POST /sign-out, then deliverLogouts",
   },
-  {
-    file: "engine/account-delete.ts",
-    fn: "deleteAccountRows",
-    call: "endSessions",
-    count: 1,
-    kind: "endSessions",
-    reason: "the account delete; the outbox rows stay and are due now",
-  },
   // Plan 12i Task 6: the anonymous delete of the route, and the page of the sweep.
   {
     file: "engine/anonymous.ts",
@@ -205,6 +197,15 @@ const SITES: Site[] = [
     kind: "late",
     reason:
       "the ban and the revoke of the platform role, when no session stays for the sweep: a session that a sign-in wrote after the read; the sweep makes its links logouts",
+  },
+  {
+    file: "engine/operator/access-end.ts",
+    fn: "endOwnSessionsPage",
+    call: 'delete("session"',
+    count: 1,
+    kind: "late",
+    reason:
+      "the account delete (plan 12f2 ruling 1, B1), when no session stays for the sweep: a session that a sign-in wrote after the read; the client links stay, and the sweep makes them logouts",
   },
   {
     file: "engine/sweep.ts",

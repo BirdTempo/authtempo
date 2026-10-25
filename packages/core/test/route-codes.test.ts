@@ -10,6 +10,7 @@ import { hookRefusal } from "../src/engine/hooks.js";
 import { inviteMember } from "../src/engine/invitations.js";
 import { mintSessionJwt } from "../src/engine/jwt.js";
 import { requestMagicLink } from "../src/engine/magic-link.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
   createOrganizationToken,
   ORGANIZATION_TOKEN_CAP,
@@ -1200,6 +1201,10 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /operator/users/create-admin",
   "POST /operator/sessions/end-user",
   "POST /operator/sessions/end-all",
+  // The create, the update, and the delete of plan 12f2: operator-user-routes.test.ts arms it on each.
+  "POST /operator/users/create",
+  "POST /operator/users/update",
+  "POST /operator/users/delete",
   // The impersonation needs a platform operator and an impersonation session:
   // operator-impersonation.test.ts drives both hook codes of each route.
   "POST /operator/impersonate",
@@ -1344,7 +1349,19 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   );
   // Plan 12i Task 8: a passkey-first sign-up runs user.beforeCreate and the session hook.
   const signUp = await signUpCeremony(config);
+  // Plan 12f2 Task 3: the app creates Ivy with an invitation. The confirm runs user.beforeVerify.
+  must(
+    await operatorApi(config).users.create({
+      actor: { kind: "app", name: "route-codes" },
+      email: "ivy@example.com",
+      reason: "Ticket 1",
+      ip: null,
+      userAgent: null,
+    }),
+  );
+  const userInvite = w.lastToken();
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /user/invite/confirm": { token: userInvite },
     "POST /passkey/sign-up/verify": signUp,
     "POST /anonymous/sign-in": {},
     "POST /anonymous/delete": {},

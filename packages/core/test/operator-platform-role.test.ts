@@ -1,5 +1,5 @@
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
@@ -157,6 +157,60 @@ describe("the platform role (plan 12f Task 8)", () => {
       "beforeRole:-:member,operator>member:app",
       "afterRole:-:member,operator>member:app",
     ]);
+  });
+
+  it("holds the user row first when a demotion of an owner adds the role part (ruling 6)", async () => {
+    // The ranks put the operator role below the owner, so the change goes
+    // through the owner lock (ownerWrite). The hold of the member's user row
+    // comes before the organization lock, in the order of user-hold.ts
+    // (rereview-12f2-task4b I1).
+    const auth = await operatorAuth({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, operator: 3, admin: 4, owner: 5 },
+      },
+    });
+    const { root, platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    const added = await addMember(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: ada.user.id,
+      role: "owner",
+    });
+    if (!added.ok) throw new Error(added.code);
+    const writes: string[] = [];
+    const storage = auth.config.storage;
+    const real = storage.transaction.bind(storage);
+    vi.spyOn(storage, "transaction").mockImplementation(((
+      work: (tx: StorageAdapter) => Promise<unknown>,
+    ) =>
+      real((tx) =>
+        work(
+          new Proxy(tx, {
+            get(target, key) {
+              const value: unknown = Reflect.get(target, key);
+              if (typeof value !== "function") return value;
+              if (key !== "update") return value.bind(target);
+              return (model: string, ...rest: unknown[]) => {
+                writes.push(model);
+                return (value as (...a: unknown[]) => unknown).apply(target, [model, ...rest]);
+              };
+            },
+          }),
+        ),
+      )) as never);
+    const moved = await updateMemberRole(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: ada.user.id,
+      role: "operator",
+    });
+    vi.restoreAllMocks();
+    if (!moved.ok) throw new Error(moved.code);
+    expect(writes).toEqual(["user", "organization", "member"]);
+    expect(await isPlatformOperator(auth.config, ada.user.id)).toBe(true);
   });
 
   it("ends the sessions of a revoked operator at once", async () => {

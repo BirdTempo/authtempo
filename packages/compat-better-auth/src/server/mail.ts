@@ -73,6 +73,9 @@ export function compatAccountMail(input: AccountMailInput): MailMessage {
     case "reauth_code":
       // The handler answers 404 on /reauth/email (better-auth.ts): Better Auth has no such code.
       throw new Error("authtempo compat: the shim serves no re-authentication code");
+    case "user_invite":
+      // Better Auth mails nothing at create, so the shim's create-user sends firstSignIn none (plan 12f2 Task 7).
+      throw new Error("authtempo compat: the shim sends no invitation of a created user");
   }
 }
 

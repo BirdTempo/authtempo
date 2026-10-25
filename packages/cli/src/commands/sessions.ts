@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
-import { Stop, UsageError } from "../errors.js";
+import { Stop } from "../errors.js";
 import { SESSIONS_END_ALL_HELP, SESSIONS_END_HELP, SESSIONS_HELP } from "../help/sessions.js";
 import type { SessionsEndAllJson, SessionsEndJson } from "../json.js";
 import { readOperatorSecret } from "../operator-client.js";
@@ -10,6 +10,7 @@ import {
   countOf,
   END_ALL_MAX,
   needYes,
+  noExtra,
   reasonOf,
   type ToolCall,
   type ToolTarget,
@@ -152,7 +153,7 @@ async function runEndAll(argv: string[], ctx: Ctx): Promise<number> {
     Object.keys(END_ALL_OPTIONS),
   );
   const [target, ...extra] = positionals;
-  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  noExtra(extra, "the base URL");
   const t = toolTarget(target, values);
   const reason = reasonOf(values.reason);
   const limit = countOf("limit", values.limit, END_ALL_MAX);

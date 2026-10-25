@@ -18,6 +18,7 @@ export function createD1Adapter(db: D1Database): StorageAdapter {
     ready: schemaVersionCheckOn(db, sent),
     ping: schemaVersionPing(db, sent),
     sent,
+    queryLimitPerInvocation: true,
   });
 }
 

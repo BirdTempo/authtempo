@@ -85,6 +85,31 @@ describe("the log line of a 401 of an operator route (spec 9)", () => {
         "POST /operator/users/ban",
         "secret_mismatch",
       ],
+      // The update and the delete of plan 12f2 Task 5 get the line from the same helper.
+      [
+        write("/operator/users/update", operatorHeader(WRONG), {
+          userId,
+          name: "Ada",
+          reason: "Case 1",
+        }),
+        "POST /operator/users/update",
+        "secret_mismatch",
+      ],
+      [
+        write("/operator/users/delete", {}, { userId, reason: "Case 1" }),
+        "POST /operator/users/delete",
+        "no_session",
+      ],
+      // The create of the second wave: a secret beside a session, with an address in the body.
+      [
+        write(
+          "/operator/users/create",
+          { ...operatorHeader(OPERATOR_SECRETS.support), ...cookie(token) },
+          { email: "ada@example.com", reason: "Case 1" },
+        ),
+        "POST /operator/users/create",
+        "secret_and_session",
+      ],
       [get("/operator/audit", {}), "GET /operator/audit", "no_session"],
       [
         write("/operator/impersonate", {}, { userId, reason: "Case 1" }),

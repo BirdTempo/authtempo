@@ -13,6 +13,7 @@ sources:
   - packages/compat-better-auth/README.md "API keys"
   - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 7"
 ---
 
 **For:** a developer who moves an app of Better Auth 1.7 to authtempo and keeps the app's code.
@@ -185,19 +186,22 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 
 | Call | On authtempo |
 | --- | --- |
-| `/admin/set-user-password`, `/admin/remove-user` | `NOT_SUPPORTED` (501). An operator bans, and the person resets the password or deletes the account. |
-| `/admin/create-user`, `/admin/update-user`, `/admin/list-user-sessions`, `/admin/revoke-user-session`, `/admin/has-permission` | `NOT_SUPPORTED` (501). |
+| `/admin/set-user-password` | `NOT_SUPPORTED` (501) before any read. No operator sets a password; the person resets it through the reset link. |
+| `/admin/list-user-sessions`, `/admin/revoke-user-session`, `/admin/has-permission` | `NOT_SUPPORTED` (501). |
+| `/admin/create-user` | Core's `POST /operator/users/create` with `firstSignIn: "none"`, so no mail goes out. It takes `email`, `name`, `data.emailVerified`, and `data.image`, and answers `{ user }`. With `data.emailVerified: true`, core takes the address as proved: no later proof resets the account, so a wrong address gives the account to its owner. Each other key is refused before any read. A `role` that is not a string or a list of strings answers `VALIDATION_ERROR` (400), and a role value that is no string `INVALID_ROLE_TYPE` (400). `password` answers `YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD` (403). A role other than `user` answers `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE` (403). A ban key answers `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (403). Any other key of `data` answers `FIELD_NOT_ALLOWED` (400). A taken address answers `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` (400), and a malformed address `INVALID_EMAIL` (400). |
+| `/admin/update-user` | Core's `POST /operator/users/update`. It takes `data.name` and `data.image` only, and answers the user itself. No `data` answers `NO_DATA_TO_UPDATE`, and `password` answers `PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER`. Then, in Better Auth's order, `role` answers `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE` (403), a ban key `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (403), and `email` or `emailVerified` `YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL` (403). Each other key answers `FIELD_NOT_ALLOWED` (400). Each refusal comes before any read. |
+| `/admin/remove-user` | Core's `POST /operator/users/delete`. It answers `{ success: true }`. The caller's own id answers `YOU_CANNOT_REMOVE_YOURSELF` (400, as Better Auth), and the last owner of an organization with other members answers `SOLE_OWNER` (409). On the D1 storage a user who alone holds an organization answers `DELETE_TOO_LARGE` (409): delete the organization first. |
 | `/admin/list-users` | One search: `searchValue` with `searchOperator: "starts_with"` on the address, or `filterField` `email` or `id`. A search of the name, `contains`, `ends_with`, `sortBy`, and an `offset` other than 0 answer `NOT_SUPPORTED` (501). |
 | `/admin/set-role` | The platform role grants it, and `user` revokes it. Any other role answers `NOT_SUPPORTED` (501). |
 | `/admin/list-users`, `/admin/get-user` | Core's `GET /operator/users`, `/operator/users/search`, and `/operator/users/get`. The list answers `total` only on a first page that ends the list. A page that does not end the list answers `next`; pass `after` for the next page. |
 | `/admin/ban-user`, `/admin/unban-user`, `/admin/set-role` | Core's `POST /operator/users/ban`, `/operator/users/unban`, and `/operator/users/platform-role`. Each answers `{ user }` with `role`, `banned`, `banReason`, and `banExpires`. With `twoFactor()`, the user also has `twoFactorEnabled`. A ban and a `set-role` add `familyEndFailed: true` when the act ran but the end of the OAuth refresh families failed. Then call `/admin/revoke-user-sessions` for the user. |
 | `/admin/revoke-user-sessions` | Core's `POST /operator/sessions/end-user`. While sessions stay, it answers `{ success: false, more: true, ended }`: call again. |
 | `/admin/impersonate-user`, `/admin/stop-impersonating` | Core's `POST /operator/impersonate` and `/operator/impersonate/stop`. Each answers `{ session, user }`. The stop answers `{ session: null, user: null }` when no operator session comes back. |
-| `auth.api` admin calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, and `stopImpersonating` run the steps of their paths with the caller's `headers`. A refusal throws `APIError` with the code of the path. |
+| `auth.api` admin calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, `stopImpersonating`, `adminUpdateUser`, `removeUser`, and `createUser` run the steps of their paths with the caller's `headers`. A refusal throws `APIError` with the code of the path. A call with no headers has no session and answers 401: the shim makes no app actor. |
 | `/get-session` | With `admin`, the user also has `role`, `banned`, `banReason`, and `banExpires`, and the session has `impersonatedBy`. |
 | `adminClient()` | The client reads `/get-session`, so `getSession` and `useSession` give the same four fields. |
-| `authClient.admin` calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, and `stopImpersonating` send the mapped paths and answer `{ data, error }`. Dates are `Date` values. |
-| `authClient.admin` calls core does not serve | `createUser`, `updateUser`, `listUserSessions`, `revokeUserSession`, `removeUser`, `setUserPassword`, and `hasPermission` answer `NOT_SUPPORTED` with no request. `checkRolePermission` throws, because core has no permission statements. |
+| `authClient.admin` calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, `stopImpersonating`, `updateUser`, `removeUser`, and `createUser` send the mapped paths and answer `{ data, error }`. Dates are `Date` values. |
+| `authClient.admin` calls core does not serve | `listUserSessions`, `revokeUserSession`, `setUserPassword`, and `hasPermission` answer `NOT_SUPPORTED` with no request. `checkRolePermission` throws, because core has no permission statements. |
 
 Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. The deviations from Better Auth:
 
@@ -211,6 +215,7 @@ Core's guard decides each mapped call: the platform role, a verified address, a 
 - An impersonation session that starts another one answers 403 `FORBIDDEN`.
 - A stop by a session that impersonates nobody answers 400 with the message `You are not impersonating anyone`.
 - `/admin/stop-impersonating` answers `{ session: null, user: null }` when no operator session comes back. Better Auth answers 500 there.
+- `/admin/create-user` sets no password, no role but `user`, no ban, and no added field. Better Auth sets each one. A server call with no headers answers 401, where Better Auth creates the user.
 
 Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. Compat migration 0009 copies the bans of Better Auth into core's columns. [From Better Auth](/docs/migrate/better-auth/#cut-over) gives the step for the admins.
 

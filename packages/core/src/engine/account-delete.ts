@@ -17,7 +17,11 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
-import { endImpersonationsPage } from "./operator/access-end.js";
+import {
+  endImpersonationsPage,
+  endOwnSessionsPage,
+  SESSIONS_PAGE_LEAST,
+} from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET } from "./operator/sessions.js";
@@ -31,13 +35,7 @@ import {
 } from "./organizations.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
-import {
-  endedList,
-  endSessions,
-  type ResolvedSession,
-  sessionIsLive,
-  sessionsEnded,
-} from "./sessions.js";
+import { endedList, type ResolvedSession, sessionIsLive, sessionsEnded } from "./sessions.js";
 import { holdUser } from "./user-hold.js";
 
 // Per hour, per user (plan 12a). A delete succeeds once. 5 lets a person
@@ -51,8 +49,10 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
 /**
  * The calls of a delete invocation before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router (the session read), the route limiter, the rest of
- * `resolveSession` (4), and the limiter of the delete or of the confirm.
+ * the router (the session read), the rest of `resolveSession` (4), and the
+ * limiter of the delete or of the confirm. `POST /user/delete` and its
+ * confirm run no route limiter (verify-12f2-r10 Low A), so the list holds
+ * none since plan 12f2.
  * The handler's session read takes the row of the router (ruling 78 of
  * plan 12d), so the rest of the worst caller session is 4: the user, the
  * pending-end read of ruling 50 of plan 12d, the session-cap read of a due
@@ -66,9 +66,12 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  * confirm, with a `session.afterEnd` hook or without. Each count was the
  * same at 7 and at 8. So the value is the sum of the list above, not a
  * measured step: 8 until ruling 78 of plan 12d took the second session
- * read from the list.
+ * read from the list, and 7 until plan 12f2 took the route limiter out.
  */
-const DELETE_CALLS_BEFORE = 7;
+const DELETE_CALLS_BEFORE = 6;
+
+/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
+export const ORGANIZATION_RULE_READS = 3;
 
 /**
  * The read of the user's scimUser rows and the delete of their
@@ -117,26 +120,89 @@ const SCIM_GROUP_CALLS = 2;
  * deletes of `LAST_MODELS`. After the commit: the verification delete 1 and
  * the outbox read 1. The pins are in operator-loss-budget.test.ts of
  * adapter-d1.
+ *
+ * Plan 12f2 (ruling 1, B1) ends the own sessions in `endOwnSessionsPage`, not
+ * `endSessions`. With no hook the page sends 2 queries more than
+ * `endSessions`. Its calls are its read, its link read, its delete, and the
+ * last delete. The run of 2026-10-25 at the move of 12f2
+ * onto main: the scenes send 42, 44, 45, and 47, and the confirm of the
+ * operator scene 48, with no SCIM Group or with 3. In its list, the page of
+ * the own sessions takes the place of `endSessions` 4. Each organization
+ * that the user owns with another owner adds 3: the owner lock 2 and the
+ * recount 1. With no size check the self delete of a due refresh passed 50
+ * at 3 such organizations (51), so a size check refuses it (ruling 10 M1 of
+ * plan 12f2).
  */
 
 /**
  * The models that `deleteAccountRows` deletes by `userId` after the
- * sessions. The client links are not among them: `endSessions` makes each
- * link of the user's sessions an outbox row and deletes it, and the sweep
- * does the same for a link that a parallel flow writes later (ruling 78 of
- * plan 12d).
+ * sessions. The client links are not among them (ruling 78 of plan 12d,
+ * ruling 1 of plan 12f2 item B1). The page of the sessions makes an outbox
+ * row of each link that fits and deletes the link. The sweep
+ * (`sweepLinks`) does the same for the other links, for the links of the
+ * sessions that the page leaves once those sessions end, and for a link
+ * that a parallel flow writes later. So a kept link lives until its
+ * session ends and one round of `sweepLinks` over all links reaches it.
+ * The D1 test of the operator delete sweeps until no link, no session, and
+ * no outbox row of the user stays.
  */
 const LAST_MODELS = USER_CHILD_MODELS.filter(
   (m) => m !== "session" && m !== "member" && m !== "oauthLogout" && m !== "oauthSessionClient",
 );
 
 /**
- * The calls of a delete after the page of the impersonation sessions. In
+ * The calls of a delete after the pages of the sessions, at the worst. In
  * the transaction: the read and the delete of the scimGroupMember rows, and
- * one delete per model of `LAST_MODELS`. After the commit: the delete of
- * the verification rows, and the read of `deliverLogouts`.
+ * one delete per model of `LAST_MODELS`. After the commit, 2 more. The self
+ * delete makes the delete of the verification rows and the read of
+ * `deliverLogouts`. The operator delete makes the same delete and sends one
+ * notice mail, which counts as a subrequest on Workers Free (ruling 41 of
+ * plan 12f).
  */
-const DELETE_KEEP = SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
+export const DELETE_KEEP = SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
+
+/**
+ * The statements of the solo organizations in the act when one or more go,
+ * for any count (rulings 30 and 78 of plan 12d): the organization,
+ * connection, domain, and SCIM token deletes, the member delete with its
+ * count, and one pending row. The operator delete reads it to refuse a
+ * delete that cannot fit its budget.
+ */
+const SOLO_CALLS = 6;
+
+/**
+ * The part of `SOLO_CALLS` that `deleteOrganizationsHead` sends on D1: the
+ * organization, connection, domain, and SCIM token deletes.
+ */
+const SOLO_HEAD_CALLS = 4;
+
+/**
+ * The statements of one `lockInOrder` at the worst: 2 on MySQL (ruling 2 of
+ * plan 12g). The size check counts it only on a store that has the lock.
+ */
+const LOCK_CALLS = 2;
+
+/**
+ * A view of `tx` that counts its reads. Each `findOne` and `findMany` by
+ * one value is one statement on every adapter. The size check of a delete
+ * reads the count, because `statementsSent` also counts the statements of
+ * a parallel invocation on the same adapter (ruling 35 of plan 12f).
+ */
+function readCounted(tx: StorageAdapter): { storage: StorageAdapter; reads(): number } {
+  let reads = 0;
+  const storage = new Proxy(tx, {
+    get(target, key) {
+      const value: unknown = Reflect.get(target, key);
+      if (typeof value !== "function") return value;
+      if (key !== "findOne" && key !== "findMany") return value.bind(target);
+      return (...args: unknown[]) => {
+        reads++;
+        return value.apply(target, args);
+      };
+    },
+  });
+  return { storage, reads: () => reads };
+}
 
 export interface AccountDelete {
   session: ResolvedSession;
@@ -144,7 +210,8 @@ export interface AccountDelete {
   userAgent: string | null;
 }
 
-interface Deleted {
+/** The rows that a delete removed: the user row as the lock held it, and the organizations that went. */
+export interface DeletedAccount {
   user: UserRow;
   going: OrganizationRow[];
 }
@@ -295,12 +362,7 @@ type Spend = (tx: StorageAdapter, user: UserRow, now: Date) => Promise<void>;
  * then commits first or waits. A sign-in of a verified user holds the same
  * row (`prepareSession`). So its session commits before the delete reads
  * the sessions, or it sees the user gone. Then `spend`, then
- * `deleteAccountRows`.
- *
- * After the commit: the verification rows of the user id and the address.
- * A reset holds its link row before the user row, so a delete inside the
- * transaction could deadlock with it on Postgres. Invitations to the
- * address stay: they belong to the organizations.
+ * `deleteAccountRows`. After the commit come the steps of `accountDeleted`.
  */
 async function runDelete(
   config: ResolvedConfig,
@@ -321,15 +383,22 @@ async function runDelete(
   const memberships = await config.storage.findMany("member", [
     { field: "userId", op: "eq", value: userId },
   ]);
+  let checked = 1;
   if (memberships.length > IN_CHUNK) {
     const plan = await organizationsOfDelete(config, config.storage, userId);
     if (!plan.ok && plan.code === "delete_too_large") return plan;
+    checked += ORGANIZATION_RULE_READS;
   }
-  const before = DELETE_CALLS_BEFORE + 1 + ((await config.storage.readyStatements?.()) ?? 1);
+  const before = DELETE_CALLS_BEFORE + checked + ((await config.storage.readyStatements?.()) ?? 1);
+  // On a store with a per-invocation query limit (D1), a delete whose least
+  // work cannot fit the budget answers delete_too_large before any delete
+  // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
+  // user owns with another owner costs 3 calls, so the check counts them.
+  const sized = config.storage.queryLimitPerInvocation === true;
   // The count of the user's sessions that the delete ended (plan 12h Task 5).
   const counted = { sessions: 0 };
   const done = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<Deleted>> => {
+    config.storage.transaction(async (tx): Promise<Result<DeletedAccount>> => {
       const meter = meterOf(tx, before);
       if (ended) ended.length = 0;
       if (stops) stops.rows.length = 0;
@@ -339,39 +408,90 @@ async function runDelete(
       // reads it again.
       let seen: UserRow | null = input.session.user;
       let user: UserRow | null = null;
+      // The calls of the lock at the worst: an update in a transaction is 2
+      // statements on D1, the undo read and the update, and a lost round reads again.
+      let calls = 0;
       for (let round = 0; round < ROUNDS && !user; round++) {
         if (!seen) return fail("not_found");
         const updatedAt = later(now, seen.updatedAt);
+        calls += 2;
         if ((await tx.update("user", unchanged(seen), { updatedAt })) === 1)
           user = { ...seen, updatedAt };
         // A parallel write landed first. No write of this call has run.
-        else seen = await tx.findOne("user", byId);
+        else {
+          calls++;
+          seen = await tx.findOne("user", byId);
+        }
       }
       if (!user) {
         config.observe.emit({ name: "account.delete_gave_up", userId });
         return fail("conflict");
       }
-      if (spend) await spend(tx, user, now);
+      // The spend is one delete.
+      if (spend) {
+        await spend(tx, user, now);
+        calls++;
+      }
       const going = await deleteAccountRows(tx, config, user, now, {
         sessionId: input.session.session.id,
         ended: ended ?? null,
         stops,
         meter,
         counted,
+        budget: OPERATOR_CALL_BUDGET,
+        refuseAfter: sized ? before + calls : null,
+        refusePlatform: false,
       });
       return ok({ user, going });
     }),
   );
   if (!done.ok) return done;
-  const { user, going } = done.value;
-  // The pending-end row of the operator stays for the sweep (ruling 63 of plan 12f).
+  await accountDeleted(config, done.value, {
+    ended,
+    stops,
+    count: counted.sessions,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    logouts: true,
+  });
+  return ok({ ok: true });
+}
+
+/**
+ * The steps after the commit of an account delete (ruling 1 of plan 12f2,
+ * item B1). The self delete and the operator delete share them, so the
+ * steps of a delete have one list. First the delete of the verification
+ * rows of the user id and the address. A reset holds its link row before
+ * the user row, so a delete inside the transaction could deadlock with it
+ * on Postgres. Invitations to the address stay: they belong to the
+ * organizations. Then `session.afterEnd`, the back-channel logouts when
+ * `logouts` is true, the organization and user hooks, and the notice.
+ *
+ * The operator delete passes `logouts: false`: no operator act sends a
+ * back-channel logout in its call (ruling 37 of plan 12f). Its outbox rows
+ * are due now, and the sweep sends them.
+ */
+export async function accountDeleted(
+  config: ResolvedConfig,
+  deleted: DeletedAccount,
+  after: {
+    ended: SessionRow[] | undefined;
+    stops: ImpersonationStops | null;
+    count: number;
+    ip: string | null;
+    userAgent: string | null;
+    logouts: boolean;
+  },
+): Promise<void> {
+  const { user, going } = deleted;
+  // The pending-end rows stay for the sweep (ruling 63 of plan 12f).
   await config.storage.delete("verification", [
     { field: "identifier", op: "in", value: [user.id, user.email] },
     { field: "purpose", op: "ne", value: "session-end" },
   ]);
-  await sessionsEnded(config, ended, "account_deleted", stops, counted.sessions);
+  await sessionsEnded(config, after.ended, "account_deleted", after.stops, after.count);
   // Every outbox row of the user, also one that waits for a retry (ruling 78 of plan 12d).
-  await deliverLogouts(config, user.id, true);
+  if (after.logouts) await deliverLogouts(config, user.id, true);
   for (const organization of going) {
     await runAfter(
       config.observe,
@@ -393,10 +513,9 @@ async function runDelete(
   await sendNotice(config, {
     event: "account_deleted",
     email: user.email,
-    ip: input.ip,
-    userAgent: input.userAgent,
+    ip: after.ip,
+    userAgent: after.userAgent,
   });
-  return ok({ ok: true });
 }
 
 /**
@@ -406,8 +525,14 @@ async function runDelete(
  * lock wrote. It answers the organizations that go.
  *
  * The session of the proof is read again: a session that ended proves
- * nothing. Then `holdImpersonations` locks the sessions, as user-hold.ts
- * states. Then the organization rule runs, and the before hooks. The owner
+ * nothing. The operator delete has no session of the user, so it passes
+ * null and skips the read (ruling 1 of plan 12f2, item B1). Then
+ * `holdImpersonations` locks the sessions, as user-hold.ts states. Then
+ * the organization rule runs. With `refuseAfter`, a delete whose least
+ * work cannot fit `budget` answers `delete_too_large` here, before any
+ * delete (ruling 1 of plan 12f2, Q3). The self delete and the operator
+ * delete pass it on a store with a per-invocation query limit (D1), and
+ * null elsewhere (ruling 10 M1 of plan 12f2). Then the before hooks. The owner
  * lock of each organization that keeps another owner comes next.
  *
  * The deletes come in this order. First the user row, the solo
@@ -416,7 +541,11 @@ async function runDelete(
  * user row goes before the sessions: D1 has no lock, and a sign-in reads the
  * user row after its session insert. The sessions go before the
  * identities: a link in flight updates its session as its last statement,
- * so it undoes or commits first.
+ * so it undoes or commits first. On a store whose user delete cascades
+ * (`userDeleteCascades`, the Better Auth tables), the user row and the
+ * solo organization rows go after the member rows, the recount, and the
+ * pages of the sessions (ruling 13 of plan 12f2). There no refusal comes
+ * after a cascade, and the pages see the sessions.
  *
  * The solo organizations go set-based (rulings 30 and 78 of plan 12d): 6
  * storage calls for any count, 0 when none goes. The act deletes their
@@ -425,6 +554,12 @@ async function runDelete(
  * organization rule reads in 3 calls for any count. At most `IN_CHUNK`
  * solo organizations go in one delete; more answer `delete_too_large`
  * before any write (`runDelete`).
+ *
+ * The sessions end in pages inside `budget` (ruling 1 of plan 12f2, item
+ * B1): first the user's own sessions, then the impersonation sessions that
+ * the user opened as an operator. The rows that do not fit stay, each set
+ * with one pending-end row of the reason `account_deleted`, and the sweep
+ * ends them. The doors refuse them before that: the user row is gone.
  */
 export async function deleteAccountRows(
   tx: StorageAdapter,
@@ -432,24 +567,68 @@ export async function deleteAccountRows(
   user: UserRow,
   now: Date,
   proof: {
-    sessionId: string;
+    /** The session of the user that proves the delete, or null for the operator delete. */
+    sessionId: string | null;
     ended: SessionRow[] | null;
     stops: ImpersonationStops | null;
     meter: Meter;
-    /** Takes the count of the user's sessions that `endSessions` answered. */
+    /** Takes the count of the sessions that the pages ended. */
     counted: { sessions: number };
+    /** The calls of `meter` that the invocation may make. */
+    budget: number;
+    /**
+     * Null: no size check (a store with no per-invocation query limit). A
+     * number: the calls of `meter` that the caller made before this call, at
+     * the worst. The reads of this call come on top. Then a delete
+     * whose least work passes `budget` answers `delete_too_large`.
+     */
+    refuseAfter: number | null;
+    /**
+     * True for a user actor: a target who holds the platform role answers
+     * `operator_required` (`organizationsOfDelete`, ruling 5 of plan 12f2).
+     */
+    refusePlatform: boolean;
   },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
-  const session = await tx.findOne("session", [{ field: "id", op: "eq", value: proof.sessionId }]);
-  if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
+  // The reads of this call up to the size check, counted one by one
+  // (verify-12f2-r10 Low B): the proof session, the targets of the hold, and
+  // the organization rule.
+  const counted = readCounted(tx);
+  if (proof.sessionId !== null) {
+    const session = await counted.storage.findOne("session", [
+      { field: "id", op: "eq", value: proof.sessionId },
+    ]);
+    if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
+  }
   // The one read that locks the user's sessions and the impersonation
   // sessions that the user opened as an operator. It comes before the owner
   // lock, in the order of user-hold.ts (ruling 65 of plan 12f).
-  const hold = await holdImpersonations(tx, config, user.id, now, true);
-  const plan = await organizationsOfDelete(config, tx, user.id);
+  const hold = await holdImpersonations(counted.storage, config, user.id, now, true);
+  const plan = await organizationsOfDelete(config, counted.storage, user.id, proof.refusePlatform);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
+  // The least calls after this point, at the worst: the owner lock (a batch
+  // of 2 on D1) and the recount of each organization that the user owns
+  // with another owner, the user delete, the solo organizations, the deletes
+  // of the invitations and the member rows of the user, the least of each
+  // page of sessions, and `DELETE_KEEP`. The size check comes before the
+  // scimUser locks, which D1 does not have.
+  const least =
+    3 * owned.length +
+    1 +
+    (going.length > 0 ? SOLO_CALLS : 0) +
+    2 +
+    SESSIONS_PAGE_LEAST * (hold.targets.length > 0 ? 2 : 1) +
+    DELETE_KEEP;
+  if (proof.refuseAfter !== null) {
+    // The meter also counts the statements of a parallel invocation on the
+    // same adapter, so it alone could refuse a delete that fits. The count
+    // of this call's own statements caps it: its reads, and the lock of the
+    // hold on a store that has one.
+    const own = proof.refuseAfter + counted.reads() + (tx.lockInOrder ? LOCK_CALLS : 0);
+    if (Math.min(proof.meter.used, own) + least > proof.budget) stopWith("delete_too_large");
+  }
   // The scimUser rows come after the sessions and before the owner locks (ruling 74 M3 of
   // plan 12d): the user's own rows, and the rows of each solo organization.
   await tx.lockInOrder?.("scimUser", [{ field: "userId", op: "eq", value: user.id }]);
@@ -484,11 +663,23 @@ export async function deleteAccountRows(
     );
     if (held === 0) stopWith("conflict");
   }
-  await tx.delete("user", byId);
-  // The rows of the solo organizations that give access or hold a claim go now, set-based
-  // (rulings 30 and 78 of plan 12d). The rest waits for the sweep.
   const solo = organizationList(going.map((x) => x.id));
-  if (solo.length > 0) await deleteOrganizationsHead(tx, solo);
+  // On a store whose user delete cascades (ruling 13 of plan 12f2), every
+  // check that can refuse and the pages of the sessions run before the user
+  // delete. Elsewhere the user row goes first: D1 has no lock, and a flow
+  // that writes a row of the user reads the user row after its insert.
+  const cascades = config.storage.userDeleteCascades === true;
+  // The user row, then the rows of the solo organizations that give access or hold a
+  // claim, set-based (rulings 30 and 78 of plan 12d). The rest waits for the sweep.
+  const dropHead = async () => {
+    await tx.delete("user", byId);
+    if (solo.length > 0) await deleteOrganizationsHead(tx, solo, cascades);
+  };
+  if (cascades) {
+    // The organization lock of user-hold.ts comes before the invitation and member rows.
+    if (solo.length > 0)
+      await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: solo }]);
+  } else await dropHead();
   // The invitations come before the member rows, in the order of user-hold.ts
   // (ruling 50 of plan 12k).
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
@@ -508,16 +699,32 @@ export async function deleteAccountRows(
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together (ruling 42 of plan 12f). The lock read of
-  // `hold` came first.
-  proof.counted.sessions = await endSessions(
-    tx,
-    [{ field: "userId", op: "eq", value: user.id }],
-    proof.ended,
-    now,
-    proof.stops,
-  );
-  // A page of them ends inside the call budget of the invocation (ruling 63
-  // of plan 12f). The rest stay on a pending-end row for the sweep.
+  // `hold` came first. Each set ends in a page inside the call budget of the
+  // invocation (ruling 63 of plan 12f, ruling 1 of plan 12f2). The rest stay
+  // on a pending-end row for the sweep. The page of the own sessions keeps
+  // to the budget only on a store with a per-invocation query limit (D1).
+  // Postgres and MySQL send more statements than D1 for the same act (the
+  // row locks), and they have no such limit. With the budget there, the
+  // delete of an owner of a solo organization ended no own session in its
+  // act, and each waited for the sweep. On a store whose user delete
+  // cascades, the pages keep the calls of `dropHead` free too.
+  const tail = cascades ? 1 + (solo.length > 0 ? SOLO_HEAD_CALLS : 0) : 0;
+  const ownBudget =
+    config.storage.queryLimitPerInvocation === true ? proof.budget : Number.POSITIVE_INFINITY;
+  proof.counted.sessions = (
+    await endOwnSessionsPage(
+      tx,
+      config,
+      user.id,
+      proof.ended,
+      now,
+      proof.meter,
+      ownBudget,
+      DELETE_KEEP + tail + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
+      "account_deleted",
+      proof.stops,
+    )
+  ).ended;
   proof.counted.sessions += (
     await endImpersonationsPage(
       tx,
@@ -526,12 +733,13 @@ export async function deleteAccountRows(
       proof.ended,
       now,
       proof.meter,
-      OPERATOR_CALL_BUDGET,
-      DELETE_KEEP,
+      proof.budget,
+      DELETE_KEEP + tail,
       "account_deleted",
       proof.stops,
     )
   ).ended;
+  if (cascades) await dropHead();
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. The delivery after the commit sends them all, with no

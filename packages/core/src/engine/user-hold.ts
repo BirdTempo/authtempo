@@ -105,6 +105,12 @@ import { ROUNDS } from "./rounds.js";
  * The team delete and the account delete write the invitations before the
  * team member and member rows (ruling 50).
  *
+ * The grant of the platform role, and a role change that adds its part,
+ * hold the target's user row first, before the read of the member row. The
+ * operator delete holds the same row before its read of the platform role,
+ * so no grant lands between that read and its member delete (ruling 6 of
+ * plan 12f2).
+ *
  * The role create takes the organization lock before its count, and no
  * user hold. The user token create holds the user row before its count of
  * the cap, and takes no other lock. The organization create holds the user

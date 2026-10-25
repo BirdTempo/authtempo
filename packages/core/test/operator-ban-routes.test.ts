@@ -56,6 +56,8 @@ const BAN_ROUTES = [
   "POST /phone/verify",
   // Plan 12i Task 20: the sign-up code opens its session through the confirm of the link.
   "POST /password/verify/code",
+  // Plan 12f2 Task 3: the invitation link opens a session through prepareSession.
+  "POST /user/invite/confirm",
 ] as const;
 
 /** The routes of the operator tools that refuse a banned target (plan 12f Task 10). */
@@ -177,6 +179,27 @@ describe("account_banned at the sign-in routes (plan 12f Task 10, lead item 3)",
     expect(await answerOf(await w.post("/phone/verify", { phone, code: w.lastSms() }))).toEqual(
       BANNED,
     );
+  });
+
+  it("answers 403 account_banned to the invitation link of a banned user, and keeps the link (plan 12f2 Task 3)", async () => {
+    const w = await world();
+    const made = await operatorApi(w.auth.config).users.create({
+      actor: APP,
+      email: EMAIL,
+      reason: "Ticket 1",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const token = w.lastToken();
+    await w.ban();
+    expect(await answerOf(await w.post("/user/invite/confirm", { token }))).toEqual(BANNED);
+    expect(await w.auth.storage.findMany("session", [])).toEqual([]);
+    // The refusal rolls back the spend: the link opens a session after an unban.
+    const rows = await w.auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "user-invite" },
+    ]);
+    expect(rows.map((r) => r.consumedAt)).toEqual([null]);
   });
 
   it("answers 403 account_banned to the verify link of a sign-up when the ban came after the mail", async () => {

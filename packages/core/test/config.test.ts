@@ -767,12 +767,14 @@ describe("totp (plan 9f)", () => {
 
   it("turns the gate on for the magic link, the email code, and social by default, takes false per method, and refuses another key (plan 12c)", () => {
     // Plan 12d Task 5 adds the key sso, on by default. Plan 12i Task 5 adds phone.
+    // Plan 12f2 Task 3 adds invite.
     expect(resolveConfig(pw).totp?.gate).toEqual({
       magicLink: true,
       emailOtp: true,
       social: true,
       sso: true,
       phone: true,
+      invite: true,
     });
     expect(resolveConfig({ ...pw, totp: { gate: { social: false } } }).totp?.gate).toEqual({
       magicLink: true,
@@ -780,6 +782,7 @@ describe("totp (plan 9f)", () => {
       social: false,
       sso: true,
       phone: true,
+      invite: true,
     });
     expect(resolveConfig({ ...pw, totp: { gate: { sso: false } } }).totp?.gate).toEqual({
       magicLink: true,
@@ -787,6 +790,7 @@ describe("totp (plan 9f)", () => {
       social: true,
       sso: false,
       phone: true,
+      invite: true,
     });
     expect(resolveConfig({ ...pw, totp: { gate: { phone: false } } }).totp?.gate).toEqual({
       magicLink: true,
@@ -794,11 +798,18 @@ describe("totp (plan 9f)", () => {
       social: true,
       sso: true,
       phone: false,
+      invite: true,
     });
     expect(() =>
       resolveConfig({ ...pw, totp: { gate: { handoff: false } as never } }),
     ).toThrowError(
-      "totp.gate.handoff is not an option; core has magicLink, emailOtp, social, sso, and phone. The handoff has no key: it continues a browser session that passed the gate",
+      "totp.gate.handoff is not an option; core has magicLink, emailOtp, social, sso, phone, and invite. The handoff has no key: it continues a browser session that passed the gate",
+    );
+    expect(resolveConfig({ ...pw, totp: { gate: { invite: false } } }).totp?.gate.invite).toBe(
+      false,
+    );
+    expect(() => resolveConfig({ ...pw, totp: { gate: { invite: 0 } as never } })).toThrowError(
+      "totp.gate.invite must be true or false",
     );
     expect(() => resolveConfig({ ...pw, totp: { gate: { phone: "no" } as never } })).toThrowError(
       "totp.gate.phone must be true or false",

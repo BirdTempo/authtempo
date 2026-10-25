@@ -2,6 +2,7 @@ import { afterAll, expect, it } from "vitest";
 import { assertFreshBuild } from "./support/bin.js";
 import {
   type ExampleWorker,
+  liveFetch,
   ownerOf,
   START_LIMIT_MS,
   startExampleWorker,
@@ -17,7 +18,7 @@ afterAll(async () => {
 }, 30_000);
 
 const info = (w: ExampleWorker, secret: string) =>
-  fetch(`${w.base}/auth/operator/info`, { headers: { authorization: `Operator ${secret}` } });
+  liveFetch(`${w.base}/auth/operator/info`, { headers: { authorization: `Operator ${secret}` } });
 
 it("asks the operator info route again after no answer, and refuses only another status", () => {
   expect([200, 401, 404, 500, null].map(ownerOf)).toEqual([

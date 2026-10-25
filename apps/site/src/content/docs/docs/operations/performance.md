@@ -10,7 +10,7 @@ sources:
   - apps/site/src/data/observe-timing.json
   - packages/core/test/observer.test.ts
 sidebar:
-  order: 10
+  order: 11
 ---
 
 **For:** an operator who sizes a deployment, or a developer who compares the cost of the operations.

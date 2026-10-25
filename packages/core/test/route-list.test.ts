@@ -50,6 +50,8 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   tokens: ["tokens"],
   jwt: ["jwtMint"],
   operator: ["operator", "operatorUsers", "operatorImpersonation", "operatorSso"],
+  // Plan 12f2 Task 3: the invitation link of a user that an operator created.
+  "user-invite": ["operatorUsers"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
   sso: ["sso"],
   scim: ["scim"],
@@ -84,7 +86,10 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
     // Plan 12i Task 20 adds POST /password/verify/code.
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
-    expect(listed.length).toBe(204);
+    // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
+    // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
+    // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
+    expect(listed.length).toBe(209);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

@@ -20,6 +20,8 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import type { Observer } from "../../observe/observer.js";
 import {
+  OPERATOR_CREATE_PER_ACTOR,
+  OPERATOR_DELETE_PER_ACTOR,
   OPERATOR_PER_IP,
   OPERATOR_SECRETS_PER_IP,
   OPERATOR_USERS_PER_IP,
@@ -34,6 +36,7 @@ import {
   auditQuery,
   banBody,
   createAdminBody,
+  createUserBody,
   endAllBody,
   enforceOffBody,
   factorDisableBody,
@@ -42,6 +45,7 @@ import {
   platformRoleBody,
   rewrapBody,
   searchQuery,
+  updateUserBody,
   userQuery,
   userReasonBody,
   usersQuery,
@@ -462,6 +466,21 @@ function limitOf(limit: string | undefined): { limit?: number } {
   return limit === undefined ? {} : { limit: Number(limit) };
 }
 
+/**
+ * The subject of an actor on a per-actor key: `<kind>:<name or user id>`.
+ * A route never builds an app actor; the case keeps the switch whole.
+ */
+function actorSubject(actor: OperatorActor): string {
+  switch (actor.kind) {
+    case "secret":
+      return `secret:${actor.name}`;
+    case "user":
+      return `user:${actor.user.id}`;
+    case "app":
+      return `app:${actor.name}`;
+  }
+}
+
 /** The value under one key: the CLI reads `{ user }` (plan 12f Task 12). */
 function under<K extends string, V>(key: K, r: Result<V>): Result<Record<K, V>> {
   return r.ok ? ok({ [key]: r.value } as Record<K, V>) : r;
@@ -475,7 +494,10 @@ function under<K extends string, V>(key: K, r: Result<V>): Result<Record<K, V>> 
  * one entry of `auth.api.operator` with the caller's IP and user agent. A session
  * caller's POST keeps the Origin rule and the Fetch Metadata rule of the
  * router. A secret caller sends no cookie, and a POST with no Origin passes.
- * The impersonation routes are plan 12f Task 11.
+ * The impersonation routes are plan 12f Task 11. A write with `perActor`
+ * counts each call of the actor after the actor read, before the body and
+ * before the scope check of the engine, so a call with a bad body or with
+ * no scope counts too (plan 12f2 Task 5). It answers false at the limit.
  */
 function toolRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator?.users) return [];
@@ -510,6 +532,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
       body: T,
       meta: { ip: string | null; userAgent: string | null },
     ) => Promise<Result<V>>,
+    perActor?: (config: ResolvedConfig, actor: OperatorActor) => Promise<boolean>,
   ): Route => ({
     method: "POST",
     path,
@@ -517,6 +540,8 @@ function toolRoutes(config: ResolvedConfig): Route[] {
     async handler(ctx) {
       const caller = await readOperatorActor(ctx.config, ctx, `POST ${path}`);
       if (!caller.ok) return respond(caller);
+      if (perActor && !(await perActor(ctx.config, caller.value.actor)))
+        return send(respond(fail("rate_limited")), caller.value.renewed);
       // JSON only (ruling 38): a JSON body forces a preflight. A text/plain
       // body or a body with no content type is a simple request with none.
       const body = isJsonRequest(ctx.request)
@@ -590,6 +615,44 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         reason: b.reason,
         ...meta,
       }),
+    ),
+    // Plan 12f2 Task 5, second wave. Each create can mail the person once, so each actor counts.
+    write(
+      "/operator/users/create",
+      createUserBody,
+      (api, actor, b, meta) =>
+        api.users.create({
+          actor,
+          email: b.email,
+          ...(b.phone === undefined ? {} : { phone: b.phone }),
+          ...(b.emailVerified === undefined ? {} : { emailVerified: b.emailVerified }),
+          ...(b.name === undefined ? {} : { name: b.name }),
+          ...(b.image === undefined ? {} : { image: b.image }),
+          ...(b.firstSignIn === undefined ? {} : { firstSignIn: b.firstSignIn }),
+          reason: b.reason,
+          ...meta,
+        }),
+      (config, actor) =>
+        limit(config, "operator-create:actor", actorSubject(actor), OPERATOR_CREATE_PER_ACTOR),
+    ),
+    // No per-actor limit (ruling 7 of plan 12f2): the plan names none, and the route limits hold.
+    write("/operator/users/update", updateUserBody, (api, actor, b, meta) =>
+      api.users.update({
+        actor,
+        userId: b.userId,
+        ...(b.name === undefined ? {} : { name: b.name }),
+        ...(b.image === undefined ? {} : { image: b.image }),
+        reason: b.reason,
+        ...meta,
+      }),
+    ),
+    write(
+      "/operator/users/delete",
+      userReasonBody,
+      (api, actor, b, meta) =>
+        api.users.delete({ actor, userId: b.userId, reason: b.reason, ...meta }),
+      (config, actor) =>
+        limit(config, "operator-delete:actor", actorSubject(actor), OPERATOR_DELETE_PER_ACTOR),
     ),
     write("/operator/sessions/end-user", userReasonBody, (api, actor, b, meta) =>
       api.sessions.endUser({ actor, userId: b.userId, reason: b.reason, ...meta }),

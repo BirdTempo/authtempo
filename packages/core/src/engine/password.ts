@@ -1384,7 +1384,28 @@ export async function requestPasswordReset(
     return fail("rate_limited");
   // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
   if (await ssoRequiredFor(config, email)) return ok({ sent: true });
-  const now = config.clock.now();
+  await sendResetLink(config, email, input.next, config.clock.now());
+  // The same event for an address with no account: the answer is the same too.
+  config.observe.emit({ name: "password.reset_request", outcome: "success", email });
+  return ok({ sent: true });
+}
+
+/**
+ * The token write and the mail of a reset link (plan 12f2 deviation 6),
+ * with no limit and no read: each caller bounds and decides first.
+ * `requestPasswordReset` calls it after its limits, and the operator
+ * create calls it after its commit, under the operator limit. The token
+ * leaves core only in the mail. A throw of the mail port passes to the
+ * caller. `config.password` must be on: the caller checks it first.
+ */
+export async function sendResetLink(
+  config: ResolvedConfig,
+  email: string,
+  next: string | undefined,
+  now: Date,
+): Promise<void> {
+  const pw = config.password;
+  if (!pw) throw new Error("authtempo: sendResetLink: password is off");
   const token = randomToken(PASSWORD_RESET_PREFIX);
   await config.storage.create("verification", {
     id: newId(now),
@@ -1393,7 +1414,7 @@ export async function requestPasswordReset(
     valueHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + pw.resetTtlMinutes * 60_000),
     consumedAt: null,
-    data: { next: safeNext(input.next) },
+    data: { next: safeNext(next) },
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
@@ -1404,9 +1425,6 @@ export async function requestPasswordReset(
     subject: `Reset your password for ${config.appName}`,
     text: `Open this link to choose a new password. It is valid for ${pw.resetTtlMinutes} minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message. Your password does not change.`,
   });
-  // The same event for an address with no account: the answer is the same too.
-  config.observe.emit({ name: "password.reset_request", outcome: "success", email });
-  return ok({ sent: true });
 }
 
 export interface PasswordReset {

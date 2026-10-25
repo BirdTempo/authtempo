@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
+import { EVENTS } from "@authtempo/core/observe";
 import {
   errorAnchor,
   ROUTER_CODES,
   ROUTES,
   type RouteEntry,
   type RouteKey,
+  routeAnchor,
   USER_ACTOR_CODES,
 } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
@@ -120,6 +122,33 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
 const ROUTER = ROUTER_CODES.filter((c) => c !== "internal");
 
+/**
+ * The codes whose Routes table on the errors page lists no operator route:
+ * an older drift of the whole operator family (O-12i-15, an owner
+ * follow-up of plan 12i). The check of plan 12f2 holds that the family stays
+ * out as one, so a later fix must take each route in.
+ */
+const OPERATOR_FAMILY_DRIFT: readonly string[] = [
+  "rate_limited",
+  "unauthorized",
+  "invalid_body",
+  "conflict",
+  "hook_refused",
+  "hook_failed",
+];
+
+/** The Routes table of a code on the errors page, from the table head to the next code. */
+function routesCell(code: string): string {
+  const page = readFileSync(`${DOCS}docs/reference/errors.md`, "utf8");
+  const start = page.indexOf(`<h3 id="${errorAnchor(code, "core")}">`);
+  expect({ code, found: start >= 0 }).toEqual({ code, found: true });
+  const end = page.indexOf("<h3 id=", start + 1);
+  const text = page.slice(start, end < 0 ? undefined : end);
+  const at = text.indexOf("| Routes |");
+  expect({ code, table: at >= 0 }).toEqual({ code, table: true });
+  return text.slice(at);
+}
+
 describe("the operator pages", () => {
   it("links each code of the operator routes in the guide", () => {
     const codes = codesOf(
@@ -178,11 +207,71 @@ describe("the operator pages", () => {
     expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
   });
 
+  it("links each code of the delete flow in the delete runbook", () => {
+    const codes = secretCodesOf(
+      keyed(
+        "GET /operator/users/search",
+        "GET /operator/users/get",
+        "POST /operator/users/delete",
+        "GET /operator/audit",
+      ),
+    );
+    const page = "operations/delete-an-account.mdx";
+    expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
+  });
+
   it("links each code of the factor disable in the dated note of the recovery runbook", () => {
     const codes = secretCodesOf(
       keyed("GET /operator/users/search", "POST /operator/users/second-factor/disable"),
     );
     const page = "operations/second-factor-recovery.mdx";
     expectLinks(page, section(page, "Update 2026-10-21 by plan 12f"), [...codes, "not_found"]);
+  });
+
+  it("lists each route of plan 12f2 in the errors table of each code that it answers", () => {
+    const routes = ROUTES.filter(
+      keyed(
+        "POST /operator/users/create",
+        "POST /operator/users/update",
+        "POST /operator/users/delete",
+        "GET /user/invite/confirm",
+        "POST /user/invite/confirm",
+      ),
+    );
+    expect(routes.length).toBe(5);
+    const missing: string[] = [];
+    for (const r of routes)
+      for (const code of r.codes) {
+        const cell = routesCell(code);
+        if (code === "impersonation_session") {
+          // The cell names the operator routes in words.
+          expect(cell).toContain("every operator route but the stop");
+          continue;
+        }
+        if (r.path.startsWith("/operator/") && OPERATOR_FAMILY_DRIFT.includes(code)) {
+          // The older drift holds for the whole family: the cell lists no operator route.
+          expect({ code, operator: cell.includes("/routes/#post-operator-") }).toEqual({
+            code,
+            operator: false,
+          });
+          continue;
+        }
+        if (!cell.includes(`](/docs/reference/routes/#${routeAnchor(r.method, r.path)})`))
+          missing.push(`${code}: ${r.method} ${r.path}`);
+      }
+    expect(missing).toEqual([]);
+  });
+
+  it("lists each action of an audit row in the events reference", () => {
+    const want = EVENTS["operator.action"].fields.action.values ?? [];
+    // 31 actions at plan 12f2, so the list is never empty.
+    expect(want.length).toBeGreaterThan(30);
+    const page = readFileSync(`${DOCS}docs/reference/events.md`, "utf8");
+    for (const field of ["operator.action.action", "operator.refused.action"]) {
+      const row = page.split("\n").find((l) => l.startsWith(`| \`${field}\` |`)) ?? "";
+      const cell = row.split(" | ")[1] ?? "";
+      const listed = [...cell.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]);
+      expect({ field, listed }).toEqual({ field, listed: [...want] });
+    }
   });
 });

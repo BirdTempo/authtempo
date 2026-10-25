@@ -52,7 +52,7 @@ authtempo users search https://api.example.com --email ada@example.com
 
 Give exactly one of `--email`, `--email-prefix`, and `--id`. Two or none is a usage error.
 
-The users go to stdout as a table: `ID`, `EMAIL`, `VERIFIED`, `BAN`, `OPERATOR`, `FACTORS`, `SESSIONS`, and `CREATED`. `BAN` is `-` for no ban, `no-end` for a ban with no end, or the end of the ban. The name is in the JSON only.
+The users go to stdout as a table: `ID`, `EMAIL`, `VERIFIED`, `BAN`, `OPERATOR`, `FACTORS`, `SESSIONS`, and `CREATED`. `EMAIL` is `-` for a user with no address, such as a phone sign-up. `BAN` is `-` for no ban, `no-end` for a ban with no end, or the end of the ban. The name is in the JSON only.
 
 The address goes in the query of the request and in the answer on stdout only. No stderr line names it, also on a stop. No match prints the header only.
 

@@ -1,11 +1,12 @@
 ---
 title: authtempo users
-description: The subcommands of authtempo users. They read, ban, and unban users, change the platform role, and turn a second factor off.
+description: The subcommands of authtempo users. They read, create, ban, update, and delete users, change the platform role, and turn a second factor off.
 type: reference
 sources:
   - packages/cli/src/commands/users.ts
   - packages/cli/src/help/users.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 6"
 sidebar:
   order: 12
 ---
@@ -36,6 +37,9 @@ authtempo users list https://api.example.com
 | `authtempo users unban` | Lifts the ban of a user. | [authtempo users unban](/docs/reference/cli/users-unban/) |
 | `authtempo users platform-role` | Grants or revokes the platform role. On a revoke, the act ends a page of the user's sessions, and the sweep ends the rest. | [authtempo users platform-role](/docs/reference/cli/users-platform-role/) |
 | `authtempo users second-factor-off` | Turns the second factor of a user off after a check of the identity. | [authtempo users second-factor-off](/docs/reference/cli/users-second-factor-off/) |
+| `authtempo users create` | Creates a user for a person, with an address or a phone number only. It sets no password. | [authtempo users create](/docs/reference/cli/users-create/) |
+| `authtempo users update` | Corrects the name or the image of a user. | [authtempo users update](/docs/reference/cli/users-update/) |
+| `authtempo users delete` | Deletes the account of a user on a request. It needs the `delete` scope, and it cannot be undone. | [authtempo users delete](/docs/reference/cli/users-delete/) |
 
 `authtempo users` with no subcommand is a usage error. With `--json` it prints `{ exit, stopped }`.
 

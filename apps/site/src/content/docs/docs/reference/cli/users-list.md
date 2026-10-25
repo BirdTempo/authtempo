@@ -47,7 +47,7 @@ authtempo users list https://api.example.com
 | 1 | The read reached --max-calls with more rows. The command printed the rows that it read. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. |
 
-The users go to stdout as a table: `ID`, `EMAIL`, `VERIFIED`, `BAN`, `OPERATOR`, `FACTORS`, `SESSIONS`, and `CREATED`. `BAN` is `-` for no ban, `no-end` for a ban with no end, or the end of the ban. The name is in the JSON only.
+The users go to stdout as a table: `ID`, `EMAIL`, `VERIFIED`, `BAN`, `OPERATOR`, `FACTORS`, `SESSIONS`, and `CREATED`. `EMAIL` is `-` for a user with no address, such as a phone sign-up. `BAN` is `-` for no ban, `no-end` for a ban with no end, or the end of the ban. The name is in the JSON only.
 
 With no `--all`, the command reads one page. When more users follow, stderr names the cursor: `more users after <id>: give --after <id>, or give --all`. With `--all`, the command reads each page until `next` is null. Each page costs one of the 600 calls of an hour.
 

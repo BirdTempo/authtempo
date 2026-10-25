@@ -89,7 +89,9 @@ export const ERRORS = {
   domain_unverified: 400,
   domain_taken: 409,
   domain_limit: 409,
-  // plan 12d ruling 30: an account delete takes at most IN_CHUNK solo organizations at once
+  // plan 12d ruling 30: an account delete takes at most IN_CHUNK solo organizations at once.
+  // Plan 12f2 ruling 1 Q3: the operator delete refuses with it when its least work passes
+  // the call budget.
   delete_too_large: 409,
   // plan 12d Task 3: the organization holds its limit of SSO connections, and the
   // SSO manager guard needs a second factor of the owner.

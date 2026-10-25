@@ -23,7 +23,9 @@ const count = (text: string) => text.split(RULE).length - 1;
 const COPIES: [string, number][] = [
   [`${DOCS}docs/reference/api.md`, 2],
   // Plan 12d Task 2b adds the override of enforce: 9 became 10.
-  [`${DOCS}docs/reference/routes.md`, 10],
+  // Plan 12f2 Task 5 adds the rows of the operator update and delete: 10 became 12.
+  // Its second wave adds the row of the operator create: 13.
+  [`${DOCS}docs/reference/routes.md`, 13],
   [`${DOCS}docs/guides/operator-tools.mdx`, 1],
   [`${DOCS}docs/concepts/threat-model.md`, 1],
   ...[
@@ -31,6 +33,9 @@ const COPIES: [string, number][] = [
     "users-unban",
     "users-platform-role",
     "users-second-factor-off",
+    "users-create",
+    "users-update",
+    "users-delete",
     "sessions-end",
     "sessions-end-all",
     "create-admin",
@@ -52,7 +57,9 @@ describe("the reason rule in each copy (ruling 65 of plan 12f)", () => {
 
   it("is in the --reason flag of each CLI help", () => {
     const says = HELP.flatMap((h) => h.flags.filter((f) => f.flag === "--reason <text>"));
-    expect(says.length).toBe(7);
+    // Plan 12f2 Task 6 adds users update and users delete (7 became 9),
+    // then users create in its second wave (9 became 10).
+    expect(says.length).toBe(10);
     for (const f of says) expect(count(f.says), f.says).toBe(1);
   });
 

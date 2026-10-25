@@ -719,6 +719,10 @@ const TOUCHED: Record<string, string[]> = {
     "team member",
   ],
   "an admin create": ["user", "member"],
+  // Plan 12f2 Task 2: the new user row with its identity, then the audit row.
+  "an operator create": ["user"],
+  // Plan 12f2 Task 3: the create, then the confirm holds the user row, claims it, and opens a session.
+  "an invitation confirm": ["user", "session"],
   // Ruling 78 of plan 12d: the sweep takes the team rows of a solo organization.
   "an account delete with a solo and a shared organization": [
     "user",
@@ -746,6 +750,17 @@ const TOUCHED: Record<string, string[]> = {
     "SCIM user",
     "organization",
     "team",
+    "invitation",
+    "member",
+    "team member",
+  ],
+  // Plan 12f2 Task 4. On main the solo organization goes set-based, and its teams go at
+  // the sweep (ruling 78 of plan 12d).
+  "an operator delete with a solo and a shared organization": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
     "invitation",
     "member",
     "team member",
@@ -993,6 +1008,22 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.operator.platformRole.revoke({ actor: APP, userId: s.cal.user.id, ...reason }),
   "an admin create": (w) =>
     w.auth.api.operator.createAdmin({ actor: APP, email: "new@example.com", ...reason }),
+  "an operator create": (w) =>
+    w.auth.api.operator.users.create({
+      actor: APP,
+      email: "made@example.com",
+      emailVerified: true,
+      firstSignIn: "none",
+      ...reason,
+    }),
+  "an invitation confirm": async (w) => {
+    must(
+      await w.auth.api.operator.users.create({ actor: APP, email: "ivy@example.com", ...reason }),
+    );
+    const res = await w.post("/user/invite/confirm", { token: w.lastToken("ivy@example.com") }, "");
+    const body = (await res.json()) as { error?: string };
+    return res.ok ? { ok: true as const, value: body } : { ok: false as const, code: body.error };
+  },
   "an account delete with a solo and a shared organization": (w, s) =>
     w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null }),
   "an account delete of an operator with an impersonation": (w, s) =>
@@ -1008,6 +1039,8 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     if (!made.ok) throw new Error(made.code);
     return w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
   },
+  "an operator delete with a solo and a shared organization": (w, s) =>
+    w.auth.api.operator.users.delete({ actor: APP, userId: s.oli.user.id, ...reason }),
   "an impersonation start": (w, s) =>
     w.auth.api.operator.impersonate({ operator: s.ada, userId: s.pat.user.id, ...reason }),
   "an impersonation stop": async (w, s) =>
@@ -1330,6 +1363,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "teams updateTeam": "one kind: the team row",
   "teams deleteTeam": ["a team delete"],
   "teams addTeamMember": ["a team member add", "a SCIM deactivate"],
+  // Plan 12f2 Task 3: the spend, the user hold, the claim, and the session.
+  "user-invite confirmUserInvite": ["an invitation confirm"],
   "teams removeTeamMember": ["a team member removal", "a team leave"],
   "teams setActiveTeam": ["a set of the active team"],
   "tokens createApiToken": "one kind: the user hold, then token rows",
@@ -1410,6 +1445,9 @@ const SITES: Record<string, readonly string[] | string> = {
     "a SCIM group rename",
     "a SCIM group delete",
   ],
+  "operator/accounts createUser": ["an operator create", "an invitation confirm"],
+  "operator/accounts updateUser": "one kind: the compare-and-set of the user row",
+  "operator/accounts deleteUser": ["an operator delete with a solo and a shared organization"],
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -1428,8 +1466,10 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
     // one of username.ts, and Task 5 the two of phone.ts. Task 6 adds the two of
     // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
-    // one of the passkey-first sign-up.
-    expect(found.length).toBe(84);
+    // one of the passkey-first sign-up. Plan 12f2 Task 4 adds the two of
+    // operator/accounts.ts, and Task 2 the third (the operator create). Task 3
+    // adds the one of user-invite.ts (the confirm).
+    expect(found.length).toBe(88);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
@@ -1496,6 +1536,46 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
     ]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
+
+  // A write that adds the platform role part to an existing member row holds
+  // the user row first, as the operator delete does (ruling 6 of plan 12f2).
+  // Tia joins the platform organization with no part before the flow.
+  const GAINS: [string, string, (w: World, s: Scene, tia: string) => Promise<unknown>][] = [
+    [
+      "a platform role grant to a member of the platform organization",
+      "operator/platform-role grantPlatformRole",
+      (w, _s, tia) =>
+        w.auth.api.operator.platformRole.grant({ actor: APP, userId: tia, ...reason }),
+    ],
+    [
+      "a role change that adds the platform role",
+      "organizations updateMemberRole",
+      (w, s, tia) =>
+        w.auth.api.updateMemberRole({
+          user: s.ada.user,
+          organizationId: s.platform,
+          userId: tia,
+          role: "member,operator",
+        }),
+    ],
+  ];
+  for (const [name, site, call] of GAINS)
+    it(`${name} takes the user row first, in the order of user-hold.ts`, async () => {
+      const w = world();
+      const s = await scene(w);
+      must(
+        await w.auth.api.addMember({
+          user: s.ada.user,
+          organizationId: s.platform,
+          userId: s.tia.user.id,
+          role: "member",
+        }),
+      );
+      expect(await w.flow(name, () => call(w, s, s.tia.user.id))).toMatchObject({ ok: true });
+      expect(w.sitesOf(name)).toEqual([site]);
+      expect(w.kindsOf(name)).toEqual(["user", "member"]);
+      expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
+    }, 60_000);
 
   it("names each step out of order, and lets a kind come again", async () => {
     const w = world();
