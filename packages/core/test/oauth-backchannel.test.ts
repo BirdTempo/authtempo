@@ -682,6 +682,25 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     }
   });
 
+  it("names the primary issuer in the logout token of a link with no issuer (final fix wave item 8)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    // A core before schema 15 wrote its links with no issuer.
+    const links = await w.auth.storage.findMany("oauthSessionClient", []);
+    expect(links).toHaveLength(1);
+    await w.auth.storage.update(
+      "oauthSessionClient",
+      [{ field: "id", op: "eq", value: links[0]?.id }],
+      {
+        issuer: null,
+      },
+    );
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(decodeJwt(tokenOfCall(w.calls[0])).iss).toBe(ISSUER);
+  });
+
   it("counts a logout token as no id_token_hint at the end-session route", async () => {
     const w = world();
     const { actor, other } = await twoSessions(w);

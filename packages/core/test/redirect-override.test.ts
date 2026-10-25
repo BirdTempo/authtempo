@@ -177,6 +177,25 @@ describe("the redirect override (plan 12i Task 12)", () => {
     ).not.toThrow();
   });
 
+  it("takes the override on the Slack, X, and Facebook presets and checks it (final fix wave item 6)", async () => {
+    const PRESET = { clientId: "p-id", clientSecret: "p-secret" };
+    for (const name of ["slack", "twitter", "facebook"] as const) {
+      const own = `${BASE_URL}/auth/oauth/${name}`;
+      const auth = makeAuth({ social: { [name]: { ...PRESET, redirectURI: own } } });
+      const handle = createRouter(auth.config, coreRoutes(auth.config));
+      const res = await handle(get(`/auth/social/${name}/start?next=/`));
+      expect(res.status, name).toBe(302);
+      const url = new URL(res.headers.get("location") ?? "");
+      expect(url.searchParams.get("redirect_uri"), name).toBe(own);
+      // The preset takes the same check as every other provider.
+      for (const bad of ["https://evil.example/auth/oauth/x", `${BASE_URL}/auth/session`])
+        expect(
+          () => makeAuth({ social: { [name]: { ...PRESET, redirectURI: bad } } }),
+          `${name} ${bad}`,
+        ).toThrow(`social.${name}.redirectURI`);
+    }
+  });
+
   it("names the provider in the failure event of an alias", async () => {
     // The path of this alias does not hold the provider name (review M2).
     const o = observed({

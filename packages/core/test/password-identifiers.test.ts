@@ -104,6 +104,10 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
       reads.mock.calls.filter(
         ([model, where]) => model === "user" && String(where[0]?.field) === "phone",
       );
+    // The per-phone counts: a number outside the regions spends none (break V1 of verify-12i-t4).
+    const allow = vi.spyOn(auth.config.limiter, "allow");
+    const phoneCounts = () =>
+      allow.mock.calls.filter(([key]) => key.startsWith("password:phone:")).length;
     // The last two are E.164 outside the one region +1: no stored phone of
     // them signs in (phoneSignsIn), so they answer as a bad form.
     for (const phone of [
@@ -124,11 +128,13 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
       expect(verified, phone).toEqual([dummy]);
     }
     expect(byPhone()).toHaveLength(0);
+    expect(phoneCounts()).toBe(0);
     // A well-formed number that no user holds answers the same, after one read.
     verified.length = 0;
     expect(await signIn(auth, { phone: PHONE })).toMatchObject({ code: "invalid_credentials" });
     expect(verified).toEqual([dummy]);
     expect(byPhone()).toHaveLength(1);
+    expect(phoneCounts()).toBe(1);
   });
 
   it("refuses two identifiers or none", async () => {
