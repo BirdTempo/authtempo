@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
-import { UsageError } from "../errors.js";
 import { AUDIT_HELP, AUDIT_LIST_HELP } from "../help/audit.js";
 import type { AuditListJson } from "../json.js";
 import { readOperatorSecret } from "../operator-client.js";
@@ -9,6 +8,7 @@ import {
   AUDIT_HEADER,
   auditLine,
   auditPage,
+  noExtra,
   pageRule,
   pagesExit,
   readPages,
@@ -40,7 +40,7 @@ async function runList(argv: string[], ctx: Ctx): Promise<number> {
     Object.keys(LIST_OPTIONS),
   );
   const [target, ...extra] = positionals;
-  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  noExtra(extra, "the base URL");
   const t = toolTarget(target, values);
   const rule = pageRule(values);
   const secret = readOperatorSecret(ctx, values);

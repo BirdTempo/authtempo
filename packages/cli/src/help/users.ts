@@ -374,7 +374,7 @@ export const USERS_CREATE_HELP: HelpText = {
     },
     {
       code: 1,
-      says: "The deployment created the user, but the mail of the link failed. The command prints the user id and a warning.",
+      says: "The deployment created the user, but no link went out: the mail failed, or the domain of the address enforces SSO. The command prints the user id and a warning.",
     },
     {
       code: 2,
@@ -384,7 +384,7 @@ export const USERS_CREATE_HELP: HelpText = {
   notes: [
     "Give exactly one of --email and --phone. A user with a phone number only signs in with a phone code, and no SMS goes out at the create.",
     "--verified and --first-sign-in invite or reset need --email. --first-sign-in reset needs the password config of the deployment.",
-    "The command refuses --email with --phone, so each run has one first sign-in. The person can add a phone number later, from a session.",
+    "The deployment refuses an address with a phone number, and so does the command, before any request. A phone number that an operator chose, beside a proved address, would open the account outside the impersonation. The person can add a phone number later, from a session.",
     "The answer holds no token and no link: the deployment mails them to the person only.",
   ],
 };

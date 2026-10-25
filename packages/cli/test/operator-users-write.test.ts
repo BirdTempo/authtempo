@@ -547,6 +547,104 @@ describe("users update and users delete (plan 12f2 Task 6)", () => {
   });
 });
 
+describe("the argv values of the user tools (plan 12f2 final fix wave)", () => {
+  const ADDRESS = "misplaced.person@example.com";
+
+  it("names the place of a misplaced argument, never its value, and sends no request", async () => {
+    const f = fixture();
+    const id = await signUp(f, "ada@example.com");
+    const write = ["--reason", "r", "--yes"];
+    for (const [args, place] of [
+      [["users", "create", BASE, ADDRESS, "--email", ADDRESS, ...write], "the base URL"],
+      [["users", "list", BASE, ADDRESS], "the base URL"],
+      [["users", "search", BASE, ADDRESS, "--email", ADDRESS], "the base URL"],
+      [["users", "get", BASE, id, ADDRESS], "the user id"],
+      [["users", "update", BASE, id, ADDRESS, "--name", "B", ...write], "the user id"],
+      [["users", "delete", BASE, id, ADDRESS, ...write], "the user id"],
+      [["sessions", "end", BASE, id, ADDRESS, ...write], "the user id"],
+      [["sessions", "end-all", BASE, ADDRESS, ...write], "the base URL"],
+      [["audit", "list", BASE, ADDRESS], "the base URL"],
+    ] as const) {
+      const r = await run([...args], f, {}, SUPPORT);
+      const label = args.slice(0, 2).join(" ");
+      expect(r.code, label).toBe(2);
+      expect(r.io.stderr[0], label).toBe(
+        `unexpected argument after ${place}: give each value with its flag`,
+      );
+      for (const line of [...r.io.stdout, ...r.io.stderr])
+        expect(line, label).not.toContain("misplaced");
+      expect(r.io.requests, label).toEqual([]);
+    }
+    expect(f.paths).toEqual([]);
+  });
+
+  it("stops on an empty user id before the question, so an empty typed line cannot act", async () => {
+    const f = fixture();
+    for (const [args, id] of [
+      [["users", "delete", BASE, "", "--reason", "r"], ""],
+      [["users", "delete", BASE, " ", "--reason", "r"], " "],
+      [["users", "update", BASE, "", "--name", "B", "--reason", "r"], ""],
+    ] as const) {
+      const io = fakeIo({
+        env: { AUTHTEMPO_OPERATOR_SECRET: DELETER },
+        fetch: f.fetch,
+        stdinIsTTY: true,
+        answer: true,
+        typed: id,
+      });
+      const questions: string[] = [];
+      for (const kind of ["confirm", "prompt"] as const) {
+        const asked = io[kind].bind(io) as (q: string) => Promise<never>;
+        io[kind] = async (q: string) => {
+          questions.push(q);
+          return asked(q);
+        };
+      }
+      expect(await main([...args], io), args[1]).toBe(2);
+      expect(io.stderr[0], args[1]).toBe("name the user id after the base URL");
+      expect(questions, args[1]).toEqual([]);
+      expect(io.requests, args[1]).toEqual([]);
+    }
+    expect(f.paths).toEqual([]);
+  });
+
+  it("puts each question through the scrub and the control character rule", async () => {
+    const f = fixture();
+    // A user id with an escape, and a user id that is the secret: the question shows neither.
+    for (const [id, shown] of [
+      ["01J8\u001b]0;x\u0007Z", "01J8?]0;x?Z"],
+      [DELETER, "***"],
+    ] as const) {
+      const io = fakeIo({
+        env: { AUTHTEMPO_OPERATOR_SECRET: DELETER },
+        fetch: f.fetch,
+        stdinIsTTY: true,
+        answer: false,
+      });
+      const questions: string[] = [];
+      for (const kind of ["confirm", "prompt"] as const) {
+        const asked = io[kind].bind(io) as (q: string) => Promise<never>;
+        io[kind] = async (q: string) => {
+          questions.push(q);
+          return asked(q);
+        };
+      }
+      expect(await main(["users", "delete", BASE, id, "--reason", "r"], io)).toBe(2);
+      expect(await main(["users", "update", BASE, id, "--name", "B", "--reason", "r"], io)).toBe(2);
+      expect(questions).toEqual([
+        `Delete the account ${shown}? This cannot be undone. Type the user id to confirm:`,
+        expect.stringContaining(`user ${shown}`),
+      ]);
+      for (const q of questions) {
+        expect(q).not.toContain(DELETER);
+        for (const c of ["\u001b", "\u0007"]) expect(q).not.toContain(c);
+      }
+      expect(io.requests).toEqual([]);
+    }
+    expect(f.paths).toEqual([]);
+  });
+});
+
 describe("users create (plan 12f2 Task 6, Wave B)", () => {
   const ADDRESS = "new.person@example.com";
   const PHONE = "+14155550199";
@@ -655,7 +753,9 @@ describe("users create (plan 12f2 Task 6, Wave B)", () => {
       ["users", "create", BASE, "more", "--email", ADDRESS, "--reason", "r", "--yes"],
       f,
     );
-    expect(extra.io.stderr[0]).toBe("unexpected argument more");
+    expect(extra.io.stderr[0]).toBe(
+      "unexpected argument after the base URL: give each value with its flag",
+    );
     const noReason = await run(["users", "create", BASE, "--email", ADDRESS, "--yes"], f);
     expect(noReason.io.stderr[0]).toBe(
       "give --reason <text>: each write needs a reason for its audit row",
@@ -836,7 +936,7 @@ describe("users create (plan 12f2 Task 6, Wave B)", () => {
       },
     });
     const warning =
-      "warning: the user exists, but the mail of the link failed; read operator.create_mail_failed in the log of the deployment. The person can sign in by any other proof of the address.";
+      "warning: the user was created, but no link went out: the mail failed (read operator.create_mail_failed in the log of the deployment), or the domain of the address enforces SSO. The person can sign in by any other proof of the address.";
     const text = await run([...create(["--email", ADDRESS]), "--yes"], f, {}, SUPPORT);
     expect(text.code).toBe(1);
     const id = text.io.stdout[0] ?? "";

@@ -15,7 +15,8 @@ const clean = (line: string, secrets: ReadonlySet<string>) =>
 
 /**
  * The no-secret rule at the last line of defence (spec 19): no output line
- * holds a secret that a command read, and no line holds a control character.
+ * and no question holds a secret that a command read, and none holds a
+ * control character.
  */
 export function guarded(io: Io): Ctx {
   const secrets = new Set<string>();
@@ -23,6 +24,9 @@ export function guarded(io: Io): Ctx {
     ...io,
     out: (line) => io.out(clean(line, secrets)),
     err: (line) => io.err(clean(line, secrets)),
+    // A question reaches the terminal too, and it can hold an argv value.
+    confirm: (question) => io.confirm(clean(question, secrets)),
+    prompt: (question) => io.prompt(clean(question, secrets)),
     addSecret(value) {
       for (const p of secretParts(value)) {
         secrets.add(p);

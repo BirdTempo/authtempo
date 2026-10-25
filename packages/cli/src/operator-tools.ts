@@ -127,10 +127,25 @@ export function toolTarget(target: string | undefined, values: OperatorValues): 
   };
 }
 
-/** The user id of a command that acts on one user: the positional after the base URL. */
+/**
+ * The usage error of a positional after the last place of a command. It
+ * names the place, never the value: a misplaced value can be an address or
+ * a phone number, and a CI log keeps stderr.
+ */
+export function noExtra(extra: readonly string[], place: string): void {
+  if (extra.length > 0)
+    throw new UsageError(`unexpected argument after ${place}: give each value with its flag`);
+}
+
+/**
+ * The user id of a command that acts on one user: the positional after the
+ * base URL. An empty id stops here, before the question: the typed answer
+ * of an empty line would match it.
+ */
 export function userIdOf(id: string | undefined, extra: readonly string[]): string {
-  if (id === undefined) throw new UsageError("name the user id after the base URL");
-  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  if (id === undefined || id.trim() === "")
+    throw new UsageError("name the user id after the base URL");
+  noExtra(extra, "the user id");
   return id;
 }
 

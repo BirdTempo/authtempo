@@ -50,12 +50,12 @@ authtempo users create https://api.example.com --email ada@example.com --name "A
 | Exit code | What it means |
 | --- | --- |
 | 0 | The deployment created the user. The command prints the user id on stdout, and the audit row id and the next step on stderr. |
-| 1 | The deployment created the user, but the mail of the link failed. The command prints the user id and a warning. |
+| 1 | The deployment created the user, but no link went out: the mail failed, or the domain of the address enforces SSO. The command prints the user id and a warning. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. A create also stops at the limit of 200 creates per actor per hour. |
 
 Give exactly one of `--email` and `--phone`. `--verified` and `--first-sign-in invite` or `reset` need `--email`. Else the command stops with a usage error and sends no request.
 
-The deployment takes an address and a phone number together only with `emailVerified: true`, because a later proof of the address clears an unproved phone. The command is stricter: it refuses `--email` with `--phone`, so each run has one first sign-in and one next step. A stricter command is safe: it refuses only inputs that the deployment could take. The person can add a phone number later, from a session.
+The deployment refuses an address with a phone number (`invalid_body`), and the command refuses `--email` with `--phone` before any request. A phone number that an operator chose, beside a proved address, would let the operator sign in to the account by a phone code. That sign-in would have no impersonation mark, no time limit, and no audit row. The person can add a phone number later, from a session.
 
 The command asks one question, such as `Create a user, and mail the invitation link to the address?` The question names no address and no phone number. With `--yes` it asks nothing.
 
@@ -70,7 +70,7 @@ On a success, stdout holds the user id only, so a script can read it. Stderr hol
 
 No line of the output holds the address, the phone number, a token, or a link. The deployment mails the link to the person only.
 
-When the mail of the link fails, the deployment keeps the user. The command then prints a `warning:` line on stderr and exits 1. The log of the deployment holds the event `operator.create_mail_failed`.
+When no link goes out, the deployment keeps the user. The command then prints a `warning:` line on stderr and exits 1. There are two causes. The mail failed: the log of the deployment holds the event `operator.create_mail_failed`. Or the domain of the address enforces SSO: the person signs in by SSO.
 
 A refusal stops with exit 2 and names its cause. An address that an account holds stops with `an account holds this address; find it with users search`. A phone number that an account holds stops too. A value that the deployment refuses stops with `invalid_body` and the rules of the flags.
 

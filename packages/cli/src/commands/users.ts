@@ -36,6 +36,7 @@ import {
   DELETE_LIMITS,
   familyEndWarning,
   needYes,
+  noExtra,
   operatorUser,
   type PageRule,
   type PageValues,
@@ -120,10 +121,10 @@ function parse<O extends Options>(argv: string[], options: O) {
   );
 }
 
-/** The base URL of a read: the one positional. */
+/** The base URL of a read or a create: the one positional. */
 function onePositional(positionals: readonly string[]): string | undefined {
   const [target, ...extra] = positionals;
-  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  noExtra(extra, "the base URL");
   return target;
 }
 
@@ -429,9 +430,13 @@ const CREATE_NEXT: Readonly<Record<CreateKind, string>> = {
   phone: "Next: the person signs in with a phone code.",
 };
 
-/** The warning of a create that answers `mailed: null` for a link: core keeps the user. */
+/**
+ * The warning of a create that answers `mailed: null` for a link: core
+ * keeps the user. Core sends no link to an address of a domain that
+ * enforces SSO, and keeps the user then too, so the warning names both causes.
+ */
 const CREATE_MAIL_WARNING =
-  "warning: the user exists, but the mail of the link failed; read operator.create_mail_failed in the log of the deployment. The person can sign in by any other proof of the address.";
+  "warning: the user was created, but no link went out: the mail failed (read operator.create_mail_failed in the log of the deployment), or the domain of the address enforces SSO. The person can sign in by any other proof of the address.";
 
 /**
  * `authtempo users create <base url>` (plan 12f2 Task 6, spec 26): a user
@@ -446,6 +451,9 @@ async function runCreate(argv: string[], ctx: Ctx): Promise<number> {
   const { values, positionals } = parse(argv, CREATE_OPTIONS);
   const t = toolTarget(onePositional(positionals), values);
   const { email, phone } = values;
+  // Core refuses a phone with an address too (ruling 12 of plan 12f2): a
+  // phone that the operator chose, beside a proved address, opens the
+  // account outside the impersonation.
   if ((email === undefined) === (phone === undefined))
     throw new UsageError("give exactly one of --email and --phone");
   const first = oneOf("first-sign-in", values["first-sign-in"], FIRST_SIGN_INS);
