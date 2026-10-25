@@ -58,6 +58,7 @@ Phone sign-in is one factor over the phone network. It is level 2 at best. A lev
 - `phone.dailyCap` counts each SMS of the deployment for 24 hours, 1000 by default. A send over the cap makes no call to the port.
 - `createAuth` refuses `phone` with a limiter that counts per isolate, with the text "phone needs a shared limiter: the daily cap is per deployment". For tests and local development, set `phone.isolateLimiter: "allow"`. The cap is then per isolate.
 - `POST /phone/add` needs a fresh session and a proved handle. A free number gets a code. A number that another account holds gets a note with no code, and the same answer.
+- The code and the note of an add go out after the answer, as at `POST /phone/request`. So the answer time does not tell a number that another account holds.
 - `POST /phone/add/verify` stores the number and sends a notice to the address of the user. Of two users who add one number at the same time, one gets `phone_taken`.
 - `POST /phone/remove` needs a fresh session. It refuses the last way into the account with `last_credential`.
 - The password sign-in takes `{ phone, password }` too. See [Passwords](/docs/guides/password/).
@@ -69,10 +70,10 @@ Phone sign-in is one factor over the phone network. It is level 2 at best. A lev
 - Number recycling and SIM swap. A carrier gives the number to a new person, or an attacker moves it to a new SIM. The new holder of the number then signs in with a code.
 - For an account with an address, core sends no mail at a phone sign-in. The session is fresh, so the routes with the fresh rule open to the new holder. Turn on the second factor, and keep `totp.gate.phone` on.
 - A user with no address who moves to a new number gets no notice on any channel. The old number gets no text.
-- `api.phone.request` in process sends before it answers. Its time tells an account, and it answers 429 for the cap and 503 for an outage on a branch that sends.
+- `api.phone.request` and `api.phone.add` in process send before they answer. Their time can tell an account. They answer 429 for the cap and 503 for an outage.
 - The work after the answer starts in the task of the answer. A known number answers about 0.3 to 0.8 ms later than an unknown one, in process on the memory store.
 - On Workers with no `waitUntil`, the answer waits for the cap, the code row, and the SMS of a known number. Its time then tells an account. Pass `waitUntil` to close it.
-- An outage of the supplier shows in no answer of `POST /phone/request`. The person gets `{ sent: true }` and no code. Only the `sms.not_sent` line shows it.
+- An outage of the supplier shows in no answer of `POST /phone/request` or `POST /phone/add`. The person gets `{ sent: true }` and no code. Only the `sms.not_sent` line shows it.
 - A region of one digit, such as `+1`, admits every country of that zone, with numbers of a high cost. List narrow prefixes.
 - The per-number limits read the number as given. Two E.164 forms of one handset, such as `+4407700900123` and `+447700900123`, each get their own count.
 - The daily cap counts in a fixed window. Up to 2 × `dailyCap` sends can go out in a short span across the end of a window. A new `dailyCap` starts a new count.
@@ -89,7 +90,6 @@ Send one real SMS through the port of your supplier. Then sign in with its code.
 - [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, expired, or spent. Ask for a new code.
 - [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): `phone.maxAttempts` wrong tries spent the code. Ask for a new code.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): too many requests from the IP or for the number. Wait 15 minutes, or a day after 10 codes to one number.
-- [`sms_unavailable`](/docs/reference/errors/#sms_unavailable): at `POST /phone/add`, the port did not send. Try again later.
 - [`phone_taken`](/docs/reference/errors/#phone_taken): another account stored the number first.
 - [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user for an unknown number.
 - [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `phone-request` refused the request.

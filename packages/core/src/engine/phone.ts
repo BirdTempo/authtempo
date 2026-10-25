@@ -286,7 +286,7 @@ export async function requestPhone(
     data: anonymousData(input.anonymous),
   } as const;
   if (!after) return sentAnswer(await sendPhoneCode(config, send));
-  after(sendLater(config, send));
+  after(sendLater(config, () => sendPhoneCode(config, send)));
   return ok({ sent: true });
 }
 
@@ -308,14 +308,14 @@ export const SEND_LATER_MS = 10_000;
  */
 async function sendLater(
   config: ResolvedConfig,
-  input: Parameters<typeof sendPhoneCode>[1],
+  send: () => Promise<Awaited<ReturnType<typeof sendPhoneCode>>>,
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const limit = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), SEND_LATER_MS);
   });
   try {
-    const answer = await Promise.race([sendPhoneCode(config, input), limit]);
+    const answer = await Promise.race([send(), limit]);
     if (answer === "capped" || answer === "unavailable" || answer === "timeout")
       config.observe.emit({ name: "sms.not_sent", reason: answer });
   } finally {
@@ -461,10 +461,16 @@ export interface PhoneAdd {
  * number gets a code bound to the user, with the number in its row. A
  * number that another user holds gets a note with no code and the same
  * answer. The note counts against the daily cap as a code does.
+ *
+ * With `after` (the route), the cap, the row, and the SMS of both branches
+ * run after the answer, as at `requestPhone` (ruling 44 of plan 12i). So
+ * the supplier time does not tell a held number. With no `after` (a call
+ * in process), the send runs before the answer.
  */
 export async function addPhone(
   config: ResolvedConfig,
   input: PhoneAdd,
+  after?: (work: Promise<unknown>) => void,
 ): Promise<Result<{ sent: true }>> {
   const phone = config.phone;
   if (!phone) return fail("not_found");
@@ -481,21 +487,26 @@ export async function addPhone(
   const holder = await config.storage.findOne("user", byPhone(number));
   // A taken number gets a decoy row and a note with no code. The writes are
   // the writes of a free number, so the time does not tell a held number (plan 12a).
-  if (holder && holder.id !== user.id)
-    return sentAnswer(
-      await countedSend(config, phone, number, async () => {
-        await issueCode(config, phone, "phone-add-otp", user.id, { phone: number, taken: true });
-        return () => takenNote(config);
-      }),
-    );
-  return sentAnswer(
-    await sendPhoneCode(config, {
-      purpose: "phone-add-otp",
-      identifier: user.id,
-      to: number,
-      data: { phone: number },
-    }),
-  );
+  const send =
+    holder && holder.id !== user.id
+      ? () =>
+          countedSend(config, phone, number, async () => {
+            await issueCode(config, phone, "phone-add-otp", user.id, {
+              phone: number,
+              taken: true,
+            });
+            return () => takenNote(config);
+          })
+      : () =>
+          sendPhoneCode(config, {
+            purpose: "phone-add-otp",
+            identifier: user.id,
+            to: number,
+            data: { phone: number },
+          });
+  if (!after) return sentAnswer(await send());
+  after(sendLater(config, send));
+  return ok({ sent: true });
 }
 
 export interface PhoneAddVerify {

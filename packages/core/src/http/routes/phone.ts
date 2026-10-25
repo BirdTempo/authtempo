@@ -83,13 +83,14 @@ export function phoneRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, addBody);
         if (!body.ok) return sent(respond(body), s.renewed);
+        // The send runs after the answer, so the time tells no held number (ruling 44 of plan 12i).
         return sent(
           respond(
-            await addPhone(ctx.config, {
-              session: s.resolved,
-              phone: body.value.phone,
-              ip: ctx.ip,
-            }),
+            await addPhone(
+              ctx.config,
+              { session: s.resolved, phone: body.value.phone, ip: ctx.ip },
+              ctx.waitUntil,
+            ),
           ),
           s.renewed,
         );

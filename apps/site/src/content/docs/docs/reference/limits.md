@@ -136,7 +136,7 @@ For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives it
 
 `password:email`, `password:username`, and `password:phone` count apart, one key for each kind of identifier. So from many IPs, one account with an address, a username, and a phone takes up to 30 guesses per 15 minutes. This is a known residual. A count per account would close it, but its 429 would tell that a phone and an address name one account. `password:ip` bounds each IP at 20 guesses.
 
-A phone code request sends its code after the answer. So a refusal of `phone-otp:all-day:deployment` at a request gives no 429. The answer stays `{ sent: true }`, and core writes one `sms.not_sent` line with the reason `capped`. A 429 there would come only on the branch that sends, so its time and status would tell whether a number has an account. Watch the line: it is the only sign that the cap stops codes.
+A phone code request and a phone add send their SMS after the answer. So a refusal of `phone-otp:all-day:deployment` at a request or an add gives no 429. The answer stays `{ sent: true }`, and core writes one `sms.not_sent` line with the reason `capped`. A 429 there would come only on the branch that sends, so its time and status would tell whether a number has an account. Watch the line: it is the only sign that the cap stops codes.
 
 The phone add counts on `phone-add:phone`, not on the two `phone-otp` keys of a number. So an add by another account spends no sign-in count of the person who holds the number.
 

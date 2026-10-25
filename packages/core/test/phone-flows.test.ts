@@ -3,7 +3,7 @@ import type { AuthConfig, PhoneConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { codeHash } from "../src/engine/email-otp.js";
 import { passwordSignIn } from "../src/engine/password.js";
-import { requestPhone, SEND_LATER_MS } from "../src/engine/phone.js";
+import { addPhone, requestPhone, SEND_LATER_MS } from "../src/engine/phone.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
@@ -394,7 +394,14 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       PORT_MS,
       inner,
       timed,
+      world: w,
+      auth,
       release: () => release(),
+      hold: () => {
+        held = new Promise<void>((r) => {
+          release = r;
+        });
+      },
       returned: () => returned - before,
     };
   }
@@ -416,6 +423,39 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     // The work after the answer sent the code to the known number only.
     expect(h.returned()).toBe(1);
     expect(h.inner.sent.at(-1)?.to).toBe(A);
+  });
+
+  it("answers an add of a held and a free number through handle before the SMS port returns (ruling 44)", async () => {
+    const h = await heldWorld();
+    h.release();
+    const w = h.world;
+    const bob = await addressUser(w, "bob@example.com");
+    h.hold();
+    const after: Promise<unknown>[] = [];
+    const timedAdd = async (phone: string) => {
+      const before = h.returned();
+      const t0 = performance.now();
+      const res = await h.auth.handle(
+        post("/auth/phone/add", { phone }, { cookie: bob.cookie, "cf-connecting-ip": w.ip() }),
+        { waitUntil: (p) => void after.push(p) },
+      );
+      return { ms: performance.now() - t0, portReturned: h.returned() - before, res };
+    };
+    const held = await timedAdd(A);
+    const free = await timedAdd(B);
+    h.release();
+    await Promise.all(after);
+    // Neither answer waited for the port: the note and the code went after it.
+    expect([held.portReturned, free.portReturned]).toEqual([0, 0]);
+    expect(free.res.status).toBe(held.res.status);
+    expect(await free.res.json()).toEqual(await held.res.json());
+    expect(held.ms).toBeLessThan(h.PORT_MS);
+    expect(Math.abs(held.ms - free.ms)).toBeLessThan(h.PORT_MS / 2);
+    // The work after the answer sent the note to A and a code to B.
+    expect(h.inner.sent.slice(-2).map((m) => [m.to, /^\d+ is your /.test(m.text)])).toEqual([
+      [A, false],
+      [B, true],
+    ]);
   });
 
   it("answers through handle with no waitUntil before the SMS port returns, off Workers (ruling 29)", async () => {
@@ -631,18 +671,31 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
   });
 
   it("counts the note to a taken number against the daily cap", async () => {
-    const w = world({ dailyCap: 2 });
-    await withPhone(w, "ada@example.com", A);
-    // The add of ada spent one send of the cap. The note to the taken number spends the second.
-    const bob = await addressUser(w, "bob@example.com");
-    expect((await add(w, bob.cookie, A)).body).toEqual({ sent: true });
-    const sent = w.sms.sent.length;
-    const capped = await add(w, bob.cookie, A);
-    expect(capped.status).toBe(429);
-    expect(capped.body).toEqual({ error: "rate_limited" });
-    expect(w.sms.sent).toHaveLength(sent);
-    // A free number now gets the same 429: the cap counts both kinds.
-    expect((await add(w, bob.cookie, B)).body).toEqual({ error: "rate_limited" });
+    const lines = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const w = world({ dailyCap: 2 });
+      await withPhone(w, "ada@example.com", A);
+      // The add of ada spent one send of the cap. The note to the taken number spends the second.
+      const bob = await addressUser(w, "bob@example.com");
+      expect((await add(w, bob.cookie, A)).body).toEqual({ sent: true });
+      const sent = w.sms.sent.length;
+      // The route sends after the answer (ruling 44): the cap gives a line, not a 429.
+      expect(await add(w, bob.cookie, A)).toMatchObject({ status: 200, body: { sent: true } });
+      expect(w.sms.sent).toHaveLength(sent);
+      expect(lines.mock.calls).toEqual([
+        ["authtempo: an SMS after the answer was not sent", "capped"],
+      ]);
+      // In process, the send runs before the answer. A free number gets the same 429:
+      // the cap counts both kinds.
+      const token = bob.cookie.slice(bob.cookie.indexOf("=") + 1);
+      const session = await resolveSession(w.config, token);
+      if (!session) throw new Error("no session");
+      const free = await addPhone(w.config, { session, phone: B, ip: null });
+      expect(free).toMatchObject({ ok: false, code: "rate_limited" });
+      expect(w.sms.sent).toHaveLength(sent);
+    } finally {
+      lines.mockRestore();
+    }
   });
 
   it("spends a right code in the transaction of the sign-in", async () => {
@@ -682,12 +735,18 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       expect((await add(w, me.cookie, phone)).body).toEqual({ error: code });
     }
     expect(w.sms.sent).toEqual([]);
-    // The port is down: the add answers 503 as the request does.
+    // The port is down: the add answers 200 and writes a line, as the request does (ruling 44).
+    const lines = vi.spyOn(console, "error").mockImplementation(() => {});
     w.sms.down(true);
-    const down = await add(w, me.cookie, A);
-    expect(down.status).toBe(503);
-    expect(down.body).toEqual({ error: "sms_unavailable" });
-    w.sms.down(false);
+    try {
+      expect(await add(w, me.cookie, A)).toMatchObject({ status: 200, body: { sent: true } });
+      expect(lines.mock.calls).toEqual([
+        ["authtempo: an SMS after the answer was not sent", "unavailable"],
+      ]);
+    } finally {
+      lines.mockRestore();
+      w.sms.down(false);
+    }
     // Three wrong guesses spend a code: the right code then answers too_many_attempts.
     await request(w, A);
     const signInCode = codeTo(w, A);

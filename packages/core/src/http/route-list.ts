@@ -1160,6 +1160,7 @@ export const ROUTES = Object.freeze([
     path: "/phone/add",
     feature: "phone",
     auth: ["session"],
+    // No sms_unavailable: the send runs after the answer (ruling 44 of plan 12i).
     codes: [
       "unauthorized",
       "invalid_body",
@@ -1168,7 +1169,6 @@ export const ROUTES = Object.freeze([
       "rate_limited",
       "phone_invalid",
       "phone_region",
-      "sms_unavailable",
       "impersonation_session",
       "anonymous_refused",
     ],
