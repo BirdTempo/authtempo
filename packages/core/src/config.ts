@@ -719,14 +719,15 @@ const RELATED_ORIGINS_MAX = 5;
  */
 function checkRpID(rpID: string): void {
   let host: string | null = null;
-  try {
-    // A scheme-relative URL on a reserved base: the parser reads `rpID` as the host.
-    const url = new URL(`//${rpID}`, "https://rp.invalid");
-    const bare = url.href === `https://${url.host}/` && url.port === "";
-    if (bare && !/[@:/?#\\]/.test(rpID)) host = url.hostname;
-  } catch {
-    host = null;
-  }
+  // With none of these characters, the parser finds no user part, port,
+  // path, query, or fragment.
+  if (!/[@:/?#\\]/.test(rpID))
+    try {
+      // A scheme-relative URL on a reserved base: the parser reads `rpID` as the host.
+      host = new URL(`//${rpID}`, "https://rp.invalid").hostname;
+    } catch {
+      host = null;
+    }
   if (host === null)
     throw new ConfigError(
       `passkey.rpID ${rpID} is not a host; write the host alone, with no user part, port, or path`,
