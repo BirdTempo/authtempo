@@ -42,6 +42,7 @@ import type {
   Member,
   Organization,
   OrganizationRoleData,
+  PluginUserFields,
   RoleRef,
   Team,
   TeamMember,
@@ -61,7 +62,22 @@ function toClientUser(u: PublicSession["user"]): ClientUser {
     image: u.image,
   };
 }
-/** The JSON of the shim's `/get-session` answer: Better Auth's session with the admin fields. */
+/**
+ * The fields of the sign-in plugins on a user of a shim answer, each only
+ * when the answer holds it (C M1 of the plan 12i final fix wave). The shim
+ * answers a field only with its server plugin on.
+ */
+function pluginFieldsOf(u: PluginUserFields): PluginUserFields {
+  return {
+    ...(u.isAnonymous !== undefined ? { isAnonymous: u.isAnonymous } : {}),
+    ...(u.username !== undefined ? { username: u.username } : {}),
+    ...(u.displayUsername !== undefined ? { displayUsername: u.displayUsername } : {}),
+    ...(u.phoneNumber !== undefined ? { phoneNumber: u.phoneNumber } : {}),
+    ...(u.phoneNumberVerified !== undefined ? { phoneNumberVerified: u.phoneNumberVerified } : {}),
+  };
+}
+
+/** The JSON of the shim's `/get-session` answer: Better Auth's session, with the admin fields under the admin plugin. */
 interface AdminSessionJSON {
   session: {
     id: string;
@@ -72,16 +88,22 @@ interface AdminSessionJSON {
     activeTeamId: string | null;
   };
   user: ClientUser & {
-    role: string;
-    banned: boolean;
-    banReason: string | null;
-    banExpires: string | null;
+    role?: string;
+    banned?: boolean;
+    banReason?: string | null;
+    banExpires?: string | null;
   };
   needsRefresh?: boolean;
 }
 
-/** The answer of the shim's `/get-session`, cut to the session keys and the user keys with the admin fields. */
-function toAdminClientSession(p: AdminSessionJSON): {
+/**
+ * The answer of the shim's `/get-session`, cut to the session keys, the
+ * user keys, and the plugin fields, with the admin fields when `admin` is true.
+ */
+function toShimClientSession(
+  p: AdminSessionJSON,
+  admin: boolean,
+): {
   session: ClientSession;
   user: ClientSessionUser;
 } {
@@ -96,17 +118,29 @@ function toAdminClientSession(p: AdminSessionJSON): {
     },
     user: {
       ...toClientUser(u),
-      role: u.role,
-      banned: u.banned,
-      banReason: u.banReason,
-      banExpires: u.banExpires === null ? null : new Date(u.banExpires),
+      ...pluginFieldsOf(u),
+      ...(admin
+        ? {
+            role: u.role ?? "user",
+            banned: u.banned === true,
+            banReason: u.banReason ?? null,
+            banExpires: typeof u.banExpires === "string" ? new Date(u.banExpires) : null,
+          }
+        : {}),
     },
   };
 }
 
-/** The user of a shim answer in the client's keys (plan 12i Task 16). */
+/** The user of a shim answer in the client's keys and the plugin fields (plan 12i Task 16). */
 function pickUser(u: ClientUser): ClientUser {
-  return { id: u.id, name: u.name, email: u.email, emailVerified: u.emailVerified, image: u.image };
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    emailVerified: u.emailVerified,
+    image: u.image,
+    ...pluginFieldsOf(u),
+  };
 }
 
 /** The shim's session JSON (shapes.ts toSession), with the dates as text. */
@@ -341,7 +375,8 @@ const keys =
   <T>() =>
   <const K extends readonly (keyof T)[]>(k: Exact<T, K>) =>
     k;
-export const CLIENT_USER_KEYS = keys<ClientUser>()([
+// The keys of every user. The plugin fields are there per client plugin.
+export const CLIENT_USER_KEYS = keys<Omit<ClientUser, keyof PluginUserFields>>()([
   "id",
   "name",
   "email",
@@ -463,6 +498,12 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
   const expo: ExpoClientOptions | null = expoPlugin ? expoPlugin.options : null;
   // With adminClient(), the session read goes to the shim's /get-session for the admin fields (plan 12f).
   const adminPlugin = options.plugins?.some((p) => p.id === "admin") ?? false;
+  // The client plugins of the sign-in plugins read it there too, for their user fields
+  // (C M1 of the plan 12i final fix wave): core's session answer holds no such field.
+  const fieldPlugin =
+    options.plugins?.some(
+      (p) => p.id === "anonymous" || p.id === "username" || p.id === "phone-number",
+    ) ?? false;
   const twoFactorPlugin = options.plugins?.find(
     (p): p is Extract<typeof p, { id: "two-factor" }> => p.id === "two-factor",
   );
@@ -609,7 +650,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
    * fields. A due session under deferSessionRefresh gets a POST there, and a
    * failed refresh keeps the GET answer, as `readSession` does with core.
    */
-  async function adminSession(
+  async function shimSession(
     quiet: boolean,
   ): Promise<CompatClientResult<{ session: ClientSession; user: ClientSessionUser } | null>> {
     const resolved = resolveBase();
@@ -637,7 +678,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     }
     if (r && answered(r)) {
       const json = r.json as AdminSessionJSON | null;
-      const data = json ? toAdminClientSession(json) : null;
+      const data = json ? toShimClientSession(json, adminPlugin) : null;
       if (fo.onSuccess && !quiet) await fo.onSuccess({ data, response: r.res, request: r.request });
       return { data, error: null };
     }
@@ -776,7 +817,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       undefined,
       quiet,
     );
-  const readSession = (quiet: boolean) => (adminPlugin ? adminSession(quiet) : coreSession(quiet));
+  const readSession = (quiet: boolean) =>
+    adminPlugin || fieldPlugin ? shimSession(quiet) : coreSession(quiet);
   const getSession = () => readSession(false);
   const store = createSessionStore(getSession);
 

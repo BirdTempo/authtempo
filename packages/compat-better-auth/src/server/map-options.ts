@@ -14,23 +14,22 @@ import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
 import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
-import {
-  type ApiKeyOptions,
-  type BetterAuthOptions,
-  COMPAT_PLUGIN,
-  type CompatDatabase,
-  type CompatPlugin,
-  type EmailOtpOptions,
-  type OrganizationOptions,
-  type PhoneNumberOptions,
-  type ScimScope,
-  type User,
+import type {
+  ApiKeyOptions,
+  BetterAuthOptions,
+  CompatDatabase,
+  EmailOtpOptions,
+  OrganizationOptions,
+  PhoneNumberOptions,
+  ScimScope,
+  User,
 } from "../types.js";
 import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
 import {
   appSchemes,
   DEFAULT_ROLE_RANKS,
   dynamicOrigins,
+  pluginIdsOf,
   pluginOf,
   signUpClosed,
 } from "./check-options.js";
@@ -597,11 +596,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   // The primary: core builds from it outside a request (plan 12i Task 18).
   const origin = url.origin;
   const database = options.database as CompatDatabase;
-  const plugins = new Set(
-    (options.plugins ?? [])
-      .filter((p) => (p as CompatPlugin).kind === COMPAT_PLUGIN)
-      .map((p) => p.id),
-  );
+  const plugins = pluginIdsOf(options);
   const magic = pluginOf(options, "magic-link");
   const org = pluginOf(options, "organization");
   const otp = pluginOf(options, "email-otp");
@@ -649,7 +644,15 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // Plan 12b: disableSignUp on every method that creates a user is core's
     // signUp false. checkOptions refuses a mix, so no other list reaches here.
     ...(signUpClosed(options) ? { signUp: false as const } : {}),
-    trustedOrigins: Array.isArray(options.trustedOrigins) ? [...options.trustedOrigins] : [],
+    // Better Auth 1.7.2 trusts each allowed host of a dynamic baseURL
+    // (dist/context/helpers.mjs:60-71, read 2026-10-25), so a page on one
+    // entry posts to another (C M2 of the plan 12i final fix wave).
+    trustedOrigins: [
+      ...new Set([
+        ...(Array.isArray(options.trustedOrigins) ? options.trustedOrigins : []),
+        ...origins,
+      ]),
+    ],
     ...(options.appName !== undefined ? { appName: options.appName } : {}),
     ...(options.authtempo?.appURL !== undefined ? { appURL: options.authtempo.appURL } : {}),
     // One name in this package (shapes.ts), passed to core, so core and the shim read one cookie.
@@ -661,6 +664,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       origins: origins.length > 0 ? origins : [origin],
       basePath,
       storage: database.storage,
+      plugins,
       sendResetPassword: ep?.sendResetPassword,
       sendVerificationEmail: options.emailVerification?.sendVerificationEmail,
       sendMagicLink: magic?.options.sendMagicLink,

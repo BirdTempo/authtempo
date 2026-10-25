@@ -81,6 +81,8 @@ export interface MailRoutes {
   origins: readonly string[];
   basePath: string;
   storage: StorageAdapter;
+  /** The ids of the compat plugins in use: the user of each callback carries their fields. */
+  plugins: ReadonlySet<string>;
   sendResetPassword?: SendEmail | undefined;
   sendVerificationEmail?: SendEmail | undefined;
   sendMagicLink?: MagicLinkOptions["sendMagicLink"] | undefined;
@@ -110,7 +112,7 @@ export function compatMail(routes: MailRoutes): MailPort {
   const at = (link: string, path: string) => prefixes.some((p) => link.startsWith(`${p}${path}`));
   const userByEmail = async (email: string) => {
     const u = await routes.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
-    return u ? toUser(u) : null;
+    return u ? toUser(u, routes.plugins) : null;
   };
   // The verify mail follows a sign-up, so its user row exists; a missing row is a bug.
   const knownUser = async (email: string) => {
@@ -146,7 +148,7 @@ export function compatMail(routes: MailRoutes): MailPort {
           role: row.role,
           email: row.email,
           organization: toOrganization(org),
-          inviter: { user: toUser(inviter) },
+          inviter: { user: toUser(inviter, routes.plugins) },
           invitation,
         };
         await cb(data);
@@ -214,7 +216,7 @@ export function compatMail(routes: MailRoutes): MailPort {
           : null;
         if (!owner) throw new Error("authtempo compat: the user of this change is gone");
         await routes.sendVerificationEmail({
-          user: { ...toUser(owner), email: message.to },
+          user: { ...toUser(owner, routes.plugins), email: message.to },
           url: link,
           token,
         });
@@ -233,7 +235,7 @@ export function compatMail(routes: MailRoutes): MailPort {
           ? await routes.storage.findOne("user", [{ field: "id", op: "eq", value: row.identifier }])
           : null;
         if (!owner) throw new Error("authtempo compat: the user of this delete is gone");
-        await cb({ user: toUser(owner), url: link, token });
+        await cb({ user: toUser(owner, routes.plugins), url: link, token });
         return;
       }
       throw new Error(

@@ -209,12 +209,12 @@ export async function sessionAnswerOf(
   // With the admin plugin, Better Auth's user holds role and the ban fields (plan 12f, ruling 53).
   const adminFields =
     mapped.platformRole !== null
-      ? toAdminUser(s.user, await roleOf(mapped, s.user.id), new Date())
+      ? toAdminUser(s.user, mapped.plugins, await roleOf(mapped, s.user.id), new Date())
       : null;
   return {
     session: adminFields ? toAdminSession(s.session, token) : toSession(s.session, token),
     user: {
-      ...(adminFields ?? toUser(s.user)),
+      ...(adminFields ?? toUser(s.user, mapped.plugins)),
       ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
     },
     ...(s.needsRefresh !== undefined ? { needsRefresh: s.needsRefresh } : {}),
@@ -292,25 +292,32 @@ export function createApi(
         mapped.config.password?.requireVerified === true
       ) {
         const now = new Date();
+        // The synthetic user holds the typed username as a new user's row
+        // would, so the answer does not tell a taken address. The two forms
+        // follow core's normalizeUsername: NFKC, then lower case for the stored form.
+        const typed = username?.normalize("NFKC") ?? null;
         return {
           token: null,
-          user: toUser({
-            id: newId(now),
-            // Core answered email_taken, so the address is well-formed.
-            email: normalizeEmail(body.email) ?? body.email,
-            emailVerified: false,
-            name: body.name !== "" ? body.name : null,
-            image: null,
-            bannedAt: null,
-            banReason: null,
-            banUntil: null,
-            username: null,
-            displayUsername: null,
-            phone: null,
-            isAnonymous: false,
-            createdAt: now,
-            updatedAt: now,
-          }),
+          user: toUser(
+            {
+              id: newId(now),
+              // Core answered email_taken, so the address is well-formed.
+              email: normalizeEmail(body.email) ?? body.email,
+              emailVerified: false,
+              name: body.name !== "" ? body.name : null,
+              image: null,
+              bannedAt: null,
+              banReason: null,
+              banUntil: null,
+              username: typed?.toLowerCase() ?? null,
+              displayUsername: typed,
+              phone: null,
+              isAnonymous: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+            mapped.plugins,
+          ),
         };
       }
       const v = unwrap(r);
@@ -321,8 +328,8 @@ export function createApi(
       // clear fault, not a wrong answer.
       if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
       // Core's answer while requireVerified is on: the user and no session.
-      if (!("token" in v)) return { token: null, user: toUser(v.user) };
-      return { token: v.token, user: toUser(v.user) };
+      if (!("token" in v)) return { token: null, user: toUser(v.user, mapped.plugins) };
+      return { token: v.token, user: toUser(v.user, mapped.plugins) };
     },
     async signInEmail({ body, headers }) {
       // Each would be dropped in silence: core answers a token, not a redirect,
@@ -361,7 +368,12 @@ export function createApi(
         ]);
         return { twoFactorRedirect: true, twoFactorMethods: ["totp"] };
       }
-      return { redirect: false, token: v.token, url: undefined, user: toUser(v.user) };
+      return {
+        redirect: false,
+        token: v.token,
+        url: undefined,
+        user: toUser(v.user, mapped.plugins),
+      };
     },
     async signOut({ headers }) {
       const token = readToken(headers);

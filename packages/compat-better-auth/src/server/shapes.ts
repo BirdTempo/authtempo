@@ -17,6 +17,7 @@ import type {
   Member,
   Organization,
   Passkey,
+  PluginUserFields,
   Session,
   Team,
   TeamMember,
@@ -41,7 +42,26 @@ export function shownAddress(user: { id: string; email: string | null }): string
   return user.email ?? `${user.id}@anonymous.placeholder.invalid`;
 }
 
-export function toUser(u: UserRow): User {
+/**
+ * The fields of the anonymous, username, and phone-number plugins of one
+ * row, each only with its plugin in `plugins` (C M1 of the plan 12i final
+ * fix wave). Better Auth answers them on each user, as the shim does with
+ * `twoFactorEnabled`.
+ */
+export function pluginUserFields(u: UserRow, plugins: ReadonlySet<string>): PluginUserFields {
+  return {
+    ...(plugins.has("anonymous") ? { isAnonymous: u.isAnonymous } : {}),
+    ...(plugins.has("username")
+      ? { username: u.username, displayUsername: u.displayUsername }
+      : {}),
+    ...(plugins.has("phone-number")
+      ? { phoneNumber: u.phone, phoneNumberVerified: u.phone !== null }
+      : {}),
+  };
+}
+
+/** Better Auth's user of one row. `plugins` holds the ids of the compat plugins in use. */
+export function toUser(u: UserRow, plugins: ReadonlySet<string>): User {
   return {
     id: u.id,
     name: u.name ?? "",
@@ -50,6 +70,7 @@ export function toUser(u: UserRow): User {
     image: u.image,
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
+    ...pluginUserFields(u, plugins),
   };
 }
 
@@ -172,7 +193,8 @@ const keys =
   <T>() =>
   <const K extends readonly (keyof T)[]>(k: Exact<T, K>) =>
     k;
-export const USER_KEYS = keys<User>()([
+// The keys of every user. The plugin fields are there per plugin (pluginUserFields).
+export const USER_KEYS = keys<Omit<User, keyof PluginUserFields>>()([
   "id",
   "name",
   "email",

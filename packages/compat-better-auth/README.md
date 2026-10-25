@@ -227,7 +227,7 @@ Better Auth defaults that core does not keep:
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
-| `baseURL` takes `{ allowedHosts, fallback, protocol }` with wildcard hosts, and `protocol: "auto"` reads `x-forwarded-proto` | Each host must be exact, and `protocol` must be `https` or `http`; a wildcard, `auto`, and no `protocol` are refused. The hosts map to core's `baseURL` list, and a `fallback` equal to one of them is the primary. Core picks the host from the request URL and reads no proxy header. The shim builds its own paths, SSO URLs, and mail links on that host. A wildcard on a shared platform lets any customer of the platform own a host of the issuer. |
+| `baseURL` takes `{ allowedHosts, fallback, protocol }` with wildcard hosts, and `protocol: "auto"` reads `x-forwarded-proto` | Each host must be exact, and `protocol` must be `https` or `http`; a wildcard, `auto`, and no `protocol` are refused. The hosts map to core's `baseURL` list, and a `fallback` equal to one of them is the primary. Core picks the host from the request URL and reads no proxy header. The shim builds its own paths, SSO URLs, and mail links on that host. Each host is also a trusted origin, as in Better Auth, so a page on one host posts to another. A wildcard on a shared platform lets any customer of the platform own a host of the issuer. |
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
 `callbackURL` or `image`, and `api.signInEmail` with `callbackURL` or
@@ -1044,6 +1044,17 @@ throws `APIError` on a refusal.
 `signUp.email` and `update-user` take `username`. `displayUsername` must be
 the typed username or absent: core keeps the typed case as
 `displayUsername`, and another value answers `NOT_SUPPORTED`.
+
+Each user that the server answers holds the fields of these plugins, as in
+Better Auth: `isAnonymous` with `anonymous`, `username` and
+`displayUsername` with `username`, and `phoneNumber` and
+`phoneNumberVerified` with `phoneNumber`. The hooks get them too.
+`phoneNumber` is the proved number or null, because core does not read a
+number that Better Auth stored with no proof. With `anonymousClient`,
+`usernameClient`, or `phoneNumberClient`, the client reads its session at
+the shim's `/get-session`, which holds the fields. An answer of a core
+route to the client, such as the email sign-in, holds the five user keys
+only. Read the session for the fields.
 
 The settings that Better Auth does not have:
 

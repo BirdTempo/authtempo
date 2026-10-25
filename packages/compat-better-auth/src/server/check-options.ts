@@ -1286,6 +1286,15 @@ export function pluginOf<I extends CompatPlugin["id"]>(
   return null;
 }
 
+/** The ids of the compat plugins in use: the one set that `mapOptions` and `compatHooks` read. */
+export function pluginIdsOf(options: BetterAuthOptions): Set<string> {
+  return new Set(
+    (options.plugins ?? [])
+      .filter((p) => (p as CompatPlugin).kind === COMPAT_PLUGIN)
+      .map((p) => p.id),
+  );
+}
+
 /**
  * The disableSignUp of each configured method that creates a user (plan 12b),
  * by its option path. `checkOptions` refuses a mixed list, and `mapOptions`

@@ -8,7 +8,12 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import readme from "../README.md?raw";
 import { betterAuthMethod, createAuthClient } from "../src/client/create-auth-client.js";
-import { lastLoginMethodClient } from "../src/client/plugins.js";
+import {
+  anonymousClient,
+  lastLoginMethodClient,
+  phoneNumberClient,
+  usernameClient,
+} from "../src/client/plugins.js";
 import { APIError } from "../src/errors.js";
 import {
   anonymous,
@@ -24,6 +29,7 @@ import {
 import { createHandler } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
+import { USER_KEYS } from "../src/server/shapes.js";
 import type {
   BetterAuthOptions,
   CompatDatabase,
@@ -1053,5 +1059,98 @@ describe("the host's waitUntil at the sign-up code resend (ruling 39 Info 5, Tas
     expect(readme).toContain(
       "the handler waits for the mail on Workers. Then the answer time tells an",
     );
+  });
+});
+
+// C M1 of the plan 12i final fix wave (probe C5 of final-12i-C). Better Auth
+// 1.7.2 returns the fields of these plugins on each user:
+// anonymous/schema.mjs:2 and index.mjs:87, username/schema.mjs:9,
+// phone-number/schema.mjs:8 and :13 (read 2026-10-25).
+describe("the user fields of the anonymous, username, and phone-number plugins", () => {
+  /** A client of the handler that sends the browser's cookies and keeps its own. */
+  const clientOf = (
+    handler: (r: Request) => Promise<Response>,
+    cookie: () => string,
+    plugins: ReturnType<typeof anonymousClient>[],
+  ) =>
+    createAuthClient({
+      baseURL: `${BASE}/api/auth`,
+      fetchOptions: {
+        customFetchImpl: async (input, init) => {
+          const req = new Request(input, init);
+          req.headers.set("cookie", cookie());
+          return handler(req);
+        },
+      },
+      plugins,
+    });
+
+  it("answers isAnonymous at the sign-in, at get-session, at auth.api.getSession, and in the client", async () => {
+    const t = await betterAuthTables();
+    const auth = betterAuth(signInOptions(t.database, { plugins: [anonymous()] }));
+    const b = browser(auth.handler);
+    const signedIn = await b.send("/sign-in/anonymous", {});
+    expect(signedIn.status).toBe(200);
+    const a = (await json(signedIn)).user as Record<string, unknown>;
+    const s = await b.send("/get-session");
+    const got = ((await json(s)) as { user: Record<string, unknown> }).user;
+    const api = await auth.api.getSession({ headers: new Headers({ cookie: b.jar.header() }) });
+    const client = clientOf(auth.handler, () => b.jar.header(), [anonymousClient()]);
+    const read = await client.getSession();
+    expect({
+      signIn: a.isAnonymous,
+      getSession: got.isAnonymous,
+      api: api?.user.isAnonymous,
+      client: read.data?.user.isAnonymous,
+      db: t.row('SELECT isAnonymous FROM "user" WHERE id = ?', a.id),
+    }).toEqual({ signIn: true, getSession: true, api: true, client: true, db: { isAnonymous: 1 } });
+    // The keys: the user keys and isAnonymous, no field of a plugin that is off.
+    expect(Object.keys(got).sort()).toEqual([...USER_KEYS, "isAnonymous"].sort());
+    // A user who is not anonymous reads false.
+    const up = await auth.api.signUpEmail({
+      body: { email: "ada@example.com", password: PASSWORD, name: "Ada" },
+    });
+    expect(up.user.isAnonymous).toBe(false);
+  });
+
+  it("answers username, displayUsername, phoneNumber, and phoneNumberVerified with both plugins on", async () => {
+    const t = await betterAuthTables();
+    const sent: { phoneNumber: string; code: string }[] = [];
+    const base = phoneOptions(t.database, sent);
+    const auth = betterAuth({ ...base, plugins: [...(base.plugins ?? []), username()] });
+    const up = await auth.api.signUpEmail({
+      body: { email: "ada@example.com", password: PASSWORD, name: "Ada", username: "Ada.L" },
+    });
+    const fields = { username: "ada.l", displayUsername: "Ada.L", phoneNumber: null };
+    expect(up.user).toMatchObject({ ...fields, phoneNumberVerified: false });
+    const ada = browser(auth.handler);
+    const byName = await ada.send("/sign-in/username", { username: "ada.l", password: PASSWORD });
+    expect((await json(byName)).user).toMatchObject({ ...fields, phoneNumberVerified: false });
+    // A phone sign-up: the proved number, and no username.
+    const pat = browser(auth.handler);
+    await pat.send("/phone-number/send-otp", { phoneNumber: "+14155550177" });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    const verified = await pat.send("/phone-number/verify", {
+      phoneNumber: "+14155550177",
+      code: sent[0]?.code,
+    });
+    const phoneFields = {
+      username: null,
+      displayUsername: null,
+      phoneNumber: "+14155550177",
+      phoneNumberVerified: true,
+    };
+    expect((await json(verified)).user).toMatchObject(phoneFields);
+    const s = await pat.send("/get-session");
+    const got = ((await json(s)) as { user: Record<string, unknown> }).user;
+    expect(got).toMatchObject(phoneFields);
+    expect(Object.keys(got).sort()).toEqual(
+      [...USER_KEYS, "username", "displayUsername", "phoneNumber", "phoneNumberVerified"].sort(),
+    );
+    const client = clientOf(auth.handler, () => pat.jar.header(), [
+      usernameClient(),
+      phoneNumberClient(),
+    ]);
+    expect((await client.getSession()).data?.user).toMatchObject(phoneFields);
   });
 });

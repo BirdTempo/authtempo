@@ -16,8 +16,31 @@ import type { AccessControl, Role } from "./access.js";
 // src/client/create-auth-client.ts build object literals under these types, so a
 // field added here and not filled there fails the compile (Review Focus 4).
 
+/**
+ * The user fields of Better Auth 1.7.2's sign-in plugins (final fix wave of
+ * plan 12i, C M1). Each schema marks them returned (anonymous/schema.mjs:2,
+ * username/schema.mjs:9, phone-number/schema.mjs:8 and :13, read
+ * 2026-10-25). A field is there only when its plugin is on.
+ */
+export interface PluginUserFields {
+  /** The anonymous plugin: true for an anonymous user. */
+  isAnonymous?: boolean;
+  /** The username plugin: the stored name, or null. */
+  username?: string | null;
+  /** The username plugin: the name in the case that the person typed, or null. */
+  displayUsername?: string | null;
+  /**
+   * The phone-number plugin: the proved number, or null. Core reads a
+   * number of a Better Auth row only with `phoneNumberVerified` true, so an
+   * unproved number reads as null.
+   */
+  phoneNumber?: string | null;
+  /** The phone-number plugin: true when `phoneNumber` holds a number. */
+  phoneNumberVerified?: boolean;
+}
+
 /** Better Auth's user as the server answers it. `name` is "" when core holds no name. */
-export interface User {
+export interface User extends PluginUserFields {
   id: string;
   name: string;
   email: string;
@@ -1471,7 +1494,11 @@ export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOpti
 
 // The client.
 
-export interface ClientUser {
+/**
+ * The user of the client. The fields of `PluginUserFields` are there with
+ * their client plugin, on each answer of a shim path and on the session read.
+ */
+export interface ClientUser extends PluginUserFields {
   id: string;
   name: string;
   email: string;

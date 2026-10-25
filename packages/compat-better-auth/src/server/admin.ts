@@ -265,13 +265,14 @@ const BAN_YOURSELF = "YOU_CANNOT_BAN_YOURSELF";
  */
 export function toAdminUser(
   row: UserRow,
+  plugins: ReadonlySet<string>,
   role: string,
   now: Date,
   twoFactorEnabled?: boolean,
 ): AdminUser {
   const holds = activeBan(row, now);
   return {
-    ...toUser(row),
+    ...toUser(row, plugins),
     role,
     banned: holds,
     banReason: holds ? row.banReason : null,
@@ -297,7 +298,13 @@ async function factorsOf(mapped: Mapped, ids: readonly string[]): Promise<Set<st
 /** Better Auth's admin user of one row, with `twoFactorEnabled` from one factor read. */
 async function adminUserOf(mapped: Mapped, row: UserRow, role: string): Promise<AdminUser> {
   const factors = await factorsOf(mapped, [row.id]);
-  return toAdminUser(row, role, new Date(), factors ? factors.has(row.id) : undefined);
+  return toAdminUser(
+    row,
+    mapped.plugins,
+    role,
+    new Date(),
+    factors ? factors.has(row.id) : undefined,
+  );
 }
 
 /**
@@ -677,6 +684,7 @@ async function usersOf(
       out.push(
         toAdminUser(
           row,
+          mapped.plugins,
           u.platformOperator ? platformRole : USER_ROLE,
           now,
           factors ? factors.has(row.id) : undefined,

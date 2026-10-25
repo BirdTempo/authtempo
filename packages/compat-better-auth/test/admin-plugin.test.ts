@@ -668,7 +668,7 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       createdAt: now,
       updatedAt: now,
     };
-    expect(Object.keys(toAdminUser(row, "user", now))).not.toContain("twoFactorEnabled");
+    expect(Object.keys(toAdminUser(row, new Set(), "user", now))).not.toContain("twoFactorEnabled");
   });
 
   it("gives the client session the role and the ban fields with adminClient() (ruling 54)", async () => {

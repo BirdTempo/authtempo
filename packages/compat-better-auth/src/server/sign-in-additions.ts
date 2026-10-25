@@ -119,7 +119,7 @@ export async function signInAdditionsRoute(
         ? await mapped.config.storage.findOne("user", [{ field: "id", op: "eq", value: id }])
         : null;
     if (!row) throw new Error("authtempo compat: the signed-in user is gone");
-    return toUser(row);
+    return toUser(row, mapped.plugins);
   };
   /** Better Auth's `{ token, user }` of a core sign-in answer. */
   const signedIn = async (b: Body) => ({
@@ -362,7 +362,7 @@ async function sessionPair(mapped: Mapped, id: unknown): Promise<{ session: Sess
     ? await storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }])
     : null;
   if (!row || !user) throw new Error("authtempo compat: the active session is gone");
-  return { session: toSession(row, row.id), user: toUser(user) };
+  return { session: toSession(row, row.id), user: toUser(user, mapped.plugins) };
 }
 
 /**
@@ -384,7 +384,9 @@ async function deviceSessions(mapped: Mapped, core: Core): Promise<Response> {
     return ids.flatMap((id) => {
       const row = rows.find((r) => r.id === id);
       const user = row ? byId.get(row.userId) : undefined;
-      return row && user ? [{ session: toSession(row, row.id), user: toUser(user) }] : [];
+      return row && user
+        ? [{ session: toSession(row, row.id), user: toUser(user, mapped.plugins) }]
+        : [];
     });
   });
 }

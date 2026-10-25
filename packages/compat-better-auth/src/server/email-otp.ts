@@ -163,7 +163,7 @@ export async function emailOtpRoute(
       // (routes.mjs:736), after its code check. The shim calls it before
       // core's route, so before core's code check. A thrown APIError refuses.
       if (mapped.changeVerifyBefore) {
-        const refused = await callBefore(mapped.changeVerifyBefore, toUser(s.user));
+        const refused = await callBefore(mapped.changeVerifyBefore, toUser(s.user, mapped.plugins));
         if (refused) return refused;
       }
     }
@@ -205,7 +205,7 @@ export async function emailOtpRoute(
         return {
           status: true,
           token: typeof b.token === "string" ? b.token : null,
-          user: toUser(row),
+          user: toUser(row, mapped.plugins),
         };
       },
     );
@@ -226,7 +226,7 @@ export async function emailOtpRoute(
           ? await mapped.config.storage.findOne("user", [{ field: "id", op: "eq", value: id }])
           : null;
       if (!row) throw new Error("authtempo compat: the signed-in user is gone");
-      return { token: b.token, user: toUser(row) };
+      return { token: b.token, user: toUser(row, mapped.plugins) };
     });
   }
   // RESET

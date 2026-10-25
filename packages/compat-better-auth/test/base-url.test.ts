@@ -68,6 +68,36 @@ describe("the base URL list through the shim (plan 12i Task 18)", () => {
     expect(mapOptions(local).config.baseURL).toEqual(["http://localhost:8787"]);
   });
 
+  // C M2 of the plan 12i final fix wave (probe C2 of final-12i-C). Better
+  // Auth 1.7.2 trusts each allowed host (dist/context/helpers.mjs:60-71, read 2026-10-25).
+  it("trusts each entry of the list as an origin, as Better Auth does, beside the app's list", async () => {
+    const o = {
+      ...options({ allowedHosts: ["a.example", "b.example"], protocol: "https" }),
+      trustedOrigins: ["https://app.example", "https://a.example"],
+    };
+    expect(mapOptions(o).config.trustedOrigins).toEqual([
+      "https://app.example",
+      "https://a.example",
+      "https://b.example",
+    ]);
+    const auth = betterAuth(o);
+    const post = (from: string) =>
+      auth.handler(
+        new Request("https://b.example/api/auth/sign-out", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: from },
+          body: "{}",
+        }),
+      );
+    const fromA = await post("https://a.example");
+    const fromOther = await post("https://evil.example");
+    expect([fromA.status, fromOther.status, (await fromOther.json()).code]).toEqual([
+      200,
+      403,
+      "INVALID_ORIGIN",
+    ]);
+  });
+
   it("refuses a wildcard host and protocol auto with their reasons", () => {
     expect(
       baseRefusals(options({ allowedHosts: ["a.example", "*.vercel.app"], protocol: "https" })),
