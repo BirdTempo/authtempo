@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import { requestEmailOtp, requestResetOtp } from "../../src/engine/email-otp.js";
+import { SESSION_VIA, type SessionVia } from "../../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
 import {
   passkeyAuthenticationOptions,
@@ -8,12 +9,14 @@ import {
   verifyPasskeyRegistration,
 } from "../../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../../src/engine/password.js";
+import { addPhone, requestPhone, verifyAddPhone } from "../../src/engine/phone.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { setUsername } from "../../src/engine/username.js";
 import type { PasswordHashSeam } from "../../src/seams/password-hash.js";
+import { createRecordingSms } from "../../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "../helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled, tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
 import { GOOGLE, tokenEndpoint } from "../social-helpers.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
@@ -31,18 +34,54 @@ afterEach(() => {
 const ADA = "ada@acme.example";
 const PASSWORD = "correct horse battery";
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
+const ADA_PHONE = "+14155550100";
 
-/** The engine with every first factor: the password, the magic link, the email code, Google, and passkeys. */
+/**
+ * The engine with every first factor: the password, the magic link, the
+ * email code, Google, passkeys, and the phone code. `sms` holds the SMS.
+ */
 function world(extra: Partial<AuthConfig> = {}) {
   const { fetchFn } = tokenEndpoint("idtok-google");
-  return ssoSignInWorld({
+  const sms = createRecordingSms();
+  const w = ssoSignInWorld({
     social: { google: GOOGLE, fetch: fetchFn },
     passkey: RP,
     password: { hash: FAST, uniformSignUp: false },
     // Plan 12i Task 3: the password sign-in by username.
     username: {},
+    // Plan 12i Task 5: the phone code sign-in and the password sign-in by phone.
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
     ...extra,
   });
+  return { ...w, sms };
+}
+
+type World = ReturnType<typeof world>;
+
+/** The code of the last SMS to `phone`. */
+const smsCodeOf = (w: World, phone: string) =>
+  /^(\d+) /.exec(w.sms.sent.findLast((m) => m.to === phone)?.text ?? "")?.[1] ?? "";
+
+/** A fresh session of `email` by the password. */
+async function sessionOf(w: World, email = ADA) {
+  const s = await passwordSignIn(w.config, {
+    email,
+    password: PASSWORD,
+    ip: null,
+    userAgent: null,
+  });
+  if (!s.ok || !("token" in s.value)) throw new Error("no session");
+  const session = await resolveSession(w.config, s.value.token);
+  if (!session) throw new Error("no session");
+  return session;
+}
+
+/** The user of `email` adds `phone` through the add flow. */
+async function addPhoneOf(w: World, phone = ADA_PHONE, email = ADA): Promise<void> {
+  const session = await sessionOf(w, email);
+  must(await addPhone(w.config, { session, phone, ip: null }));
+  const code = smsCodeOf(w, phone);
+  must(await verifyAddPhone(w.config, { session, code, ip: null, userAgent: null }));
 }
 
 /** A Google sign-in through the routes, whose ID token names `sub` and `email`. */
@@ -77,15 +116,18 @@ async function answerOf(res: Response): Promise<{ status: number; code: string |
 
 interface Door {
   name: string;
+  /** The `SessionVia` of the session that the door opens with enforce off. */
+  via: SessionVia;
   /** JSON: the door answers a JSON body. Else a redirect with `auth_error`. */
   json: boolean;
   /** Runs before the enforce flag, and answers the call of the door. */
-  prepare(w: SsoWorld): Promise<() => Promise<Response>>;
+  prepare(w: World): Promise<() => Promise<Response>>;
 }
 
 const DOORS: Door[] = [
   {
     name: "the password sign-in",
+    via: "password",
     json: true,
     async prepare(w) {
       return () => w.handle(post("/auth/password/sign-in", { email: ADA, password: PASSWORD }));
@@ -95,24 +137,41 @@ const DOORS: Door[] = [
     // Plan 12i Task 3: a username names its address only through the user
     // row, so the check runs after the password, and the answer is the same.
     name: "the password sign-in by username",
+    via: "password",
     json: true,
     async prepare(w) {
-      const s = await passwordSignIn(w.config, {
-        email: ADA,
-        password: PASSWORD,
-        ip: null,
-        userAgent: null,
-      });
-      if (!s.ok || !("token" in s.value)) throw new Error("no session");
-      const session = await resolveSession(w.config, s.value.token);
-      if (!session) throw new Error("no session");
+      const session = await sessionOf(w);
       must(await setUsername(w.config, { session, username: "Ada", ip: null, userAgent: null }));
       return () =>
         w.handle(post("/auth/password/sign-in", { username: "ada", password: PASSWORD }));
     },
   },
   {
+    // Plan 12i Task 3: the check runs after the password, as by username.
+    name: "the password sign-in by phone",
+    via: "password",
+    json: true,
+    async prepare(w) {
+      await addPhoneOf(w);
+      return () =>
+        w.handle(post("/auth/password/sign-in", { phone: ADA_PHONE, password: PASSWORD }));
+    },
+  },
+  {
+    // Plan 12i Task 5: a code sent before enforce went on (final review A H1).
+    name: "the phone code verify",
+    via: "phone",
+    json: true,
+    async prepare(w) {
+      await addPhoneOf(w);
+      must(await requestPhone(w.config, { phone: ADA_PHONE, ip: null }));
+      const code = smsCodeOf(w, ADA_PHONE);
+      return () => w.handle(post("/auth/phone/verify", { phone: ADA_PHONE, code }));
+    },
+  },
+  {
     name: "the password sign-up of a new address of the domain",
+    via: "password",
     json: true,
     async prepare(w) {
       return () =>
@@ -121,6 +180,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a first password",
+    via: "password",
     json: true,
     async prepare(w) {
       // Pat signs in by a magic link, so Pat has no password row.
@@ -134,6 +194,7 @@ const DOORS: Door[] = [
   },
   {
     name: "the magic link verify",
+    via: "magic_link",
     json: true,
     async prepare(w) {
       const sent = await requestMagicLink(w.config, { email: ADA, ip: null });
@@ -144,6 +205,7 @@ const DOORS: Door[] = [
   },
   {
     name: "the email code verify",
+    via: "email_otp",
     json: true,
     async prepare(w) {
       const sent = await requestEmailOtp(w.config, { email: ADA, ip: null });
@@ -154,6 +216,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a social callback with the address",
+    via: "social",
     json: false,
     async prepare(w) {
       return () => google(w, ADA);
@@ -161,6 +224,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a social callback of the linked identity with another address",
+    via: "social",
     json: false,
     async prepare(w) {
       return () => google(w, "ada@mail.example");
@@ -169,6 +233,7 @@ const DOORS: Door[] = [
   // Ruling 38 of plan 12d: a proof that was mailed or written before enforce went on.
   {
     name: "a reset link mailed before enforce",
+    via: "password",
     json: true,
     async prepare(w) {
       must(await requestPasswordReset(w.config, { email: ADA, ip: null }));
@@ -178,6 +243,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a reset code mailed before enforce",
+    via: "email_otp",
     json: true,
     async prepare(w) {
       must(await requestResetOtp(w.config, { email: ADA, ip: null }));
@@ -187,6 +253,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a sign-up verify link mailed before enforce",
+    via: "password",
     json: true,
     async prepare(w) {
       const email = "neo@acme.example";
@@ -199,6 +266,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a second factor challenge written before enforce",
+    via: "password",
     json: true,
     async prepare(w) {
       const email = "tia@acme.example";
@@ -217,6 +285,7 @@ const DOORS: Door[] = [
   },
   {
     name: "a passkey sign-in",
+    via: "passkey",
     json: true,
     async prepare(w) {
       const user = await w.storage.findOne("user", [{ field: "email", op: "eq", value: ADA }]);
@@ -238,6 +307,18 @@ const DOORS: Door[] = [
     },
   },
 ];
+
+/**
+ * The `SessionVia` values with no door, each with its reason. Every other
+ * value needs a door in `DOORS`, so a new first factor fails the test below
+ * until it gets one (final review A H1 of plan 12i).
+ */
+const NO_DOOR: Partial<Record<SessionVia, string>> = {
+  sso: "the SSO sign-in is the door that enforce sends the person to",
+  anonymous: "an anonymous user has no address, so no domain claims it",
+  handoff: "a handoff carries a session that a door opened before",
+  impersonation: "an operator acts as the user; the person signs in at no door",
+};
 
 /**
  * Ada of acme.example with a password, a Google identity, and the door's
@@ -269,15 +350,28 @@ function must(r: { ok: boolean; code?: string }): void {
 }
 
 /** The ids of the session rows. */
-const sessionIds = async (w: SsoWorld) =>
+const sessionIds = async (w: World) =>
   new Set((await w.storage.findMany("session", [])).map((s) => s.id));
 
 /** The session rows that came after `before`. */
-async function newSessions(w: SsoWorld, before: Set<string>): Promise<number> {
+async function newSessions(w: World, before: Set<string>): Promise<number> {
   return [...(await sessionIds(w))].filter((id) => !before.has(id)).length;
 }
 
 describe("the enforcement of a domain (plan 12d Task 5)", () => {
+  it("has a door for each SessionVia value but the named exceptions", () => {
+    const vias = Object.keys(SESSION_VIA) as SessionVia[];
+    const withDoor = new Set(DOORS.map((d) => d.via));
+    for (const via of vias) {
+      const reason = NO_DOOR[via];
+      expect({ via, door: withDoor.has(via), reason: reason !== undefined }).toEqual({
+        via,
+        door: reason === undefined,
+        reason: reason !== undefined,
+      });
+    }
+  });
+
   it.each(DOORS)("refuses every first factor of an enforced domain: $name", async (door) => {
     const { w, call, start } = await scene(door, true);
     const before = await sessionIds(w);
@@ -376,6 +470,29 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
       expect(await request()).toEqual({ ok: true, value: { sent: true } });
       expect(w.mail.length - sent).toBe(1);
     }
+  });
+
+  it("sends no phone code to a user of an enforced address", async () => {
+    // Final review A H1 of plan 12i: in process, and on the route after the answer.
+    const door = DOORS.find((d) => d.name === "the password sign-in by phone") as Door;
+    const { w } = await scene(door, true);
+    const route = settled(w.handle);
+    const other = "+14155550111";
+    w.sms.sent.length = 0;
+    expect(await requestPhone(w.config, { phone: ADA_PHONE, ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    const res = await route(post("/auth/phone/request", { phone: ADA_PHONE }));
+    expect([res.status, await res.json()]).toEqual([200, { sent: true }]);
+    expect(w.sms.sent).toEqual([]);
+    // A known number outside the domain gets its code: the check is of the domain.
+    await signUpAndVerify(w, "bob@other.example", PASSWORD);
+    await addPhoneOf(w, other, "bob@other.example");
+    w.sms.sent.length = 0;
+    const sent = await route(post("/auth/phone/request", { phone: other }));
+    expect([sent.status, await sent.json()]).toEqual([200, { sent: true }]);
+    expect(w.sms.sent.map((m) => m.to)).toEqual([other]);
   });
 
   it.each(DOORS)("keeps every door open with enforce off: $name", async (door) => {

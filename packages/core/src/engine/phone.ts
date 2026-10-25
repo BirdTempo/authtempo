@@ -15,7 +15,7 @@ import {
 import { createSteps } from "./create-steps.js";
 import { compareCode, consumeCode, issueCode } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
-import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
+import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
 import { unchanged } from "./profile.js";
@@ -28,6 +28,7 @@ import {
   touchTrust,
 } from "./second-factor.js";
 import { challengeOpened, type ResolvedSession, sessionOpened } from "./sessions.js";
+import { enforcedAnswer, ssoRequiredFor } from "./sso/enforce.js";
 import { draftUserRow } from "./users.js";
 
 /**
@@ -266,6 +267,10 @@ export interface PhoneRequest {
  * becomes an `sms.not_sent` line, not a 429 or a 503. With no `after` (a
  * call in process), the send runs before the answer. A cap or an outage
  * then answers 429 or 503 only on a branch that sends.
+ *
+ * A known user of an address in an enforced SSO domain gets no code and the
+ * same answer (plan 12d, the rule of the other code requests). The check of
+ * the domain runs with the send, so after the answer on the route.
  */
 export async function requestPhone(
   config: ResolvedConfig,
@@ -285,8 +290,10 @@ export async function requestPhone(
     to: number,
     data: anonymousData(input.anonymous),
   } as const;
-  if (!after) return sentAnswer(await sendPhoneCode(config, send));
-  after(sendLater(config, () => sendPhoneCode(config, send)));
+  const sendUnlessEnforced = async () =>
+    known && (await ssoRequiredFor(config, known.email)) ? "sent" : sendPhoneCode(config, send);
+  if (!after) return sentAnswer(await sendUnlessEnforced());
+  after(sendLater(config, sendUnlessEnforced));
   return ok({ sent: true });
 }
 
@@ -423,6 +430,9 @@ async function resolvePhoneUser(
         const found = await tx.findOne("user", byPhone(phone));
         // A code that went out with `signUp` on, and a config that turned it off since.
         if (!found && !config.phone?.signUp) stopWith("invalid_code");
+        // A first factor of an enforced SSO domain (plan 12d, spec 30 item 12).
+        const enforced = found ? await enforcedAnswer(config, found.email, tx) : null;
+        if (enforced) throw new HookStop(enforced);
         const user =
           found ??
           (await made.user(

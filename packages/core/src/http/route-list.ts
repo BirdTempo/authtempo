@@ -1152,6 +1152,7 @@ export const ROUTES = Object.freeze([
       "hook_refused",
       "hook_failed",
       "account_banned",
+      "sso_required",
     ],
     oauthCodes: [],
   },
