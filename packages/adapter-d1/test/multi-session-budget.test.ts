@@ -26,8 +26,9 @@ const now = () => new Date(NOW.getTime() + shift);
 // The counts of the run of 2026-10-25, with the D1 limiter and one fixed
 // time, so each session read also reads the SCIM record (the worst count).
 // A first sign-in in a browser reads no bag. A sign-in with a full bag reads
-// every row of the browser in one query, reads the user of the old active
-// session, and ends the oldest bag session (displaced). The list and the
+// every row of the browser in one query, and reads the user of the old active
+// session. It ends the bag session that the browser used least recently
+// (displaced), never the active one. The list and the
 // switch resolve each of the nine bag tokens. The switch then reads its
 // target as a request does, 3 queries more (ruling 34 H1 of plan 12i). The
 // sign-out ends ten sessions.
@@ -173,7 +174,7 @@ describe("multi-session on D1 (plan 12i Task 11)", () => {
     for (let i = 1; i < 10; i++)
       expect((await signUp(w, b, `user${i}@example.com`)).status).toBe(200);
     expect(b.cookies.get(BAG)?.split(".")).toHaveLength(9);
-    // The eleventh user: the bag is full, so the oldest bag session ends.
+    // The eleventh user: the bag is full, so the least recently used bag session ends.
     const full = await signUp(w, b, "user10@example.com");
     expect(full.status).toBe(200);
     expect(b.cookies.get(BAG)?.split(".")).toHaveLength(9);

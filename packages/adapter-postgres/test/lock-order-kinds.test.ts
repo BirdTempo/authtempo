@@ -859,7 +859,7 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     anonymousOf(w).signIn({ current: null, ip: null, userAgent: null }),
   // The anonymous delete locks the user row, then ends the sessions.
   "an anonymous delete": (w, s) => anonymousOf(w).delete({ session: s.anonymous }),
-  // Plan 12i Task 7: the claim of an unverified user writes its user row, and then the
+  // Plan 12i Task 7: the claim of an unverified user writes its user row. Then the
   // upgrade claims the anonymous sessions, right before the session write. After the
   // commit, the anonymous sessions end, and the anonymous user goes.
   "an anonymous upgrade by an email claim": async (w, s) => {
@@ -1303,7 +1303,7 @@ const SITES: Record<string, readonly string[] | string> = {
   ],
   // Plan 12i Task 7: the end of the anonymous sessions after an upgrade, before the delete.
   "anonymous upgradeSteps": ["an anonymous upgrade by an email claim"],
-  // Plan 12i Task 5: the phone sign-in reads the user, then spends the code, then
+  // Plan 12i Task 5: the phone sign-in reads the user, then spends the code. Then it
   // creates the user and the session or the challenge, as the email code sign-in does.
   "phone resolvePhoneUser":
     "the user read, the spend of the code, then the new user row and the session or the challenge",
@@ -1426,9 +1426,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
     // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
     // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
-    // one of username.ts, Task 5 the two of phone.ts, Task 6 the two of anonymous.ts,
-    // and Task 7 the one of the anonymous upgrade. Task 8 adds the one of the
-    // passkey-first sign-up.
+    // one of username.ts, and Task 5 the two of phone.ts. Task 6 adds the two of
+    // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
+    // one of the passkey-first sign-up.
     expect(found.length).toBe(84);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
