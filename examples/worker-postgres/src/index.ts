@@ -1,5 +1,5 @@
 import { createPostgresAdapter, createPostgresLimiter } from "@authtempo/adapter-postgres";
-import { createAuth, type HooksConfig, type MailPort } from "@authtempo/core";
+import { type AuthConfig, createAuth, type HooksConfig, type MailPort } from "@authtempo/core";
 import { workersLogsSink } from "@authtempo/observe/workers-logs";
 import postgres from "postgres";
 
@@ -20,8 +20,15 @@ export const mail: MailPort = {
   },
 };
 
-/** The Worker. The test passes a mail port that keeps the mails, and hooks of its own. */
-export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
+/**
+ * The Worker. The test passes a mail port that keeps the mails, and hooks of its own.
+ * `more` adds config keys for one env, after the keys below. The test adds `phone` with it.
+ */
+export function createWorker(
+  mailPort: MailPort,
+  hooks?: HooksConfig,
+  more?: (env: Env) => Partial<AuthConfig>,
+) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       // One client per request, as the adapter README asks on Workers: one
@@ -47,14 +54,23 @@ export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
         // turns the logs on. With a sink, core writes no console line of its own.
         // The sink scrubs the secret of the config from each field, as the last guard.
         observe: { sink: workersLogsSink({ secrets: [env.AUTH_SECRET] }) },
+        ...(more ? more(env) : {}),
       });
+      // Some routes do work after the answer, such as the phone code SMS. That
+      // work goes to waitUntil and still queries this client. So the client
+      // ends only after each promise kept here settles. The call keeps
+      // ctx.waitUntil bound: an unbound ctx.waitUntil throws Illegal invocation
+      // (Cloudflare Workers best practices, read 2026-10-14).
+      const kept: Promise<unknown>[] = [];
+      const waitUntil = (p: Promise<unknown>) => {
+        kept.push(p);
+        ctx.waitUntil(p);
+      };
       const url = new URL(request.url);
       const viaHandle = url.pathname.startsWith("/auth/");
       try {
-        // The events flush after the answer. Bound on purpose: an unbound
-        // ctx.waitUntil throws Illegal invocation (Cloudflare Workers best
-        // practices, read 2026-10-14).
-        if (viaHandle) return await auth.handle(request, { waitUntil: (p) => ctx.waitUntil(p) });
+        // The events flush after the answer.
+        if (viaHandle) return await auth.handle(request, { waitUntil });
         if (url.pathname === "/me") {
           const s = await auth.session(request);
           if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -70,7 +86,9 @@ export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
         // event of a call outside handle, such as the session read of /me,
         // flushes here or never. The flush uses no connection.
         if (!viaHandle) ctx.waitUntil(auth.observe.flush());
-        ctx.waitUntil(sql.end({ timeout: 5 }));
+        // An end at once refuses each query of the work after the answer. The
+        // answer is still 200, but no SMS, no mail, and no row go out.
+        ctx.waitUntil(Promise.allSettled(kept).then(() => sql.end({ timeout: 5 })));
       }
     },
     // The cron trigger of wrangler.jsonc runs this. It deletes the rows that no flow can use.

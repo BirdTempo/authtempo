@@ -16,7 +16,24 @@ const auth = createAuth({ ...config, storage: createPostgresAdapter(sql) });
 
 Set `compatibility_flags: ["nodejs_compat"]` and connect through Hyperdrive
 with `max: 1`, `prepare: false`, and `fetch_types: false`. Create the
-client per request and call `sql.end({ timeout: 5 })` when the request ends.
+client per request. Call `sql.end({ timeout: 5 })` only after the work that
+`handle` passes to `waitUntil` settles. Some routes, such as the phone code
+request and the code-mode sign-up, write rows and send after the answer on
+this client. An end at once refuses those queries: the answer is 200, but no
+SMS, no mail, and no row go out. examples/worker-postgres shows the order:
+
+```ts
+const kept: Promise<unknown>[] = [];
+const waitUntil = (p: Promise<unknown>) => {
+  kept.push(p);
+  ctx.waitUntil(p);
+};
+try {
+  return await auth.handle(request, { waitUntil });
+} finally {
+  ctx.waitUntil(Promise.allSettled(kept).then(() => sql.end({ timeout: 5 })));
+}
+```
 
 With `max: 1`, a write outside an open transaction waits for that
 transaction's connection. The engine itself never does this. Since plan 9d
