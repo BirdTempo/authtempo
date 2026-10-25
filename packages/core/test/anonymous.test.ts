@@ -493,6 +493,36 @@ describe("ANONYMOUS_REFUSED (plan 12i Task 6)", () => {
     expect(await request.json()).toEqual({ sent: true });
   });
 
+  it("decides the operator user routes of plan 12f2: not listed, the operator guard refuses them (the move onto main)", async () => {
+    const w = world({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+      operator: { users: true },
+    });
+    const a = await anonymous(w);
+    const before = await dump(w);
+    // A session needs the platform role, a second factor, and a verified address: an
+    // anonymous user has none, so the guard answers operator_required before the body.
+    for (const path of ["/auth/operator/users/update", "/auth/operator/users/delete"]) {
+      const res = await w.handle(
+        post(
+          path,
+          { userId: a.resolved.user.id, name: "Pat", reason: "Ticket 1" },
+          { cookie: a.cookie },
+        ),
+      );
+      expect([path, res.status, await res.json()]).toEqual([
+        path,
+        403,
+        { error: "operator_required" },
+      ]);
+    }
+    expect(await dump(w)).toEqual(before);
+  });
+
   it("refuses a listed route to an anonymous user with anonymous off since", async () => {
     const w = world();
     const a = await anonymous(w);

@@ -57,6 +57,10 @@ import { draftUserRow } from "./users.js";
  * and grant no privilege. A switch leaves the anonymous user as a sign-in
  * does, and its token never enters the bag. The sign-out of one ends a
  * session of the browser, as `POST /sign-out` does.
+ * Also not listed: the operator routes, the update and the delete of plan
+ * 12f2 too. The operator guard needs the platform role, a second factor,
+ * and a verified address, so it refuses an anonymous session with
+ * `operator_required`. anonymous.test.ts holds the two routes of 12f2.
  */
 export const ANONYMOUS_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The re-authentication: an anonymous user has no proof to give.
