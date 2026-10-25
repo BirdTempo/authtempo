@@ -483,16 +483,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "sso_required",
-    "the ID-token route signs in through signInByProfile, the door of completeSocial that sso/enforce.test.ts drives through the Google callback (plan 12i Task 10)",
-    ["POST /social/:provider/id-token"],
-  ),
-  ...rows(
-    "sso_required",
-    "the sign-up code runs confirmSignUp, the door of POST /password/verify, where sso/enforce.test.ts answers it (plan 12i Task 20)",
-    ["POST /password/verify/code"],
-  ),
-  ...rows(
-    "sso_required",
     "the form route of verifyTwoFactor; sso/enforce.test.ts drives the same door through POST /totp/verify (ruling 38 of plan 12d)",
     ["POST /totp/challenge"],
   ),
