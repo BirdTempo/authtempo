@@ -156,10 +156,10 @@ const SITES: Site[] = [
     file: "engine/sessions.ts",
     fn: "endSessions",
     call: 'delete("session"',
-    count: 3,
+    count: 4,
     kind: "endSessions",
     reason:
-      "the deletes of endSessions itself, after its outbox write; the first deletes each impersonation session by id with its stop row (ruling 43 of plan 12f)",
+      "the deletes of endSessions itself, after its outbox write; the first deletes each impersonation session by id with its stop row (ruling 43 of plan 12f); a claim deletes the read rows by one statement per chunk of ids (final review B M of plan 12i)",
   },
   {
     file: "engine/oauth-outbox.ts",
