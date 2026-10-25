@@ -555,6 +555,9 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
   it("ends the sessions past the page at the sweep, and the doors refuse them first", async () => {
     // Every sign-in passes: the page, not the limit of the sign-in, is under test.
     const w = await world({ limiter: { allow: async () => true } });
+    // The page of the own sessions keeps to the budget only on a store with a
+    // per-invocation query limit (D1). This memory store claims one.
+    (w.auth.storage as StorageAdapter).queryLimitPerInvocation = true;
     const tokens: string[] = [];
     for (let i = 0; i < 40; i++) tokens.push((await verifiedSession(w.auth, ADA)).token);
     const ada = await resolveSession(w.auth.config, tokens[0] ?? "");
