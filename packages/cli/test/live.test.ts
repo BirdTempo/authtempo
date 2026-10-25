@@ -1,7 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
 import {
   type ExampleWorker,
+  liveFetch,
   START_LIMIT_MS,
   startExampleWorker,
 } from "./support/example-worker.js";
@@ -21,7 +23,7 @@ const base = () => worker?.base ?? "";
 const secret = () => worker?.operatorSecret ?? "";
 
 async function keyIds(): Promise<string[]> {
-  const res = await fetch(`${base()}/auth/jwks`);
+  const res = await liveFetch(`${base()}/auth/jwks`);
   return ((await res.json()) as { keys: { kid: string }[] }).keys.map((k) => k.kid);
 }
 
@@ -119,6 +121,13 @@ describe("the live runs (spec 19)", () => {
     expect(linesOf(r.stderr).at(-1)).toBe("stopped: the deployment refused the operator secret");
   });
 
+  it("answers a fetch after the binary blocks the loop for longer than the idle limit of the dev server", async () => {
+    expect((await liveFetch(`${base()}/auth/jwks`)).status).toBe(200);
+    // A 6 s block: the dev server closes a connection after about 5 s with no request.
+    spawnSync("sleep", ["6"]);
+    expect((await liveFetch(`${base()}/auth/jwks`)).status).toBe(200);
+  });
+
   it("stops with exit 2 when no server answers", () => {
     const r = runBin(["check", "http://127.0.0.1:1"]);
     expect(r.status).toBe(2);
@@ -144,7 +153,7 @@ describe("the live runs of the operator user tools (plan 12f)", () => {
     const env = { AUTHTEMPO_OPERATOR_SECRET: tools?.operatorSecret ?? "" };
     const email = "live-ban@example.com";
     const post = (path: string, body: unknown) =>
-      fetch(`${at}/auth${path}`, {
+      liveFetch(`${at}/auth${path}`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: at },
         body: JSON.stringify(body),

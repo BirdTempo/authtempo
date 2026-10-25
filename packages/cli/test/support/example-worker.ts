@@ -27,6 +27,22 @@ const ENV = {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Each fetch of a live test, on a new connection that ends after its answer.
+ * The tests run the binary with spawnSync, which blocks the event loop. The
+ * dev server closes a connection after about 5 s with no request, and a
+ * blocked loop does not see that close. The next fetch then sends on the
+ * closed pooled socket and fails with ECONNRESET. That happened under a load
+ * over 40, where a run of the binary takes more than 5 s (fix-12f2-live,
+ * 2026-10-25). With "connection: close", no request uses an old socket, so
+ * no request is sent twice and a POST needs no retry.
+ */
+export function liveFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("connection", "close");
+  return fetch(url, { ...init, headers });
+}
+
+/**
  * The longest time startExampleWorker takes, the stop included. The hook that
  * calls it gets a longer limit (START_LIMIT_MS + 30 s), so the start always
  * ends inside the hook: on a timeout of the hook, afterAll has no worker to
@@ -224,12 +240,12 @@ export async function startExampleWorker(
   // The loop ends 5 s before the deadline, so the stop below ends inside START_LIMIT_MS.
   let infoSilent = false;
   while (child.exitCode === null && Date.now() < deadline - 5000) {
-    const r = await fetch(`${base}/auth/session`, { signal: AbortSignal.timeout(2000) }).catch(
+    const r = await liveFetch(`${base}/auth/session`, { signal: AbortSignal.timeout(2000) }).catch(
       () => null,
     );
     if (r?.status === 401) {
       // A 401 comes from any Worker of this example. Only this run's Worker accepts its secret.
-      const own = await fetch(`${base}/auth/operator/info`, {
+      const own = await liveFetch(`${base}/auth/operator/info`, {
         headers: { authorization: `Operator ${operatorSecret}` },
         signal: AbortSignal.timeout(2000),
       }).catch(() => null);
