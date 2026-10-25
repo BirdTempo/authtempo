@@ -215,3 +215,32 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
     expect(Math.max(...Object.values(exact))).toBeLessThanOrEqual(50);
   });
 });
+
+// B L3 of the plan 12i final review: the anonymous step of core's sweep on
+// the Better Auth tables on D1, in one invocation, with its queries pinned.
+describe("the anonymous sweep on the Better Auth tables on D1", () => {
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("deletes the old anonymous users with no live session in 50 queries or fewer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+    for (const _ of [1, 2, 3]) await browser().setup("/sign-in/anonymous", {});
+    // Fifty days on: the three are past core's 30 days, and their sessions ended.
+    vi.setSystemTime(new Date("2026-09-20T00:00:00.000Z"));
+    await browser().setup("/sign-in/anonymous", {});
+    const anonymousCount = async () =>
+      (await env.DB.prepare('SELECT count(*) AS n FROM "user" WHERE "isAnonymous" = 1').first())?.n;
+    expect(await anonymousCount()).toBe(4);
+    const c = counting(env.DB);
+    const swept = await shim(c.db).tempo.api.sweepExpired();
+    // The ready check of the new storage (4) and the steps of the sweep.
+    expect({ anonymousUsers: swept.anonymousUsers, queries: c.count.queries }).toEqual({
+      anonymousUsers: 3,
+      queries: 26,
+    });
+    expect(c.count.queries).toBeLessThanOrEqual(50);
+    expect(await anonymousCount()).toBe(1);
+  });
+});

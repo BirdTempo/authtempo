@@ -195,8 +195,8 @@ describe("the placeholder address", () => {
       const res = await send("/user/change-email", { newEmail });
       expect([res.status, await json(res)]).toEqual([403, refused]);
       // Better Auth's own path, in Better Auth's shape (ruling 44 L-A).
-      const own = await send("/change-email", { newEmail });
-      expect([own.status, await json(own)]).toEqual([
+      const ba = await send("/change-email", { newEmail });
+      expect([ba.status, await json(ba)]).toEqual([
         403,
         { code: "HOOK_REFUSED", message: PLACEHOLDER_ADDRESS_TEXT },
       ]);
@@ -215,6 +215,30 @@ describe("the placeholder address", () => {
     });
     expect(errors.mock.calls.flat().join(" ")).not.toMatch(/unhandled error/);
     errors.mockRestore();
+  });
+
+  // Item 36 of the plan 12i final fix wave (break B3c of verify-12i-task16).
+  it("answers CHANGE_EMAIL_DISABLED, not HOOK_REFUSED, to a placeholder at /change-email with the option off", async () => {
+    const t = await betterAuthTables();
+    const verifies: EmailCallbackData[] = [];
+    const auth = betterAuth(
+      signInOptions(
+        t.database,
+        { plugins: [anonymous({ emailDomainName: "anon.example.com" })] },
+        verifies,
+      ),
+    );
+    const { send } = browser(auth.handler);
+    const up = await send("/password/sign-up", { email: "ann@example.com", password: PASSWORD });
+    const id = ((await json(up)).user as { id: string }).id;
+    expect((await send("/password/verify", { token: verifies[0]?.token })).status).toBe(200);
+    for (const newEmail of [
+      `temp-${id.toLowerCase()}@anon.example.com`,
+      "eve@placeholder.invalid",
+    ]) {
+      const res = await send("/change-email", { newEmail });
+      expect([res.status, (await json(res)).code]).toEqual([400, "CHANGE_EMAIL_DISABLED"]);
+    }
   });
 
   it("reads a getTempEmail address back as null", async () => {

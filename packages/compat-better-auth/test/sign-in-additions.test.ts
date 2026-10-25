@@ -237,6 +237,44 @@ describe("the anonymous plugin", () => {
   });
 });
 
+// B L3 of the plan 12i final review: the anonymous step of core's sweep on
+// Better Auth's own tables, which store the dates as ISO text.
+describe("the anonymous sweep on the Better Auth tables", () => {
+  it("deletes the old anonymous users with no live session, and keeps every other user", async () => {
+    const t = await betterAuthTables();
+    const auth = betterAuth(signInOptions(t.database, { plugins: [anonymous()] }));
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const res = await browser(auth.handler).send("/sign-in/anonymous", {});
+      ids.push(((await json(res)).user as { id: string }).id);
+    }
+    await auth.api.signUpEmail({
+      body: { email: "ada@example.com", password: PASSWORD, name: "Ada" },
+    });
+    const day = 86_400_000;
+    const old = new Date(Date.now() - 40 * day).toISOString();
+    const [kept, live, ...going] = ids;
+    // Forty days on: each user is past core's 30 days, and each session but
+    // the live one ended. The live user kept its session alive by use.
+    t.db.prepare(`UPDATE "user" SET "createdAt" = ? WHERE "id" != ?`).run(old, kept);
+    t.db
+      .prepare(`UPDATE "session" SET "expiresAt" = ? WHERE "userId" != ?`)
+      .run(new Date(Date.now() - day).toISOString(), live);
+    const swept = await auth.tempo.api.sweepExpired();
+    expect(swept.anonymousUsers).toBe(3);
+    const left = t.rows('SELECT "id", "isAnonymous" FROM "user" ORDER BY "email"');
+    expect(left.map((r) => r.id).sort()).toEqual(
+      [kept, live, t.row(`SELECT "id" FROM "user" WHERE "email" = 'ada@example.com'`)?.id].sort(),
+    );
+    expect(
+      t.row(
+        `SELECT count(*) AS n FROM "user" WHERE "id" IN (${going.map(() => "?").join(",")})`,
+        ...going,
+      ),
+    ).toEqual({ n: 0 });
+  });
+});
+
 describe("the username plugin", () => {
   it("signs up with a username, signs in at /sign-in/username, answers /is-username-available, and changes it at /update-user", async () => {
     const t = await betterAuthTables();
@@ -462,6 +500,55 @@ describe("the phone-number plugin", () => {
     expect([reset.status, (await json(reset)).code]).toEqual([501, "NOT_SUPPORTED"]);
   });
 
+  // M2 of final-12i-A, the compat part. The core part is FW1's (415bebc1 on
+  // task/12i-fw1): claimEmail clears the phone. This test fails on this
+  // branch alone and passes once the lead joins FW1's core change.
+  it("clears a proved number that Better Auth stored for an unverified user when the owner proves the address", async () => {
+    const t = await betterAuthTables();
+    // A row as Better Auth 1.7.2 leaves it after /sign-up/email with no proof
+    // and a verify with updatePhoneNumber (phone-number/routes.mjs:329 to :345):
+    // an unverified address and a proved number.
+    t.db.exec(`
+      INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","phoneNumber","phoneNumberVerified")
+        VALUES ('ba-squat','Squat','owner@example.com',0,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','+14155550177',1);
+    `);
+    const sent: { phoneNumber: string; code: string }[] = [];
+    const mails: { email: string; url: string }[] = [];
+    const auth = betterAuth(
+      signInOptions(t.database, {
+        plugins: [
+          phoneNumber({ sendOTP: (d) => void sent.push(d) }),
+          (await import("../src/plugins.js")).magicLink({
+            sendMagicLink: async (d) => void mails.push(d),
+          }),
+        ],
+        authtempo: { passwordHash: fastHash, phone: { regions: ["+1"] } },
+      }),
+    );
+    // The owner proves the mailbox: the claim.
+    const owner = browser(auth.handler);
+    expect((await owner.send("/magic-link/request", { email: "owner@example.com" })).status).toBe(
+      200,
+    );
+    const token = new URL(mails[0]?.url ?? "").searchParams.get("token") ?? "";
+    expect((await owner.send("/magic-link/verify", { token })).status).toBe(200);
+    expect(t.row('SELECT emailVerified, phoneNumber FROM "user" WHERE id = ?', "ba-squat")).toEqual(
+      { emailVerified: 1, phoneNumber: null },
+    );
+    // The number is no account's now, and sign-up by code is off: core sends
+    // no code after the answer, and no code opens the owner's account.
+    const squatter = browser(auth.handler);
+    await squatter.send("/phone-number/send-otp", { phoneNumber: "+14155550177" });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toEqual([]);
+    const res = await squatter.send("/phone-number/verify", {
+      phoneNumber: "+14155550177",
+      code: sent[0]?.code ?? "000000",
+    });
+    const user = (await json(res)).user as { id?: string } | undefined;
+    expect({ status: res.status, user: user?.id ?? null }).toEqual({ status: 400, user: null });
+  });
+
   it("refuses verifyOTP and every key core cannot keep, and needs authtempo.phone.regions", () => {
     const sendOTP = () => {};
     expect(
@@ -643,44 +730,52 @@ describe("the phone-number plugin", () => {
     expect(sent.map((x) => x.phoneNumber)).toEqual(["+14155550180", "+14155550181"]);
   });
 
-  it("passes the host's waitUntil to core, so the SMS goes out under it after the answer (ruling 23)", async () => {
-    const t = await betterAuthTables();
-    let release = () => {};
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const sent: string[] = [];
-    const auth = betterAuth(
-      phoneOptions(t.database, [], {
-        sendOTP: async (d) => {
-          await gate;
-          sent.push(d.phoneNumber);
-        },
-      }),
-    );
-    const held: Promise<unknown>[] = [];
-    const res = await auth.handler(
-      new Request(`${BASE}/api/auth/phone-number/send-otp`, {
-        method: "POST",
-        headers: { origin: BASE, "content-type": "application/json" },
-        body: JSON.stringify({ phoneNumber: "+14155550160" }),
-      }),
-      { waitUntil: (p) => void held.push(p) },
-    );
-    expect(res.status).toBe(200);
-    // One promise for the host: the SMS, then the flush.
-    expect(held).toHaveLength(1);
-    let settled = false;
-    void Promise.all(held).then(() => {
-      settled = true;
-    });
-    await new Promise((r) => setTimeout(r, 20));
-    // The host's promise waits for the send that core runs after the answer.
-    expect([settled, sent]).toEqual([false, []]);
-    release();
-    await Promise.all(held);
-    expect([settled, sent]).toEqual([true, ["+14155550160"]]);
-  });
+  // The shim's path, and core's own path through the main pass-through
+  // (C I1 of the plan 12i final fix wave, break B3 of final-12i-C).
+  it.each([
+    ["/phone-number/send-otp", { phoneNumber: "+14155550160" }],
+    ["/phone/request", { phone: "+14155550160" }],
+  ])(
+    "passes the host's waitUntil to core at %s, so the SMS goes out under it after the answer (ruling 23)",
+    async (path, payload) => {
+      const t = await betterAuthTables();
+      let release = () => {};
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      const sent: string[] = [];
+      const auth = betterAuth(
+        phoneOptions(t.database, [], {
+          sendOTP: async (d) => {
+            await gate;
+            sent.push(d.phoneNumber);
+          },
+        }),
+      );
+      const held: Promise<unknown>[] = [];
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method: "POST",
+          headers: { origin: BASE, "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        { waitUntil: (p) => void held.push(p) },
+      );
+      expect(res.status).toBe(200);
+      // One promise for the host: the SMS, then the flush.
+      expect(held).toHaveLength(1);
+      let settled = false;
+      void Promise.all(held).then(() => {
+        settled = true;
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      // The host's promise waits for the send that core runs after the answer.
+      expect([settled, sent]).toEqual([false, []]);
+      release();
+      await Promise.all(held);
+      expect([settled, sent]).toEqual([true, ["+14155550160"]]);
+    },
+  );
 });
 
 /** Two tokens in the compact form: core keys its used-token row on the payload part. */
