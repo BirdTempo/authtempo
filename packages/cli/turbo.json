@@ -8,13 +8,18 @@
     // The mcp-server scaffold test imports @authtempo/verify/mcp through the
     // example's node_modules. The example's test builds verify first (^build),
     // and proves the example before the scaffold copies it (plan 11e Task 13).
+    // The two Workers scaffolds import @authtempo/observe/workers-logs, and no
+    // dependency of this package builds observe. Without its build a clean tree
+    // fails with "Cannot resolve" (fix wave of plan 12i, item 13).
+    // test/turbo-graph.test.ts holds this list to the imports of each example.
     "test": {
       "dependsOn": [
         "^build",
         "build",
         "authtempo-example-node#test",
         "authtempo-example-mcp-server#test",
-        "@authtempo/mcp#build"
+        "@authtempo/mcp#build",
+        "@authtempo/observe#build"
       ]
     },
     // test/program.test.ts imports the package's own entry @authtempo/cli/program,

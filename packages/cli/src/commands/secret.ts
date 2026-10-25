@@ -126,7 +126,7 @@ function readTarget(
 
 type VersionCount = SecretStatusJson["versions"][number];
 
-/** The eight keys of one entry of the status answer, each with its type. */
+/** The nine keys of one entry of the status answer, each with its type. */
 const COUNT_KEYS = {
   version: "number",
   configured: "boolean",
