@@ -151,7 +151,10 @@ async function nonceMatches(claim: unknown, nonce: string): Promise<boolean> {
  * The claims that jose does not check: one `aud` string, a numeric `iat`
  * that is not in the future past the skew, and a numeric `exp` at most one
  * day after `iat`. jose checks the signature, `iss`, the `aud` list, the
- * alg, and that `exp` is not past.
+ * alg, and that `exp` is not past. Core checks `exp` against its own clock
+ * too, with no tolerance (final review B L of plan 12i). The used-token row
+ * lives until `exp`, so a seam with a clock tolerance would let a token in
+ * again after the sweep deleted its row.
  */
 function claimsInRange(claims: Record<string, unknown>, now: Date): boolean {
   const { aud, iat, exp } = claims;
@@ -159,6 +162,7 @@ function claimsInRange(claims: Record<string, unknown>, now: Date): boolean {
   if (typeof iat !== "number" || typeof exp !== "number") return false;
   const nowSeconds = now.getTime() / 1000;
   if (iat > nowSeconds + ID_TOKEN_IAT_SKEW_SECONDS) return false;
+  if (exp <= nowSeconds) return false;
   return exp > iat && exp - iat <= ID_TOKEN_LIFE_MAX_SECONDS;
 }
 

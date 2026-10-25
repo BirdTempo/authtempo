@@ -5,9 +5,11 @@ import type { AnonymousLinkEvent } from "../src/engine/hooks.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import type { JwtSeam } from "../src/seams/jwt.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post, recordCredential, settled } from "./helpers.js";
 import { fakeFetch } from "./social-helpers.js";
 import { EMAIL, enrolled, totpAuth } from "./totp-helpers.js";
@@ -228,6 +230,26 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     // The copy on this isolate is refused by the row, with its event.
     await a.config.observe.flush();
     expect(names.filter((x) => x === "social.id_token_replayed")).toHaveLength(1);
+  });
+
+  it("refuses a token past exp by its own clock when the seam allows a tolerance (final review B L)", async () => {
+    const a = world({}, { idToken: { requireNonce: false } });
+    // A seam with a clock tolerance of 2 minutes, as many JWT libraries allow.
+    const base = a.config.jwt;
+    (a.config as { jwt: JwtSeam }).jwt = {
+      ...base,
+      verifyIdToken: (input) =>
+        base.verifyIdToken({ ...input, now: new Date(input.now.getTime() - 120_000) }),
+    };
+    const iat = Math.floor(a.clock.now().getTime() / 1000);
+    const token = await a.google({ iat, exp: iat + 60 });
+    expect((await a.signIn("google", { idToken: token })).status).toBe(200);
+    // Past exp, inside the tolerance: the sweep deleted the used-token row at exp.
+    a.clock.advance(90_000);
+    await sweepExpired(a.config);
+    const again = await a.signIn("google", { idToken: token });
+    expect(await code(again)).toBe("invalid_token");
+    expect(await a.storage.findMany("session", [])).toHaveLength(1);
   });
 
   it("accepts each audience of the list and refuses another", async () => {
