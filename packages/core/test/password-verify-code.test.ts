@@ -356,13 +356,13 @@ describe("the sign-up code (plan 12i Task 20)", () => {
   });
 
   it.each(["code", "link"] as const)(
-    "answers the sign-up, and the resend of a code, before the mail goes, for a new and a known address (%s)",
+    "answers the sign-up and the resend before the mail goes, for a new and a known address (%s)",
     async (verifyBy) => {
       // Ruling 23 of plan 12i: the slow work that differs by account runs
       // after the answer. That is the code or link row and its mail, or the
       // mail to a known address. The link sign-up does the same since final
-      // fix wave item 19; the link resend keeps the order of plan 8b. A mail
-      // port that waits until released shows it.
+      // fix wave item 19, and the link resend since ruling 46. A mail port
+      // that waits until released shows it.
       let release: () => void = () => {};
       const gate = new Promise<void>((resolve) => {
         release = resolve;
@@ -389,11 +389,10 @@ describe("the sign-up code (plan 12i Task 20)", () => {
         await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
         await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
       ];
-      if (verifyBy === "code")
-        answers.push(
-          await call("/auth/password/verify/resend", { email: EMAIL }),
-          await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
-        );
+      answers.push(
+        await call("/auth/password/verify/resend", { email: EMAIL }),
+        await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
+      );
       for (const a of answers) {
         expect(a).not.toBe("held");
         if (a !== "held") expect(await a.json()).toEqual({ sent: true });
@@ -402,10 +401,9 @@ describe("the sign-up code (plan 12i Task 20)", () => {
       release();
       await Promise.all(work);
       // The new address got a code or a link, the known address the
-      // existing-account mail, the resend a new code, and the unknown address nothing.
-      expect(sent.map((m) => m.to)).toEqual(
-        verifyBy === "code" ? [EMAIL, EMAIL, EMAIL] : [EMAIL, EMAIL],
-      );
+      // existing-account mail, the resend a new code or link, and the
+      // unknown address nothing.
+      expect(sent.map((m) => m.to)).toEqual([EMAIL, EMAIL, EMAIL]);
       expect(sent[1]?.subject).toBe("Your account at api.example.com");
     },
   );
@@ -558,5 +556,54 @@ describe("the answer time of the uniform sign-up (ruling 39 M1, final fix wave i
       expect(Math.abs(median(fresh) - median(known))).toBeLessThan(BOUND_MS);
     },
     20_000,
+  );
+  it.each(["code", "link"] as const)(
+    "answers the resend of a known unverified and an unknown address within a small fixed bound (%s)",
+    async (verifyBy) => {
+      // Ruling 46 of plan 12i: a store with 2 ms per call and a mail of
+      // 20 ms, through auth.handle with a waitUntil. The reads and the mail
+      // of the resend run after the answer for both addresses. Before the
+      // fix, the link resend of a known unverified user waited for both:
+      // about 30 ms more (review probe R1).
+      const PER_CALL_MS = 2;
+      const MAIL_MS = 20;
+      const BOUND_MS = 3;
+      const ROUNDS = 15;
+      const auth = createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: ["https://app.example.com"],
+        storage: slowStore(createMemoryAdapter(), PER_CALL_MS),
+        mail: { send: () => new Promise((resolve) => setTimeout(resolve, MAIL_MS)) },
+        password: { hash: FAST, verifyBy },
+      });
+      const after: Promise<unknown>[] = [];
+      const call = async (path: string, body: unknown) => {
+        const t0 = performance.now();
+        const res = await auth.handle(post(path, body, ip()), {
+          waitUntil: (p) => void after.push(p),
+        });
+        const ms = performance.now() - t0;
+        expect(await res.json()).toEqual({ sent: true });
+        await Promise.all(after.splice(0));
+        return ms;
+      };
+      const known = (i: number) => recordAddress(`pending${i}@example.com`);
+      for (let i = 0; i < ROUNDS; i++)
+        await call("/auth/password/sign-up", { email: known(i), password: PASSWORD });
+      const pending: number[] = [];
+      const unknown: number[] = [];
+      for (let i = 0; i < ROUNDS; i++) {
+        pending.push(await call("/auth/password/verify/resend", { email: known(i) }));
+        unknown.push(
+          await call("/auth/password/verify/resend", {
+            email: recordAddress(`nobody${i}@example.com`),
+          }),
+        );
+      }
+      const median = (x: number[]) => [...x].sort((a, b) => a - b)[Math.floor(x.length / 2)] ?? 0;
+      expect(Math.abs(median(pending) - median(unknown))).toBeLessThan(BOUND_MS);
+    },
+    30_000,
   );
 });

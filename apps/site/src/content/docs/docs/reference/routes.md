@@ -457,7 +457,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email }` |
-| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`). With the link, the new link goes before the answer, so the answer time can tell an unverified user with a password |
+| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`). With the link, the new link goes after the answer while `password.uniformSignUp` is on (the default). With it off, the link goes before the answer, and the sign-up answer already tells a known address |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-password-reset-request"><code>POST /password/reset/request</code></h3>
