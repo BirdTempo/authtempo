@@ -3,6 +3,7 @@ import type { AuthConfig } from "../../src/config.js";
 import { requestEmailOtp, requestResetOtp } from "../../src/engine/email-otp.js";
 import { SESSION_VIA, type SessionVia } from "../../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
+import { operatorApi } from "../../src/engine/operator/index.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
@@ -150,6 +151,31 @@ const DOORS: Door[] = [
       must(await setUsername(w.config, { session, username: "Ada", ip: null, userAgent: null }));
       return () =>
         w.handle(post("/auth/password/sign-in", { username: "ada", password: PASSWORD }));
+    },
+  },
+  {
+    // Plan 12f2 Task 3: an invitation mailed before enforce went on. Bea of
+    // the same domain, because Ada exists: the operator creates Bea.
+    name: "the invitation link",
+    json: true,
+    extra: {
+      operator: {
+        users: true,
+        secrets: [{ name: "support", secretHash: "c".repeat(64), scopes: ["users"] }],
+      },
+    },
+    async prepare(w) {
+      must(
+        await operatorApi(w.config).users.create({
+          actor: { kind: "app", name: "support-tool" },
+          email: "bea@acme.example",
+          reason: "Ticket 1",
+          ip: null,
+          userAgent: null,
+        }),
+      );
+      const token = tokenFromMail(w.mail.findLast((m) => m.to === "bea@acme.example")?.text ?? "");
+      return () => w.handle(post("/auth/user/invite/confirm", { token }));
     },
   },
   {

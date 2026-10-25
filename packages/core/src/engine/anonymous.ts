@@ -57,6 +57,9 @@ import { draftUserRow } from "./users.js";
  * and grant no privilege. A switch leaves the anonymous user as a sign-in
  * does, and its token never enters the bag. The sign-out of one ends a
  * session of the browser, as `POST /sign-out` does.
+ * Also not listed: the confirm of an invitation link (plan 12f2 Task 3). It
+ * is a sign-in of the invited user: it changes nothing of the anonymous user,
+ * and it links nothing, as its row records no anonymous session.
  * Also not listed: the operator routes, the update and the delete of plan
  * 12f2 too. The operator guard needs the platform role, a second factor,
  * and a verified address, so it refuses an anonymous session with

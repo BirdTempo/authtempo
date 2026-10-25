@@ -195,6 +195,8 @@ The measurement of 2026-10-20 at 03:00 UTC: one search for a prefix that no addr
 - [`conflict`](/docs/reference/errors/#conflict): another write changed the row at the same time. Try again.
 - [`hook_refused`](/docs/reference/errors/#hook_refused): `hooks.operator.beforeAction` or another before hook refused the act.
 - [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook threw another error.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the person opened an invitation link that is wrong, spent, or past its life, or the address of the user changed since the create. Create no second user: the person signs in by a magic link at the address.
+- [`sso_required`](/docs/reference/errors/#sso_required): the invitation link names an address of a domain that enforces SSO. The person signs in through the SSO connection.
 
 ## Next
 

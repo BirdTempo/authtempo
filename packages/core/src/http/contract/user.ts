@@ -1,8 +1,15 @@
 import { z } from "zod";
 import { DELETE_TOKEN_RE } from "../../engine/account-delete.js";
 import { EMAIL_CHANGE_TOKEN_RE } from "../../engine/email-change.js";
+import { USER_INVITE_TOKEN_RE } from "../../engine/user-invite.js";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SentAnswer, UserJson } from "./shapes.js";
+import {
+  OkAnswer,
+  SentAnswer,
+  SessionSignInAnswer,
+  TwoFactorChallenge,
+  UserJson,
+} from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 export const updateBody = z.strictObject({
@@ -18,6 +25,14 @@ export const changeBody = z.strictObject({
 });
 // Not strict: a form may carry the name of its button.
 export const confirmBody = z.object({ token: z.string().max(64) });
+/** The confirm of an invitation link (plan 12f2 Task 3). Not strict, as `confirmBody`. */
+export const inviteConfirmBody = z.object({
+  token: z.string().max(64),
+  // A native app's trust token (plan 12c); a browser sends the cookie.
+  trustDevice: z.string().max(64).optional(),
+});
+/** The query of the invitation link. The route holds the token to the engine's form. */
+export const inviteConfirmQuery = z.object({ token: z.string().regex(USER_INVITE_TOKEN_RE) });
 export const verifyBody = z.strictObject({ code: z.string().min(1).max(16) });
 // No field: the fresh session is the proof. Strict, so a client that sends a password learns that core reads none.
 export const deleteBody = z.strictObject({});
@@ -69,6 +84,20 @@ export const USER_CONTRACT = {
     body: { schema: confirmBody, media: ["json", "form"], parsedBy: "zod" },
     // JSON: `{ ok: true }` with the cleared cookie. A form: the app's root, or the app's error page.
     answer: { kind: "json", schema: OkAnswer },
+    alt: { kind: "redirect", param: "auth_error" },
+  },
+} as const satisfies Partial<Record<RouteKey, RouteContract>>;
+
+/** The contract of `routes/user-invite.ts` (plan 12f2 Task 3). */
+export const USER_INVITE_CONTRACT = {
+  "GET /user/invite/confirm": {
+    query: { schema: inviteConfirmQuery, parsedBy: "hand" },
+    answer: { kind: "html" },
+    alt: { kind: "redirect", param: "auth_error" },
+  },
+  "POST /user/invite/confirm": {
+    body: { schema: inviteConfirmBody, media: ["json", "form"], parsedBy: "zod" },
+    answer: { kind: "json", schema: z.union([SessionSignInAnswer, TwoFactorChallenge]) },
     alt: { kind: "redirect", param: "auth_error" },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

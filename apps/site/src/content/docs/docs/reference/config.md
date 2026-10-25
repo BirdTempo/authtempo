@@ -10,6 +10,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 2"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.
@@ -300,6 +301,7 @@ Another key of `totp` is refused.
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
 | `totp.gate.sso` | boolean | `true` | `false` lets every SSO connection open a session with no second factor. A connection's `mfa` list passes the gate when the provider asserts one of its values. |
 | `totp.gate.phone` | boolean | `true` | `false` lets the phone code sign-in open a session with no challenge. A challenge after a phone code offers no email method. |
+| `totp.gate.invite` | boolean | `true` | `false` lets the invitation link of a created user open a session with no challenge. A person can sign in by another path first, turn a factor on, and open the old invitation later. The gate keeps that link from opening a session with one factor. A challenge after the link offers no email method. |
 | `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting
@@ -362,6 +364,8 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
 | `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
 | `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. `account.notices: false` turns it off too. |
+| `operator.invite` | object | `{ ttlHours: 72 }` | The invitation link that a user created with `firstSignIn: "invite"` gets as the first sign-in (plan 12f2). It needs `operator.users`. Another key is refused. |
+| `operator.invite.ttlHours` | number | 72 | A whole number from 1 to 168. The life of the invitation link. 72 hours covers a weekend; the link is spent once and bound to the address. |
 
 ## SSO
 
@@ -418,7 +422,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `account.mail` | function of `AccountMailInput` | `defaultAccountMail` | Answers the proof mails: the re-authentication code, the change-of-address link and code, and the note to a taken address. Core sends each to its address. |
+| `account.mail` | function of `AccountMailInput` | `defaultAccountMail` | Answers the proof mails: the re-authentication code, the change-of-address link and code, and the note to a taken address. Also the invitation link of a created user (`user_invite`, plan 12f2), which names the app only, never the operator. Core sends each to its address. |
 | `account.notices` | object or `false` | on | The notice mails after a change of a way in. `false` turns them off. |
 | `account.notices.mail` | function of `NoticeMailInput` | `defaultNoticeMail` | Answers a notice. Core sends it to the input's address. |
 | `account.confirmPage` | function of `EmailChangePageInput` | `defaultEmailChangePage` | Answers the markup of the page a change-of-address link opens. It must post `token` to `action`. Core sets the headers. |

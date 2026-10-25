@@ -53,6 +53,11 @@ const TOOL_ROUTES = [
 
 /** The routes of plan 12f2 Task 5 under the same feature: operator-user-routes.test.ts covers them. */
 const PLAN_12F2_ROUTES = ["POST /operator/users/update", "POST /operator/users/delete"];
+/**
+ * The invitation link of plan 12f2 Task 3: the feature operatorUsers, but
+ * no operator credential. The person who got the mail calls it.
+ */
+const INVITE_ROUTES = ["GET /user/invite/confirm", "POST /user/invite/confirm"];
 
 type ToolKey = (typeof TOOL_ROUTES)[number]["key"];
 type WriteKey = Extract<ToolKey, `POST ${string}`>;
@@ -214,7 +219,12 @@ async function fitted(key: ToolKey, res: Response): Promise<Record<string, unkno
 
 describe("the operator routes (plan 12f Task 10)", () => {
   it("lists the 12f routes in ROUTES with the feature operatorUsers and both credential forms", () => {
-    const tagged = ROUTES.filter((r) => r.feature === "operatorUsers");
+    const all = ROUTES.filter((r) => r.feature === "operatorUsers");
+    const invite = all.filter((r) => INVITE_ROUTES.includes(`${r.method} ${r.path}`));
+    expect(invite.map((r) => [`${r.method} ${r.path}`, r.auth])).toEqual(
+      INVITE_ROUTES.map((key) => [key, ["none"]]),
+    );
+    const tagged = all.filter((r) => !invite.includes(r));
     expect(tagged.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
       [...TOOL_ROUTES.map((r) => r.key), ...PLAN_12F2_ROUTES].sort(),
     );

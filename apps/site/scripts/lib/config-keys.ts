@@ -335,6 +335,7 @@ export const CONFIG_KEYS = {
     social: true,
     sso: true,
     phone: true,
+    invite: true,
   } satisfies Keys<TotpGateConfig>,
   jwtMint: {
     alg: true,
@@ -378,6 +379,7 @@ export const CONFIG_KEYS = {
     secrets: true,
     users: true,
     impersonation: true,
+    invite: true,
   } satisfies Keys<OperatorConfig>,
   "operator.secrets[]": {
     name: true,
@@ -388,6 +390,7 @@ export const CONFIG_KEYS = {
     ttlMinutes: true,
     notice: true,
   } satisfies Keys<NonNullable<OperatorConfig["impersonation"]>>,
+  "operator.invite": { ttlHours: true } satisfies Keys<NonNullable<OperatorConfig["invite"]>>,
   sso: {
     oidc: true,
     saml: true,

@@ -920,6 +920,13 @@ export interface TotpGateConfig {
   sso?: boolean;
   /** The phone code sign-in (plan 12i). Default true. */
   phone?: boolean;
+  /**
+   * The invitation link of a created user (plan 12f2). Default true. A
+   * person can sign in by another path first, turn a factor on, and open
+   * the old invitation later. Without the gate, the link would open a
+   * session with one factor.
+   */
+  invite?: boolean;
 }
 
 export interface TotpConfig {
@@ -962,7 +969,14 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
-  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean; phone: boolean };
+  gate: {
+    magicLink: boolean;
+    emailOtp: boolean;
+    social: boolean;
+    sso: boolean;
+    phone: boolean;
+    invite: boolean;
+  };
   emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
@@ -1072,6 +1086,13 @@ export interface OperatorConfig {
    * user gets a mail at each start (owner decision 3).
    */
   impersonation?: { ttlMinutes?: number; notice?: boolean };
+  /**
+   * Plan 12f2: the invitation link that a created user gets as the first
+   * sign-in. It needs `users`. `ttlHours` is a whole number from 1 to 168,
+   * default 72: 72 hours covers a weekend; the link is spent once and
+   * bound to the address.
+   */
+  invite?: { ttlHours?: number };
 }
 
 /** The operator config after construction (plan 12f). The 11c `secretHash` is the entry "default". */
@@ -1079,6 +1100,8 @@ export interface ResolvedOperator {
   secrets: readonly ResolvedOperatorSecret[];
   users: boolean;
   impersonation: { ttlMinutes: number; notice: boolean } | null;
+  /** The invitation link of a created user (plan 12f2). */
+  invite: { ttlHours: number };
 }
 
 export interface OAuthConfig {
@@ -2864,19 +2887,27 @@ const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
   social: true,
   sso: true,
   phone: true,
+  invite: true,
 };
 
 /** `totp.gate` (plan 12c): each method on unless the app sets it false. */
 function resolveGate(input: unknown): ResolvedTotp["gate"] {
-  const gate = { magicLink: true, emailOtp: true, social: true, sso: true, phone: true };
+  const gate = {
+    magicLink: true,
+    emailOtp: true,
+    social: true,
+    sso: true,
+    phone: true,
+    invite: true,
+  };
   if (input === undefined) return gate;
   if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
       throw new ConfigError(
-        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, sso, and phone. The handoff has no key: it continues a browser session that passed the gate`,
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, sso, phone, and invite. The handoff has no key: it continues a browser session that passed the gate`,
       );
-  for (const key of ["magicLink", "emailOtp", "social", "sso", "phone"] as const) {
+  for (const key of ["magicLink", "emailOtp", "social", "sso", "phone", "invite"] as const) {
     const value = (input as TotpGateConfig)[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);
@@ -3187,6 +3218,7 @@ const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = {
   secrets: true,
   users: true,
   impersonation: true,
+  invite: true,
 };
 const OPERATOR_ENTRY_KEYS: Readonly<Record<keyof OperatorSecretEntry, true>> = {
   name: true,
@@ -3196,6 +3228,9 @@ const OPERATOR_ENTRY_KEYS: Readonly<Record<keyof OperatorSecretEntry, true>> = {
 const OPERATOR_IMPERSONATION_KEYS: Readonly<
   Record<keyof NonNullable<OperatorConfig["impersonation"]>, true>
 > = { ttlMinutes: true, notice: true };
+const OPERATOR_INVITE_KEYS: Readonly<Record<keyof NonNullable<OperatorConfig["invite"]>, true>> = {
+  ttlHours: true,
+};
 const OPERATOR_SCOPES: ReadonlySet<string> = new Set<OperatorScope>([
   "keys",
   "secrets",
@@ -3260,7 +3295,7 @@ function resolveOperator(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OPERATOR_KEYS, key))
       throw new ConfigError(
-        `operator.${key} is not an option; core has secretHash, secrets, users, and impersonation`,
+        `operator.${key} is not an option; core has secretHash, secrets, users, impersonation, and invite`,
       );
   let secrets: ResolvedOperatorSecret[];
   if (input.secretHash !== undefined && input.secrets !== undefined)
@@ -3297,7 +3332,30 @@ function resolveOperator(
     secrets: Object.freeze(secrets),
     users,
     impersonation: resolveImpersonation(input.impersonation, users, platformRole),
+    invite: resolveInvite(input.invite, users),
   };
+}
+
+/**
+ * `operator.invite` (plan 12f2 Task 3). Default 72 hours: 72 hours covers
+ * a weekend; the link is spent once and bound to the address. The upper
+ * bound of 168 hours keeps a lost link short-lived. ASVS 5.0.0 6.4.1
+ * names no period for a system-made first code (plan 12f2 Task 1).
+ */
+function resolveInvite(
+  input: OperatorConfig["invite"],
+  users: boolean,
+): ResolvedOperator["invite"] {
+  if (input === undefined) return { ttlHours: 72 };
+  if (!isPlainObject(input as unknown)) throw new ConfigError("operator.invite must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OPERATOR_INVITE_KEYS, key))
+      throw new ConfigError(`operator.invite.${key} is not an option; core has ttlHours`);
+  if (!users) throw new ConfigError("operator.invite needs operator.users");
+  const ttlHours = input.ttlHours ?? 72;
+  if (!Number.isSafeInteger(ttlHours) || ttlHours < 1 || ttlHours > 168)
+    throw new ConfigError("operator.invite.ttlHours must be a whole number from 1 to 168");
+  return { ttlHours };
 }
 
 /**

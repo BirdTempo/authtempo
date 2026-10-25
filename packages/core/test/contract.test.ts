@@ -7,6 +7,7 @@ import { MAGIC_LINK_TOKEN_RE } from "../src/engine/magic-link.js";
 import { CHALLENGE_RE as PKCE_CHALLENGE_RE } from "../src/engine/oauth-authorize.js";
 import { createClient } from "../src/engine/oauth-client-store.js";
 import { DEVICE_GRANT } from "../src/engine/oauth-clients.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
   PASSWORD_RESET_TOKEN_RE,
   PASSWORD_VERIFY_TOKEN_RE,
@@ -14,6 +15,7 @@ import {
 } from "../src/engine/password.js";
 import { TWO_FACTOR_TOKEN_RE } from "../src/engine/second-factor.js";
 import { createSession } from "../src/engine/sessions.js";
+import { USER_INVITE_TOKEN_RE } from "../src/engine/user-invite.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
 import { AUTH_ERROR_PARAM } from "../src/http/redirect.js";
@@ -307,6 +309,16 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
   // The real tokens of the mailed links, so each verify route takes its valid body.
   await w.handle(post("/auth/magic-link/request", { email: "link@example.com" }));
   const magicToken = lastToken(w.auth);
+  // The invitation of a user that the app creates (plan 12f2 Task 3).
+  const invited = await operatorApi(w.auth.config).users.create({
+    actor: { kind: "app", name: "contract" },
+    email: "invited@example.com",
+    reason: "Ticket 1",
+    ip: null,
+    userAgent: null,
+  });
+  if (!invited.ok) throw new Error(invited.code);
+  const inviteToken = lastToken(w.auth);
   await w.handle(post("/auth/password/sign-up", { email: "new@example.com", password: PASSWORD }));
   const verifyToken = lastToken(w.auth);
   await w.handle(post("/auth/password/reset/request", { email: "new@example.com" }));
@@ -414,6 +426,7 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /magic-link/verify", body: { token: magicToken }, refused: INVALID_TOKEN },
+    { key: "POST /user/invite/confirm", body: { token: inviteToken }, refused: INVALID_TOKEN },
     {
       key: "POST /social/:provider/link",
       path: "/social/google/link",
@@ -883,7 +896,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 20 adds POST /password/verify/code.
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
-    expect(keys.length).toBe(206);
+    // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
+    expect(keys.length).toBe(208);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -899,8 +913,8 @@ describe("the route contract (plan 11g)", () => {
     // module scim, so 22 became 23. Plan 12i Task 2 adds the module
     // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
     // Plan 12i Task 6 adds the module anonymous: 26. Plan 12i Task 11 adds
-    // the module multi-session: 27.
-    expect(modules.length).toBe(27);
+    // the module multi-session: 27. Plan 12f2 Task 3 adds the module user-invite: 28.
+    expect(modules.length).toBe(28);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -977,6 +991,20 @@ describe("the route contract (plan 11g)", () => {
         valid: { status: 200, code: null },
         missing: { token: PAGE_REFUSED },
         wrong: { key: "token", value: `ad_${SHORT}`, answer: PAGE_REFUSED, regex: DELETE_TOKEN_RE },
+      },
+      {
+        key: "GET /user/invite/confirm",
+        path: "/user/invite/confirm",
+        query: { token: `ui_${BODY43}` },
+        required: ["token"],
+        valid: { status: 200, code: null },
+        missing: { token: PAGE_REFUSED },
+        wrong: {
+          key: "token",
+          value: `ui_${SHORT}`,
+          answer: PAGE_REFUSED,
+          regex: USER_INVITE_TOKEN_RE,
+        },
       },
       {
         key: "GET /magic-link/verify",
@@ -1216,7 +1244,8 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(24);
+    // Plan 12f2 Task 3 adds the query of GET /user/invite/confirm: 25.
+    expect(hand.length).toBe(25);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1244,8 +1273,9 @@ describe("the route contract (plan 11g)", () => {
       const refused = await w.handle(get(`/auth${row.path}?${query(wrong)}`, row.headers));
       expect(await answerOf(refused), `${row.key}: the wrong form`).toEqual(row.wrong.answer);
     }
-    // The nine GETs whose schema holds a key to an engine regex.
-    expect(wrongForms).toBe(9);
+    // The ten GETs whose schema holds a key to an engine regex. Plan 12f2
+    // Task 3 adds the invitation link: nine became ten.
+    expect(wrongForms).toBe(10);
   });
 
   it("holds a hand-read body to its schema", async () => {
@@ -1453,7 +1483,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 20 adds the body of the sign-up code.
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds the bodies of the operator update and delete.
-    expect(withBody.length).toBe(110);
+    // Plan 12f2 Task 3 adds the body of the invitation confirm.
+    expect(withBody.length).toBe(111);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1483,7 +1514,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 20 adds the refusal of the sign-up code body.
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up: 106.
     // Plan 12f2 Task 5 adds the refused bodies of the operator update and delete: 108.
-    expect(refusals).toBe(108);
+    // Plan 12f2 Task 3 adds the refused body of the invitation confirm.
+    expect(refusals).toBe(109);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1511,7 +1543,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 20 adds the body of the sign-up code to json.
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up to json.
     // Plan 12f2 Task 5 adds the two operator bodies to json.
-    expect(counts).toEqual({ json: 101, both: 10, form: 8 });
+    // Plan 12f2 Task 3 adds the invitation confirm to both.
+    expect(counts).toEqual({ json: 101, both: 11, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

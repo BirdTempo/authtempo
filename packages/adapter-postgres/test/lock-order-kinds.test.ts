@@ -721,6 +721,8 @@ const TOUCHED: Record<string, string[]> = {
   "an admin create": ["user", "member"],
   // Plan 12f2 Task 2: the new user row with its identity, then the audit row.
   "an operator create": ["user"],
+  // Plan 12f2 Task 3: the create, then the confirm holds the user row, claims it, and opens a session.
+  "an invitation confirm": ["user", "session"],
   // Ruling 78 of plan 12d: the sweep takes the team rows of a solo organization.
   "an account delete with a solo and a shared organization": [
     "user",
@@ -1014,6 +1016,14 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
       firstSignIn: "none",
       ...reason,
     }),
+  "an invitation confirm": async (w) => {
+    must(
+      await w.auth.api.operator.users.create({ actor: APP, email: "ivy@example.com", ...reason }),
+    );
+    const res = await w.post("/user/invite/confirm", { token: w.lastToken("ivy@example.com") }, "");
+    const body = (await res.json()) as { error?: string };
+    return res.ok ? { ok: true as const, value: body } : { ok: false as const, code: body.error };
+  },
   "an account delete with a solo and a shared organization": (w, s) =>
     w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null }),
   "an account delete of an operator with an impersonation": (w, s) =>
@@ -1353,6 +1363,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "teams updateTeam": "one kind: the team row",
   "teams deleteTeam": ["a team delete"],
   "teams addTeamMember": ["a team member add", "a SCIM deactivate"],
+  // Plan 12f2 Task 3: the spend, the user hold, the claim, and the session.
+  "user-invite confirmUserInvite": ["an invitation confirm"],
   "teams removeTeamMember": ["a team member removal", "a team leave"],
   "teams setActiveTeam": ["a set of the active team"],
   "tokens createApiToken": "one kind: the user hold, then token rows",
@@ -1433,7 +1445,7 @@ const SITES: Record<string, readonly string[] | string> = {
     "a SCIM group rename",
     "a SCIM group delete",
   ],
-  "operator/accounts createUser": ["an operator create"],
+  "operator/accounts createUser": ["an operator create", "an invitation confirm"],
   "operator/accounts updateUser": "one kind: the compare-and-set of the user row",
   "operator/accounts deleteUser": ["an operator delete with a solo and a shared organization"],
 };
@@ -1455,8 +1467,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // one of username.ts, and Task 5 the two of phone.ts. Task 6 adds the two of
     // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
     // one of the passkey-first sign-up. Plan 12f2 Task 4 adds the two of
-    // operator/accounts.ts, and Task 2 the third (the operator create).
-    expect(found.length).toBe(87);
+    // operator/accounts.ts, and Task 2 the third (the operator create). Task 3
+    // adds the one of user-invite.ts (the confirm).
+    expect(found.length).toBe(88);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

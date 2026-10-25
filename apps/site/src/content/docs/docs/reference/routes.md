@@ -13,6 +13,7 @@ sources:
   - packages/core/src/http/health.ts
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -1411,6 +1412,24 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Input | Query { targetUserId?, after?, limit? }. `targetUserId` reads one user's rows. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
 | Answer | `{ rows, next }`: the audit rows by `id` ascending, oldest first. A row has `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`. `actorId` names a secret by its name, never by the secret. `next` is the last id of a full page, else null |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-user-invite-confirm"><code>GET /user/invite/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists with `operator.users` |
+| Input | Query `{ token }` |
+| Answer | 200, the confirm page with a form that posts the token; no storage read, no limiter call, no side effect. The `ui_` token comes in the invitation mail of a user created with `firstSignIn: "invite"`. A malformed token redirects to `/?auth_error=invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token) |
+
+<h3 id="post-user-invite-confirm"><code>POST /user/invite/confirm</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists with `operator.users`. Each POST counts on `user-invite-confirm:ip:<ip>`, 20 per 15 minutes, before the token check |
+| Input | JSON or form `{ token, trustDevice? }`. `trustDevice` is JSON only: the `td_` token of a trusted device. A browser sends the trust cookie |
+| Answer | The link is spent once, lives `operator.invite.ttlHours`, and holds the address of the create. It proves the address and opens a session with the via `invite`. A form: 302 to `appURL` with the cookie. JSON: `{ user, session }` with the cookie. For a user with the second factor on, no cookie: a form gets a 302 to [the challenge page](/docs/reference/routes/#get-totp-challenge), and JSON gets `{ twoFactor: { challenge, expiresAt, methods } }` (`totp.gate.invite`). A wrong, spent, or expired link, and a link of a user whose address changed, answer `invalid_token` |
+| Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 ## OAuth provider
 

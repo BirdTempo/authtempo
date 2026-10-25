@@ -26,7 +26,7 @@ import { TEAMS_CONTRACT } from "./teams.js";
 import { TOKENS_CONTRACT } from "./tokens.js";
 import { TOTP_CONTRACT } from "./totp.js";
 import type { RouteContract } from "./types.js";
-import { USER_CONTRACT } from "./user.js";
+import { USER_CONTRACT, USER_INVITE_CONTRACT } from "./user.js";
 import { USERNAME_CONTRACT } from "./username.js";
 
 /**
@@ -59,6 +59,7 @@ export const ROUTE_CONTRACT = {
   ...TOKENS_CONTRACT,
   ...JWT_CONTRACT,
   ...OPERATOR_CONTRACT,
+  ...USER_INVITE_CONTRACT,
   ...OAUTH_CONTRACT,
   ...HEALTH_CONTRACT,
   ...SSO_CONTRACT,

@@ -259,6 +259,8 @@ describe("the operator config of plan 12f", () => {
       secrets: [{ name: "a", secretHash: HASH, scopes: ["keys"] }],
       users: false,
       impersonation: null,
+      // Plan 12f2 Task 3: the invitation life, 72 hours by default.
+      invite: { ttlHours: 72 },
     });
     const on = resolveConfig({
       ...base,
@@ -284,7 +286,12 @@ describe("the operator config of plan 12f", () => {
   it("accepts the user tools with a platform role and no secret", async () => {
     // Spec 26 item 3 and the plan ask for an actor, not a secret (ruling 21).
     const resolved = resolveConfig({ ...base, ...PLATFORM, operator: { users: true } });
-    expect(resolved.operator).toEqual({ secrets: [], users: true, impersonation: null });
+    expect(resolved.operator).toEqual({
+      secrets: [],
+      users: true,
+      impersonation: null,
+      invite: { ttlHours: 72 },
+    });
     // With no secret entry the secret routes are a tool that is off. They answer 404, as a
     // path that does not exist (ruling 22 of plan 12f, spec 26 item 7).
     const app = operatorApp({ users: true }, PLATFORM);

@@ -253,8 +253,10 @@ describe("the column map (plan 12g)", () => {
     // 1: the day cap of the sign-up code mails. Plan 12i Task 8 adds 2: the
     // per-IP keys of the passkey-first sign-up options and its verify.
     // Ruling 38 adds 1: the daily cap of the passkey-first sign-up. Plan 12f2
-    // Task 5 adds 1: the per-actor count of the operator delete.
-    expect(sites.length).toBe(110);
+    // Task 5 adds 1: the per-actor count of the operator delete. Plan 12f2
+    // Task 3 adds 1: the per-IP count of the invitation confirm.
+    expect(sites.length).toBe(111);
+    expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
     expect(sites).toContain('engine/passkeys.ts "passkey-sign-up:all-day" SIGN_UP_CAP_SUBJECT');

@@ -173,6 +173,9 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /password/verify/code": "password",
   "GET /magic-link/verify": "magic_link",
   "POST /magic-link/verify": "magic_link",
+  // The invitation link of plan 12f2 Task 3.
+  "GET /user/invite/confirm": "invite",
+  "POST /user/invite/confirm": "invite",
   "POST /otp/verify": "email_otp",
   // The phone code of plan 12i Task 5.
   "POST /phone/verify": "phone",

@@ -216,6 +216,17 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "GET",
+    path: "/user/invite/confirm",
+    reason: "the confirm page of the mailed invitation link; a browser opens it (plan 12f2 Task 3)",
+  },
+  {
+    method: "POST",
+    path: "/user/invite/confirm",
+    reason:
+      "the form of the invitation page posts it in the browser that opened the mail; the plan names no SDK call (plan 12f2 Task 3)",
+  },
+  {
+    method: "GET",
     path: "/scim/v2/ServiceProviderConfig",
     reason:
       "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 9b)",

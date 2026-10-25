@@ -26,6 +26,7 @@ import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
 import { userRoutes } from "./user.js";
+import { userInviteRoutes } from "./user-invite.js";
 import { usernameRoutes } from "./username.js";
 
 /**
@@ -55,6 +56,7 @@ export type RouteModule =
   | "tokens"
   | "jwt"
   | "operator"
+  | "user-invite"
   | "oauth"
   | "sso"
   | "scim"
@@ -91,6 +93,7 @@ export function coreRouteModules(
     { module: "tokens", routes: tokenRoutes(config) },
     { module: "jwt", routes: jwtRoutes(config) },
     { module: "operator", routes: operatorRoutes(config) },
+    { module: "user-invite", routes: userInviteRoutes(config) },
     { module: "oauth", routes: oauthRoutes(config) },
     { module: "sso", routes: ssoRoutes(config) },
     { module: "scim", routes: scimRoutes(config) },

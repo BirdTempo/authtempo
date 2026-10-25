@@ -164,6 +164,8 @@ describe("operator config (plan 11c)", () => {
       secrets: [{ name: "default", secretHash: HASH, scopes: ["keys", "secrets"] }],
       users: false,
       impersonation: null,
+      // Plan 12f2 Task 3: the invitation life, 72 hours by default.
+      invite: { ttlHours: 72 },
     });
   });
 

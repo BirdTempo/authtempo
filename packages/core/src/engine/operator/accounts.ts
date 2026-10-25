@@ -19,6 +19,7 @@ import { phoneRefusal } from "../phone.js";
 import { unchanged } from "../profile.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
+import { mailUserInvite, writeUserInvite } from "../user-invite.js";
 import { createUserIn, normalizeEmail, takenCode, validImageUrl, validUserName } from "../users.js";
 import { SESSIONS_PAGE_LEAST } from "./access-end.js";
 import { auditDraft, impersonationStops, operatorAct, operatorReason } from "./audit.js";
@@ -135,9 +136,14 @@ function taken(err: unknown): Result<never> {
  * race maps by `takenCode` after the transaction. Either way no audit row
  * stays and no mail goes out, so an actor cannot mail any person.
  *
- * After the commit: `user.afterCreate`, then the mail. `reset` mails a
+ * `invite` writes the invitation row in the same transaction (Task 3).
+ *
+ * After the commit: `user.afterCreate`, then the mail. `invite` mails the
+ * invitation link (`mailUserInvite`). `reset` mails a
  * reset link (`sendResetLink`) with no limit of the reset route: the
- * operator limit of the route bounds it. A mail that throws writes one
+ * operator limit of the route bounds both. The mail runs before the
+ * answer, because the answer says what was mailed; the caller already
+ * knows that the account exists. A mail that throws writes one
  * log line with no address, keeps the user, and answers `mailed: null`.
  * The audit `data` holds flags only, never the address, the phone, or the
  * name. The answer holds no token, no link, and no code.
@@ -189,11 +195,15 @@ export async function createUser(
   });
   if (!drafted.ok) return drafted;
   const steps = createSteps(config, "operator", { signUpRule: false });
+  // The clear invitation token, kept out of the work's value: that value
+  // reaches the steps of the act, and the token leaves core only in the mail.
+  let invite: string | null = null;
   const done = await operatorAct(
     config,
     drafted.value,
     async (tx) => {
       steps.begin();
+      invite = null;
       const made = await createUserIn(
         tx,
         steps,
@@ -208,17 +218,27 @@ export async function createUser(
         now,
       );
       if (!made.ok) return made;
-      return ok({ user: made.value });
+      const user = made.value;
+      // The invitation row commits with the user and the audit row (plan 12f2 Task 3).
+      if (firstSignIn === "invite" && user.email !== null)
+        invite = await writeUserInvite(tx, config, { ...user, email: user.email }, now);
+      return ok({ user });
     },
     { committed: (value) => steps.after(value.user) },
   ).catch(taken);
   if (!done.ok) return done;
   const { user, auditId } = done.value;
-  let mailed: "reset" | null = null;
-  if (firstSignIn === "reset" && user.email !== null) {
+  let mailed: "invite" | "reset" | null = null;
+  const token: string | null = invite;
+  if (user.email !== null && (firstSignIn === "reset" || token !== null)) {
     try {
-      await sendResetLink(config, user.email, undefined, config.clock.now());
-      mailed = "reset";
+      if (token !== null) {
+        await mailUserInvite(config, user.email, token);
+        mailed = "invite";
+      } else {
+        await sendResetLink(config, user.email, undefined, config.clock.now());
+        mailed = "reset";
+      }
     } catch (e) {
       config.observe.emit({ name: "operator.create_mail_failed", userId: user.id, errorName: e });
     }

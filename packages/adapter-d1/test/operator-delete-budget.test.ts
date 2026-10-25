@@ -850,4 +850,60 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     for (const c of counts) expect(c).toBeLessThanOrEqual(50);
     expect(counts).toEqual(ROUTE_COUNTS.update);
   }, 120_000);
+
+  /**
+   * The invitation of plan 12f2 Task 3. The create writes the row in its
+   * transaction and mails the link after the commit. The confirm runs
+   * through `auth.handle` with the D1 limiter: an unverified user gets the
+   * claim, and a verified user only the identity read.
+   *
+   * Measured on the binding 2026-10-25. The create: 3 before the act, 5
+   * queries (the ready check; the address read, the user, the invitation
+   * row, and the audit row in one transaction), and the mail: 9. The
+   * confirm of an unverified user: 27. That is the limiter, the ready
+   * check, the spend (3: the read, the read of the D1 undo, the update),
+   * the user read, the gate read, the session hook reads and hold (3), the
+   * identity (2), the claim (10), the session, and the 4 reads of the JSON
+   * answer. A verified user skips the
+   * identity write and the claim: 16. The confirm has no loop and no page.
+   */
+  const INVITE_COUNTS = { create: 9, confirm: [27, 16] };
+
+  it("creates a user with an invitation in 50 calls (plan 12f2 Task 3)", async () => {
+    const sent: MailMessage[] = [];
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.create({ actor: SUPPORT, email: "ada@example.com", ...REASON }),
+    );
+    expect(r.answer).toMatchObject({ ok: true, value: { mailed: "invite" } });
+    expect([r.refused, r.mails, r.posts]).toEqual([0, 1, 0]);
+    expect(await rows("ta_verification", "purpose = 'user-invite'")).toBe(1);
+    const calls = ROUTE_BEFORE + r.queries + r.mails;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(calls).toBe(INVITE_COUNTS.create);
+  }, 120_000);
+
+  it("confirms an invitation through the route in 50 calls (plan 12f2 Task 3)", async () => {
+    const counts: number[] = [];
+    for (const emailVerified of [false, true]) {
+      const sent: MailMessage[] = [];
+      const setup = await engine(env.DB, sent);
+      const email = emailVerified ? "bea@example.com" : "ada@example.com";
+      const made = await setup.api.operator.users.create({
+        actor: SUPPORT,
+        email,
+        emailVerified,
+        ...REASON,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const text = sent.filter((m) => m.to === email).at(-1)?.text ?? "";
+      const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+      const r = await route(sent, "/user/invite/confirm", { token }, { origin: APP_ORIGIN });
+      expect(r.answer).toMatchObject({ status: 200, body: { user: { id: made.value.userId } } });
+      expect([r.refused, r.mails, r.posts]).toEqual([0, 0, 0]);
+      counts.push(r.queries);
+      current = new Date(current.getTime() + 1);
+    }
+    for (const c of counts) expect(c).toBeLessThanOrEqual(50);
+    expect(counts).toEqual(INVITE_COUNTS.confirm);
+  }, 120_000);
 });

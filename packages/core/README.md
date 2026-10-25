@@ -99,6 +99,8 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/operator/users/create-admin` | `Authorization: Operator <secret>` with the scope `users`; a session caller gets 403 `operator_required` | `{ userId, created, auditId }`. Only with `operator.users` and `organizations.platformRole` |
 | POST | `/operator/users/update` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, name?, image?, reason }` | `{ user, auditId }`; a strict body, so `password`, `email`, and `emailVerified` answer 400 `invalid_body`; no mail. Only with `operator.users` |
 | POST | `/operator/users/delete` | `Authorization: Operator <secret>` with the scope `delete`, or a platform operator's session, `{ userId, reason }` | `{ organizations, auditId }`; 409 `sole_owner`; 409 `delete_too_large` on D1 only; 429 `rate_limited` after 100 calls of one actor per hour (`operator-delete:actor:<kind>:<id>`). Only with `operator.users` |
+| GET | `/user/invite/confirm` | `?token=` | 200 HTML confirm page of the invitation link of a created user (plan 12f2); 302 to `/?auth_error=invalid_token` on a malformed token. No storage read, no limit, no cookie. Only with `operator.users` |
+| POST | `/user/invite/confirm` | form or JSON `token`, `trustDevice?` | As `POST /magic-link/verify`: a session with the via `invite`, or the challenge for a user with the second factor on (`totp.gate.invite`). It proves the address. 400 `invalid_token` (a wrong, spent, or expired link, or a user whose address changed); 403 `account_banned`, `hook_refused`, `sso_required`; 409 `conflict`; 429 `rate_limited` (`user-invite-confirm:ip:<ip>`, 20 per 15 minutes); 500 `hook_failed`. Only with `operator.users` |
 | POST | `/operator/sessions/end-user` | `Authorization: Operator <secret>` with the scope `sessions`, or a platform operator's session, `{ userId, reason }` | `{ ended, more, auditId }`; call again while `more` is true. Only with `operator.users` |
 | POST | `/operator/sessions/end-all` | `Authorization: Operator <secret>` with the scope `sessions`, or a platform operator's session, `{ reason, limit? }` | `{ ended, more, auditId }`; keeps the caller's own session; call again while `more` is true. Only with `operator.users` |
 | GET | `/operator/audit` | `Authorization: Operator <secret>` with the scope `audit`, or a platform operator's session, `?targetUserId=&after=&limit=` | `{ rows, next }`: the audit rows, oldest first. Only with `operator.users` |
@@ -1471,7 +1473,9 @@ const auth = createAuth({
   403 `hook_refused` and the flow writes nothing: the user stays unverified.
   The magic link, the email code, the verify link, and social spend their
   proof before the transaction, so a refusal spends it. The reset keeps its
-  link. `afterVerify` fires once after the commit with the stored row, now
+  link. Since plan 12f2 the `via` can be `invite`: the invitation link of a
+  user that an operator created. Its spend is in the transaction, so a
+  refusal keeps the link. `afterVerify` fires once after the commit with the stored row, now
   verified. A throw there logs one line, and the answer stays. A user that
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A

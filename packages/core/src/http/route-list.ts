@@ -2140,6 +2140,31 @@ export const ROUTES = Object.freeze([
     ],
     oauthCodes: [],
   },
+  // Plan 12f2 Task 3: the invitation link of a created user.
+  {
+    method: "GET",
+    path: "/user/invite/confirm",
+    feature: "operatorUsers",
+    auth: ["none"],
+    codes: ["invalid_token"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/user/invite/confirm",
+    feature: "operatorUsers",
+    auth: ["none"],
+    codes: [
+      "invalid_token",
+      "rate_limited",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "account_banned",
+      "sso_required",
+    ],
+    oauthCodes: [],
+  },
   {
     method: "POST",
     path: "/oauth/register",

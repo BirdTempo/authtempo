@@ -40,7 +40,8 @@ export type RemoveVia = "remove" | "leave" | "operator" | "scim";
 /**
  * How a session came. `impersonation`: a platform operator opened it for the
  * user (plan 12f). `sso`: the IdP of an organization's connection (plan 12d).
- * `phone`: a code by SMS (plan 12i).
+ * `phone`: a code by SMS (plan 12i). `invite`: the invitation link of a
+ * user that an operator created (plan 12f2).
  */
 export type SessionVia =
   | "password"
@@ -52,7 +53,8 @@ export type SessionVia =
   | "impersonation"
   | "sso"
   | "phone"
-  | "anonymous";
+  | "anonymous"
+  | "invite";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -68,6 +70,7 @@ export const SESSION_VIA = {
   sso: true,
   phone: true,
   anonymous: true,
+  invite: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -374,12 +377,14 @@ export interface SessionHooks {
  * How a user row came: the flow's sign-in, or a reset that created the user
  * (plan 12a). `operator`: `createAdmin` of plan 12f creates the user, with no
  * proof of the address. An impersonation opens a session of a user that
- * exists, so it creates no user. `sso` comes through `SessionVia`: the
+ * exists, so it creates no user. The invitation link of plan 12f2 opens
+ * a session of a user that the operator created, so it creates no user
+ * either. `sso` comes through `SessionVia`: the
  * just-in-time create of plan 12d. `scim`: a create by the organization's
  * directory (plan 12d).
  */
 export type UserCreateVia =
-  | Exclude<SessionVia, "impersonation">
+  | Exclude<SessionVia, "impersonation" | "invite">
   | "password_reset"
   | "operator"
   | "scim";
@@ -421,7 +426,8 @@ export type UserUpdateVia =
  * `password_reset` is the reset link or the reset code. `sso` is an SSO
  * sign-in: a verified domain of the organization proves the address (plan
  * 12d). `scim` is a create by the organization's directory: the address rule
- * of a verified domain proves it too (plan 12d).
+ * of a verified domain proves it too (plan 12d). `invite` is the
+ * invitation link of a user that an operator created (plan 12f2).
  */
 export type UserVerifyVia =
   | "password_verify"
@@ -430,7 +436,8 @@ export type UserVerifyVia =
   | "social"
   | "password_reset"
   | "sso"
-  | "scim";
+  | "scim"
+  | "invite";
 /** Each value of `UserVerifyVia`, for the event `email.verify` (plan 12h Task 5). */
 export const USER_VERIFY_VIA = {
   password_verify: true,
@@ -440,6 +447,7 @@ export const USER_VERIFY_VIA = {
   password_reset: true,
   sso: true,
   scim: true,
+  invite: true,
 } as const satisfies Record<UserVerifyVia, true>;
 /**
  * How an identity came (plan 12a). `sign_in` is a social sign-in that

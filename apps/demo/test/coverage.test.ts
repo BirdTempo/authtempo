@@ -92,7 +92,8 @@ describe("the demo lists and the routes of core", () => {
       // multiSession: 111. Plan 12i Task 10 adds the two routes of
       // socialIdToken: 113. Task 8 adds the two routes of passkeySignUp: 115.
       // Plan 12f2 Task 5 adds the update and the delete of operatorUsers: 117.
-      expect(checked).toBe(117);
+      // Plan 12f2 Task 3 adds the two routes of the invitation confirm: 119.
+      expect(checked).toBe(119);
     },
     LONG_TEST_MS,
   );

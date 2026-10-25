@@ -101,7 +101,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 20 adds POST /password/verify/code.
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
-    expect(keys.length).toBe(206);
+    // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
+    expect(keys.length).toBe(208);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -208,8 +209,9 @@ describe("openApiDocument (plan 11g)", () => {
     // Task 10 adds the bodies of the ID-token nonce and sign-in: 114. Plan
     // 12i Task 20 adds the body of the sign-up code: 115. Plan 12i Task 8
     // adds the two bodies of the passkey-first sign-up: 117. Plan 12f2 Task 5
-    // adds the bodies of the operator update and delete: 119.
-    expect(bodies.length).toBe(119);
+    // adds the bodies of the operator update and delete: 119. Plan 12f2
+    // Task 3 adds the body of the invitation confirm: 120.
+    expect(bodies.length).toBe(120);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -458,7 +460,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 20 adds the answer and the body of the sign-up code.
     // Plan 12i Task 8 adds the 2 answers and the 2 bodies of the sign-up.
     // Plan 12f2 Task 5 adds 2 answers and 2 bodies of the operator update and delete.
-    expect([answers, bodies, queries]).toEqual([156, 119, 32]);
+    // Plan 12f2 Task 3 adds the answer, the body, and the query of the invitation confirm.
+    expect([answers, bodies, queries]).toEqual([157, 120, 33]);
   });
 
   it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {

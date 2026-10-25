@@ -176,6 +176,8 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /magic-link/request": NO_SESSION,
   "GET /magic-link/verify": NO_SESSION,
   "POST /magic-link/verify": NO_SESSION,
+  "GET /user/invite/confirm": NO_SESSION,
+  "POST /user/invite/confirm": NO_SESSION,
   "GET /social/:provider/start": NO_SESSION,
   "GET /social/:provider/callback": "It takes the state of a start; the link start is refused.",
   "POST /social/apple/callback": "It takes the state of a start; the link start is refused.",
