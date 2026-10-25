@@ -29,7 +29,10 @@ const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
 function world() {
   const base = createD1Adapter(env.DB);
   const sent: MailMessage[] = [];
-  const race: { interleave: (() => Promise<void>) | null } = { interleave: null };
+  const race: {
+    interleave: (() => Promise<void>) | null;
+    afterUserRead: (() => Promise<void>) | null;
+  } = { interleave: null, afterUserRead: null };
   const wrapTx = (tx: StorageAdapter): StorageAdapter => ({
     ...tx,
     async update(model, where, data) {
@@ -40,6 +43,15 @@ function world() {
         await run();
       }
       return n;
+    },
+    async findOne(model, where) {
+      const row = await tx.findOne(model, where);
+      if (model === "user" && race.afterUserRead) {
+        const run = race.afterUserRead;
+        race.afterUserRead = null;
+        await run();
+      }
+      return row;
     },
     transaction: (fn) => tx.transaction((inner) => fn(wrapTx(inner))),
   });
@@ -106,13 +118,21 @@ function world() {
     const s = await signIn(email);
     return { kind: "user", user: s.user, session: s.session } as const;
   }
-  return { auth, other, race, moving, signIn, platformOperator };
+  return { auth, other, race, moving, signIn, platformOperator, tokenOf };
 }
 
 /** The rows that name the user in the user, identity, session, and member tables. */
 async function rowsOf(userId: string): Promise<number> {
   let n = Number(
     await env.DB.prepare("SELECT count(*) AS n FROM ta_user WHERE id = ?").bind(userId).first("n"),
+  );
+  // The invitation row of the user, and the pending-end row of its sessions.
+  n += Number(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM ta_verification WHERE identifier = ? AND purpose <> 'session-end'",
+    )
+      .bind(userId)
+      .first("n"),
   );
   for (const table of ["ta_identity", "ta_session", "ta_member"])
     n += Number(
@@ -199,4 +219,69 @@ describe("the operator delete beside a grant of the platform role on D1 (ruling 
     expect(Number(audit)).toBe(0);
     expect(await w.auth.api.getSession(target.token)).not.toBeNull();
   });
+});
+
+describe("the invitation confirm beside the operator delete on D1 (ruling 13 L1 of plan 12f2)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  });
+
+  const confirm = (auth: ReturnType<typeof createAuth>, token: string) =>
+    auth.handle(
+      new Request(`${BASE}/auth/user/invite/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      }),
+    );
+
+  for (const emailVerified of [false, true]) {
+    it(`a delete inside the confirm's transaction, after its user read (verified ${emailVerified}): the confirm answers conflict, and no row stays`, async () => {
+      const w = world();
+      const made = await w.auth.api.operator.users.create({
+        actor: APP,
+        email: "ivy@example.com",
+        emailVerified,
+        ...REASON,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const token = w.tokenOf("ivy@example.com");
+      let deleted: Awaited<ReturnType<typeof w.other.api.operator.users.delete>> | null = null;
+      w.race.afterUserRead = async () => {
+        deleted = await w.other.api.operator.users.delete({
+          actor: APP,
+          userId: made.value.userId,
+          ...REASON,
+        });
+      };
+      const res = await confirm(w.auth, token);
+      expect(deleted).toMatchObject({ ok: true });
+      expect([res.status, await res.json()]).toEqual([409, { error: "conflict" }]);
+      expect(await rowsOf(made.value.userId)).toBe(0);
+    });
+
+    it(`a confirm inside the delete's transaction, after its lock (verified ${emailVerified}): the confirm signs in, then the delete takes every row`, async () => {
+      const w = world();
+      const made = await w.auth.api.operator.users.create({
+        actor: APP,
+        email: "ivy@example.com",
+        emailVerified,
+        ...REASON,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const token = w.tokenOf("ivy@example.com");
+      let confirmed: Response | null = null;
+      w.race.interleave = async () => {
+        confirmed = await confirm(w.other, token);
+      };
+      const deleted = await w.auth.api.operator.users.delete({
+        actor: APP,
+        userId: made.value.userId,
+        ...REASON,
+      });
+      expect(deleted).toMatchObject({ ok: true });
+      expect((confirmed as Response | null)?.status).toBe(200);
+      expect(await rowsOf(made.value.userId)).toBe(0);
+    });
+  }
 });

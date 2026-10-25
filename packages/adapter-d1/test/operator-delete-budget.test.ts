@@ -737,8 +737,9 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(await rows("ta_verification", "purpose = 'password-reset'")).toBe(1);
     // Measured 2026-10-25: 3 before the act, 6 queries (the ready check; the
     // address read, the user, the identity, and the audit row in one
-    // transaction; the reset row after it), and the mail. The create has no loop and no page, so the
-    // count is the same for every input.
+    // transaction; the reset row after it), and the mail. The create has no
+    // loop and no page. A create with a phone reads the number too, 1 more
+    // (review-12f2-task2 I4); a phone takes no mail, so that create is lower.
     expect(ROUTE_BEFORE + r.queries + r.mails).toBe(10);
   }, 120_000);
 
@@ -864,8 +865,8 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * the address read, the user, the identity, and the audit row in one
    * transaction; the reset row after it), and the mail: 15. No mail: 3
    * limiter calls and 4 queries (the ready check; the address read, the
-   * user, and the audit row): 7. The create has no loop and no page, so
-   * the count is the same for every input.
+   * user, and the audit row): 7. The create has no loop and no page. A
+   * create with a phone reads the number too, 1 more, and sends no mail.
    */
   const CREATE_COUNTS = [9, 15, 7];
 
@@ -953,4 +954,119 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     for (const c of counts) expect(c).toBeLessThanOrEqual(50);
     expect(counts).toEqual(INVITE_COUNTS.confirm);
   }, 120_000);
+
+  /**
+   * The paths of final-12f2-B I1 (ruling 13 of plan 12f2), each a whole
+   * invocation on the binding with the D1 limiter. A platform operator's
+   * session refreshes in the call (7 hours past, slidingRefreshDays 0.25).
+   */
+  it("creates with a reset link as a platform operator whose session refreshes, in 50 calls", async () => {
+    const sent: MailMessage[] = [];
+    const setup = await engine(env.DB, sent);
+    const token = await platformOperator(setup, sent, "op@example.com");
+    current = new Date(current.getTime() + 7 * 3_600_000);
+    const r = await route(
+      sent,
+      "/operator/users/create",
+      { email: "bea@example.com", emailVerified: true, firstSignIn: "reset", ...ROUTE_REASON },
+      cookieOf(token),
+    );
+    expect(r.answer).toMatchObject({ status: 200, body: { mailed: "reset" } });
+    expect([r.refused, r.mails, r.posts]).toEqual([0, 1, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    // Run of 2026-10-25.
+    expect(calls).toBe(16);
+  }, 120_000);
+
+  it("confirms an invitation of a verified user with the email second factor, in 50 calls", async () => {
+    const sent: MailMessage[] = [];
+    const setup = await engine(env.DB, sent);
+    const made = await setup.api.operator.users.create({
+      actor: SUPPORT,
+      email: "ada@example.com",
+      emailVerified: true,
+      ...REASON,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const text = sent.filter((m) => m.to === "ada@example.com").at(-1)?.text ?? "";
+    const invite = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    const { tokens } = await signIns(setup, sent, "ada@example.com", 1);
+    const session = await setup.api.getSession(tokens[0] ?? "");
+    if (!session) throw new Error("no session");
+    const changed = await setup.api.password?.change({
+      session,
+      newPassword: "correct horse battery",
+    });
+    if (!changed?.ok) throw new Error("no password");
+    const enabled = await setup.handle(
+      new Request(`${BASE}/auth/second-factor/email/enable`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `__Host-tempo_session=${tokens[0]}`,
+        },
+        body: JSON.stringify({ password: "correct horse battery" }),
+      }),
+    );
+    expect(enabled.status).toBe(200);
+    current = new Date(current.getTime() + 1);
+    const r = await route(sent, "/user/invite/confirm", { token: invite }, { origin: APP_ORIGIN });
+    // The gate answers the challenge: no session yet.
+    expect(r.answer).toMatchObject({ status: 200, body: { twoFactor: expect.any(Object) } });
+    expect([r.refused, r.posts]).toEqual([0, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    // Run of 2026-10-25.
+    expect(calls).toBe(9);
+  }, 120_000);
+
+  for (const solos of [0, 1])
+    it(`deletes through the route as a platform operator whose session refreshes, 60 sessions and ${solos} solo organizations, in 50 calls`, async () => {
+      const sent: MailMessage[] = [];
+      const { setup, userId } = await loaded(sent, solos);
+      const token = await platformOperator(setup, sent, "op@example.com");
+      current = new Date(current.getTime() + 7 * 3_600_000);
+      endings.length = 0;
+      const r = await route(
+        sent,
+        "/operator/users/delete",
+        { userId, ...ROUTE_REASON },
+        cookieOf(token),
+      );
+      expect(r.answer).toMatchObject({ status: 200 });
+      expect([r.refused, r.mails, r.posts]).toEqual([0, 1, 0]);
+      const calls = r.queries + r.mails + r.posts;
+      expect(calls).toBeLessThanOrEqual(50);
+      expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+      // Run of 2026-10-25.
+      expect({ solos, act: calls, inAct: endings.length }).toEqual({
+        solos,
+        act: 46,
+        inAct: solos === 0 ? 7 : 0,
+      });
+    }, 300_000);
+
+  for (const solos of [0, 1])
+    it(`deletes the own account through the route, 60 sessions, 10 client links, and ${solos} solo organizations, in 50 calls; the sweeps end the rest`, async () => {
+      const sent: MailMessage[] = [];
+      const { userId, tokens } = await loaded(sent, solos);
+      const r = await route(sent, "/user/delete", {}, cookieOf(tokens.at(-1) ?? ""));
+      expect(r.answer).toMatchObject({ status: 200 });
+      expect([r.refused, r.posts]).toEqual([0, 0]);
+      const calls = r.queries + r.mails + r.posts;
+      expect(calls).toBeLessThanOrEqual(50);
+      expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+      const inAct = endings.length;
+      const sweeps = await sweepAll(sent);
+      for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
+      // Each session ends once with account_deleted, and each link logs out once.
+      expect(await rows("ta_session")).toBe(0);
+      expect(new Set(endings.map((e) => e.id)).size).toBe(60);
+      expect(endings).toHaveLength(60);
+      expect(new Set(posts).size).toBe(10);
+      expect(posts).toHaveLength(10);
+      // Run of 2026-10-25.
+      expect({ solos, act: calls, inAct }).toEqual({ solos, act: 46, inAct: solos === 0 ? 13 : 5 });
+    }, 300_000);
 });
