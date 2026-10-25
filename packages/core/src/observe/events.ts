@@ -169,6 +169,8 @@ export type Outcome = (typeof OUTCOMES)[number];
  */
 export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /password/sign-in": "password",
+  // The sign-up code of plan 12i Task 20: a wrong guess is a sign-in failure.
+  "POST /password/verify/code": "password",
   "GET /magic-link/verify": "magic_link",
   "POST /magic-link/verify": "magic_link",
   "POST /otp/verify": "email_otp",

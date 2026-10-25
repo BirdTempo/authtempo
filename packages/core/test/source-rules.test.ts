@@ -75,6 +75,9 @@ describe("the source rules of plan 12i", () => {
     // calls one is a pathway with a decision in the gate table
     // (gate-table.test.ts). The phone code and the ID-token sign-in pass the
     // gate of 12c, so they open sessions only through gatedSteps.
+    // The rule works per file: a new open in a listed file passes it. That
+    // is a recorded residual. The gate table rows cover the sign-ins in
+    // password.ts and passkeys.ts.
     const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
     const src = new URL("../src/", import.meta.url);
     const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));

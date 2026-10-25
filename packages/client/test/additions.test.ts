@@ -451,6 +451,34 @@ describe("the client calls of the sign-in additions (plan 12i Task 15)", () => {
     expect(await bearer.multiSession.list()).toMatchObject({ ok: false, code: "unauthorized" });
   });
 
+  it("multiSession.switch and multiSession.signOut make the store read the new active user", async () => {
+    const server = makeServer({ multiSession: {} });
+    const client = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
+    for (const email of ["ada@example.com", "bea@example.com"]) {
+      await client.magicLink.request({ email });
+      const v = await client.magicLink.verify({
+        token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
+      });
+      if (!v.ok) throw new Error(v.code);
+    }
+    const stop = client.store.subscribe(() => {});
+    await vi.waitFor(() => expect(client.store.get().data?.user.email).toBe("bea@example.com"));
+    const list = await client.multiSession.list();
+    if (!list.ok) throw new Error(list.code);
+    const ada = list.value.find((s) => s.user.email === "ada@example.com");
+    if (!ada) throw new Error("no session of ada");
+    // A switch makes the store read again: the page shows ada, not bea.
+    expect((await client.multiSession.switch({ sessionId: ada.sessionId })).ok).toBe(true);
+    await vi.waitFor(() => expect(client.store.get().data?.user.email).toBe("ada@example.com"));
+    // The end of the active session makes the first bag session active, and the store reads it.
+    expect(await client.multiSession.signOut({ sessionId: ada.sessionId })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    await vi.waitFor(() => expect(client.store.get().data?.user.email).toBe("bea@example.com"));
+    stop();
+  });
+
   it("lastMethod reads the last method cookie through the closed set, and answers null with none", async () => {
     const server = makeServer({ lastMethod: {} });
     const { fetch, jar } = inProcessFetch(server.auth);

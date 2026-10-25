@@ -71,6 +71,13 @@ const FAILING: Readonly<
     make: async () =>
       post("/auth/password/sign-in", { email: "ada@example.com", password: "wrong password 1" }),
   },
+  // Plan 12i Task 20: a wrong sign-up code.
+  "POST /password/verify/code": {
+    via: "password",
+    over: { password: { hash: FAST, verifyBy: "code" } },
+    make: async () =>
+      post("/auth/password/verify/code", { email: "ada@example.com", code: "000000" }),
+  },
   "GET /magic-link/verify": {
     via: "magic_link",
     make: async () => get("/auth/magic-link/verify?token=short"),

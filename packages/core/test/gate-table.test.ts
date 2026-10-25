@@ -1,6 +1,6 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
-import { CAPTCHA_FLOWS } from "../src/captcha.js";
+import { describe, expect, it, vi } from "vitest";
+import { CAPTCHA_FLOWS, CAPTCHA_HEADER, type CaptchaFlow } from "../src/captcha.js";
 import type { AuthConfig } from "../src/config.js";
 import { ANONYMOUS_REFUSED } from "../src/engine/anonymous.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -21,6 +21,7 @@ import { IMPERSONATION_REFUSED } from "../src/http/impersonation-rules.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { LIMIT_FAMILIES } from "../src/limiter/limit.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
 import { sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
@@ -51,11 +52,15 @@ import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PHONE = "+14155550100";
+/** A new user of the sign-up rows. */
+const BEA = "bea@example.com";
+/** The new password of the reset rows. */
+const NEW = "a new correct horse staple";
 const RP = { rpID: "example.com", rpName: "Example", origins: [APP_ORIGIN] };
 
 /** The methods of a challenge after a password sign-in: the email code passes there only (12c decision 4). */
 const PASSWORD_METHODS: ChallengeMethod[] = ["passkey", "totp", "email", "backup"];
-/** The methods of a challenge after any other first factor. */
+/** The methods of a challenge after any other first factor, and after a reset: it proves the mailbox. */
 const OTHER_METHODS: ChallengeMethod[] = ["passkey", "totp", "backup"];
 
 type Outcome =
@@ -265,6 +270,19 @@ async function world(extra: Partial<AuthConfig> = {}) {
 }
 type World = Awaited<ReturnType<typeof world>>;
 
+/** A world of the main config with no user: for a config that the factor user cannot pass. */
+function bareWorld(extra: Partial<AuthConfig> = {}) {
+  const vias = viaRecorder();
+  const f = providerFetch({ msNonce: "", now: () => 0 });
+  const auth = makeAuth({
+    ...gateConfig(f.fetchFn, createRecordingSms()),
+    hooks: vias.hooks,
+    ...extra,
+  });
+  const handle = settled(createRouter(auth.config, coreRoutes(auth.config)));
+  return { ...auth, handle, vias: vias.byId };
+}
+
 /**
  * The `via` of each session that opened, by session id, as the session
  * hook `afterCreate` gets it. The session row holds no via: the hook event
@@ -319,6 +337,13 @@ async function redirectOutcome(
   }
   const opened = sessionToken ? await resolveSession(w.config, sessionToken) : null;
   if (!opened) throw new Error(`no challenge and no session: ${location}`);
+  return sessionOutcome(w, opened.session.id);
+}
+
+/** The outcome of a JSON answer that sets the session cookie and holds no session. */
+async function cookieOutcome(w: Pick<World, "config" | "vias">, b: Browser): Promise<Outcome> {
+  const opened = await resolveSession(w.config, b.jar.get("__Host-tempo_session") ?? "");
+  if (!opened) throw new Error("the answer set no live session cookie");
   return sessionOutcome(w, opened.session.id);
 }
 
@@ -442,6 +467,82 @@ const ROWS: GateRow[] = [
         w,
         await browser(w.handle).post("/password/sign-in", { phone: PHONE, password: PASSWORD }),
       );
+    },
+  },
+  {
+    pathway: "password reset by link",
+    via: "password",
+    gate: "always",
+    expect: { kind: "challenge", methods: OTHER_METHODS },
+    async run(extra) {
+      const w = await world(extra);
+      const b = browser(w.handle);
+      expect((await b.post("/password/reset/request", { email: EMAIL })).status).toBe(200);
+      return outcomeOf(w, await b.post("/password/reset", { token: mailToken(w), password: NEW }));
+    },
+  },
+  {
+    pathway: "password reset by email code",
+    via: "password",
+    gate: "always",
+    expect: { kind: "challenge", methods: OTHER_METHODS },
+    async run(extra) {
+      const w = await world(extra);
+      const b = browser(w.handle);
+      expect((await b.post("/otp/reset/request", { email: EMAIL })).status).toBe(200);
+      return outcomeOf(
+        w,
+        await b.post("/otp/reset", { email: EMAIL, code: mailCode(w), password: NEW }),
+      );
+    },
+  },
+  {
+    pathway: "password sign-up session",
+    via: "password",
+    gate: "none: an unverified address holds no factor",
+    expect: { kind: "session", via: "password" },
+    async run(extra) {
+      const w = await world(extra);
+      return outcomeOf(
+        w,
+        await browser(w.handle).post("/password/sign-up", { email: BEA, password: PASSWORD }),
+      );
+    },
+  },
+  {
+    pathway: "sign-up confirm by link",
+    via: "password",
+    gate: "none: an unverified address holds no factor",
+    expect: { kind: "session", via: "password" },
+    async run(extra) {
+      // The GET of the link shows a page only: its form posts the token here.
+      const w = await world({ ...extra, password: { hash: FAST, requireVerified: true } });
+      const b = browser(w.handle);
+      expect((await b.post("/password/sign-up", { email: BEA, password: PASSWORD })).status).toBe(
+        200,
+      );
+      const res = await b.post("/password/verify", { token: mailToken(w) });
+      expect(await res.json()).toEqual({ verified: true });
+      return cookieOutcome(w, b);
+    },
+  },
+  {
+    pathway: "sign-up confirm by code",
+    via: "password",
+    gate: "none: an unverified address holds no factor",
+    expect: { kind: "session", via: "password" },
+    async run(extra) {
+      // The factor user signs up by a link, so this world holds no user.
+      const w = bareWorld({
+        ...extra,
+        password: { hash: FAST, requireVerified: true, verifyBy: "code" },
+      });
+      const b = browser(w.handle);
+      expect((await b.post("/password/sign-up", { email: BEA, password: PASSWORD })).status).toBe(
+        200,
+      );
+      const code = recordCredential(/\b(\d{6})\b/.exec(w.mail.at(-1)?.text ?? "")?.[1] ?? "");
+      return outcomeOf(w, await b.post("/password/verify/code", { email: BEA, code }));
     },
   },
   {
@@ -757,6 +858,99 @@ const ROWS: GateRow[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// The limits and the captcha of each route, read from what the code calls.
+// ---------------------------------------------------------------------------
+
+const WRONG = "000000";
+const WRONG_PASSWORD = "not the password of ada";
+
+/** The challenge of a password sign-in of the factor user, from another browser. */
+async function challengeOf(w: World): Promise<string> {
+  const res = await browser(w.handle).post("/password/sign-in", {
+    email: EMAIL,
+    password: PASSWORD,
+  });
+  return ((await res.json()) as { twoFactor: { challenge: string } }).twoFactor.challenge;
+}
+
+/**
+ * A wrong guess at each route that checks a secret short enough to guess.
+ * The setup runs first, then the returned guess goes out alone, so the
+ * limiter calls are the guess's own. `b` holds the factor user's session.
+ */
+const GUESSES: Partial<
+  Record<RouteKey, (w: World, b: Browser) => Promise<() => Promise<Response>>>
+> = {
+  // A user with a factor on proves by a password and a code together.
+  "POST /reauth": async (_w, b) => () =>
+    b.post("/reauth", { password: WRONG_PASSWORD, code: WRONG }),
+  "POST /user/change-email/verify": async (_w, b) => {
+    expect((await b.post("/user/change-email", { newEmail: BEA, method: "code" })).status).toBe(
+      200,
+    );
+    return () => b.post("/user/change-email/verify", { code: WRONG });
+  },
+  "POST /password/sign-in": async (_w, b) => () =>
+    b.post("/password/sign-in", { email: EMAIL, password: WRONG_PASSWORD }),
+  "POST /password/verify/code": async (_w, b) => () =>
+    b.post("/password/verify/code", { email: EMAIL, code: WRONG }),
+  "POST /password/change": async (_w, b) => () =>
+    b.post("/password/change", { currentPassword: WRONG_PASSWORD, newPassword: NEW }),
+  "POST /totp/setup": async (_w, b) => () => b.post("/totp/setup", { password: WRONG_PASSWORD }),
+  "POST /totp/enable": async (w) => {
+    // The factor user has TOTP on: a new user after the setup guesses the code.
+    const session = await verifiedSession(w, BEA);
+    const setup = await setupTotp(w.config, { userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    recordCredential(setup.value.secret);
+    for (const c of setup.value.backupCodes) recordCredential(c);
+    const c = browser(w.handle);
+    c.jar.set("__Host-tempo_session", session.token);
+    return () => c.post("/totp/enable", { code: WRONG });
+  },
+  "POST /totp/disable": async (_w, b) => () => b.post("/totp/disable", { code: WRONG }),
+  "POST /totp/backup-codes": async (_w, b) => () => b.post("/totp/backup-codes", { code: WRONG }),
+  "POST /totp/verify": async (w, b) => {
+    const challenge = await challengeOf(w);
+    return () => b.post("/totp/verify", { challenge, code: WRONG });
+  },
+  "POST /totp/challenge": async (w, b) => {
+    const challenge = await challengeOf(w);
+    return () => b.post("/totp/challenge", { challenge, code: WRONG });
+  },
+  "POST /second-factor/passkey/enable": async (_w, b) => () =>
+    b.post("/second-factor/passkey/enable", { password: WRONG_PASSWORD, response: {} }),
+  "POST /second-factor/disable": async (_w, b) => () =>
+    b.post("/second-factor/disable", { method: "email", password: WRONG_PASSWORD }),
+  "POST /second-factor/email/enable": async (_w, b) => () =>
+    b.post("/second-factor/email/enable", { password: WRONG_PASSWORD }),
+  "POST /otp/verify": async (_w, b) => () => b.post("/otp/verify", { email: EMAIL, code: WRONG }),
+  "POST /otp/reset": async (_w, b) => () =>
+    b.post("/otp/reset", { email: EMAIL, code: WRONG, password: NEW }),
+  "POST /phone/verify": async (_w, b) => () =>
+    b.post("/phone/verify", { phone: PHONE, code: WRONG }),
+  "POST /phone/add/verify": async (_w, b) => {
+    expect((await b.post("/phone/add", { phone: "+14155550199" })).status).toBe(200);
+    return () => b.post("/phone/add/verify", { code: WRONG });
+  },
+};
+
+/** The routes of each captcha flow, and a body that reaches the check. */
+const CAPTCHA_ROUTES: Record<CaptchaFlow, [RouteKey, unknown][]> = {
+  "password-sign-up": [["POST /password/sign-up", { email: BEA, password: PASSWORD }]],
+  "password-sign-in": [["POST /password/sign-in", { email: EMAIL, password: PASSWORD }]],
+  "magic-link-request": [["POST /magic-link/request", { email: EMAIL }]],
+  "email-otp-request": [["POST /otp/request", { email: EMAIL }]],
+  "password-reset-request": [
+    ["POST /password/reset/request", { email: EMAIL }],
+    ["POST /otp/reset/request", { email: EMAIL }],
+  ],
+  "phone-request": [["POST /phone/request", { phone: PHONE }]],
+  "anonymous-sign-in": [["POST /anonymous/sign-in", {}]],
+  "passkey-sign-up": [["POST /passkey/sign-up/options", { name: "Bea" }]],
+};
+
 describe("the gate table (plan 12i Task 15, Review Focus 1)", () => {
   it.each(ROWS.map((r) => [r.pathway, r] as const))(
     "each pathway answers its row of the gate table: %s",
@@ -825,13 +1019,79 @@ describe("the gate table (plan 12i Task 15, Review Focus 1)", () => {
           row.key,
         ).toBe(true);
     }
-    // Each captcha flow guards at least one route that declares it.
-    expect(table.filter((r) => r.captcha).length).toBeGreaterThanOrEqual(CAPTCHA_FLOWS.length);
+    // The declarations only: the two tests below read what each route calls.
+    // The routes that declare the captcha are the routes of CAPTCHA_ROUTES.
+    expect(table.filter((r) => r.captcha).map((r) => r.key)).toEqual(
+      ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey).filter((k) =>
+        Object.values(CAPTCHA_ROUTES).some((routes) => routes.some(([key]) => key === k)),
+      ),
+    );
     // A route that checks a secret short enough to guess (a password or a
-    // code) has an owned limit, so each guess costs a count (ASVS 6.6.3). A
-    // link token, a state, or a signed assertion is too long to guess.
+    // code) declares the limit. A link token, a state, or a signed
+    // assertion is too long to guess.
     for (const row of table)
       if (row.codes.has("invalid_code") || row.codes.has("invalid_credentials"))
         expect(row.limited, row.key).toBe(true);
+  });
+
+  it("counts a wrong guess at each guess route on the limiter, per IP where no session bounds it", async () => {
+    // ASVS 6.6.3: each guess costs a count of an owned limit. A route with
+    // no session counts per IP, so one client cannot spread its guesses
+    // over many addresses. The list comes from the declared codes.
+    const keys = ROUTES.filter((r) => {
+      const codes: readonly string[] = (r as { codes?: readonly string[] }).codes ?? [];
+      return codes.includes("invalid_code") || codes.includes("invalid_credentials");
+    }).map((r) => ({ key: `${r.method} ${r.path}` as RouteKey, auth: r.auth }));
+    expect(keys.map((k) => k.key).sort()).toEqual(Object.keys(GUESSES).sort());
+    for (const { key, auth } of keys) {
+      const w = await world();
+      const b = browser(w.handle);
+      b.jar.set("__Host-tempo_session", w.session.token);
+      const guess = await GUESSES[key]?.(w, b);
+      if (!guess) throw new Error(`no guess for ${key}`);
+      const allow = vi.spyOn(w.config.limiter, "allow");
+      const res = await guess();
+      // The answer is the refusal of a wrong guess: the guess reached the check.
+      const refusal =
+        res.status === 302
+          ? new URL(res.headers.get("location") ?? "").searchParams.get("error")
+          : ((await res.json()) as { error?: string }).error;
+      expect(["invalid_code", "invalid_credentials"], key).toContain(refusal);
+      const families = allow.mock.calls.map(
+        ([k]) => LIMIT_FAMILIES.find((f) => k.startsWith(`${f}:`)) ?? k,
+      );
+      expect(families.length, key).toBeGreaterThan(0);
+      if (!(auth ?? []).some((a) => a.startsWith("session")))
+        expect(
+          families.some((f) => f.endsWith(":ip")),
+          `${key} counts per IP: ${families.join(", ")}`,
+        ).toBe(true);
+    }
+  });
+
+  it("checks each captcha flow at the routes of CAPTCHA_ROUTES", async () => {
+    const seen: CaptchaFlow[] = [];
+    // Core's own sign-in page needs the widget: the app serves this page.
+    const w = bareWorld({
+      handoff: { schemes: ["consumera://"], signInPage: () => "<p>sign in</p>" },
+      captcha: {
+        port: {
+          async verify(input) {
+            seen.push(input.flow);
+            return "fail";
+          },
+        },
+        flows: [...CAPTCHA_FLOWS],
+      },
+    });
+    expect(Object.keys(CAPTCHA_ROUTES).sort()).toEqual([...CAPTCHA_FLOWS].sort());
+    for (const [flow, routes] of Object.entries(CAPTCHA_ROUTES))
+      for (const [key, body] of routes) {
+        seen.length = 0;
+        const path = key.slice("POST ".length);
+        const res = await w.handle(post(`/auth${path}`, body, { ...ip(), [CAPTCHA_HEADER]: "t" }));
+        expect(((await res.json()) as { error?: string }).error, key).toBe("captcha_failed");
+        expect(seen, key).toEqual([flow]);
+      }
   });
 });
