@@ -760,13 +760,21 @@ export async function organizationGroups(
  * order (`lockInOrder`), in the step of the organization row. The account
  * delete takes these rows and the member rows in its act. A flow that comes
  * later finds no organization, no domain claim, and no SCIM token.
+ * `locked` is true when the caller took the scimUser and organization locks
+ * already (the account delete on a store whose user delete cascades).
  */
-export async function deleteOrganizationsHead(tx: StorageAdapter, list: string[]): Promise<void> {
+export async function deleteOrganizationsHead(
+  tx: StorageAdapter,
+  list: string[],
+  locked = false,
+): Promise<void> {
   // The scimUser rows come before the organization row (ruling 74 M3): a SCIM deactivate holds
   // its scimUser row and then takes the organization lock. On Postgres this lock costs one
   // statement; D1 has no row lock.
-  await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
-  await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  if (!locked) {
+    await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
+    await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  }
   await tx.delete("organization", [{ field: "id", op: "in", value: list }]);
   // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
   // organization row. A kept domain row would hold its claim forever, so no

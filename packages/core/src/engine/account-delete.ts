@@ -169,6 +169,12 @@ export const DELETE_KEEP = SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
 const SOLO_CALLS = 6;
 
 /**
+ * The part of `SOLO_CALLS` that `deleteOrganizationsHead` sends on D1: the
+ * organization, connection, domain, and SCIM token deletes.
+ */
+const SOLO_HEAD_CALLS = 4;
+
+/**
  * The calls of `holdImpersonations` at the worst: the read of the targets
  * and `lockInOrder`, which sends 2 statements on MySQL (ruling 2 of plan
  * 12g).
@@ -534,7 +540,11 @@ export async function accountDeleted(
  * user row goes before the sessions: D1 has no lock, and a sign-in reads the
  * user row after its session insert. The sessions go before the
  * identities: a link in flight updates its session as its last statement,
- * so it undoes or commits first.
+ * so it undoes or commits first. On a store whose user delete cascades
+ * (`userDeleteCascades`, the Better Auth tables), the user row and the
+ * solo organization rows go after the member rows, the recount, and the
+ * pages of the sessions (ruling 13 of plan 12f2). There no refusal comes
+ * after a cascade, and the pages see the sessions.
  *
  * The solo organizations go set-based (rulings 30 and 78 of plan 12d): 6
  * storage calls for any count, 0 when none goes. The act deletes their
@@ -650,11 +660,23 @@ export async function deleteAccountRows(
     );
     if (held === 0) stopWith("conflict");
   }
-  await tx.delete("user", byId);
-  // The rows of the solo organizations that give access or hold a claim go now, set-based
-  // (rulings 30 and 78 of plan 12d). The rest waits for the sweep.
   const solo = organizationList(going.map((x) => x.id));
-  if (solo.length > 0) await deleteOrganizationsHead(tx, solo);
+  // On a store whose user delete cascades (ruling 13 of plan 12f2), every
+  // check that can refuse and the pages of the sessions run before the user
+  // delete. Elsewhere the user row goes first: D1 has no lock, and a flow
+  // that writes a row of the user reads the user row after its insert.
+  const cascades = config.storage.userDeleteCascades === true;
+  // The user row, then the rows of the solo organizations that give access or hold a
+  // claim, set-based (rulings 30 and 78 of plan 12d). The rest waits for the sweep.
+  const dropHead = async () => {
+    await tx.delete("user", byId);
+    if (solo.length > 0) await deleteOrganizationsHead(tx, solo, cascades);
+  };
+  if (cascades) {
+    // The organization lock of user-hold.ts comes before the invitation and member rows.
+    if (solo.length > 0)
+      await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: solo }]);
+  } else await dropHead();
   // The invitations come before the member rows, in the order of user-hold.ts
   // (ruling 50 of plan 12k).
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
@@ -681,7 +703,9 @@ export async function deleteAccountRows(
   // Postgres and MySQL send more statements than D1 for the same act (the
   // row locks), and they have no such limit. With the budget there, the
   // delete of an owner of a solo organization ended no own session in its
-  // act, and each waited for the sweep.
+  // act, and each waited for the sweep. On a store whose user delete
+  // cascades, the pages keep the calls of `dropHead` free too.
+  const tail = cascades ? 1 + (solo.length > 0 ? SOLO_HEAD_CALLS : 0) : 0;
   const ownBudget =
     config.storage.queryLimitPerInvocation === true ? proof.budget : Number.POSITIVE_INFINITY;
   proof.counted.sessions = (
@@ -693,7 +717,7 @@ export async function deleteAccountRows(
       now,
       proof.meter,
       ownBudget,
-      DELETE_KEEP + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
+      DELETE_KEEP + tail + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
       "account_deleted",
       proof.stops,
     )
@@ -707,11 +731,12 @@ export async function deleteAccountRows(
       now,
       proof.meter,
       proof.budget,
-      DELETE_KEEP,
+      DELETE_KEEP + tail,
       "account_deleted",
       proof.stops,
     )
   ).ended;
+  if (cascades) await dropHead();
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. The delivery after the commit sends them all, with no

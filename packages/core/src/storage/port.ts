@@ -167,6 +167,19 @@ export interface StorageAdapter {
    */
   queryLimitPerInvocation?: boolean;
   /**
+   * Optional. True when a delete of a user row also deletes, by a foreign
+   * key, the rows that name the user: the sessions, the accounts, the
+   * member rows, and the invitations that the user sent. The Better Auth
+   * tables do this, and so does an organization delete for its member
+   * rows (ruling 13 of plan 12f2). The account delete then runs every
+   * check that can refuse, and the pages of the sessions, before the user
+   * delete. Else a refusal came after rows that no undo could restore on
+   * D1, and the session hooks saw no session. Core's tables have no
+   * foreign key and leave it out: there the user row goes first, because
+   * D1 has no lock (user-hold.ts).
+   */
+  userDeleteCascades?: boolean;
+  /**
    * Optional. Inside a transaction, takes the row locks of the rows that
    * `where` matches, by `id` ascending (ruling 36 of plan 12f). The caller
    * then writes them. One DELETE locks rows in the order of its scan. So

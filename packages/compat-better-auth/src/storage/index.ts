@@ -77,6 +77,20 @@ export type SqliteSchemaStorage = CompatDatabase & {
 /** The adapter's own parameter type. Without workers-types it is `any`, so the structural binding passes. */
 type D1 = Parameters<typeof createD1AdapterOn>[0];
 
+/**
+ * Marks a storage of the Better Auth tables: a user delete there cascades
+ * to the sessions, the accounts, the member rows, and the invitations that
+ * the user sent (the `on delete cascade` keys of Better Auth's schema). So
+ * core's account delete runs its checks and its session pages before the
+ * user delete (ruling 13 of plan 12f2). The flag is set on every dialect.
+ * Where SQLite keeps foreign keys off, the order is still safe there: its
+ * transactions lock.
+ */
+function cascading<T extends { userDeleteCascades?: boolean }>(storage: T): T {
+  storage.userDeleteCascades = true;
+  return storage;
+}
+
 /** Core's storage port, and the owned limiter, over the app's Better Auth tables (spec 16.2). */
 export function betterAuthSchemaStorage(
   options: PostgresSchemaStorageOptions,
@@ -106,20 +120,22 @@ export function betterAuthSchemaStorage(
       kind: "authtempo-compat-database",
       dialect: "sqlite",
       names,
-      storage: createD1AdapterOnSeam(driver.db, {
-        statements: st,
-        toStorageError: st.toStorageError,
-        ready: async () => {
-          await probe();
-          await compatReady();
-        },
-        ping: async () => {
-          await probe();
-          await compatPing();
-        },
-        sent,
-        boundParams: SQLITE_BOUND_PARAMS,
-      }),
+      storage: cascading(
+        createD1AdapterOnSeam(driver.db, {
+          statements: st,
+          toStorageError: st.toStorageError,
+          ready: async () => {
+            await probe();
+            await compatReady();
+          },
+          ping: async () => {
+            await probe();
+            await compatPing();
+          },
+          sent,
+          boundParams: SQLITE_BOUND_PARAMS,
+        }),
+      ),
       limiter: createD1LimiterOnSeam(driver.db),
       migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),
       migrate: () => applyBetterAuthCompatSqliteMigrations(driver, names, variant),
@@ -138,15 +154,17 @@ export function betterAuthSchemaStorage(
       kind: "authtempo-compat-database",
       dialect: "d1",
       names,
-      storage: createD1AdapterOn(db, {
-        statements: st,
-        toStorageError: st.toStorageError,
-        ready: d1CompatReady(options.db, names, sent),
-        ping: d1CompatPing(options.db, names, sent),
-        sent,
-        // A D1 binding: 50 queries per invocation on Workers Free (ruling 5 of plan 12f2).
-        queryLimitPerInvocation: true,
-      }),
+      storage: cascading(
+        createD1AdapterOn(db, {
+          statements: st,
+          toStorageError: st.toStorageError,
+          ready: d1CompatReady(options.db, names, sent),
+          ping: d1CompatPing(options.db, names, sent),
+          sent,
+          // A D1 binding: 50 queries per invocation on Workers Free (ruling 5 of plan 12f2).
+          queryLimitPerInvocation: true,
+        }),
+      ),
       limiter: createD1Limiter(db),
       migrationSql: (variant?: SqliteVariant) => compatMigrationSql("sqlite", names, variant),
     };
@@ -163,12 +181,14 @@ export function betterAuthSchemaStorage(
     kind: "authtempo-compat-database",
     dialect: "postgres",
     names,
-    storage: createPostgresAdapterOn(sql, {
-      statements: st,
-      toStorageError: st.toStorageError,
-      ready: postgresCompatReady(sql),
-      ping: postgresCompatPing(sql),
-    }),
+    storage: cascading(
+      createPostgresAdapterOn(sql, {
+        statements: st,
+        toStorageError: st.toStorageError,
+        ready: postgresCompatReady(sql),
+        ping: postgresCompatPing(sql),
+      }),
+    ),
     limiter: createPostgresLimiter(sql),
     migrationSql: () => compatMigrationSql("postgres", names),
     migrate: () => applyBetterAuthCompatMigrations(sql, names),
