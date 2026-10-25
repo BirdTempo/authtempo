@@ -127,6 +127,7 @@ What changes at cutover:
 - A passkey counter above 2147483647 fails: Better Auth's `counter` column is `integer`.
 - The session cookie is `__Host-tempo_session`, not `better-auth.session_token`. For one release the shim also reads `tempo_session`, the name of plan 9, and moves it: the handler sets `__Host-tempo_session` with the same token and clears `tempo_session`. `api.getSession` reads the old name too, but sets no cookie. App code, tests, and legal pages that name the old cookie must change. For example, consumer-i's site lists `__Secure-better-auth.session_token` in its cookie text (`apps/site/test/legal.test.ts`).
 - `socialProviders.microsoft` (`clientId`, `clientSecret`, `tenantId`, default `common`), `discord`, `gitlab` (with `issuer`), `twitter`, and `facebook` map to core's presets (plan 12i Task 16). Each preset keeps the subject that Better Auth stored as `accountId`, so the rows link on the first sign-in. Every other key of these providers is refused.
+- Core trusts fewer provider addresses than Better Auth. A Microsoft address is verified only with the `xms_edov: true` claim, and Better Auth also counts `email_verified` and the `verified_*_email` lists. A GitLab address is never verified in core, and Better Auth counts `email_verified`. Take a person whose account has a password, at a first Microsoft or GitLab sign-in. Better Auth links by the address, and core answers `email_taken_unverified`. Rows that Better Auth linked before keep linking by subject.
 - Better Auth-era `account` rows of providers that the package does not map stay in the table. Core reads them as identities of their users, so a claim of the address deletes them as it deletes any identity other than the proving one. The factory refuses such a provider in `socialProviders`, and the reason depends on the provider id:
   - `slack`: refused. Core's Slack subject is `<team_id>:<user_id>`, and a Better Auth Slack row holds the user id alone (ruling 22 of plan 12i). The row would not link at the first sign-in, and the person would get a second account, or `email_taken` for a verified address. Before you use core's `social.slack` through core's `createAuth`, rewrite each Slack `accountId` to `<team_id>:<user_id>`. The refusal text starts with `not mapped: core's Slack subject is team_id:user_id`.
   - Any other id: `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in.
@@ -440,7 +441,11 @@ Auth request and answer shapes. It answers 404 for each, with two exceptions
 that are core's own routes (core `http/routes`, read 2026-10-10): `POST
 /sign-out` ends the session, as Better Auth's does, and `/magic-link/verify` is
 core's magic link route. With the `magicLink` plugin, a Better Auth-era link
-answers `invalid_token`. Without the plugin, it answers 404. The handler
+answers `invalid_token`. Without the plugin, it answers 404. Since plan 12i
+Task 16, two more paths of the list answer. `/callback/<provider>` is core's
+provider callback on an https `baseURL`, and it answers 404 on http.
+`/sign-in/social` with `idToken` is core's ID-token sign-in, and it answers
+404 without `idToken`. The handler
 serves `/get-session`, the eleven account paths of plan 12a, and
 `/passkey/update-passkey` in Better Auth's shapes, so they are not in this list. See "The session read" and "Account operations". The email code paths are not in
 it either (see "Email codes"), nor the paths of the sign-in plugins (see "Sign-in plugins").
@@ -593,7 +598,7 @@ answer type holds `twoFactorRedirect` only when the client options name
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
 | `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
 | `apiKey` | Core's API tokens (plan 12k Task 12): `references: "user"` gives user tokens (`tk_`), and `"organization"` gives organization tokens (`to_`). See "API keys". |
-| `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, and social stays off, as in Better Auth; a reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
+| `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, social, and the phone code stays off, as in Better Auth. A reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
 
 | `admin` | Core's operator tools (plan 12f). Needs `organization` and `authtempo.platformOrganization`. See "The admin plugin". |
 | `sso` | Core's OIDC and SAML connections and its domain proof (plan 12d). Needs `organization` and `authtempo.ssoDns`. See "SSO and SCIM". |
@@ -1031,7 +1036,7 @@ throws `APIError` on a refusal.
 | `POST /delete-anonymous-user` | `/anonymous/delete` | `{ success: true }`; 403 `USER_IS_NOT_ANONYMOUS` for a session that is not anonymous, as Better Auth does |
 | `POST /sign-in/username` | `/password/sign-in` | `{ token, user }`; with `twoFactor`, Better Auth's redirect answer. `callbackURL` and `rememberMe: false` answer `NOT_SUPPORTED` |
 | `POST /is-username-available` | `GET /username/available` | `{ available }` |
-| `POST /phone-number/send-otp` | `/phone/request` with no session or an anonymous one, else `/phone/add` | `{ message: "code sent" }` for a known and an unknown number |
+| `POST /phone-number/send-otp` | `/phone/request` with no session or an anonymous one, else `/phone/add` | `{ message: "code sent" }` for a known and an unknown number. With a session that is not anonymous, core's add needs a fresh session (`session.freshAge`, one day by default). An older session gets 403 `SESSION_NOT_FRESH`. Better Auth needs no fresh session here |
 | `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session that is not anonymous verifies only with `updatePhoneNumber: true`. With an anonymous session, the verify signs in and upgrades the anonymous user, and `onLinkAccount` runs, as in Better Auth. With an anonymous session and `updatePhoneNumber: true`, the verify answers 403 `ANONYMOUS_REFUSED`: Better Auth sets the number on the anonymous user, and core refuses a phone on an anonymous user |
 | `POST /sign-in/phone-number` | `/password/sign-in` | As `/sign-in/username` |
 | `POST /one-tap/callback` | `/social/google/id-token` | `{ token, user }`; 400 `INVALID_TOKEN` |
@@ -1084,8 +1089,9 @@ Behavior that differs from Better Auth:
   A sign-up or a change of address to an address in a placeholder form
   answers 403 `HOOK_REFUSED` before any write. At `/change-email` and at
   core's `/user/change-email`, the refusal also comes before any mail.
-  Better Auth takes such an address. One database takes one `emailDomainName`: a second instance on
-  it with another domain is refused at start.
+  Better Auth takes such an address. One database takes one
+  `emailDomainName`: a second instance on it with another domain is
+  refused at start.
 - A residual of the move: Better Auth 1.7.2 writes
   `temp-<random id>@<emailDomainName>`, not the row id, and
   `generateRandomEmail` writes any address. After the move, such an older
