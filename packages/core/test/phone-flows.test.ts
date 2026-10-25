@@ -556,6 +556,27 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     }
   });
 
+  it("waits through handle for the work after the answer on Workers when waitUntil throws (final fix wave item 14)", async () => {
+    const lines = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+    try {
+      const h = await heldWorld();
+      h.release();
+      // An unbound ctx.waitUntil throws: the work must still go out before the answer.
+      const timed = await h.timed(A, {
+        waitUntil: () => {
+          throw new TypeError("Illegal invocation");
+        },
+      });
+      expect(await timed.res.json()).toEqual({ sent: true });
+      expect(timed.portReturned).toBe(1);
+      expect(h.inner.sent.at(-1)?.to).toBe(A);
+    } finally {
+      vi.unstubAllGlobals();
+      lines.mockRestore();
+    }
+  });
+
   it("gives up a hung send after the answer at the time limit (ruling 29, LB)", async () => {
     const lines = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

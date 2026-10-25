@@ -1337,6 +1337,10 @@ export function createAuth(input: AuthConfig): Auth {
         start();
       } catch (e) {
         config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
+        // A waitUntil that throws took no promise, so on Workers the work
+        // would stop at the answer. Wait for it, as with no waitUntil (final
+        // fix wave item 14).
+        if (after.length > 0 && onWorkers()) await Promise.all(after);
       }
       return res;
     },
