@@ -1125,6 +1125,13 @@ Behavior that differs from Better Auth:
 - Core signs in by phone and password only with a number that its code
   proved. A number that Better Auth stored with no proof does not sign in,
   so `requireVerification` other than `true` logs a note.
+- A proof of the address clears the phone of an unverified user, by the
+  claim rule: a number on an unverified row can be a claimant's. Better
+  Auth 1.7.2 keeps the number at an email verify. So a moved user who
+  proved a number, but never the address, loses the phone sign-in at
+  their own verify link, magic link, email code, or social sign-in. They
+  add the number again with `/phone-number/send-otp` and
+  `updatePhoneNumber: true`.
 - The last method cookie holds core's values. The client maps them to
   Better Auth's names: `password` is `email`, `social:<id>` is `<id>`,
   `magic_link` is `magic-link`, `email_otp` is `email-otp`, and `phone` is
