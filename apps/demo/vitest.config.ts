@@ -36,6 +36,13 @@ export default defineConfig({
     exclude: ["test/node/**"],
     // Each pool test runs a full Worker sandbox; test-time.ts holds the measures.
     testTimeout: LONG_TEST_MS,
+    // A beforeAll of cookies.test.ts and of mailbox-only.test.ts runs every
+    // flow (flows.ts everyFlow), so a hook gets the limit of a test, not the
+    // 10 s default. On 2026-10-25 each hook took 0.25 to 1.3 s alone (load
+    // 6 to 60). In the full pool at load 64 to 88 they took 9.0 and 9.2 s.
+    // At load 86 to 111 both timed out at 10 s, as in two full runs of main.
+    // With this limit they passed in 15.2 to 16.3 s at load 104 to 151.
+    hookTimeout: LONG_TEST_MS,
     // The teardown fails the run on any request that left the Worker, from any file.
     globalSetup: ["./test/outbound-teardown.ts"],
     // After each pool file, the cookie rule reads every Set-Cookie line of call().
