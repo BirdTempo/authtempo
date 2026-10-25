@@ -30,6 +30,17 @@ const DETACHED_PROBE = `export default {
   },
 };`;
 
+/**
+ * The time limit of each pool test. The 5 s default failed a full run of
+ * main: the 429 test of verify.e2e.test.ts took 5022 ms at a load up to 38.
+ * Measured on 2026-10-25 (18 CPUs): alone (load 6) the slowest test took
+ * 1.4 s. With 90 CPU loops (load 67 to 106) three tests failed at 5 s. With
+ * this limit they took up to 7.2 s (the scrypt sign-in of compat-better-auth),
+ * 6.0 s (the 429 test), and 3.3 s. The other tests took under 2 s. The demo
+ * and core tests use the same 20 s limit (LONG_TEST_MS).
+ */
+const LONG_TEST_MS = 20_000;
+
 // Option names checked against @cloudflare/vitest-plugin 1.3.7 on 2026-10-09.
 // The auxiliary worker list (`miniflare.workers`) checked against 1.4.0
 // (dist/pool/index.d.mts:35) on 2026-10-25.
@@ -76,6 +87,9 @@ export default defineConfig(async () => {
       // The RS256 cost measure runs by hand only, through vitest.cost.config.ts (plan 12e Task 2).
       exclude: [...configDefaults.exclude, "test/rs256-cost.test.ts"],
       setupFiles: ["./test/setup.ts"],
+      // Each pool test runs a full Worker sandbox; LONG_TEST_MS holds the measures.
+      // The two hooks of the package only restore mocks, so they keep the 10 s default.
+      testTimeout: LONG_TEST_MS,
     },
   };
 });
