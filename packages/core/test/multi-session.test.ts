@@ -311,6 +311,30 @@ describe("multi-session (plan 12i Task 11)", () => {
     expect(await rowOf(w, a)).toBeNull();
   });
 
+  it("writes one sign_out event for each session that ends with sign_out, on each end path (final fix wave item 15)", async () => {
+    const events: { name: string; sessionId?: string }[] = [];
+    const w = world({
+      observe: { sink: { write: (batch) => void events.push(...(batch as typeof events)) } },
+    });
+    const b = browser();
+    const signOuts = async () => {
+      await w.auth.config.observe.flush();
+      return events.filter((e) => e.name === "sign_out").map((e) => e.sessionId);
+    };
+    // A sign-in of the same user replaces the old session.
+    const a1 = await signIn(w, b, "ada@example.com");
+    const a1Id = await idOf(w, a1);
+    await signIn(w, b, "bob@example.com");
+    const a2 = await signIn(w, b, "ada@example.com");
+    expect(await signOuts()).toEqual([a1Id]);
+    // The sign-out of the browser ends the active session and the bag.
+    const ids = [await idOf(w, a2), ...(await Promise.all(b.bag().map((t) => idOf(w, t))))];
+    expect((await w.handle(post("/auth/sign-out", {}, b.header()))).status).toBe(200);
+    expect((await signOuts()).sort()).toEqual([a1Id, ...ids].sort());
+    // Each event names a session that ended with sign_out, once.
+    expect(w.ends.list.filter((e) => e.reason === "sign_out")).toHaveLength(3);
+  });
+
   it("signs out every session of the browser", async () => {
     const w = world();
     const b = browser();

@@ -135,7 +135,9 @@ export async function bagAtSignIn(
 
 /**
  * Ends each row by id with its outbox rows, fires the end hooks with
- * `reason`, then delivers the back-channel logouts of each user.
+ * `reason`, then delivers the back-channel logouts of each user. A row that
+ * ends with `sign_out` gets its `sign_out` event, as at `signOutBrowser`:
+ * one rule for each end path of the bag (final fix wave item 15).
  */
 async function endRows(
   config: ResolvedConfig,
@@ -146,7 +148,10 @@ async function endRows(
   const now = config.clock.now();
   const ended: SessionRow[] = [];
   for (const row of rows)
-    if ((await endSessionById(config.storage, row, now, null)) === 1) ended.push(row);
+    if ((await endSessionById(config.storage, row, now, null)) === 1) {
+      ended.push(row);
+      if (reason === "sign_out") signedOut(config, row);
+    }
   await sessionsEnded(config, ended, reason, null, ended.length);
   for (const userId of new Set(ended.map((r) => r.userId))) await deliverLogouts(config, userId);
 }
@@ -279,13 +284,18 @@ export async function signOutBrowser(
   for (const row of rows)
     if ((await endSessionById(config.storage, row, now, stops)) === 1) {
       ended.push(row);
-      config.observe.emit({
-        name: "sign_out",
-        outcome: "success",
-        userId: row.userId,
-        sessionId: row.id,
-      });
+      signedOut(config, row);
     }
   await sessionsEnded(config, ended, "sign_out", stops, ended.length);
   for (const userId of new Set(ended.map((r) => r.userId))) await deliverLogouts(config, userId);
+}
+
+/** The event `sign_out` of one bag session that ended with `sign_out`. */
+function signedOut(config: ResolvedConfig, row: SessionRow): void {
+  config.observe.emit({
+    name: "sign_out",
+    outcome: "success",
+    userId: row.userId,
+    sessionId: row.id,
+  });
 }
