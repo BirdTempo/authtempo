@@ -1,4 +1,5 @@
 import {
+  CREATES_PER_HOUR,
   DELETES_PER_HOUR,
   PAGE_MAX,
   PROOF_MAX_AGE_MS,
@@ -99,6 +100,7 @@ export const USERS_HELP: HelpText = {
     "authtempo users unban <base url> <user id> --reason <text> --yes",
     "authtempo users platform-role <base url> <user id> --grant | --revoke --reason <text> --yes",
     "authtempo users second-factor-off <base url> <user id> --reason <text> --proof-method <method> --proof-reference <text> --proof-checked-at <date> --yes",
+    "authtempo users create <base url> --email <address> | --phone <E.164> [--first-sign-in <invite|reset|none>] --reason <text> --yes",
     "authtempo users update <base url> <user id> [--name <name> | --no-name] [--image <url> | --no-image] --reason <text> --yes",
     "authtempo users delete <base url> <user id> --reason <text> [--yes]",
   ],
@@ -311,6 +313,78 @@ export const USERS_SECOND_FACTOR_OFF_HELP: HelpText = {
       says: "The deployment turned the factors off. The command prints the audit row id.",
     },
     { code: 2, says: writeStop("users") },
+  ],
+};
+
+/**
+ * The text after `invalid_body` of `users create`: the address rule, the
+ * name rule, and the image rule of core, and the two configs that core
+ * needs. The CLI checks the other causes of `invalid_body` before any request.
+ */
+export const CREATE_INVALID =
+  "--email is an address with 1 to 64 characters before the @ and a dot in the domain, --name is 1 to 200 UTF-16 code units with no control or format character, --image is an https URL with a host, of at most 2048 characters, with no space, --phone needs the phone config of the deployment, and --first-sign-in reset needs the password config";
+
+export const USERS_CREATE_HELP: HelpText = {
+  command: "users create",
+  page: "users-create",
+  purpose:
+    "Create a user for a person, with an address or with a phone number only. The command sets no password, and no line of its output holds the address, the phone number, or a token.",
+  usage: [
+    `authtempo users create <base url> --email <address> | --phone <E.164> [--name <name>] [--image <url>] [--verified] [--first-sign-in <invite|reset|none>] --reason <text> ${TOKEN} --yes`,
+  ],
+  examples: [
+    {
+      line: 'authtempo users create https://api.example.com --email ada@example.com --name "Ada Lovelace" --reason "ticket 4710" --yes',
+      says: "Create a user and mail an invitation link to the address.",
+    },
+    {
+      line: 'authtempo users create https://api.example.com --phone +14155550123 --reason "ticket 4714" --yes',
+      says: "Create a user with a phone number only. The person signs in with a phone code.",
+    },
+  ],
+  flags: [
+    { flag: "--email <address>", says: "The address of the new user." },
+    {
+      flag: "--phone <E.164>",
+      says: "The phone number of a new user with no address: a plus sign and 8 to 15 digits. The deployment needs the phone config.",
+    },
+    {
+      flag: "--name <name>",
+      says: "The name: 1 to 200 UTF-16 code units with no control or format character.",
+    },
+    {
+      flag: "--image <url>",
+      says: "The image: an https URL with a host, of at most 2048 characters, with no space.",
+    },
+    {
+      flag: "--verified",
+      says: "Mark the address as verified. Give it only when you checked the address yourself.",
+    },
+    {
+      flag: "--first-sign-in <invite|reset|none>",
+      says: "How the person signs in first. invite mails an invitation link and is the default. reset mails a reset link. none mails nothing.",
+    },
+    REASON_FLAG,
+    ...WRITE_FLAGS,
+  ],
+  exits: [
+    {
+      code: 0,
+      says: "The deployment created the user. The command prints the user id on stdout, and the audit row id and the next step on stderr.",
+    },
+    {
+      code: 1,
+      says: "The deployment created the user, but the mail of the link failed. The command prints the user id and a warning.",
+    },
+    {
+      code: 2,
+      says: `${writeStop("users")} A create also stops at the limit of ${CREATES_PER_HOUR} creates per actor per hour.`,
+    },
+  ],
+  notes: [
+    "Give exactly one of --email and --phone. A user with a phone number only signs in with a phone code, and no SMS goes out at the create.",
+    "--verified and --first-sign-in invite or reset need --email. --first-sign-in reset needs the password config of the deployment.",
+    "The answer holds no token and no link: the deployment mails them to the person only.",
   ],
 };
 

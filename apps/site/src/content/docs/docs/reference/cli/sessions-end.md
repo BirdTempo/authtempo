@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/sessions.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
-  order: 23
+  order: 24
 ---
 
 **For:** an operator who must sign a user out of every device, for example after a theft of a laptop (ASVS 5.0.0 7.4.5).

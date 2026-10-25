@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/users.ts
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 6"
 sidebar:
-  order: 21
+  order: 22
 ---
 
 **For:** an operator who deletes an account on a request of the person, when the person cannot use the self delete.

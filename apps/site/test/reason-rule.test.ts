@@ -33,6 +33,7 @@ const COPIES: [string, number][] = [
     "users-unban",
     "users-platform-role",
     "users-second-factor-off",
+    "users-create",
     "users-update",
     "users-delete",
     "sessions-end",
@@ -56,8 +57,9 @@ describe("the reason rule in each copy (ruling 65 of plan 12f)", () => {
 
   it("is in the --reason flag of each CLI help", () => {
     const says = HELP.flatMap((h) => h.flags.filter((f) => f.flag === "--reason <text>"));
-    // Plan 12f2 Task 6 adds users update and users delete: 7 became 9.
-    expect(says.length).toBe(9);
+    // Plan 12f2 Task 6 adds users update and users delete (7 became 9),
+    // then users create in its second wave (9 became 10).
+    expect(says.length).toBe(10);
     for (const f of says) expect(count(f.says), f.says).toBe(1);
   });
 

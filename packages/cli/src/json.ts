@@ -315,6 +315,25 @@ export const OPERATOR_WRITE_JSON_KEYS = {
 } as const satisfies Record<keyof OperatorWriteJson, true>;
 
 /**
+ * `authtempo users create --json` (plan 12f2): the id of the new user, what
+ * the deployment mailed to the person, and the audit row of the act. It
+ * holds no address, no phone number, no token, and no link. The user id is
+ * "" only in the document of a stop.
+ */
+export interface UserCreateJson extends RunKeys {
+  userId: string;
+  mailed: "invite" | "reset" | null;
+  auditId: string;
+}
+export const USER_CREATE_JSON_KEYS = {
+  userId: true,
+  mailed: true,
+  auditId: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof UserCreateJson, true>;
+
+/**
  * `authtempo users update --json` (plan 12f2): the user after the change,
  * and the audit row of the act. The user is null only in the document of a stop.
  */
@@ -493,6 +512,7 @@ export const STOP_JSON = {
   "users unban": { auditId: "", exit: 2, stopped: null },
   "users platform-role": { auditId: "", exit: 2, stopped: null },
   "users second-factor-off": { auditId: "", exit: 2, stopped: null },
+  "users create": { userId: "", mailed: null, auditId: "", exit: 2, stopped: null },
   "users update": { user: null, auditId: "", exit: 2, stopped: null },
   "users delete": { organizations: [], auditId: "", exit: 2, stopped: null },
   sessions: { exit: 2, stopped: null },
@@ -529,6 +549,7 @@ export const STOP_JSON = {
   "users unban": OperatorWriteJson;
   "users platform-role": OperatorWriteJson;
   "users second-factor-off": OperatorWriteJson;
+  "users create": UserCreateJson;
   "users update": UserUpdateJson;
   "users delete": UserDeleteJson;
   sessions: GroupJson;

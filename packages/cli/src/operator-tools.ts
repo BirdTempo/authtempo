@@ -1,5 +1,6 @@
 import {
   isOperatorReason,
+  OPERATOR_CREATE_PER_ACTOR,
   OPERATOR_DELETE_PER_ACTOR,
   OPERATOR_USERS_PER_IP,
   REASON_MAX,
@@ -55,6 +56,15 @@ export const DELETES_PER_HOUR = OPERATOR_DELETE_PER_ACTOR.max;
 
 /** The 429 text of `users delete`: the route counts each IP and each actor. */
 export const DELETE_LIMITS = `the operator routes allow ${TOOL_CALLS_PER_HOUR} calls per IP per hour, and ${DELETES_PER_HOUR} deletes per actor per hour`;
+
+/**
+ * The creates of one actor in an hour: 200 (plan 12f2 Task 5, second wave).
+ * Core's limiter reads the same value. Each call counts, also a refused one.
+ */
+export const CREATES_PER_HOUR = OPERATOR_CREATE_PER_ACTOR.max;
+
+/** The 429 text of `users create`: the route counts each IP and each actor. */
+export const CREATE_LIMITS = `the operator routes allow ${TOOL_CALLS_PER_HOUR} calls per IP per hour, and ${CREATES_PER_HOUR} creates per actor per hour`;
 
 // The reason rule and the proof rules come from core (ruling 40 of plan 12f): one source.
 export {

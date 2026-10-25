@@ -1,7 +1,7 @@
-// The operator commands users update and users delete of plan 12f2 Task 6
-// (Wave A; users create comes with Wave B). Each request goes to a real core
-// handle, so each answer is an answer that core can give. Each state comes
-// through the API, never by a row write.
+// The operator commands users create, users update, and users delete of
+// plan 12f2 Task 6 (update and delete in Wave A, create in Wave B). Each
+// request goes to a real core handle, so each answer is an answer that core
+// can give. Each state comes through the API, never by a row write.
 import { createHash } from "node:crypto";
 import {
   type Auth,
@@ -544,5 +544,333 @@ describe("users update and users delete (plan 12f2 Task 6)", () => {
       expect(code, args[1]).toBe(0);
       for (const line of [...io.stdout, ...io.stderr]) expect(line).not.toContain(DELETER);
     }
+  });
+});
+
+describe("users create (plan 12f2 Task 6, Wave B)", () => {
+  const ADDRESS = "new.person@example.com";
+  const PHONE = "+14155550199";
+  /** The phone config of plan 12i, with an SMS sender that sends nothing. */
+  const phoneOn = () =>
+    fixture({
+      phone: {
+        sms: { send: async () => "sent" as const },
+        regions: ["+1"],
+        isolateLimiter: "allow",
+        signUp: true,
+      },
+    });
+  const create = (flags: readonly string[]) => [
+    "users",
+    "create",
+    BASE,
+    ...flags,
+    "--reason",
+    "ticket 9",
+  ];
+  /** Every line of a run, for the checks that no line holds a value. */
+  const lines = (io: { stdout: readonly string[]; stderr: readonly string[] }) => [
+    ...io.stdout,
+    ...io.stderr,
+  ];
+  /** The users of an address, through the API of the app. */
+  async function usersOf(f: Fixture, email: string) {
+    const found = await f.auth.api.operator.users.search({ actor: APP, email });
+    if (!found.ok) throw new Error(found.code);
+    return found.value.users;
+  }
+
+  it("creates a user and prints the id and the next step, with no address on any line", async () => {
+    const f = phoneOn();
+    const cases = [
+      {
+        flags: ["--email", ADDRESS],
+        mails: 1,
+        next: "Next: the person signs in with the mailed link.",
+        row: { email: ADDRESS, emailVerified: false, phone: null },
+      },
+      {
+        flags: ["--email", "reset.person@example.com", "--first-sign-in", "reset"],
+        mails: 1,
+        next: "Next: the person sets a password with the mailed reset link.",
+        row: { email: "reset.person@example.com", emailVerified: false },
+      },
+      {
+        flags: ["--email", "none.person@example.com", "--verified", "--first-sign-in", "none"],
+        mails: 0,
+        next: "Next: the person signs in by any proof of the address.",
+        row: { email: "none.person@example.com", emailVerified: true },
+      },
+      {
+        flags: ["--phone", PHONE, "--name", "Pat"],
+        mails: 0,
+        next: "Next: the person signs in with a phone code.",
+        row: { email: null, phone: PHONE, name: "Pat" },
+      },
+    ];
+    for (const c of cases) {
+      const before = f.mails.length;
+      const r = await run([...create(c.flags), "--yes"], f, {}, SUPPORT);
+      expect(r.code, c.next).toBe(0);
+      expect(r.io.stdout, c.next).toHaveLength(1);
+      const id = r.io.stdout[0] ?? "";
+      const [row] = await auditOf(f, id);
+      expect(row).toMatchObject({ action: "user_create", reason: "ticket 9" });
+      expect(r.io.stderr).toEqual([
+        `posting ${OPERATOR}/users/create`,
+        `created the user ${id}; audit row ${row?.id}`,
+        c.next,
+      ]);
+      expect(await userRow(f, id)).toMatchObject(c.row);
+      expect(f.mails.length - before, c.next).toBe(c.mails);
+      const value = c.flags[1] ?? "";
+      for (const line of lines(r.io)) expect(line, c.next).not.toContain(value);
+    }
+    // The body sends the address null with --phone, and core wrote no address.
+    expect(f.mails.map((m) => m.to)).toEqual([ADDRESS, "reset.person@example.com"]);
+  });
+
+  it("takes exactly one of --email and --phone, and checks the flags before any request", async () => {
+    const f = phoneOn();
+    const one = "give exactly one of --email and --phone";
+    const phoneOnly =
+      "--verified and --first-sign-in invite or reset need --email: a user with no address signs in with a phone code";
+    for (const [flags, error] of [
+      [[], one],
+      [["--email", ADDRESS, "--phone", PHONE], one],
+      [["--phone", PHONE, "--verified"], phoneOnly],
+      [["--phone", PHONE, "--first-sign-in", "invite"], phoneOnly],
+      [["--phone", PHONE, "--first-sign-in", "reset"], phoneOnly],
+      [
+        ["--email", ADDRESS, "--first-sign-in", "magic"],
+        "--first-sign-in is one of invite, reset, none",
+      ],
+    ] as const) {
+      const r = await run([...create(flags), "--yes"], f, {}, SUPPORT);
+      expect(r.code, flags.join(" ")).toBe(2);
+      expect(r.io.stderr[0], flags.join(" ")).toBe(error);
+      expect(r.io.requests, flags.join(" ")).toEqual([]);
+    }
+    const extra = await run(
+      ["users", "create", BASE, "more", "--email", ADDRESS, "--reason", "r", "--yes"],
+      f,
+    );
+    expect(extra.io.stderr[0]).toBe("unexpected argument more");
+    const noReason = await run(["users", "create", BASE, "--email", ADDRESS, "--yes"], f);
+    expect(noReason.io.stderr[0]).toBe(
+      "give --reason <text>: each write needs a reason for its audit row",
+    );
+    expect(f.paths).toEqual([]);
+    expect(await usersOf(f, ADDRESS)).toEqual([]);
+
+    // A value that core refuses names the rules of the flags.
+    const stop =
+      "stopped: the deployment refused a value (invalid_body): --email is an address with 1 to 64 characters before the @ and a dot in the domain, --name is 1 to 200 UTF-16 code units with no control or format character, --image is an https URL with a host, of at most 2048 characters, with no space, --phone needs the phone config of the deployment, and --first-sign-in reset needs the password config";
+    const image = await run(
+      [...create(["--email", ADDRESS, "--image", "http://a.example/x.png"]), "--yes"],
+      f,
+      {},
+      SUPPORT,
+    );
+    expect(image.code).toBe(2);
+    expect(image.io.stderr.at(-1)).toBe(stop);
+    const noPhone = await run([...create(["--phone", PHONE]), "--yes"], fixture(), {}, SUPPORT);
+    expect(noPhone.io.stderr.at(-1)).toBe(stop);
+    expect(await usersOf(f, ADDRESS)).toEqual([]);
+  });
+
+  it("never prints the invitation token or the reset token", async () => {
+    const f = fixture();
+    for (const [json, mode] of [
+      [false, "invite"],
+      [true, "invite"],
+      [false, "reset"],
+      [true, "reset"],
+    ] as const) {
+      const email = `${mode}.${json ? "json" : "text"}@example.com`;
+      const args = [...create(["--email", email, "--first-sign-in", mode]), "--yes"];
+      const r = await run(json ? [...args, "--json"] : args, f, {}, SUPPORT);
+      expect(r.code, email).toBe(0);
+      const mail = f.mails.find((m) => m.to === email);
+      const token = decodeURIComponent(
+        /token=([A-Za-z0-9_%.-]+)/.exec(mail?.text ?? "")?.[1] ?? "",
+      );
+      if (mode === "invite") expect(token).toMatch(/^ui_./);
+      expect(token.length, email).toBeGreaterThan(20);
+      for (const line of lines(r.io)) {
+        expect(line, email).not.toContain(token);
+        expect(line, email).not.toContain(token.slice(3));
+        expect(line, email).not.toContain(email);
+      }
+      if (!json) continue;
+      const doc = docOf(r.io.stdout);
+      expect(Object.keys(doc).sort()).toEqual(["auditId", "exit", "mailed", "stopped", "userId"]);
+      const [row] = await auditOf(f, String(doc.userId));
+      expect(doc).toEqual({
+        userId: row?.targetUserId,
+        mailed: mode,
+        auditId: row?.id,
+        exit: 0,
+        stopped: null,
+      });
+    }
+  });
+
+  it("asks one question with no address, and follows the confirmation rule of the other writes", async () => {
+    const f = phoneOn();
+    const questions: string[] = [];
+    for (const [flags, question] of [
+      [["--email", ADDRESS], "Create a user, and mail the invitation link to the address?"],
+      [
+        ["--email", ADDRESS, "--first-sign-in", "reset"],
+        "Create a user, and mail a reset link to the address?",
+      ],
+      [
+        ["--email", ADDRESS, "--first-sign-in", "none"],
+        "Create a user with the address, and mail nothing?",
+      ],
+      [["--phone", PHONE], "Create a user with the phone number? No SMS goes out now."],
+    ] as const) {
+      const io = fakeIo({
+        env: { AUTHTEMPO_OPERATOR_SECRET: SUPPORT },
+        fetch: f.fetch,
+        stdinIsTTY: true,
+      });
+      io.confirm = async (q: string) => {
+        questions.push(q);
+        return false;
+      };
+      expect(await main(create(flags), io)).toBe(2);
+      expect(questions.at(-1)).toBe(question);
+      expect(io.stderr.at(-1)).toBe("stopped: no create: the answer was not yes");
+      expect(io.requests).toEqual([]);
+    }
+    expect(questions).toHaveLength(4);
+    const usage = "users create asks for a confirmation: give --yes when no person can answer";
+    const args = create(["--email", ADDRESS]);
+    const pipe = await run([...args], f, { stdinIsTTY: false, answer: true }, SUPPORT);
+    expect(pipe.code).toBe(2);
+    expect(pipe.io.stderr[0]).toBe(usage);
+    const quiet = await run(
+      [...args, "--no-input"],
+      f,
+      { stdinIsTTY: true, answer: true },
+      SUPPORT,
+    );
+    expect(quiet.io.stderr[0]).toBe(usage);
+    const stdin = await run([...args, "--token-file", "-"], f, {
+      stdinIsTTY: true,
+      answer: true,
+      stdin: SUPPORT,
+    });
+    expect(stdin.io.stderr[0]).toBe(
+      "--token-file - reads the secret from stdin, so the command cannot ask: give --yes",
+    );
+    for (const r of [pipe, quiet, stdin]) expect(r.io.requests).toEqual([]);
+    expect(f.paths).toEqual([]);
+    expect(await usersOf(f, ADDRESS)).toEqual([]);
+    // A yes on a terminal creates the user.
+    const yes = await run(args, f, { stdinIsTTY: true, answer: true }, SUPPORT);
+    expect(yes.code).toBe(0);
+    expect((await usersOf(f, ADDRESS)).map((u) => u.id)).toEqual(yes.io.stdout);
+  });
+
+  it("names the scope on a 403, and stops on a taken address or phone number", async () => {
+    const f = phoneOn();
+    const denied = await run([...create(["--email", ADDRESS]), "--yes"], f, {}, AUDITOR);
+    expect(denied.code).toBe(2);
+    expect(denied.io.stderr.at(-1)).toBe("stopped: the operator secret has no users scope");
+    expect(await usersOf(f, ADDRESS)).toEqual([]);
+
+    await signUp(f, ADDRESS);
+    const mails = f.mails.length;
+    const taken = "an account holds this address; find it with users search";
+    for (const json of [false, true]) {
+      const args = [...create(["--email", ADDRESS]), "--yes"];
+      const r = await run(json ? [...args, "--json"] : args, f, {}, SUPPORT);
+      expect(r.code).toBe(2);
+      expect(r.io.stderr.at(-1)).toBe(`stopped: ${taken}`);
+      if (json)
+        expect(docOf(r.io.stdout)).toEqual({ ...STOP_JSON["users create"], stopped: taken });
+      else expect(r.io.stdout).toEqual([]);
+      for (const line of lines(r.io)) expect(line).not.toContain(ADDRESS);
+    }
+    expect(f.mails.length).toBe(mails);
+    expect(await usersOf(f, ADDRESS)).toHaveLength(1);
+
+    const first = await run([...create(["--phone", PHONE]), "--yes"], f, {}, SUPPORT);
+    expect(first.code).toBe(0);
+    const again = await run([...create(["--phone", PHONE]), "--yes"], f, {}, SUPPORT);
+    expect(again.code).toBe(2);
+    expect(again.io.stderr.at(-1)).toBe("stopped: an account holds this phone number");
+    for (const line of lines(again.io)) expect(line).not.toContain(PHONE);
+  });
+
+  it("names both limits on a 429 of the create", async () => {
+    const f = fixture();
+    // The support secret spends its 200 creates of the hour: a refused body still counts.
+    for (let i = 0; i < 200; i++)
+      await f.fetch(`${OPERATOR}/users/create`, {
+        method: "POST",
+        headers: { authorization: `Operator ${SUPPORT}`, "content-type": "application/json" },
+        body: JSON.stringify({ email: null, reason: "r" }),
+      });
+    const r = await run([...create(["--email", ADDRESS]), "--yes", "--json"], f, {}, SUPPORT);
+    const stop =
+      "the operator routes allow 600 calls per IP per hour, and 200 creates per actor per hour; wait, then run it again";
+    expect(r.code).toBe(2);
+    expect(r.io.stderr.at(-1)).toBe(`stopped: ${stop}`);
+    expect(docOf(r.io.stdout)).toEqual({ ...STOP_JSON["users create"], stopped: stop });
+    expect(await usersOf(f, ADDRESS)).toEqual([]);
+    // Another secret is not counted: its create passes.
+    const other = await run([...create(["--email", ADDRESS]), "--yes"], f, {}, DELETER);
+    expect(other.code).toBe(0);
+  });
+
+  it("warns and exits 1 when the deployment created the user but mailed no link", async () => {
+    const f = fixture({
+      mail: {
+        send: async () => {
+          throw new Error("the mail supplier is down");
+        },
+      },
+    });
+    const warning =
+      "warning: the user exists, but the mail of the link failed; read operator.create_mail_failed in the log of the deployment. The person can sign in by any other proof of the address.";
+    const text = await run([...create(["--email", ADDRESS]), "--yes"], f, {}, SUPPORT);
+    expect(text.code).toBe(1);
+    const id = text.io.stdout[0] ?? "";
+    expect(text.io.stdout).toEqual([id]);
+    expect(text.io.stderr.slice(1)).toEqual([expect.stringMatching(/^created the user /), warning]);
+    expect(await userRow(f, id)).toMatchObject({ email: ADDRESS });
+    const json = await run(
+      [...create(["--email", "two@example.com", "--first-sign-in", "reset"]), "--yes", "--json"],
+      f,
+      {},
+      SUPPORT,
+    );
+    expect(json.code).toBe(1);
+    expect(docOf(json.io.stdout)).toMatchObject({ mailed: null, exit: 1, stopped: null });
+    expect(json.io.stderr.at(-1)).toBe(warning);
+  });
+
+  it("scrubs the secret from every line", async () => {
+    const f = fixture();
+    // A 401: the wrong secret is in no line.
+    const wrong = await run([...create(["--email", ADDRESS]), "--yes"], f, {}, WRONG);
+    expect(wrong.code).toBe(2);
+    expect(wrong.io.stderr.at(-1)).toBe("stopped: the deployment refused the operator secret");
+    for (const line of lines(wrong.io)) expect(line).not.toContain(WRONG);
+    // The name is the secret: no line holds it.
+    const named = await run(
+      [...create(["--email", ADDRESS, "--name", SUPPORT]), "--yes", "--json"],
+      f,
+      {},
+      SUPPORT,
+    );
+    expect(named.code).toBe(0);
+    for (const line of lines(named.io)) expect(line).not.toContain(SUPPORT);
+    const [user] = await usersOf(f, ADDRESS);
+    expect(user?.name).toBe(SUPPORT);
   });
 });

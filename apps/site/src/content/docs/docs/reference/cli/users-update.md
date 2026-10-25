@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/users.ts
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 6"
 sidebar:
-  order: 20
+  order: 21
 ---
 
 **For:** an operator who corrects the name or the image of a user on a support request.

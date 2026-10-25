@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/sessions.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
-  order: 24
+  order: 25
 ---
 
 **For:** an operator who must end every session after a breach (ASVS 5.0.0 7.4.5).

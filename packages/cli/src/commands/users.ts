@@ -3,9 +3,11 @@ import { COMMON_OPTIONS, nearest, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
 import {
+  CREATE_INVALID,
   PROOF_DAYS,
   UPDATE_INVALID,
   USERS_BAN_HELP,
+  USERS_CREATE_HELP,
   USERS_DELETE_HELP,
   USERS_GET_HELP,
   USERS_HELP,
@@ -18,6 +20,7 @@ import {
 } from "../help/users.js";
 import type {
   OperatorWriteJson,
+  UserCreateJson,
   UserDeleteJson,
   UserJson,
   UsersListJson,
@@ -29,6 +32,7 @@ import {
   askTyped,
   auditIdOf,
   bannedText,
+  CREATE_LIMITS,
   DELETE_LIMITS,
   familyEndWarning,
   needYes,
@@ -87,6 +91,15 @@ const FACTOR_OPTIONS = {
   "proof-method": { type: "string" },
   "proof-reference": { type: "string" },
   "proof-checked-at": { type: "string" },
+} as const;
+const CREATE_OPTIONS = {
+  ...WRITE_OPTIONS,
+  email: { type: "string" },
+  phone: { type: "string" },
+  name: { type: "string" },
+  image: { type: "string" },
+  verified: { type: "boolean" },
+  "first-sign-in": { type: "string" },
 } as const;
 const UPDATE_OPTIONS = {
   ...WRITE_OPTIONS,
@@ -394,6 +407,92 @@ async function runFactorOff(argv: string[], ctx: Ctx): Promise<number> {
   });
 }
 
+/** The first sign-in of a user with an address (plan 12f2 Task 2). */
+const FIRST_SIGN_INS = ["invite", "reset", "none"] as const;
+
+/** The first sign-in of a create, or `phone` for a user with no address. */
+type CreateKind = (typeof FIRST_SIGN_INS)[number] | "phone";
+
+/** The question of a create. It names no address and no phone number. */
+const CREATE_QUESTIONS: Readonly<Record<CreateKind, string>> = {
+  invite: "Create a user, and mail the invitation link to the address?",
+  reset: "Create a user, and mail a reset link to the address?",
+  none: "Create a user with the address, and mail nothing?",
+  phone: "Create a user with the phone number? No SMS goes out now.",
+};
+
+/** The last stderr line of a create: how the person signs in first. */
+const CREATE_NEXT: Readonly<Record<CreateKind, string>> = {
+  invite: "Next: the person signs in with the mailed link.",
+  reset: "Next: the person sets a password with the mailed reset link.",
+  none: "Next: the person signs in by any proof of the address.",
+  phone: "Next: the person signs in with a phone code.",
+};
+
+/** The warning of a create that answers `mailed: null` for a link: core keeps the user. */
+const CREATE_MAIL_WARNING =
+  "warning: the user exists, but the mail of the link failed; read operator.create_mail_failed in the log of the deployment. The person can sign in by any other proof of the address.";
+
+/**
+ * `authtempo users create <base url>` (plan 12f2 Task 6, spec 26): a user
+ * for a person, with an address or with a phone number only. The CLI
+ * checks each flag rule that it can before any request, so a wrong run
+ * costs none of the creates of the actor. Core mails the invitation or
+ * the reset link to the person; the answer holds no token and no link.
+ * stdout holds the user id only, so a script can read it. No line holds
+ * the address or the phone number.
+ */
+async function runCreate(argv: string[], ctx: Ctx): Promise<number> {
+  const { values, positionals } = parse(argv, CREATE_OPTIONS);
+  const t = toolTarget(onePositional(positionals), values);
+  const { email, phone } = values;
+  if ((email === undefined) === (phone === undefined))
+    throw new UsageError("give exactly one of --email and --phone");
+  const first = oneOf("first-sign-in", values["first-sign-in"], FIRST_SIGN_INS);
+  // Core refuses each of these with invalid_body: a user with no address has no link to open.
+  if (phone !== undefined && (values.verified === true || (first ?? "none") !== "none"))
+    throw new UsageError(
+      "--verified and --first-sign-in invite or reset need --email: a user with no address signs in with a phone code",
+    );
+  const reason = reasonOf(values.reason);
+  // Core's default first sign-in is invite for a user with an address.
+  const kind: CreateKind = phone !== undefined ? "phone" : (first ?? "invite");
+  const body = {
+    // The address is required and may be null: a phone user states it on purpose.
+    email: email ?? null,
+    ...(phone === undefined ? {} : { phone }),
+    ...(values.verified === true ? { emailVerified: true } : {}),
+    ...(values.name === undefined ? {} : { name: values.name }),
+    ...(values.image === undefined ? {} : { image: values.image }),
+    ...(first === undefined ? {} : { firstSignIn: first }),
+    reason,
+  };
+  needYes(ctx, values, "users create");
+  const secret = readOperatorSecret(ctx, values);
+  const path = "/operator/users/create";
+  const request = `POST ${t.base}${t.basePath}${path}`;
+  ctx.err(`posting ${t.base}${t.basePath}${path}`);
+  await ask(ctx, values, CREATE_QUESTIONS[kind], "create");
+  // No user id: a 404 means that the tools are off.
+  const answer = await toolCall(
+    ctx,
+    { ...t, secret },
+    { path, method: "POST", body, scope: "users", invalid: CREATE_INVALID, limits: CREATE_LIMITS },
+  );
+  const auditId = auditIdOf(answer, request);
+  const { userId, mailed } = answer as { userId?: unknown; mailed?: unknown };
+  if (typeof userId !== "string" || !(mailed === null || mailed === "invite" || mailed === "reset"))
+    throw new Stop(`${request} answered 200 with no user id`);
+  // A link that core did not mail: the user exists, so exit 1 and a warning, not a stop.
+  const exit = (kind === "invite" || kind === "reset") && mailed === null ? 1 : 0;
+  if (values.json === true)
+    printJson(ctx, { userId, mailed, auditId, exit, stopped: null } satisfies UserCreateJson);
+  else ctx.out(userId);
+  ctx.err(writtenLine(`created the user ${userId}`, auditId));
+  ctx.err(exit === 1 ? CREATE_MAIL_WARNING : CREATE_NEXT[kind]);
+  return exit;
+}
+
 /** The fields of an update in words, such as `the name and the image`. */
 function fieldWords(fields: readonly string[]): string {
   return fields.map((f) => `the ${f}`).join(" and ");
@@ -483,6 +582,7 @@ const SUBCOMMANDS: Readonly<Record<string, (argv: string[], ctx: Ctx) => Promise
   unban: runUnban,
   "platform-role": runPlatformRole,
   "second-factor-off": runFactorOff,
+  create: runCreate,
   update: runUpdate,
   delete: runDelete,
 };
@@ -503,6 +603,7 @@ export const usersCommand: Command = {
     unban: { help: USERS_UNBAN_HELP, options: UNBAN_OPTIONS },
     "platform-role": { help: USERS_PLATFORM_ROLE_HELP, options: ROLE_OPTIONS },
     "second-factor-off": { help: USERS_SECOND_FACTOR_OFF_HELP, options: FACTOR_OPTIONS },
+    create: { help: USERS_CREATE_HELP, options: CREATE_OPTIONS },
     update: { help: USERS_UPDATE_HELP, options: UPDATE_OPTIONS },
     delete: { help: USERS_DELETE_HELP, options: DELETE_OPTIONS },
   },
