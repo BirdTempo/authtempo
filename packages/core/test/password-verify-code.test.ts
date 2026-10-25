@@ -356,12 +356,13 @@ describe("the sign-up code (plan 12i Task 20)", () => {
   });
 
   it.each(["code", "link"] as const)(
-    "answers the sign-up and the resend before the mail goes, for a new and a known address (%s)",
+    "answers the sign-up, and the resend of a code, before the mail goes, for a new and a known address (%s)",
     async (verifyBy) => {
       // Ruling 23 of plan 12i: the slow work that differs by account runs
       // after the answer. That is the code or link row and its mail, or the
-      // mail to a known address. The link does the same since final fix wave
-      // item 19. A mail port that waits until released shows it.
+      // mail to a known address. The link sign-up does the same since final
+      // fix wave item 19; the link resend keeps the order of plan 8b. A mail
+      // port that waits until released shows it.
       let release: () => void = () => {};
       const gate = new Promise<void>((resolve) => {
         release = resolve;
@@ -387,9 +388,12 @@ describe("the sign-up code (plan 12i Task 20)", () => {
       const answers = [
         await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
         await call("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }),
-        await call("/auth/password/verify/resend", { email: EMAIL }),
-        await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
       ];
+      if (verifyBy === "code")
+        answers.push(
+          await call("/auth/password/verify/resend", { email: EMAIL }),
+          await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
+        );
       for (const a of answers) {
         expect(a).not.toBe("held");
         if (a !== "held") expect(await a.json()).toEqual({ sent: true });
@@ -397,9 +401,11 @@ describe("the sign-up code (plan 12i Task 20)", () => {
       expect(sent).toEqual([]);
       release();
       await Promise.all(work);
-      // The new address got a code, the known address the existing-account
-      // mail, the resend a new code, and the unknown address nothing.
-      expect(sent.map((m) => m.to)).toEqual([EMAIL, EMAIL, EMAIL]);
+      // The new address got a code or a link, the known address the
+      // existing-account mail, the resend a new code, and the unknown address nothing.
+      expect(sent.map((m) => m.to)).toEqual(
+        verifyBy === "code" ? [EMAIL, EMAIL, EMAIL] : [EMAIL, EMAIL],
+      );
       expect(sent[1]?.subject).toBe("Your account at api.example.com");
     },
   );

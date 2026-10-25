@@ -249,7 +249,7 @@ describe("the reset page and code points (plan 8b)", () => {
 describe("password resend route (plan 8b)", () => {
   it("POST /password/verify/resend answers sent and mails a new link", async () => {
     const h = pwHandle({ hash: FAST });
-    // The rows and the mails run after the answer (final fix wave item 19): wait for them.
+    // The sign-up's rows and mail run after the answer (final fix wave item 19): wait for them.
     const after: Promise<unknown>[] = [];
     const options = { waitUntil: (p: Promise<unknown>) => void after.push(p) };
     await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }), options);

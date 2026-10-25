@@ -781,15 +781,13 @@ export interface PasswordResend {
  * whether an address has an account; `rate_limited` is the one visible
  * failure. A mail goes only to a user that exists, is unverified, and has
  * an active password row (not `PENDING_HASH_PREFIX`). The other pending
- * links of the address go first, so one link at a time is live. With a
- * `waitUntil`, the reads and the send run after the answer, for the code
- * and the link alike (ruling 23 of plan 12i, final fix wave item 19). So
- * the answer time does not tell that an address has an unverified password
- * account. With none (a call in process), they run first, and the time can
- * tell it. The mail goes after the row is written, never inside a
- * transaction. The old links go before the send, so a mail throw leaves no
- * live link; the next resend repairs it. Two parallel resends can leave two
- * live links, within the per-email limit of 3.
+ * links of the address go first, so one link at a time is live. A call
+ * that mails takes longer than one that does not; with the link, the time
+ * can tell that an address has an unverified password account. The mail
+ * goes after the row is written, never inside a transaction. The old links
+ * go before the send, so a mail throw leaves no live link and answers 500;
+ * the next resend repairs it. Two parallel resends can leave two live
+ * links, within the per-email limit of 3.
  */
 export async function resendPasswordVerification(
   config: ResolvedConfig,
@@ -815,9 +813,10 @@ export async function resendPasswordVerification(
     if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return;
     await replaceVerifyMail(config, email, row.id, input.anonymous ?? null);
   };
-  // The reads and the send go after the answer (ruling 23 of plan 12i).
-  // Then the time of the answer tells no account.
-  await deliver(send, after);
+  // With the code, the reads and the send go after the answer (ruling 23 of
+  // plan 12i). Then the time of the answer tells no account. The link keeps
+  // the order of plan 8b: a residual that the final fix wave left.
+  await deliver(send, pw.verifyBy === "code" ? after : undefined);
   return ok({ sent: true });
 }
 
