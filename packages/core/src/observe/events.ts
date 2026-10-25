@@ -684,6 +684,11 @@ export const EVENTS = {
   "operator.update_gave_up": fault("error", "authtempo: operator update gave up", {
     userId: ROW_ID,
   }),
+  // The mail of an operator create threw; the user stays (plan 12f2 Task 2). No address.
+  "operator.create_mail_failed": fault("error", "authtempo: operator create mail failed", {
+    userId: ROW_ID,
+    errorName: ERROR_NAME,
+  }),
   // The route keys and `api`, the name of an engine call (ruling 1 point 18 of plan 12h).
   "operator.guard_refused": fault("error", "authtempo: operator guard refused", {
     route: enumOf([...ROUTE_KEYS, "api"]),

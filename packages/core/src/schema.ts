@@ -587,6 +587,7 @@ export type OperatorAction =
   | "impersonation_start"
   | "impersonation_stop"
   | "create_admin"
+  | "user_create"
   | "user_update"
   | "user_delete"
   | (typeof SSO_AUDIT_ACTIONS)[number];

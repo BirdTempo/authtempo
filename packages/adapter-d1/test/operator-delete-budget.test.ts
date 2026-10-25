@@ -719,6 +719,29 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect(ROUTE_BEFORE + r.queries).toBe(13);
   }, 120_000);
 
+  it("creates a user with a verified address and a reset link in 50 calls (plan 12f2 Task 2)", async () => {
+    const sent: MailMessage[] = [];
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.create({
+        actor: SUPPORT,
+        email: "ada@example.com",
+        emailVerified: true,
+        firstSignIn: "reset",
+        ...REASON,
+      }),
+    );
+    expect(r.answer).toMatchObject({ ok: true, value: { mailed: "reset" } });
+    expect([r.refused, r.mails, r.posts]).toEqual([0, 1, 0]);
+    expect(await rows("ta_user")).toBe(1);
+    expect(await rows("ta_identity")).toBe(1);
+    expect(await rows("ta_verification", "purpose = 'password-reset'")).toBe(1);
+    // Measured 2026-10-25: 3 before the act, 6 queries (the ready check; the
+    // address read, the user, the identity, and the audit row in one
+    // transaction; the reset row after it), and the mail. The create has no loop and no page, so the
+    // count is the same for every input.
+    expect(ROUTE_BEFORE + r.queries + r.mails).toBe(10);
+  }, 120_000);
+
   /**
    * One invocation of a route through `auth.handle`, with the D1 limiter on
    * the counting view: the status, the body, and the whole count, with each

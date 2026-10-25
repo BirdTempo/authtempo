@@ -1,5 +1,5 @@
 import { createAuth, type MailMessage, type StorageAdapter } from "@authtempo/core";
-import { SoftAuthenticator } from "@authtempo/core/testing";
+import { createRecordingSms, SoftAuthenticator } from "@authtempo/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMysqlAdapter } from "../src/index.js";
 import { freshDatabase, MYSQL_84, type MysqlDatabase } from "./db.js";
@@ -2307,4 +2307,99 @@ describe("the operator delete races on MySQL 8.4 (plan 12f2 Task 4)", () => {
       await w.auth.api.sweepExpired();
       expect(await rowsOf(target.user.id)).toBe(0);
     }, 60_000);
+});
+
+describe("two operator creates at once on MySQL 8.4 (plan 12f2 Task 2)", () => {
+  const APP = { kind: "app", name: "support-tool" } as const;
+  const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
+  const PHONE = "+15555550100";
+
+  /**
+   * The user tools and the phone of plan 12i. `user.beforeCreate` runs
+   * after the address and phone reads of `createUserIn` and before its
+   * first write. It holds each create there until both have read, so both
+   * find no user, and each round meets the unique-key race.
+   */
+  function createWorld() {
+    const sent: MailMessage[] = [];
+    let waiting: (() => void)[] = [];
+    const storage = createMysqlAdapter(db.pool);
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage,
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      password: {},
+      phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+      operator: {
+        users: true,
+        secrets: [{ name: "support", secretHash: "0".repeat(64), scopes: ["users"] }],
+      },
+      hooks: {
+        user: {
+          beforeCreate: () =>
+            new Promise<void>((resolve) => {
+              waiting.push(resolve);
+              if (waiting.length < 2) return;
+              for (const go of waiting) go();
+              waiting = [];
+            }),
+        },
+      },
+    });
+    return { auth, sent, storage };
+  }
+
+  it("answers one user and one email_taken or phone_taken, with one audit row and one mail", async () => {
+    const w = createWorld();
+    for (let round = 0; round < 3; round++) {
+      const email = `twice-${round}@example.com`;
+      const before = w.sent.length;
+      const answers = await Promise.all(
+        [0, 1].map(() =>
+          w.auth.api.operator.users.create({
+            actor: APP,
+            email,
+            firstSignIn: "reset",
+            ...REASON,
+          }),
+        ),
+      );
+      // The loser threw unique_violation in its insert, and the create mapped it after the transaction.
+      expect(answers.map((a) => (a.ok ? "ok" : a.code)).sort()).toEqual(["email_taken", "ok"]);
+      const winner = answers.find((a) => a.ok);
+      if (!winner?.ok) throw new Error("no winner");
+      expect(
+        (await w.storage.findMany("user", [{ field: "email", op: "eq", value: email }])).map(
+          (u) => u.id,
+        ),
+      ).toEqual([winner.value.userId]);
+      expect(
+        await w.storage.findMany("operatorAudit", [
+          { field: "targetUserId", op: "eq", value: winner.value.userId },
+        ]),
+      ).toHaveLength(1);
+      expect(w.sent.slice(before).map((m) => m.to)).toEqual([email]);
+    }
+    const phoned = await Promise.all(
+      [0, 1].map(() =>
+        w.auth.api.operator.users.create({ actor: APP, email: null, phone: PHONE, ...REASON }),
+      ),
+    );
+    expect(phoned.map((a) => (a.ok ? "ok" : a.code)).sort()).toEqual(["ok", "phone_taken"]);
+    expect(
+      await w.storage.findMany("user", [{ field: "phone", op: "eq", value: PHONE }]),
+    ).toHaveLength(1);
+    expect(
+      await w.storage.findMany("operatorAudit", [
+        { field: "action", op: "eq", value: "user_create" },
+      ]),
+    ).toHaveLength(4);
+  }, 60_000);
 });

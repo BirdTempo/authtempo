@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
 import { IN_CHUNK } from "../../storage/batch.js";
@@ -10,18 +11,51 @@ import {
   type DeletedAccount,
   deleteAccountRows,
 } from "../account-delete.js";
+import { createSteps } from "../create-steps.js";
 import { runAfter, runBefore, type UserPatch } from "../hooks.js";
 import { organizationsOfDelete } from "../organizations.js";
+import { sendResetLink } from "../password.js";
+import { phoneRefusal } from "../phone.js";
 import { unchanged } from "../profile.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
-import { validImageUrl, validUserName } from "../users.js";
+import { createUserIn, normalizeEmail, takenCode, validImageUrl, validUserName } from "../users.js";
 import { SESSIONS_PAGE_LEAST } from "./access-end.js";
 import { auditDraft, impersonationStops, operatorAct, operatorReason } from "./audit.js";
 import { reasonOf, targetOf } from "./ban.js";
 import { type OperatorActor, requireScope } from "./guards.js";
 import { OPERATOR_CALLS_BEFORE, workBudget } from "./sessions.js";
 import { type OperatorUser, operatorUsers } from "./users.js";
+
+/**
+ * The first sign-in of a created user (plan 12f2 Task 2). `invite` mails
+ * an invitation link (Task 3), `reset` mails a reset link, and `none`
+ * mails nothing.
+ */
+export type FirstSignIn = "invite" | "reset" | "none";
+
+const FIRST_SIGN_INS: readonly unknown[] = ["invite", "reset", "none"];
+
+/**
+ * The input of an operator create (plan 12f2 Task 2). `email` is required
+ * and may be null, so a caller states the case of no address on purpose.
+ * A null address needs `phone` (owner decision 2 of 2026-10-15).
+ */
+export interface OperatorCreateUser {
+  actor: OperatorActor;
+  email: string | null;
+  /** E.164. Needs the `phone` config of plan 12i. */
+  phone?: string;
+  /** False by default. True needs an address. */
+  emailVerified?: boolean;
+  name?: string | null;
+  image?: string | null;
+  /** `invite` by default with an address, `none` with no address. */
+  firstSignIn?: FirstSignIn;
+  reason: string;
+  ip: string | null;
+  userAgent: string | null;
+}
 
 /**
  * The input of an operator update (plan 12f2 Task 4). Each of `name` and
@@ -69,6 +103,128 @@ const ORGANIZATION_RULE_READS = 3;
  * own sessions, and `DELETE_KEEP`.
  */
 const DELETE_LEAST = 3 + 2 + 1 + 1 + 2 + SESSIONS_PAGE_LEAST + DELETE_KEEP;
+
+/** A parallel create took the address or the number first: mapped after the transaction (spec 8.14 item 6). */
+function taken(err: unknown): Result<never> {
+  const code = takenCode(err);
+  if (code === null) throw err;
+  return fail(code);
+}
+
+/**
+ * Creates a user for a person (plan 12f2 Task 2, spec 26), with an address
+ * or with a phone number only. The order of the checks: the tool is on,
+ * the actor holds `users`, then the reason. The scope check comes before
+ * any read of the input and any storage read, so a caller with no scope
+ * learns nothing about an address (Review Focus 1). Then the address, the
+ * name, the image, the phone, `emailVerified`, and `firstSignIn`; each
+ * refusal answers `invalid_body`, `phone_invalid`, or `phone_region`.
+ *
+ * A user with no address needs a phone, and its first sign-in is the phone
+ * code: no SMS goes out at create. A phone on an address needs
+ * `emailVerified: true`, because a proof of the address clears the phone
+ * (`claimEmail`, plan 12i). A user with neither has no way in.
+ *
+ * The create does not read `signUp` (plan 12b): it is the provisioning path
+ * of an app whose self sign-up is closed. The operator, not a stranger,
+ * creates the user.
+ *
+ * In one transaction with the audit row `user_create`: `createUserIn` with
+ * `user.beforeCreate` and `via: "operator"`. A taken address or number
+ * answers `email_taken` or `phone_taken` before any write; the loser of a
+ * race maps by `takenCode` after the transaction. Either way no audit row
+ * stays and no mail goes out, so an actor cannot mail any person.
+ *
+ * After the commit: `user.afterCreate`, then the mail. `reset` mails a
+ * reset link (`sendResetLink`) with no limit of the reset route: the
+ * operator limit of the route bounds it. A mail that throws writes one
+ * log line with no address, keeps the user, and answers `mailed: null`.
+ * The audit `data` holds flags only, never the address, the phone, or the
+ * name. The answer holds no token, no link, and no code.
+ */
+export async function createUser(
+  config: ResolvedConfig,
+  input: OperatorCreateUser,
+): Promise<Result<{ userId: string; mailed: "invite" | "reset" | null; auditId: string }>> {
+  const reason = reasonOf(config, input);
+  if (!reason.ok) return reason;
+  let email: string | null = null;
+  if (input.email !== null) {
+    email = typeof input.email === "string" ? normalizeEmail(input.email) : null;
+    if (email === null) return fail("invalid_body");
+  }
+  if (input.name != null && (typeof input.name !== "string" || !validUserName(input.name)))
+    return fail("invalid_body");
+  if (input.image != null && (typeof input.image !== "string" || !validImageUrl(input.image)))
+    return fail("invalid_body");
+  const emailVerified = input.emailVerified ?? false;
+  if (typeof emailVerified !== "boolean") return fail("invalid_body");
+  const firstSignIn = input.firstSignIn ?? (email === null ? "none" : "invite");
+  if (!FIRST_SIGN_INS.includes(firstSignIn)) return fail("invalid_body");
+  if (input.phone !== undefined) {
+    if (typeof input.phone !== "string" || config.phone === null) return fail("invalid_body");
+    const refused = phoneRefusal(config, input.phone);
+    if (refused) return fail(refused);
+  }
+  // Neither handle: the user would have no way in and no path to a first proof.
+  if (email === null && input.phone === undefined) return fail("invalid_body");
+  if (email === null && (emailVerified || firstSignIn !== "none")) return fail("invalid_body");
+  if (firstSignIn === "reset" && !config.password) return fail("invalid_body");
+  // A proof of the address clears the phone (`claimEmail`), so a phone needs a proved address.
+  if (input.phone !== undefined && email !== null && !emailVerified) return fail("invalid_body");
+  const now = config.clock.now();
+  const userId = newId(now);
+  const drafted = auditDraft(input.actor, {
+    action: "user_create",
+    targetUserId: userId,
+    reason: reason.value,
+    data: {
+      emailVerified,
+      firstSignIn,
+      hasAddress: email !== null,
+      hasPhone: input.phone !== undefined,
+    },
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  if (!drafted.ok) return drafted;
+  const steps = createSteps(config, "operator", { signUpRule: false });
+  const done = await operatorAct(
+    config,
+    drafted.value,
+    async (tx) => {
+      steps.begin();
+      const made = await createUserIn(
+        tx,
+        steps,
+        {
+          id: userId,
+          email,
+          emailVerified,
+          name: input.name ?? null,
+          image: input.image ?? null,
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+        },
+        now,
+      );
+      if (!made.ok) return made;
+      return ok({ user: made.value });
+    },
+    { committed: (value) => steps.after(value.user) },
+  ).catch(taken);
+  if (!done.ok) return done;
+  const { user, auditId } = done.value;
+  let mailed: "reset" | null = null;
+  if (firstSignIn === "reset" && user.email !== null) {
+    try {
+      await sendResetLink(config, user.email, undefined, config.clock.now());
+      mailed = "reset";
+    } catch (e) {
+      config.observe.emit({ name: "operator.create_mail_failed", userId: user.id, errorName: e });
+    }
+  }
+  return ok({ userId: user.id, mailed, auditId });
+}
 
 /**
  * Corrects the name or the image of a user (plan 12f2, spec 26 and 8.15).

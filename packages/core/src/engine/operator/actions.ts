@@ -17,6 +17,7 @@ const ACTIONS: Readonly<Record<OperatorAction, true>> = {
   impersonation_start: true,
   impersonation_stop: true,
   create_admin: true,
+  user_create: true,
   user_update: true,
   user_delete: true,
   // The actions of plan 12d (SSO_AUDIT_ACTIONS of the schema).
