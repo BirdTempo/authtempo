@@ -50,7 +50,8 @@ Do the steps in this order. Each step names what happens when you skip it.
 
 The delete runs one transaction with its audit row. A refusal writes nothing and leaves no audit row.
 
-- The user row and every row of the user go: the identities, the passkeys, the tokens, the second factor, and the invitation rows.
+- The user row and every row of the user go: the identities, the passkeys, the tokens, and the second factor.
+- After the commit, the mailed links of the user go too, the invitation link of an operator create among them.
 - Each organization where the user is the only member goes with the account. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep.
 - The act ends a page of the sessions. The sweep ends the rest with the reason `account_deleted`.
 - The user gets the notice mail `account_deleted` at the old address, unless `account.notices` is false. The notice holds no IP of the operator. A user with no address gets no notice.

@@ -86,13 +86,14 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - `firstSignIn: "none"` mails nothing. The person signs in by any proof of the address, such as a magic link.
 - `email: null` with a `phone` in E.164 makes a user with no address. It needs the `phone` config, and allows `none` only.
 - The phone form sends no SMS at the create. The person asks for a phone code at the first sign-in.
-- A phone beside an address needs `emailVerified: true`, because a later proof of the address clears an unproved phone.
+- A `phone` beside an address answers `invalid_body`, after the scope check and before any read. A phone number that the operator chose would let the operator sign in to the account by a phone code. That sign-in would have no impersonation mark, no time limit, and no audit row.
 - The create does not read `signUp`. It is the way in of an app whose self sign-up is closed: the operator, not a stranger, makes the user.
 - `user.beforeCreate` runs with `via: "operator"`, so a hook of the app can still refuse the user.
 - No operator path sets a password. The answer holds no token, no link, and no code.
 - A caller with no `users` scope gets `operator_required` before any read. So the create tells nothing about an address to that caller.
 - A taken address or number answers `email_taken` or `phone_taken`, writes nothing, and mails no one.
 - The mail goes after the commit. A mail that fails keeps the user, answers `mailed: null`, and emits the event `operator.create_mail_failed`.
+- An address of a domain that enforces SSO gets no link. The create writes no invitation row, mails nothing, and answers `mailed: null`. The person signs in through the SSO connection.
 - The audit row `user_create` holds four flags: `emailVerified`, `firstSignIn`, `hasAddress`, and `hasPhone`. It never holds the address, the number, or the name.
 - Each actor gets 200 creates an hour through the route, on `operator-create:actor:<kind>:<id>`. A refused call counts too.
 
@@ -262,7 +263,7 @@ The measurement of 2026-10-20 at 03:00 UTC: one search for a prefix that no addr
 - [`unauthorized`](/docs/reference/errors/#unauthorized): no credential, a wrong secret, or a secret beside a session.
 - [`operator_required`](/docs/reference/errors/#operator_required): the secret lacks the scope, or the session fails a step of the guard.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the hour is spent.
-- [`invalid_body`](/docs/reference/errors/#invalid_body): a body that is not JSON, a bad reason, a bad app name, a bad proof, or a date out of range.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a body that is not JSON, a bad reason, a bad app name, a bad proof, or a date out of range. A create with a phone beside an address answers it too.
 - [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): a session caller posted from an origin outside `trustedOrigins`.
 - [`operator_self`](/docs/reference/errors/#operator_self): a platform operator acted on their own user.
 - [`account_banned`](/docs/reference/errors/#account_banned): the target of a grant or of `createAdmin` is banned.

@@ -400,6 +400,7 @@ gains no account calls. A client app posts these paths, or calls
 | A spent, expired, unknown, or foreign token answers `INVALID_TOKEN` with 400, not 404. A confirm after a change of address answers it too | Core's status. The link went to the old mailbox |
 | `deleteUser` with `callbackURL` answers `NOT_SUPPORTED` (501). The confirm page lands on the app | Core lands a form post on `appURL` |
 | An organization where the user is the last owner and other members remain stops the delete: `SOLE_OWNER` (409) | Better Auth keeps such an organization with no owner |
+| A delete answers `DELETE_TOO_LARGE` (409) before any write when the user alone holds more than 50 organizations. On D1 it also answers it when its least work cannot fit 50 queries | Core deletes the account in one transaction, and D1 Free allows 50 queries per invocation |
 | `updateUser` takes `name` and `image`, for a verified address only. `email` answers `EMAIL_CAN_NOT_BE_UPDATED`, and any other field `FIELD_NOT_ALLOWED` | Core keeps no other user field. Better Auth drops an unknown field |
 | The change of address mails the new address through `emailVerification.sendVerificationEmail`. A taken address gets no mail. The link opens core's confirm page | As Better Auth does. Core moves the address only after the proof. `sendChangeEmailConfirmation` is refused |
 | `changeEmail` with the option off answers `CHANGE_EMAIL_DISABLED` (400). Core's own `/user/change-email` routes answer 404 | Better Auth 1.7.2's answer |
@@ -656,15 +657,17 @@ refusal comes before any read, so its answer is the same for every user id.
 `/admin/update-user` takes `data.name` and `data.image` only, as core's
 operator update does (plan 12f2). An empty name clears the name, as `null`
 does. Each other key of `data` is refused before any read, and nothing is
-written. The shim never drops a key in silence:
+written. After the password, the shim checks the keys in Better Auth's
+order: the role, the ban keys, then the address. It never drops a key in
+silence:
 
 | Key of `data` | Answer |
 | --- | --- |
 | None | 400 `NO_DATA_TO_UPDATE`, Better Auth's code. |
 | `password` | 400 `PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER`, Better Auth's code. The line names spec section 26 and the reset link. |
-| `email`, `emailVerified` | 400 `FIELD_NOT_ALLOWED`. The person changes the address and proves it (spec section 8.15 item 5). |
-| `role` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/set-role`. |
-| `banned`, `banReason`, `banExpires` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/ban-user` and `/admin/unban-user`. |
+| `role` | 403 `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, Better Auth's code. Use `/admin/set-role`. |
+| `banned`, `banReason`, `banExpires` | 403 `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`, Better Auth's code. Use `/admin/ban-user` and `/admin/unban-user`. |
+| `email`, `emailVerified` | 403 `YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL`, Better Auth's code. The person changes the address and proves it (spec section 8.15 item 5). |
 | Any other key | 400 `FIELD_NOT_ALLOWED`, with a line that names the key and spec section 26. |
 
 `/admin/create-user` takes `email`, `name`, `data.emailVerified`, and
@@ -681,6 +684,8 @@ The shim never drops a key in silence:
 
 | Key | Answer |
 | --- | --- |
+| `role` of a form other than a string or a list of strings, such as `null` | 400 `VALIDATION_ERROR`, before any other check, as Better Auth's body schema answers. |
+| `role` or `data.role` with a value that is no string | 400 `INVALID_ROLE_TYPE`, Better Auth's code. |
 | `password` | 403 `YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD`, the code of Better Auth's password set. No operator sets a password; the line names the reset link and spec section 26. |
 | `role` or `data.role` other than `user` | 403 `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, Better Auth's code. Grant the platform role through `/admin/set-role`. `user` and `["user"]` add nothing. |
 | `data.banned`, `data.banReason`, `data.banExpires` | 403 `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`, Better Auth's code. Use `/admin/ban-user`. |
@@ -721,7 +726,7 @@ core's guard decides (plan 12f Task 10):
 | `POST /admin/impersonate-user` | `POST /operator/impersonate` | `{ session, user }` of the new session. The session cookie holds its token, and core's actor cookie keeps the operator's token. A bearer caller gets the token in `session.token` and no cookie. |
 | `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |
 | `POST /admin/update-user` | `POST /operator/users/update` | The user itself, as Better Auth answers it, not `{ user }`. Core writes the change and its audit row `user_update` in one transaction. |
-| `POST /admin/remove-user` | `POST /operator/users/delete` | `{ success: true }`. Core deletes the account and each organization that the user alone holds, and writes the audit row `user_delete`. |
+| `POST /admin/remove-user` | `POST /operator/users/delete` | `{ success: true }`. Core deletes the account and each organization that the user alone holds, and writes the audit row `user_delete`. On the D1 storage, a solo owner answers `DELETE_TOO_LARGE`: see below. |
 | `POST /admin/create-user` | `POST /operator/users/create` | `{ user }`, as Better Auth answers it, with `role: "user"`. Core writes the user and its audit row `user_create` in one transaction, and runs `user.beforeCreate` and `user.afterCreate`. |
 
 `auth.api` has Better Auth's server calls of these paths: `listUsers`,
@@ -753,9 +758,9 @@ no operator secret.
 | `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
 | `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
-| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 409 `YOU_CANNOT_REMOVE_YOURSELF` on a remove, else 409 `FORBIDDEN`. |
+| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 400 `YOU_CANNOT_REMOVE_YOURSELF` on a remove (Better Auth's status), else 409 `FORBIDDEN`. |
 | `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
-| `delete_too_large` (a `delete-user` or a remove of a user who alone holds more than 50 organizations, or either on D1 when its least work does not fit the query limit of one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
+| `delete_too_large` (a remove of a user who alone holds more than 50 organizations, or on D1 a remove that does not fit one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
 | `email_taken` on a create | 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`, Better Auth's code and status. |
 | `invalid_body` on a create with a malformed address | 400 `INVALID_EMAIL`, Better Auth's code. |
 | `not_found` | 404 `USER_NOT_FOUND`. |
@@ -805,8 +810,13 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - `/admin/update-user` takes `name` and `image` only. Better Auth also sets
   the address, the role, the ban fields, and any added field. The
   update of the caller's own user answers 409 `FORBIDDEN`.
-- `/admin/remove-user` of the caller answers `YOU_CANNOT_REMOVE_YOURSELF`
-  with status 409. Better Auth answers 400.
+- `/admin/remove-user` on the D1 storage answers `DELETE_TOO_LARGE` for a
+  user who alone holds an organization (test run of 2026-10-25). A
+  platform operator has the smallest query budget of the operator acts, and
+  this act does not fit it. Delete the organization first. Or let the app
+  delete the account in process with
+  `auth.tempo.api.operator.users.delete`, which fits in 47 queries with 60
+  sessions.
 - `/admin/remove-user` deletes the user's solo organizations with the
   account, and refuses the last owner of an organization with other members
   (`SOLE_OWNER`). Better Auth keeps every organization.
