@@ -1,4 +1,4 @@
-import { isIpLiteral, isLocalHost } from "../primitives/host.js";
+import { isPublicHost } from "../primitives/host.js";
 import {
   type OAuth2Provider,
   type RedirectOverride,
@@ -17,10 +17,12 @@ export const DEFAULT_GITLAB_ISSUER = "https://gitlab.com";
 
 /**
  * True for an `https:` origin on a public host. The origin has no path,
- * query, fragment, user, or trailing slash. A public host is not an IP
- * literal, not a local name, and not the host of an entry of `baseURL`.
- * Core posts the client secret to this host, so a config must not point it
- * inside a network or at core itself.
+ * query, fragment, user, or trailing slash. The host rule is `isPublicHost`,
+ * the one rule of each URL that core fetches from the server (ruling 2 of
+ * the 12i lane). So the host is not an IP literal or a local name. It has no
+ * empty label, and it is not the host of an entry of `baseURL`. Core posts the
+ * client secret to this host, so a config must not point it inside a
+ * network or at core itself.
  */
 export function isGitlabIssuer(
   value: unknown,
@@ -33,10 +35,7 @@ export function isGitlabIssuer(
   } catch {
     return false;
   }
-  if (u.protocol !== "https:" || u.origin !== value) return false;
-  const host = u.hostname.replace(/\.$/, "");
-  const own = (typeof baseURL === "string" ? [baseURL] : baseURL).map((b) => new URL(b).hostname);
-  return !isIpLiteral(host) && !isLocalHost(host) && !own.includes(host);
+  return u.protocol === "https:" && u.origin === value && isPublicHost(u.hostname, baseURL);
 }
 
 /**

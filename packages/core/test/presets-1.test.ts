@@ -301,6 +301,11 @@ describe("the presets of plan 12i Task 13", () => {
       "https://localhost",
       "https://api.example.com",
       "gitlab.example.com",
+      // An empty label hides a local name from a rule that strips one dot. The
+      // issuer shares isPublicHost, which refuses each (final review D, M1).
+      "https://localhost...",
+      "https://gitlab.internal...",
+      "https://a..example.com",
     ])
       expect(() => gitlab(issuer), issuer).toThrow(
         /social\.gitlab\.issuer must be an https origin/,
