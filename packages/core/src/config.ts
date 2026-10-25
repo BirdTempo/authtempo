@@ -708,19 +708,29 @@ const RELATED_ORIGINS_MAX = 5;
  * host in another form never equals the browser's RP ID, and the domain
  * tree check of the origins and the related origins document compare
  * strings. So core refuses it and names the form to write.
+ *
+ * An RP ID is a host alone. A user part, a port, a path, a query, or a
+ * fragment has no host form to name, so core refuses it with no form (final
+ * fix wave item 1). The parser would read `a@b.example` as the host
+ * `b.example`, another host than the app meant.
  */
 function checkRpID(rpID: string): void {
-  // Printable ASCII with no capital letter: a control character or a Unicode letter fails.
-  if (rpID === rpID.toLowerCase() && /^[\x20-\x7e]*$/.test(rpID)) return;
-  let form: string;
+  let host: string | null = null;
   try {
     // A scheme-relative URL on a reserved base: the parser reads `rpID` as the host.
-    form = new URL(`//${rpID}`, "https://rp.invalid").hostname;
+    const url = new URL(`//${rpID}`, "https://rp.invalid");
+    const bare = url.href === `https://${url.host}/` && url.port === "";
+    if (bare && !/[@:/?#\\]/.test(rpID)) host = url.hostname;
   } catch {
-    form = rpID.toLowerCase();
+    host = null;
   }
+  if (host === null)
+    throw new ConfigError(
+      `passkey.rpID ${rpID} is not a host; write the host alone, with no user part, port, or path`,
+    );
+  if (host === rpID) return;
   throw new ConfigError(
-    `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${form}`,
+    `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${host}`,
   );
 }
 

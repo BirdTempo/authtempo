@@ -254,6 +254,20 @@ describe("the form of the RP ID (ruling 10 of plan 12i)", () => {
         `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${form}`,
       );
     }
+    // A user part, a port, a path, a query, or a fragment: no host form fits,
+    // and the message names no other host (final fix wave item 1).
+    for (const rpID of [
+      "ada@example.com",
+      "Ada@Example.com",
+      "example.com:8443",
+      "example.com:443",
+      "example.com/app",
+      "example.com?x",
+      "example.com#x",
+    ])
+      expect(() => authWith({ rpID, rpName: "Example", origins: [APP_ORIGIN] })).toThrow(
+        `passkey.rpID ${rpID} is not a host; write the host alone, with no user part, port, or path`,
+      );
     // The punycode form passes, with its origins.
     expect(() =>
       authWith({
