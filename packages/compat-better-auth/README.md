@@ -1032,7 +1032,7 @@ throws `APIError` on a refusal.
 | `POST /sign-in/username` | `/password/sign-in` | `{ token, user }`; with `twoFactor`, Better Auth's redirect answer. `callbackURL` and `rememberMe: false` answer `NOT_SUPPORTED` |
 | `POST /is-username-available` | `GET /username/available` | `{ available }` |
 | `POST /phone-number/send-otp` | `/phone/request` with no session or an anonymous one, else `/phone/add` | `{ message: "code sent" }` for a known and an unknown number |
-| `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session that is not anonymous verifies only with `updatePhoneNumber: true`. With an anonymous session, the verify signs in and upgrades the anonymous user, and `onLinkAccount` runs, as in Better Auth |
+| `POST /phone-number/verify` | `/phone/verify`, or `/phone/add/verify` with `updatePhoneNumber: true` | `{ status: true, token, user }`. `disableSession: true` answers `NOT_SUPPORTED`. A code sent with a session that is not anonymous verifies only with `updatePhoneNumber: true`. With an anonymous session, the verify signs in and upgrades the anonymous user, and `onLinkAccount` runs, as in Better Auth. With an anonymous session and `updatePhoneNumber: true`, the verify answers 403 `ANONYMOUS_REFUSED`: Better Auth sets the number on the anonymous user, and core refuses a phone on an anonymous user |
 | `POST /sign-in/phone-number` | `/password/sign-in` | As `/sign-in/username` |
 | `POST /one-tap/callback` | `/social/google/id-token` | `{ token, user }`; 400 `INVALID_TOKEN` |
 | `POST /sign-in/social` with `idToken` | `/social/<provider>/id-token` | `{ redirect: false, token, user }` for `google` and `apple`; `NOT_SUPPORTED` for another provider. `idToken.nonce` must come from core's `POST <basePath>/social/<provider>/id-token/nonce`, and the app gives its `providerNonce` to the provider. Without `oneTap`, a token with no nonce answers `INVALID_TOKEN`. Core keeps no provider token, so `accessToken`, `refreshToken`, and `expiresAt` are not stored |
@@ -1071,8 +1071,9 @@ Behavior that differs from Better Auth:
   `getTempEmail` and a TikTok or WeChat user. Core never mails a
   placeholder, never finds a user by one, and never counts one as proved.
   A sign-up or a change of address to an address in a placeholder form
-  answers 403 `HOOK_REFUSED` before any write. Better Auth takes such an
-  address. One database takes one `emailDomainName`: a second instance on
+  answers 403 `HOOK_REFUSED` before any write. At `/change-email` and at
+  core's `/user/change-email`, the refusal also comes before any mail.
+  Better Auth takes such an address. One database takes one `emailDomainName`: a second instance on
   it with another domain is refused at start.
 - A residual of the move: Better Auth 1.7.2 writes
   `temp-<random id>@<emailDomainName>`, not the row id, and
@@ -1093,13 +1094,12 @@ Behavior that differs from Better Auth:
 - `sendOTP` gets each code that core makes, keys, binds to its number, and
   counts. It is the one place where app code sees a code. Core sends a
   note to a number that another user holds. Better Auth has no sender for
-  that note, so the shim sends nothing. The port still answers `sent`:
-  core answers 503 for a send that is not `sent`, and a free number gets
-  200, so another answer would tell a held number. The note counts against
-  the daily cap. Core sends
-  the code after the answer, so the answer time tells no account. A throw
-  of `sendOTP` changes no answer, and core writes the line
-  `sms.port_threw`. On Workers, pass `{ waitUntil }` to `auth.handler`.
+  that note, so the shim sends nothing, and the port answers `sent`. The
+  note counts against the daily cap. Core sends each code and note after
+  the answer, at a sign-in request and at an add. So the answer time tells
+  no account and no held number. A throw of `sendOTP` changes no answer,
+  and core writes the line `sms.port_threw`. On Workers, pass
+  `{ waitUntil }` to `auth.handler`.
 - Core signs in by phone and password only with a number that its code
   proved. A number that Better Auth stored with no proof does not sign in,
   so `requireVerification` other than `true` logs a note.

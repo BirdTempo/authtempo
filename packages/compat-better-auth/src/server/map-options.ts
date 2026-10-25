@@ -104,10 +104,11 @@ const CODE_TEXT = /^authtempo-code:(\d{6,8})$/;
  * text is the code with a mark, and this wrapper is the one place that
  * passes a code to app code. A note to a taken number holds no code, and
  * Better Auth has no sender for it: it is not sent. Core counted it against
- * the daily cap already. The port still answers "sent" (ruling 42 L3,
- * decided by fix-12i-task16): core's /phone/add answers 503 for any other
- * result, and 200 for a free number, so that answer would tell a held number.
- * Core catches a throw of `sendOTP` and writes the line `sms.port_threw`.
+ * the daily cap already. The port still answers "sent" (ruling 42 L3): any
+ * other result gives a false `sms.not_sent` line, and `api.phone.add` would
+ * answer 503 for a held number only. Core's /phone/add sends after the
+ * answer (ruling 44), so the time of `sendOTP` tells no held number. Core
+ * catches a throw of `sendOTP` and writes the line `sms.port_threw`.
  */
 export function phonePort(sendOTP: PhoneNumberOptions["sendOTP"]): SmsPort {
   return {

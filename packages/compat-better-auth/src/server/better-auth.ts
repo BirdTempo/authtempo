@@ -93,6 +93,8 @@ export function createHandler(
   // Core's own change routes follow Better Auth's option (plan 12a), as the
   // magic link does. The email code paths reach them through auth.handle.
   const changePath = `${basePath}/user/change-email`;
+  // Better Auth's own path of the change, which account.ts sends to core's route.
+  const betterAuthChangePath = `${basePath}/change-email`;
   // Better Auth has no re-authentication code, and the shim maps no mail for it.
   const reauthCodePath = `${basePath}/reauth/email`;
   const magicLinkPath = `${basePath}/magic-link/`;
@@ -142,7 +144,12 @@ export function createHandler(
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
     if (req.method === "POST" && pathname === changePath) {
-      const held = await placeholderChange(auth, base, req);
+      const held = await placeholderChange(auth, base, req, false);
+      if (held) return held;
+    }
+    // With the option off, account.ts answers CHANGE_EMAIL_DISABLED first (ruling 44 L-A).
+    if (req.method === "POST" && pathname === betterAuthChangePath && base.account.changeEmail) {
+      const held = await placeholderChange(auth, base, req, true);
       if (held) return held;
     }
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
@@ -207,15 +214,17 @@ export function createHandler(
 }
 
 /**
- * A change of address to an address in a placeholder form answers core's
+ * A change of address to an address in a placeholder form answers
  * `hook_refused` before core mails the confirm link (ruling 42 L1). Core's
  * user `beforeUpdate` refuses it at the commit too (hooks.ts), but core
- * mails the new address first. Null for any other change.
+ * mails the new address first. Better Auth's own path `/change-email` gets
+ * the refusal in Better Auth's shape (ruling 44 L-A). Null for any other change.
  */
 async function placeholderChange(
   auth: Auth,
   mapped: Mapped,
   request: Request,
+  betterAuthShape: boolean,
 ): Promise<Response | null> {
   const body: unknown = await request
     .clone()
@@ -225,10 +234,10 @@ async function placeholderChange(
   if (typeof email !== "string") return null;
   const s = await auth.session(request, { refresh: false });
   if (!isPlaceholder(email, mapped.emailDomainName, s?.user.id ?? null)) return null;
-  return Response.json(
-    { error: "hook_refused", message: PLACEHOLDER_ADDRESS_TEXT },
-    { status: 403 },
-  );
+  const refusal = betterAuthShape
+    ? { code: BETTER_AUTH_CODES.hook_refused, message: PLACEHOLDER_ADDRESS_TEXT }
+    : { error: "hook_refused", message: PLACEHOLDER_ADDRESS_TEXT };
+  return Response.json(refusal, { status: 403 });
 }
 
 /** Core's 421 of a host outside the `baseURL` list in Better Auth's shape, with core's headers. */

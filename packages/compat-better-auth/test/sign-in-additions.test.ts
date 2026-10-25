@@ -547,7 +547,93 @@ describe("the phone-number plugin", () => {
     const free = await send("/phone-number/send-otp", { phoneNumber: "+14155550181" });
     expect([taken.status, await json(taken)]).toEqual([free.status, await json(free)]);
     expect(free.status).toBe(200);
-    // The add sends before its answer: the free number got its code, and the taken one nothing.
+    // The add sends after its answer: the free number gets its code, and the taken one nothing.
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent.map((x) => x.phoneNumber)).toEqual(["+14155550180", "+14155550181"]);
+  });
+
+  it("answers 403 to a verify with updatePhoneNumber over an anonymous session (ruling 44 L-B)", async () => {
+    const t = await betterAuthTables();
+    const sent: { phoneNumber: string; code: string }[] = [];
+    const options = phoneOptions(t.database, sent);
+    const auth = betterAuth({ ...options, plugins: [anonymous(), ...(options.plugins ?? [])] });
+    const { send } = browser(auth.handler);
+    const anon = await json(await send("/sign-in/anonymous", {}));
+    const anonId = (anon.user as { id: string }).id;
+    expect((await send("/phone-number/send-otp", { phoneNumber: "+14155550190" })).status).toBe(
+      200,
+    );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    const v = await send("/phone-number/verify", {
+      phoneNumber: "+14155550190",
+      code: sent[0]?.code,
+      updatePhoneNumber: true,
+    });
+    // Better Auth sets the number on the anonymous user. Core refuses a phone on it.
+    expect([v.status, (await json(v)).code]).toEqual([403, "ANONYMOUS_REFUSED"]);
+    expect(t.row('SELECT phoneNumber, isAnonymous FROM "user" WHERE id = ?', anonId)).toEqual({
+      phoneNumber: null,
+      isAnonymous: 1,
+    });
+    expect(readme).toContain(
+      "updatePhoneNumber: true`, the verify answers 403 `ANONYMOUS_REFUSED`",
+    );
+  });
+
+  it("answers an add of a held and a free number before sendOTP returns (ruling 44)", async () => {
+    const t = await betterAuthTables();
+    const PORT_MS = 1000;
+    const sent: { phoneNumber: string; code: string }[] = [];
+    let returned = 0;
+    let release = () => {};
+    let held = Promise.resolve();
+    const verifies: EmailCallbackData[] = [];
+    const auth = betterAuth(
+      phoneOptions(
+        t.database,
+        sent,
+        {
+          // A slow supplier (probe P1 of the Task 16 re-review waited 150 ms).
+          sendOTP: async (d) => {
+            sent.push(d);
+            await Promise.race([held, new Promise((r) => setTimeout(r, PORT_MS))]);
+            returned++;
+          },
+        },
+        verifies,
+      ),
+    );
+    const holder = browser(auth.handler);
+    await holder.send("/phone-number/send-otp", { phoneNumber: "+14155550180" });
+    await vi.waitFor(() => expect(returned).toBe(1));
+    await holder.send("/phone-number/verify", { phoneNumber: "+14155550180", code: sent[0]?.code });
+    const after: Promise<unknown>[] = [];
+    const { send } = browser((r) => auth.handler(r, { waitUntil: (p) => void after.push(p) }));
+    await send("/password/sign-up", { email: "tom@example.com", password: PASSWORD });
+    expect((await send("/password/verify", { token: verifies[0]?.token })).status).toBe(200);
+    await Promise.all(after);
+    held = new Promise<void>((r) => {
+      release = r;
+    });
+    const timed = async (phoneNumber: string) => {
+      const before = returned;
+      const t0 = performance.now();
+      const res = await send("/phone-number/send-otp", { phoneNumber });
+      return { ms: performance.now() - t0, portReturned: returned - before, res };
+    };
+    const taken = await timed("+14155550180");
+    const free = await timed("+14155550181");
+    release();
+    await Promise.all(after);
+    // Neither answer waited for sendOTP, so the time does not tell a held number.
+    expect([taken.portReturned, free.portReturned]).toEqual([0, 0]);
+    expect([taken.res.status, await json(taken.res)]).toEqual([
+      free.res.status,
+      await json(free.res),
+    ]);
+    expect(free.ms).toBeLessThan(PORT_MS);
+    expect(Math.abs(taken.ms - free.ms)).toBeLessThan(PORT_MS / 2);
+    // The free number got its code after the answer. The note to the taken number is not sent.
     expect(sent.map((x) => x.phoneNumber)).toEqual(["+14155550180", "+14155550181"]);
   });
 

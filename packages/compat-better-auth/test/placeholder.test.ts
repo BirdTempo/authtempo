@@ -194,8 +194,17 @@ describe("the placeholder address", () => {
     for (const newEmail of [own, "eve@x.placeholder.invalid"]) {
       const res = await send("/user/change-email", { newEmail });
       expect([res.status, await json(res)]).toEqual([403, refused]);
+      // Better Auth's own path, in Better Auth's shape (ruling 44 L-A).
+      const own = await send("/change-email", { newEmail });
+      expect([own.status, await json(own)]).toEqual([
+        403,
+        { code: "HOOK_REFUSED", message: PLACEHOLDER_ADDRESS_TEXT },
+      ]);
     }
     expect(verifies).toHaveLength(1);
+    // A real address still goes through Better Auth's path, and core mails it.
+    expect((await send("/change-email", { newEmail: "sales@example.com" })).status).toBe(200);
+    expect(verifies).toHaveLength(2);
     // The code change: the code goes out, and core's user hook refuses the commit.
     await send("/email-otp/request-email-change", { newEmail: own });
     const code = codes.find((c) => c.email === own)?.otp;
