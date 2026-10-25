@@ -478,13 +478,38 @@ describe("claimEmail and the password row (plan 8)", () => {
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
-    // The claim clears the username in the same statement (ruling 16 M2).
-    expect(order[0]).toBe(`update:user:["emailVerified","username","displayUsername","updatedAt"]`);
+    // The claim clears the username and the phone in the same statement (ruling 16 M2, final review A M2).
+    expect(order[0]).toBe(
+      `update:user:["emailVerified","username","displayUsername","phone","updatedAt"]`,
+    );
     expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
     const password = order.indexOf("delete:password");
     expect(password).toBeGreaterThan(0);
     expect(password).toBeLessThan(order.indexOf("delete:session"));
   });
+
+  it.each([
+    ["no keep", null],
+    ["keep.username", { username: true }],
+  ] as const)(
+    "clears the claimant's phone with %s (final review A M2 of plan 12i)",
+    async (_, keep) => {
+      // Core sets no phone on an unverified user. The compat store reads one
+      // from a Better Auth 1.7.2 row: a sign-up by address, then
+      // updatePhoneNumber with phoneNumberVerified true.
+      const { storage, now } = await unverifiedWithPassword();
+      await storage.update("user", [{ field: "id", op: "eq", value: "u1" }], {
+        phone: "+14155550177",
+      });
+      const verified = await checkedFor(storage, "u1");
+      await storage.transaction((tx) => claimEmail(tx, "u1", keep, now, verified));
+      const user = await storage.findOne("user", [{ field: "id", op: "eq", value: "u1" }]);
+      expect({ verified: user?.emailVerified, phone: user?.phone }).toEqual({
+        verified: true,
+        phone: null,
+      });
+    },
+  );
 });
 
 describe("validUserName (exported for the importer, plan 9b)", () => {

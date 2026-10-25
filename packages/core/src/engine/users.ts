@@ -141,10 +141,17 @@ export interface ClaimKeep {
 
 /**
  * The user row as `claimEmail` with no `keep.username` leaves it: verified,
- * with no username.
+ * with no username and no phone.
  */
 export function claimedUser(user: UserRow, now: Date): UserRow {
-  return { ...user, emailVerified: true, username: null, displayUsername: null, updatedAt: now };
+  return {
+    ...user,
+    emailVerified: true,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    updatedAt: now,
+  };
 }
 
 /**
@@ -154,7 +161,8 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
  * session, every password row (except the one `keep.passwordId` names),
  * every passkey, every pending passkey challenge, and every
  * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
- * The username is cleared, except where `keep.username` says so.
+ * The username is cleared, except where `keep.username` says so. The phone
+ * is always cleared.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -180,9 +188,11 @@ export async function claimEmail(
     ],
     // A claimant chose the username, and the owner must not inherit it: a
     // username is a way in and the name of each passkey (ruling 16 M2).
+    // A phone is a way in too. Core sets none on an unverified user, but a
+    // Better Auth store can hold one (final review A M2 of plan 12i).
     keep?.username
-      ? { emailVerified: true, updatedAt: now }
-      : { emailVerified: true, username: null, displayUsername: null, updatedAt: now },
+      ? { emailVerified: true, phone: null, updatedAt: now }
+      : { emailVerified: true, username: null, displayUsername: null, phone: null, updatedAt: now },
   );
   if (flipped === 0) {
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).

@@ -1271,7 +1271,7 @@ async function confirmSignUp(
           { field: "email", op: "eq", value: row.identifier },
         ]);
         if (!user) return fail(refused);
-        const claimed = { ...user, emailVerified: true, updatedAt: now };
+        const claimed = { ...user, emailVerified: true, phone: null, updatedAt: now };
         // `user.beforeVerify`, then the session hook, before the first write,
         // for the D1 undo (see `insertSignUp`). A verified user gets no
         // session and no verify, so no hook.
