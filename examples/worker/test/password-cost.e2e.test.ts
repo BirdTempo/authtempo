@@ -1,4 +1,4 @@
-import { createExecutionContext, env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { expect, it, vi } from "vitest";
 
 const BASE = "https://example.test";
@@ -16,6 +16,7 @@ it("stores a hash at 100000 iterations when TEST_MODE is unset", async () => {
   // bindings; the runtime value carries every binding. The cast is the one
   // in the sweep test.
   const prodEnv: Env = { ...(env as unknown as Env), TEST_MODE: "" };
+  const ctx = createExecutionContext();
   const up = await worker.fetch(
     new Request(`${BASE}/auth/password/sign-up`, {
       method: "POST",
@@ -23,10 +24,12 @@ it("stores a hash at 100000 iterations when TEST_MODE is unset", async () => {
       body: JSON.stringify({ email: "cost@example.com", password: "correct horse battery" }),
     }),
     prodEnv,
-    createExecutionContext(),
+    ctx,
   );
   expect(up.status).toBe(200);
   expect(await up.json()).toEqual({ sent: true });
+  // The uniform sign-up writes its rows after the answer, under ctx.waitUntil (final fix wave item 19).
+  await waitOnExecutionContext(ctx);
   const stored = await env.DB.prepare(
     "SELECT p.hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
   )

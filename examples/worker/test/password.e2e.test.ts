@@ -17,6 +17,19 @@ const form = (body: Record<string, string>) => ({
 async function lastLink(): Promise<string> {
   return ((await (await SELF.fetch(`${BASE}/__test/last-link`)).json()) as { link: string }).link;
 }
+/**
+ * The value of `read` once it holds one. The uniform sign-up writes its rows
+ * and sends its mail after the answer, under ctx.waitUntil (final fix wave
+ * item 19 of plan 12i), so the test waits up to 2 seconds for them.
+ */
+async function eventually<T>(read: () => Promise<T | null | undefined>): Promise<T | null> {
+  for (let i = 0; i < 200; i++) {
+    const value = await read();
+    if (value) return value;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return null;
+}
 
 it("signs up, confirms by the mailed link, signs in, resets, and signs in again on D1", async () => {
   const up = await SELF.fetch(
@@ -28,14 +41,20 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
   expect(await up.json()).toEqual({ sent: true });
   expect(up.headers.get("set-cookie")).toBeNull();
   // The example uses 1000 iterations in TEST_MODE. The stored hash shows the seam ran in workerd.
-  const stored = await env.DB.prepare(
-    "SELECT p.hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
-  )
-    .bind(EMAIL)
-    .first<{ hash: string }>();
+  const stored = await eventually(() =>
+    env.DB.prepare(
+      "SELECT p.hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
+    )
+      .bind(EMAIL)
+      .first<{ hash: string }>(),
+  );
   expect(stored?.hash).toMatch(/^pbkdf2-sha256\$1000\$/);
 
-  const verifyLink = await lastLink();
+  const verifyLink =
+    (await eventually(async () => {
+      const link = await lastLink();
+      return link.startsWith(`${BASE}/auth/password/verify?token=pv_`) ? link : null;
+    })) ?? "";
   expect(verifyLink.startsWith(`${BASE}/auth/password/verify?token=pv_`)).toBe(true);
   const page = await SELF.fetch(verifyLink, { redirect: "manual" });
   expect(page.status).toBe(200);
