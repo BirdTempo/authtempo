@@ -4,6 +4,7 @@ import {
   createAuth,
   createPbkdf2PasswordHash,
   type MailMessage,
+  type StorageAdapter,
 } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -231,6 +232,61 @@ async function invoke(
     body: (await res.json()) as Record<string, unknown>,
     queries: count.queries,
     last: count.last,
+  };
+}
+
+/**
+ * `invoke` beside a parallel invocation on the same adapter (verify-12f2-r10
+ * Low B). After the first user update in a transaction, the lock of the
+ * act, `noise` reads run on the adapter of the call. They count in its
+ * `statementsSent`, so the meter of the act sees them, and the size check
+ * must take the count of the act's own statements. `queries` is the act's
+ * own count: the noise is out.
+ */
+async function invokeBeside(
+  sent: MailMessage[],
+  path: string,
+  headers: Record<string, string>,
+  body: unknown,
+  extra: Partial<AuthConfig>,
+  noise: number,
+) {
+  const { db, count } = counting(env.DB);
+  const base = createD1Adapter(db);
+  let left = noise;
+  const wrap = (tx: StorageAdapter): StorageAdapter => ({
+    ...tx,
+    async update(model, where, data) {
+      const n = await tx.update(model, where, data);
+      if (model === "user" && left > 0) {
+        for (; left > 0; left--)
+          await base.findOne("user", [{ field: "id", op: "eq", value: "parallel" }]);
+      }
+      return n;
+    },
+  });
+  const storage: StorageAdapter = {
+    ...base,
+    transaction: ((fn: (tx: StorageAdapter) => Promise<unknown>) =>
+      base.transaction((tx) => fn(wrap(tx)))) as typeof base.transaction,
+  };
+  const { auth } = await engine(db, sent, createD1Limiter(db, clock), { ...extra, storage });
+  const res = await auth.handle(
+    new Request(`${BASE}/auth${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.9",
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+  expect(left).toBe(0);
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, unknown>,
+    queries: count.queries - noise,
   };
 }
 
@@ -576,9 +632,12 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * 50. The spend is a delete now, 1 statement. Measured on 2026-10-24.
    * Ruling 78 of plan 12d (same day): 48 queries, and the page ends 1
    * impersonation session. Ruling 79 (same day): `endSessions` reads the
-   * sessions once, so 47 queries, and still no page fits.
+   * sessions once, so 47 queries, and still no page fits. Plan 12f2
+   * (verify-12f2-r10 Low A, 2026-10-25): the reserve of the size check
+   * keeps no route limiter, so the page of the impersonation sessions ends
+   * 1 more: 49 queries.
    */
-  const DUE_CONFIRM_COUNTS: [number, number] = [47, 2];
+  const DUE_CONFIRM_COUNTS: [number, number] = [49, 3];
 
   it("confirms a mailed delete of an operator with a due refresh and sso.saml on in 50 queries", async () => {
     const sent: MailMessage[] = [];
@@ -840,13 +899,15 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * run of 2026-10-25 at the move of 12f2 onto main: the operator scenes send
  * 47 and 48. The act ends fewer impersonation sessions, so each last
  * sweep sends 4 queries more. The last query of each confirm is still the
- * read of the outbox.
+ * read of the outbox. Plan 12f2 (verify-12f2-r10 Low A, 2026-10-25): the
+ * size check keeps no route limiter, so the page of the operator scene
+ * ends 2 more impersonation sessions: 49, and the last sweep sends 35.
  */
 const SOLO_COUNTS = {
   plain: [42, [30]],
   due: [44, [31]],
   confirm: [45, [31]],
-  operator: [47, [48, 48, 48, 39]],
+  operator: [49, [48, 48, 48, 35]],
   operatorConfirm0: [48, [48, 48, 48, 39]],
   operatorConfirm3: [48, [48, 48, 48, 41]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
@@ -1032,12 +1093,14 @@ describe("the account delete of a solo organization's owner through the route on
  * run had no scimUser row; the row adds 1. The confirm sent 1 more for its
  * spend. With the row, 3 shared organizations sent 52 and the confirm of 2
  * sent 50. So the direct delete fits 2 and refuses 3: the edge is exact.
- * The confirm fits 1 and refuses 2, 1 call early. `DELETE_CALLS_BEFORE`
- * keeps 1 call for a route limiter, and this route runs none. The pins are
- * the queries of the act that fits.
+ * The confirm fitted 1 and refused 2, 1 call early, while
+ * `DELETE_CALLS_BEFORE` kept 1 call for a route limiter that this route
+ * does not run. Since verify-12f2-r10 Low A (2026-10-25) it keeps none,
+ * so the confirm fits 2 in 50 and refuses 3: its edge is exact too. The
+ * pins are the queries of the act that fits.
  */
-const OWNED_EDGE = { direct: 2, confirm: 1 } as const;
-const OWNED_COUNTS = { direct: 49, confirm: 49 } as const;
+const OWNED_EDGE = { direct: 2, confirm: 2 } as const;
+const OWNED_COUNTS = { direct: 49, confirm: 50 } as const;
 
 describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () => {
   beforeEach(async () => {
@@ -1057,14 +1120,18 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
    * another user, and the call of the self delete in the worst scene. The
    * clock moves 80 minutes before the call, so the refresh is due.
    */
-  async function coOwner(scene: "direct" | "confirm" | "probe", shared: number) {
+  async function coOwner(scene: "direct" | "confirm" | "probe", shared: number, tool = true) {
     const sent: MailMessage[] = [];
+    const worst = await dueWithSaml();
+    // With the impersonation tool off, the hold reads no audit row: 1 call fewer.
+    const { impersonation: _, ...off } = worst.operator;
+    const due = tool ? worst : { ...worst, operator: off };
     const extra: Partial<AuthConfig> =
       scene === "probe"
         ? { hooks: {} }
         : scene === "direct"
-          ? await dueWithSaml()
-          : { ...(await dueWithSaml()), account: { deleteConfirm: { ttlMinutes: 1440 } } };
+          ? due
+          : { ...due, account: { deleteConfirm: { ttlMinutes: 1440 } } };
     const { token, userId, organizationId } = await soloOwner(sent, extra);
     const { auth: setup } = await engine(env.DB, sent, undefined, extra);
     const other = await signIns(setup, sent, "bob@example.com", 1);
@@ -1108,6 +1175,7 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
       userId,
       organizationId,
       call: () => invoke(sent, path, asUser(token), body, extra),
+      beside: (noise: number) => invokeBeside(sent, path, asUser(token), body, extra, noise),
     };
   }
 
@@ -1127,7 +1195,7 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
   }
 
   for (const scene of ["direct", "confirm"] as const) {
-    it(`deletes a co-owner of ${OWNED_EDGE[scene]} organizations at the edge in 50 queries: ${scene}`, async () => {
+    it(`deletes a co-owner of ${OWNED_EDGE[scene]} organizations at the edge in ${OWNED_COUNTS[scene]} queries: ${scene}`, async () => {
       const w = await coOwner(scene, OWNED_EDGE[scene]);
       const r = await w.call();
       expect(r.status, JSON.stringify(r.body)).toBe(200);
@@ -1157,6 +1225,43 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
       expect(await auth.api.getSession(w.token)).not.toBeNull();
     });
   }
+
+  /**
+   * The size check beside a parallel invocation on the same adapter
+   * (verify-12f2-r10 Low B). The meter then counts more than the act sends,
+   * so the check takes the count of the act's own statements. Each term of
+   * that count is exact, so a scene whose least work comes to exactly 51
+   * refuses, and a scene of exactly 50 passes. The direct delete with the
+   * impersonation tool off and 3 shared organizations comes to 51; with 2
+   * it sends 48. The confirm with the tool on and 2 shared ones comes to
+   * 50. A confirm scene of exactly 51 has no form here: each shared
+   * organization costs 3, and the other steps are the spend and the tool.
+   */
+  const NOISE = 10;
+
+  it("refuses beside a parallel invocation a direct delete whose least work comes to 51, and passes 48", async () => {
+    const over = await coOwner("direct", 3, false);
+    const before = await store();
+    const refused = await over.beside(NOISE);
+    expect([refused.status, refused.body.error]).toEqual([409, "delete_too_large"]);
+    expect(await store()).toEqual(before);
+    expect(endings).toEqual([]);
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    const fits = await coOwner("direct", 2, false);
+    const r = await fits.beside(NOISE);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.queries).toBe(48);
+  });
+
+  it("passes beside a parallel invocation a confirm whose least work comes to exactly 50", async () => {
+    const w = await coOwner("confirm", 2);
+    const r = await w.beside(NOISE);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.queries).toBe(OWNED_COUNTS.confirm);
+    expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(w.userId).first()).toBe(
+      null,
+    );
+  });
 
   /**
    * The probe of review-12f2-rebase: 1 solo organization and 6 shared ones,

@@ -1067,6 +1067,6 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
       expect(new Set(posts).size).toBe(10);
       expect(posts).toHaveLength(10);
       // Run of 2026-10-25.
-      expect({ solos, act: calls, inAct }).toEqual({ solos, act: 46, inAct: solos === 0 ? 13 : 5 });
+      expect({ solos, act: calls, inAct }).toEqual({ solos, act: 47, inAct: solos === 0 ? 14 : 6 });
     }, 300_000);
 });

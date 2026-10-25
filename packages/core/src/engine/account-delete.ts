@@ -49,8 +49,10 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
 /**
  * The calls of a delete invocation before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router (the session read), the route limiter, the rest of
- * `resolveSession` (4), and the limiter of the delete or of the confirm.
+ * the router (the session read), the rest of `resolveSession` (4), and the
+ * limiter of the delete or of the confirm. `POST /user/delete` and its
+ * confirm run no route limiter (verify-12f2-r10 Low A), so the list holds
+ * none since plan 12f2.
  * The handler's session read takes the row of the router (ruling 78 of
  * plan 12d), so the rest of the worst caller session is 4: the user, the
  * pending-end read of ruling 50 of plan 12d, the session-cap read of a due
@@ -64,9 +66,9 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  * confirm, with a `session.afterEnd` hook or without. Each count was the
  * same at 7 and at 8. So the value is the sum of the list above, not a
  * measured step: 8 until ruling 78 of plan 12d took the second session
- * read from the list.
+ * read from the list, and 7 until plan 12f2 took the route limiter out.
  */
-const DELETE_CALLS_BEFORE = 7;
+const DELETE_CALLS_BEFORE = 6;
 
 /** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
 export const ORGANIZATION_RULE_READS = 3;
@@ -175,11 +177,10 @@ const SOLO_CALLS = 6;
 const SOLO_HEAD_CALLS = 4;
 
 /**
- * The calls of `holdImpersonations` at the worst: the read of the targets
- * and `lockInOrder`, which sends 2 statements on MySQL (ruling 2 of plan
- * 12g).
+ * The statements of one `lockInOrder` at the worst: 2 on MySQL (ruling 2 of
+ * plan 12g). The size check counts it only on a store that has the lock.
  */
-const HOLD_CALLS = 3;
+const LOCK_CALLS = 2;
 
 /**
  * A view of `tx` that counts its reads. Each `findOne` and `findMany` by
@@ -578,7 +579,7 @@ export async function deleteAccountRows(
     /**
      * Null: no size check (a store with no per-invocation query limit). A
      * number: the calls of `meter` that the caller made before this call, at
-     * the worst. The read of the proof session comes on top. Then a delete
+     * the worst. The reads of this call come on top. Then a delete
      * whose least work passes `budget` answers `delete_too_large`.
      */
     refuseAfter: number | null;
@@ -590,8 +591,12 @@ export async function deleteAccountRows(
   },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
+  // The reads of this call up to the size check, counted one by one
+  // (verify-12f2-r10 Low B): the proof session, the targets of the hold, and
+  // the organization rule.
+  const counted = readCounted(tx);
   if (proof.sessionId !== null) {
-    const session = await tx.findOne("session", [
+    const session = await counted.storage.findOne("session", [
       { field: "id", op: "eq", value: proof.sessionId },
     ]);
     if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
@@ -599,8 +604,7 @@ export async function deleteAccountRows(
   // The one read that locks the user's sessions and the impersonation
   // sessions that the user opened as an operator. It comes before the owner
   // lock, in the order of user-hold.ts (ruling 65 of plan 12f).
-  const hold = await holdImpersonations(tx, config, user.id, now, true);
-  const counted = readCounted(tx);
+  const hold = await holdImpersonations(counted.storage, config, user.id, now, true);
   const plan = await organizationsOfDelete(config, counted.storage, user.id, proof.refusePlatform);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
@@ -619,11 +623,10 @@ export async function deleteAccountRows(
     DELETE_KEEP;
   if (proof.refuseAfter !== null) {
     // The meter also counts the statements of a parallel invocation on the
-    // same adapter, so it alone could refuse a delete that fits. The worst
-    // count of this call's own statements caps it. The read of the proof
-    // session is 1 more.
-    const own =
-      proof.refuseAfter + (proof.sessionId !== null ? 1 : 0) + HOLD_CALLS + counted.reads();
+    // same adapter, so it alone could refuse a delete that fits. The count
+    // of this call's own statements caps it: its reads, and the lock of the
+    // hold on a store that has one.
+    const own = proof.refuseAfter + counted.reads() + (tx.lockInOrder ? LOCK_CALLS : 0);
     if (Math.min(proof.meter.used, own) + least > proof.budget) stopWith("delete_too_large");
   }
   // The scimUser rows come after the sessions and before the owner locks (ruling 74 M3 of
