@@ -46,6 +46,26 @@ const PINS = {
 // anonymous session has ended by then, so the step reads no user and ends
 // no bag session. Counts of the run of 2026-10-25.
 const FULL_BAG_PINS = { signIn: 26, signUpConfirm: 36 };
+// The two worst joins of final review B M of plan 12i, with every hook of
+// the flows set. An ID-token sign-in that claims an unverified account with
+// 1 or 10 sessions, and the sign-up confirm by code. Before the claim ended
+// its sessions in one delete, each claimant session added one query (49 at
+// 10 sessions). Now the count is the same for both. Counts of the run of
+// 2026-10-25.
+const WORST_JOIN_PINS = { idTokenClaim: 39, codeConfirm: 27, codeConfirmUniform: 38 };
+/** Every hook that the two worst joins can run. */
+const ALL_HOOKS: AuthConfig["hooks"] = {
+  anonymous: { beforeLink: () => {}, afterLink: () => {} },
+  session: { beforeCreate: () => {}, afterCreate: () => {}, afterEnd: () => {} },
+  user: {
+    beforeCreate: () => {},
+    afterCreate: () => {},
+    beforeVerify: () => {},
+    afterVerify: () => {},
+    afterDelete: () => {},
+  },
+  identity: { beforeLink: () => {}, afterLink: () => {} },
+};
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -422,6 +442,102 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       // The anonymous session took no bag place, so the bag is the same nine.
       expect(b.cookies.get("__Host-tempo_sessions")?.split(".")).toEqual(bag);
       expect(done.queries).toBe(FULL_BAG_PINS[name]);
+      expect(done.queries).toBeLessThanOrEqual(BUDGET);
+    });
+
+  /** A browser with nine bag sessions whose active session ended elsewhere, then an anonymous sign-in. */
+  async function fullBagAnonymous(w: World, confirm: (email: string) => Promise<void>) {
+    const b = browser();
+    for (let i = 0; i < 10; i++) {
+      const email = `u${i}@example.com`;
+      await confirm(email);
+      const res = b.take(
+        await call(w, post("/password/sign-in", { email, password: PASSWORD }, b.jar())),
+      );
+      expect(res.status).toBe(200);
+    }
+    expect(b.cookies.get("__Host-tempo_sessions")?.split(".")).toHaveLength(9);
+    const active = b.cookies.get("__Host-tempo_session") ?? "";
+    const other = browser();
+    other.take(
+      await call(w, post("/password/sign-in", { email: "u9@example.com", password: PASSWORD })),
+    );
+    const row = await createD1Adapter(env.DB).findOne("session", [
+      { field: "tokenHash", op: "eq", value: await hashOf(active) },
+    ]);
+    expect((await call(w, post("/sessions/revoke", { id: row?.id }, other.jar()))).status).toBe(
+      200,
+    );
+    expect(b.take(await call(w, post("/anonymous/sign-in", {}, b.jar()))).status).toBe(200);
+    return b;
+  }
+
+  for (const sessions of [1, 10])
+    it(`keeps an ID-token claim with a full bag and ${sessions} claimant sessions within the D1 Free budget`, async () => {
+      const w = make({ multiSession: { max: 10 }, hooks: ALL_HOOKS });
+      const b = await fullBagAnonymous(w, (email) => verifiedUser(w, email));
+      // The claimant signs up with the address and signs in on other devices.
+      const email = "bo@example.com";
+      await call(w, post("/password/sign-up", { email, password: PASSWORD }));
+      for (let i = 0; i < sessions; i++)
+        expect(
+          (await call(w, post("/password/sign-in", { email, password: PASSWORD }))).status,
+        ).toBe(200);
+      const nonce = (await (await call(w, post("/social/google/id-token/nonce", {}))).json()) as {
+        nonce: string;
+        providerNonce: string;
+      };
+      const iat = Math.floor(Date.now() / 1000);
+      w.claims.current = {
+        iss: "https://accounts.google.com",
+        aud: "gid",
+        sub: "g-bo",
+        email,
+        email_verified: true,
+        nonce: nonce.providerNonce,
+        iat,
+        exp: iat + 3600,
+      };
+      const done = await measure(
+        w,
+        post("/social/google/id-token", { idToken: "h.e30.s", nonce: nonce.nonce }, b.jar()),
+      );
+      expect(b.take(done.res).status).toBe(200);
+      const left = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM ta_session s JOIN ta_user u ON u.id = s.user_id WHERE u.email = ?",
+      )
+        .bind(email)
+        .first<{ n: number }>();
+      // The claim ended every claimant session; the sign-in made one.
+      expect(left?.n).toBe(1);
+      expect(done.queries).toBe(WORST_JOIN_PINS.idTokenClaim);
+      expect(done.queries).toBeLessThanOrEqual(BUDGET);
+    });
+
+  for (const uniformSignUp of [false, true])
+    it(`keeps the sign-up confirm by code with a full bag within the D1 Free budget (uniformSignUp ${uniformSignUp})`, async () => {
+      const hash = createPbkdf2PasswordHash({ iterations: 1000 });
+      const w = make({
+        multiSession: { max: 10 },
+        hooks: ALL_HOOKS,
+        password: { hash, uniformSignUp, verifyBy: "code" },
+      });
+      const codeOf = (email: string) =>
+        /\b(\d{6})\b/.exec(w.mail.findLast((m) => m.to === email)?.text ?? "")?.[1];
+      const b = await fullBagAnonymous(w, async (email) => {
+        await call(w, post("/password/sign-up", { email, password: PASSWORD }));
+        const res = await call(w, post("/password/verify/code", { email, code: codeOf(email) }));
+        expect(res.status).toBe(200);
+      });
+      const email = "new@example.com";
+      await call(w, post("/password/sign-up", { email, password: PASSWORD }, b.jar()));
+      const done = await measure(
+        w,
+        post("/password/verify/code", { email, code: codeOf(email) }, b.jar()),
+      );
+      expect(b.take(done.res).status).toBe(200);
+      const pin = uniformSignUp ? WORST_JOIN_PINS.codeConfirmUniform : WORST_JOIN_PINS.codeConfirm;
+      expect(done.queries).toBe(pin);
       expect(done.queries).toBeLessThanOrEqual(BUDGET);
     });
 

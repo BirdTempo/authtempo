@@ -213,9 +213,10 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
-  // With an `afterEnd` hook, each row by id; with none, one statement (plan 9h).
-  // The last delete is by user id, so a session that another request adds
-  // after the read goes too.
+  // With an `afterEnd` hook, one read and one delete of the read ids; with
+  // none, one statement (plan 9h). So the claimant's session count adds no
+  // query (final review B M of plan 12i). The last delete is by user id, so
+  // a session that another request adds after the read goes too.
   // The count goes to the event `session.end` of the claim (plan 12h Task 5).
   verified.sessionsEnded(
     await endSessions(
@@ -224,6 +225,12 @@ export async function claimEmail(
       ended ?? null,
       now,
       verified.stops,
+      // A session that another flow ended after the read: run the claim again.
+      {
+        raced: () => {
+          throw new ClaimLostError();
+        },
+      },
     ),
   );
   // A claimant's passkeys would keep the account open after the claim.
@@ -267,6 +274,10 @@ export type BeforeResolveWrite = (
  * undoes this transaction. Each flow catches it outside and runs once more.
  * The retry finds a verified user and claims nothing. So the verify pair
  * fires once, for the flow that claimed.
+ *
+ * `claimEmail` also throws it when another flow ended a claimant session
+ * between the claim's read and its delete (final review B M of plan 12i).
+ * The retry then reads the sessions again and claims.
  */
 export class ClaimLostError extends Error {
   constructor() {

@@ -10,6 +10,7 @@ import {
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
+import { IN_CHUNK } from "../storage/batch.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import {
   type PatchShapeRefusal,
@@ -478,6 +479,16 @@ export function challengeOpened(
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
  *
+ * With `oneDelete` (a claim, final review B M of plan 12i), the read rows go
+ * by one delete of their ids per `IN_CHUNK`, not one per row. So the count of
+ * the claimant's sessions adds no query on D1. A delete count equal to the
+ * count of the chunk's rows puts those rows in `ended`. A smaller count
+ * means another flow ended a row of the chunk after the read, and fired its
+ * hook. This flow cannot tell which row, so it calls `oneDelete.raced`,
+ * which throws: the flow undoes its transaction and runs once more, and the
+ * new read no longer holds that row. Postgres and MySQL lock the rows before
+ * the read (`lockInOrder`), so there the counts always match.
+ *
  * The back-channel outbox (plan 12e Task 16): first the user's client links.
  * With none, nothing more runs. With some, each linked session that `where`
  * matches gets one `oauthLogout` row per link, and its links go, in this
@@ -490,6 +501,7 @@ export async function endSessions(
   ended: SessionRow[] | null,
   now: Date,
   stops: ImpersonationStops | null,
+  oneDelete: { raced(): never } | null = null,
 ): Promise<number> {
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
@@ -540,14 +552,22 @@ export async function endSessions(
         n++;
         await writeStopRow(tx, stops, row, now);
       }
-  if (ended)
-    for (const row of rows) {
-      if (stops && row.actorId !== null) continue;
+  const plain = rows.filter((row) => !(stops && row.actorId !== null));
+  if (ended && oneDelete)
+    for (let i = 0; i < plain.length; i += IN_CHUNK) {
+      const chunk = plain.slice(i, i + IN_CHUNK);
+      const ids = { field: "id", op: "in", value: chunk.map((row) => row.id) } as const;
+      const gone = await tx.delete("session", [...where, ids]);
+      if (gone !== chunk.length) oneDelete.raced();
+      ended.push(...chunk);
+      n += gone;
+    }
+  else if (ended)
+    for (const row of plain)
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
         ended.push(row);
         n++;
       }
-    }
   return n + (await tx.delete("session", where));
 }
 

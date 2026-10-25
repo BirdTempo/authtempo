@@ -22,7 +22,9 @@ const PASSWORD = "correct horse battery";
 // the request. `claim` proves the address of an unverified user, which ends
 // the claimant's sessions. `challenge` answers the challenge of a user with
 // the second factor on. `replay` is the refusal of a token used before.
-const PINS = { nonce: 3, create: 25, claim: 26, challenge: 9, replay: 3 };
+// The claim ends the claimant's sessions in one delete since final review
+// B M of plan 12i, so `claim` went from 26 to 25 (run of 2026-10-25).
+const PINS = { nonce: 3, create: 25, claim: 25, challenge: 9, replay: 3 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
