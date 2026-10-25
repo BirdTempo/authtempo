@@ -639,7 +639,14 @@ export async function deleteAccountRows(
   // as an operator go together (ruling 42 of plan 12f). The lock read of
   // `hold` came first. Each set ends in a page inside the call budget of the
   // invocation (ruling 63 of plan 12f, ruling 1 of plan 12f2). The rest stay
-  // on a pending-end row for the sweep.
+  // on a pending-end row for the sweep. The page of the own sessions keeps
+  // to the budget only on a store with a per-invocation query limit (D1).
+  // Postgres and MySQL send more statements than D1 for the same act (the
+  // row locks), and they have no such limit. With the budget there, the
+  // delete of an owner of a solo organization ended no own session in its
+  // act, and each waited for the sweep.
+  const ownBudget =
+    config.storage.queryLimitPerInvocation === true ? proof.budget : Number.POSITIVE_INFINITY;
   proof.counted.sessions = (
     await endOwnSessionsPage(
       tx,
@@ -648,7 +655,7 @@ export async function deleteAccountRows(
       proof.ended,
       now,
       proof.meter,
-      proof.budget,
+      ownBudget,
       DELETE_KEEP + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
       "account_deleted",
       proof.stops,

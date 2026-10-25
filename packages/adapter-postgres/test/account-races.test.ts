@@ -211,6 +211,26 @@ describe("account races on Postgres (plan 12a)", () => {
   }, 60_000);
 });
 
+describe("the own sessions of an account delete on Postgres (plan 12f2, the move onto main)", () => {
+  it("ends every own session in the act: the page keeps to the call budget only on D1", async () => {
+    const w = world();
+    const me = await w.signIn("pages@example.com");
+    for (let i = 0; i < 39; i++) await w.signIn("pages@example.com");
+    const own = await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`;
+    expect(own).toHaveLength(40);
+    w.ended.length = 0;
+    const done = await w.auth.api.user.delete({ session: me, ip: null, userAgent: null });
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    // Each session ended in the act, with its hook, and no pending-end row waits for the sweep.
+    expect(await db.sql`SELECT id FROM ta_session WHERE user_id = ${me.user.id}`).toHaveLength(0);
+    expect(
+      await db.sql`SELECT id FROM ta_verification WHERE purpose = 'session-end' AND identifier = ${me.user.id}`,
+    ).toHaveLength(0);
+    expect(w.ended.map((e) => e.split(":")[0]).sort()).toEqual(own.map((r) => r.id).sort());
+    expect(new Set(w.ended.map((e) => e.split(":")[1]))).toEqual(new Set(["account_deleted"]));
+  }, 60_000);
+});
+
 describe("user hook races on Postgres (plan 12a Task 5, review M3)", () => {
   it("parallel magic links of one new address: one user and one user.afterCreate", async () => {
     const sent: MailMessage[] = [];
