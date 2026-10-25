@@ -852,6 +852,53 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
   }, 120_000);
 
   /**
+   * The create route of plan 12f2 Task 5, second wave: each whole
+   * invocation with the router, the D1 limiter (the per-actor count too),
+   * the act, and the mail. An invitation by a secret, then a reset link
+   * as a platform operator, then a create with no mail by a secret.
+   * Measured on the binding 2026-10-25. The invitation: 3 limiter calls
+   * (per IP, per secret, per actor), 5 queries (the ready check; the
+   * address read, the user, the invitation row, and the audit row in one
+   * transaction), and the mail: 9. The reset link as a platform operator:
+   * 8 before the act with the per-actor count, 6 queries (the ready check;
+   * the address read, the user, the identity, and the audit row in one
+   * transaction; the reset row after it), and the mail: 15. No mail: 3
+   * limiter calls and 4 queries (the ready check; the address read, the
+   * user, and the audit row): 7. The create has no loop and no page, so
+   * the count is the same for every input.
+   */
+  const CREATE_COUNTS = [9, 15, 7];
+
+  it("creates a user through the route by a secret and as a platform operator in 50 calls (plan 12f2 Task 5)", async () => {
+    const sent: MailMessage[] = [];
+    const setup = await engine(env.DB, sent);
+    const token = await platformOperator(setup, sent, "op@example.com");
+    const counts: number[] = [];
+    for (const [body, headers, mailed] of [
+      [{ email: "ada@example.com", ...ROUTE_REASON }, UPDATE_HEADER, "invite"],
+      [
+        { email: "bea@example.com", emailVerified: true, firstSignIn: "reset", ...ROUTE_REASON },
+        cookieOf(token),
+        "reset",
+      ],
+      [{ email: "cal@example.com", firstSignIn: "none", ...ROUTE_REASON }, UPDATE_HEADER, null],
+    ] as const) {
+      const r = await route(sent, "/operator/users/create", body, headers);
+      expect(r.answer).toEqual({
+        status: 200,
+        body: { userId: expect.any(String), mailed, auditId: expect.any(String) },
+      });
+      expect([r.refused, r.mails, r.posts]).toEqual([0, mailed === null ? 0 : 1, 0]);
+      counts.push(r.queries + r.mails + r.posts);
+      current = new Date(current.getTime() + 1);
+    }
+    for (const c of counts) expect(c).toBeLessThanOrEqual(50);
+    expect(counts).toEqual(CREATE_COUNTS);
+    expect(await rows("ta_verification", "purpose = 'user-invite'")).toBe(1);
+    expect(await rows("ta_verification", "purpose = 'password-reset'")).toBe(1);
+  }, 120_000);
+
+  /**
    * The invitation of plan 12f2 Task 3. The create writes the row in its
    * transaction and mails the link after the commit. The confirm runs
    * through `auth.handle` with the D1 limiter: an unverified user gets the

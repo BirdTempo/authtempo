@@ -93,7 +93,8 @@ describe("the demo lists and the routes of core", () => {
       // socialIdToken: 113. Task 8 adds the two routes of passkeySignUp: 115.
       // Plan 12f2 Task 5 adds the update and the delete of operatorUsers: 117.
       // Plan 12f2 Task 3 adds the two routes of the invitation confirm: 119.
-      expect(checked).toBe(119);
+      // Plan 12f2 Task 5 adds the create of operatorUsers in its second wave: 120.
+      expect(checked).toBe(120);
     },
     LONG_TEST_MS,
   );

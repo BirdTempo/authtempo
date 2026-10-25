@@ -281,6 +281,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `OPERATOR_USERS_PER_IP` | The limit of every secret call to the user, session, and audit routes of plan 12f: 600 calls per IP per hour. |
 | `OPERATOR_USERS_PER_SECRET` | The limit of each operator secret on the same routes after the secret matches: 600 calls per hour from any IP. |
 | `OPERATOR_DELETE_PER_ACTOR` | The limit of the operator delete route of each actor: 100 calls per hour, before the body and the scope check. |
+| `OPERATOR_CREATE_PER_ACTOR` | The limit of the operator create route of each actor: 200 calls per hour, before the body and the scope check. |
 | `REASON_MAX` | The longest reason of an operator act: 500 UTF-16 code units. |
 | `isOperatorReason` | The reason rule. True for 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. The engine and the CLI check with it. |
 | `PROOF_METHODS` | The methods of an identity check before an operator turns a second factor off: `document`, `in_person`, `video`, `knowledge`, and `other`. |

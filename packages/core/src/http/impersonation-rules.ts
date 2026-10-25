@@ -39,6 +39,7 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /operator/users/platform-role",
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/create-admin",
+  "POST /operator/users/create",
   "POST /operator/users/update",
   "POST /operator/users/delete",
   "POST /operator/sessions/end-user",

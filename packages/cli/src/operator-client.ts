@@ -74,6 +74,11 @@ export const REFUSALS: Readonly<Record<string, string>> = {
   hook_failed: "a hook of the deployment failed; read the log of the deployment",
   sole_owner:
     "the user is the last owner of an organization with other members, or of the platform organization; make another member an owner first",
+  // The create of plan 12f2 Task 5: a caller with the scope users may learn that an account exists.
+  email_taken: "an account holds this address; find it with users search",
+  phone_taken: "an account holds this phone number",
+  phone_invalid: "the phone number is not in E.164 form: a plus sign and 8 to 15 digits",
+  phone_region: "the phone number is outside the regions of the phone config of the deployment",
   delete_too_large:
     "the account holds too many organizations to delete in one call; delete the organizations that the user alone holds, or let the user leave the organizations that the user owns with another owner, first",
 };

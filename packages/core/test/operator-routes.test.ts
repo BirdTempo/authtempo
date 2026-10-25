@@ -52,7 +52,11 @@ const TOOL_ROUTES = [
 ] as const;
 
 /** The routes of plan 12f2 Task 5 under the same feature: operator-user-routes.test.ts covers them. */
-const PLAN_12F2_ROUTES = ["POST /operator/users/update", "POST /operator/users/delete"];
+const PLAN_12F2_ROUTES = [
+  "POST /operator/users/create",
+  "POST /operator/users/update",
+  "POST /operator/users/delete",
+];
 /**
  * The invitation link of plan 12f2 Task 3: the feature operatorUsers, but
  * no operator credential. The person who got the mail calls it.

@@ -1201,7 +1201,8 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /operator/users/create-admin",
   "POST /operator/sessions/end-user",
   "POST /operator/sessions/end-all",
-  // The update and the delete of plan 12f2: operator-user-routes.test.ts arms it on each.
+  // The create, the update, and the delete of plan 12f2: operator-user-routes.test.ts arms it on each.
+  "POST /operator/users/create",
   "POST /operator/users/update",
   "POST /operator/users/delete",
   // The impersonation needs a platform operator and an impersonation session:

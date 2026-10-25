@@ -60,10 +60,11 @@ import { draftUserRow } from "./users.js";
  * Also not listed: the confirm of an invitation link (plan 12f2 Task 3). It
  * is a sign-in of the invited user: it changes nothing of the anonymous user,
  * and it links nothing, as its row records no anonymous session.
- * Also not listed: the operator routes, the update and the delete of plan
- * 12f2 too. The operator guard needs the platform role, a second factor,
- * and a verified address, so it refuses an anonymous session with
- * `operator_required`. anonymous.test.ts holds the two routes of 12f2.
+ * Also not listed: the operator routes, the create, the update, and the
+ * delete of plan 12f2 too. The operator guard needs the platform role, a
+ * second factor, and a verified address, so it refuses an anonymous
+ * session with `operator_required`. anonymous.test.ts holds the three
+ * routes of 12f2.
  */
 export const ANONYMOUS_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The re-authentication: an anonymous user has no proof to give.

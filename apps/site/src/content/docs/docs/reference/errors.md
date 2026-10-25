@@ -283,12 +283,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="email_taken"><code>email_taken</code> 409</h3>
 
-- **Meaning:** A verified account, or an account with a password, holds the address. At a change of address: any account holds the new address.
-- **Do:** Offer the sign-in, or a reset.
+- **Meaning:** A verified account, or an account with a password, holds the address. At a change of address: any account holds the new address. At an operator create: any account holds the address.
+- **Do:** Offer the sign-in, or a reset. An operator finds the account with `GET /operator/users/search`.
 
 | Routes |
 | --- |
-| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify). |
+| [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create). |
 
 <h3 id="token_limit"><code>token_limit</code> 409</h3>
 
@@ -459,7 +459,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
+| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add), [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create). |
 
 <h3 id="phone_region"><code>phone_region</code> 400</h3>
 
@@ -468,7 +468,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add). |
+| [`POST /phone/request`](/docs/reference/routes/#post-phone-request), [`POST /phone/add`](/docs/reference/routes/#post-phone-add), [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create). |
 
 <h3 id="sms_unavailable"><code>sms_unavailable</code> 503</h3>
 
@@ -482,11 +482,11 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="phone_taken"><code>phone_taken</code> 409</h3>
 
 - **Meaning:** Another account set this phone number first. The unique key of the number decided a race. The code of this request stays live.
-- **Do:** Tell the person that another account has the number. To move the number, that account must remove it first.
+- **Do:** Tell the person that another account has the number. To move the number, that account must remove it first. At an operator create, an account holds the number, and nothing was written.
 
 | Routes |
 | --- |
-| [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify). |
+| [`POST /phone/add/verify`](/docs/reference/routes/#post-phone-add-verify), [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create). |
 
 <h3 id="host_not_allowed"><code>host_not_allowed</code> 421</h3>
 
@@ -567,7 +567,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. The operator user tools need the scope `users`, `sessions`, or `audit`, or a platform operator who passes the guard. These routes are [`GET /operator/users`](/docs/reference/routes/#get-operator-users), [`GET /operator/users/search`](/docs/reference/routes/#get-operator-users-search), [`GET /operator/users/get`](/docs/reference/routes/#get-operator-users-get), [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/users/update`](/docs/reference/routes/#post-operator-users-update), [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), [`POST /operator/sessions/end-all`](/docs/reference/routes/#post-operator-sessions-end-all), and [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit). [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete) needs the scope `delete`. [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) takes a secret only. |
+| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. The operator user tools need the scope `users`, `sessions`, or `audit`, or a platform operator who passes the guard. These routes are [`GET /operator/users`](/docs/reference/routes/#get-operator-users), [`GET /operator/users/search`](/docs/reference/routes/#get-operator-users-search), [`GET /operator/users/get`](/docs/reference/routes/#get-operator-users-get), [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/users/create`](/docs/reference/routes/#post-operator-users-create), [`POST /operator/users/update`](/docs/reference/routes/#post-operator-users-update), [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), [`POST /operator/sessions/end-all`](/docs/reference/routes/#post-operator-sessions-end-all), and [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit). [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete) needs the scope `delete`. [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) takes a secret only. |
 
 <h3 id="operator_self"><code>operator_self</code> 409</h3>
 

@@ -364,6 +364,11 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
         // Plan 12f2 Task 5. The secret has no scope delete, so the delete answers operator_required.
         ["POST /operator/users/update", { userId: id, name: "Ada", reason: "case 1" }],
         ["POST /operator/users/delete", { userId: id, reason: "case 1" }],
+        // Plan 12f2 Task 5, second wave: a user with no mail, whom no later row reads.
+        [
+          "POST /operator/users/create",
+          { email: "made@example.com", firstSignIn: "none", reason: "case 1" },
+        ],
       ] as const
     ).map(([key, body]) => ({ key, body, headers: OPERATOR, refused: INVALID_BODY })),
     // The session is no platform operator: the start answers operator_required after the body.
@@ -897,7 +902,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
-    expect(keys.length).toBe(208);
+    // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
+    expect(keys.length).toBe(209);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1484,7 +1490,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds the bodies of the operator update and delete.
     // Plan 12f2 Task 3 adds the body of the invitation confirm.
-    expect(withBody.length).toBe(111);
+    // Plan 12f2 Task 5 adds the body of the operator create.
+    expect(withBody.length).toBe(112);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1515,7 +1522,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up: 106.
     // Plan 12f2 Task 5 adds the refused bodies of the operator update and delete: 108.
     // Plan 12f2 Task 3 adds the refused body of the invitation confirm.
-    expect(refusals).toBe(109);
+    // Plan 12f2 Task 5 adds the refused body of the operator create: 110.
+    expect(refusals).toBe(110);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1544,7 +1552,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up to json.
     // Plan 12f2 Task 5 adds the two operator bodies to json.
     // Plan 12f2 Task 3 adds the invitation confirm to both.
-    expect(counts).toEqual({ json: 101, both: 11, form: 8 });
+    // Plan 12f2 Task 5 adds the operator create to json.
+    expect(counts).toEqual({ json: 102, both: 11, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

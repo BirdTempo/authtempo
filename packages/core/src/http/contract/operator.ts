@@ -117,6 +117,24 @@ export const enforceOffBody = z.strictObject({ domainId: operatorId, reason });
  * schema is strict, so `password`, `email`, `emailVerified`, `role`, and
  * the ban keys answer `invalid_body`: no operator path sets them here.
  */
+/**
+ * The body of an operator create (plan 12f2 Task 5). `email` is required
+ * and may be null, so a caller states the case of no address on purpose;
+ * a null address needs `phone`. The engine applies the address, phone,
+ * name, and image rules; these caps bound the body. The schema is strict,
+ * so `password`, `role`, the ban keys, and every other key answer
+ * `invalid_body`: no operator path sets a credential.
+ */
+export const createUserBody = z.strictObject({
+  email: z.string().min(1).max(320).nullable(),
+  phone: z.string().min(1).max(32).optional(),
+  emailVerified: z.boolean().optional(),
+  name: z.string().max(400).nullable().optional(),
+  image: z.string().max(4096).nullable().optional(),
+  firstSignIn: z.enum(["invite", "reset", "none"]).optional(),
+  reason,
+});
+
 export const updateUserBody = z.strictObject({
   userId: operatorId,
   name: z.string().max(400).nullable().optional(),
@@ -193,8 +211,8 @@ const jsonBody = <T extends z.ZodType>(schema: T) =>
  * rotation names the new signing key. The three routes of 11c2 answer
  * counts, key names, and versions, never a sealed value, a hash, or a
  * config value. The routes of 12f answer users, audit rows, and the id of
- * the audit row of each write. The update and the delete of 12f2 answer
- * the same id.
+ * the audit row of each write. The create, the update, and the delete of
+ * 12f2 answer the same id.
  */
 export const OPERATOR_CONTRACT = {
   "POST /operator/keys/rotate": {
@@ -262,6 +280,18 @@ export const OPERATOR_CONTRACT = {
     answer: {
       kind: "json",
       schema: z.strictObject({ userId: z.string(), created: z.boolean(), auditId: z.string() }),
+    },
+  },
+  // The mail kind is what the create mailed to the person, never a token or a link.
+  "POST /operator/users/create": {
+    body: jsonBody(createUserBody),
+    answer: {
+      kind: "json",
+      schema: z.strictObject({
+        userId: z.string(),
+        mailed: z.enum(["invite", "reset"]).nullable(),
+        auditId: z.string(),
+      }),
     },
   },
   "POST /operator/users/update": {

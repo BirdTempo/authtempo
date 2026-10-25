@@ -188,6 +188,10 @@ The measurement of 2026-10-20 at 03:00 UTC: one search for a prefix that no addr
 - [`last_owner`](/docs/reference/errors/#last_owner): the revoke would leave the platform organization with no owner.
 - [`member_limit`](/docs/reference/errors/#member_limit): the platform organization holds its most members.
 - [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): the user has no second factor to turn off.
+- [`email_taken`](/docs/reference/errors/#email_taken): an account holds the address of the create. Find it with a search; the create mailed no one.
+- [`phone_taken`](/docs/reference/errors/#phone_taken): an account holds the phone number of the create.
+- [`phone_invalid`](/docs/reference/errors/#phone_invalid): the phone number of the create is not in E.164 form.
+- [`phone_region`](/docs/reference/errors/#phone_region): the phone number of the create is outside `phone.regions`.
 - [`sole_owner`](/docs/reference/errors/#sole_owner): the delete target is the last owner of an organization with other members, or of the platform organization.
 - [`delete_too_large`](/docs/reference/errors/#delete_too_large): the user alone holds more than 50 organizations, or on D1 the delete cannot fit 50 queries. Delete the solo organizations of the user, or let the user leave the organizations that the user owns with another owner, first.
 - [`impersonation_refused`](/docs/reference/errors/#impersonation_refused): the target is the operator, a platform operator, banned, or absent.

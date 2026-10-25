@@ -64,6 +64,16 @@ export const OPERATOR_USERS_PER_SECRET = { seconds: 3600, max: 600 };
 export const OPERATOR_DELETE_PER_ACTOR = { seconds: 3600, max: 100 };
 
 /**
+ * The limit of the user create route of each actor (plan 12f2 Task 5):
+ * 200 calls per hour on `operator-create:actor:<kind>:<id>`. Each create
+ * can send one mail, an invitation or a reset link, so a leaked secret or
+ * a stolen operator session must not become a mail cannon. Every call of
+ * the route counts after the actor read, before the body and the scope
+ * check. The app in process counts on no key: it is the app's own code.
+ */
+export const OPERATOR_CREATE_PER_ACTOR = { seconds: 3600, max: 200 };
+
+/**
  * The longest reason of an operator act, in UTF-16 code units (spec 26
  * item 5). A reason is a short note for a later reader of the audit row,
  * not a document. The engine and the CLI read this one value.

@@ -105,6 +105,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes |
 | `operator-impersonate:user:<userId>` | 1 hour | 20 | Impersonation starts of one platform operator |
 | `operator-delete:actor:<kind>:<id>` | 1 hour | 100 | Every call of one actor to the operator delete route, before the body and the scope check. The subject is `secret:<name>` or `user:<userId>`. A delete cannot be undone, so the count bounds what a leaked credential destroys. `OPERATOR_DELETE_PER_ACTOR` |
+| `operator-create:actor:<kind>:<id>` | 1 hour | 200 | Every call of one actor to the operator create route, before the body and the scope check. The subject is `secret:<name>` or `user:<userId>`. Each create can mail the person once, so a leaked credential must not become a mail cannon. `OPERATOR_CREATE_PER_ACTOR` |
 | `user-invite-confirm:ip:<ip>` | 15 minutes | 20 | The confirm POST of an invitation link, before the token check, so a malformed token counts too. `INVITE_CONFIRM_PER_IP` |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize, and each `GET /oauth/device` with no session. The count runs before a request is held for the sign-in |

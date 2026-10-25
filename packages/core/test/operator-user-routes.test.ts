@@ -14,8 +14,9 @@ import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-he
 import { verifiedSession } from "./totp-helpers.js";
 
 // The operator routes of the update and the delete (plan 12f2 Task 5, spec
-// 26). The create route belongs to the second wave of the plan (ruling 1 of
-// plan 12f2, Q1). The users come from the sign-up flows.
+// 26). The create route came with the second wave of the plan (ruling 1 of
+// plan 12f2, Q1): its tests are the last block. The users come from the
+// sign-up flows and from the create route.
 
 beforeEach(() => {
   // The guard and the refusals write log lines; the tests read the answers.
@@ -116,7 +117,7 @@ const auditRows = (w: World) =>
   w.auth.storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } });
 
 /** The JSON body of a 200, held to the route's contract: the parse succeeds and changes nothing. */
-async function fitted(key: Key, res: Response): Promise<Record<string, unknown>> {
+async function fitted(key: string, res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
   expect(res.status, `${key}: ${text}`).toBe(200);
   expect(res.headers.get("cache-control"), key).toBe("no-store");
@@ -512,5 +513,350 @@ describe("the operator update and delete routes (plan 12f2 Task 5)", () => {
     }
     expect(await userOf(w, w.ada.id)).toEqual(w.ada);
     expect(await auditRows(w)).toEqual([]);
+  });
+});
+
+const CREATE = "POST /operator/users/create";
+const TAKEN = "taken@example.com";
+const FREE = "free@example.com";
+
+/** One call of the create route, as `call` does for the other two. */
+function create(w: World, body: unknown, headers: Record<string, string>) {
+  return w.handle(
+    post("/auth/operator/users/create", body, {
+      "cf-connecting-ip": IP,
+      "user-agent": AGENT,
+      ...headers,
+    }),
+  );
+}
+
+/** A valid create body for `email` with no mail. */
+function createBody(email: string | null, extra: Record<string, unknown> = {}) {
+  return { email, firstSignIn: "none", reason: REASON, ...extra };
+}
+
+/** Each storage call on `w.auth.config.storage` from now on, as `[method, model]`. */
+function spyStorage(w: World): [string, unknown][] {
+  const storage = w.auth.config.storage;
+  const calls: [string, unknown][] = [];
+  for (const name of ["findOne", "findMany", "create", "update", "delete"] as const) {
+    const real = storage[name].bind(storage) as (...a: unknown[]) => unknown;
+    vi.spyOn(storage, name).mockImplementation(((...args: unknown[]) => {
+      calls.push([name, args[0]]);
+      return real(...args);
+    }) as never);
+  }
+  return calls;
+}
+
+const usersAt = async (w: World, email: string) =>
+  (await w.auth.storage.findMany("user", [])).filter((u) => u.email === email);
+
+describe("the operator create route (plan 12f2 Task 5, second wave)", () => {
+  it("answers 404 for the create while operator.users is off", async () => {
+    const w = await world({}, false);
+    for (const headers of [operatorHeader(ERASURE), w.operatorCookie, {}]) {
+      const res = await create(w, createBody(FREE), headers);
+      expect(await answerOf(res)).toEqual({ status: 404, code: "not_found" });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+  });
+
+  it("answers one body for a taken and a free address to a caller without the users scope", async () => {
+    const w = await world();
+    const made = await create(w, createBody(TAKEN), operatorHeader(ERASURE));
+    expect(made.status).toBe(200);
+    const mails = w.auth.mail.length;
+    const rows = (await auditRows(w)).length;
+    const calls = spyStorage(w);
+    for (const headers of [{}, operatorHeader(WRONG), operatorHeader(OPERATOR_SECRETS.keys)]) {
+      const taken = await create(w, createBody(TAKEN), headers);
+      const free = await create(w, createBody(FREE), headers);
+      const pair = [taken.status, await taken.text()];
+      expect([free.status, await free.text()], JSON.stringify(headers)).toEqual(pair);
+      expect(pair[0], JSON.stringify(headers)).not.toBe(200);
+    }
+    // No caller without the scope reads a user row: the scope check comes before any read.
+    expect(calls.filter(([, model]) => model === "user")).toEqual([]);
+    vi.restoreAllMocks();
+    expect(w.auth.mail.length).toBe(mails);
+    expect((await auditRows(w)).length).toBe(rows);
+    expect(await usersAt(w, FREE)).toEqual([]);
+  });
+
+  it("answers 409 email_taken to a caller with the users scope, and the phone refusals", async () => {
+    const sms = createRecordingSms();
+    const w = await world({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
+    const erasure = operatorHeader(ERASURE);
+    expect((await create(w, createBody(TAKEN), erasure)).status).toBe(200);
+    const phone = "+14155550199";
+    const phoned = await create(w, createBody(null, { phone }), erasure);
+    expect(phoned.status).toBe(200);
+    const mails = w.auth.mail.length;
+    const rows = (await auditRows(w)).length;
+    for (const [body, answer] of [
+      [createBody(TAKEN), { status: 409, code: "email_taken" }],
+      [createBody(null, { phone }), { status: 409, code: "phone_taken" }],
+      [createBody(null, { phone: "4155550199" }), { status: 400, code: "phone_invalid" }],
+      [createBody(null, { phone: "+447700900123" }), { status: 400, code: "phone_region" }],
+    ] as const) {
+      const res = await create(w, body, erasure);
+      expect(await answerOf(res), JSON.stringify(body)).toEqual(answer);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    // The platform operator gets the same answer.
+    const own = await create(w, createBody(TAKEN), w.operatorCookie);
+    expect(await answerOf(own)).toEqual({ status: 409, code: "email_taken" });
+    expect(w.auth.mail.length).toBe(mails);
+    expect(sms.sent).toEqual([]);
+    expect((await auditRows(w)).length).toBe(rows);
+    expect(await usersAt(w, TAKEN)).toHaveLength(1);
+  });
+
+  it("refuses unknown keys", async () => {
+    const w = await world();
+    const body = createBody(FREE);
+    const cases: Record<string, unknown>[] = [
+      { ...body, password: "correct horse battery" },
+      { ...body, role: "admin" },
+      { ...body, banned: true },
+      { ...body, data: { plan: "pro" } },
+      { ...body, userId: w.ada.id },
+      // The address is required, so a caller states the case of no address on purpose.
+      { firstSignIn: "none", reason: REASON },
+      { ...body, firstSignIn: "magic" },
+      { ...body, emailVerified: "yes" },
+      // The engine rules: no address and no phone, and a reset with no address.
+      createBody(null),
+      createBody(null, { firstSignIn: "reset", phone: "+14155550123" }),
+    ];
+    for (const c of cases)
+      for (const headers of [operatorHeader(ERASURE), w.operatorCookie]) {
+        const res = await create(w, c, headers);
+        expect(await answerOf(res), JSON.stringify(c)).toEqual({
+          status: 400,
+          code: "invalid_body",
+        });
+      }
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+  });
+
+  it("counts creates per actor", async () => {
+    const w = await world();
+    const keys = operatorHeader(OPERATOR_SECRETS.keys);
+    // A bad body counts first: the limit runs before the body read.
+    const bad = await create(w, { ...createBody(FREE), bogus: 1 }, keys);
+    expect(await answerOf(bad)).toEqual({ status: 400, code: "invalid_body" });
+    // Calls 2 to 200 of the secret with no users scope: the limit runs before the scope check.
+    for (let i = 2; i <= 200; i++) {
+      const res = await create(w, createBody(FREE), keys);
+      if (res.status !== 403) throw new Error(`call ${i} answered ${res.status}`);
+    }
+    const over = await create(w, createBody(FREE), keys);
+    expect(await answerOf(over)).toEqual({ status: 429, code: "rate_limited" });
+    expect(over.headers.get("cache-control")).toBe("no-store");
+    // Another secret, and a platform operator, each count on their own key.
+    expect((await create(w, createBody(FREE), operatorHeader(ERASURE))).status).toBe(200);
+    const bea = await create(w, createBody("bea@example.com"), w.operatorCookie);
+    expect(bea.status).toBe(200);
+    // One hour later the secret counts from zero again.
+    w.auth.clock.advance(3600_000);
+    const again = await create(w, createBody("cal@example.com"), keys);
+    expect(await answerOf(again)).toEqual({ status: 403, code: "operator_required" });
+    expect(await usersAt(w, "cal@example.com")).toEqual([]);
+  });
+
+  it("counts each create on operator-create:actor with the actor kind and id, apart from the delete", async () => {
+    const keys: string[] = [];
+    const w = await world({
+      limiter: {
+        allow: async (key: string) => {
+          keys.push(key);
+          return true;
+        },
+      },
+    });
+    const counted = () =>
+      keys
+        .splice(0)
+        .filter((k) => k.startsWith("operator-create:") || k.startsWith("operator-delete:"));
+    keys.length = 0;
+    expect((await create(w, createBody(FREE), operatorHeader(ERASURE))).status).toBe(200);
+    expect(counted()).toEqual(["operator-create:actor:secret:erasure"]);
+    expect((await create(w, createBody("bea@example.com"), w.operatorCookie)).status).toBe(200);
+    expect(counted()).toEqual([`operator-create:actor:user:${w.operator.user.id}`]);
+    // The update counts on no actor key, and the delete on its own.
+    expect((await call(w, UPDATE, bodyOf(UPDATE, w.ada.id), operatorHeader(ERASURE))).status).toBe(
+      200,
+    );
+    expect(counted()).toEqual([]);
+    expect((await call(w, DELETE, bodyOf(DELETE, w.ada.id), operatorHeader(ERASURE))).status).toBe(
+      200,
+    );
+    expect(counted()).toEqual(["operator-delete:actor:secret:erasure"]);
+    // A wrong secret has no actor, so it counts on no create key.
+    expect((await create(w, createBody(FREE), operatorHeader(WRONG))).status).toBe(401);
+    expect(counted()).toEqual([]);
+  });
+
+  it("refuses an impersonation session at the create", async () => {
+    const w = await world();
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    const started = await w.handle(
+      post("/auth/operator/impersonate", { userId: bob.user.id, reason: REASON }, w.operatorCookie),
+    );
+    expect(started.status).toBe(200);
+    const name = w.auth.config.cookieName;
+    const line = started.headers.getSetCookie().find((s) => s.startsWith(`${name}=`)) ?? "";
+    const token = line.slice(name.length + 1).split(";")[0] ?? "";
+    expect(token).not.toBe("");
+    const rows = (await auditRows(w)).length;
+    const res = await create(w, createBody(FREE), { cookie: `${name}=${token}` });
+    expect(await answerOf(res)).toEqual({ status: 403, code: "impersonation_session" });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect((await auditRows(w)).length).toBe(rows);
+  });
+
+  it("answers no-store, and keeps the Origin rule for a session caller", async () => {
+    const w = await world();
+    const res = await create(w, createBody(FREE), {
+      ...w.operatorCookie,
+      origin: "https://evil.example.com",
+    });
+    expect(await answerOf(res)).toEqual({ status: 403, code: "origin_not_trusted" });
+    // A cross-site form post with no Origin: the Fetch Metadata rule of plan 12b.
+    const form = await w.handle(
+      new Request("https://api.example.com/auth/operator/users/create", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "sec-fetch-site": "cross-site",
+          ...w.operatorCookie,
+        },
+        body: new URLSearchParams({ email: FREE, reason: REASON }).toString(),
+      }),
+    );
+    expect(await answerOf(form)).toEqual({ status: 403, code: "origin_not_trusted" });
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+    // Every answer of the route is no-store: 200, 400, 401, 403, and 409.
+    const statuses = new Set<number>();
+    for (const [body, headers] of [
+      [createBody(FREE), operatorHeader(ERASURE)],
+      [{ reason: REASON }, operatorHeader(ERASURE)],
+      [createBody(FREE), operatorHeader(WRONG)],
+      [createBody(FREE), operatorHeader(OPERATOR_SECRETS.keys)],
+      [createBody(FREE), operatorHeader(ERASURE)],
+    ] as const) {
+      const r = await create(w, body, headers);
+      statuses.add(r.status);
+      expect(r.headers.get("cache-control"), String(r.status)).toBe("no-store");
+    }
+    expect([...statuses].sort()).toEqual([200, 400, 401, 403, 409]);
+  });
+
+  it("answers the shapes of the contract, and no token of a mail", async () => {
+    const sms = createRecordingSms();
+    const w = await world({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
+    const erasure = operatorHeader(ERASURE);
+    const answers: Record<string, unknown>[] = [];
+    // An invitation by the secret, a reset link and no mail by the platform operator, and a phone user.
+    for (const [body, headers, mailed] of [
+      [{ email: "ivy@example.com", reason: REASON }, erasure, "invite"],
+      [
+        { email: "rex@example.com", firstSignIn: "reset", emailVerified: true, reason: REASON },
+        w.operatorCookie,
+        "reset",
+      ],
+      [
+        { email: "nia@example.com", name: "Nia", reason: REASON, firstSignIn: "none" },
+        erasure,
+        null,
+      ],
+      [{ email: null, phone: "+14155550142", reason: REASON }, w.operatorCookie, null],
+    ] as const) {
+      const mails = w.auth.mail.length;
+      const res = await create(w, body, headers);
+      const text = await res.clone().text();
+      const answer = await fitted(CREATE, res);
+      expect(answer).toEqual({
+        userId: expect.any(String),
+        mailed,
+        auditId: expect.any(String),
+      });
+      // The mail holds the link; the answer holds no part of it.
+      const sent = w.auth.mail.slice(mails);
+      expect(sent.length).toBe(mailed === null ? 0 : 1);
+      for (const m of sent) {
+        const token = /token=([A-Za-z0-9_%-]+)/.exec(m.text)?.[1] ?? "";
+        expect(token.length).toBeGreaterThan(20);
+        expect(text).not.toContain(decodeURIComponent(token).slice(3));
+      }
+      answers.push(answer);
+    }
+    expect(sms.sent).toEqual([]);
+    const rows = (await auditRows(w)).filter((r) => r.action === "user_create");
+    expect(rows.map((r) => [r.id, r.actorKind, r.targetUserId, r.data])).toEqual([
+      [
+        answers[0]?.auditId,
+        "secret",
+        answers[0]?.userId,
+        { emailVerified: false, firstSignIn: "invite", hasAddress: true, hasPhone: false },
+      ],
+      [
+        answers[1]?.auditId,
+        "user",
+        answers[1]?.userId,
+        { emailVerified: true, firstSignIn: "reset", hasAddress: true, hasPhone: false },
+      ],
+      [
+        answers[2]?.auditId,
+        "secret",
+        answers[2]?.userId,
+        { emailVerified: false, firstSignIn: "none", hasAddress: true, hasPhone: false },
+      ],
+      [
+        answers[3]?.auditId,
+        "user",
+        answers[3]?.userId,
+        { emailVerified: false, firstSignIn: "none", hasAddress: false, hasPhone: true },
+      ],
+    ]);
+    for (const r of rows) expect([r.reason, r.ip, r.userAgent]).toEqual([REASON, IP, AGENT]);
+    expect(JSON.stringify(rows)).not.toContain("@example.com");
+    expect(await userOf(w, String(answers[3]?.userId))).toMatchObject({
+      email: null,
+      phone: "+14155550142",
+    });
+  });
+
+  it("answers hook_refused and hook_failed of hooks.operator.beforeAction at the create", async () => {
+    let mode: "refuse" | "throw" = "refuse";
+    const w = await world({
+      hooks: {
+        operator: {
+          beforeAction() {
+            if (mode === "refuse") throw hookRefusal("Not in the change window.");
+            throw new Error("the change system is down");
+          },
+        },
+      },
+    });
+    for (const [m, answer] of [
+      ["refuse", { status: 403, code: "hook_refused" }],
+      ["throw", { status: 500, code: "hook_failed" }],
+    ] as const) {
+      mode = m;
+      const res = await create(w, createBody(FREE), operatorHeader(ERASURE));
+      expect(await answerOf(res), m).toEqual(answer);
+    }
+    expect(await usersAt(w, FREE)).toEqual([]);
+    expect(await auditRows(w)).toEqual([]);
+    expect(w.auth.mail.filter((m) => m.to === FREE)).toEqual([]);
   });
 });

@@ -507,7 +507,12 @@ describe("ANONYMOUS_REFUSED (plan 12i Task 6)", () => {
     const before = await dump(w);
     // A session needs the platform role, a second factor, and a verified address: an
     // anonymous user has none, so the guard answers operator_required before the body.
-    for (const path of ["/auth/operator/users/update", "/auth/operator/users/delete"]) {
+    // Plan 12f2 Task 5 adds the create of the second wave: the same guard refuses it.
+    for (const path of [
+      "/auth/operator/users/update",
+      "/auth/operator/users/delete",
+      "/auth/operator/users/create",
+    ]) {
       const res = await w.handle(
         post(
           path,

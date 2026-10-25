@@ -88,7 +88,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
-    expect(listed.length).toBe(208);
+    // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
+    expect(listed.length).toBe(209);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
