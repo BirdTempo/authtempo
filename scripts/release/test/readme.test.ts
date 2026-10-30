@@ -23,6 +23,12 @@ const INSTALL =
   "After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.";
 /** The install line in its place above 0.0.0. */
 const PUBLISHED = ENTRIES.find((e) => e.sentence === INSTALL)?.published ?? "";
+/**
+ * A README before the first release, for the probes. The version branch
+ * rewrites the real README, so a probe on it fails there (ruling 65 of plan
+ * 12j, C1). The first test holds the real README at the group version.
+ */
+const BEFORE = `# authtempo\n\nAn auth engine.\n\n## Packages\n\n${NOTE}\n\n${INSTALL}\n\n## Security\n\nRead SECURITY.md.\n`;
 
 /** The text of the section `## <name>`, up to the next `## ` heading. */
 function section(text: string, name: string): string | null {
@@ -73,16 +79,20 @@ function released(text: string): string {
 }
 
 describe("the root README", () => {
-  it("holds the note and the install line at 0.0.0, and the published install line above", () => {
+  it("holds the real README at the group version", () => {
     expect(ENTRIES).toHaveLength(2);
     expect(noteForms(NOTE)).toEqual(["not on a registry yet"]);
     expect(PUBLISHED).toContain("`pnpm add @authtempo/core @authtempo/adapter-d1`");
     expect(readmeFaults(README, groupVersion(root))).toEqual([]);
+  });
+
+  it("holds the note and the install line at 0.0.0, and the published install line above", () => {
+    expect(readmeFaults(BEFORE, "0.0.0")).toEqual([]);
     // Both ways: the release-day README has the published texts, and the README of main keeps them.
-    const day = released(README);
-    expect(day).toBe(README.replace(`${NOTE}\n\n`, "").replace(INSTALL, PUBLISHED));
+    const day = released(BEFORE);
+    expect(day).toBe(BEFORE.replace(`${NOTE}\n\n`, "").replace(INSTALL, PUBLISHED));
     expect(readmeFaults(day, "0.1.0")).toEqual([]);
-    expect(readmeFaults(README, "0.1.0")).toEqual([
+    expect(readmeFaults(BEFORE, "0.1.0")).toEqual([
       'the group is at 0.1.0, and the README still holds "not on a registry yet"',
       "the group is at 0.1.0, and the README still holds the install line of 0.0.0",
       "the group is at 0.1.0, and the section Packages lacks the published install line",
@@ -95,7 +105,7 @@ describe("the root README", () => {
     expect(readmeFaults(`${day}\nWhen the package is published, run x.\n`, "0.1.0")).toEqual([
       'the group is at 0.1.0, and the README still holds "when the package is published"',
     ]);
-    expect(readmeFaults(README.replace(INSTALL, ""), "0.0.0")).toEqual([
+    expect(readmeFaults(BEFORE.replace(INSTALL, ""), "0.0.0")).toEqual([
       "the section Packages lacks the install line",
     ]);
   });

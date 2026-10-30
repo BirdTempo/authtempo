@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PUBLIC_REGISTRY } from "../src/lib/release-facts.ts";
-import { releasedNames } from "../src/lib/released.ts";
+import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import {
   attestationsUrl,
@@ -19,6 +20,7 @@ import {
   versionUrl,
   WORKFLOW_PATH,
 } from "../src/verify-published.ts";
+import { copyFixture } from "./support/release-copy.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const NAMES = ["@authtempo/cli", "@authtempo/core"];
@@ -404,7 +406,8 @@ describe("the entry of verify-published", () => {
     expect(input.repository).toBe(repository.url);
     expect(input.workflow).toBe(".github/workflows/release.yml");
     expect(input.names).toHaveLength(27);
-    expect(input.version).toBe("0.0.0");
+    // The group version of the tree, from the manifests (ruling 65 of plan 12j, C1).
+    expect(input.version).toBe(groupVersion(ROOT));
     expect(input.fallback).toEqual(
       JSON.parse(readFileSync(new URL(`../../../${FALLBACK_FILE}`, import.meta.url), "utf8")),
     );
@@ -424,14 +427,20 @@ describe("the entry of verify-published", () => {
     );
   });
 
-  it("fails at the group version of the tree today, 0.0.0, with no read", async () => {
-    const { urls, get } = allAttested();
-    const { lines, code } = await entry(ROOT, undefined, get);
-    expect(lines).toEqual([
-      "verify-published: FAIL packages=27 attested=0 fallback=0 failures=1",
-      "  the group version is 0.0.0, so no release exists to verify",
-    ]);
-    expect(code).toBe(1);
-    expect(urls).toEqual([]);
+  it("fails at the group version 0.0.0 of a tree with no release, with no read", async () => {
+    // A fixture tree at 0.0.0, so the probe holds at each version of the tree (ruling 65 of plan 12j, C1).
+    const dir = copyFixture((d) => writeFileSync(join(d, FALLBACK_FILE), "[]\n"));
+    try {
+      const { urls, get } = allAttested();
+      const { lines, code } = await entry(dir, undefined, get);
+      expect(lines).toEqual([
+        "verify-published: FAIL packages=2 attested=0 fallback=0 failures=1",
+        "  the group version is 0.0.0, so no release exists to verify",
+      ]);
+      expect(code).toBe(1);
+      expect(urls).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

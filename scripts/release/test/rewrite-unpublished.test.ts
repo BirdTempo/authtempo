@@ -20,12 +20,13 @@ import {
   UNPUBLISHED_PAGES,
   VERSION_SLOT,
 } from "../../../apps/site/src/data/unpublished.ts";
-import { releasedNames } from "../src/lib/released.ts";
+import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { reportLines, summaryLine } from "../src/lib/report.ts";
 import {
   noteForms,
   UNPUBLISHED_FILES,
   UNPUBLISHED_MARK,
+  UNPUBLISHED_VERSION,
   unpublishedFailures,
 } from "../src/lib/unpublished.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
@@ -83,23 +84,42 @@ afterEach(() => {
 });
 
 describe("rewrite-unpublished on the tree", () => {
-  it("rewrites each listed text of the tree, and the checks pass at the new version", () => {
-    const r = rewriteUnpublished(readTree, "0.1.0");
-    expect(r.failures).toEqual([]);
-    // 12 packed files with 13 notes, 42 pages with 44 note lines, and 14 texts, 3 of them by hand.
-    expect(summaryLine(r)).toBe(
-      "rewrite-unpublished: PASS files=12 notes=13 pages=42 lines=44 texts=11 hand=3 failures=0",
-    );
-    // A listed file that the rewrite did not change fails here.
-    expect([...r.texts.keys()].sort()).toEqual(rewrittenPaths());
-    for (const [path, text] of r.texts) {
-      expect(text, path).not.toBe(readTree(path));
-      expect(noteForms(text), path).toEqual([]);
-      expect(text, path).not.toContain(VERSION_SLOT);
-    }
-    const rewritten = (path: string) => r.texts.get(path) ?? readTree(path);
+  // At 0.0.0 the tree holds each note, and the rewrite gives the tree of the
+  // first release. Above 0.0.0 the version branch ran the rewrite and the
+  // steps by hand, so the tree is that tree (ruling 65 of plan 12j, C1).
+  const version = groupVersion(root);
+  const unreleased = version === UNPUBLISHED_VERSION;
+  const next = unreleased ? "0.1.0" : version;
 
-    // check-pack's rule on the shipped files at 0.1.0: no packed file holds a note form.
+  it("rewrites each listed text of the tree, and the checks pass at the new version", () => {
+    let rewritten: (path: string) => string | null = readTree;
+    if (unreleased) {
+      const r = rewriteUnpublished(readTree, next);
+      expect(r.failures).toEqual([]);
+      // 12 packed files with 13 notes, 42 pages with 44 note lines, and 14 texts, 3 of them by hand.
+      expect(summaryLine(r)).toBe(
+        "rewrite-unpublished: PASS files=12 notes=13 pages=42 lines=44 texts=11 hand=3 failures=0",
+      );
+      // A listed file that the rewrite did not change fails here.
+      expect([...r.texts.keys()].sort()).toEqual(rewrittenPaths());
+      for (const [path, text] of r.texts) {
+        expect(text, path).not.toBe(readTree(path));
+        expect(noteForms(text), path).toEqual([]);
+        expect(text, path).not.toContain(VERSION_SLOT);
+      }
+      expect(r.notes).toEqual(
+        PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
+          (e) => `by hand: ${e.file}: ${e.sentence.split("\n")[0]}`,
+        ),
+      );
+      rewritten = (path: string) => r.texts.get(path) ?? readTree(path);
+    } else
+      for (const path of rewrittenPaths()) {
+        expect(noteForms(readTree(path) ?? ""), path).toEqual([]);
+        expect(readTree(path), path).not.toContain(VERSION_SLOT);
+      }
+
+    // check-pack's rule on the shipped files at the new version: no packed file holds a note form.
     const packed = shippedFiles();
     const marked = new Map(
       packed
@@ -108,7 +128,7 @@ describe("rewrite-unpublished on the tree", () => {
     );
     expect(
       unpublishedFailures({
-        version: "0.1.0",
+        version: next,
         packed,
         marked,
         lists: { files: UNPUBLISHED_FILES, code: [] },
@@ -116,24 +136,25 @@ describe("rewrite-unpublished on the tree", () => {
       }),
     ).toEqual([]);
 
-    // check-unpublished at 0.1.0: no page holds a note form, and each listed page holds REGISTRY_INSTALL.
+    // check-unpublished at the new version: no page holds a note form, and each listed page holds REGISTRY_INSTALL.
     const pages = treePages().map((p) => ({
       path: p.path,
       source: rewritten(`${DOCS_DIR}${p.path}`) ?? "",
     }));
     expect(
       checkUnpublished({
-        version: "0.1.0",
+        version: next,
         pages,
         listed: UNPUBLISHED_PAGES,
         install: REGISTRY_INSTALL,
       }).failures,
     ).toEqual([]);
 
-    // check-pre-release at 0.1.0: only the three texts of the runbook steps stay.
+    // check-pre-release: after the script, only the three texts of the runbook
+    // steps stay. After those steps too, on the version branch, none stays.
     expect(
       checkPreRelease({
-        version: "0.1.0",
+        version: next,
         listed: PRE_RELEASE_SENTENCES,
         read: rewritten,
         pages,
@@ -141,20 +162,24 @@ describe("rewrite-unpublished on the tree", () => {
         exempt: PRE_RELEASE_EXEMPT,
       }).failures,
     ).toEqual(
-      PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
-        (e) => `${e.file}: core is at 0.1.0, and the file still holds the text: ${e.sentence}`,
-      ),
-    );
-    expect(r.notes).toEqual(
-      PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
-        (e) => `by hand: ${e.file}: ${e.sentence.split("\n")[0]}`,
-      ),
+      unreleased
+        ? PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
+            (e) => `${e.file}: core is at 0.1.0, and the file still holds the text: ${e.sentence}`,
+          )
+        : [],
     );
   });
 
   it("writes the version in place of each slot", () => {
-    const r = rewriteUnpublished(readTree, "0.3.0");
+    // A fixture tree of the texts with a slot, each in quotes as in compare.ts,
+    // so the probe holds at each version of the tree (ruling 65 of plan 12j, C1).
+    const slotted = PRE_RELEASE_SENTENCES.filter((e) => e.published?.includes(VERSION_SLOT));
+    const tree = new Map<string, string>();
+    for (const e of slotted) tree.set(e.file, `${tree.get(e.file) ?? ""}"${e.sentence}"\n`);
+    const lists = { files: [], pages: [], pageNotes: [], sentences: slotted };
+    const r = rewriteUnpublished((p) => tree.get(p) ?? null, "0.3.0", lists);
     expect(r.failures).toEqual([]);
+    expect([...r.texts.keys()].sort()).toEqual([...tree.keys()].sort());
     const readme = r.texts.get("packages/compat-better-auth/README.md") ?? "";
     expect(readme).toContain('"better-auth": "npm:@authtempo/compat-better-auth@0.3.0",');
     expect(readme).toContain('"@authtempo/core": "0.3.0",');
