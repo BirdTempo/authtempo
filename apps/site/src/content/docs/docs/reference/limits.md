@@ -199,7 +199,7 @@ These counts live in their rows, so they hold under every limiter.
 | Nesting of one JSON request body | 16 levels of `[` and `{` | 400 `invalid_body` |
 | Items of one JSON request body | 4096 of `[`, `{`, and `,` outside its strings | 400 `invalid_body` |
 | Pairs of one form request body | 128, one more than its `&` separators. The OAuth token route has the most fields, 12, and the limit is 8 times the next power of two | 400 `invalid_body`, the `invalid_request` of an OAuth form route, or `sso_failed` at the SAML ACS |
-| One SCIM request body | 1 MB | SCIM 413 |
+| One SCIM request body | 1 MiB | SCIM 413 |
 | Nesting and items of one SCIM request body | 16 levels of `[` and `{`, and 65536 items of `[`, `{`, and `,` outside its strings | SCIM 400 `invalidSyntax` |
 | The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap, in two halves that do not lend bytes to each other. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The bytes that the body reads above the floor of signed-in users hold at once, in each isolate | 8388608, the user half of the budget. A read counts here after a session check names its user: the SSO connection writes | 503 `body_busy` with `Retry-After: 1` |

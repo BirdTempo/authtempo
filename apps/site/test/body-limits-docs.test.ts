@@ -155,6 +155,16 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     ],
   ],
   [
+    "the cap of a SCIM body",
+    () => constant("SCIM_BODY_MAX", scimSource),
+    [
+      ["errors", /which answer their own SCIM 413 past (\d+) (MiB)/],
+      ["limits", /\| One SCIM request body \| (\d+) (MiB) \| SCIM 413 \|/],
+      ["scim", /\| A body over (\d+) (MiB) \| 413 \|/],
+      ["readme", /SCIM keeps its own (\d+) (MiB) cap/],
+    ],
+  ],
+  [
     "the item limit of a SCIM body",
     () => constant("SCIM_ITEMS_MAX", scimSource),
     [

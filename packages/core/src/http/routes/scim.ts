@@ -53,14 +53,14 @@ import { managedBody, managedCall, readQuery } from "./sso.js";
 // The answer form lives on the engine side (review l2 of plan 12d Task 9b); the routes export it too.
 export { NS_SCIM_ERROR, SCIM_MEDIA, scimError, scimJson };
 
-/** The largest SCIM request body: 1 MB. */
+/** The largest SCIM request body: 1 MiB. */
 export const SCIM_BODY_MAX = 1_048_576;
 
 /**
  * The most items of a SCIM body: each `[`, `{`, and `,` outside a string,
  * as for a route body (ruling 56 of the 12j lane). The scan runs before the
  * parse. Measured 2026-10-30 (Node 26, a heap of 128 MB, body-memory.test.ts):
- * before the scan, 1 MB of nesting kept 54 MB of heap, and 1 MB of `{}`
+ * before the scan, 1 MiB of nesting kept 54 MB of heap, and 1 MiB of `{}`
  * items 56 MB. With it, each shape past the limits peaks at 26 MB. The worst
  * shape at them, 65536 distinct keys, peaks at 35 to 36 MB (measured again
  * 2026-10-30, Node 26.10.0, load 3 to 4: five runs alone, then the test).

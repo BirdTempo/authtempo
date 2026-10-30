@@ -505,7 +505,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| Every route with a body, except the SCIM routes, which answer their own SCIM 413 past 1 MB. See [Limits](/docs/reference/limits/). |
+| Every route with a body, except the SCIM routes, which answer their own SCIM 413 past 1 MiB. See [Limits](/docs/reference/limits/). |
 
 <h3 id="body_busy"><code>body_busy</code> 503</h3>
 
