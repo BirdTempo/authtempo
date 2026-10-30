@@ -9,6 +9,10 @@ Plans: `docs/superpowers/plans/README.md`.
 
 ## Packages
 
+The packages are not on a registry yet.
+
+After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.
+
 | Package | Role |
 | --- | --- |
 | `@authtempo/core` | The engine: `createAuth(config)` returns `handle`, `session`, and `api`. |
@@ -34,6 +38,14 @@ Organizations are in core behind `organizations: {}`. Passwords are in core behi
 Enterprise SSO per organization (OIDC and SAML 2.0) with DNS domain proofs, and a SCIM 2.0 server for Users and Groups. Core holds them behind `sso` and `scim`. Both need `organizations`, and `sso.dns` must list one DNS resolver or more.
 
 The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The memory limiter is for tests. `auth.api.sweepExpired()` deletes expired rows, including limit windows, and runs from a scheduled handler.
+
+## Security
+
+Report a fault through a channel of [`SECURITY.md`](SECURITY.md), never in a public issue. The [support table](SECURITY.md#supported-versions) lists the supported minors.
+
+## Contribute
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) tells you how to build, test, and commit a change to authtempo.
 
 ## Commands
 
