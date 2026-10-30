@@ -58,23 +58,28 @@ describe("the record files in the prose pages", () => {
     expect(page?.plain).toBe(true);
   });
 
-  it("reads each changeset present in the tree with the same blank form", () => {
-    const pages = recordProsePages();
-    const present = readdirSync(`${REPO}.changeset`).filter(
-      (n) => n.endsWith(".md") && n !== "README.md",
-    );
-    for (const name of present) {
-      const raw = readFileSync(`${REPO}.changeset/${name}`, "utf8").split("\n");
-      const end = raw.indexOf("---", 1);
-      expect(raw[0], name).toBe("---");
-      expect(end, name).toBeGreaterThan(0);
-      const page = pages.find((p) => p.path === `.changeset/${name}`);
-      expect(page?.source.split("\n"), name).toEqual([
-        ...raw.slice(0, end + 1).map(() => ""),
-        ...raw.slice(end + 1),
-      ]);
-    }
-  });
+  // The version branch deletes each changeset. There the summary counts a
+  // skip, not a pass with no assertion (ruling 70 of plan 12j, Low 2).
+  const present = readdirSync(`${REPO}.changeset`).filter(
+    (n) => n.endsWith(".md") && n !== "README.md",
+  );
+  it.skipIf(present.length === 0)(
+    "reads each changeset present in the tree with the same blank form",
+    () => {
+      const pages = recordProsePages();
+      for (const name of present) {
+        const raw = readFileSync(`${REPO}.changeset/${name}`, "utf8").split("\n");
+        const end = raw.indexOf("---", 1);
+        expect(raw[0], name).toBe("---");
+        expect(end, name).toBeGreaterThan(0);
+        const page = pages.find((p) => p.path === `.changeset/${name}`);
+        expect(page?.source.split("\n"), name).toEqual([
+          ...raw.slice(0, end + 1).map(() => ""),
+          ...raw.slice(end + 1),
+        ]);
+      }
+    },
+  );
 });
 
 describe("the agent markdown of the changelog page", () => {

@@ -378,64 +378,76 @@ describe("docs/release/RUNBOOK.md", () => {
     ]);
   });
 
-  // Ruling 65 of plan 12j, L1: the bullet named no link form, and the
-  // owner of final review D learned the forms from 50 failure lines.
-  it("gives the link form of each Resources row that check-resources reads", () => {
+  /** The link forms of the Resources rows that the check-resources bullet names. */
+  const resourceForms = () => {
     const bullet =
       section(TEXT, "At each release")
         .split("\n")
         .find((l) => l.startsWith("- `check-resources`:")) ?? "";
-    const forms = [...bullet.matchAll(/ row links `([^`]+)`/g)].map((m) => m[1] ?? "");
-    expect(forms).toEqual([
+    return [...bullet.matchAll(/ row links `([^`]+)`/g)].map((m) => m[1] ?? "");
+  };
+
+  // Ruling 65 of plan 12j, L1: the bullet named no link form, and the
+  // owner of final review D learned the forms from 50 failure lines.
+  it("gives the link form of each Resources row that check-resources reads", () => {
+    expect(resourceForms()).toEqual([
       "https://www.npmjs.com/package/<name>",
       `${REPOSITORY.url}/tree/main/examples/<folder>`,
       DEMO_PATH,
     ]);
-    // While no release exists, the planned rows of the rehearsal use these
-    // forms, and check-resources passes them at the first release.
-    if (groupVersion(ROOT_PATH) !== "0.0.0") return;
-    const { resources } = JSON.parse(readFileSync(new URL(PLAN_FILE, ROOT), "utf8")) as {
-      resources: string[];
-    };
-    const links = resources.flatMap((l) => [...l.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]));
-    const pattern = (form: string) =>
-      new RegExp(
-        `^${form
-          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          .replace("<name>", "@authtempo/[a-z0-9-]+")
-          .replace("<folder>", "[a-z0-9-]+")}$`,
-      );
-    for (const link of links)
-      expect(
-        forms.some((f) => pattern(f).test(link ?? "")),
-        link,
-      ).toBe(true);
-    // The example folders of check-resources: each folder whose package release/unreleased.json names.
-    const unreleased = Object.keys(
-      JSON.parse(readFileSync(new URL("release/unreleased.json", ROOT), "utf8")) as object,
-    );
-    const examples = readdirSync(new URL("examples/", ROOT))
-      .filter((folder) => {
-        const file = new URL(`examples/${folder}/package.json`, ROOT);
-        if (!existsSync(file)) return false;
-        const { name } = JSON.parse(readFileSync(file, "utf8")) as { name?: string };
-        return name !== undefined && unreleased.includes(name);
-      })
-      .sort();
-    const contribute = ["CONTRIBUTING.md", "SECURITY.md"]
-      .map((f) => `- [${f}](${REPOSITORY.url}/blob/main/${f})`)
-      .join("\n");
-    const r = checkResources({
-      version: FIRST_RELEASE,
-      source: `${resources.join("\n")}\n\n${contribute}\n`,
-      released: releasedNames(ROOT_PATH),
-      examples,
-      repoUrl: REPOSITORY.url,
-      empty: RESOURCES_EMPTY,
-    });
-    expect(r.failures).toEqual([]);
-    expect(r.counts).toMatchObject({ examples: examples.length, demo: 1 });
   });
+
+  // While no release exists, the planned rows of the rehearsal use these
+  // forms, and check-resources passes them at the first release. Above
+  // 0.0.0 the rows are not read, and the summary counts a skip, not a pass
+  // with no assertion (ruling 70 of plan 12j, Low 2).
+  it.skipIf(groupVersion(ROOT_PATH) !== "0.0.0")(
+    "passes the planned Resources rows of the rehearsal at the first release",
+    () => {
+      const forms = resourceForms();
+      const { resources } = JSON.parse(readFileSync(new URL(PLAN_FILE, ROOT), "utf8")) as {
+        resources: string[];
+      };
+      const links = resources.flatMap((l) => [...l.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]));
+      const pattern = (form: string) =>
+        new RegExp(
+          `^${form
+            .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+            .replace("<name>", "@authtempo/[a-z0-9-]+")
+            .replace("<folder>", "[a-z0-9-]+")}$`,
+        );
+      for (const link of links)
+        expect(
+          forms.some((f) => pattern(f).test(link ?? "")),
+          link,
+        ).toBe(true);
+      // The example folders of check-resources: each folder whose package release/unreleased.json names.
+      const unreleased = Object.keys(
+        JSON.parse(readFileSync(new URL("release/unreleased.json", ROOT), "utf8")) as object,
+      );
+      const examples = readdirSync(new URL("examples/", ROOT))
+        .filter((folder) => {
+          const file = new URL(`examples/${folder}/package.json`, ROOT);
+          if (!existsSync(file)) return false;
+          const { name } = JSON.parse(readFileSync(file, "utf8")) as { name?: string };
+          return name !== undefined && unreleased.includes(name);
+        })
+        .sort();
+      const contribute = ["CONTRIBUTING.md", "SECURITY.md"]
+        .map((f) => `- [${f}](${REPOSITORY.url}/blob/main/${f})`)
+        .join("\n");
+      const r = checkResources({
+        version: FIRST_RELEASE,
+        source: `${resources.join("\n")}\n\n${contribute}\n`,
+        released: releasedNames(ROOT_PATH),
+        examples,
+        repoUrl: REPOSITORY.url,
+        empty: RESOURCES_EMPTY,
+      });
+      expect(r.failures).toEqual([]);
+      expect(r.counts).toMatchObject({ examples: examples.length, demo: 1 });
+    },
+  );
 
   // Ruling 65 of plan 12j, L3: a fixed folder made mkdir fail at the next
   // release, and step 15 named a dry run line that names the next minor.
