@@ -27,10 +27,14 @@ const text = [
   "",
 ].join("\n");
 
-// The typecheck runs this script after the build. A write of the same bytes
-// makes src newer than dist, and the build-age rule of release-check (spec 33
-// item 12.1) then fails on a fresh build (ruling 57 of plan 12j). So the
-// script writes only when the bytes differ, as copy-migrations does.
+// The build and the typecheck both run this script, in either order: the
+// typecheck of core waits only for the builds of its dependencies, and that of
+// mcp waits for its own build too (turbo.json). A typecheck after the build
+// that writes the same bytes makes src newer than dist. The build-age rule of
+// release-check (spec 33 item 12.1) then fails on a fresh build (ruling 57 of
+// plan 12j). So the script writes only when the bytes differ, as
+// copy-migrations does. turbo.json lists the module as an output of the build
+// of core and of mcp, so a cache hit restores it with dist (ruling 70).
 const same = existsSync(target) && readFileSync(target, "utf8") === text;
 if (!same) writeFileSync(target, text);
 console.log(`write-version: ${name} ${version}, ${same ? "unchanged" : "written"}`);

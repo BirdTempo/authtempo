@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -51,6 +53,36 @@ describe("scripts/write-version.mjs", () => {
     writeFileSync(join(dir, "package.json"), '{ "version": "0.2.0" }\n');
     expect(write(dir, "MCP_VERSION").stdout).toBe("write-version: MCP_VERSION 0.2.0, written\n");
     expect(readFileSync(target, "utf8")).toContain('export const MCP_VERSION = "0.2.0";');
+  });
+
+  // Ruling 70 of plan 12j, Low 1: turbo.json named only dist/** as the build
+  // output. A cache hit restored dist and left src at another version.
+  it("is an output of each build that runs it, in turbo.json", () => {
+    /** A JSON file of the repository; turbo.json holds comments on whole lines only. */
+    const json = (path: string) =>
+      JSON.parse(readFileSync(`${REPO}${path}`, "utf8").replace(/^\s*\/\/.*$/gm, ""));
+    const tasks = (json("turbo.json") as { tasks: Record<string, unknown> }).tasks;
+    const writers: string[] = [];
+    for (const parent of ["apps", "packages", "examples"])
+      for (const dir of readdirSync(`${REPO}${parent}`)) {
+        const path = `${parent}/${dir}/package.json`;
+        if (!existsSync(`${REPO}${path}`)) continue;
+        const m = json(path) as { name: string; scripts?: Record<string, string> };
+        if (!(m.scripts?.build ?? "").includes("scripts/write-version.mjs")) continue;
+        writers.push(m.name);
+        expect({ name: m.name, build: tasks[`${m.name}#build`] }).toEqual({
+          name: m.name,
+          build: { dependsOn: ["^build"], outputs: ["dist/**", "src/version.generated.ts"] },
+        });
+        // A build task of the package turbo.json would be a second source of the outputs.
+        const own = `${parent}/${dir}/turbo.json`;
+        if (existsSync(`${REPO}${own}`))
+          expect(
+            (json(own) as { tasks: Record<string, unknown> }).tasks.build,
+            own,
+          ).toBeUndefined();
+      }
+    expect(writers.sort()).toEqual(["@authtempo/core", "@authtempo/mcp"]);
   });
 
   it("stops on a bad name or a bad version, and writes nothing", () => {

@@ -15,6 +15,20 @@
   ],
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
+    // The build of core and of mcp also writes src/version.generated.ts from
+    // package.json (scripts/write-version.mjs). With only dist/** here, a cache
+    // hit restored dist and left src at the version of another run, so the
+    // version tests failed on src (ruling 70 of plan 12j, Low 1). A package
+    // task replaces the build task whole, so each line names dependsOn again.
+    // apps/site/test/write-version.test.ts holds these lines to the scripts.
+    "@authtempo/core#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "src/version.generated.ts"]
+    },
+    "@authtempo/mcp#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "src/version.generated.ts"]
+    },
     // The site build reads the root package.json, SECURITY.md, and LICENSE
     // (apps/site/src/data/repo.ts). Without these inputs, a cache hit serves a
     // stale license or a stale empty state (ruling 21 of the plan 11b lane).
