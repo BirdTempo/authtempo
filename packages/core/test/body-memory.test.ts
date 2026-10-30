@@ -220,6 +220,14 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
       expect([l.shape, l.answer]).toEqual([l.shape, "302 sso_failed"]);
       expect(l.ms).toBeLessThan(1000);
     }
+    // Each JSON shape reaches its reader: the parse runs, or the scan refuses it. No read
+    // stops at the budget, so each cap measures the whole read path (rulings 66 and 69).
+    for (const l of lines.filter((l) => l.route !== ACS && l.route !== SCIM))
+      expect([l.route, l.shape, ["ok", "invalid_body"].includes(l.answer)]).toEqual([
+        l.route,
+        l.shape,
+        true,
+      ]);
     // SCIM refuses each shape past its limits, and reads one string and each shape at them.
     for (const l of lines.filter((l) => l.route === SCIM))
       expect([l.shape, l.answer]).toEqual([l.shape, SCIM_PAST.includes(l.shape) ? "400" : "ok"]);

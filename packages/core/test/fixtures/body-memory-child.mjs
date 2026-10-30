@@ -8,8 +8,15 @@
 import v8 from "node:v8";
 
 const dist = new URL("../../dist/", import.meta.url);
-const { bindBodyClient, bindBodyRoute, bodyCapOf, BODY_DEPTH_MAX, BODY_ITEMS_MAX, FORM_PAIRS_MAX } =
-  await import(new URL("http/body-cap.js", dist).href);
+const {
+  bindBodyClient,
+  bindBodyRoute,
+  bodyCapOf,
+  BODY_DEPTH_MAX,
+  BODY_ITEMS_MAX,
+  FORM_PAIRS_MAX,
+  LARGE_READ_SHARE,
+} = await import(new URL("http/body-cap.js", dist).href);
 const { holdsBadText } = await import(new URL("http/body-text.js", dist).href);
 const { readJson } = await import(new URL("http/json.js", dist).href);
 const { ROUTE_CONTRACT } = await import(new URL("http/contract/index.js", dist).href);
@@ -250,6 +257,10 @@ async function answerOf() {
     return r.ok ? "ok" : String(r.response.status);
   }
   bindBodyRoute(request, route);
+  // A read past the share of one IP is the read of a signed-in user: the SSO writes read after
+  // the session (managedCall). With no bind, the client is ip:unknown, whose share of 4 MiB
+  // refused each body at the cap of 8 MiB before the parse (rulings 66 and 69 of the 12j lane).
+  bindBodyClient(request, cap > LARGE_READ_SHARE ? "user:memory" : "ip:memory");
   try {
     const result = await readJson(request, ROUTE_CONTRACT[route].body.schema);
     return result.ok ? "ok" : result.code;
