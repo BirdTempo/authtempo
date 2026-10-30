@@ -103,7 +103,7 @@ const PUBLIC_RUNS: Readonly<Record<string, string>> = {
   // @simplewebauthn/server 14.0.3: the CBOR bytes of a known bad EdDSA key, and an AAGUID in a comment.
   a301634f4b500327206745643235353139: "a CBOR constant",
   adce000235bcc60a648b0b25f1f05503: "an example AAGUID",
-  // zod 4.6.5, core/visit.js, in the source map: a hex value in its source.
+  // zod 4.6.6, core/visit.js, in the source map: a hex value in its source.
   "7e15ae1984bb338c86eb5e452dee3010": "a hex value of zod",
 };
 

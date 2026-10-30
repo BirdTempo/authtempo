@@ -28,7 +28,7 @@ Each supplier sits behind one module that does not carry its name. A replacement
 | --- | --- | --- | --- |
 | jose | 6.2.12 | Verifies the ID tokens of Google, Apple, and the OIDC providers, reads their key sets, and signs the Apple client secret | `core/src/seams/jwt.ts` |
 | @simplewebauthn/server | 14.0.3 | The two passkey ceremonies: generate and verify | `core/src/seams/webauthn.ts` |
-| zod | 4.6.5 | Checks the request bodies | Direct, in the routes only |
+| zod | 4.6.6 | Checks the request bodies | Direct, in the routes only |
 | postgres | 3.4.9 | The Postgres driver | `@authtempo/adapter-postgres`, and the run time of the `@authtempo/import` CLI |
 | @noble/hashes | 2.4.0 | The scrypt verify of Better Auth hashes, and the scrypt, Argon2id, and PBKDF2 verify of imported hashes | `compat-better-auth/src/hash.ts`, `legacy-hashes/src/derive.ts` |
 | bcryptjs | 3.0.3 | The bcrypt verify of imported hashes | `legacy-hashes/src/derive.ts` |

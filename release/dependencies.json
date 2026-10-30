@@ -1157,10 +1157,10 @@
   {
     "name": "zod",
     "kind": "runtime",
-    "versions": ["4.6.5"],
+    "versions": ["4.6.6"],
     "users": ["@authtempo/core", "@authtempo/mcp"],
     "reason": "Core validates each request body with it, and the MCP server declares its tool schemas with it (spec 13).",
-    "read": "2026-10-09",
+    "read": "2026-10-30",
     "seam": "packages/core/src/http/body.ts and packages/core/src/http/contract/ (direct, in the routes only, spec 13); packages/mcp/src/protocol.ts and its tool files"
   }
 ]
