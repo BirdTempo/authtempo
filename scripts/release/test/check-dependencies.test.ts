@@ -17,6 +17,17 @@ const lockfile = (name: string) =>
 /** A new copy of the input of the real tree, so that each test changes its own copy. */
 const real = (): DependenciesInput => structuredClone(readInput(repoRoot));
 
+/**
+ * The real input with a fixture closure in place of the real one. The real
+ * platform rows describe the real closure, so they go with it.
+ */
+const realWith = (closure: DependenciesInput["closure"]): DependenciesInput => {
+  const input = real();
+  input.closure = closure;
+  input.rows = input.rows.filter((r) => r.kind !== "platform");
+  return input;
+};
+
 const manifestOf = (input: DependenciesInput, name: string) => {
   const p = input.packages.find((q) => q.name === name);
   if (p === undefined) throw new Error(`no package ${name}`);
@@ -53,7 +64,7 @@ describe("check-dependencies", () => {
     const r = checkDependencies(real());
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-dependencies: PASS rows=89 runtime=34 peer=13 dev=42 platform=0 packages=50 closure=33 skipped=0 exempt=1 builds=3 failures=0",
+      "check-dependencies: PASS rows=111 runtime=37 peer=16 dev=49 platform=9 packages=53 closure=65 skipped=8 exempt=1 builds=5 failures=0",
     );
   });
 
@@ -164,8 +175,7 @@ describe("check-dependencies", () => {
       { name: "peer-lib", version: "2.0.0", license: "MIT", from: "@fixture/core" },
       { name: "string-width", version: "4.2.3", license: "MIT", from: "@fixture/util" },
     ]);
-    const input = real();
-    input.closure = closure;
+    const input = realWith(closure);
     input.licenseExempt = [];
     expect(checkDependencies(input).failures).toEqual([
       "copyleft@1.0.0 has the license GPL-3.0 in the runtime closure of @fixture/core, outside the allow list",
@@ -191,8 +201,7 @@ describe("check-dependencies", () => {
       },
       { name: "jose", version: "6.2.12", license: "MIT", from: "@fixture/core" },
     ]);
-    const input = real();
-    input.closure = closure;
+    const input = realWith(closure);
     input.licenseExempt = [];
     const none = checkDependencies(input);
     expect(none.failures).toEqual([
@@ -210,7 +219,7 @@ describe("check-dependencies", () => {
     input.rows.push(row);
     const held = checkDependencies(input);
     expect(held.failures).toEqual([]);
-    expect(summaryLine(held)).toMatch(/ platform=1 packages=50 closure=2 skipped=1 /);
+    expect(summaryLine(held)).toMatch(/ platform=1 packages=53 closure=2 skipped=1 /);
     row.license = "GPL-3.0";
     expect(checkDependencies(input).failures).toEqual([
       "@esbuild/aix-ppc64@0.28.1 has the license GPL-3.0 in the runtime closure of @fixture/core, outside the allow list",
@@ -226,9 +235,10 @@ describe("check-dependencies", () => {
   });
 
   it("fails a platform row with a gap, a stale platform row, and a row that the installed license contradicts", () => {
-    const input = real();
-    input.closure = runtimeClosure(lockfile("gpl.yaml"), FIXTURE_RELEASED, fixtureLicense).filter(
-      (c) => c.name !== "copyleft",
+    const input = realWith(
+      runtimeClosure(lockfile("gpl.yaml"), FIXTURE_RELEASED, fixtureLicense).filter(
+        (c) => c.name !== "copyleft",
+      ),
     );
     input.licenseExempt = [];
     const row = (name: string, fields: Record<string, unknown>) => ({

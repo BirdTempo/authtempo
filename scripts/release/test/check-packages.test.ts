@@ -152,7 +152,7 @@ describe("check-packages", () => {
     const input = readInput(fileURLToPath(new URL("../../../", import.meta.url)));
     expect(input.rootName).toBe("authtempo");
     const r = checkPackages(input);
-    expect(summaryLine(r)).toMatch(/^check-packages: PASS packages=\d+ released=24 /);
+    expect(summaryLine(r)).toMatch(/^check-packages: PASS packages=\d+ released=27 /);
     expect(r.failures).toEqual([]);
   });
 });
