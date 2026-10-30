@@ -1,0 +1,60 @@
+ Container authtempo-s3-libsql-cli-1 Running 
+ Container authtempo-s3-libsql-cli-compat-1 Running 
+ Container authtempo-s3-mysql84-1 Running 
+ Container authtempo-s3-mysql97-1 Running 
+ Container authtempo-s3-postgres-1 Running 
+ Container authtempo-s3-libsql-1 Running 
+ Container authtempo-s3-mysql97-1 Waiting 
+ Container authtempo-s3-postgres-1 Waiting 
+ Container authtempo-s3-libsql-1 Waiting 
+ Container authtempo-s3-libsql-cli-1 Waiting 
+ Container authtempo-s3-libsql-cli-compat-1 Waiting 
+ Container authtempo-s3-mysql84-1 Waiting 
+ Container authtempo-s3-mysql84-1 Healthy 
+ Container authtempo-s3-libsql-1 Healthy 
+ Container authtempo-s3-postgres-1 Healthy 
+ Container authtempo-s3-libsql-cli-compat-1 Healthy 
+ Container authtempo-s3-libsql-cli-1 Healthy 
+ Container authtempo-s3-mysql97-1 Healthy 
+
+   • Packages in scope: //, @authtempo/breach-check
+   • Running test, typecheck, typecheck:configs in 2 packages
+   • Remote caching disabled, using shared worktree cache
+
+::group::@authtempo/breach-check:build
+@authtempo/breach-check:build: cache bypass, force executing 661648a170c294d4
+@authtempo/breach-check:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+::endgroup::
+::group::@authtempo/breach-check:typecheck
+@authtempo/breach-check:typecheck: cache bypass, force executing a8bc0477c45ac14b
+@authtempo/breach-check:typecheck: $ tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json
+::endgroup::
+::group:://:typecheck:configs
+//:typecheck:configs: cache bypass, force executing 3cad3a5c2cccc63e
+//:typecheck:configs: $ tsc -p tsconfig.configs.json && node scripts/check-config-count.mjs
+//:typecheck:configs: typecheck:configs checked 57 vitest config files (minimum 57).
+::endgroup::
+::group::@authtempo/breach-check:test
+@authtempo/breach-check:test: cache bypass, force executing 2c5147150d4030d4
+@authtempo/breach-check:test: $ vitest run && node ../../examples/worker/proof/bundle-no-node.mjs proof && tsc -p tsconfig.json && node proof/pack-files.mjs
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/breach-check[39m
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test:  [2m[90m↓[39m[22m test/live.test.ts [2m([22m[2m1 test[22m[2m | [22m[33m1 skipped[39m[2m)[22m
+@authtempo/breach-check:test:  [32m✓[39m test/breach-check.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 533[2mms[22m[39m
+@authtempo/breach-check:test:    [32m✓[39m createBreachCheck (plan 12b) [2m(8)[22m
+@authtempo/breach-check:test:      [33m[2m✓[22m[39m answers unavailable for a timeout, a network error, a 302, a 500, and a body over the cap[33m 503[2mms[22m[39m
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test: [2m Test Files [22m [1m[32m1 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (2)[39m
+@authtempo/breach-check:test: [2m      Tests [22m [1m[32m8 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (9)[39m
+@authtempo/breach-check:test: [2m   Start at [22m 12:03:55
+@authtempo/breach-check:test: [2m   Duration [22m 659ms[2m (tests 93%, transform 5%, import 2%)[22m
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test: bundle-no-node: PASS, 1 bundle file(s) scanned, the Worker bundles with no_nodejs_compat and imports no node: module
+@authtempo/breach-check:test: pack-files: PASS, 6 packed file(s) checked, each inside the allowlist
+::endgroup::
+
+ Tasks:    4 successful, 4 total
+Cached:    0 cached, 4 total
+  Time:    2.159s 
+

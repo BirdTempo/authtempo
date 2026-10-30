@@ -28,6 +28,15 @@ const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/${path}`, im
  * failing log below is this log with one change.
  */
 const PASS = readFileSync(fixture("turbo-logs/pass.txt"), "utf8");
+/**
+ * Two real logs of a GitHub runner's env, 2026-10-30: `CI=true
+ * GITHUB_ACTIONS=true node scripts/test-servers.mjs run -- pnpm turbo run test
+ * typecheck typecheck:configs --force --continue --filter=//
+ * --filter=@authtempo/breach-check`, with --log-prefix=task and without it.
+ * The path of the worktree became /work/authtempo.
+ */
+const GITHUB_TASK = readFileSync(fixture("turbo-logs/github-task.txt"), "utf8");
+const GITHUB_AUTO = readFileSync(fixture("turbo-logs/github-auto.txt"), "utf8");
 /** The workspace of the run: the five packages, each with a test and a typecheck script. */
 const ROOT = fixture("release-check");
 const WITH_TEST = [
@@ -129,6 +138,26 @@ describe("release-check", () => {
       "check-security-policy: PASS sections=7 rows=0 channels=2 failures=0",
     );
     expect(report.notes).toContain(`@authtempo/breach-check@0.1.0 ${SHA} files=6`);
+  });
+
+  it("reads the log of a GitHub runner, and names the cause of a log with no prefix", () => {
+    // GitHub Actions sets GITHUB_ACTIONS=true, and Turbo 2.11.7 then drops the
+    // prefix of each line unless the run has --log-prefix=task (review Major 2).
+    expect(EVIDENCE_RUN).toContain("--log-prefix=task");
+    const one = ["@authtempo/breach-check"];
+    const github = (text: string) => readTurboRun(text, one, { withTypecheck: one, configs: true });
+    const task = github(GITHUB_TASK);
+    expect(task.failures).toEqual([]);
+    expect(task.counts).toMatchObject({ tasks: 4, total: 4, cached: 0, packages: 1, withTest: 1 });
+    expect(task.notes).toContain(
+      "@authtempo/breach-check: Test Files 1 passed | 1 skipped (2); Tests 8 passed | 1 skipped (9); 2 check lines",
+    );
+    expect(github(GITHUB_AUTO).failures).toEqual([
+      'the log has 4 ::group:: tasks with no "<package>:<task>: " prefix, such as @authtempo/breach-check:build; Turbo drops the prefix under GITHUB_ACTIONS=true unless it runs with --log-prefix=task',
+      "@authtempo/breach-check has a test script and no @authtempo/breach-check:test block; it did not report",
+      "@authtempo/breach-check has a typecheck script and no @authtempo/breach-check:typecheck block; it did not report",
+      "//:typecheck:configs printed no count line",
+    ]);
   });
 
   it("fails when a package did not report", () => {

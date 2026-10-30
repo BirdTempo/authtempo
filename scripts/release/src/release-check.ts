@@ -44,6 +44,10 @@ export type Step = (typeof STEPS)[number];
  * the test servers of the checkout, as `pnpm test` does: without their
  * variables, each test that needs a server stops. --continue lets each task
  * report, so the log names each failure and not only the first one.
+ * --log-prefix=task keeps the "<package>:<task>: " prefix of each line, which
+ * taskBlocks reads. Turbo 2.11.7 drops the prefix when GITHUB_ACTIONS=true,
+ * and GitHub Actions always sets it (review of plan 12j Task 14, Major 2,
+ * measured 2026-10-30). Without the flag, every run in CI fails closed.
  */
 export const EVIDENCE_RUN = [
   "node",
@@ -58,6 +62,7 @@ export const EVIDENCE_RUN = [
   "typecheck:configs",
   "--force",
   "--continue",
+  "--log-prefix=task",
 ] as const;
 
 /**
@@ -91,6 +96,20 @@ export function stripColours(text: string): string {
 
 /** One line of a task: `<package>:<task>: <text>`. A task name can hold a colon. */
 const TASK_LINE = /^(\/\/|@[\w.-]+\/[\w.-]+|[\w.-]+):([\w:-]+): ?(.*)$/;
+
+/**
+ * The tasks of the `::group::<package>:<task>` lines of a log that have no
+ * prefixed line. Under GITHUB_ACTIONS=true, Turbo 2.11.7 writes such a group
+ * line before the output of each task, and it drops the prefix unless it runs
+ * with --log-prefix=task. A task always prints a prefixed line, such as its
+ * cache line, so a group with none is a log of the wrong form.
+ */
+export function unprefixedGroups(text: string): string[] {
+  const blocks = taskBlocks(text);
+  return [...stripColours(text).matchAll(/^::group::(\S+)\s*$/gm)]
+    .map((m) => m[1] ?? "")
+    .filter((key) => !blocks.has(key));
+}
 
 /** Each line of each task block, by `<package>:<task>`. */
 export function taskBlocks(text: string): Map<string, string[]> {
@@ -136,6 +155,12 @@ export function readTurboRun(
   const notes: string[] = [];
   const clean = stripColours(text);
   const blocks = taskBlocks(clean);
+
+  const bare = unprefixedGroups(clean);
+  if (bare.length > 0)
+    failures.push(
+      `the log has ${bare.length} ::group:: tasks with no "<package>:<task>: " prefix, such as ${bare[0]}; Turbo drops the prefix under GITHUB_ACTIONS=true unless it runs with --log-prefix=task`,
+    );
 
   const tasks = / Tasks:\s+(\d+) successful, (\d+) total/.exec(clean);
   const cached = /Cached:\s+(\d+) cached, (\d+) total/.exec(clean);
