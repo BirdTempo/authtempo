@@ -1,7 +1,7 @@
-// The changelog link of authtempo upgrade. It imports no Node.js module. The
-// public entry does not export it, because each export of a released package
-// is a promise of semver (review of plan 12j Task 13b, L10). The docs site
-// test reads the built file dist/changelog-link.js by its path.
+// The changelog link of authtempo upgrade. It imports no Node.js module. Each
+// export of a released package is a promise of semver. So the public entry
+// does not export it (review L10 of plan 12j Task 13b). The docs site test
+// reads the built file dist/changelog-link.js by its path.
 
 /** The changelog page of the docs site. */
 export const CHANGELOG_PAGE = "https://authtempo.com/docs/changelog/";

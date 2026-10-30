@@ -3,8 +3,8 @@
 // For each released name of releasedNames, it reads the version document of
 // the group version from the public registry. The document must hold
 // dist.attestations with the SLSA provenance predicate. `npm audit signatures`
-// cannot take this place: it counts the attestations of every installed
-// package, such as zod and each peer, so its count never equals the released
+// cannot take this place. It counts the attestations of every installed
+// package, such as zod and each peer. So its count never equals the released
 // count. A version that the owner published by hand (the token fallback of the
 // runbook) has no attestation. Only a version that release/fallback-published.json
 // lists, with its date and reason, may lack one.
@@ -17,10 +17,10 @@ import { type Report, reportLines, requireCounts, unreadReport } from "./lib/rep
 import { readWorkspace } from "./lib/workspace.ts";
 
 /**
- * The predicate type of npm provenance. The version documents of zod 4.6.6 and
- * @sveltejs/kit 3.0.1 hold it in dist.attestations.provenance.predicateType,
- * and the document of postgres 3.4.9, with no provenance, has no
- * dist.attestations (registry.npmjs.org, read 2026-10-30 03:13 UTC).
+ * The predicate type of npm provenance (registry.npmjs.org, read 2026-10-30
+ * 03:13 UTC). The version documents of zod 4.6.6 and @sveltejs/kit 3.0.1 hold
+ * it in dist.attestations.provenance.predicateType. The document of postgres
+ * 3.4.9 has no provenance, and it has no dist.attestations.
  */
 export const PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1";
 

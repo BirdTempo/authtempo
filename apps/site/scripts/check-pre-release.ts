@@ -4,9 +4,9 @@
 // PRE_RELEASE_SENTENCES is in its file. Above 0.0.0, none is. So the version
 // pull request of the first release removes each one, or this check fails.
 // check-security-policy holds the texts of SECURITY.md on release/support.json
-// too, so a removed text with no support row also fails. A text that matches
-// PRE_RELEASE_PATTERN in a docs page or a listed file, and that the list
-// lacks, fails at every version: a new text of this kind joins the list.
+// too, so a removed text with no support row also fails. The check also reads
+// each docs page and each listed file for PRE_RELEASE_PATTERN. A match outside
+// the list fails at every version, so a new text of this kind joins the list.
 import type { PreReleaseSentence } from "../src/data/unpublished.ts";
 import type { Page } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
