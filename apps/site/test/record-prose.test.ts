@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { agentMarkdown } from "../scripts/lib/agent.ts";
 import { DOCS, REPO, SITE } from "../scripts/lib/paths.ts";
-import { prosePages, RUNBOOK_PATH, recordProsePages } from "../scripts/lib/prose.ts";
+import { GUIDE_PATHS, prosePages, RUNBOOK_PATH, recordProsePages } from "../scripts/lib/prose.ts";
 import { changelogMarkdown, readChangelogFiles } from "../src/data/changelogs.ts";
 import { REPO_ROOT, repositoryUrl } from "../src/data/repo.ts";
 import { CHANGELOG_EMPTY } from "../src/data/unpublished.ts";
@@ -18,6 +18,17 @@ describe("the record files in the prose pages", () => {
     expect(changesets.length).toBeGreaterThan(0);
     for (const path of [...changesets, RUNBOOK_PATH]) expect(paths, path).toContain(path);
     for (const c of readChangelogFiles(REPO_ROOT)) expect(paths).toContain(`${c.dir}/CHANGELOG.md`);
+  });
+
+  it("holds the guides of the repository (ruling 64 of plan 12j, Low 6)", () => {
+    // No check read these two files, and the release README held long sentences.
+    const pages = prosePages();
+    for (const path of GUIDE_PATHS) {
+      const page = pages.find((p) => p.path === path);
+      expect(page?.plain, path).toBe(true);
+      expect(page?.source, path).toBe(readFileSync(`${REPO}${path}`, "utf8"));
+    }
+    expect(GUIDE_PATHS).toEqual(["CONTRIBUTING.md", "scripts/release/README.md"]);
   });
 
   it("holds each package changelog, read from a tree that has them", () => {

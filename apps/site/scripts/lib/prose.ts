@@ -34,8 +34,26 @@ export function prosePages(
     demoProsePage(),
     ...policyProsePages(policy),
     ...recordProsePages(),
+    ...guideProsePages(),
     ...cliHelpPages(),
   ];
+}
+
+/**
+ * The guides of the repository for a person who works on it (ruling 64 of
+ * plan 12j, Low 6). Each one is Simplified Technical English, so the prose
+ * checks read it too. docs/security/advisories.md is a record with long old
+ * sentences that no edit may change, so it stays out.
+ */
+export const GUIDE_PATHS = ["CONTRIBUTING.md", "scripts/release/README.md"] as const;
+
+/** The guides of GUIDE_PATHS as plain pages. A missing guide throws, so the checks never pass on a file they did not read. */
+export function guideProsePages(root: string = REPO_ROOT): Page[] {
+  return GUIDE_PATHS.map((path) => ({
+    path,
+    source: readFileSync(join(root, path), "utf8"),
+    plain: true,
+  }));
 }
 
 /** The runbook of the owner (plan 12j Task 13). */

@@ -38,7 +38,7 @@ The rules (`check-changesets`, plan 12j Task 4):
 5. A changeset never names an unreleased package.
 6. An empty changeset (no package lines) needs the body line `No release: <reason>`.
 7. The body is Simplified Technical English. It names the change, not a plan number.
-8. A change to a root input needs a changeset that names each package of its row. A root input is a file that `prepare` or a build reads outside the package, such as `tsconfig.base.json`, `LICENSE`, or an example that the CLI renders. `ROOT_INPUTS` in `scripts/release/src/lib/root-inputs.ts` lists them.
+8. A change to a root input needs a changeset that names each package of its row. A root input is a file outside the package that `prepare` or a build reads. Examples are `tsconfig.base.json`, `LICENSE`, and an example that the CLI renders. `ROOT_INPUTS` in `scripts/release/src/lib/root-inputs.ts` lists them.
 
 ## The bump
 
