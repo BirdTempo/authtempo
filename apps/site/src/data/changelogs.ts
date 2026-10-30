@@ -55,6 +55,10 @@ export function changelogVersions(text: string): string[] {
  * the github-slugger form, which drops each dot: `0.1.0` gives `010`. A site
  * test holds this form to the real processor of renderMarkdown, and to the
  * link that `authtempo upgrade` prints for each crossed minor.
+ *
+ * The limit: two versions can give one id. 0.1.10 and 0.11.0 both give `0110`,
+ * and the processor gives the lower heading `0110-1`. check-changelog fails
+ * on two versions with one id, so such a release fails before it ships.
  */
 export function changelogAnchor(version: string): string {
   return version.toLowerCase().replace(/[^a-z0-9_-]/g, "");

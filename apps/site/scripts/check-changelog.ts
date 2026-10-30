@@ -2,7 +2,9 @@
 // page against the changelog files of the tree. With no file, the page states
 // the empty state. With files, the page has the anchor of each version of
 // core, which `authtempo upgrade` links for each crossed minor, and a link to
-// the file of each other package. The page always links the feed.
+// the file of each other package. The page always links the feed. Two
+// versions with one heading id fail, such as 0.1.10 and 0.11.0 (both 0110):
+// the link of `authtempo upgrade` can name only one of them.
 import {
   type ChangelogFile,
   CORE_PACKAGE,
@@ -47,15 +49,23 @@ export function checkChangelog(input: ChangelogInput): CheckReport {
   const core = changelogs.find((c) => c.pkg === CORE_PACKAGE);
   if (core === undefined)
     r.failures.push(`no changelog of ${CORE_PACKAGE}, and other packages have one`);
-  else
+  else {
+    const byAnchor = new Map<string, string[]>();
     for (const version of changelogVersions(core.text)) {
       r.counts.versions = (r.counts.versions ?? 0) + 1;
       const anchor = changelogAnchor(version);
+      byAnchor.set(anchor, [...(byAnchor.get(anchor) ?? []), version]);
       if (!page.includes(`id="${anchor}"`))
         r.failures.push(
           `the page has no anchor #${anchor} for the heading ${version} of ${CORE_PACKAGE}`,
         );
     }
+    for (const [anchor, versions] of byAnchor)
+      if (versions.length > 1)
+        r.failures.push(
+          `the versions ${versions.join(" and ")} of ${CORE_PACKAGE} give one heading id #${anchor}; the link of authtempo upgrade names only one of them`,
+        );
+  }
   for (const c of changelogs) {
     if (c.pkg === CORE_PACKAGE) continue;
     const href = changelogFileUrl(repoUrl, c.dir);
