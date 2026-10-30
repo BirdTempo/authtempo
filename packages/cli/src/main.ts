@@ -12,6 +12,7 @@ import { mcpCommand } from "./commands/mcp.js";
 import { migrateCommand } from "./commands/migrate.js";
 import { secretCommand } from "./commands/secret.js";
 import { sessionsCommand } from "./commands/sessions.js";
+import { upgradeCommand } from "./commands/upgrade.js";
 import { usersCommand } from "./commands/users.js";
 import { UsageError } from "./errors.js";
 import { ROOT_HELP } from "./help/authtempo.js";
@@ -36,6 +37,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   audit: auditCommand,
   "create-admin": createAdminCommand,
   generate: generateCommand,
+  upgrade: upgradeCommand,
 };
 
 /**

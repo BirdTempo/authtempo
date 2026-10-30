@@ -1,0 +1,9 @@
+{
+  "name": "better-auth-app",
+  "private": true,
+  "dependencies": {
+    "better-auth": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@authtempo/core": "0.1.0",
+    "@authtempo/adapter-postgres": "0.1.0"
+  }
+}

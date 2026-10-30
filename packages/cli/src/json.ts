@@ -437,6 +437,35 @@ export const CREATE_ADMIN_JSON_KEYS = {
 } as const satisfies Record<keyof CreateAdminJson, true>;
 
 /**
+ * `authtempo upgrade --json` (plan 12j Task 10, spec 33 item 10.8): the
+ * installed version and the target, each package entry that moved, the
+ * schema versions of core, each crossed minor with its "Breaking:" lines,
+ * and each deprecation whose removal falls in the range. `from` and `to`
+ * are null only in the document of a stop.
+ */
+export interface UpgradeJson extends RunKeys {
+  exit: 0 | 1 | 2;
+  from: string | null;
+  to: string | null;
+  /** One row per entry of package.json, by its key: the alias keeps the key `better-auth`. */
+  packages: { name: string; from: string; to: string }[];
+  /** Null when the app is current, or when a core manifest names no schema version. */
+  schema: { from: number; to: number; migrate: boolean } | null;
+  breaking: { minor: string; lines: string[] }[];
+  deprecations: { id: string; removeIn: string; docs: string }[];
+}
+export const UPGRADE_JSON_KEYS = {
+  exit: true,
+  stopped: true,
+  from: true,
+  to: true,
+  packages: true,
+  schema: true,
+  breaking: true,
+  deprecations: true,
+} as const satisfies Record<keyof UpgradeJson, true>;
+
+/**
  * The document of a usage error or a thrown stop under `--json`, for each
  * command and each subcommand (plan 11e deviation 19). The key is the key
  * of `helpOf`. Each other key holds its empty value: "", [], null, false,
@@ -530,6 +559,16 @@ export const STOP_JSON = {
     exit: 2,
     stopped: null,
   },
+  upgrade: {
+    exit: 2,
+    stopped: null,
+    from: null,
+    to: null,
+    packages: [],
+    schema: null,
+    breaking: [],
+    deprecations: [],
+  },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -559,4 +598,5 @@ export const STOP_JSON = {
   "audit list": AuditListJson;
   "create-admin": CreateAdminJson;
   generate: GenerateJson;
+  upgrade: UpgradeJson;
 };

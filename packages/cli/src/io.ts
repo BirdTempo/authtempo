@@ -45,7 +45,7 @@ export interface Io {
   /** Makes the folders on the way, and refuses a file that exists. */
   writeNew(path: string, text: string): void;
   writePrivate(path: string, text: string): void;
-  /** The one write over a file that exists; only authtempo mcp calls it. Mode 0644, or the old mode when it is narrower. */
+  /** The one write over a file that exists: authtempo mcp and authtempo upgrade call it. Mode 0644, or the old mode when it is narrower. */
   replaceFile(path: string, text: string): void;
   /**
    * A new file with mode 0600 (plan 11c2): `authtempo secret --out`. It

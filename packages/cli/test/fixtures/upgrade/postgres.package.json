@@ -1,0 +1,11 @@
+{
+  "name": "postgres-app",
+  "private": true,
+  "devDependencies": {
+    "@authtempo/cli": "0.1.0"
+  },
+  "dependencies": {
+    "@authtempo/core": "0.1.0",
+    "@authtempo/adapter-postgres": "0.1.0"
+  }
+}

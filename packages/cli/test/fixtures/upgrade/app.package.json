@@ -1,0 +1,19 @@
+{
+  "name": "my-app",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "4.12.4",
+    "@authtempo/core": "0.1.0",
+    "@authtempo/adapter-d1": "0.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.148.0",
+    "@authtempo/cli": "0.1.0"
+  }
+}

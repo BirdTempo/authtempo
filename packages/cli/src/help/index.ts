@@ -12,6 +12,7 @@ import { MIGRATE_HELP } from "./migrate.js";
 import { SECRET_HELP, SECRET_REWRAP_HELP, SECRET_STATUS_HELP } from "./secret.js";
 import { SESSIONS_END_ALL_HELP, SESSIONS_END_HELP, SESSIONS_HELP } from "./sessions.js";
 import type { HelpText } from "./types.js";
+import { UPGRADE_HELP } from "./upgrade.js";
 import {
   USERS_BAN_HELP,
   USERS_CREATE_HELP,
@@ -62,4 +63,5 @@ export const HELP: readonly HelpText[] = [
   AUDIT_LIST_HELP,
   CREATE_ADMIN_HELP,
   GENERATE_HELP,
+  UPGRADE_HELP,
 ];

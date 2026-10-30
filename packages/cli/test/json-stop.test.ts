@@ -25,6 +25,7 @@ import {
   SESSIONS_END_ALL_JSON_KEYS,
   SESSIONS_END_JSON_KEYS,
   STOP_JSON,
+  UPGRADE_JSON_KEYS,
   USER_CREATE_JSON_KEYS,
   USER_DELETE_JSON_KEYS,
   USER_JSON_KEYS,
@@ -543,6 +544,7 @@ describe("STOP_JSON", () => {
       "audit list": AUDIT_LIST_JSON_KEYS,
       "create-admin": CREATE_ADMIN_JSON_KEYS,
       generate: GENERATE_JSON_KEYS,
+      upgrade: UPGRADE_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
       [
@@ -574,6 +576,7 @@ describe("STOP_JSON", () => {
         "audit list",
         "create-admin",
         "generate",
+        "upgrade",
       ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {

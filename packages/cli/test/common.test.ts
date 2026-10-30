@@ -34,6 +34,7 @@ const NAMES = [
   "audit",
   "create-admin",
   "generate",
+  "upgrade",
 ];
 
 /**
@@ -56,11 +57,15 @@ const NEEDS_ARGUMENT = [
   "generate",
 ] as const;
 
-/** The commands that run with no argument (ruling 5): `secret` prints a value, and `info` prints a report. */
-const NO_ARGUMENT = ["secret", "info"] as const;
+/**
+ * The commands that run with no argument (ruling 5): `secret` prints a value,
+ * `info` prints a report, and `upgrade` reads the package.json of the
+ * current folder (plan 12j Task 10).
+ */
+const NO_ARGUMENT = ["secret", "info", "upgrade"] as const;
 
 describe("the common rules (spec 19)", () => {
-  it("has the thirteen commands in the order of the root help", () => {
+  it("has the fourteen commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 
