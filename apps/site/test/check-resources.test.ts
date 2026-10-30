@@ -1,13 +1,17 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkResources, type ResourcesInput } from "../scripts/check-resources.ts";
-import { DOCS } from "../scripts/lib/paths.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
 import { RESOURCES_EMPTY } from "../src/data/unpublished.ts";
 
 const URL = "https://github.com/BirdTempo/authtempo";
-const source = readFileSync(`${DOCS}docs/resources.md`, "utf8");
 const CONTRIBUTE = `- [CONTRIBUTING.md](${URL}/blob/main/CONTRIBUTING.md)\n- [SECURITY.md](${URL}/blob/main/SECURITY.md)\n`;
+/**
+ * The page before the first release, for the probes. The version branch
+ * replaces the empty state of the real page with the rows, so a probe on it
+ * fails there (ruling 65 of plan 12j, C1). The site check run holds the real
+ * page at the version of core.
+ */
+const source = `## Packages, examples, and the demo\n\n${RESOURCES_EMPTY}\n\n## Contribute\n\n${CONTRIBUTE}`;
 /** A page of the first release: each released package, each example, and the demo. */
 const RELEASE_PAGE = [
   "| [`@authtempo/core`](https://www.npmjs.com/package/@authtempo/core) |",

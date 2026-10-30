@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   checkSecurityPolicy,
@@ -6,13 +7,21 @@ import {
   type SupportRow,
 } from "../scripts/check-security-policy.ts";
 import { readRepoFile } from "../scripts/lib/load.ts";
+import { SITE as SITE_DIR } from "../scripts/lib/paths.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
 import { SITE } from "../src/data/site.ts";
+import { CHANNELS_CLOSED, NO_RELEASE_YET } from "../src/data/unpublished.ts";
 
 // The real files of the tree: SECURITY.md, release/support.json, and
 // release/repository.json (plan 12j Task 12, spec 33 item 7).
 const real = readPolicyInput(readRepoFile);
-const TEXT = real.text ?? "";
+const core = JSON.parse(readRepoFile("packages/core/package.json") ?? "{}") as { version: string };
+/**
+ * SECURITY.md before the first release: the base of each probe. The version
+ * branch rewrites the real file, so a probe on it fails there (ruling 65 of
+ * plan 12j, C1). The first test holds the fixture to the real file at 0.0.0.
+ */
+const TEXT = readFileSync(`${SITE_DIR}test/fixtures/site/pre-release/SECURITY.md`, "utf8");
 const REPOSITORY = {
   url: "https://github.com/BirdTempo/authtempo",
   owner: "BirdTempo",
@@ -24,13 +33,13 @@ const ORIGIN = "https://authtempo.com";
 const check = (text: string, rows: readonly SupportRow[] = []) =>
   checkSecurityPolicy({ text, rows, repository: REPOSITORY, origin: ORIGIN });
 
-/** The real text with one part replaced. Each break replaces one whole part, as a person would. */
+/** The fixture text with one part replaced. Each break replaces one whole part, as a person would. */
 const textWith = (from: string, to: string) => {
   expect(TEXT).toContain(from);
   return TEXT.replace(from, to);
 };
 
-/** The text of one `## ` section of the real file, with its heading. */
+/** The text of one `## ` section of the fixture, with its heading. */
 const sectionText = (heading: string) => {
   const start = TEXT.indexOf(`## ${heading}\n`);
   expect(start).toBeGreaterThan(-1);
@@ -39,7 +48,16 @@ const sectionText = (heading: string) => {
 };
 
 describe("check-security-policy", () => {
-  it("passes the real file", () => {
+  it("holds the fixture of the probes to SECURITY.md before the first release", () => {
+    for (const text of [NO_RELEASE_YET, CHANNELS_CLOSED]) expect(TEXT).toContain(text);
+    expect(check(TEXT).failures).toEqual([]);
+    // At 0.0.0 the fixture is the real file. Above it, the real file has the published texts.
+    if (core.version === "0.0.0") expect(TEXT).toBe(real.text);
+    else
+      for (const text of [NO_RELEASE_YET, CHANNELS_CLOSED]) expect(real.text).not.toContain(text);
+  });
+
+  it("passes the real file at the rows of release/support.json", () => {
     expect(SECURITY_SECTIONS).toEqual([
       "Supported versions",
       "How to report",
@@ -51,16 +69,17 @@ describe("check-security-policy", () => {
     ]);
     expect(real.failures).toEqual([]);
     expect(real.repository).toEqual(REPOSITORY);
-    expect(real.rows).toEqual([]);
+    // No row before the first release, and one row or more after it.
+    expect(real.rows.length === 0).toBe(core.version === "0.0.0");
     const r = checkSecurityPolicy({
-      text: TEXT,
+      text: real.text ?? "",
       rows: real.rows,
       repository: real.repository,
       origin: SITE.origin,
     });
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-security-policy: PASS sections=7 rows=0 channels=2 failures=0",
+      `check-security-policy: PASS sections=7 rows=${real.rows.length} channels=2 failures=0`,
     );
   });
 
@@ -267,7 +286,7 @@ describe("check-security-policy", () => {
         repository: REPOSITORY,
         origin: "https://auth.example.org",
       });
-    // The real file names the mailbox of authtempo.com, so another origin fails it.
+    // The fixture names the mailbox of authtempo.com, so another origin fails it.
     expect(other(TEXT).failures).toEqual([
       "the second channel is mailto:security@authtempo.com; it must be mailto:security@auth.example.org, at the host of https://auth.example.org",
     ]);

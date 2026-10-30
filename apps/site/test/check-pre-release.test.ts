@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { checkPreRelease, type PreReleaseInput } from "../scripts/check-pre-release.ts";
@@ -5,8 +6,10 @@ import {
   checkSecurityPolicy,
   readPolicyInput,
   type SupportRow,
+  supportTable,
 } from "../scripts/check-security-policy.ts";
 import { docsPages, readRepoFile } from "../scripts/lib/load.ts";
+import { SITE as SITE_DIR } from "../scripts/lib/paths.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
 import { SITE } from "../src/data/site.ts";
 import {
@@ -28,6 +31,19 @@ function realTexts(): Map<string, string> {
     if (text === null) throw new Error(`${file} does not exist`);
     texts.set(file, text);
   }
+  return texts;
+}
+
+/**
+ * A tree before the first release, for the probes: each listed file holds its
+ * listed texts, one paragraph each, and nothing else. The version branch
+ * removes each text from the real tree, so a probe on it fails there (ruling
+ * 65 of plan 12j, C1). The first test holds the real tree at its version.
+ */
+function fixtureTexts(): Map<string, string> {
+  const texts = new Map<string, string>();
+  for (const { file, sentence } of PRE_RELEASE_SENTENCES)
+    texts.set(file, `${texts.get(file) ?? "# A fixture\n"}\n${sentence}\n`);
   return texts;
 }
 
@@ -60,18 +76,25 @@ const failures = (input: PreReleaseInput) => checkPreRelease(input).failures;
 
 describe("check-pre-release", () => {
   it("passes the real tree at the version of core", () => {
-    expect(core.version).toBe("0.0.0");
     const r = checkPreRelease(inputOf(core.version, realTexts()));
     expect(r.failures).toEqual([]);
+    // Each listed text is present at 0.0.0, and none is above it.
+    const present = core.version === "0.0.0" ? PRE_RELEASE_SENTENCES.length : 0;
     expect(summaryLine(r)).toMatch(
       new RegExp(
-        `^check-pre-release: PASS listed=${PRE_RELEASE_SENTENCES.length} files=\\d+ pages=\\d+ present=${PRE_RELEASE_SENTENCES.length} exempt=${PRE_RELEASE_EXEMPT.length} failures=0$`,
+        `^check-pre-release: PASS listed=${PRE_RELEASE_SENTENCES.length} files=\\d+ pages=\\d+ present=${present} exempt=${PRE_RELEASE_EXEMPT.length} failures=0$`,
       ),
     );
   });
 
+  it("passes the fixture tree at 0.0.0, and fails each of its texts above 0.0.0", () => {
+    const texts = fixtureTexts();
+    expect(failures(inputOf("0.0.0", texts))).toEqual([]);
+    expect(failures(inputOf("0.1.0", texts))).toHaveLength(PRE_RELEASE_SENTENCES.length);
+  });
+
   it("fails each listed text that its file lacks at 0.0.0, one probe per text", () => {
-    const texts = realTexts();
+    const texts = fixtureTexts();
     for (const e of PRE_RELEASE_SENTENCES) {
       const gone = new Map(texts).set(e.file, (texts.get(e.file) ?? "").replace(e.sentence, ""));
       expect(failures(inputOf("0.0.0", gone)), e.sentence).toEqual([
@@ -81,7 +104,7 @@ describe("check-pre-release", () => {
   });
 
   it("fails each listed text that its file still holds above 0.0.0, one probe per text", () => {
-    const texts = realTexts();
+    const texts = fixtureTexts();
     expect(failures(inputOf("0.1.0", without(texts)))).toEqual([]);
     for (const e of PRE_RELEASE_SENTENCES)
       expect(failures(inputOf("0.1.0", without(texts, e))), e.sentence).toEqual([
@@ -91,7 +114,7 @@ describe("check-pre-release", () => {
   });
 
   it("fails a text of the pattern that the list lacks, in any case and at every version", () => {
-    const texts = realTexts();
+    const texts = fixtureTexts();
     const page = `${DOCS_DIR}docs/resources.md`;
     const added = new Map(texts).set(
       page,
@@ -111,7 +134,7 @@ describe("check-pre-release", () => {
 
   // Ruling 58 of plan 12j, item 5: the words of the README install line and of the owner check.
   it("fails a text with before or after the first release that the list lacks", () => {
-    const texts = realTexts();
+    const texts = fixtureTexts();
     const page = `${DOCS_DIR}docs/resources.md`;
     for (const words of ["Before the first release", "AFTER THE FIRST RELEASE"]) {
       const added = new Map(texts).set(page, `${texts.get(page)}\n${words}, read the repo.\n`);
@@ -123,7 +146,7 @@ describe("check-pre-release", () => {
   });
 
   it("passes a text of PRE_RELEASE_EXEMPT at every version, and holds each entry", () => {
-    const texts = realTexts();
+    const texts = fixtureTexts();
     const page = `${DOCS_DIR}docs/resources.md`;
     const text = "The upgrade command works after the first release.";
     const added = new Map(texts).set(page, `${texts.get(page)}\n${text}\n`);
@@ -159,7 +182,7 @@ describe("check-pre-release", () => {
   it("fails a listed file that does not exist, a text listed twice, and an empty read", () => {
     const [first] = PRE_RELEASE_SENTENCES;
     if (first === undefined) throw new Error("PRE_RELEASE_SENTENCES is empty");
-    const input = inputOf("0.0.0", realTexts());
+    const input = inputOf("0.0.0", fixtureTexts());
     expect(
       failures({
         ...input,
@@ -223,12 +246,18 @@ describe("the quotes of docs/release/RUNBOOK.md", () => {
     expect(row?.minor).toBe(first);
     expect(row?.status).toBe("current");
     expect(row?.schemaFrom).toEqual([SCHEMA_VERSION]);
+    // The table is the form that the rehearsal writes from the row (ruling 65 of plan 12j).
+    expect(table.body.trimEnd()).toBe(supportTable(rows));
     // SECURITY.md after the edits: the table in the place of the first text, and no other text.
+    // The base is SECURITY.md before the first release, a fixture (ruling 65 of plan 12j, C1).
     const [support, ...others] = PRE_RELEASE_SENTENCES.filter((e) => e.file === "SECURITY.md");
     if (support === undefined)
       throw new Error("PRE_RELEASE_SENTENCES names no text of SECURITY.md");
-    const policy = readPolicyInput(readRepoFile);
-    let text = (policy.text ?? "").replace(support.sentence, table.body.trimEnd());
+    const policy = {
+      ...readPolicyInput(readRepoFile),
+      text: readFileSync(`${SITE_DIR}test/fixtures/site/pre-release/SECURITY.md`, "utf8"),
+    };
+    let text = policy.text.replace(support.sentence, table.body.trimEnd());
     for (const e of others) text = text.replace(`${e.sentence}\n\n`, "");
     const check = (t: string, r: readonly SupportRow[]) =>
       checkSecurityPolicy({ text: t, rows: r, repository: policy.repository, origin: SITE.origin })
@@ -236,6 +265,6 @@ describe("the quotes of docs/release/RUNBOOK.md", () => {
     expect(check(text, rows)).toEqual([]);
     // The quotes are evidence only while each half fails alone.
     expect(check(text, [])).not.toEqual([]);
-    expect(check(policy.text ?? "", rows)).not.toEqual([]);
+    expect(check(policy.text, rows)).not.toEqual([]);
   });
 });

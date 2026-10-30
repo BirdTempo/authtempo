@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FEED_GLOBS, feedSources } from "../scripts/lib/feed.ts";
@@ -116,7 +116,15 @@ describe("the inputs of the site build in turbo.json (plan 11b Task 5, rulings 2
     // The readers read only the files of FEED_GLOBS, so each glob must be an input.
     const globs = Object.values(FEED_GLOBS).map((g) => `$TURBO_ROOT$/${g}`);
     expect(globs.filter((g) => !inputs.includes(g))).toEqual([]);
-    expect(feedRead.filter((p) => p.endsWith("CHANGELOG.md")).length).toBe(2);
+    // The fixture tree holds two changelogs. This tree holds one for each package with
+    // one: none at 0.0.0, and one per released package after changeset version
+    // (ruling 65 of plan 12j, C1).
+    const changelogs = (paths: string[]) => paths.filter((p) => p.endsWith("CHANGELOG.md"));
+    expect(changelogs(feedSources(`${SITE}test/fixtures/site/changelogs`))).toHaveLength(2);
+    const onDisk = readdirSync(`${REPO}packages`).filter((d) =>
+      existsSync(`${REPO}packages/${d}/CHANGELOG.md`),
+    );
+    expect(changelogs(feedSources(REPO_ROOT))).toHaveLength(onDisk.length);
     expect(feedSources(REPO_ROOT).length).toBeGreaterThan(0);
     const missed = feedRead.filter((p) => !rootPatterns.some((g) => matches(p, g)));
     expect(missed).toEqual([]);

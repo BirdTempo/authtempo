@@ -31,12 +31,38 @@ describe("the record files in the prose pages", () => {
   });
 
   it("blanks the frontmatter of a changeset and keeps its line numbers", () => {
-    const page = recordProsePages().find((p) => p.path === ".changeset/cli-upgrade.md");
-    if (page === undefined) throw new Error("no page for .changeset/cli-upgrade.md");
-    const lines = page.source.split("\n");
-    expect(lines.slice(0, 3)).toEqual(["", "", ""]);
-    expect(lines[4]).toMatch(/^Add `authtempo upgrade`/);
-    expect(page.plain).toBe(true);
+    // A fixture tree, since the version branch deletes each changeset (ruling 65 of plan 12j, C1).
+    const [page, ...more] = recordProsePages(`${SITE}test/fixtures/site/changesets`);
+    expect(more).toEqual([]);
+    expect(page?.path).toBe(".changeset/fixture-change.md");
+    expect(page?.source.split("\n")).toEqual([
+      "",
+      "",
+      "",
+      "",
+      "",
+      "A fixture change of two packages.",
+      "",
+    ]);
+    expect(page?.plain).toBe(true);
+  });
+
+  it("reads each changeset present in the tree with the same blank form", () => {
+    const pages = recordProsePages();
+    const present = readdirSync(`${REPO}.changeset`).filter(
+      (n) => n.endsWith(".md") && n !== "README.md",
+    );
+    for (const name of present) {
+      const raw = readFileSync(`${REPO}.changeset/${name}`, "utf8").split("\n");
+      const end = raw.indexOf("---", 1);
+      expect(raw[0], name).toBe("---");
+      expect(end, name).toBeGreaterThan(0);
+      const page = pages.find((p) => p.path === `.changeset/${name}`);
+      expect(page?.source.split("\n"), name).toEqual([
+        ...raw.slice(0, end + 1).map(() => ""),
+        ...raw.slice(end + 1),
+      ]);
+    }
   });
 });
 

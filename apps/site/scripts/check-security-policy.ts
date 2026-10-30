@@ -52,6 +52,21 @@ const TIMES: readonly {
 /** Text that only a draft holds. A `<` is a template part such as `<owner>`. */
 const PLACEHOLDERS = ["example.com", "TODO", "<"];
 
+/** The header row and the separator row of the support table of SECURITY.md. */
+export const SUPPORT_TABLE_HEAD = [
+  "| Minor | Status | Released | Security fixes until | Schema versions |",
+  "| --- | --- | --- | --- | --- |",
+] as const;
+
+/**
+ * The support table of SECURITY.md for the rows of release/support.json: the
+ * head and one line for each row. The rehearsal of the release package writes
+ * it, and a test holds the quote of the runbook to it (ruling 65 of plan 12j).
+ */
+export function supportTable(rows: readonly SupportRow[]): string {
+  return [...SUPPORT_TABLE_HEAD, ...tableLines(rows)].join("\n");
+}
+
 /** The table of release/support.json, one line each, as SECURITY.md holds it. */
 function tableLines(rows: readonly SupportRow[]): string[] {
   return rows.map(
