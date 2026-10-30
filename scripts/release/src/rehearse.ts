@@ -294,9 +294,11 @@ export function rehearsalLine(r: RehearsalReport): string {
 
 /**
  * The failure lines of a lint run, or none for a clean run. Biome prints each
- * diagnostic on stderr under a head such as `apps/x.ts:2:3 lint/suspicious/noDebugger`,
- * and the counts on stdout, such as `Found 1 error.` (Biome 2.5.15, read
- * 2026-10-31). A count of errors or warnings fails the run, also at exit 0.
+ * diagnostic on stderr under a head of its place and category and a line of
+ * "━", such as `apps/x.ts:2:3 lint/suspicious/noDebugger  FIXABLE  ━━━` or
+ * `apps/x.ts format ━━━`. It prints the counts on stdout, such as `Found 1
+ * error.` (Biome 2.5.15, read 2026-10-31). A count of errors or warnings
+ * fails the run, also at exit 0. The last head, `check ━━━`, names no place.
  */
 export function lintFailures(r: { status: number; stdout: string; stderr: string }): string[] {
   const lines = stripColours(`${r.stdout}\n${r.stderr}`).split(/\r?\n/);
@@ -305,7 +307,7 @@ export function lintFailures(r: { status: number; stdout: string; stderr: string
     .filter((l) => /^Found \d+ (errors?|warnings?)\.$/.test(l));
   if (r.status === 0 && found.length === 0) return [];
   const heads = lines.flatMap((l) => {
-    const m = /^(\S+:\d+:\d+) (\S+)/.exec(l);
+    const m = /^(\S+) ([a-z][\w/]*)(?:\s+FIXABLE)?\s+━/.exec(l);
     return m === null ? [] : [`lint: ${m[1]} ${m[2]}`];
   });
   const counts = found.length > 0 ? found.join(" ") : "no count line";

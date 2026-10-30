@@ -426,7 +426,8 @@ describe("rehearse", () => {
 
   it("stops at a lint fault with its place and rule, and starts no server", async () => {
     const { tmp, source } = folders();
-    // The output of Biome 2.5.15 on one error and one warning (2026-10-31), cut to the heads.
+    // The output of Biome 2.5.15 on a warning, a lint error, a format fault,
+    // and an import order fault (2026-10-31), cut to the heads and one line each.
     const stderr = [
       "probe/warn.ts:2:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━",
       "",
@@ -434,22 +435,31 @@ describe("rehearse", () => {
       "probe/err.ts:2:3 lint/suspicious/noDebugger  FIXABLE  ━━━━━━━━",
       "",
       "  × This is an unexpected use of the debugger statement.",
+      "probe/fmt.ts format ━━━━━━━━",
+      "",
+      "  × Formatter would have printed the following content:",
+      "probe/imp.ts:1:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━",
+      "",
+      "  × The imports and exports are not sorted.",
       "check ━━━━━━━━",
       "",
       "  × Some errors were emitted while running checks.",
     ].join("\n");
-    const stdout = "Checked 2 files in 4ms. No fixes applied.\nFound 1 error.\nFound 1 warning.\n";
+    const stdout =
+      "Checked 4 files in 17ms. No fixes applied.\nFound 3 errors.\nFound 1 warning.\n";
     const { calls, exec } = fakeExec(source, (line) =>
       line === COPY_LINT.join(" ") ? { status: 1, stdout, stderr } : undefined,
     );
     const r = await rehearse({ root: source, exec, tmp });
     expect(r.stopped).toBe("lint");
     expect(r.failures).toEqual([
-      "lint: pnpm lint --error-on-warnings exited 1: Found 1 error. Found 1 warning.",
+      "lint: pnpm lint --error-on-warnings exited 1: Found 3 errors. Found 1 warning.",
       "lint: probe/warn.ts:2:9 lint/correctness/noUnusedVariables",
       "lint: probe/err.ts:2:3 lint/suspicious/noDebugger",
+      "lint: probe/fmt.ts format",
+      "lint: probe/imp.ts:1:1 assist/source/organizeImports",
     ]);
-    expect(rehearsalLine(r)).toMatch(/ lint=FAIL release-check=not-run failures=3$/);
+    expect(rehearsalLine(r)).toMatch(/ lint=FAIL release-check=not-run failures=5$/);
     expect(calls.at(-1)).toBe(COPY_LINT.join(" "));
     expect(calls.indexOf(COPY_FORMAT.join(" "))).toBe(calls.length - 2);
     expect(r.notes).toContain("not run: release-check, after the failed lint");
