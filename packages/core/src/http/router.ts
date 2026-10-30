@@ -5,7 +5,7 @@ import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
-import { BodyTooLarge } from "./body-cap.js";
+import { BodyTooLarge, bindBodyRoute } from "./body-cap.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
@@ -503,7 +503,7 @@ export function createRouter(
     // The one error boundary of a request (plan 11g). A throw of the handler,
     // of the bag write, of the cookie move, of the CORS write, or of the
     // trace header answers `internal` with one log line. A `BodyTooLarge` of a
-    // body read answers 413 `body_too_large` (ruling 43 of the 12j lane). The bag write of
+    // body read answers 413 `body_too_large` (rulings 43 and 46 of the 12j lane). The bag write of
     // multi-session (plan 12i Task 11) runs after every handler, so no
     // sign-in route can skip it.
     try {
@@ -518,7 +518,7 @@ export function createRouter(
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
-      // A body past REQUEST_BODY_MAX is the client's fault, not an error of core: 413, no log line.
+      // A body past the cap of its route is the client's fault, not an error of core: 413, no log line.
       if (e instanceof BodyTooLarge) {
         const res = routerError(BODY_CODE);
         return withTrace(trusted ? cors(res, origin) : res, traceId);
@@ -587,6 +587,8 @@ export function createRouter(
     // The anonymous step (plan 12i Task 6): beside the impersonation step, in its form.
     const anonymous = match.route.key && (await anonymousRefusal(scoped, request, match.route.key));
     if (anonymous) return anonymous;
+    // A body read of the handler takes the cap of this route (ruling 46 of the 12j lane).
+    bindBodyRoute(request, match.route.key);
     return match.route.handler({
       request,
       url,

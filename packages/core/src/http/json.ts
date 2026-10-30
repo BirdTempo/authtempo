@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { fail, ok, type Result } from "../result.js";
-import { readBodyText } from "./body-cap.js";
+import { parseBodyJson, readBodyText } from "./body-cap.js";
 import { holdsBadText } from "./body-text.js";
 
 /** The headers of every JSON answer of core. A route that writes its own JSON text reads them too. */
@@ -28,18 +28,14 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 }
 
 /**
- * The JSON body by its schema. The read stops at `REQUEST_BODY_MAX` and
- * throws `BodyTooLarge` there, before the parse (ruling 43 of the 12j lane).
+ * The JSON body by its schema. The read stops at the cap of the route and
+ * throws `BodyTooLarge` there, before the parse (rulings 43 and 46 of the
+ * 12j lane). A body past the depth or the item limit answers
+ * `invalid_body` before the parse.
  */
 export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promise<Result<T>> {
-  const text = await readBodyText(request);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return fail("invalid_body");
-  }
-  if (holdsBadText(raw)) return fail("invalid_body");
+  const raw = parseBodyJson(await readBodyText(request));
+  if (raw === undefined || holdsBadText(raw)) return fail("invalid_body");
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
@@ -49,22 +45,16 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
  * body reads as `{}`, so a caller of the route before the body existed
  * keeps working (plan 12i). The passkey options, the impersonation stop,
  * and the rewrap read it. A NUL or a lone surrogate answers `invalid_body`,
- * as in readJson. The read stops at `REQUEST_BODY_MAX`, as in readJson.
+ * as in readJson. The read stops at the cap of the route, and the depth
+ * and the item limits apply, as in readJson.
  */
 export async function readOptionalJson<T>(
   request: Request,
   schema: z.ZodType<T>,
 ): Promise<Result<T>> {
   const text = await readBodyText(request);
-  let raw: unknown = {};
-  if (text !== "") {
-    try {
-      raw = JSON.parse(text);
-    } catch {
-      return fail("invalid_body");
-    }
-  }
-  if (holdsBadText(raw)) return fail("invalid_body");
+  const raw = text === "" ? {} : parseBodyJson(text);
+  if (raw === undefined || holdsBadText(raw)) return fail("invalid_body");
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }

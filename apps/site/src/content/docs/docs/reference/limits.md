@@ -194,7 +194,9 @@ These counts live in their rows, so they hold under every limiter.
 | Members of a group that one SCIM request takes away | 1000 | SCIM 400 `invalidValue` |
 | Members whose role one rename or delete of a mapped SCIM group computes | 1000 | SCIM 400 `invalidValue` |
 | Results of one SCIM list page | 100 | The page ends there |
-| One request body of any other route | 8388608 bytes, by a stream read that stops at the cap. The cap is derived from the largest valid body of the route contracts | 413 `body_too_large` |
+| One request body of any other route | 65536 bytes, 262144 for `POST /social/apple/callback`, and 8388608 for the two SSO connection writes, by a stream read that stops at the cap. Each cap is the next power of two above the largest valid body of its route contract | 413 `body_too_large` |
+| Nesting of one JSON request body | 16 levels of `[` and `{` | 400 `invalid_body` |
+| Items of one JSON request body | 4096 of `[`, `{`, and `,` outside its strings | 400 `invalid_body` |
 | One SCIM request body | 1 MB | SCIM 413 |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |

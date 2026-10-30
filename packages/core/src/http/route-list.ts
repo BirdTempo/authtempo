@@ -2975,8 +2975,8 @@ export type RouterCode = (typeof ROUTER_CODES)[number];
 export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
 
 /**
- * The code that the router answers for a request body past
- * `REQUEST_BODY_MAX` (ruling 43 of the 12j lane). Each route with a body in
+ * The code that the router answers for a request body past the cap of its
+ * route (`bodyCapOf`, rulings 43 and 46 of the 12j lane). Each route with a body in
  * its contract can answer it. No entry declares it, and the OpenAPI
  * document states it in its rules, as it states `HOST_CODE`. The SCIM
  * routes answer their own SCIM 413.

@@ -9,7 +9,7 @@ import { readJson } from "./json.js";
  * `application/x-www-form-urlencoded`; a script posts JSON. A repeated form
  * field is a client bug and fails, so a schema never sees a silent first
  * or last value. Any other content type fails `invalid_body`. Each read
- * stops at `REQUEST_BODY_MAX` (ruling 43 of the 12j lane).
+ * stops at the cap of the route (rulings 43 and 46 of the 12j lane).
  */
 export async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<Result<T>> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();

@@ -500,8 +500,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="body_too_large"><code>body_too_large</code> 413</h3>
 
-- **Meaning:** The request body has more than 8388608 bytes. Core stopped the read at the cap, so no handler parsed the body. A false or absent `content-length` does not change the count. The router answers it for every route that reads a body.
-- **Do:** Send a smaller body. No valid body of a core route comes near the cap, so a client that gets this code sends a wrong body.
+- **Meaning:** The request body is longer than the cap of its route. Core stopped the read at the cap, so no handler parsed the body. A false or absent `content-length` does not change the count. The cap is 65536 bytes, 262144 bytes for `POST /social/apple/callback`, and 8388608 bytes for the two SSO connection writes. The router answers it for every route that reads a body.
+- **Do:** Send a smaller body. Each cap is the next power of two above the largest valid body of its route, so a client that gets this code sends a wrong body.
 
 | Routes |
 | --- |

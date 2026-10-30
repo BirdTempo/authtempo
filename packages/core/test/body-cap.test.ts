@@ -1,127 +1,40 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createAuth } from "../src/create-auth.js";
+import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
 import { readBody } from "../src/http/body.js";
-import { BodyTooLarge, REQUEST_BODY_MAX } from "../src/http/body-cap.js";
-import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
-import type { RouteContract } from "../src/http/contract/types.js";
+import {
+  BODY_CAP_FLOOR,
+  BODY_CAPS,
+  BODY_DEPTH_MAX,
+  BODY_ITEMS_MAX,
+  BodyTooLarge,
+  bodyCapOf,
+  jsonShapeFits,
+  REQUEST_BODY_MAX,
+} from "../src/http/body-cap.js";
 import { readJson, readOptionalJson } from "../src/http/json.js";
+import type { RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { newId } from "../src/primitives/ids.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { largestBodies } from "./body-limits.js";
 import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
 
 /**
- * The request body cap of core (ruling 43 of the 12j lane). The first test
- * computes the derivation that the comment of `REQUEST_BODY_MAX` states. The
- * other tests send a body over the cap, at the cap, with a false
- * `content-length`, and with none, to the readers and through the router.
+ * The request body limits of core (rulings 43 and 46 of the 12j lane). The
+ * first tests compute the derivation that the comments of `body-cap.ts`
+ * state. The other tests send a body over the cap, at the cap, with a false
+ * `content-length`, and with none, to the readers and through the router,
+ * and a body past the depth and the item limits.
  */
 
-/** UTF-8 bytes of one UTF-16 unit of a JSON string: 3 for a character that is not a control character. */
-const JSON_UNIT = 3;
-/** Bytes of one UTF-16 unit of a form value: `%XX%XX%XX` for a character of 3 UTF-8 bytes. */
-const FORM_UNIT = 9;
-/** Digits, sign, point, and exponent of the longest JSON number that `JSON.stringify` writes. */
-const NUMBER_MAX = 24;
-
-interface ZodNode {
-  readonly _zod: { readonly def: Record<string, unknown> & { type: string } };
-}
-
-/** The `max_length` or `length_equals` check of a string or an array, or null for none. */
-function maxOf(def: ZodNode["_zod"]["def"]): number | null {
-  let max: number | null = null;
-  for (const check of (def.checks ?? []) as ZodNode[]) {
-    const d = check._zod.def as { check?: string; maximum?: number; length?: number };
-    if (d.check === "max_length" && d.maximum !== undefined)
-      max = Math.min(max ?? d.maximum, d.maximum);
-    if (d.check === "length_equals" && d.length !== undefined) max = d.length;
-  }
-  return max;
-}
-
-/**
- * The most bytes of a value of `node` as compact JSON, with `unit` bytes for
- * each UTF-16 unit of a string. A node that no schema bounds (a string or an
- * array with no max, a record, an unknown, an open object) adds its least
- * size and its path to `open`: the cap is its bound.
- */
-function largest(node: ZodNode, path: string, unit: number, open: string[]): number {
-  const def = node._zod.def;
-  const inner = (key: string) => def[key] as ZodNode;
-  switch (def.type) {
-    case "object": {
-      let n = 1;
-      for (const [key, value] of Object.entries(def.shape as Record<string, ZodNode>))
-        n += JSON.stringify(key).length + 1 + largest(value, `${path}.${key}`, unit, open) + 1;
-      const rest = def.catchall as ZodNode | undefined;
-      if (rest !== undefined && rest._zod.def.type !== "never") open.push(`${path}.*`);
-      return n;
-    }
-    case "string": {
-      const max = maxOf(def);
-      if (max === null) open.push(path);
-      return 2 + (max ?? 0) * unit;
-    }
-    case "array": {
-      const max = maxOf(def);
-      const element = largest(inner("element"), `${path}[]`, unit, open);
-      if (max === null) open.push(`${path}[]`);
-      return max === null ? 2 : 1 + max * (element + 1);
-    }
-    case "record":
-      open.push(`${path}{}`);
-      return 2;
-    case "optional":
-    case "nullable":
-    case "default":
-    case "prefault":
-    case "readonly":
-    case "catch":
-    case "nonoptional":
-      return Math.max(
-        largest(inner("innerType"), path, unit, open),
-        def.type === "nullable" ? 4 : 0,
-      );
-    case "pipe":
-      return largest(inner("in"), path, unit, open);
-    case "union":
-      return Math.max(...(def.options as ZodNode[]).map((o) => largest(o, path, unit, open)));
-    case "enum":
-      return Math.max(...Object.values(def.entries as object).map((v) => JSON.stringify(v).length));
-    case "literal":
-      return Math.max(...(def.values as unknown[]).map((v) => JSON.stringify(v).length));
-    case "boolean":
-      return 5;
-    case "null":
-      return 4;
-    case "number":
-    case "int":
-      return NUMBER_MAX;
-    default:
-      open.push(`${path}: ${def.type}`);
-      return 0;
-  }
-}
-
-/** The largest valid body of each route with a body, largest first. */
-function largestBodies(): { key: string; bytes: number }[] {
-  const contract: Record<string, RouteContract> = ROUTE_CONTRACT;
-  const rows: { key: string; bytes: number }[] = [];
-  for (const [key, c] of Object.entries(contract)) {
-    if (c.body === undefined) continue;
-    const schema = c.body.schema as unknown as ZodNode;
-    const json = c.body.media.includes("json") ? largest(schema, key, JSON_UNIT, []) : 0;
-    // The JSON walk with the form unit: an upper bound of the form, which has no quotes or braces.
-    const form = c.body.media.includes("form") ? largest(schema, key, FORM_UNIT, []) : 0;
-    rows.push({ key, bytes: Math.max(json, form) });
-  }
-  return rows.sort((a, b) => b.bytes - a.bytes);
-}
+/** The cap that the derivation gives a route: the next power of two above its largest body, at least the floor. */
+const derivedCap = (bytes: number) =>
+  Math.max(BODY_CAP_FLOOR, 2 ** Math.ceil(Math.log2(bytes + 1)));
 
 /** A POST of `text` with a JSON type, with the length that the body has unless `length` says another. */
 function jsonPost(path: string, text: string, headers: Record<string, string> = {}): Request {
@@ -161,22 +74,72 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("the request body cap (ruling 43 of the 12j lane)", () => {
-  it("derives REQUEST_BODY_MAX as the next power of two above the largest valid body of the contracts", () => {
+describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
+  it("derives the cap of each route as the next power of two above its largest valid body, at least 64 KiB", () => {
     const rows = largestBodies();
-    const top = rows[0];
+    const table = rows.map((r) => ({ ...r, cap: bodyCapOf(r.key as RouteKey) }));
+    const perCap = new Map<number, number>();
+    for (const r of table) perCap.set(r.cap, (perCap.get(r.cap) ?? 0) + 1);
     console.log(
-      `body-cap: routes=${rows.length} largest=${top?.key} ${top?.bytes} cap=${REQUEST_BODY_MAX}`,
+      `body-cap: routes=${rows.length} ${[...perCap]
+        .sort(([a], [b]) => a - b)
+        .map(([cap, n]) => `cap ${cap}: ${n}`)
+        .join(", ")}`,
     );
-    expect(top).toEqual({ key: "POST /sso/connections/update", bytes: 4_705_616 });
-    expect(REQUEST_BODY_MAX).toBe(2 ** Math.ceil(Math.log2(top?.bytes ?? 0)));
-    expect(top?.bytes ?? 0).toBeLessThan(REQUEST_BODY_MAX);
+    console.log(
+      table
+        .map(
+          (r) =>
+            `body-cap: ${r.key} largest=${r.bytes} depth=${r.depth} items=${r.items} cap=${r.cap}`,
+        )
+        .join("\n"),
+    );
+    expect(rows[0]).toMatchObject({ key: "POST /sso/connections/update", bytes: 4_705_616 });
+    // A route above its cap fails, and so does a cap that is not its derived value.
+    expect(table.filter((r) => r.bytes >= r.cap)).toEqual([]);
+    expect(table.filter((r) => r.cap !== derivedCap(r.bytes)).map((r) => r.key)).toEqual([]);
+    // BODY_CAPS names only the routes above the floor, and each is a route with a body.
+    for (const [key, cap] of Object.entries(BODY_CAPS)) {
+      expect(cap).toBeGreaterThan(BODY_CAP_FLOOR);
+      expect(rows.map((r) => r.key)).toContain(key);
+    }
+    expect(REQUEST_BODY_MAX).toBe(Math.max(...table.map((r) => r.cap)));
+    expect(perCap).toEqual(
+      new Map([
+        [65_536, rows.length - 3],
+        [262_144, 1],
+        [8_388_608, 2],
+      ]),
+    );
   });
 
-  it("refuses a body one byte over the cap and parses nothing", async () => {
+  it("derives BODY_DEPTH_MAX as the deepest schema plus a margin of 12", () => {
+    const rows = largestBodies();
+    const deepest = Math.max(...rows.map((r) => r.depth));
+    console.log(
+      `body-cap: deepest=${deepest} at ${rows.filter((r) => r.depth === deepest).map((r) => r.key)} limit=${BODY_DEPTH_MAX}`,
+    );
+    expect(deepest).toBe(4);
+    expect(BODY_DEPTH_MAX).toBe(deepest + 12);
+  });
+
+  it("derives BODY_ITEMS_MAX as 8 times the next power of two above the most items of a valid body", () => {
+    const rows = largestBodies();
+    const most = rows.reduce((a, b) => (b.items > a.items ? b : a));
+    // scimRoles counts as one item in the schema walk; the engine takes at most SCIM_ROLES_MAX entries.
+    const withRoles = most.items + (SCIM_ROLES_MAX - 1);
+    console.log(
+      `body-cap: most items ${most.key} ${most.items}, ${withRoles} with scimRoles, limit=${BODY_ITEMS_MAX}`,
+    );
+    expect(most).toMatchObject({ key: "POST /sso/connections/update", items: 230 });
+    expect(most.open).toEqual(["POST /sso/connections/update.scimRoles{}"]);
+    expect(BODY_ITEMS_MAX).toBe(8 * 2 ** Math.ceil(Math.log2(withRoles)));
+  });
+
+  it("refuses a body one byte over the floor of a request with no route, and parses nothing", async () => {
     const parse = vi.spyOn(JSON, "parse");
     const { schema, parse: zod } = spySchema();
-    const text = padded("{}", REQUEST_BODY_MAX + 1);
+    const text = padded("{}", BODY_CAP_FLOOR + 1);
     await expect(readJson(jsonPost("/x", text), schema)).rejects.toBeInstanceOf(BodyTooLarge);
     await expect(readOptionalJson(jsonPost("/x", text), schema)).rejects.toBeInstanceOf(
       BodyTooLarge,
@@ -185,17 +148,17 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
     const form = new Request(`${BASE_URL}/x`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: padded("a=b", REQUEST_BODY_MAX + 1),
+      body: padded("a=b", BODY_CAP_FLOOR + 1),
     });
     await expect(readBody(form, schema)).rejects.toBeInstanceOf(BodyTooLarge);
     // The run parses small texts of its own; no parse took a body of this test.
-    expect(parse.mock.calls.filter(([t]) => t.length > REQUEST_BODY_MAX)).toEqual([]);
+    expect(parse.mock.calls.filter(([t]) => t.length > BODY_CAP_FLOOR)).toEqual([]);
     expect(zod).not.toHaveBeenCalled();
   });
 
-  it("reads a body of exactly the cap", async () => {
-    const text = padded(JSON.stringify({ a: "b" }), REQUEST_BODY_MAX);
-    expect(new TextEncoder().encode(text).length).toBe(REQUEST_BODY_MAX);
+  it("reads a body of exactly the floor", async () => {
+    const text = padded(JSON.stringify({ a: "b" }), BODY_CAP_FLOOR);
+    expect(new TextEncoder().encode(text).length).toBe(BODY_CAP_FLOOR);
     const schema = z.strictObject({ a: z.string() });
     expect(await readJson(jsonPost("/x", text), schema)).toEqual({ ok: true, value: { a: "b" } });
     expect(await readOptionalJson(jsonPost("/x", text), schema)).toEqual({
@@ -206,7 +169,7 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
 
   it("refuses a body over the cap whose content-length is false", async () => {
     const { schema, parse } = spySchema();
-    const text = padded("{}", REQUEST_BODY_MAX + 1);
+    const text = padded("{}", BODY_CAP_FLOOR + 1);
     const lying = jsonPost("/x", text, { "content-length": "2" });
     expect(lying.headers.get("content-length")).toBe("2");
     await expect(readJson(lying, schema)).rejects.toBeInstanceOf(BodyTooLarge);
@@ -218,7 +181,7 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
     const request = new Request(`${BASE_URL}/x`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: spaceStream(REQUEST_BODY_MAX + 1),
+      body: spaceStream(BODY_CAP_FLOOR + 1),
       duplex: "half",
     } as RequestInit);
     expect(request.headers.get("content-length")).toBeNull();
@@ -228,24 +191,24 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
 
   it("refuses a body over the cap of a request that the app cloned, and does not wait for the clone", async () => {
     const { schema } = spySchema();
-    const request = jsonPost("/x", padded("{}", REQUEST_BODY_MAX + 1));
+    const request = jsonPost("/x", padded("{}", BODY_CAP_FLOOR + 1));
     // The clone is the other branch of a tee, and no one reads it.
     const kept = request.clone();
     await expect(readJson(request, schema)).rejects.toBeInstanceOf(BodyTooLarge);
     expect(kept.bodyUsed).toBe(false);
   });
 
-  it("answers 413 body_too_large through the router one byte over the cap, and 200 at the cap", async () => {
+  it("answers 413 body_too_large through the router one byte over the cap of the route, and 200 at the cap", async () => {
     const { config, mail } = makeAuth();
     const handle = createRouter(config, magicLinkRoutes(config));
     const body = JSON.stringify({ email: "ada@example.com" });
     const over = await handle(
-      jsonPost("/auth/magic-link/request", padded(body, REQUEST_BODY_MAX + 1)),
+      jsonPost("/auth/magic-link/request", padded(body, BODY_CAP_FLOOR + 1)),
     );
     expect(over.status).toBe(413);
     expect(await over.json()).toEqual({ error: "body_too_large" });
     expect(mail).toHaveLength(0);
-    const at = await handle(jsonPost("/auth/magic-link/request", padded(body, REQUEST_BODY_MAX)));
+    const at = await handle(jsonPost("/auth/magic-link/request", padded(body, BODY_CAP_FLOOR)));
     expect(at.status).toBe(200);
     expect(mail).toHaveLength(1);
     // A form post answers 413 too, not the redirect of a bad link.
@@ -253,7 +216,7 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
       new Request(`${BASE_URL}/auth/magic-link/verify`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE_URL },
-        body: padded("token=x", REQUEST_BODY_MAX + 1),
+        body: padded("token=x", BODY_CAP_FLOOR + 1),
       }),
     );
     expect(form.status).toBe(413);
@@ -266,13 +229,13 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
       new Request(`${BASE_URL}/auth/oauth/token`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: padded("grant_type=authorization_code", REQUEST_BODY_MAX + 1),
+        body: padded("grant_type=authorization_code", BODY_CAP_FLOOR + 1),
       }),
     );
     expect(token.status).toBe(413);
     expect(await token.json()).toEqual({ error: "body_too_large" });
     const register = await auth.handle(
-      jsonPost("/auth/oauth/register", padded("{}", REQUEST_BODY_MAX + 1)),
+      jsonPost("/auth/oauth/register", padded("{}", BODY_CAP_FLOOR + 1)),
     );
     expect(register.status).toBe(413);
     expect(await register.json()).toEqual({ error: "body_too_large" });
@@ -321,7 +284,7 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
       role: "member",
       teamIds: Array.from({ length: 1_000_000 }, (_, i) => `t${String(i).padStart(6, "0")}`),
     });
-    // 9.9 MB, the probe of the 12j fix report: past the cap, so neither JSON.parse nor zod sees it.
+    // 9.9 MB, the probe of the 12j fix report: past the cap of the route, so neither JSON.parse nor zod sees it.
     expect(probe.length).toBeGreaterThan(9_900_000);
     const parse = vi.spyOn(JSON, "parse");
     const res = await auth.handle(
@@ -331,7 +294,62 @@ describe("the request body cap (ruling 43 of the 12j lane)", () => {
     );
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: "body_too_large" });
-    expect(parse.mock.calls.filter(([text]) => text.length > REQUEST_BODY_MAX)).toEqual([]);
+    expect(parse.mock.calls.filter(([text]) => text.length > BODY_CAP_FLOOR)).toEqual([]);
     expect(await storage.findMany("invitation", [])).toEqual([]);
+  });
+  it("refuses a JSON body nested deeper than BODY_DEPTH_MAX before JSON.parse", async () => {
+    const schema = z.unknown();
+    const nest = (depth: number) => `${"[".repeat(depth)}${"]".repeat(depth)}`;
+    const parse = vi.spyOn(JSON, "parse");
+    expect(await readJson(jsonPost("/x", nest(BODY_DEPTH_MAX)), schema)).toMatchObject({
+      ok: true,
+    });
+    expect(parse).toHaveBeenCalledTimes(1);
+    parse.mockClear();
+    expect(await readJson(jsonPost("/x", nest(BODY_DEPTH_MAX + 1)), schema)).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+    expect(await readOptionalJson(jsonPost("/x", nest(BODY_DEPTH_MAX + 1)), schema)).toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
+    expect(parse).not.toHaveBeenCalled();
+    // A bracket or a brace inside a string is text, and an escaped quote does not end the string.
+    expect(
+      jsonShapeFits(JSON.stringify({ a: '[[[[[[[[[[[[[[[[[[[[{{{{{{{{{{{{{{{{{\\"[[[' })),
+    ).toBe(true);
+    expect(jsonShapeFits(`{"a":"\\\\"}${"[".repeat(BODY_DEPTH_MAX + 1)}`)).toBe(false);
+  });
+
+  it("refuses a JSON body with more than BODY_ITEMS_MAX items before JSON.parse", async () => {
+    const schema = z.unknown();
+    // A bracket and items - 1 commas: exactly `items` items.
+    const flat = (items: number) => `[${"0,".repeat(items - 1)}0]`;
+    const parse = vi.spyOn(JSON, "parse");
+    expect(await readJson(jsonPost("/x", flat(BODY_ITEMS_MAX)), schema)).toMatchObject({
+      ok: true,
+    });
+    expect(parse).toHaveBeenCalledTimes(1);
+    parse.mockClear();
+    expect(await readJson(jsonPost("/x", flat(BODY_ITEMS_MAX + 1)), schema)).toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
+    // Empty arrays and objects count one item each, and a comma inside a string counts none.
+    expect(jsonShapeFits(`[${"[],".repeat(BODY_ITEMS_MAX / 2)}0]`)).toBe(false);
+    expect(jsonShapeFits(`[${"{},".repeat(BODY_ITEMS_MAX / 2 - 1)}0]`)).toBe(true);
+    expect(jsonShapeFits(JSON.stringify([",".repeat(BODY_ITEMS_MAX * 2)]))).toBe(true);
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("answers invalid_body at the OAuth register route for a body past the depth limit", async () => {
+    const { auth } = oauthHandle();
+    const deep = `{"redirect_uris":${"[".repeat(BODY_DEPTH_MAX)}${"]".repeat(BODY_DEPTH_MAX)}}`;
+    const parse = vi.spyOn(JSON, "parse");
+    const res = await auth.handle(jsonPost("/auth/oauth/register", deep));
+    expect(res.status).toBe(400);
+    expect(parse.mock.calls.filter(([t]) => t === deep)).toEqual([]);
   });
 });

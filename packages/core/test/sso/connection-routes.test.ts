@@ -3,8 +3,10 @@ import type { AuthConfig } from "../../src/config.js";
 import { createOrganization } from "../../src/engine/organizations.js";
 import { createConnection } from "../../src/engine/sso/connections.js";
 import { addDomain } from "../../src/engine/sso/domains.js";
+import { BODY_CAP_FLOOR, bodyCapOf } from "../../src/http/body-cap.js";
 import { createRouter } from "../../src/http/router.js";
 import { coreRoutes } from "../../src/http/routes/index.js";
+import { SSO_MANAGE_PER_USER } from "../../src/http/routes/sso.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
 import { BASE_URL } from "../helpers.js";
 import { operatorFixture } from "../operator-helpers.js";
@@ -284,5 +286,65 @@ describe("the connection routes (plan 12d Task 3)", () => {
         403,
         { error: "session_not_fresh" },
       ]);
+  });
+});
+
+/** A POST of the JSON text `text` with the session cookie of `token`, so a test can read `bodyUsed` after the answer. */
+function rawPost(path: string, text: string, token: string | null): Request {
+  return new Request(`${BASE_URL}/auth${path}`, {
+    method: "POST",
+    headers: {
+      "cf-connecting-ip": IP,
+      "content-type": "application/json",
+      origin: BASE_URL,
+      ...(token === null ? {} : { cookie: `__Host-tempo_session=${token}` }),
+    },
+    body: text,
+  });
+}
+
+describe("the body cap of the connection writes (ruling 46 of the 12j lane)", () => {
+  it("reads the body of a connection write only after the session check and the limit of the user", async () => {
+    const w = await routeWorld();
+    const text = JSON.stringify({ ...oidcBody(w.org), idpMetadata: "m".repeat(200_000) });
+    for (const path of ["/sso/connections/create", "/sso/connections/update"]) {
+      const anonymous = rawPost(path, text, null);
+      const res = await w.handle(anonymous);
+      expect(res.status).toBe(401);
+      expect(anonymous.bodyUsed).toBe(false);
+    }
+    // The limit of the user: each write before it reads its body, the next one does not.
+    for (let i = 0; i < SSO_MANAGE_PER_USER.max; i++) {
+      const res = await w.handle(rawPost("/sso/connections/update", "{}", w.owner.token));
+      expect(res.status).toBe(400);
+    }
+    const limited = rawPost("/sso/connections/create", text, w.owner.token);
+    expect((await w.handle(limited)).status).toBe(429);
+    expect(limited.bodyUsed).toBe(false);
+  });
+
+  it("reads a connection write past the floor up to 8 MiB, and answers 413 past it", async () => {
+    const w = await routeWorld();
+    const cap = bodyCapOf("POST /sso/connections/create");
+    expect(cap).toBe(8_388_608);
+    // The largest metadata that the schema allows: past the floor of every other route.
+    const text = JSON.stringify({
+      organizationId: w.org,
+      kind: "saml",
+      label: "Acme Okta",
+      idpMetadata: "m".repeat(200_000),
+    });
+    expect(text.length).toBeGreaterThan(BODY_CAP_FLOOR);
+    const [status, body] = await (async () => {
+      const res = await w.handle(rawPost("/sso/connections/create", text, w.owner.token));
+      return [res.status, (await res.json()) as { error: string }] as const;
+    })();
+    expect(status).toBe(400);
+    expect(body.error).toBe("invalid_body");
+    const over = await w.handle(
+      rawPost("/sso/connections/create", text + " ".repeat(cap + 1 - text.length), w.owner.token),
+    );
+    expect(over.status).toBe(413);
+    expect(await over.json()).toEqual({ error: "body_too_large" });
   });
 });

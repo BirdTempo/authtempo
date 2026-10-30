@@ -74,7 +74,7 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
-import { readBodyText } from "../body-cap.js";
+import { parseBodyJson, readBodyText } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -93,21 +93,19 @@ export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
   return r.ok ? json(r.value, status) : json({ error: r.error }, r.status);
 }
 
-/** A JSON object body, or null. The read stops at `REQUEST_BODY_MAX` (ruling 43 of the 12j lane). */
+/**
+ * A JSON object body, or null. The read stops at the cap of the route, and
+ * the depth and the item limits apply (rulings 43 and 46 of the 12j lane).
+ */
 async function readObject(request: Request): Promise<Record<string, unknown> | null> {
-  const text = await readBodyText(request);
-  try {
-    const value: unknown = JSON.parse(text);
-    if (holdsBadText(value)) return null;
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  const value = parseBodyJson(await readBodyText(request));
+  if (value === undefined || holdsBadText(value)) return null;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-/** A form body whose fields each come once (RFC 6749 section 3.1), or null. The read stops at `REQUEST_BODY_MAX`. */
+/** A form body whose fields each come once (RFC 6749 section 3.1), or null. The read stops at the cap of the route. */
 async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
