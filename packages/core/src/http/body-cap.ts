@@ -378,14 +378,14 @@ export function bodyReadable(request: Request): boolean {
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against the
  * half of `client` and against the share of `client` until it ends, and
- * throws `BodyBusy` past either one (ruling 66). It throws `BodyTimeout` when it gets
- * no chunk for `LARGE_READ_IDLE_MS`, or when it does not end within
- * `largeReadDeadlineMs` of its cap. Each end frees its bytes (ruling 59 of
- * the 12j lane). Workers, Node, Bun, and Deno each give `request.body` as a
- * stream. Null when the body was read or locked before, such as by app
- * middleware, and at a chunk that is not bytes: each reader answers it
- * `invalid_body`, not 500 (ruling 46 Low 1, ruling 51 Low 3, and ruling 59
- * Low 1 of the 12j lane).
+ * throws `BodyBusy` past either one (ruling 66). It throws `BodyTimeout`
+ * when it gets no chunk for `LARGE_READ_IDLE_MS`, or when it does not end
+ * within `largeReadDeadlineMs` of its cap. Each end frees its bytes (ruling
+ * 59 of the 12j lane). Workers, Node, Bun, and Deno each give
+ * `request.body` as a stream. Null when the body was read or locked before,
+ * such as by app middleware, and at a chunk that is not bytes: each reader
+ * answers it `invalid_body`, not 500 (ruling 46 Low 1, ruling 51 Low 3, and
+ * ruling 59 Low 1 of the 12j lane).
  */
 export async function readBodyBytes(
   request: Request,
