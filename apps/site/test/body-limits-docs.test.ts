@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, and 69 of the 12j lane). The errors page, the limits page, the Express,
+// 68, 69, and 72 of the 12j lane). The errors page, the limits page, the Express,
 // Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
 // README, and the deploy page state the caps and the scan limits by hand.
 // This test reads each constant from the source of core
@@ -277,6 +277,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /the time of its cap at (\d+) bytes per second/],
       ["limits", /\| The time of its cap at (\d+) bytes per second/],
       ["readme", /cap at (\d+) (KiB) per second/],
+      // The link that gets 408 for a large body (ruling 72 Low 1).
+      ["errors", /A link slower than (\d+) (KiB) per second/],
     ],
   ],
   [
@@ -291,6 +293,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // A SCIM body takes the least time, and a stalled one gets a SCIM 408 (ruling 63 b).
       ["scim", /A body that does not arrive within (\d+) s/],
       ["readme", /per second, at least (\d+) s \(`LARGE_READ_MIN_RATE`\)/],
+      // The other large reads each take the least time (ruling 72 Low 1).
+      ["limits", /for an SSO connection write, (\d+) s for the others/],
+      ["deploy", /while that caller sends \d+ MiB each (\d+) s\. The callers with an IP key/],
     ],
   ],
   [
@@ -376,6 +381,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /one client, `unknown`, with the share of one IP, (\d+) (MiB)/],
       ["deploy", /In the body budget, it is one client of (\d+) (MiB)/],
       ["deploy", /one client of (\d+) (MiB) in the budget of the large body reads/],
+      ["deploy", /while that caller sends (\d+) (MiB) each \d+ s/],
       ["readme", /One IP holds at most (\d+) (MiB)/],
     ],
   ],
@@ -398,7 +404,7 @@ const PLAN_PAGES = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, and 69 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, and 72 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();
