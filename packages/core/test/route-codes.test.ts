@@ -584,9 +584,11 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
                       : w.cookie(me.token),
       fills,
     );
-    // The four routes that carry the code in a redirect to the app.
+    // The five routes that carry the code in a redirect to the app. The Apple
+    // callback counts its form post before the read (ruling 68 Minor 2 of the 12j lane).
     const redirects: RouteKey[] = [
       "GET /social/:provider/start",
+      "POST /social/apple/callback",
       "POST /totp/challenge",
       "GET /sso/:connectionId/start",
       "POST /sso/:connectionId/acs",
