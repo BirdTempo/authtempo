@@ -1,4 +1,4 @@
-import { readCappedBytes } from "../primitives/read-capped.js";
+import { readCappedOutcome } from "../primitives/read-capped.js";
 import type { RouteKey } from "./route-list.js";
 
 /**
@@ -301,14 +301,14 @@ export function bodyReadable(request: Request): boolean {
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against
  * `LARGE_READ_BUDGET` and against the share of `client` until it ends, and
- * throws `BodyBusy` past either one. It
- * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
- * when it does not end within `largeReadDeadlineMs` of its cap. Each end
- * frees its bytes (ruling 59 of the 12j lane).
- * Workers, Node, Bun, and Deno each give `request.body` as a stream. Null
- * when the body was read or locked before, such as by app middleware: each
- * reader answers it `invalid_body`, not 500 (ruling 46 Low 1 and ruling 51
- * Low 3 of the 12j lane).
+ * throws `BodyBusy` past either one. It throws `BodyTimeout` when it gets
+ * no chunk for `LARGE_READ_IDLE_MS`, or when it does not end within
+ * `largeReadDeadlineMs` of its cap. Each end frees its bytes (ruling 59 of
+ * the 12j lane). Workers, Node, Bun, and Deno each give `request.body` as a
+ * stream. Null when the body was read or locked before, such as by app
+ * middleware, and at a chunk that is not bytes: each reader answers it
+ * `invalid_body`, not 500 (ruling 46 Low 1, ruling 51 Low 3, and ruling 59
+ * Low 1 of the 12j lane).
  */
 export async function readBodyBytes(
   request: Request,
@@ -363,7 +363,7 @@ export async function readBodyBytes(
     return true;
   };
   try {
-    const bytes = await readCappedBytes(
+    const read = await readCappedOutcome(
       new Response(body, length === null ? {} : { headers: { "content-length": length } }),
       cap,
       large ? stop.signal : request.signal,
@@ -371,8 +371,10 @@ export async function readBodyBytes(
     );
     if (busy) throw new BodyBusy();
     if (timedOut > 0) throw new BodyTimeout(timedOut);
-    if (bytes === null) throw new BodyTooLarge(cap);
-    return bytes;
+    // A chunk that is not bytes: a bad body, which no count saw (ruling 59 Low 1).
+    if (read === "chunk") return null;
+    if (!(read instanceof Uint8Array)) throw new BodyTooLarge(cap);
+    return read;
   } finally {
     clearTimeout(idle);
     clearTimeout(whole);

@@ -1061,3 +1061,80 @@ describe("the ACS reads no byte before its limit and its SAML check (ruling 59 M
     expect(other.pulled()).toBe(1_048_576);
   });
 });
+
+/** A body stream of `count` strings of 64 KiB, as an app can build it: no chunk has a byteLength. */
+function stringBody(count: number) {
+  let pulled = 0;
+  let cancelled = false;
+  const stream = new ReadableStream({
+    pull(c) {
+      if (pulled >= count) return c.close();
+      pulled += 1;
+      c.enqueue("a".repeat(65_536));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }) as unknown as ReadableStream<Uint8Array>;
+  return { stream, pulled: () => pulled, cancelled: () => cancelled };
+}
+
+describe("a body chunk that is not bytes (ruling 59 Low 1 of the 12j lane)", () => {
+  it("answers invalid_body at the first chunk, cancels the stream, and counts none of it", async () => {
+    // 4 MiB of strings at the floor: before the fix the read passed the cap of 64 KiB.
+    const body = stringBody(64);
+    expect(await readJson(streamPost("/x", body.stream), z.unknown())).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+    expect(body.cancelled()).toBe(true);
+    expect(body.pulled()).toBeLessThanOrEqual(2);
+    // The SAML ACS answers its refusal of a bad form, not 500.
+    const acs = await samlAuth().handle(acsPost("203.0.113.7", stringBody(64).stream));
+    expect([
+      acs.status,
+      new URL(acs.headers.get("location") ?? "x:").searchParams.get("auth_error"),
+    ]).toEqual([302, "sso_failed"]);
+  });
+
+  it("leaves the count of the budget whole after a read of strings above the floor", {
+    timeout: 30_000,
+  }, async () => {
+    // Before the fix, the strings turned the count into NaN, and no read met the budget again.
+    // The answer is held to the end, so the check of the budget runs in any case.
+    const strings = await readBodyText(
+      streamPost("/x", stringBody(4).stream),
+      REQUEST_BODY_MAX,
+      "strings",
+    ).then(
+      (t) => t,
+      (e: unknown) => e,
+    );
+    const count = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
+    const held = Array.from({ length: count }, () =>
+      gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 65_536),
+    );
+    try {
+      const reads = held.map((h, i) =>
+        readBodyText(streamPost("/x", h.stream), REQUEST_BODY_MAX, `hold:${i}`),
+      );
+      await Promise.all(held.map((h) => h.atGate));
+      await settle();
+      await expect(
+        readBodyText(
+          streamPost("/x", gatedBody(1_000_000, 1_000_000).stream),
+          REQUEST_BODY_MAX,
+          "more",
+        ),
+      ).rejects.toBeInstanceOf(BodyBusy);
+      for (const h of held) h.open();
+      expect((await Promise.all(reads)).map((t) => t?.length)).toEqual(
+        Array(count).fill(REQUEST_BODY_MAX),
+      );
+    } finally {
+      for (const h of held) h.open();
+    }
+    expect(strings).toBeNull();
+  });
+});
