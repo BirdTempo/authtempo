@@ -121,20 +121,24 @@ export async function readScimBody(
   try {
     bytes = await readBodyBytes(request, SCIM_BODY_MAX);
   } catch (e) {
+    // Each SCIM answer of the read sets core's code, so its request event carries the code as
+    // core's JSON answers do (ruling 72 Low 3 and ruling 73 of the 12j lane).
+    const coded = (response: Response, code: string) => {
+      ANSWER_CODE.set(response, code);
+      return { ok: false as const, response };
+    };
     if (e instanceof BodyTooLarge)
-      return {
-        ok: false,
-        response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
-      };
+      return coded(
+        scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
+        "body_too_large",
+      );
     // A stalled body: the read stopped at its deadline and freed its bytes (ruling 63 b).
     if (e instanceof BodyTimeout)
-      return { ok: false, response: scimError(408, "the body did not arrive in time") };
+      return coded(scimError(408, "the body did not arrive in time"), "body_timeout");
     if (!(e instanceof BodyBusy)) throw e;
     const response = scimError(503, "the large request reads of the server are busy");
     response.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));
-    // The request event carries the code, as core's JSON 503 does (ruling 72 Low 3 of the 12j lane).
-    ANSWER_CODE.set(response, "body_busy");
-    return { ok: false, response };
+    return coded(response, "body_busy");
   }
   if (bytes === null)
     return {

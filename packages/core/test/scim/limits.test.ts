@@ -291,6 +291,42 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
     expect(userWrites(await events())).toEqual([{ status: 503, code: "body_busy", ip: SCIM_IP }]);
   });
 
+  it("gives the request event of a SCIM 413 the code body_too_large (ruling 73)", async () => {
+    const { w, events } = await observedWorld();
+    const res = await scim(w, w.token, "POST", "/Users", `{}${" ".repeat(SCIM_BODY_MAX - 1)}`);
+    expect([res.status, res.headers.get("content-type")]).toEqual([413, "application/scim+json"]);
+    expect(userWrites(await events())).toEqual([
+      { status: 413, code: "body_too_large", ip: SCIM_IP },
+    ]);
+  });
+
+  it("gives the request event of a SCIM 408 the code body_timeout (ruling 73)", async () => {
+    const { w, events } = await observedWorld();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = stalledBody(SCIM_BODY_MAX, 65_536);
+    const answer = w.handle(
+      new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/scim+json",
+          authorization: `Bearer ${w.token}`,
+          "cf-connecting-ip": SCIM_IP,
+        },
+        body: stalled.stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    await stalled.atGate;
+    await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS);
+    const res = await answer;
+    stalled.open();
+    vi.useRealTimers();
+    expect([res.status, res.headers.get("content-type")]).toEqual([408, "application/scim+json"]);
+    expect(userWrites(await events())).toEqual([
+      { status: 408, code: "body_timeout", ip: SCIM_IP },
+    ]);
+  });
+
   it("answers 400 invalidSyntax before JSON.parse to a body past the depth or the item limit", async () => {
     const w = await world();
     const body = (name: string, x: string) =>
