@@ -89,7 +89,7 @@ Do these steps in this order, before step 1 of "At each release". Step 8 of "At 
 12. In a new empty folder, install `@authtempo/core` and `@authtempo/cli` at the new version, and run `npm audit signatures`. If it prints an invalid or a missing signature, stop. Do not compare its counts with the released packages: it counts each installed package, such as each dependency.
 13. Run `npm view @authtempo/core@<version> authtempo --json`. If the output has no `breaking` key, `authtempo upgrade` stops for each app with exit 1. Then follow "A bad version", and release a patch.
 14. Run `npm view @authtempo/core time --json`, and read the time of the new version. If its day differs from the rows of step 4, correct each row by a pull request. At a new minor, also correct the day `released` of step 5 in `release/support.json` and in `SECURITY.md`.
-15. Append one dated evidence line to `docs/superpowers/plans/README.md`, on a new branch, and merge it by a pull request. The protection of `main` refuses a direct push. Name the version, the tagged commit, the `release-dry-run` line, and the `verify-published` line.
+15. Append one dated evidence line to `docs/superpowers/plans/README.md`, on a new branch, and merge it by a pull request. The protection of `main` refuses a direct push. Name the version, the tagged commit, and the `verify-published` line. Also name the `release-dry-run` line of the job `check` of `release.yml`. At the tag, its dry run versions a copy to the next minor. So the line names that minor, such as `version=0.2.0` at `v0.1.0`.
 16. Publish the site: run `pnpm turbo run build --filter=@authtempo/site --force`, then `pnpm --filter @authtempo/site exec wrangler deploy`. Without the build, the deploy guard refuses the folder `dist`. The hold of 2026-10-11 stays until you lift it.
 
 Do not run `authtempo init` from the version branch between step 3 and the end of the job `publish`. Do not run it from `main` between the merge of step 7 and the end of the job `publish` either. In that time the scaffold names a version that is not on npm yet, and the texts of `PRE_RELEASE_SENTENCES` and `UNPUBLISHED_FILES` have their published form. A failed publish keeps that state until the rerun, and the token fallback keeps it until its reviewed change.
@@ -102,7 +102,7 @@ git tag v0.1.0 && git push origin v0.1.0
 
 node scripts/release/src/verify-published.ts 0.1.0
 
-mkdir /tmp/authtempo-audit && cd /tmp/authtempo-audit
+cd "$(mktemp -d)"
 npm init -y
 npm install @authtempo/core@0.1.0 @authtempo/cli@0.1.0
 npm audit signatures

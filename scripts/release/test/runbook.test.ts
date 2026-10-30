@@ -424,6 +424,24 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(r.counts).toMatchObject({ examples: examples.length, demo: 1 });
   });
 
+  // Ruling 65 of plan 12j, L3: a fixed folder made mkdir fail at the next
+  // release, and step 15 named a dry run line that names the next minor.
+  it("audits in a new folder each time, and says which dry run line to copy", () => {
+    const part = TEXT.slice(TEXT.indexOf("The commands of steps 9, 11, and 12:"));
+    const sh = /```sh\n([\s\S]*?)```/.exec(part)?.[1] ?? "";
+    expect(sh).toContain('cd "$(mktemp -d)"\nnpm init -y\n');
+    expect(sh).not.toMatch(/\bmkdir\b/);
+    const step = stepOf(TEXT, "At each release", 15);
+    expect(step).toContain(
+      `the \`release-dry-run\` line of the job \`check\` of \`${WORKFLOW_FILE}\``,
+    );
+    // The dry run writes one minor changeset, so at a tag it names the next minor.
+    const [major, minor] = FIRST_RELEASE.split(".");
+    expect(step).toContain(
+      `\`version=${major}.${Number(minor) + 1}.0\` at \`${TAG_PREFIX}${FIRST_RELEASE}\``,
+    );
+  });
+
   it("discards the output of changeset version with a glob that covers each changelog", () => {
     const step = stepOf(TEXT, "At each release", 3);
     const glob = "packages/*/CHANGELOG.md";
