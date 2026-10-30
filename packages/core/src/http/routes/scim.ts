@@ -45,7 +45,7 @@ import {
 } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
-import { json } from "../json.js";
+import { ANSWER_CODE, json } from "../json.js";
 import type { RouteKey } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { managedBody, managedCall, readQuery } from "./sso.js";
@@ -132,6 +132,8 @@ export async function readScimBody(
     if (!(e instanceof BodyBusy)) throw e;
     const response = scimError(503, "the large request reads of the server are busy");
     response.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));
+    // The request event carries the code, as core's JSON 503 does (ruling 72 Low 3 of the 12j lane).
+    ANSWER_CODE.set(response, "body_busy");
     return { ok: false, response };
   }
   if (bytes === null)

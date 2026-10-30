@@ -6,11 +6,23 @@ import {
   BODY_DEPTH_MAX,
   BODY_ITEMS_MAX,
   jsonShapeFits,
+  LARGE_READ_ANON_BUDGET,
   LARGE_READ_IDLE_MS,
+  LARGE_READ_SHARE,
+  REQUEST_BODY_MAX,
+  readBodyText,
 } from "../../src/http/body-cap.js";
 import { SCIM_BODY_MAX, SCIM_ITEMS_MAX } from "../../src/http/routes/scim.js";
+import type { AuthEvent } from "../../src/observe/port.js";
 import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
-import { SCIM_IP, scim, type ScimTokenWorld as World, scimTokenWorld as world } from "./helpers.js";
+import {
+  SCIM_IP,
+  scim,
+  scimAuth,
+  scimToken,
+  type ScimTokenWorld as World,
+  scimTokenWorld as world,
+} from "./helpers.js";
 
 // The limits of the SCIM server (plan 12d Task 12): the per-token limit of
 // Task 9, the body and operation caps of Tasks 9 and 10, and the member cap
@@ -99,6 +111,26 @@ function stalledBody(bytes: number, before: number) {
   });
   return { stream, open, atGate };
 }
+
+/** A SCIM world whose events land in `events()`, with the raw IP (ruling 72 Low 3 of the 12j lane). */
+async function observedWorld() {
+  const batches: AuthEvent[][] = [];
+  const w = await scimAuth({
+    observe: { sink: { write: (b) => void batches.push([...b]) }, include: { ip: "raw" } },
+  });
+  const { token } = await scimToken(w);
+  const events = async () => {
+    await w.config.observe.flush();
+    return batches.flat();
+  };
+  return { w: { ...w, token }, events };
+}
+
+/** The request events of `POST /scim/v2/Users`: the status, the code, and the IP of each. */
+const userWrites = (events: AuthEvent[]) =>
+  events
+    .filter((e) => e.name === "request" && e.route === "POST /scim/v2/Users")
+    .map((e) => ({ status: e.status, code: e.code, ip: e.ip }));
 
 /** A SCIM User through the route: its id. */
 async function user(w: World, local: string): Promise<string> {
@@ -227,6 +259,36 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
       userName: "next@acme.example",
     });
     expect(next.status).toBe(201);
+  });
+
+  it("gives the request event of a SCIM 503 the code body_busy (ruling 72 Low 3)", async () => {
+    const { w, events } = await observedWorld();
+    // Other IPs hold the anonymous half, where a SCIM read counts, all but 32 bytes of it.
+    const holds = Array.from({ length: LARGE_READ_ANON_BUDGET / LARGE_READ_SHARE }, (_, i) => {
+      const body = stalledBody(LARGE_READ_SHARE, LARGE_READ_SHARE - 16);
+      const request = new Request(`${BASE_URL}/x`, {
+        method: "POST",
+        body: body.stream,
+        duplex: "half",
+      } as RequestInit);
+      const read = readBodyText(request, REQUEST_BODY_MAX, `ip:198.51.100.${i + 1}`);
+      read.catch(() => {});
+      return { body, read };
+    });
+    try {
+      await Promise.all(holds.map((h) => h.body.atGate));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const res = await scim(w, w.token, "POST", "/Users", {
+        schemas: [USER_URN],
+        userName: "busy@acme.example",
+      });
+      expect([res.status, res.headers.get("retry-after")]).toEqual([503, "1"]);
+      expect(res.headers.get("content-type")).toBe("application/scim+json");
+    } finally {
+      for (const h of holds) h.body.open();
+    }
+    for (const h of holds) expect(await h.read).toHaveLength(LARGE_READ_SHARE);
+    expect(userWrites(await events())).toEqual([{ status: 503, code: "body_busy", ip: SCIM_IP }]);
   });
 
   it("answers 400 invalidSyntax before JSON.parse to a body past the depth or the item limit", async () => {
