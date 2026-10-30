@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkSupport,
   entry,
+  readMigrationSources,
   readMigrations,
   readSchemaVersion,
   readSupport,
@@ -241,10 +242,11 @@ describe("check-support", () => {
       write("packages/adapter-postgres/src/migrations/notes.md");
       write("packages/adapter-mysql/package.json", "{}");
       write("packages/core/src/schema.ts", "export const SCHEMA_VERSION = 2;\n");
+      write("release/migration-sources.json", "{}");
       expect(readMigrations(root)).toEqual({
         migrations: { "adapter-d1": [1, 2], "adapter-postgres": [1] },
         failures: [
-          "packages/adapter-mysql has no migrations or src/migrations folder",
+          "packages/adapter-mysql has no migrations or src/migrations folder and no entry in release/migration-sources.json",
           "packages/adapter-postgres: notes.md is not a migration file name",
         ],
       });
@@ -254,6 +256,150 @@ describe("check-support", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe("release/migration-sources.json (ruling 38)", () => {
+    /** The proof of the SQLite entry, as the real file names it. */
+    const PROOF = "packages/adapter-sqlite/test/migrations-copy.test.ts";
+    const sqlite = (entry: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        "adapter-sqlite": {
+          from: "packages/adapter-d1/migrations",
+          reason: "The build copies the D1 files.",
+          proof: PROOF,
+          ...entry,
+        },
+      });
+
+    /** A tree with a D1 folder of two files, a SQLite package with no folder, and its proof. */
+    const withTree = (fn: (root: string, write: (path: string, text?: string) => void) => void) => {
+      const root = mkdtempSync(join(tmpdir(), "check-support-sources-"));
+      try {
+        const write = (path: string, text = "") => {
+          mkdirSync(join(root, path, ".."), { recursive: true });
+          writeFileSync(join(root, path), text);
+        };
+        write("packages/adapter-d1/migrations/0001_schema_v1.sql");
+        write("packages/adapter-d1/migrations/0002_schema_v2.sql");
+        write("packages/adapter-sqlite/package.json", "{}");
+        write(PROOF);
+        fn(root, write);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    it("takes the versions of the from folder for an adapter with an entry", () => {
+      withTree((root, write) => {
+        write("release/migration-sources.json", sqlite());
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2], "adapter-sqlite": [1, 2] },
+          failures: [],
+        });
+      });
+    });
+
+    it("fails an adapter with neither a folder nor an entry", () => {
+      withTree((root, write) => {
+        write("release/migration-sources.json", "{}");
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2] },
+          failures: [
+            "packages/adapter-sqlite has no migrations or src/migrations folder and no entry in release/migration-sources.json",
+          ],
+        });
+      });
+    });
+
+    it("fails an entry whose from folder has no migrations", () => {
+      withTree((root, write) => {
+        mkdirSync(join(root, "packages/adapter-d1/empty"));
+        write("release/migration-sources.json", sqlite({ from: "packages/adapter-d1/empty" }));
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2] },
+          failures: [
+            "release/migration-sources.json: adapter-sqlite: packages/adapter-d1/empty has no migrations",
+          ],
+        });
+        write("release/migration-sources.json", sqlite({ from: "packages/adapter-d1/gone" }));
+        expect(readMigrations(root).failures).toEqual([
+          "release/migration-sources.json: adapter-sqlite: packages/adapter-d1/gone has no migrations",
+        ]);
+      });
+    });
+
+    it("fails an entry whose proof file does not exist", () => {
+      withTree((root, write) => {
+        write(
+          "release/migration-sources.json",
+          sqlite({ proof: "packages/adapter-sqlite/test/gone.test.ts" }),
+        );
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2] },
+          failures: [
+            "release/migration-sources.json: adapter-sqlite: the proof packages/adapter-sqlite/test/gone.test.ts does not exist",
+          ],
+        });
+      });
+    });
+
+    it("fails an entry that names an adapter with its own folder", () => {
+      withTree((root, write) => {
+        write("packages/adapter-sqlite/src/migrations/0001_schema_v1.ts");
+        write("release/migration-sources.json", sqlite());
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2], "adapter-sqlite": [1] },
+          failures: [
+            "release/migration-sources.json: packages/adapter-sqlite has its own migrations folder, so it takes no entry",
+          ],
+        });
+      });
+    });
+
+    it("fails an entry that names no adapter package", () => {
+      withTree((root, write) => {
+        const entries = JSON.parse(sqlite());
+        write(
+          "release/migration-sources.json",
+          JSON.stringify({ ...entries, "adapter-gone": entries["adapter-sqlite"] }),
+        );
+        expect(readMigrations(root).failures).toEqual([
+          "release/migration-sources.json: adapter-gone is not an adapter package of packages/",
+        ]);
+      });
+    });
+
+    it("fails a missing file and a file of another shape", () => {
+      withTree((root, write) => {
+        expect(readMigrations(root).failures).toEqual([
+          "release/migration-sources.json does not exist",
+          "packages/adapter-sqlite has no migrations or src/migrations folder and no entry in release/migration-sources.json",
+        ]);
+        write("release/migration-sources.json", "[]");
+        expect(readMigrations(root).failures[0]).toBe(
+          "release/migration-sources.json is not an object",
+        );
+      });
+      expect(readMigrationSources("{").failures).toEqual([
+        "release/migration-sources.json is not JSON",
+      ]);
+      expect(
+        readMigrationSources(
+          JSON.stringify({
+            a: 1,
+            b: { from: "../x", reason: " ", proof: "p.ts", extra: true },
+          }),
+        ),
+      ).toEqual({
+        sources: {},
+        failures: [
+          "release/migration-sources.json: a is not an object",
+          "release/migration-sources.json: b: extra is not a key of a migration source",
+          "release/migration-sources.json: b: from ../x is not a path under the repository root",
+          "release/migration-sources.json: b: reason must be a text that is not empty",
+        ],
+      });
+    });
   });
 
   it("passes the real tree: support.json, SCHEMA_VERSION, and each adapter's migrations", () => {
@@ -280,8 +426,13 @@ describe("check-support", () => {
       expect(lines).toHaveLength(2);
     }
     // Later plans add adapters and schema versions, so the last note has a pattern.
-    expect(lines.at(-1)).toMatch(
-      /^ {2}note: adapters=[1-9]\d* \(adapter-d1, adapter-postgres.*\), SCHEMA_VERSION \d+$/,
+    const note = /^ {2}note: adapters=([1-9]\d*) \((.*)\), SCHEMA_VERSION \d+$/.exec(
+      lines.at(-1) ?? "",
+    );
+    expect(note).not.toBeNull();
+    // The SQLite adapter is read through its entry in release/migration-sources.json.
+    expect(note?.[2]?.split(", ")).toEqual(
+      expect.arrayContaining(["adapter-d1", "adapter-mysql", "adapter-postgres", "adapter-sqlite"]),
     );
     expect(code).toBe(0);
   });

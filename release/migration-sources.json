@@ -1,0 +1,7 @@
+{
+  "adapter-sqlite": {
+    "from": "packages/adapter-d1/migrations",
+    "reason": "SQLite runs the D1 SQL as it is. The build copies each D1 file into src/migrations.generated.ts (scripts/copy-migrations.mjs), so the adapter has no folder of its own (plan 12g).",
+    "proof": "packages/adapter-sqlite/test/migrations-copy.test.ts"
+  }
+}
