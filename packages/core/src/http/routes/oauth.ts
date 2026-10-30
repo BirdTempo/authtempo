@@ -114,10 +114,23 @@ async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
   const params = parseBodyForm(await readBodyText(request));
-  if (params === null) return null;
-  for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
+  if (params === null || !fieldsOnce(params)) return null;
   if (holdsBadText([...params])) return null;
   return params;
+}
+
+/**
+ * True when each key of `params` comes once. One pass with a set (ruling 51
+ * Minor 4 of the 12j lane): a `getAll` for each key took time of the keys
+ * squared, 714 ms for 64 KiB of distinct keys on Node.
+ */
+function fieldsOnce(params: URLSearchParams): boolean {
+  const seen = new Set<string>();
+  for (const key of params.keys()) {
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
 }
 
 /**
@@ -639,8 +652,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       key: "GET /oauth/end-session",
       async handler(ctx) {
         const params = ctx.url.searchParams;
-        const once = [...new Set(params.keys())].every((k) => params.getAll(k).length === 1);
-        return endSessionAnswer(ctx, once ? params : null);
+        return endSessionAnswer(ctx, fieldsOnce(params) ? params : null);
       },
     },
     {

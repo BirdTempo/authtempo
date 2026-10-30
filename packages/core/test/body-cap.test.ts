@@ -220,6 +220,28 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(pairs.filter((n) => n > FORM_PAIRS_MAX)).toEqual([]);
   });
 
+  it("checks that each field of an OAuth form and of the end-session query comes once, in one pass", async () => {
+    const { auth } = oauthHandle();
+    const getAll = vi.spyOn(URLSearchParams.prototype, "getAll");
+    // FORM_PAIRS_MAX - 1 distinct keys: a getAll for each key took time of the keys squared.
+    const keys = formOf(FORM_PAIRS_MAX - 1);
+    const form = (body: string) =>
+      auth.handle(
+        new Request(`${BASE_URL}/auth/oauth/revoke`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
+        }),
+      );
+    // RFC 7009 section 2.2: an unknown token answers 200.
+    expect((await form(`token=x&${keys}`)).status).toBe(200);
+    const end = await auth.handle(new Request(`${BASE_URL}/auth/oauth/end-session?${keys}`));
+    expect(end.status).toBe(200);
+    expect(getAll.mock.calls.length).toBeLessThan(FORM_PAIRS_MAX / 4);
+    // A repeated field still fails, at its first repeat.
+    expect(await (await form(`token=x&${keys}&a=c`)).json()).toEqual({ error: "invalid_request" });
+  });
+
   it("refuses a body one byte over the floor of a request with no route, and parses nothing", async () => {
     const parse = vi.spyOn(JSON, "parse");
     const { schema, parse: zod } = spySchema();
