@@ -217,6 +217,37 @@ export function checkPack(input: PackInput): Report {
 }
 
 /**
+ * The marker of a break in a changeset body: a line that starts with this
+ * text. check-changesets refuses each other form, and breakingByMinor reads
+ * this form in the changelog. So each "Breaking:" line of a changeset either
+ * reaches upgrade or fails the check (ruling 77 of plan 12j).
+ */
+export const BREAKING = "Breaking: ";
+
+/** The text of a break line, with some text after the marker. Both checks read this one pattern. */
+const BREAKING_TEXT = `${BREAKING}.*\\S`;
+
+/** True when a line of a changeset body is a break line in the form that breakingByMinor reads. */
+export function isBreaking(line: string): boolean {
+  return new RegExp(`^${BREAKING_TEXT}`).test(line);
+}
+
+/**
+ * True when a line of a changeset body names a break in a form that
+ * breakingByMinor does not read: "Breaking:" after a space, a list marker,
+ * or a quote marker, in another case, or with no text after it. Changesets
+ * indents a later line and keeps its marker, so `changeset version` wrote
+ * "  - Breaking: ..." for a list item, and no reader found it (ruling 77 of
+ * plan 12j, item 3; test/fixtures/changelogs/core-breaking-forms-3.0.3.md).
+ */
+export function unreadBreaking(line: string): boolean {
+  return !isBreaking(line) && /^(?:[\s>*+-]|\d+[.)])*breaking:/i.test(line);
+}
+
+/** A changelog line of a change that holds a break line: the first line or a later line. */
+const BREAKING_ENTRY = new RegExp(`^(?:- (?:[0-9a-f]{7,40}: )?| {2})(${BREAKING_TEXT})\\s*$`);
+
+/**
  * The "Breaking:" lines of each minor of a Changesets changelog, by "<major>.<minor>".
  * A minor with no such line has no key. Changesets writes each change as
  * "- <text>", or "- <commit>: <text>" when it reads the git history. It
@@ -234,7 +265,7 @@ export function breakingByMinor(changelog: string): Record<string, string[]> {
       minor = `${heading[1]}.${heading[2]}`;
       continue;
     }
-    const entry = /^(?:- (?:[0-9a-f]{7,40}: )?| {2})(Breaking: .*\S)\s*$/.exec(line);
+    const entry = BREAKING_ENTRY.exec(line);
     if (minor !== null && entry?.[1] !== undefined) out[minor] = [...(out[minor] ?? []), entry[1]];
   }
   return out;

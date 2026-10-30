@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BREAKING, isBreaking, unreadBreaking } from "./check-pack.ts";
 import { parseChangeset } from "./lib/changeset-file.ts";
 import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
@@ -176,7 +177,8 @@ export function checkChangesets(input: ChangesetsInput): Report {
     // break in a patch reaches no app (ruling 67 of plan 12j, Major 3). At
     // 0.x a break is a minor; from 1.0.0 it is a major.
     const breakBump = input.version.startsWith("0.") ? "minor" : "major";
-    if (/^Breaking: /m.test(parsed.body)) {
+    const body = parsed.body.split("\n");
+    if (body.some(isBreaking)) {
       if (parsed.releases.length === 0)
         failures.push(`${file} has a "Breaking:" line and names no package`);
       for (const { name, bump } of parsed.releases)
@@ -185,10 +187,13 @@ export function checkChangesets(input: ChangesetsInput): Report {
             `${file} has a "Breaking:" line and names ${name} as ${bump}; a break is a ${breakBump}`,
           );
     }
-    // Changesets indents each later line of a change by two spaces, so an
-    // indented "Breaking:" line moves deeper and no reader finds it.
-    if (/^[ \t]+Breaking: /m.test(parsed.body))
-      failures.push(`${file} has an indented "Breaking:" line; start it at the line start`);
+    // Changesets indents each later line of a change by two spaces and keeps
+    // its marker. So an indented line, a list item, or a quote moves deeper,
+    // and no reader finds it (ruling 77 of plan 12j, item 3).
+    for (const line of body.filter(unreadBreaking))
+      failures.push(
+        `${file} names a break in a form that upgrade does not read: "${line.trim()}"; start the line with "${BREAKING}"`,
+      );
     // The body becomes the changelog entry, and a reader of the changelog
     // does not know the plan numbers.
     if (/^plan\s+\d/i.test(parsed.body))

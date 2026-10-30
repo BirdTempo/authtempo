@@ -21,7 +21,7 @@ import {
   readInput,
   statusNotes,
 } from "../src/check-changesets.ts";
-import { breakingByMinor } from "../src/check-pack.ts";
+import { BREAKING, breakingByMinor, isBreaking, unreadBreaking } from "../src/check-pack.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { rewrittenPaths } from "../src/rewrite-unpublished.ts";
@@ -382,7 +382,7 @@ describe("check-changesets", () => {
       '.changeset/breaking-minor.md has a "Breaking:" line and names @authtempo/core as minor; a break is a major',
     ]);
     expect(run(x, ["breaking-indented.md"]).failures).toEqual([
-      '.changeset/breaking-indented.md has an indented "Breaking:" line; start it at the line start',
+      '.changeset/breaking-indented.md names a break in a form that upgrade does not read: "Breaking: `createAuth` refuses the `foo` option. Remove it from the config."; start the line with "Breaking: "',
     ]);
     expect(run(paths("docs/x.md"), ["breaking-empty.md"]).failures).toEqual([
       '.changeset/breaking-empty.md has a "Breaking:" line and names no package',
@@ -469,6 +469,88 @@ describe("check-changesets", () => {
     const changelog = readFileSync(join(repo.root, "packages/a/CHANGELOG.md"), "utf8");
     expect(changelog).toContain("\n  Breaking: `foo` is gone. Use `bar`.\n");
     expect(breakingByMinor(changelog)).toEqual({ "0.1": ["Breaking: `foo` is gone. Use `bar`."] });
+  });
+
+  // Ruling 77 of plan 12j, item 3: a list item "- Breaking:" passed the
+  // check, and changeset version wrote it where breakingByMinor finds nothing.
+  it("reads each Breaking line of a real changeset version output, or refuses it", () => {
+    // The four changesets of core and the output of `pnpm changeset version`
+    // (@changesets/cli 3.0.3) on them, in a clone of the lane on 2026-10-31.
+    const names = [
+      "breaking-forms-first-line.md",
+      "breaking-forms-first-list.md",
+      "breaking-forms-first-quote.md",
+      "breaking-forms-later.md",
+    ];
+    const changelog = readFileSync(
+      new URL("./fixtures/changelogs/core-breaking-forms-3.0.3.md", import.meta.url),
+      "utf8",
+    );
+    const reached = breakingByMinor(changelog)["0.1"] ?? [];
+    expect(reached).toEqual([
+      "Breaking: the first line at the line start.",
+      "Breaking: a later line at the line start.",
+    ]);
+    const failures = run(paths("packages/core/src/x.ts"), names).failures;
+    // Each line that names a break reaches upgrade or fails the check, never both, never neither.
+    const verdicts: Record<string, number> = {};
+    for (const name of names)
+      for (const line of parseChangeset(read(name)).body.split("\n")) {
+        if (!/breaking:/i.test(line)) continue;
+        const inLog = reached.includes(line);
+        const refused = failures.includes(
+          `.changeset/${name} names a break in a form that upgrade does not read: "${line.trim()}"; start the line with "${BREAKING}"`,
+        );
+        const verdict =
+          inLog && !refused ? "read" : refused && !inLog ? "refused" : "both or neither";
+        expect({ name, line, verdict }).toEqual({
+          name,
+          line,
+          verdict: isBreaking(line) ? "read" : "refused",
+        });
+        verdicts[verdict] = (verdicts[verdict] ?? 0) + 1;
+      }
+    expect(verdicts).toEqual({ read: 2, refused: 9 });
+    expect(failures).toHaveLength(9);
+  });
+
+  it("refuses the list item of the review, which changeset version hides from upgrade", () => {
+    const body = "Change the probe.\n- Breaking: the probe line is a list item.\n";
+    repo = fixtureRepo();
+    repo.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+    repo.write(".changeset/break.md", `---\n"@fixture/a": minor\n---\n\n${body}`);
+    expect(checkChangesets(readInput(repo.root, "main")).failures).toEqual([
+      '.changeset/break.md names a break in a form that upgrade does not read: "- Breaking: the probe line is a list item."; start the line with "Breaking: "',
+    ]);
+    // The real command keeps the marker under the indent, so breakingByMinor reads no line.
+    repo.run(process.execPath, [CHANGESET_BIN, "version"]);
+    const changelog = readFileSync(join(repo.root, "packages/a/CHANGELOG.md"), "utf8");
+    expect(changelog).toContain("\n  - Breaking: the probe line is a list item.\n");
+    expect(breakingByMinor(changelog)).toEqual({});
+  });
+
+  it("holds the forms of a break line to one rule", () => {
+    const forms: [string, "read" | "refused" | "none"][] = [
+      ["Breaking: `foo` is gone.", "read"],
+      ["Breaking:  two spaces.", "read"],
+      ["Breaking: ", "refused"],
+      ["Breaking:no space.", "refused"],
+      ["BREAKING: in capitals.", "refused"],
+      ["  Breaking: indented.", "refused"],
+      ["\tBreaking: a tab.", "refused"],
+      ["- Breaking: a list item.", "refused"],
+      ["1) Breaking: a numbered item.", "refused"],
+      ["> > Breaking: a deep quote.", "refused"],
+      ["Non-breaking: a word, not a marker.", "none"],
+      ["The upgrade prints each Breaking: line.", "none"],
+    ];
+    for (const [line, form] of forms) {
+      const got = isBreaking(line) ? "read" : unreadBreaking(line) ? "refused" : "none";
+      expect({ line, got }).toEqual({ line, got: form });
+      // A read form is what breakingByMinor reads as a later line of a change.
+      const later = breakingByMinor(`## 0.2.0\n\n- First line.\n  ${line}\n`);
+      expect({ line, read: later["0.2"] !== undefined }).toEqual({ line, read: form === "read" });
+    }
   });
 
   // A root input changes the tarballs of its names, though no released folder
