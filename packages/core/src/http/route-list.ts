@@ -503,6 +503,8 @@ export const ROUTES = Object.freeze([
     feature: "social",
     auth: ["none"],
     codes: [
+      // Ruling 68 Minor 2 of the 12j lane: the limit of its IP, before the read of the form.
+      "rate_limited",
       "invalid_token",
       "token_expired",
       "oauth_denied",

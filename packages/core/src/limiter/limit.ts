@@ -12,6 +12,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "magic-link:email",
   "social-start:ip",
   "social-link:user",
+  // Ruling 68 Minor 2 of the 12j lane: a callback form post, counted before its read.
+  "social-callback:ip",
   "passkey-options:ip",
   "passkey-verify:ip",
   "handoff-start:ip",

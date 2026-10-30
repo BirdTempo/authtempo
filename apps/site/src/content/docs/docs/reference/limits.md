@@ -38,6 +38,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `magic-link:email:<email>` | 15 minutes | 5 | Magic link request |
 | `social-start:ip:<ip>` | 15 minutes | 30 | Social start and link start, for every provider |
 | `social-link:user:<userId>` | 15 minutes | 10 | Link start of a provider, after the start key |
+| `social-callback:ip:<ip>` | 15 minutes | 30 | Callback form post of a provider, such as Apple's, before the read of its form. A post past it reads no byte. `CALLBACK_POST_LIMIT` |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
 | `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify and passkey sign-up verify |
 | `passkey-sign-up:ip:<ip>` | 1 hour | 10 | Passkey sign-up options, after the name rule and the sign-up rule, before the captcha |

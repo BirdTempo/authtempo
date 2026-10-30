@@ -241,7 +241,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 31 values, the action of each audit row: `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete` |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 103 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 104 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
   - packages/core/README.md "Social sign-in"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -46,6 +47,7 @@ import test from "../../../../../samples/guides/social.test.ts?raw";
 - An address that a verified provider proves claims an unverified account. [The claim rule](/docs/concepts/claim-rule/) tells what core deletes.
 - Apple sends the name on the first sign-in only. Core stores it then.
 - The start has one [limit](/docs/reference/limits/) for every provider: `social-start:ip:<ip>` 30 per 15 minutes.
+- Apple's callback form post has its own limit, `social-callback:ip:<ip>` 30 per 15 minutes. Core counts a post before it reads the form.
 - A user with the second factor on goes to the challenge page, with no cookie. [Turn on the second factor](/docs/guides/second-factor/) tells the next step.
 
 ## If it fails

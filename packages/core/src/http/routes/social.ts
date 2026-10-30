@@ -3,7 +3,12 @@ import { anonymousCaller } from "../../engine/anonymous.js";
 import { ID_TOKEN_PROVIDERS, idTokenNonce, signInWithIdToken } from "../../engine/id-token.js";
 import { socialMethod } from "../../engine/last-method.js";
 import { sessionCookieToken, sessionMaxAgeSeconds } from "../../engine/sessions.js";
-import { completeSocial, startLink, startSocial } from "../../engine/social.js";
+import {
+  completeSocial,
+  socialCallbackPostAllowed,
+  startLink,
+  startSocial,
+} from "../../engine/social.js";
 import type { Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { callbackBody, idTokenBody, idTokenNonceBody, linkBody } from "../contract/social.js";
@@ -86,6 +91,9 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         ]
       : [];
     async function callbackAnswer(ctx: RouteContext): Promise<Response> {
+      // A form post counts on its IP before the read, as the SAML ACS does (ruling 68 Minor 2).
+      if (ctx.request.method === "POST" && !(await socialCallbackPostAllowed(ctx.config, ctx.ip)))
+        return failed(ctx, "rate_limited");
       const params = await callbackParams(ctx.request, ctx.url);
       const r = await completeSocial(ctx.config, {
         provider: provider.name,

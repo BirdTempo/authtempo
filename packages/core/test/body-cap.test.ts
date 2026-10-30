@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createAuth } from "../src/create-auth.js";
+import { CALLBACK_POST_LIMIT, START_LIMIT } from "../src/engine/social.js";
 import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
 import { SAML_FORM_MAX } from "../src/engine/sso/saml-sp.js";
 import { readBody } from "../src/http/body.js";
@@ -44,6 +45,7 @@ import { createMemoryAdapter } from "../src/storage/memory.js";
 import { largestBodies } from "./body-limits.js";
 import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
+import { observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { ssoAuth } from "./sso/helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
@@ -1317,6 +1319,56 @@ describe("the ACS reads no byte before its limit and its SAML check (ruling 59 M
     const other = countedForm(1_048_576);
     expect(errorOf(await auth.handle(acsPost("198.51.100.9", other.stream)))).toBe("sso_failed");
     expect(other.pulled()).toBe(1_048_576);
+  });
+});
+
+describe("the Apple form post reads no byte past its IP limit (ruling 68 Minor 2 of the 12j lane)", () => {
+  /** A form post of Apple's callback from `ip`, cross-site as Apple sends it. */
+  const applePost = (ip: string, body: ReadableStream<Uint8Array> | string) =>
+    new Request(`${BASE_URL}/auth/social/apple/callback`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: "https://appleid.apple.com",
+        "cf-connecting-ip": ip,
+      },
+      body,
+      duplex: "half",
+    } as RequestInit);
+  /** The `auth_error` of a redirect of the callback. */
+  const errorOf = (res: Response) =>
+    new URL(res.headers.get("location") ?? "x:").searchParams.get("auth_error");
+
+  it("derives the limit of the callback form posts from the limit of the social start", () => {
+    // Each callback ends one flow that a start began.
+    expect(CALLBACK_POST_LIMIT).toEqual(START_LIMIT);
+  });
+
+  it("answers rate_limited past the limit of an IP, reads no byte of the form, and names the family", async () => {
+    const s = observed();
+    for (let i = 0; i < CALLBACK_POST_LIMIT.max; i++)
+      expect(errorOf(await s.auth.handle(applePost("203.0.113.7", "code=c&state=nope")))).not.toBe(
+        "rate_limited",
+      );
+    const body = countedForm(bodyCapOf("POST /social/apple/callback"));
+    const res = await s.auth.handle(applePost("203.0.113.7", body.stream));
+    expect([res.status, errorOf(res)]).toEqual([302, "rate_limited"]);
+    // At most the chunks that a stream fills ahead of a reader: no read ran.
+    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    const hits = (await s.events()).filter((e) => e.name === "limit.hit");
+    expect(hits.map((e) => (e as { family?: string }).family)).toEqual(["social-callback:ip"]);
+    // Another IP still reads its whole form, and a GET callback of the first IP counts no post.
+    const other = countedForm(bodyCapOf("POST /social/apple/callback"));
+    expect(errorOf(await s.auth.handle(applePost("198.51.100.9", other.stream)))).not.toBe(
+      "rate_limited",
+    );
+    expect(other.pulled()).toBe(bodyCapOf("POST /social/apple/callback"));
+    const get = await s.auth.handle(
+      new Request(`${BASE_URL}/auth/social/google/callback?code=c&state=nope`, {
+        headers: { "cf-connecting-ip": "203.0.113.7" },
+      }),
+    );
+    expect([get.status, errorOf(get)]).toEqual([302, "invalid_token"]);
   });
 });
 
