@@ -1758,9 +1758,11 @@ writes each value under version 1.
 - The body reads of the routes with a cap above 64 KiB hold at most
   16 MiB at once in one isolate (`LARGE_READ_BUDGET`). A read past it
   answers 503 `body_busy` with `Retry-After: 1`, and SCIM its own 503.
-  One client holds at most 4 MiB of it (`LARGE_READ_SHARE`), or the cap
-  of its read when that is more. A client is its IP before a session
-  and its user after one.
+  The budget has two halves of 8 MiB that do not lend bytes to each
+  other: the reads of signed-in users, and every other read. One IP holds
+  at most 4 MiB (`LARGE_READ_SHARE`), and so does the one client with no
+  IP. A user may hold the cap of its read, with one large read at a
+  time. A client is its IP before a session and its user after one.
 - Such a read that gets no bytes for 10 s stops and frees its bytes
   (`LARGE_READ_IDLE_MS`). So does a read that runs past the time of its
   cap at 128 KiB per second, at least 10 s (`LARGE_READ_MIN_RATE`). The

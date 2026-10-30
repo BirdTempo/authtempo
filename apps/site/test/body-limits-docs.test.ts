@@ -190,6 +190,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /Now the reads of signed-in users hold their half, (\d+) bytes/],
       ["limits", /of signed-in users hold at once, in each isolate \| (\d+), the user half/],
       ["limits", /stalls an SSO connection write of (\d+) (MiB) fills the user half/],
+      ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
     ],
   ],
   [
@@ -199,6 +200,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /or the other reads hold theirs, (\d+) bytes/],
       ["limits", /every other body read above the floor holds at once, in each isolate \| (\d+), /],
       ["limits", /so \d+ IPs must send (\d+) (MiB) each/],
+      ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
     ],
   ],
   [
@@ -310,7 +312,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /one client, `unknown`, with the share of one IP, (\d+) (MiB)/],
       ["deploy", /In the body budget, it is one client of (\d+) (MiB)/],
       ["deploy", /one client of (\d+) (MiB) in the budget of the large body reads/],
-      ["readme", /One client holds at most (\d+) (MiB) of it/],
+      ["readme", /One IP holds at most (\d+) (MiB)/],
     ],
   ],
 ];
