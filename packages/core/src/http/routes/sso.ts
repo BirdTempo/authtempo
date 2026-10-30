@@ -116,12 +116,15 @@ export function ssoLargeReadAllowed(config: ResolvedConfig, userId: string): Pro
  * check of such a mark would set it at each start. The spend keeps the
  * promise with the count that the start checks already make.
  *
- * The residual, derived 2026-10-31. A stall holds the user half once per
- * account and window, so about 113 accounts (3600 s / 32 s) from 12 IPs
- * (10 password sign-ups per IP per hour) hold it for the hour. Before the
- * spend, 19 accounts did. An account that sends each write whole within
- * 32 s spends nothing: 19 such accounts still hold the half for the hour,
- * at about 256 KiB per second. The limits page states both.
+ * The residual, derived 2026-10-31 (ruling 79). A read that spends nothing
+ * holds the user half for at most 8 s. If each read of an account ends so,
+ * a hold for the hour takes 450 reads (3600 s / 8 s) from 75 accounts. At
+ * 10 password sign-ups per IP per hour, they come from 8 IPs. The last read
+ * of a window has no start left to spend, so it can run to 32 s. So one
+ * account holds the half for at most 5 times 8 s and 32 s, 72 s, in a
+ * window. The least for the hour is 50 accounts with 300 reads, from 5
+ * IPs. Before the spend of slow reads, 19 accounts did it. The limits page
+ * states this.
  */
 export function spendLargeReads(config: ResolvedConfig, userId: string): Promise<void> {
   return spendLimit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER);

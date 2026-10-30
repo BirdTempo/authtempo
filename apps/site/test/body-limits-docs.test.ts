@@ -90,11 +90,27 @@ const ssoWriteSeconds = () =>
     ),
   ) / 1000;
 
-/** The accounts whose single stalls, one per window, fill the window (ruling 75). */
-const accountsOfStalls = () =>
-  Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / ssoWriteSeconds());
+/** The time in seconds that a large read of a user may take with no spend (ruling 79). */
+const slowSeconds = () => constant("LARGE_READ_SLOW_MS") / 1000;
 
-/** The accounts whose 6 holds each fill the window: before the spend, and with whole writes. */
+/** The reads within that time, each with no spend, that fill the window (ruling 79). */
+const slowReads = () => Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / slowSeconds());
+
+/**
+ * The seconds that one account holds the user half in a window (ruling 79):
+ * each read but the last within the time of no spend, and the last read,
+ * with no start left to spend, to the time of an SSO connection write.
+ */
+const holdOfAccount = () =>
+  (limitMax("SSO_LARGE_READ_PER_USER") - 1) * slowSeconds() + ssoWriteSeconds();
+
+/** The least accounts that hold the user half for the window (ruling 79). */
+const leastAccounts = () => Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / holdOfAccount());
+
+/** The MiB of the cap of an SSO connection write: what one read sends to hold the user half. */
+const capMiB = () => capOf("POST /sso/connections/create") / 1_048_576;
+
+/** The accounts whose 6 holds each fill the window, before the spend of slow reads. */
 const accountsOfHolds = () =>
   Math.ceil(
     limitSeconds("SSO_LARGE_READ_PER_USER") /
@@ -151,8 +167,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /and (\d+) bytes for the two SSO connection writes/],
       ["limits", /and (\d+) for the two SSO connection writes/],
-      // The holds of the accounts that send each write whole (ruling 75).
-      ["limits", /each with \d+ holds of (\d+) (MiB), still hold it/],
+      // What each read of the residual sends (ruling 79).
+      ["limits", /Each read sends about (\d+) (MiB), so the hour/],
       ["readme", /and (\d+) (MiB) for the two SSO connection writes/],
       // The measure of ruling 56: a parser at this cap on the two SSO paths stopped a process.
       ["express", /with their cap of (\d+) (MiB) as its limit/],
@@ -334,7 +350,6 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /or (\d+) (KiB) per second for a signed-in user/],
       ["limits", /or at (\d+) for a signed-in user/],
       ["limits", /an admin must send it at (\d+) (KiB) per second or more/],
-      ["limits", /still hold it for the hour, at about (\d+) (KiB) per second/],
       ["readme", /read of a signed-in user takes (\d+) (KiB) per second/],
     ],
   ],
@@ -342,10 +357,10 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     "the time of an SSO connection write, in seconds",
     ssoWriteSeconds,
     [
-      // The residual of the stall spend (ruling 75).
-      ["limits", /About \d+ accounts, \d+ s \/ (\d+) s, each with one stall/],
-      ["limits", /\d+ accounts at \d+ times (\d+) s, \d+ s, held it/],
-      ["limits", /An account that sends each write whole within (\d+) s spends nothing/],
+      // The residual of the spend of slow reads (ruling 79).
+      ["limits", /\d+ accounts at \d+ times (\d+) s, \d+ s, held the user half/],
+      ["limits", /has no start left to spend, so it can run to (\d+) s\./],
+      ["limits", /for \d+ times \d+ s and (\d+) s, \d+ s, in a window/],
       ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
       ["limits", /fills the user half for at most (\d+) s/],
       ["limits", /delay the SSO connection writes of others by up to (\d+) s/],
@@ -356,10 +371,15 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   ],
   [
     "the time of a large read of a user with no spend, in seconds",
-    () => constant("LARGE_READ_SLOW_MS") / 1000,
+    slowSeconds,
     [
       ["limits", /A read that takes more than (\d+) s spends the rest of the window/],
       ["errors", /So does such a write that reads whole after more than (\d+) s/],
+      // The residual of the spend of slow reads (ruling 79).
+      ["limits", /A large read of a user that takes more than (\d+) s spends the rest/],
+      ["limits", /A careful account ends each read within (\d+) s and spends nothing/],
+      ["limits", /takes \d+ reads, \d+ s \/ (\d+) s, from/],
+      ["limits", /holds the half for \d+ times (\d+) s and \d+ s/],
     ],
   ],
   [
@@ -369,20 +389,25 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /and starts at most (\d+) in an hour/],
       ["limits", /by up to \d+ s, (\d+) times per hour/],
       ["limits", /the user half of the body budget at most (\d+) times/],
-      // The residual of the stall spend (ruling 75).
-      ["limits", /\d+ accounts at (\d+) times \d+ s, \d+ s, held it/],
-      ["limits", /each with (\d+) holds of \d+ MiB/],
+      // The residual of the spend of slow reads (ruling 79).
+      ["limits", /\d+ accounts at (\d+) times \d+ s, \d+ s, held the user half/],
+      ["limits", /If each of its (\d+) reads ends so/],
     ],
   ],
   [
     "the window of the large reads of one user, in seconds",
     () => limitSeconds("SSO_LARGE_READ_PER_USER"),
-    [["limits", /About \d+ accounts, (\d+) s \/ \d+ s, each with one stall/]],
+    [["limits", /takes \d+ reads, (\d+) s \/ \d+ s, from/]],
   ],
   [
-    "the accounts whose one stall in each window holds the user half for the hour",
-    accountsOfStalls,
-    [["limits", /About (\d+) accounts, \d+ s \/ \d+ s, each with one stall/]],
+    "the reads within the time of no spend that hold the user half for the hour",
+    slowReads,
+    [["limits", /a hold for the hour takes (\d+) reads/]],
+  ],
+  [
+    "the accounts of those reads, at 6 starts each",
+    () => Math.ceil(slowReads() / limitMax("SSO_LARGE_READ_PER_USER")),
+    [["limits", /\d+ s \/ \d+ s, from (\d+) accounts/]],
   ],
   [
     "the password sign-ups of one IP in an hour",
@@ -391,21 +416,54 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   ],
   [
     "the IPs of those accounts",
-    () => Math.ceil(accountsOfStalls() / signUpsPerIpHour()),
+    () =>
+      Math.ceil(Math.ceil(slowReads() / limitMax("SSO_LARGE_READ_PER_USER")) / signUpsPerIpHour()),
     [["limits", /per IP per hour, they come from (\d+) IPs/]],
   ],
   [
-    "the accounts whose 6 holds each fill the hour",
+    "the upload of those reads, in MiB",
+    () => slowReads() * capMiB(),
+    [["limits", /so the hour takes about (\d+) MiB of upload/]],
+  ],
+  [
+    "the reads of one account before its last read of a window",
+    () => limitMax("SSO_LARGE_READ_PER_USER") - 1,
+    [["limits", /holds the half for (\d+) times \d+ s and/]],
+  ],
+  [
+    "the seconds that one account holds the user half in a window",
+    holdOfAccount,
+    [["limits", /times \d+ s and \d+ s, (\d+) s, in a window/]],
+  ],
+  [
+    "the least accounts that hold the user half for the hour",
+    leastAccounts,
+    [["limits", /the least for the hour is (\d+) accounts/]],
+  ],
+  [
+    "the reads of the least accounts",
+    () => leastAccounts() * limitMax("SSO_LARGE_READ_PER_USER"),
+    [["limits", /the least for the hour is \d+ accounts with (\d+) reads/]],
+  ],
+  [
+    "the IPs of the least accounts",
+    () => Math.ceil(leastAccounts() / signUpsPerIpHour()),
+    [["limits", /\d+ reads, from (\d+) IPs, with/]],
+  ],
+  [
+    "the upload of the least accounts, in MiB",
+    () => leastAccounts() * limitMax("SSO_LARGE_READ_PER_USER") * capMiB(),
+    [["limits", /IPs, with about (\d+) MiB of upload/]],
+  ],
+  [
+    "the accounts whose 6 holds each fill the hour, before the spend of slow reads",
     accountsOfHolds,
-    [
-      ["limits", /Before the spend, (\d+) accounts at/],
-      ["limits", /So (\d+) such accounts, each with \d+ holds/],
-    ],
+    [["limits", /Before the spend of slow reads, (\d+) accounts at/]],
   ],
   [
     "the seconds of the holds of those accounts",
     () => accountsOfHolds() * limitMax("SSO_LARGE_READ_PER_USER") * ssoWriteSeconds(),
-    [["limits", /accounts at \d+ times \d+ s, (\d+) s, held it/]],
+    [["limits", /accounts at \d+ times \d+ s, (\d+) s, held the user half/]],
   ],
   [
     "the share of one client",
