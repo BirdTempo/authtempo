@@ -600,7 +600,10 @@ describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 
     );
     await Promise.all(held.map((h) => h.atGate));
     await settle();
-    return { reads, open: () => held.forEach((h) => h.open()) };
+    const open = () => {
+      for (const h of held) h.open();
+    };
+    return { reads, open };
   }
 
   it("derives LARGE_READ_BUDGET as 2 reads of REQUEST_BODY_MAX", () => {
