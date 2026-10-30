@@ -116,6 +116,8 @@ Run the migration once per deploy, before the first request:
 await betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate();
 ```
 
+`migrations/postgres/` holds the text of each step that `migrate()` runs on Postgres, for the default table names. It is the record of each shipped step: read it before a migration, and do not run it by hand.
+
 What the migration does (`0001_compat_better_auth`, append-only):
 
 - It adds two tables, `ta_meta` and `ta_limit`, and no other table. A schema that already holds core's own `ta_meta` and `ta_limit` (from `@authtempo/adapter-postgres` migrations) makes `migrate()` stop with `relation "ta_limit" already exists`, and the migration changes nothing. Run the compat storage on a schema without core's tables.

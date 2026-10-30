@@ -122,6 +122,11 @@ describe("check-records", () => {
     expect(
       recordOf("packages/compat-better-auth/migrations/d1/0001_compat_better_auth.sql")?.kind,
     ).toBe("migrations");
+    // The Postgres text of the compat runner is a record too (ruling 67 of plan 12j, Minor 2).
+    expect(
+      recordOf("packages/compat-better-auth/migrations/postgres/0001_compat_better_auth.sql")
+        ?.kind,
+    ).toBe("migrations");
     expect(recordOf("packages/adapter-postgres/src/migrations/0001_schema_v1.ts")?.kind).toBe(
       "migrations",
     );

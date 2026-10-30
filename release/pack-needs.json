@@ -87,6 +87,7 @@
     "dist/adapters/drizzle.js",
     "migrations/d1/",
     "migrations/d1-before-1.7/",
+    "migrations/postgres/",
     "migrations/d1/0001_compat_better_auth.sql"
   ],
   "@authtempo/core": [

@@ -408,18 +408,14 @@ export function readMigrations(root: string): {
 export const COMPAT_MIGRATIONS = "packages/compat-better-auth/migrations";
 
 /**
- * Each folder of COMPAT_MIGRATIONS: a chain (null), or an overlay with the
- * name of its chain. `authtempo migrate --tables compat` runs these files,
- * and owner decision 3 holds them as it holds the adapters (ruling 26 of
- * plan 12j, L5, held by ruling 64, Minor 3). A chain holds each schema
- * version. An overlay holds only the files that differ for older tables:
- * the compat README says to copy "the file of the same name" from it. A new
- * folder fails until it has its row here.
+ * Each folder of COMPAT_MIGRATIONS, each a chain of every compat migration.
+ * `authtempo migrate --tables compat` runs these steps, and owner decision 3
+ * holds them as it holds the adapters (ruling 26 of plan 12j, L5, held by
+ * ruling 64, Minor 3). d1 is for the tables of Better Auth 1.7, d1-before-1.7
+ * for older tables, and postgres holds the text of the Postgres runner
+ * (ruling 67 of plan 12j, Minor 2). A new folder fails until it has its row here.
  */
-export const COMPAT_FOLDERS: Readonly<Record<string, string | null>> = {
-  d1: null,
-  "d1-before-1.7": "d1",
-};
+export const COMPAT_FOLDERS: readonly string[] = ["d1", "d1-before-1.7", "postgres"];
 
 /** A compat migration: the base `0001_compat_better_auth.sql`, or a step `00NN_compat_schema_v<n>.sql` to core schema n. */
 const COMPAT_FILE = /^\d{4}_compat_(?:better_auth|schema_v(\d+))\.sql$/;
@@ -437,32 +433,23 @@ export function readCompat(root: string): {
     .filter((f) => statSync(join(dir, f)).isDirectory())
     .sort();
   for (const folder of folders)
-    if (!Object.hasOwn(COMPAT_FOLDERS, folder))
-      failures.push(
-        `${COMPAT_MIGRATIONS}/${folder} is neither a chain nor an overlay of COMPAT_FOLDERS`,
-      );
-  for (const [folder, chain] of Object.entries(COMPAT_FOLDERS)) {
+    if (!COMPAT_FOLDERS.includes(folder))
+      failures.push(`${COMPAT_MIGRATIONS}/${folder} is not a chain of COMPAT_FOLDERS`);
+  for (const folder of COMPAT_FOLDERS) {
     const at = `${COMPAT_MIGRATIONS}/${folder}`;
     if (!folders.includes(folder)) {
       failures.push(`${at} does not exist, and COMPAT_FOLDERS names it`);
       continue;
     }
     const files = readdirSync(join(dir, folder)).sort();
-    const bad = files.filter((f) => !COMPAT_FILE.test(f));
-    for (const f of bad) failures.push(`${at}: ${f} is not a compat migration file name`);
-    if (chain === null) {
-      const versions = files.flatMap((f) => {
-        const v = COMPAT_FILE.exec(f)?.[1];
-        return v === undefined ? [] : [Number(v)];
-      });
-      if (versions.length === 0) failures.push(`${at} has no compat migration`);
-      else compat[`compat-better-auth/${folder}`] = versions;
-    } else {
-      const own = existsSync(join(dir, chain)) ? readdirSync(join(dir, chain)) : [];
-      for (const f of files)
-        if (!own.includes(f))
-          failures.push(`${at}: ${f} has no file of the same name in its chain ${chain}`);
-    }
+    for (const f of files.filter((f) => !COMPAT_FILE.test(f)))
+      failures.push(`${at}: ${f} is not a compat migration file name`);
+    const versions = files.flatMap((f) => {
+      const v = COMPAT_FILE.exec(f)?.[1];
+      return v === undefined ? [] : [Number(v)];
+    });
+    if (versions.length === 0) failures.push(`${at} has no compat migration`);
+    else compat[`compat-better-auth/${folder}`] = versions;
   }
   return { compat, failures };
 }

@@ -587,27 +587,36 @@ describe("check-support on the compat chains", () => {
     );
   });
 
-  it("reads each chain, holds each overlay to its chain, and fails a folder of no row", () => {
+  it("reads each chain, and fails a folder of no row, a bad name, and an empty chain", () => {
+    const steps = ["0001_compat_better_auth.sql", "0002_compat_schema_v5.sql"];
     const ok = compatTree({
-      d1: ["0001_compat_better_auth.sql", "0002_compat_schema_v5.sql", "0003_compat_schema_v6.sql"],
-      "d1-before-1.7": ["0001_compat_better_auth.sql"],
+      d1: [...steps, "0003_compat_schema_v6.sql"],
+      "d1-before-1.7": steps,
+      postgres: steps,
     });
     try {
-      expect(readCompat(ok)).toEqual({ compat: { "compat-better-auth/d1": [5, 6] }, failures: [] });
+      expect(readCompat(ok)).toEqual({
+        compat: {
+          "compat-better-auth/d1": [5, 6],
+          "compat-better-auth/d1-before-1.7": [5],
+          "compat-better-auth/postgres": [5],
+        },
+        failures: [],
+      });
     } finally {
       rmSync(ok, { recursive: true, force: true });
     }
     const bad = compatTree({
       d1: ["0001_compat_better_auth.sql", "notes.txt"],
-      "d1-before-1.7": ["0002_compat_schema_v5.sql"],
-      postgres: ["0001_compat_better_auth.sql"],
+      "d1-before-1.7": steps,
+      sqlite: steps,
     });
     try {
       expect(readCompat(bad).failures).toEqual([
-        `${COMPAT_MIGRATIONS}/postgres is neither a chain nor an overlay of COMPAT_FOLDERS`,
+        `${COMPAT_MIGRATIONS}/sqlite is not a chain of COMPAT_FOLDERS`,
         `${COMPAT_MIGRATIONS}/d1: notes.txt is not a compat migration file name`,
         `${COMPAT_MIGRATIONS}/d1 has no compat migration`,
-        `${COMPAT_MIGRATIONS}/d1-before-1.7: 0002_compat_schema_v5.sql has no file of the same name in its chain d1`,
+        `${COMPAT_MIGRATIONS}/postgres does not exist, and COMPAT_FOLDERS names it`,
       ]);
     } finally {
       rmSync(bad, { recursive: true, force: true });
@@ -618,8 +627,9 @@ describe("check-support on the compat chains", () => {
     const root = new URL("../../../", import.meta.url).pathname;
     const { compat, failures } = readCompat(decodeURIComponent(root));
     expect(failures).toEqual([]);
-    expect(Object.keys(compat).length).toBe(
-      Object.values(COMPAT_FOLDERS).filter((chain) => chain === null).length,
-    );
+    // d1-before-1.7 holds each step too, not only the files that differ (ruling 67 of plan 12j, Minor 2).
+    expect(Object.keys(compat)).toEqual(COMPAT_FOLDERS.map((f) => `compat-better-auth/${f}`));
+    const lengths = new Set(Object.values(compat).map((v) => v.join(",")));
+    expect(lengths.size).toBe(1);
   });
 });
