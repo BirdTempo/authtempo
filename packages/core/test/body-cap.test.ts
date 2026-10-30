@@ -25,6 +25,7 @@ import {
   LARGE_READ_IDLE_MS,
   LARGE_READ_MIN_RATE,
   LARGE_READ_SHARE,
+  LARGE_READ_SLOW_LINK_RATE,
   LARGE_READ_SLOW_MS,
   LARGE_READ_USER_BUDGET,
   LARGE_READ_USER_MIN_RATE,
@@ -1935,7 +1936,7 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
     // The largest valid SSO connection write takes 4.5 s at 1 MiB per second: 8 s keeps a margin.
     const largest = largestBodies()[0]?.bytes ?? Number.POSITIVE_INFINITY;
     expect(largest).toBe(4_705_616);
-    expect(Math.ceil((largest * 1000) / 1_048_576)).toBe(4_488);
+    expect(Math.ceil((largest * 1000) / LARGE_READ_SLOW_LINK_RATE)).toBe(4_488);
     // Each 408 of a large read takes longer than a slow read, so it spends too.
     expect(LARGE_READ_SLOW_MS).toBeLessThan(LARGE_READ_IDLE_MS);
     expect(LARGE_READ_SLOW_MS).toBeLessThan(LARGE_READ_DEADLINE_FLOOR_MS);
