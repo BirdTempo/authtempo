@@ -31,24 +31,6 @@ const ROOT_PACKAGE = JSON.parse(readFileSync(new URL("package.json", ROOT), "utf
 };
 const SCRIPTS = ROOT_PACKAGE.scripts;
 
-/**
- * The files that a root script of the runbook runs and that a later task adds,
- * each with its task. A file here that exists fails as stale, so the entry
- * leaves with the task.
- */
-const LATER_FILES: Readonly<Record<string, string>> = {
-  "scripts/release/src/release-check.ts": "plan 12j Task 14 (pnpm release:check)",
-};
-
-/**
- * The code names of the runbook that a later task exports, each with its
- * task. An entry whose name a file exports fails as stale.
- */
-const LATER_NAMES: Readonly<Record<string, string>> = {
-  UNPUBLISHED_FILES:
-    "plan 12j Task 14, ruling 47(1): the packed files with the note, in check-pack",
-};
-
 /** The capital names of the runbook that name a file, not an export: the hash list of the job check. */
 const FILE_NAMES = new Set(["SHA256SUMS"]);
 
@@ -324,8 +306,10 @@ describe("docs/release/RUNBOOK.md", () => {
     );
   });
 
-  it("names root scripts and files that exist, or that a later task adds", () => {
-    const later = new Set<string>();
+  // The LATER lists left with plan 12j Task 14, which added the last file and
+  // the last name (ruling 52 of plan 12j). So each target exists now.
+  it("names root scripts and files that exist", () => {
+    let targets = 0;
     for (const m of TEXT.matchAll(/`pnpm ([a-z:-]+)/g)) {
       const name = m[1] ?? "";
       // pnpm install, a flag, or a binary of a root dev dependency (turbo) is no root script.
@@ -334,15 +318,11 @@ describe("docs/release/RUNBOOK.md", () => {
       expect(Object.keys(SCRIPTS), `pnpm ${name}`).toContain(name);
       for (const target of (SCRIPTS[name] ?? "").matchAll(/\bnode (\S+\.(?:ts|mjs|js))\b/g)) {
         const file = target[1] ?? "";
-        if (LATER_FILES[file] !== undefined) later.add(file);
-        else expect(existsSync(new URL(file, ROOT)), `${file} of pnpm ${name}`).toBe(true);
+        targets++;
+        expect(existsSync(new URL(file, ROOT)), `${file} of pnpm ${name}`).toBe(true);
       }
     }
-    for (const file of Object.keys(LATER_FILES))
-      expect(existsSync(new URL(file, ROOT)), `${file} exists, so LATER_FILES is stale`).toBe(
-        false,
-      );
-    expect([...later]).toEqual(Object.keys(LATER_FILES));
+    expect(targets).toBeGreaterThan(0);
     const paths = [...TEXT.matchAll(/`((?:apps|docs|packages|release|scripts)\/[^`\s<]+)`/g)].map(
       (m) => m[1] ?? "",
     );
@@ -350,18 +330,13 @@ describe("docs/release/RUNBOOK.md", () => {
     for (const path of paths) expect(existsSync(new URL(path, ROOT)), path).toBe(true);
   });
 
-  it("names code that exists, or that a later task adds", () => {
+  it("names code that exists", () => {
     const files = [...EXPORT_DIRS.flatMap(tsFiles), ...EXPORT_FILES];
     const names = new Set(
       spans(TEXT).filter((s) => /^[A-Z][A-Z0-9_]+$/.test(s) && !FILE_NAMES.has(s)),
     );
     expect(names.size).toBeGreaterThan(10);
-    for (const name of names)
-      if (LATER_NAMES[name] === undefined) expect(exports(files, name), name).toBe(true);
-    for (const name of Object.keys(LATER_NAMES)) {
-      expect(names, `the runbook names ${name}`).toContain(name);
-      expect(exports(files, name), `${name} is exported, so LATER_NAMES is stale`).toBe(false);
-    }
+    for (const name of names) expect(exports(files, name), name).toBe(true);
   });
 
   it("names each released package with its Node floor", () => {
