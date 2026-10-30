@@ -240,6 +240,7 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
         { name: "@authtempo/cli", section: "devDependencies", from: "0.1.0", to: "0.2.1" },
       ],
       schema: { from: 15, to: 16, migrate: true },
+      peers: [],
       breaking: [{ minor: "0.2", lines: [...(BREAKING["0.2"] ?? [])] }],
       deprecations: REGISTER.map((d) => ({ id: d.id, removeIn: d.removeIn, docs: d.docs })),
     } satisfies UpgradeJson);
@@ -355,6 +356,26 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
     ]);
   });
 
+  it("names the same deprecations in the text and the JSON when the target names no Breaking lines", async () => {
+    // A core manifest with an authtempo key and no breaking key (rr-12j-task10 N2).
+    const docs = {
+      ...registryDocs(),
+      "@authtempo/core": registryDoc("@authtempo/core", { facts: "no-breaking" }),
+    };
+    const text = appIo(fixture("app.package.json"), { docs });
+    expect(await main(["upgrade", "app", "--to", "0.3.0"], text)).toBe(1);
+    const json = appIo(fixture("app.package.json"), { docs });
+    expect(await main(["upgrade", "app", "--to", "0.3.0", "--json"], json)).toBe(1);
+    const doc = docOf(json.stdout);
+    expect(doc.deprecations.length).toBeGreaterThan(0);
+    expect(text.stdout.filter((l) => l.startsWith("removed in "))).toEqual(
+      doc.deprecations.map(
+        (d) => `removed in ${d.removeIn}: ${d.id}: https://authtempo.com${d.docs}`,
+      ),
+    );
+    expect(text.stdout.at(-1)).toBe("wrote nothing");
+  });
+
   it("stops when a package has no version at the target, and writes nothing", async () => {
     const text = fixture("app.package.json");
     const io = appIo(text, {
@@ -436,6 +457,13 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       "  peer @authtempo/core ^0.1.0 excludes 0.2.1: change the range by hand",
       "  peer @authtempo/cli 0.1.x: upgrade cannot read the range; check that it holds 0.2.1",
     ]);
+    // The JSON holds the same peers as rows (rr-12j-task10 N1).
+    const json = appIo(text);
+    expect(await main(["upgrade", "app", "--json"], json)).toBe(1);
+    expect(docOf(json.stdout).peers).toEqual([
+      { name: "@authtempo/core", range: "^0.1.0", holds: false },
+      { name: "@authtempo/cli", range: "0.1.x", holds: null },
+    ]);
   });
 
   it("names the section of each package line", async () => {
@@ -495,6 +523,16 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       `stopped: GET https://registry.npmjs.org/@authtempo%2fcore: the answer body is over ${REGISTRY_BODY_CAP_BYTES / 1024} KiB, the cap of one read`,
     );
     expect(io.files.get(APP)).toBe(text);
+  });
+
+  it("names each key of the JSON in the table of the docs page", () => {
+    const page = readFileSync(
+      join(PKG, "../../apps/site/src/content/docs/docs/reference/cli/upgrade.md"),
+      "utf8",
+    );
+    const section = page.split("## The JSON")[1]?.split("\n## ")[0] ?? "";
+    const keys = [...section.matchAll(/^\| `([a-z]+)` \|/gm)].map((m) => m[1]);
+    expect(keys.sort()).toEqual(Object.keys(UPGRADE_JSON_KEYS).sort());
   });
 
   it("reads a peer range as npm does, or gives null", () => {

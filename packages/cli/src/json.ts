@@ -458,6 +458,11 @@ export interface UpgradeJson extends RunKeys {
   }[];
   /** Null when the app is current, or when a core manifest names no schema version. */
   schema: { from: number; to: number; migrate: boolean } | null;
+  /**
+   * One row for each @authtempo peer range that excludes the target (`holds: false`), or that
+   * upgrade cannot read (`holds: null`): the peer lines of the text. upgrade never writes them.
+   */
+  peers: { name: string; range: string; holds: false | null }[];
   breaking: { minor: string; lines: string[] }[];
   deprecations: { id: string; removeIn: string; docs: string }[];
 }
@@ -468,6 +473,7 @@ export const UPGRADE_JSON_KEYS = {
   to: true,
   packages: true,
   schema: true,
+  peers: true,
   breaking: true,
   deprecations: true,
 } as const satisfies Record<keyof UpgradeJson, true>;
@@ -573,6 +579,7 @@ export const STOP_JSON = {
     to: null,
     packages: [],
     schema: null,
+    peers: [],
     breaking: [],
     deprecations: [],
   },

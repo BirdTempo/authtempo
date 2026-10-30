@@ -81,6 +81,7 @@ export const upgradeCommand: Command = {
           to: plan.to,
           packages: [],
           schema: null,
+          peers: [],
           breaking: [],
           deprecations: [],
         } satisfies UpgradeJson);
@@ -103,6 +104,8 @@ export const upgradeCommand: Command = {
       say(`${b.minor}: ${changelogLink(b.minor)}`);
       for (const line of b.lines) say(`  ${line}`);
     }
+    // Before the stop of an unknown list, so the text and the JSON name the same deprecations.
+    for (const d of plan.deprecations) say(`removed in ${d.removeIn}: ${d.id}: ${linkOf(d.docs)}`);
     if (!plan.breakingKnown) {
       // No `authtempo.breaking` key: an empty list here would read as "no Breaking line".
       const unknown = `the registry names no Breaking lines for ${plan.to}: read the changelog of each crossed minor at ${CHANGELOG_PAGE}, then change the versions by hand`;
@@ -116,12 +119,12 @@ export const upgradeCommand: Command = {
           to: plan.to,
           packages: plan.packages,
           schema: plan.schema,
+          peers: plan.peers,
           breaking: plan.breaking,
           deprecations: plan.deprecations,
         } satisfies UpgradeJson);
       return 1;
     }
-    for (const d of plan.deprecations) say(`removed in ${d.removeIn}: ${d.id}: ${linkOf(d.docs)}`);
     say(dryRun ? "dry run: wrote nothing" : `wrote ${path}`);
     const install = installOf(dir, (file) => ctx.exists(file));
     say(
@@ -151,6 +154,7 @@ export const upgradeCommand: Command = {
         to: plan.to,
         packages: plan.packages,
         schema: plan.schema,
+        peers: plan.peers,
         breaking: plan.breaking,
         deprecations: plan.deprecations,
       } satisfies UpgradeJson);

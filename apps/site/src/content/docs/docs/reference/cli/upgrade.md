@@ -61,7 +61,7 @@ The command stops with exit 2 and writes nothing in each of these cases:
 - The registry gives no answer in 10 seconds.
 - A registry document is larger than 64 MiB.
 
-The command also writes nothing when the target core names no Breaking lines. Then it cannot tell "no Breaking line" from "unknown". It prints the changelog link of each crossed minor and exits 1. Read the changelog, then change the versions by hand.
+The command also writes nothing when the target core names no Breaking lines. Then it cannot tell "no Breaking line" from "unknown". It prints the changelog link of each crossed minor, the peer lines, and the deprecations, and exits 1. Read the changelog, then change the versions by hand.
 
 ## What it writes
 
@@ -85,6 +85,7 @@ The command runs no install and no other program. It prints the install command 
 | `to` | The target version, or null in the document of a stop. |
 | `packages` | One row for each entry of `package.json`: `name` (the key, so the alias is `better-auth`), `section` (`dependencies` or `devDependencies`), `from`, and `to`. The list is empty when the app is current. |
 | `schema` | The schema version of the installed core and of the target core, and `migrate`, which is true when they differ. Null when the app is current, or when the registry names no schema version for the installed core or the target core. |
+| `peers` | One row for each line of an `@authtempo` peer range: `name`, `range`, and `holds`. `holds` is false when the range excludes the target, and null when the command cannot read it. |
 | `breaking` | One row for each crossed minor: `minor` and its Breaking `lines`. |
 | `deprecations` | One row for each item that the range removes: `id`, `removeIn`, and `docs`. |
 | `exit` | The exit code of the run. |
