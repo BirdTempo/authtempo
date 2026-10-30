@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { isRecordVerify } from "../../compat-seams.js";
+import { isRecordVerify, takeSsoManageCounted } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
@@ -66,6 +66,11 @@ import { ssoContinuePage } from "../sso-continue-page.js";
  */
 export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
 
+/** Counts one SSO manager write of the user on its limit. True when the write is within the limit. */
+export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return limit(config, "sso-manage:user", userId, SSO_MANAGE_PER_USER);
+}
+
 /** The life of the binding cookie: the life of the state row. */
 const BIND_MAX_AGE_SECONDS = 600;
 
@@ -88,7 +93,9 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * input. Then the manager guard runs for the organization that
  * `organizationOf` names from the input. An id that names no row answers
  * `not_found`. The SSO routes and the SCIM token routes run these steps, so
- * the two cannot drift.
+ * the two cannot drift. A write that a compat package counted before its
+ * own read (`countSsoManageWrite`) is not counted again (ruling 51 Minor 1
+ * of the 12j lane).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -105,7 +112,8 @@ export async function managedCall<T, V>(
   const resolved = await sessionFromRequest(config, ctx.request);
   if (!resolved) return json({ error: "unauthorized" }, 401);
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
-  if (!(await limit(config, "sso-manage:user", resolved.user.id, SSO_MANAGE_PER_USER)))
+  const counted = takeSsoManageCounted(ctx.request, resolved.user.id);
+  if (!counted && !(await ssoManageAllowed(config, resolved.user.id)))
     return send(respond(fail("rate_limited")), renewed);
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);

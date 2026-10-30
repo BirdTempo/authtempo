@@ -134,3 +134,93 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
     }
   });
 });
+
+/**
+ * A JSON body of `bytes` bytes, `{}` and spaces, in chunks of 64 KiB. It
+ * counts the bytes that a reader pulled, so a test sees that no read ran.
+ */
+function countedBody(bytes: number) {
+  const spaces = new Uint8Array(65_536).fill(0x20);
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(c) {
+      if (sent >= bytes) return c.close();
+      const chunk = spaces.slice(0, Math.min(spaces.byteLength, bytes - sent));
+      if (sent === 0) chunk.set(new TextEncoder().encode("{}"));
+      sent += chunk.byteLength;
+      c.enqueue(chunk);
+    },
+  });
+  return { stream, pulled: () => sent };
+}
+
+/** Core's SSO_MANAGE_PER_USER.max: the SSO manager writes of one user in 15 minutes. */
+const SSO_MANAGE_MAX = 30;
+
+const OIDC = {
+  clientId: "acme-client",
+  clientSecret: "acme-secret-value",
+  skipDiscovery: true,
+  authorizationEndpoint: "https://idp.acme.example/authorize",
+  tokenEndpoint: "https://idp.acme.example/token",
+  jwksEndpoint: "https://idp.acme.example/jwks",
+  scopes: ["openid", "email", "profile"],
+  pkce: true,
+};
+
+describe("core's limit of the user before the large read of an SSO write (ruling 51 Minor 1 of the 12j lane)", () => {
+  it("counts each write once, and past the limit answers 429 with no read and no parse", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const { cookie } = await person("ada@example.com");
+    // Small writes through the shim's label check: each counts once, as in core.
+    const statuses: number[] = [];
+    for (let i = 0; i <= SSO_MANAGE_MAX; i++)
+      statuses.push((await auth.handler(post("/sso/connections/update", 64, cookie))).status);
+    expect(statuses.indexOf(429)).toBe(SSO_MANAGE_MAX);
+    for (const path of SSO_WRITES) {
+      const parse = vi.spyOn(JSON, "parse");
+      const body = countedBody(SSO_CAP);
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: body.stream,
+          duplex: "half",
+        } as RequestInit),
+      );
+      expect([path, res.status]).toEqual([path, 429]);
+      // The lengths of the parsed texts, not the texts: a diff of 8 MiB never ends.
+      const long = parse.mock.calls.map(([t]) => (typeof t === "string" ? t.length : 0));
+      expect(long.filter((n) => n > BODY_CAP_FLOOR)).toEqual([]);
+      // No reader took the body: at most the first chunks that a stream fills ahead.
+      expect(body.pulled()).toBeLessThan(4 * 65_536);
+      parse.mockRestore();
+    }
+  });
+
+  it("counts a register as core counts its writes, with no extra count of the shim", {
+    timeout: 60_000,
+  }, async () => {
+    const app = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const owner = await app.manager("ann@acme.example");
+    const organizationId = await app.organizationOf(owner, "acme");
+    const reg = await app.call(
+      "/sso/register",
+      {
+        organizationId,
+        providerId: "acme-oidc",
+        issuer: "https://idp.acme.example",
+        domain: "acme.example",
+        oidcConfig: OIDC,
+      },
+      owner.cookie,
+    );
+    expect(reg.status).toBe(200);
+    // The register made three writes of core: the connection, the domain, and its route.
+    let left = 0;
+    while ((await app.call("/sso/connections/update", {}, owner.cookie)).status === 400) left++;
+    expect(left).toBe(SSO_MANAGE_MAX - 3);
+  });
+});

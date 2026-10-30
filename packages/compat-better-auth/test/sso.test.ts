@@ -255,7 +255,10 @@ describe("the sso plugin (plan 12d Task 14)", () => {
   });
 
   it("refuses each provider field with no core feature at the register call", async () => {
-    const app = await owned();
+    // Each register counts on core's limit of the user before its read (ruling 51 Minor 1
+    // of the 12j lane), and this test makes more calls than the 30 of the limit.
+    // body-cap.test.ts tests the limit; here a limiter that allows each call.
+    const app = await owned(undefined, { ...memory(), limiter: { allow: async () => true } });
     const rows: [Record<string, unknown>, string][] = [
       [
         { oidcConfig: { ...OIDC, tokenEndpointAuthentication: "private_key_jwt" } },

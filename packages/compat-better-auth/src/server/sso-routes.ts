@@ -1,5 +1,10 @@
 import type { Auth, SsoConnectionSummary, SsoDomainSummary } from "@authtempo/core";
-import { scimRequestAs, verifyDomainByRecord } from "@authtempo/core/compat";
+import {
+  countSsoManageWrite,
+  moveSsoManageCount,
+  scimRequestAs,
+  verifyDomainByRecord,
+} from "@authtempo/core/compat";
 import type { RouteKey } from "@authtempo/core/routes";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { BETTER_AUTH_CODES, messageOf } from "../errors.js";
@@ -605,7 +610,11 @@ class Calls {
   }
 
   async core(to: string, body?: Json): Promise<Response> {
-    return this.keep(await this.auth.handle(this.requestTo(to, body), this.mapped.handleOptions));
+    const request = this.requestTo(to, body);
+    // The first write to core carries the count that the shim made before its
+    // read, so core does not count the write again (ruling 51 Minor 1 of the 12j lane).
+    if (body !== undefined) moveSsoManageCount(this.request, request);
+    return this.keep(await this.auth.handle(request, this.mapped.handleOptions));
   }
 
   keep(res: Response): Response {
@@ -643,6 +652,13 @@ const NOT_FOUND: Refusal = {
   status: 404,
   code: "NOT_FOUND",
   message: "No SSO provider has this providerId",
+};
+
+/** Core's limit of the SSO manager writes of the user, in Better Auth's shape. */
+const TOO_MANY: Refusal = {
+  status: 429,
+  code: BETTER_AUTH_CODES.rate_limited,
+  message: messageOf(BETTER_AUTH_CODES.rate_limited),
 };
 
 /**
@@ -734,8 +750,12 @@ async function register(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  if (!(await auth.session(request)))
+  const session = await auth.session(request);
+  if (!session)
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  // Core's limit of the user comes before the read of the large cap, as in
+  // core's manager routes (ruling 51 Minor 1 of the 12j lane).
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
   const body = await jsonBody(request, "POST /sso/connections/create");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   const sso = mapped.sso;
@@ -820,9 +840,9 @@ async function listProviders(
 
 /**
  * `POST /sso/update-provider`: core's update of the connection, and a new
- * domain when it changes. The session check comes before the read of the
- * body, as at the register: the read takes the large cap of the connection
- * writes (ruling 46 of the 12j lane).
+ * domain when it changes. The session check and core's limit of the user
+ * come before the read of the body, as at the register: the read takes the
+ * large cap of the connection writes (rulings 46 and 51 of the 12j lane).
  */
 async function updateProvider(
   auth: Auth,
@@ -830,8 +850,10 @@ async function updateProvider(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  if (!(await auth.session(request)))
+  const session = await auth.session(request);
+  if (!session)
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
   const body = await jsonBody(request, "POST /sso/connections/update");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   for (const [key, v] of Object.entries(body))
@@ -1122,7 +1144,9 @@ export async function ssoAcsRoute(
  * no form of body passes unread. Null for every other request. A request
  * with no session is null too: core answers it 401 before it reads the body,
  * so no one reads a body of the large cap of these writes without a session
- * (ruling 46 of the 12j lane).
+ * (ruling 46 of the 12j lane). Core's limit of the user comes before the
+ * read too, and a write past it is null: core answers it 429 before its own
+ * read. A write within the limit carries the count to core (ruling 51).
  */
 async function coreLabelRefusal(
   auth: Auth,
@@ -1131,7 +1155,9 @@ async function coreLabelRefusal(
   path: string,
 ): Promise<Response | null> {
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
-  if (!(await auth.session(request))) return null;
+  const session = await auth.session(request);
+  if (!session) return null;
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return null;
   const refuse = (message: string) =>
     Response.json({ error: "invalid_body", message }, { status: 400 });
   const body = await jsonBody(request, `POST ${path}`);

@@ -31,6 +31,8 @@ const configRecords = new WeakMap<object, DomainRecordOf>();
 const RECORD = Symbol("authtempo.compat.domainRecord");
 const recordVerifies = new WeakSet<Request>();
 const scimCallers = new WeakMap<Request, ScimCaller>();
+/** The user of an SSO manager write that a compat package counted before its own read. */
+const ssoManageCounted = new WeakMap<Request, string>();
 
 export function setConfigDomainRecord(input: object, record: DomainRecordOf): void {
   configRecords.set(input, record);
@@ -66,4 +68,31 @@ export function setScimCaller(request: Request, caller: ScimCaller): void {
 /** The caller of a SCIM route that a compat package checked, or null for core's token check. */
 export function scimCallerOf(request: Request): ScimCaller | null {
   return scimCallers.get(request) ?? null;
+}
+
+/**
+ * Marks `request` as one SSO manager write of `userId` that core's limit
+ * counted already (ruling 51 Minor 1 of the 12j lane). Only
+ * `countSsoManageWrite` sets the mark, after the count.
+ */
+export function markSsoManageCounted(request: Request, userId: string): void {
+  ssoManageCounted.set(request, userId);
+}
+
+/** Moves the mark of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
+export function moveSsoManageCounted(from: Request, to: Request): void {
+  const userId = ssoManageCounted.get(from);
+  if (userId === undefined) return;
+  ssoManageCounted.delete(from);
+  ssoManageCounted.set(to, userId);
+}
+
+/**
+ * True when `request` holds the mark of a write of `userId`. The mark goes
+ * at the read, so it covers one count only.
+ */
+export function takeSsoManageCounted(request: Request, userId: string): boolean {
+  const marked = ssoManageCounted.get(request) === userId;
+  ssoManageCounted.delete(request);
+  return marked;
 }
