@@ -46,10 +46,12 @@
     "versions": ["1.4.0"],
     "users": [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-sqlite",
       "@authtempo/compat-better-auth",
       "@authtempo/demo",
       "@authtempo/import",
       "@authtempo/mcp",
+      "@authtempo/observe",
       "authtempo-example-mcp-server",
       "authtempo-example-worker",
       "authtempo-example-worker-d1"
@@ -63,6 +65,8 @@
     "versions": ["5.20261007.1"],
     "users": [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-mysql",
+      "@authtempo/adapter-sqlite",
       "@authtempo/breach-check",
       "@authtempo/captcha-turnstile",
       "@authtempo/compat-better-auth",
@@ -70,6 +74,7 @@
       "@authtempo/import",
       "@authtempo/legacy-hashes",
       "@authtempo/mcp",
+      "@authtempo/observe",
       "@authtempo/verify",
       "authtempo-example-mcp-server",
       "authtempo-example-pbkdf2-probe",
@@ -79,6 +84,112 @@
     ],
     "reason": "The Worker code typechecks against the Workers runtime types with it.",
     "read": "2026-10-20"
+  },
+  {
+    "name": "@libsql/client",
+    "kind": "dev",
+    "versions": ["0.18.0"],
+    "users": ["@authtempo/adapter-sqlite"],
+    "reason": "The SQLite adapter tests its libSQL driver against a local file and a libSQL HTTP server with it.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/client",
+    "kind": "peer",
+    "versions": ["^0.18.0"],
+    "users": ["@authtempo/adapter-sqlite"],
+    "reason": "The app brings its own libSQL client for a remote libSQL database, and the libsql entry of the SQLite adapter uses that client. The peer is optional.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/client",
+    "kind": "runtime",
+    "versions": ["0.18.0"],
+    "users": ["@authtempo/cli"],
+    "reason": "The CLI opens a libSQL database with it for migrate and check. The seam loads it only for a libSQL URL.",
+    "read": "2026-10-30",
+    "seam": "packages/cli/src/seams/sqlite.ts"
+  },
+  {
+    "name": "@libsql/core",
+    "kind": "runtime",
+    "versions": ["0.18.0"],
+    "users": ["@authtempo/cli"],
+    "reason": "The CLI reads a libSQL URL with its config and URI parsers, so the transport rule judges the host that the driver connects to.",
+    "read": "2026-10-30",
+    "seam": "packages/cli/src/seams/sqlite.ts"
+  },
+  {
+    "name": "@libsql/darwin-arm64",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for darwin on arm64. The license is from npm view @libsql/darwin-arm64@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/darwin-x64",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for darwin on x64. The license is from npm view @libsql/darwin-x64@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-arm-gnueabihf",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with glibc on arm. The license is from npm view @libsql/linux-arm-gnueabihf@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-arm-musleabihf",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with musl on arm. The license is from npm view @libsql/linux-arm-musleabihf@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-arm64-gnu",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with glibc on arm64. The license is from npm view @libsql/linux-arm64-gnu@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-arm64-musl",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with musl on arm64. The license is from npm view @libsql/linux-arm64-musl@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-x64-gnu",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with glibc on x64. The license is from npm view @libsql/linux-x64-gnu@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/linux-x64-musl",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for linux with musl on x64. The license is from npm view @libsql/linux-x64-musl@0.5.29 license.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "@libsql/win32-x64-msvc",
+    "kind": "platform",
+    "versions": ["0.5.29"],
+    "license": "MIT",
+    "reason": "libsql 0.5.29 takes it as an optional dependency for win32 on x64. The license is from npm view @libsql/win32-x64-msvc@0.5.29 license.",
+    "read": "2026-10-30"
   },
   {
     "name": "@modelcontextprotocol/client",
@@ -243,10 +354,18 @@
     "read": "2026-10-20"
   },
   {
+    "name": "@types/better-sqlite3",
+    "kind": "dev",
+    "versions": ["9.6.0"],
+    "users": ["@authtempo/adapter-sqlite", "@authtempo/cli", "@authtempo/compat-better-auth"],
+    "reason": "The tests that open a better-sqlite3 database typecheck with it.",
+    "read": "2026-10-30"
+  },
+  {
     "name": "@types/bun",
     "kind": "dev",
     "versions": ["1.4.3"],
-    "users": ["authtempo-example-node"],
+    "users": ["@authtempo/adapter-sqlite", "authtempo-example-node"],
     "reason": "The Node example typechecks its Bun entry with it.",
     "read": "2026-10-20"
   },
@@ -263,6 +382,8 @@
     "kind": "dev",
     "versions": ["24.19.1"],
     "users": [
+      "@authtempo/adapter-mysql",
+      "@authtempo/adapter-sqlite",
       "@authtempo/cli",
       "@authtempo/compat-better-auth",
       "@authtempo/express",
@@ -373,12 +494,36 @@
     "seam": "packages/legacy-hashes/src/derive.ts"
   },
   {
+    "name": "better-sqlite3",
+    "kind": "dev",
+    "versions": ["13.0.3"],
+    "users": ["@authtempo/adapter-sqlite", "@authtempo/cli", "@authtempo/compat-better-auth"],
+    "reason": "The SQLite adapter, CLI, and compat tests open a better-sqlite3 database with it. Version 13.0.3 has no install script.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "better-sqlite3",
+    "kind": "peer",
+    "versions": ["^13.0.3"],
+    "users": ["@authtempo/adapter-sqlite"],
+    "reason": "The app brings its own better-sqlite3 database, and the better-sqlite3 entry of the SQLite adapter uses it. The peer is optional.",
+    "read": "2026-10-30"
+  },
+  {
     "name": "bun",
     "kind": "dev",
     "versions": ["1.4.3"],
-    "users": ["authtempo-example-elysia", "authtempo-example-node"],
+    "users": ["@authtempo/adapter-sqlite", "authtempo-example-elysia", "authtempo-example-node"],
     "reason": "The Node and Elysia examples run their Bun tests with it.",
     "read": "2026-10-20"
+  },
+  {
+    "name": "drizzle-orm",
+    "kind": "dev",
+    "versions": ["0.45.3"],
+    "users": ["@authtempo/cli"],
+    "reason": "The CLI tests read the Drizzle schema that generate writes for Postgres, SQLite, and MySQL with it.",
+    "read": "2026-10-30"
   },
   {
     "name": "electron",
@@ -551,6 +696,31 @@
     "seam": "packages/core/src/seams/jwt.ts"
   },
   {
+    "name": "mysql2",
+    "kind": "dev",
+    "versions": ["3.24.5"],
+    "users": ["@authtempo/adapter-mysql", "@authtempo/site"],
+    "reason": "The MySQL adapter tests and the MySQL guide sample of the docs site open their MySQL databases with it.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "mysql2",
+    "kind": "peer",
+    "versions": ["^3.24.5"],
+    "users": ["@authtempo/adapter-mysql"],
+    "reason": "The app brings its own mysql2 pool and opens the database, and the MySQL adapter uses that pool.",
+    "read": "2026-10-30"
+  },
+  {
+    "name": "mysql2",
+    "kind": "runtime",
+    "versions": ["3.24.5"],
+    "users": ["@authtempo/cli"],
+    "reason": "The CLI connects to MySQL with it for migrate and check.",
+    "read": "2026-10-30",
+    "seam": "packages/cli/src/seams/mysql.ts"
+  },
+  {
     "name": "next",
     "kind": "dev",
     "versions": ["16.4.0"],
@@ -631,6 +801,14 @@
     "reason": "The CLI connects to Postgres with it for migrate and import, and two examples open their database with it (spec 13).",
     "read": "2026-10-09",
     "seam": "packages/cli/src/seams/postgres.ts; examples/node/src/app.ts; examples/worker-postgres/src/index.ts"
+  },
+  {
+    "name": "prisma",
+    "kind": "dev",
+    "versions": ["7.10.0"],
+    "users": ["@authtempo/cli"],
+    "reason": "The CLI tests run prisma validate on the schema that generate writes. Its preinstall checks the Node version only, and allowBuilds keeps it off.",
+    "read": "2026-10-30"
   },
   {
     "name": "react",
@@ -788,7 +966,9 @@
     "versions": ["6.0.3", "7.0.2"],
     "users": [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-mysql",
       "@authtempo/adapter-postgres",
+      "@authtempo/adapter-sqlite",
       "@authtempo/astro",
       "@authtempo/breach-check",
       "@authtempo/captcha-turnstile",
@@ -805,6 +985,7 @@
       "@authtempo/legacy-hashes",
       "@authtempo/mcp",
       "@authtempo/next",
+      "@authtempo/observe",
       "@authtempo/react",
       "@authtempo/react-router",
       "@authtempo/sdk-conformance",
@@ -865,7 +1046,9 @@
     "versions": ["5.0.3"],
     "users": [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-mysql",
       "@authtempo/adapter-postgres",
+      "@authtempo/adapter-sqlite",
       "@authtempo/astro",
       "@authtempo/breach-check",
       "@authtempo/captcha-turnstile",
@@ -882,6 +1065,7 @@
       "@authtempo/legacy-hashes",
       "@authtempo/mcp",
       "@authtempo/next",
+      "@authtempo/observe",
       "@authtempo/react",
       "@authtempo/react-router",
       "@authtempo/sdk-conformance",
@@ -941,6 +1125,8 @@
     "versions": ["4.148.0"],
     "users": [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-mysql",
+      "@authtempo/adapter-sqlite",
       "@authtempo/breach-check",
       "@authtempo/captcha-turnstile",
       "@authtempo/compat-better-auth",
@@ -948,6 +1134,7 @@
       "@authtempo/import",
       "@authtempo/legacy-hashes",
       "@authtempo/mcp",
+      "@authtempo/observe",
       "@authtempo/site",
       "@authtempo/verify",
       "authtempo-example-mcp-server",
@@ -958,6 +1145,14 @@
     ],
     "reason": "The Worker packages and examples run and dry-run their Workers with it.",
     "read": "2026-10-09"
+  },
+  {
+    "name": "xml-crypto",
+    "kind": "dev",
+    "versions": ["6.3.3"],
+    "users": ["@authtempo/core"],
+    "reason": "The SAML differential test of core holds the owned canonicalizer and signature check to it.",
+    "read": "2026-10-30"
   },
   {
     "name": "zod",
