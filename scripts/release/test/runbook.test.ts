@@ -13,6 +13,7 @@ import {
 } from "../src/lib/release-facts.ts";
 import { releasedNames } from "../src/lib/released.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
+import { copyCheck, PLAN_FILE } from "../src/rehearse.ts";
 import { FALLBACK_FILE, type FallbackEntry, fallbackFaults } from "../src/verify-published.ts";
 
 // docs/release/RUNBOOK.md, the steps of the owner (plan 12j Task 13, spec 33
@@ -107,7 +108,11 @@ function orderFaults(text: string): string[] {
   const disallow = stepIndex(text, "Require two-factor authentication and disallow tokens");
   const dates = stepIndex(text, "to `RELEASE_DATES` in");
   const support = stepIndex(text, "add its support row");
+  const rehearse = stepIndex(text, "`pnpm release:rehearse`");
+  const branch = stepIndex(text, "`git switch -c version/<version>`");
   for (const [name, i] of Object.entries({
+    rehearse,
+    branch,
     environment,
     dates,
     support,
@@ -119,6 +124,8 @@ function orderFaults(text: string): string[] {
     disallow,
   }))
     if (i === -1) faults.push(`the runbook has no ${name} step`);
+  // The rehearsal runs on main, before the version branch (ruling 65 of plan 12j, C1 b).
+  if (branch <= rehearse) faults.push("the version branch step comes before the rehearsal step");
   if (publisher <= environment)
     faults.push("the trusted publisher step comes before the environment step");
   // The support row reads the day of RELEASE_DATES, and the pull request needs it (ruling 52 of plan 12j).
@@ -326,6 +333,31 @@ describe("docs/release/RUNBOOK.md", () => {
     // The support row after the dates, as the order rule reads it.
     expect(orderFaults(swapSteps(TEXT, "At each release", 4, 5))).toEqual([
       "the support row step comes before the RELEASE_DATES step",
+    ]);
+  });
+
+  // Ruling 65 of plan 12j, C1 b: the version pull request of 0.1.0 failed its
+  // own check, and only a run of the suite at the version state shows that.
+  it("rehearses the version pull request on main, with the planned values", () => {
+    const step = stepOf(TEXT, "At each release", 1);
+    expect(SCRIPTS["release:rehearse"]).toBe("node scripts/release/src/rehearse.ts");
+    expect(step).toContain("Run `pnpm release:rehearse`.");
+    // Each key of the plan file, as the step names it.
+    expect(step).toContain(`\`${PLAN_FILE}\``);
+    const plan = JSON.parse(readFileSync(new URL(PLAN_FILE, ROOT), "utf8")) as object;
+    expect(Object.keys(plan)).toEqual(["publish", "support", "resources"]);
+    for (const key of Object.keys(plan)) expect(step, key).toContain(`\`${key}\` `);
+    // The check of the copy is the release check of the job check of ci.yml.
+    const [node = "", script = "", ...flags] = copyCheck("<base>");
+    expect(SCRIPTS["release:check"]).toBe(`${node} ${script}`);
+    expect(flags.slice(0, 2)).toEqual(["--no-osv", "--no-dry-run"]);
+    const run = `pnpm release:check ${flags.slice(0, 2).join(" ")}`;
+    expect(step).toContain(`\`${run}\` in the copy`);
+    const ci = readFileSync(new URL(`.github/workflows/${CI_FILE}`, ROOT), "utf8");
+    expect(ci).toContain(`- run: ${run} --base origin/main\n`);
+    expect(step).toContain("Without it, the version pull request can fail its own check.");
+    expect(orderFaults(swapSteps(TEXT, "At each release", 1, 2))).toEqual([
+      "the version branch step comes before the rehearsal step",
     ]);
   });
 
