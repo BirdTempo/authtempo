@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { agentMarkdown } from "../scripts/lib/agent.ts";
-import { DOCS, REPO } from "../scripts/lib/paths.ts";
+import { DOCS, REPO, SITE } from "../scripts/lib/paths.ts";
 import { prosePages, RUNBOOK_PATH, recordProsePages } from "../scripts/lib/prose.ts";
 import { changelogMarkdown, readChangelogFiles } from "../src/data/changelogs.ts";
 import { REPO_ROOT, repositoryUrl } from "../src/data/repo.ts";
@@ -10,7 +10,7 @@ import { CHANGELOG_EMPTY } from "../src/data/unpublished.ts";
 // Plan 12j Task 13: the record files of the release are Simplified Technical
 // English, so check-terms and check-sentences read them through prosePages().
 describe("the record files in the prose pages", () => {
-  it("holds each changeset, each package changelog, and the runbook", () => {
+  it("holds each changeset and the runbook", () => {
     const paths = prosePages().map((p) => p.path);
     const changesets = readdirSync(`${REPO}.changeset`)
       .filter((n) => n.endsWith(".md"))
@@ -18,6 +18,16 @@ describe("the record files in the prose pages", () => {
     expect(changesets.length).toBeGreaterThan(0);
     for (const path of [...changesets, RUNBOOK_PATH]) expect(paths, path).toContain(path);
     for (const c of readChangelogFiles(REPO_ROOT)) expect(paths).toContain(`${c.dir}/CHANGELOG.md`);
+  });
+
+  it("holds each package changelog, read from a tree that has them", () => {
+    // The tree at 0.0.0 has no CHANGELOG.md, so the fixture tree proves the read.
+    const pages = recordProsePages(`${SITE}test/fixtures/site/changelogs-group`);
+    expect(pages.map((p) => p.path)).toEqual([
+      "packages/client/CHANGELOG.md",
+      "packages/core/CHANGELOG.md",
+    ]);
+    expect(pages.every((p) => p.plain === true && p.source.startsWith("# @authtempo/"))).toBe(true);
   });
 
   it("blanks the frontmatter of a changeset and keeps its line numbers", () => {
