@@ -8,9 +8,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunResult } from "../src/io.js";
 import { STOP_JSON, UPGRADE_JSON_KEYS, type UpgradeJson } from "../src/json.js";
 import { main } from "../src/main.js";
+import { REGISTRY_BODY_CAP_BYTES, rangeHolds } from "../src/upgrade-core.js";
 import { PKG } from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
-import { BREAKING, fakeRegistry, LATER_DEPRECATION } from "./support/fake-registry.js";
+import {
+  BREAKING,
+  fakeRegistry,
+  LATER_DEPRECATION,
+  registryDoc,
+  registryDocs,
+} from "./support/fake-registry.js";
 
 const fixture = (name: string) => readFileSync(join(PKG, "test/fixtures/upgrade", name), "utf8");
 /**
@@ -29,10 +36,20 @@ const REGISTER = JSON.parse(readFileSync(join(PKG, "../../release/deprecations.j
 }[];
 
 /** An app in /work/app with the manifest `text` and a pnpm lockfile, over the fake registry. */
-function appIo(text: string, o: { silent?: boolean; run?: () => void } = {}) {
+function appIo(
+  text: string,
+  o: {
+    silent?: boolean;
+    run?: () => void;
+    docs?: Readonly<Record<string, Record<string, unknown>>>;
+  } = {},
+) {
   return fakeIo({
     files: { [APP]: text, [LOCK]: "lockfileVersion: '9.0'\n" },
-    fetch: fakeRegistry(o.silent === true ? { silent: true } : {}),
+    fetch: fakeRegistry({
+      ...(o.silent === true ? { silent: true } : {}),
+      ...(o.docs === undefined ? {} : { docs: o.docs }),
+    }),
     run: async (): Promise<RunResult> => {
       o.run?.();
       return { status: 0, stdout: "", stderr: "" };
@@ -191,7 +208,7 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       expect(await main(["upgrade", "app", flag], io), flag).toBe(1);
       expect(io.files.get(APP), flag).toBe(text);
       expect(io.stdout, flag).toContain("dry run: wrote nothing");
-      expect(io.stdout, flag).toContain("  @authtempo/core 0.1.0 to 0.2.1");
+      expect(io.stdout, flag).toContain("  @authtempo/core 0.1.0 to 0.2.1 (dependencies)");
     }
   });
 
@@ -214,9 +231,9 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       from: "0.1.0",
       to: "0.2.1",
       packages: [
-        { name: "@authtempo/core", from: "0.1.0", to: "0.2.1" },
-        { name: "@authtempo/adapter-d1", from: "0.1.0", to: "0.2.1" },
-        { name: "@authtempo/cli", from: "0.1.0", to: "0.2.1" },
+        { name: "@authtempo/core", section: "dependencies", from: "0.1.0", to: "0.2.1" },
+        { name: "@authtempo/adapter-d1", section: "dependencies", from: "0.1.0", to: "0.2.1" },
+        { name: "@authtempo/cli", section: "devDependencies", from: "0.1.0", to: "0.2.1" },
       ],
       schema: { from: 15, to: 16, migrate: true },
       breaking: [{ minor: "0.2", lines: [...(BREAKING["0.2"] ?? [])] }],
@@ -301,5 +318,197 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       'stopped: @authtempo/core is "workspace:*" in dependencies; upgrade needs a version such as 0.1.0',
     );
     expect(io.requests).toEqual([]);
+  });
+
+  it("writes nothing and answers 1 when the target core names no Breaking lines", async () => {
+    const notice =
+      "the registry names no Breaking lines for 0.3.0: read the changelog of each crossed minor at https://authtempo.com/docs/changelog/, then change the versions by hand";
+    for (const facts of ["none", "no-breaking"] as const) {
+      const text = fixture("app.package.json");
+      const io = appIo(text, {
+        docs: { ...registryDocs(), "@authtempo/core": registryDoc("@authtempo/core", { facts }) },
+      });
+      expect(await main(["upgrade", "app", "--to", "0.3.0"], io), facts).toBe(1);
+      expect(io.files.get(APP), facts).toBe(text);
+      expect(io.stdout, facts).toContain(notice);
+      expect(io.stdout, facts).toContain("wrote nothing");
+      expect(io.stdout, facts).toContain("0.2: https://authtempo.com/docs/changelog/");
+      expect(io.stdout.join("\n"), facts).not.toContain(`wrote ${APP}`);
+    }
+    const json = appIo(fixture("app.package.json"), {
+      docs: {
+        ...registryDocs(),
+        "@authtempo/core": registryDoc("@authtempo/core", { facts: "none" }),
+      },
+    });
+    expect(await main(["upgrade", "app", "--to", "0.3.0", "--json"], json)).toBe(1);
+    const doc = docOf(json.stdout);
+    expect(doc.exit).toBe(1);
+    expect(doc.stopped).toBe(notice);
+    expect(doc.breaking).toEqual([
+      { minor: "0.2", lines: [] },
+      { minor: "0.3", lines: [] },
+    ]);
+  });
+
+  it("stops when a package has no version at the target, and writes nothing", async () => {
+    const text = fixture("app.package.json");
+    const io = appIo(text, {
+      docs: {
+        ...registryDocs(),
+        "@authtempo/adapter-d1": registryDoc("@authtempo/adapter-d1", {
+          versions: ["0.1.0", "0.1.3", "0.2.0"],
+          latest: "0.2.0",
+        }),
+      },
+    });
+    expect(await main(["upgrade", "app"], io)).toBe(2);
+    expect(io.stderr).toContain(
+      "stopped: @authtempo/adapter-d1 has no version 0.2.1 on the registry",
+    );
+    expect(io.files.get(APP)).toBe(text);
+  });
+
+  it("orders versions by number: 0.10.0 is above 0.9.0", async () => {
+    const docs = registryDocs({ versions: ["0.9.0", "0.10.0"], latest: "0.10.0" });
+    const text = fixture("app.package.json").replaceAll('"0.1.0"', '"0.9.0"');
+    const io = appIo(text, { docs });
+    expect(await main(["upgrade", "app"], io), io.stderr.join("\n")).toBe(0);
+    expect(io.files.get(APP)).toBe(text.replaceAll('"0.9.0"', '"0.10.0"'));
+    expect(io.stdout).toContain("0.10: https://authtempo.com/docs/changelog/");
+    // The fake core at 0.9.0 and 0.10.0 names no schema version.
+    expect(io.stdout).toContain("next: authtempo migrate (the registry names no schema version)");
+    const down = fixture("app.package.json").replaceAll('"0.1.0"', '"0.10.0"');
+    const back = appIo(down, { docs });
+    expect(await main(["upgrade", "app", "--to", "0.9.0"], back)).toBe(2);
+    expect(back.stderr).toContain("stopped: the target 0.9.0 is below the installed 0.10.0");
+    expect(back.files.get(APP)).toBe(down);
+  });
+
+  it("prints no deprecation whose removeIn is the installed version", async () => {
+    // The register items leave in 0.2.0. An app at 0.2.0 already lost them.
+    const at = "0.2.0";
+    const gone = REGISTER.filter((d) => d.removeIn === at);
+    expect(gone.length).toBeGreaterThan(0);
+    const io = appIo(fixture("app.package.json").replaceAll('"0.1.0"', `"${at}"`));
+    expect(await main(["upgrade", "app", "--to", "0.3.0"], io)).toBe(1);
+    const out = io.stdout.join("\n");
+    for (const d of gone) expect(out).not.toContain(`: ${d.id}: `);
+    expect(out).toContain(`removed in 0.3.0: ${LATER_DEPRECATION.id}`);
+  });
+
+  it("names no other key when the file writes a key in another form", async () => {
+    // "@authtempo\/core" parses as "@authtempo/core", but the text has no such key.
+    const text = fixture("app.package.json").replace(
+      '"@authtempo/core": "0.1.0"',
+      '"@authtempo\\/core": "0.1.0"',
+    );
+    const io = appIo(text);
+    expect(await main(["upgrade", "app"], io)).toBe(2);
+    expect(io.stderr).toContain(
+      `stopped: ${APP}: the versions cannot change in place; change them by hand`,
+    );
+    expect(io.files.get(APP)).toBe(text);
+  });
+
+  it("prints each peer range that excludes the target, and never writes it", async () => {
+    const text = fixture("app.package.json").replace(
+      '"type": "module",',
+      `"type": "module",
+  "peerDependencies": {
+    "@authtempo/core": "^0.1.0",
+    "@authtempo/adapter-d1": ">=0.1.0 <0.3.0",
+    "@authtempo/cli": "0.1.x",
+    "hono": "^3.0.0"
+  },`,
+    );
+    const io = appIo(text);
+    expect(await main(["upgrade", "app"], io)).toBe(1);
+    const after = io.files.get(APP) ?? "";
+    expect(after).toContain('"@authtempo/core": "^0.1.0"');
+    expect(after).toContain('"@authtempo/core": "0.2.1"');
+    const peers = io.stdout.filter((l) => l.startsWith("  peer "));
+    expect(peers).toEqual([
+      "  peer @authtempo/core ^0.1.0 excludes 0.2.1: change the range by hand",
+      "  peer @authtempo/cli 0.1.x: upgrade cannot read the range; check that it holds 0.2.1",
+    ]);
+  });
+
+  it("names the section of each package line", async () => {
+    const text = fixture("app.package.json").replace(
+      '"wrangler": "4.148.0",',
+      '"wrangler": "4.148.0",\n    "@authtempo/core": "0.1.0",',
+    );
+    const io = appIo(text);
+    expect(await main(["upgrade", "app"], io)).toBe(1);
+    expect(io.stdout).toContain("  @authtempo/core 0.1.0 to 0.2.1 (dependencies)");
+    expect(io.stdout).toContain("  @authtempo/core 0.1.0 to 0.2.1 (devDependencies)");
+    expect(io.files.get(APP)).toBe(text.replaceAll('"0.1.0"', '"0.2.1"'));
+  });
+
+  it("finds the first lockfile in the folder or in a parent folder", async () => {
+    const app = "/work/apps/api/package.json";
+    const run = async (files: Record<string, string>) => {
+      const io = fakeIo({
+        files: { [app]: fixture("app.package.json"), ...files },
+        fetch: fakeRegistry(),
+      });
+      expect(await main(["upgrade", "apps/api", "--dry-run"], io)).toBe(1);
+      return io.stdout;
+    };
+    const lock = "lockfileVersion: '9.0'\n";
+    expect(await run({ "/work/pnpm-lock.yaml": lock })).toContain("next: pnpm install in /work");
+    // The first lockfile on the walk up wins.
+    expect(
+      await run({ "/work/pnpm-lock.yaml": lock, "/work/apps/yarn.lock": "# yarn\n" }),
+    ).toContain("next: yarn install in /work/apps");
+    expect(await run({ "/work/apps/api/package-lock.json": "{}\n" })).toContain(
+      "next: npm install",
+    );
+    expect(await run({})).toContain(
+      "next: run the install of your package manager (no folder up to the root has a lockfile)",
+    );
+  });
+
+  it("stops on a registry document over the cap, and writes nothing", async () => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    let sent = 0;
+    const big = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(c) {
+            if (sent > REGISTRY_BODY_CAP_BYTES) return c.close();
+            sent += chunk.byteLength;
+            c.enqueue(chunk);
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const text = fixture("app.package.json");
+    const io = fakeIo({ files: { [APP]: text, [LOCK]: "" }, fetch: async () => big() });
+    expect(await main(["upgrade", "app"], io)).toBe(2);
+    expect(io.stderr).toContain(
+      `stopped: GET https://registry.npmjs.org/@authtempo%2fcore: the answer body is over ${REGISTRY_BODY_CAP_BYTES / 1024} KiB, the cap of one read`,
+    );
+    expect(io.files.get(APP)).toBe(text);
+  });
+
+  it("reads a peer range as npm does, or gives null", () => {
+    const cases: [string, string, boolean | null][] = [
+      ["^0.1.0", "0.1.9", true],
+      ["^0.1.0", "0.2.0", false],
+      ["^0.0.3", "0.0.4", false],
+      ["^1.2.3", "1.9.0", true],
+      ["~0.2.0", "0.2.5", true],
+      ["~0.2.0", "0.3.0", false],
+      [">= 0.2.0 < 0.3.0", "0.2.1", true],
+      ["<0.2.0 || >=0.2.1", "0.2.1", true],
+      ["0.2.1", "0.2.1", true],
+      ["*", "0.2.1", true],
+      ["0.1.0 - 0.3.0", "0.2.1", null],
+      ["0.2.x", "0.2.1", null],
+      [">=0.3.0 0.2.x", "0.2.1", false],
+    ];
+    for (const [range, v, want] of cases) expect(rangeHolds(range, v), `${range} ${v}`).toBe(want);
   });
 });

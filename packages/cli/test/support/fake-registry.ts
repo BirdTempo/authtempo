@@ -66,10 +66,15 @@ export function coreFacts(version: string): Record<string, unknown> {
   return { schemaVersion: SCHEMA_OF[version], breaking, deprecations };
 }
 
-/** The full registry document of one package, with the keys that Step 1 recorded. */
+/**
+ * The full registry document of one package, with the keys that Step 1
+ * recorded. `facts` sets core's `authtempo` key: "none" drops it, as in a
+ * manifest that `prepare` did not write; "no-breaking" drops its
+ * `breaking` key only.
+ */
 export function registryDoc(
   name: string,
-  o: { versions?: readonly string[]; latest?: string } = {},
+  o: { versions?: readonly string[]; latest?: string; facts?: "none" | "no-breaking" } = {},
 ): Record<string, unknown> {
   const list = o.versions ?? VERSIONS;
   const versions: Record<string, unknown> = {};
@@ -91,7 +96,9 @@ export function registryDoc(
       },
       engines: { node: ">=22" },
       exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } },
-      ...(name === "@authtempo/core" ? { authtempo: coreFacts(v) } : {}),
+      ...(name === "@authtempo/core" && o.facts !== "none"
+        ? { authtempo: factsOf(v, o.facts) }
+        : {}),
       _id: `${name}@${v}`,
       dist: {
         shasum: "0".repeat(40),
@@ -117,6 +124,24 @@ export function registryDoc(
   };
 }
 
+function factsOf(v: string, facts: "no-breaking" | undefined): Record<string, unknown> {
+  const { breaking: _, ...rest } = coreFacts(v);
+  return facts === "no-breaking" ? rest : coreFacts(v);
+}
+
+/** The packages of the fake registry. */
+export const NAMES = [
+  "@authtempo/core",
+  "@authtempo/adapter-d1",
+  "@authtempo/adapter-postgres",
+  "@authtempo/cli",
+  "@authtempo/compat-better-auth",
+] as const;
+
+/** The document of each name of NAMES, each built with `o`. */
+export const registryDocs = (o: Parameters<typeof registryDoc>[1] = {}) =>
+  Object.fromEntries(NAMES.map((n) => [n, registryDoc(n, o)]));
+
 /**
  * The fetch of a fake registry at `base`. A GET of `<base><name>`, with the
  * slash of the scope as %2f, answers the document of that name; any other
@@ -131,14 +156,7 @@ export function fakeRegistry(
   } = {},
 ): (url: string, init: RequestInit) => Promise<Response> {
   const base = o.base ?? "https://registry.npmjs.org/";
-  const names = [
-    "@authtempo/core",
-    "@authtempo/adapter-d1",
-    "@authtempo/adapter-postgres",
-    "@authtempo/cli",
-    "@authtempo/compat-better-auth",
-  ];
-  const docs = o.docs ?? Object.fromEntries(names.map((n) => [n, registryDoc(n)]));
+  const docs = o.docs ?? registryDocs();
   return (url, init) => {
     if (o.silent === true)
       return new Promise((_, fail) => {

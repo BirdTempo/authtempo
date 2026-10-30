@@ -38,7 +38,8 @@ const linkOf = (docs: string) => (docs.startsWith("/") ? `https://authtempo.com$
  * the deprecations, and the next steps. It reads one full registry document
  * per package. It runs no install and no child process: a person reads each
  * "Breaking:" line before the install. Exit 1 tells that a crossed minor has
- * such a line; the file is still written.
+ * such a line; the file is still written. Exit 1 with no write tells that
+ * the target core names no Breaking lines: "none" and "unknown" differ.
  */
 export const upgradeCommand: Command = {
   help: UPGRADE_HELP,
@@ -87,21 +88,47 @@ export const upgradeCommand: Command = {
 
     // The write comes before the report: a stop in the rewrite prints no plan as done.
     const after = rewriteManifest(text, app, plan.to);
-    if (!dryRun) ctx.replaceFile(path, after);
+    if (!dryRun && plan.breakingKnown) ctx.replaceFile(path, after);
 
     say(`upgrade ${plan.from} to ${plan.to} in ${path}`);
-    for (const p of plan.packages) say(`  ${p.name} ${p.from} to ${p.to}`);
+    for (const p of plan.packages) say(`  ${p.name} ${p.from} to ${p.to} (${p.section})`);
+    for (const p of plan.peers)
+      say(
+        p.holds === false
+          ? `  peer ${p.name} ${p.range} excludes ${plan.to}: change the range by hand`
+          : `  peer ${p.name} ${p.range}: upgrade cannot read the range; check that it holds ${plan.to}`,
+      );
     for (const b of plan.breaking) {
       say(`${b.minor}: ${CHANGELOG_PAGE}`);
       for (const line of b.lines) say(`  ${line}`);
     }
+    if (!plan.breakingKnown) {
+      // No `authtempo.breaking` key: an empty list here would read as "no Breaking line".
+      const unknown = `the registry names no Breaking lines for ${plan.to}: read the changelog of each crossed minor at ${CHANGELOG_PAGE}, then change the versions by hand`;
+      say(unknown);
+      say("wrote nothing");
+      if (json)
+        printJson(ctx, {
+          exit: 1,
+          stopped: unknown,
+          from: plan.from,
+          to: plan.to,
+          packages: plan.packages,
+          schema: plan.schema,
+          breaking: plan.breaking,
+          deprecations: plan.deprecations,
+        } satisfies UpgradeJson);
+      return 1;
+    }
     for (const d of plan.deprecations) say(`removed in ${d.removeIn}: ${d.id}: ${linkOf(d.docs)}`);
     say(dryRun ? "dry run: wrote nothing" : `wrote ${path}`);
-    const install = installOf((name) => ctx.exists(join(dir, name)));
+    const install = installOf(dir, (file) => ctx.exists(file));
     say(
       install === null
-        ? "next: run the install of your package manager (the folder has no lockfile)"
-        : `next: ${install}`,
+        ? "next: run the install of your package manager (no folder up to the root has a lockfile)"
+        : install.dir === dir
+          ? `next: ${install.command}`
+          : `next: ${install.command} in ${install.dir}`,
     );
     // A core manifest with no schema version: the migrate step is the safe answer.
     if (plan.schema === null || plan.schema.migrate) {

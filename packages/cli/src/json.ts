@@ -441,14 +441,21 @@ export const CREATE_ADMIN_JSON_KEYS = {
  * installed version and the target, each package entry that moved, the
  * schema versions of core, each crossed minor with its "Breaking:" lines,
  * and each deprecation whose removal falls in the range. `from` and `to`
- * are null only in the document of a stop.
+ * are null only in the document of a stop. When the target core names no
+ * Breaking lines, `stopped` holds that notice, `exit` is 1, and the
+ * command wrote nothing.
  */
 export interface UpgradeJson extends RunKeys {
   exit: 0 | 1 | 2;
   from: string | null;
   to: string | null;
-  /** One row per entry of package.json, by its key: the alias keeps the key `better-auth`. */
-  packages: { name: string; from: string; to: string }[];
+  /** One row per entry of package.json, by its key and section: the alias keeps the key `better-auth`. */
+  packages: {
+    name: string;
+    section: "dependencies" | "devDependencies";
+    from: string;
+    to: string;
+  }[];
   /** Null when the app is current, or when a core manifest names no schema version. */
   schema: { from: number; to: number; migrate: boolean } | null;
   breaking: { minor: string; lines: string[] }[];

@@ -39,7 +39,7 @@ export const UPGRADE_HELP: HelpText = {
     { code: 0, says: "The versions are written, or the app is already at the target." },
     {
       code: 1,
-      says: "A crossed minor has a Breaking line. The versions are written. Read each Breaking line before the install.",
+      says: "A crossed minor has a Breaking line. The versions are written. Read each Breaking line before the install. Or the registry names no Breaking lines for the target, and the command wrote nothing.",
     },
     {
       code: 2,

@@ -1,4 +1,6 @@
+import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { textOf } from "./checks.js";
 import { Stop, UsageError } from "./errors.js";
 import { type Fetcher, HostError, isLocalHost, withoutCredentials } from "./net.js";
 
@@ -18,12 +20,20 @@ const ALIAS_PREFIX = `npm:${COMPAT}@`;
 export const DEFAULT_REGISTRY = "https://registry.npmjs.org/";
 /** The time limit of one registry read (spec 33 item 10.3). */
 export const REGISTRY_TIMEOUT_MS = 10_000;
+/**
+ * The cap of one registry document. On 2026-10-30 the full document of
+ * `next` was 31,486,906 bytes and of `typescript` 15,865,004 bytes. The cap
+ * is about twice the larger one. A bad registry cannot fill the memory.
+ */
+export const REGISTRY_BODY_CAP_BYTES = 64 * 1024 * 1024;
 const SITE = "https://authtempo.com";
 export const UPGRADES_PAGE = `${SITE}/docs/operations/upgrades/`;
 export const CHANGELOG_PAGE = `${SITE}/docs/changelog/`;
 /** The two lists that the command reads and writes, in this order. */
 const SECTIONS = ["dependencies", "devDependencies"] as const;
-type Section = (typeof SECTIONS)[number];
+export type Section = (typeof SECTIONS)[number];
+/** The list that the command reads but never writes: a peer range is the choice of its author. */
+const PEERS = "peerDependencies";
 
 /** A version as the command takes it: an exact version, or one with a ^ or ~ in front. */
 const VERSION_IN_APP = /^[\^~]?(\d+\.\d+\.\d+)$/;
@@ -43,9 +53,16 @@ export interface AppEntry {
   version: string;
 }
 
+/** One @authtempo key of `peerDependencies`, with its range as the file holds it. */
+export interface AppPeer {
+  key: string;
+  range: string;
+}
+
 export interface AppManifest {
   path: string;
   entries: AppEntry[];
+  peers: AppPeer[];
   /** The one version of the group in the app. */
   version: string;
 }
@@ -63,7 +80,14 @@ export interface UpgradePlan {
   to: string;
   /** True when the app is at the target: the command changes nothing. */
   current: boolean;
-  packages: { name: string; from: string; to: string }[];
+  packages: { name: string; section: Section; from: string; to: string }[];
+  /**
+   * False when the target core has no `authtempo.breaking` key: the
+   * registry does not tell the Breaking lines, so the command writes nothing.
+   */
+  breakingKnown: boolean;
+  /** Each peer range that excludes the target (`holds: false`), or that the command cannot read (`holds: null`). */
+  peers: { name: string; range: string; holds: false | null }[];
   /** Null when a core manifest of the registry names no schema version. */
   schema: { from: number; to: number; migrate: boolean } | null;
   /** Each crossed minor, in order, with the "Breaking:" lines of the target core. */
@@ -88,6 +112,65 @@ export function compareVersions(a: string, b: string): number {
 }
 
 const minorOf = (v: string) => v.split(".").slice(0, 2).join(".");
+
+/** One comparator of a range, such as `>=0.2.0`, `^0.2.0`, or `0.2.0`. */
+const COMPARATOR = /^(\^|~|>=|<=|>|<|=)?v?(\d+\.\d+\.\d+)$/;
+
+/**
+ * True when the npm range holds `v`, false when it excludes it, and null
+ * when the command cannot read the range. It reads `||`, comparators joined
+ * by spaces, `*`, `^`, and `~`. It reads no x-range, no hyphen range, and
+ * no tag: such a range gives null, so a person checks it.
+ */
+export function rangeHolds(range: string, v: string): boolean | null {
+  let known = true;
+  // An operator may stand apart from its version: ">= 0.2.0" is ">=0.2.0".
+  for (const set of range.split("||").map((s) => s.trim().replace(/([<>]=?|=|\^|~)\s+/g, "$1"))) {
+    if (set === "" || set === "*") return true;
+    if (/\s-\s/.test(set)) {
+      known = false;
+      continue;
+    }
+    let holds = true;
+    let unread = false;
+    for (const c of set.split(/\s+/)) {
+      const m = COMPARATOR.exec(c);
+      const [op = "=", at] = [m?.[1], m?.[2]];
+      if (at === undefined) {
+        unread = true;
+        continue;
+      }
+      const [x, y, z] = parts(at);
+      // The upper bound of ^ and ~, as npm reads them for a 0.x version.
+      const top =
+        op === "~"
+          ? `${x}.${y + 1}.0`
+          : x > 0
+            ? `${x + 1}.0.0`
+            : y > 0
+              ? `0.${y + 1}.0`
+              : `0.0.${z + 1}`;
+      const d = compareVersions(v, at);
+      const ok =
+        op === "^" || op === "~"
+          ? d >= 0 && compareVersions(v, top) < 0
+          : op === ">="
+            ? d >= 0
+            : op === "<="
+              ? d <= 0
+              : op === ">"
+                ? d > 0
+                : op === "<"
+                  ? d < 0
+                  : d === 0;
+      if (!ok) holds = false;
+    }
+    // A set with a comparator that the command cannot read holds only when each other comparator holds.
+    if (holds && !unread) return true;
+    if (holds) known = false;
+  }
+  return known ? false : null;
+}
 
 /**
  * The @authtempo entries of the text of a package.json (spec 33 item 10.1):
@@ -120,6 +203,12 @@ export function readApp(text: string, path: string): AppManifest {
       entries.push({ section, key, name: alias ? COMPAT : key, value, version: m[1] });
     }
   }
+  const peers: AppPeer[] = [];
+  const declared = pkg[PEERS];
+  if (isRecord(declared))
+    for (const [key, value] of Object.entries(declared))
+      if (key.startsWith(SCOPE))
+        peers.push({ key, range: typeof value === "string" ? value : JSON.stringify(value) });
   const first = entries[0];
   if (first === undefined) throw new Stop(`no @authtempo package in ${path}`);
   const other = entries.find((e) => e.version !== first.version);
@@ -127,7 +216,7 @@ export function readApp(text: string, path: string): AppManifest {
     throw new Stop(
       `two versions of the group in one app: ${first.key} ${first.version} and ${other.key} ${other.version}; set one version by hand, then run upgrade`,
     );
-  return { path, entries, version: first.version };
+  return { path, entries, peers, version: first.version };
 }
 
 /**
@@ -200,8 +289,9 @@ export async function readRegistry(
         );
       if (res.status === 404) throw new Stop(`${name} is not on the registry ${base}`);
       if (res.status !== 200) throw new HostError(`GET ${url} answered ${res.status}`);
+      const text = await textOf(res, `GET ${url}`, REGISTRY_BODY_CAP_BYTES);
       try {
-        return (await res.json()) as unknown;
+        return JSON.parse(text) as unknown;
       } catch {
         throw new Stop(`GET ${url} answered no JSON document`);
       }
@@ -257,6 +347,8 @@ export function planUpgrade(
       to,
       current: true,
       packages: [],
+      breakingKnown: true,
+      peers: [],
       schema: null,
       breaking: [],
       deprecations: [],
@@ -276,6 +368,7 @@ export function planUpgrade(
       : { from: installed, to: next, migrate: installed !== next };
 
   // Each minor in (from, to], from the versions of core and the keys of breaking.
+  const breakingKnown = isRecord(target.breaking);
   const lines = isRecord(target.breaking) ? target.breaking : {};
   const minors = new Set<string>();
   for (const v of [...Object.keys(core.versions), ...Object.keys(lines).map((m) => `${m}.0`)])
@@ -306,7 +399,12 @@ export function planUpgrade(
     from,
     to,
     current: false,
-    packages: app.entries.map((e) => ({ name: e.key, from: e.version, to })),
+    packages: app.entries.map((e) => ({ name: e.key, section: e.section, from: e.version, to })),
+    breakingKnown,
+    peers: app.peers.flatMap((p) => {
+      const holds = rangeHolds(p.range, to);
+      return holds === true ? [] : [{ name: p.key, range: p.range, holds }];
+    }),
     schema,
     breaking,
     deprecations,
@@ -326,16 +424,17 @@ const valueAt = (e: AppEntry, to: string) =>
  */
 export function rewriteManifest(text: string, app: AppManifest, to: string): string {
   let out = text;
+  let found = 0;
   const want = JSON.parse(text) as Record<string, Record<string, unknown>>;
   for (const e of app.entries) {
     const section = want[e.section];
     if (section !== undefined) section[e.key] = valueAt(e, to);
     const key = JSON.stringify(e.key).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     const value = JSON.stringify(e.value).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    out = out.replace(
-      new RegExp(`(${key}\\s*:\\s*)${value}`, "g"),
-      (_, head: string) => `${head}${JSON.stringify(valueAt(e, to))}`,
-    );
+    out = out.replace(new RegExp(`(${key}\\s*:\\s*)${value}`, "g"), (_, head: string) => {
+      found++;
+      return `${head}${JSON.stringify(valueAt(e, to))}`;
+    });
   }
   let got: unknown;
   try {
@@ -343,18 +442,35 @@ export function rewriteManifest(text: string, app: AppManifest, to: string): str
   } catch {
     got = null;
   }
-  if (!isDeepStrictEqual(got, want))
-    throw new Stop(
-      `${app.path}: the versions cannot change in place, because another key holds the same text; change them by hand`,
-    );
+  if (!isDeepStrictEqual(got, want)) {
+    // More matches than entries: another key holds the same text. Fewer: the file writes a key in another form.
+    const cause = found > app.entries.length ? ", because another key holds the same text" : "";
+    throw new Stop(`${app.path}: the versions cannot change in place${cause}; change them by hand`);
+  }
   return out;
 }
 
-/** The install command of the lockfile in the app's folder, or null when it has none. */
-export function installOf(exists: (name: string) => boolean): string | null {
-  if (exists("pnpm-lock.yaml")) return "pnpm install";
-  if (exists("package-lock.json")) return "npm install";
-  if (exists("yarn.lock")) return "yarn install";
-  if (exists("bun.lock") || exists("bun.lockb")) return "bun install";
-  return null;
+const LOCKFILES = [
+  ["pnpm-lock.yaml", "pnpm install"],
+  ["package-lock.json", "npm install"],
+  ["yarn.lock", "yarn install"],
+  ["bun.lock", "bun install"],
+  ["bun.lockb", "bun install"],
+] as const;
+
+/**
+ * The install command of the first lockfile in the app's folder or in a
+ * parent folder, and the folder that holds it, or null when no folder up
+ * to the root has one. An app of a workspace has the lockfile at the root
+ * of the workspace.
+ */
+export function installOf(
+  dir: string,
+  exists: (path: string) => boolean,
+): { command: string; dir: string } | null {
+  for (let at = dir; ; at = dirname(at)) {
+    for (const [file, command] of LOCKFILES)
+      if (exists(join(at, file))) return { command, dir: at };
+    if (dirname(at) === at) return null;
+  }
 }

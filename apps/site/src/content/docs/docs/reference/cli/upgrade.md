@@ -42,12 +42,12 @@ authtempo upgrade apps/api --to 0.2.1
 | Exit code | What it means |
 | --- | --- |
 | 0 | The versions are written, or the app is already at the target. |
-| 1 | A crossed minor has a Breaking line. The versions are written. Read each Breaking line before the install. |
+| 1 | A crossed minor has a Breaking line. The versions are written. Read each Breaking line before the install. Or the registry names no Breaking lines for the target, and the command wrote nothing. |
 | 2 | A usage error, a stop, or no answer from the registry. The command wrote nothing. |
 
 ## What it reads
 
-1. The `package.json` of the folder, or of the current folder. The command lists each `@authtempo` key of `dependencies` and `devDependencies`, and the alias `"better-auth": "npm:@authtempo/compat-better-auth@<version>"`.
+1. The `package.json` of the folder, or of the current folder. The command lists each `@authtempo` key of `dependencies` and `devDependencies`, and the alias `"better-auth": "npm:@authtempo/compat-better-auth@<version>"`. It also reads each `@authtempo` key of `peerDependencies`, but it never writes it.
 2. The registry document of each package, one read each, with a time limit of 10 seconds. The target is `--to`, or the `latest` tag of `@authtempo/core`.
 3. The `authtempo` key of the target core: the schema version, the Breaking lines of each minor, and the deprecations.
 
@@ -59,19 +59,23 @@ The command stops with exit 2 and writes nothing in each of these cases:
 - The target is below the installed version.
 - A package has no version at the target on the registry.
 - The registry gives no answer in 10 seconds.
+- A registry document is larger than 64 MiB.
+
+The command also writes nothing when the target core names no Breaking lines. Then it cannot tell "no Breaking line" from "unknown". It prints the changelog link of each crossed minor and exits 1. Read the changelog, then change the versions by hand.
 
 ## What it writes
 
 The command changes the version text of each entry in `package.json`, and nothing else. The key order and the indent stay. A version with `^` or `~` becomes the exact version. The alias keeps its `npm:` form.
 
-The command runs no install and no other program. It prints the install command of the lockfile in the folder, such as `pnpm install` for `pnpm-lock.yaml`.
+The command runs no install and no other program. It prints the install command of the lockfile, such as `pnpm install` for `pnpm-lock.yaml`. It looks for the lockfile in the folder, then in each parent folder up to the root, and it takes the first that it finds. In a workspace, the lockfile is at the root of the workspace, so the line names that folder.
 
 ## What it prints
 
-- One line for each package, from the installed version to the target.
+- One line for each package, from the installed version to the target, with its section, such as `(dependencies)`.
+- One line for each `@authtempo` peer range that excludes the target, or that the command cannot read. The command does not change a peer range.
 - For each crossed minor: the changelog link, and each Breaking line of that minor.
 - Each deprecated item that the range removes, with its docs link.
-- The next steps: the install, and `authtempo migrate` when the schema version changes. [Upgrades and schema versions](/docs/operations/upgrades/) tells the order of the migration and the deploy.
+- The next steps: the install, and `authtempo migrate` when the schema version changes. The command also prints `authtempo migrate` when the registry names no schema version for the installed core or the target core. Then migrate is the safe step. [Upgrades and schema versions](/docs/operations/upgrades/) tells the order of the migration and the deploy.
 
 ## The JSON
 
@@ -79,12 +83,12 @@ The command runs no install and no other program. It prints the install command 
 | --- | --- |
 | `from` | The installed version, or null in the document of a stop. |
 | `to` | The target version, or null in the document of a stop. |
-| `packages` | One row for each entry of `package.json`: `name` (the key, so the alias is `better-auth`), `from`, and `to`. The list is empty when the app is current. |
-| `schema` | The schema version of the installed core and of the target core, and `migrate`, which is true when they differ. Null when the app is current. |
+| `packages` | One row for each entry of `package.json`: `name` (the key, so the alias is `better-auth`), `section` (`dependencies` or `devDependencies`), `from`, and `to`. The list is empty when the app is current. |
+| `schema` | The schema version of the installed core and of the target core, and `migrate`, which is true when they differ. Null when the app is current, or when the registry names no schema version for the installed core or the target core. |
 | `breaking` | One row for each crossed minor: `minor` and its Breaking `lines`. |
 | `deprecations` | One row for each item that the range removes: `id`, `removeIn`, and `docs`. |
 | `exit` | The exit code of the run. |
-| `stopped` | The reason of a stop or a usage error, or null. |
+| `stopped` | The reason of a stop or a usage error, or null. When the target core names no Breaking lines, it holds that notice, and `exit` is 1. |
 
 The document of a stop or a usage error holds the empty values of each key, `exit: 2`, and the reason in `stopped`. [The output](/docs/reference/cli/#the-output) gives the rule for every command.
 
