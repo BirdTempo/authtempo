@@ -23,6 +23,8 @@ import { REPO_ROOT } from "../src/data/repo.ts";
 import { SITE } from "../src/data/site.ts";
 import {
   CHANGELOG_EMPTY,
+  PRE_RELEASE_PATTERN,
+  PRE_RELEASE_SENTENCES,
   REGISTRY_INSTALL,
   RESOURCES_EMPTY,
   UNPUBLISHED_MARK,
@@ -69,6 +71,7 @@ import {
   type PerformanceData,
 } from "./check-performance.ts";
 import { checkPolicyPages, readPolicyPagesInput } from "./check-policy-pages.ts";
+import { checkPreRelease } from "./check-pre-release.ts";
 import { checkResources } from "./check-resources.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
@@ -524,6 +527,19 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         listed: UNPUBLISHED_PAGES,
         mark: UNPUBLISHED_MARK,
         install: REGISTRY_INSTALL,
+      }),
+  },
+  // Review M2 and L7 of plan 12j Task 13b: each text that holds only before
+  // the first release, against the version of core, both ways.
+  {
+    name: "check-pre-release",
+    run: () =>
+      checkPreRelease({
+        version: releaseFacts().version,
+        listed: PRE_RELEASE_SENTENCES,
+        read: readRepoFile,
+        pages: docsPages(),
+        pattern: PRE_RELEASE_PATTERN,
       }),
   },
   {

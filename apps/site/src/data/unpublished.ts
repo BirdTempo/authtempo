@@ -76,3 +76,59 @@ export const RESOURCES_EMPTY =
 
 /** The one sentence of the Releases part of the changelog page while no changelog exists. */
 export const CHANGELOG_EMPTY = "No release exists. Every package is at version `0.0.0`.";
+
+/** The support window of SECURITY.md and of the versioning page while release/support.json is []. */
+export const NO_RELEASE_YET =
+  "No release exists yet. The first minor is the current minor at its release.";
+
+/**
+ * The channels and the times are owner promises, and no person can report
+ * before the repository and the mailbox exist. So while no release exists,
+ * SECURITY.md and the security policy page say so.
+ */
+export const CHANNELS_CLOSED =
+  "Until the first release, the two channels are not open, and the times of this policy do not apply.";
+
+/** The section "The versions today" of the versioning page while core is at 0.0.0. */
+export const VERSIONS_TODAY =
+  "Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.";
+
+/** A text that holds only before the first release, with the repository path of its file. */
+export interface PreReleaseSentence {
+  file: string;
+  /** One sentence, or the sentences of one paragraph that goes as a whole. */
+  sentence: string;
+}
+
+/**
+ * Each text that is true only while no release exists (review M2 and L7 of
+ * plan 12j Task 13b). check-pre-release holds each one in its file while core
+ * is at 0.0.0, and out of its file above 0.0.0. So the version pull request
+ * of the first release removes each one, or the site checks fail. The list
+ * was read with `git grep -i` of "no release" and "until the first release"
+ * on 2026-10-30. The check also fails on a text that matches
+ * PRE_RELEASE_PATTERN in a docs page or a listed file, outside this list.
+ * docs/release/RUNBOOK.md quotes each entry, and a site test holds the quotes.
+ */
+export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
+  { file: "SECURITY.md", sentence: NO_RELEASE_YET },
+  { file: "SECURITY.md", sentence: CHANNELS_CLOSED },
+  {
+    file: "apps/site/src/content/docs/docs/reference/security-policy.md",
+    sentence: CHANNELS_CLOSED,
+  },
+  { file: "apps/site/src/content/docs/docs/versioning.md", sentence: VERSIONS_TODAY },
+  { file: "apps/site/src/content/docs/docs/versioning.md", sentence: NO_RELEASE_YET },
+  {
+    file: "apps/site/src/content/docs/docs/changelog.mdx",
+    sentence:
+      "Until the first release, the plan index of the repo is the record of each change: `docs/superpowers/plans/README.md`. Each row names a plan, its spec sections, and the commit that merged it.",
+  },
+  { file: "apps/site/src/content/docs/docs/resources.md", sentence: RESOURCES_EMPTY },
+  // The authtempo cells of the rows g10 and g11 of /compare/.
+  { file: "apps/site/src/data/compare.ts", sentence: "No release yet." },
+  { file: "apps/site/src/data/compare.ts", sentence: "No release notes yet." },
+];
+
+/** The words of a text that holds only before the first release. */
+export const PRE_RELEASE_PATTERN = /no release|until the first release/i;

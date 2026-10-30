@@ -3,6 +3,7 @@
 // and the support table against release/support.json. It also reads the times
 // of owner decision 4 and the two channels. The prose rules are not here:
 // check-terms and check-sentences read the file through policyProsePages (plan 11b).
+import { CHANNELS_CLOSED, NO_RELEASE_YET as NO_RELEASE } from "../src/data/unpublished.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The `## ` sections of SECURITY.md, in this order (spec 33 item 7). */
@@ -34,17 +35,6 @@ export interface Repository {
   owner: string;
   name: string;
 }
-
-/** The state of the support table while release/support.json is [] (plan 12j Task 12). */
-const NO_RELEASE = "No release exists yet. The first minor is the current minor at its release.";
-
-/**
- * The channels and the times are owner promises, and no person can report
- * before the repository and the mailbox exist. So while no release exists,
- * the policy says so, and it stops saying so at the first release.
- */
-const CHANNELS_CLOSED =
-  "Until the first release, the two channels are not open, and the times of this policy do not apply.";
 
 /** Each time that a section must state, with its source. */
 const TIMES: readonly {
@@ -129,7 +119,8 @@ export function checkSecurityPolicy(input: {
         );
     });
 
-  // The statements that hold only while no release exists, both ways.
+  // The statements that hold only while no release exists, both ways, on the
+  // table. check-pre-release holds the same texts on the version of core.
   const released = rows.length > 0;
   const state = released
     ? `release/support.json has ${rows.length} row${rows.length === 1 ? "" : "s"}`

@@ -10,6 +10,7 @@
 // FIRST_RELEASE gives the first release. Two release checks refuse a release
 // at 0.0.x, and each names FIRST_RELEASE.
 import { existsSync, readdirSync } from "node:fs";
+import { VERSIONS_TODAY as TODAY } from "../src/data/unpublished.ts";
 import { type Repository, readPolicyInput } from "./check-security-policy.ts";
 import { REPO } from "./lib/paths.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
@@ -164,8 +165,6 @@ const POINTER = /^Read \[[^\]]+\]\([^)\s]+\)\.$/;
 
 /** The state of the versions while core is at 0.0.0. The release branch removes the section. */
 const TODAY_SECTION = "The versions today";
-const TODAY =
-  "Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.";
 /**
  * The docs of today (ruling 29 of plan 12j). Spec 33 item 13 puts the
  * versioned docs trees outside plan 12j. So the page says that only the docs
