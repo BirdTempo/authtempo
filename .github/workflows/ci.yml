@@ -40,6 +40,11 @@ jobs:
       # The lockfile as written. Without --frozen-lockfile, a new resolution
       # installs and no check sees it.
       - run: pnpm install --frozen-lockfile
+      # The lint and format rules of Biome, with no error and no warning
+      # (CONTRIBUTING.md). Without it, a pull request that fails pnpm lint
+      # merges, and the format that runbook step 6 asks for has no gate
+      # (ruling 65 of plan 12j).
+      - run: pnpm lint
       # Every release check with the cache off, against the merge base with
       # the base branch of the pull request: main, or release/<major>.<minor>
       # for a patch of an older minor. A push to main has no base branch, so

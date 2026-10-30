@@ -322,20 +322,25 @@ describe("check-workflows", () => {
     const install = "      - run: pnpm install --frozen-lockfile\n";
     const gate = `      - run: pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}\n`;
     expect(ciFailures(swap(CI, install, ""))).toEqual([
-      "ci.yml: jobs.check: 4 steps, not the 5 steps of the rule",
+      "ci.yml: jobs.check: 5 steps, not the 6 steps of the rule",
     ]);
     expect(ciFailures(swap(CI, install, `${install}      - run: echo extra\n`))).toEqual([
-      "ci.yml: jobs.check: 6 steps, not the 5 steps of the rule",
+      "ci.yml: jobs.check: 7 steps, not the 6 steps of the rule",
     ]);
     expect(ciFailures(swap(swap(CI, gate, ""), install, `${gate}${install}`))).toEqual([
       "ci.yml: jobs.check: step 4 is not pnpm install --frozen-lockfile",
-      `ci.yml: jobs.check: step 5 is not pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}`,
+      "ci.yml: jobs.check: step 5 is not pnpm lint",
+      `ci.yml: jobs.check: step 6 is not pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}`,
+    ]);
+    // A pull request that fails Biome merges without the lint step (ruling 65 of plan 12j).
+    expect(ciFailures(swap(CI, "      - run: pnpm lint\n", ""))).toEqual([
+      "ci.yml: jobs.check: 5 steps, not the 6 steps of the rule",
     ]);
     // The servers come from release-check, so a docker step starts a set that no test reads (ruling 50).
     const docker = "      - run: docker compose up -d --wait\n";
     expect(ciFailures(swap(CI, install, `${docker}${install}`))).toEqual([
       "ci.yml: jobs.check step 4: a docker command; release-check starts the test servers through scripts/test-servers.mjs",
-      "ci.yml: jobs.check: 6 steps, not the 5 steps of the rule",
+      "ci.yml: jobs.check: 7 steps, not the 6 steps of the rule",
     ]);
     expect(releaseFailures(swap(RELEASE, install, `${docker}${install}`)).slice(0, 1)).toEqual([
       "release.yml: jobs.check step 5: a docker command; release-check starts the test servers through scripts/test-servers.mjs",
@@ -680,13 +685,15 @@ describe("check-workflows", () => {
     // pnpm <script> runs a root script, and each node path of the script must exist.
     const scripts = (s: Record<string, string>) => ({ ...TREE, scripts: s });
     expect(check(CI, RELEASE, scripts({})).failures).toEqual([
-      "ci.yml: jobs.check step 5: pnpm release:check is not a root script of package.json",
+      "ci.yml: jobs.check step 5: pnpm lint is not a root script of package.json",
+      "ci.yml: jobs.check step 6: pnpm release:check is not a root script of package.json",
       "release.yml: jobs.check step 6: pnpm release:check is not a root script of package.json",
     ]);
     expect(
       check(CI, RELEASE, scripts({ "release:check": "node scripts/release/src/gone.ts" })).failures,
     ).toEqual([
-      "ci.yml: jobs.check step 5: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
+      "ci.yml: jobs.check step 5: pnpm lint is not a root script of package.json",
+      "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
       "release.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
     ]);
   });
@@ -701,7 +708,7 @@ describe("check-workflows", () => {
       exists: (p: string) => p !== gone && TREE.exists(p),
     });
     expect(check(CI, RELEASE, without("scripts/release/src/release-check.ts")).failures).toEqual([
-      "ci.yml: jobs.check step 5: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
+      "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
       "release.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
     ]);
   });

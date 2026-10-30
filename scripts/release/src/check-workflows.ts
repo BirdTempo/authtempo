@@ -271,6 +271,8 @@ const JOBS: Record<string, Record<string, Job>> = {
         PNPM,
         NODE,
         { run: "pnpm install --frozen-lockfile" },
+        // Biome on each pull request (ruling 65 of plan 12j).
+        { run: "pnpm lint" },
         // The base branch of a pull request, or main on a push (ruling 67 of plan 12j, Minor 3).
         { run: `pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}` },
       ],
