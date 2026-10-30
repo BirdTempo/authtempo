@@ -208,7 +208,7 @@ const OPEN_NODES: Readonly<Record<string, string>> = {
     "equal to the alg of jwtMint (engine/oauth-clients.ts)",
   "POST /operator/impersonate.reason": "operatorReason: REASON_MAX, 500 units (engine/operator)",
   "POST /operator/impersonate/stop.reason":
-    "the cap of the route and the shape scan only: no engine rule bounds it; the audit row keeps the text",
+    "operatorReason: REASON_MAX, 500 units, in operatorAct before any write (engine/operator/audit.ts)",
   "POST /operator/secrets/rewrap.after":
     "the cap of the route and the shape scan only: no engine rule bounds it; CURSOR (engine/secrets.ts) checks the kind only",
 };

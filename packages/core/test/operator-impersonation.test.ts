@@ -4,6 +4,7 @@ import { deleteAccount } from "../src/engine/account-delete.js";
 import { HookRefusal } from "../src/engine/hooks.js";
 import { mintSessionJwt, verifySessionJwt } from "../src/engine/jwt.js";
 import { defaultNoticeMail } from "../src/engine/notices.js";
+import { REASON_MAX } from "../src/engine/operator/audit.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
@@ -726,5 +727,27 @@ describe("the impersonation (plan 12f Task 11)", () => {
     // The refused stop leaves the session.
     expect(await resolveSession(fresh.auth.config, t3)).not.toBeNull();
     errors.mockRestore();
+  });
+
+  it("checks a stop reason by operatorReason, as the start: 1 to REASON_MAX units (ruling 73 of the 12j lane)", async () => {
+    const w = await world();
+    const token = await started(w);
+    const stopWith = (reason: string) =>
+      w.handle(
+        post("/auth/operator/impersonate/stop", { reason }, { cookie: sessionCookie(token) }),
+      );
+    // One unit past REASON_MAX, and the empty text: each answers invalid_body, and the session stays.
+    for (const reason of ["x".repeat(REASON_MAX + 1), ""]) {
+      const res = await stopWith(reason);
+      expect([reason.length, res.status, await res.json()]).toEqual([
+        reason.length,
+        400,
+        { error: "invalid_body" },
+      ]);
+    }
+    expect(await resolveSession(w.auth.config, token)).not.toBeNull();
+    // A reason of REASON_MAX units stops it, and the audit row keeps the text.
+    expect((await stopWith("x".repeat(REASON_MAX))).status).toBe(200);
+    expect((await auditRows(w)).at(-1)?.reason).toBe("x".repeat(REASON_MAX));
   });
 });
