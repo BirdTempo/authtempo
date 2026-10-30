@@ -14,6 +14,7 @@ import {
   PACK_SCRIPTS,
   RELEASE_LICENSE,
   repositoryFor,
+  VERSION_CONSTANTS,
 } from "./lib/pack-rules.ts";
 import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
@@ -49,6 +50,11 @@ export interface PackInput {
   deprecations: Deprecation[];
   /** The scripts of the workspace manifest. pnpm 12.8.1 pack strips the publish scripts from the packed one. */
   scripts: Record<string, unknown>;
+  /**
+   * The packed text of the file of VERSION_CONSTANTS for the package, or null
+   * when the tarball lacks it. A package with no entry there leaves it out.
+   */
+  versionText?: string | null;
 }
 
 /** The package whose manifest carries the upgrade facts (spec 33 item 10.5). prepare writes them. */
@@ -133,6 +139,24 @@ export function checkPack(input: PackInput): Report {
     failures.push(
       `the version is ${manifest.version}, not the group version ${input.groupVersion}`,
     );
+  // changeset version moves only package.json, so a literal in dist stayed at
+  // 0.0.0 in the tarballs of 0.1.0 (ruling 65 of plan 12j, M2).
+  const constant = VERSION_CONSTANTS[manifest.name];
+  if (constant !== undefined) {
+    const text = input.versionText ?? null;
+    const form = new RegExp(`^export const ${constant.name} = "([^"\\n]*)";$`, "gm");
+    const values = text === null ? [] : [...text.matchAll(form)].map((m) => m[1] ?? "");
+    if (text === null)
+      failures.push(
+        `the tarball lacks ${constant.file}, which holds ${constant.name}, the version that the code answers`,
+      );
+    else if (values.length !== 1)
+      failures.push(`${constant.file} holds ${values.length} values of ${constant.name}, not 1`);
+    else if (values[0] !== manifest.version)
+      failures.push(
+        `${constant.file} gives ${constant.name} ${values[0]}, not the manifest version ${manifest.version}`,
+      );
+  }
 
   if (manifest.license === undefined) failures.push("the manifest has no license");
   else if (manifest.license !== RELEASE_LICENSE)
@@ -397,6 +421,8 @@ export function checkTarballs(
     seen.add(name);
     const need = needs[name];
     if (need === undefined) failures.push(`${name}: no entry in release/pack-needs.json`);
+    const texts = packedTexts(path, t.files);
+    const constant = VERSION_CONSTANTS[name];
     const r = checkPack({
       files: t.files,
       manifest: t.manifest,
@@ -408,11 +434,12 @@ export function checkTarballs(
       breaking: breakingByMinor(t.changelog ?? ""),
       deprecations,
       scripts: (scripts.get(name) ?? {}) as Record<string, unknown>,
+      ...(constant === undefined ? {} : { versionText: texts.get(constant.file) ?? null }),
     });
     files += t.files.length;
     for (const f of r.failures) failures.push(`${name}@${t.manifest.version}: ${f}`);
     packed.push(...t.files.map((f) => `${dir}/${f}`));
-    for (const [f, text] of packedTexts(path, t.files)) {
+    for (const [f, text] of texts) {
       const forms = noteForms(text);
       if (forms.length > 0) marked.set(`${dir}/${f}`, forms);
       const local = LOCAL_PATH.exec(text);

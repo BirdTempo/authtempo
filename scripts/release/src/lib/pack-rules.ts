@@ -70,6 +70,20 @@ export const BINARY_EXTENSIONS = [".node", ".wasm", ".so", ".dylib", ".dll", ".e
 /** The declared binary files of each released package, by name. No package ships one today. */
 export const DECLARED_BINARIES: Readonly<Record<string, readonly string[]>> = {};
 
+/**
+ * The version constant in dist of each released package that has one, by
+ * name (ruling 65 of plan 12j, M2). The code of the package answers it: core
+ * in GET /operator/info and the OpenAPI document, mcp in its server info and
+ * its version tool. The build writes the module from package.json
+ * (scripts/write-version.mjs), and check-pack holds the value to the
+ * manifest version of the tarball. So a test pinned to a new value cannot
+ * ship 0.0.0. A test holds each entry to the build script of its package.
+ */
+export const VERSION_CONSTANTS: Readonly<Record<string, { file: string; name: string }>> = {
+  "@authtempo/core": { file: "dist/version.generated.js", name: "VERSION" },
+  "@authtempo/mcp": { file: "dist/version.generated.js", name: "MCP_VERSION" },
+};
+
 /** The license of every released package: the owner's decision 2 of 2026-10-14. */
 export const RELEASE_LICENSE = "MIT";
 

@@ -1,0 +1,2 @@
+# Written by scripts/write-version.mjs from package.json at each build and typecheck.
+src/version.generated.ts

@@ -26,7 +26,7 @@ import {
   readTarball,
 } from "../src/check-pack.ts";
 import { readDeprecations } from "../src/lib/deprecations.ts";
-import { FORBIDDEN_PACK_NAMES } from "../src/lib/pack-rules.ts";
+import { FORBIDDEN_PACK_NAMES, VERSION_CONSTANTS } from "../src/lib/pack-rules.ts";
 import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import {
@@ -458,6 +458,54 @@ describe("check-pack", () => {
     }
   });
 
+  // Ruling 65 of plan 12j, M2: changeset version moved only package.json, and
+  // the tarballs of 0.1.0 held VERSION and MCP_VERSION at 0.0.0.
+  it("holds each version constant in dist to the manifest version", () => {
+    const at = (name: string, versionText: string | null) => {
+      const manifest = structuredClone(MANIFEST);
+      manifest.name = name;
+      // core also holds the upgrade facts, which prepare writes.
+      if (name === "@authtempo/core") manifest.authtempo = { breaking: {}, deprecations: [] };
+      return failuresOf({ manifest, versionText });
+    };
+    const line = (name: string, v: string) => `export const ${name} = "${v}";\n`;
+    for (const [pkg, { file, name }] of Object.entries(VERSION_CONSTANTS)) {
+      expect(at(pkg, `// Generated.\n${line(name, "0.1.0")}`), pkg).toEqual([]);
+      expect(at(pkg, line(name, "0.0.0")), pkg).toEqual([
+        `${file} gives ${name} 0.0.0, not the manifest version 0.1.0`,
+      ]);
+      expect(at(pkg, null), pkg).toEqual([
+        `the tarball lacks ${file}, which holds ${name}, the version that the code answers`,
+      ]);
+      expect(at(pkg, `${line(name, "0.1.0")}${line(name, "0.1.0")}`), pkg).toEqual([
+        `${file} holds 2 values of ${name}, not 1`,
+      ]);
+      // Another constant, or the form with no export, is not the value.
+      expect(at(pkg, `${line("OTHER", "0.1.0")}const ${name} = "0.1.0";\n`), pkg).toEqual([
+        `${file} holds 0 values of ${name}, not 1`,
+      ]);
+    }
+    // A package with no entry has no such rule.
+    expect(at("@authtempo/client", null)).toEqual([]);
+  });
+
+  it("names the version module that the build of each package writes", () => {
+    expect(Object.keys(VERSION_CONSTANTS).sort()).toEqual(["@authtempo/core", "@authtempo/mcp"]);
+    const dirs = new Map(readWorkspace(root).map((p) => [p.name, p]));
+    for (const [pkg, { file, name }] of Object.entries(VERSION_CONSTANTS)) {
+      const p = dirs.get(pkg);
+      expect(p, pkg).toBeDefined();
+      expect(releasedNames(root), pkg).toContain(pkg);
+      const scripts = (p?.manifest.scripts ?? {}) as Record<string, string>;
+      expect(scripts.build, pkg).toContain(`node ../../scripts/write-version.mjs ${name} && tsc`);
+      // tsc writes src/version.generated.ts to the dist file of the same name.
+      expect(file).toBe("dist/version.generated.js");
+      expect(readFileSync(join(root, p?.dir ?? "", ".gitignore"), "utf8").split("\n")).toContain(
+        "src/version.generated.ts",
+      );
+    }
+  });
+
   it("fails a missing license, repository.url, repository.directory, or CHANGELOG.md", () => {
     expect(
       withManifest((m) => {
@@ -528,7 +576,9 @@ describe("check-pack", () => {
       const manifest = structuredClone(MANIFEST);
       manifest.name = "@authtempo/core";
       manifest.authtempo = authtempo;
-      return failuresOf({ manifest, breaking, deprecations });
+      // A core tarball also holds its version module (ruling 65 of plan 12j, M2).
+      const versionText = 'export const VERSION = "0.1.0";\n';
+      return failuresOf({ manifest, breaking, deprecations, versionText });
     };
     expect(core({ schemaVersion: 11, breaking, deprecations })).toEqual([]);
     expect(core({ schemaVersion: 11, breaking: {}, deprecations })).toEqual([

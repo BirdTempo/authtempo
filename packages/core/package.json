@@ -92,8 +92,8 @@
     "schemaVersion": 15
   },
   "scripts": {
-    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "build": "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json",
+    "typecheck": "node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run && vitest run --config vitest.answers.config.ts && vitest run --config vitest.events.config.ts",
     "measure": "vitest run --config vitest.measure.config.ts"
   },
