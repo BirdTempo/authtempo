@@ -10,6 +10,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 sidebar:
   order: 1
 ---

@@ -15,6 +15,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.

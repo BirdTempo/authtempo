@@ -21,6 +21,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12k-organizations-tokens-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.

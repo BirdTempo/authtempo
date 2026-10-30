@@ -327,6 +327,19 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   ],
 ];
 
+/** The plan of the body limits: each page that states them cites it (spec 18 rule 4, ruling 64 Low 3). */
+const PLAN = "docs/superpowers/plans/2026-10-14-12j-release-program.md";
+const PLAN_PAGES = [
+  FILES.errors,
+  FILES.limits,
+  FILES.express,
+  FILES.fastify,
+  FILES.scim,
+  FILES.deploy,
+  `${DOCS}docs/reference/routes.md`,
+  `${DOCS}docs/reference/api.md`,
+];
+
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
@@ -349,6 +362,17 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
     const noIp = /A request with no client IP keys `([^`]+)`\./.exec(limits)?.[1];
     const text = /A value that is not an IP keys `([^`]+)` and the value/.exec(limits)?.[1];
     expect({ noIp, text: `${text}x` }).toEqual({ noIp: ipKey(null), text: ipKey("x") });
+  });
+
+  it("cites plan 12j in the sources of each page that states a body limit (ruling 64 Low 3)", () => {
+    for (const page of PLAN_PAGES) {
+      const head = readFileSync(page, "utf8").split("\n---\n")[0] ?? "";
+      const cites = head.split("\n").some((line) => line.startsWith(`  - ${PLAN}`));
+      expect({ page: page.slice(DOCS.length), cites }).toEqual({
+        page: page.slice(DOCS.length),
+        cites: true,
+      });
+    }
   });
 
   it("states no cap number in bytes that no fact holds", () => {

@@ -12,6 +12,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
