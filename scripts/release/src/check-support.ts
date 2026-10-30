@@ -230,7 +230,7 @@ export interface MigrationSource {
   from: string;
   /** Why the adapter has no folder of its own. */
   reason: string;
-  /** The test file, from the repository root, that holds the copy to the files. */
+  /** The test file, from the repository root, that holds the copy to the files: under packages/<adapter>/test/. */
   proof: string;
 }
 
@@ -244,7 +244,9 @@ function isTreePath(text: string): boolean {
 /**
  * Reads release/migration-sources.json: each adapter folder name to its
  * MigrationSource. Each entry must have the shape, so the check never reads
- * a field that the file does not hold.
+ * a field that the file does not hold. The sources object has no prototype,
+ * so a `__proto__` key is an own key: the stale-entry rule of readMigrations
+ * then sees it and fails it.
  */
 export function readMigrationSources(text: string): {
   sources: Record<string, MigrationSource>;
@@ -260,7 +262,7 @@ export function readMigrationSources(text: string): {
   if (typeof data !== "object" || data === null || Array.isArray(data))
     return { sources: {}, failures: [`${at} is not an object`] };
   const failures: string[] = [];
-  const sources: Record<string, MigrationSource> = {};
+  const sources: Record<string, MigrationSource> = Object.create(null);
   for (const [adapter, raw] of Object.entries(data)) {
     const before = failures.length;
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -298,15 +300,17 @@ function readVersions(dir: string, label: string, failures: string[]): number[] 
  * Each adapter package of the tree (`packages/adapter-*`) to the schema
  * version of each migration file. The files are the one list: the D1 adapter
  * ships its folder, and the Postgres list imports each file. A file of
- * another name fails, and so does an adapter with no migration folder.
+ * another name fails, and so does an adapter with no migration folder or
+ * with an empty one.
  *
  * The exemption: an adapter can ship the files of another folder, such as
  * the SQLite adapter, whose build copies the D1 files. Its versions are then
  * the versions of that folder. The exemption is data in
  * release/migration-sources.json, not a name in this code, so each entry
  * states its reason and names the test that holds the copy. An entry fails
- * when its folder has no migration, when its proof file does not exist, and
- * when its adapter has a folder of its own or no package. Without these
+ * when its folder has no migration, when its proof is not a file under
+ * packages/<adapter>/test/, and when its adapter has a folder of its own or
+ * no package. Without these
  * failures, an entry could hide an adapter that ships no migration at all.
  */
 export function readMigrations(root: string): {
@@ -330,14 +334,17 @@ export function readMigrations(root: string): {
         `release/migration-sources.json: ${name} is not an adapter package of packages/`,
       );
   for (const name of adapters) {
-    const dir = MIGRATION_DIRS.map((sub) => join(packages, name, sub)).find((d) => existsSync(d));
+    const sub = MIGRATION_DIRS.find((d) => existsSync(join(packages, name, d)));
     const source = sources[name];
-    if (dir !== undefined) {
+    if (sub !== undefined) {
       if (source !== undefined)
         failures.push(
           `release/migration-sources.json: packages/${name} has its own migrations folder, so it takes no entry`,
         );
-      migrations[name] = readVersions(dir, `packages/${name}`, failures);
+      const versions = readVersions(join(packages, name, sub), `packages/${name}`, failures);
+      // An empty folder of its own is an adapter that ships no migration.
+      if (versions.length === 0) failures.push(`packages/${name}: ${sub} has no migrations`);
+      migrations[name] = versions;
       continue;
     }
     if (source === undefined) {
@@ -347,9 +354,15 @@ export function readMigrations(root: string): {
       continue;
     }
     const before = failures.length;
-    if (!existsSync(join(root, source.proof)))
+    // The proof is a test of the adapter itself, not any path that exists.
+    const proof = join(root, source.proof);
+    if (!existsSync(proof))
       failures.push(
         `release/migration-sources.json: ${name}: the proof ${source.proof} does not exist`,
+      );
+    else if (!source.proof.startsWith(`packages/${name}/test/`) || !statSync(proof).isFile())
+      failures.push(
+        `release/migration-sources.json: ${name}: the proof ${source.proof} is not a file under packages/${name}/test/`,
       );
     const from = join(root, source.from);
     const versions =

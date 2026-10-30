@@ -369,6 +369,68 @@ describe("check-support", () => {
       });
     });
 
+    it("fails an entry whose from names a file (ruling 42)", () => {
+      withTree((root, write) => {
+        write("release/migration-sources.json", sqlite({ from: "packages/adapter-d1/one.sql" }));
+        write("packages/adapter-d1/one.sql");
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2] },
+          failures: [
+            "release/migration-sources.json: adapter-sqlite: packages/adapter-d1/one.sql has no migrations",
+          ],
+        });
+      });
+    });
+
+    it("fails an adapter whose own folder is empty (ruling 42)", () => {
+      withTree((root, write) => {
+        write("release/migration-sources.json", sqlite());
+        mkdirSync(join(root, "packages/adapter-x/src/migrations"), { recursive: true });
+        expect(readMigrations(root)).toEqual({
+          migrations: { "adapter-d1": [1, 2], "adapter-sqlite": [1, 2], "adapter-x": [] },
+          failures: ["packages/adapter-x: src/migrations has no migrations"],
+        });
+      });
+    });
+
+    it("fails a proof that is not a file under the test folder of the adapter (ruling 42)", () => {
+      withTree((root, write) => {
+        write("package.json", "{}");
+        write("packages/adapter-d1/test/copy.test.ts");
+        mkdirSync(join(root, "packages/adapter-sqlite/test/fixtures"));
+        for (const proof of [
+          "package.json",
+          "packages",
+          "packages/adapter-sqlite/test",
+          "packages/adapter-sqlite/test/fixtures",
+          "packages/adapter-d1/test/copy.test.ts",
+        ]) {
+          write("release/migration-sources.json", sqlite({ proof }));
+          expect(readMigrations(root)).toEqual({
+            migrations: { "adapter-d1": [1, 2] },
+            failures: [
+              `release/migration-sources.json: adapter-sqlite: the proof ${proof} is not a file under packages/adapter-sqlite/test/`,
+            ],
+          });
+        }
+      });
+    });
+
+    it("fails a __proto__ key as an entry with no package (ruling 42)", () => {
+      withTree((root, write) => {
+        const entries = JSON.parse(sqlite());
+        const text = `{ "adapter-sqlite": ${JSON.stringify(entries["adapter-sqlite"])}, "__proto__": ${JSON.stringify(entries["adapter-sqlite"])} }`;
+        expect(Object.keys(readMigrationSources(text).sources)).toEqual([
+          "adapter-sqlite",
+          "__proto__",
+        ]);
+        write("release/migration-sources.json", text);
+        expect(readMigrations(root).failures).toEqual([
+          "release/migration-sources.json: __proto__ is not an adapter package of packages/",
+        ]);
+      });
+    });
+
     it("fails a missing file and a file of another shape", () => {
       withTree((root, write) => {
         expect(readMigrations(root).failures).toEqual([
