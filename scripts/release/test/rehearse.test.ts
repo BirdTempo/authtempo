@@ -23,10 +23,13 @@ import {
 } from "../../../apps/site/src/data/unpublished.ts";
 import { groupVersion } from "../src/lib/released.ts";
 import {
+  COPY_FORMAT,
+  COPY_LINT,
   checkFailures,
   copyCheck,
   DATES_FILE,
   HAND_EDITS,
+  lintFailures,
   PLAN_FILE,
   planFailures,
   type RehearsalPlan,
@@ -208,14 +211,17 @@ const PASS =
  */
 function fakeExec(
   source: string,
-  answer: (line: string) => { status: number; stdout: string } | undefined = () => undefined,
+  answer: (
+    line: string,
+    cwd: string,
+  ) => { status: number; stdout: string; stderr?: string } | undefined = () => undefined,
 ) {
   const calls: string[] = [];
   const exec: Exec = async (cmd, args, cwd) => {
     const line = [cmd, ...args].join(" ");
     calls.push(line);
-    const own = answer(line);
-    if (own !== undefined) return { ...own, stderr: "" };
+    const own = answer(line, cwd);
+    if (own !== undefined) return { stderr: "", ...own };
     if (line.startsWith("git clone")) cpSync(source, args.at(-1) ?? "", { recursive: true });
     if (line === "pnpm changeset version") changesetVersion(cwd, "A fixture change.");
     if (line === "git rev-parse HEAD")
@@ -252,7 +258,7 @@ describe("rehearse", () => {
     const r = await rehearse({ root: source, exec, tmp, keep: true });
     expect(r.failures).toEqual([]);
     expect(rehearsalLine(r)).toBe(
-      `release-rehearsal: PASS version=0.1.0 first=yes dates=2 support=1 resources=${PLAN.resources.length} removed=1 release-check=PASS failures=0`,
+      `release-rehearsal: PASS version=0.1.0 first=yes dates=2 support=1 resources=${PLAN.resources.length} removed=1 lint=PASS release-check=PASS failures=0`,
     );
     const repo = r.dir ?? "";
     const base = "a".repeat(40);
@@ -265,6 +271,7 @@ describe("rehearse", () => {
       "pnpm changeset version",
       "node scripts/release/src/rewrite-unpublished.ts",
       "pnpm format",
+      "pnpm lint --error-on-warnings",
       copyCheck(base).join(" "),
       "node scripts/test-servers.mjs down",
     ]);
@@ -382,5 +389,89 @@ describe("rehearse", () => {
     expect(r.failures).toEqual([
       "changeset version: the group stays at 0.0.0; no changeset names a released package",
     ]);
+  });
+
+  // Ruling 77 of plan 12j: the format step of the runbook is at the first
+  // release only, and the lint of ci.yml runs at each release.
+  it("runs no format at a later release, and runs the lint there too", async () => {
+    const { tmp, source } = folders();
+    // The tree after the first release, and a patch: 0.1.0 to 0.1.1.
+    const at = (dir: string, from: string, to: string) => {
+      for (const name of ["packages/client/package.json", "packages/core/package.json"]) {
+        const file = join(dir, name);
+        const text = readFileSync(file, "utf8");
+        expect(text, name).toContain(`"version": "${from}"`);
+        writeFileSync(file, text.replace(`"version": "${from}"`, `"version": "${to}"`));
+      }
+    };
+    at(source, "0.0.0", "0.1.0");
+    const { calls, exec } = fakeExec(source, (line, cwd) => {
+      if (line !== "pnpm changeset version") return undefined;
+      at(cwd, "0.1.0", "0.1.1");
+      return { status: 0, stdout: "" };
+    });
+    const r = await rehearse({ root: source, exec, tmp });
+    expect(r.failures).toEqual([]);
+    expect(rehearsalLine(r)).toBe(
+      "release-rehearsal: PASS version=0.1.1 first=no dates=2 support=0 resources=0 removed=0 lint=PASS release-check=PASS failures=0",
+    );
+    expect(calls).not.toContain(COPY_FORMAT.join(" "));
+    expect(calls).not.toContain("node scripts/release/src/rewrite-unpublished.ts");
+    expect(calls.slice(-3)).toEqual([
+      COPY_LINT.join(" "),
+      copyCheck("a".repeat(40)).join(" "),
+      "node scripts/test-servers.mjs down",
+    ]);
+  });
+
+  it("stops at a lint fault with its place and rule, and starts no server", async () => {
+    const { tmp, source } = folders();
+    // The output of Biome 2.5.15 on one error and one warning (2026-10-31), cut to the heads.
+    const stderr = [
+      "probe/warn.ts:2:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━",
+      "",
+      "  ! This variable unused is unused.",
+      "probe/err.ts:2:3 lint/suspicious/noDebugger  FIXABLE  ━━━━━━━━",
+      "",
+      "  × This is an unexpected use of the debugger statement.",
+      "check ━━━━━━━━",
+      "",
+      "  × Some errors were emitted while running checks.",
+    ].join("\n");
+    const stdout = "Checked 2 files in 4ms. No fixes applied.\nFound 1 error.\nFound 1 warning.\n";
+    const { calls, exec } = fakeExec(source, (line) =>
+      line === COPY_LINT.join(" ") ? { status: 1, stdout, stderr } : undefined,
+    );
+    const r = await rehearse({ root: source, exec, tmp });
+    expect(r.stopped).toBe("lint");
+    expect(r.failures).toEqual([
+      "lint: pnpm lint --error-on-warnings exited 1: Found 1 error. Found 1 warning.",
+      "lint: probe/warn.ts:2:9 lint/correctness/noUnusedVariables",
+      "lint: probe/err.ts:2:3 lint/suspicious/noDebugger",
+    ]);
+    expect(rehearsalLine(r)).toMatch(/ lint=FAIL release-check=not-run failures=3$/);
+    expect(calls.at(-1)).toBe(COPY_LINT.join(" "));
+    expect(calls.indexOf(COPY_FORMAT.join(" "))).toBe(calls.length - 2);
+    expect(r.notes).toContain("not run: release-check, after the failed lint");
+  });
+});
+
+describe("the failure lines of the lint", () => {
+  it("passes a clean run, and fails an error or a warning, also at exit 0", () => {
+    const run = (status: number, stdout: string, stderr = "") =>
+      lintFailures({ status, stdout, stderr });
+    // The lint of the tree on 2026-10-31: two infos, no error, no warning.
+    expect(run(0, "Checked 2587 files in 1s. No fixes applied.\nFound 2 infos.\n")).toEqual([]);
+    expect(run(0, "Checked 1 file in 1ms. No fixes applied.\nFound 1 warning.\n")).toEqual([
+      "lint: pnpm lint --error-on-warnings exited 0: Found 1 warning.",
+    ]);
+    expect(run(0, "\u001b[1mFound 3 errors.\u001b[0m\n")).toEqual([
+      "lint: pnpm lint --error-on-warnings exited 0: Found 3 errors.",
+    ]);
+    expect(run(1, "", "ERR_PNPM_NO_SCRIPT Missing script: lint\n")).toEqual([
+      "lint: pnpm lint --error-on-warnings exited 1: no count line",
+    ]);
+    // The flag of Biome that fails a warning, which the lint of ci.yml lets pass.
+    expect(COPY_LINT).toEqual(["pnpm", "lint", "--error-on-warnings"]);
   });
 });

@@ -17,7 +17,7 @@ import {
 } from "../src/lib/release-facts.ts";
 import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
-import { copyCheck, PLAN_FILE, planFailures } from "../src/rehearse.ts";
+import { COPY_FORMAT, COPY_LINT, copyCheck, PLAN_FILE, planFailures } from "../src/rehearse.ts";
 import { FALLBACK_FILE, type FallbackEntry, fallbackFaults } from "../src/verify-published.ts";
 
 // docs/release/RUNBOOK.md, the steps of the owner (plan 12j Task 13, spec 33
@@ -370,8 +370,22 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(flags.slice(0, 2)).toEqual(["--no-osv", "--no-dry-run"]);
     const run = `pnpm release:check ${flags.slice(0, 2).join(" ")}`;
     expect(step).toContain(`\`${run}\` in the copy`);
+    // The lint of ci.yml runs in the copy after the edits, and fails a
+    // warning too (ruling 77 of plan 12j).
+    expect(step).toContain(
+      `Then it runs \`${COPY_LINT.join(" ")}\` in the copy, so a format fault or a warning fails the rehearsal.`,
+    );
+    expect(step.indexOf(COPY_LINT.join(" "))).toBeLessThan(step.indexOf(run));
     const ci = readFileSync(new URL(`.github/workflows/${CI_FILE}`, ROOT), "utf8");
     expect(ci).toContain(`- run: ${run} --base ${CI_BASE}\n`);
+    expect(ci).toContain(`- run: ${COPY_LINT.slice(0, 2).join(" ")}\n`);
+    // The format is a step of the first release only, and its result is committed.
+    const first = TEXT.slice(TEXT.indexOf("\n### The first release\n"));
+    expect(first).toContain(
+      `- Then run \`${COPY_FORMAT.join(" ")}\`, and commit its result with the other edits.`,
+    );
+    expect(first).toContain("A later release has no format step.");
+    expect(TEXT.split(`\`${COPY_FORMAT.join(" ")}\``)).toHaveLength(2);
     expect(step).toContain("Without it, the version pull request can fail its own check.");
     // A FAIL can come from main, from the plan values, or from a dirty
     // checkout, and only main is fixed on main (ruling 70 of plan 12j, Low 3).

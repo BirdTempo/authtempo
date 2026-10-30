@@ -25,9 +25,10 @@ import { removeParagraph } from "./rewrite-unpublished.ts";
 // (final review D of plan 12j, C1). This script makes that state in a copy of
 // HEAD. It runs `changeset version`, the rewrite of the first release, and the
 // scripted forms of the edits by hand, with the planned values of
-// release/rehearsal.json. Then it runs release-check --no-osv --no-dry-run in
-// the copy, through the test servers of the copy, and prints one summary
-// line. It never commits, tags, pushes, or publishes, and it leaves the
+// release/rehearsal.json. It runs the format at the first release only, and
+// the lint of ci.yml at each release (ruling 77 of plan 12j). Then it runs
+// release-check --no-osv --no-dry-run in the copy, through the test servers
+// of the copy, and prints one summary line. It never commits, tags, pushes, or publishes, and it leaves the
 // checkout unchanged.
 
 /** The planned values of the next release, by the path from the root. */
@@ -44,6 +45,7 @@ export const REHEARSAL_STEPS = [
   "rewrite",
   "edits",
   "format",
+  "lint",
   "release-check",
 ] as const;
 export type RehearsalStep = (typeof REHEARSAL_STEPS)[number];
@@ -65,6 +67,22 @@ export const COPY_REWRITE: readonly string[] = [
   "node",
   "scripts/release/src/rewrite-unpublished.ts",
 ];
+
+/**
+ * The format of the runbook step of the first release. The rewrite changes
+ * many pages, and a rewritten cell can pass the line width of Biome. A later
+ * release has no format step, so the copy runs it at the first release only.
+ */
+export const COPY_FORMAT: readonly string[] = ["pnpm", "format"];
+
+/**
+ * The lint of the job check of ci.yml, with no --write, after each edit.
+ * Before, the copy ran the format at each release and no lint. So it could
+ * not show a format fault of a later version pull request, which ci.yml
+ * then fails (ruling 77 of plan 12j). --error-on-warnings fails a warning
+ * too, which the lint of ci.yml lets pass.
+ */
+export const COPY_LINT: readonly string[] = ["pnpm", "lint", "--error-on-warnings"];
 
 /** The release check in the copy, with the merge base of the version branch given by --base. */
 export const copyCheck = (base: string): readonly string[] => [
@@ -255,6 +273,8 @@ export interface RehearsalReport extends Report {
   stopped: RehearsalStep | null;
   /** True when the copy was at 0.0.0, so the edits of the first release ran. */
   first: boolean;
+  /** The verdict of the lint in the copy. */
+  lint: "PASS" | "FAIL" | "not-run";
   /** The verdict of release-check in the copy. */
   check: "PASS" | "FAIL" | "not-run";
   /** The copy, or null when the run stopped before it. */
@@ -263,12 +283,33 @@ export interface RehearsalReport extends Report {
 
 /**
  * The summary line: `release-rehearsal: PASS version=<v> first=<yes|no>
- * dates=<n> support=<n> resources=<n> removed=<n> release-check=PASS failures=0`.
+ * dates=<n> support=<n> resources=<n> removed=<n> lint=PASS release-check=PASS
+ * failures=0`.
  */
 export function rehearsalLine(r: RehearsalReport): string {
   const c = r.counts;
   const verdict = r.failures.length === 0 ? "PASS" : "FAIL";
-  return `release-rehearsal: ${verdict} version=${r.version ?? "none"} first=${r.first ? "yes" : "no"} dates=${c.dates ?? 0} support=${c.support ?? 0} resources=${c.resources ?? 0} removed=${c.removed ?? 0} release-check=${r.check} failures=${r.failures.length}`;
+  return `release-rehearsal: ${verdict} version=${r.version ?? "none"} first=${r.first ? "yes" : "no"} dates=${c.dates ?? 0} support=${c.support ?? 0} resources=${c.resources ?? 0} removed=${c.removed ?? 0} lint=${r.lint} release-check=${r.check} failures=${r.failures.length}`;
+}
+
+/**
+ * The failure lines of a lint run, or none for a clean run. Biome prints each
+ * diagnostic on stderr under a head such as `apps/x.ts:2:3 lint/suspicious/noDebugger`,
+ * and the counts on stdout, such as `Found 1 error.` (Biome 2.5.15, read
+ * 2026-10-31). A count of errors or warnings fails the run, also at exit 0.
+ */
+export function lintFailures(r: { status: number; stdout: string; stderr: string }): string[] {
+  const lines = stripColours(`${r.stdout}\n${r.stderr}`).split(/\r?\n/);
+  const found = lines
+    .map((l) => l.trim())
+    .filter((l) => /^Found \d+ (errors?|warnings?)\.$/.test(l));
+  if (r.status === 0 && found.length === 0) return [];
+  const heads = lines.flatMap((l) => {
+    const m = /^(\S+:\d+:\d+) (\S+)/.exec(l);
+    return m === null ? [] : [`lint: ${m[1]} ${m[2]}`];
+  });
+  const counts = found.length > 0 ? found.join(" ") : "no count line";
+  return [`lint: ${COPY_LINT.join(" ")} exited ${r.status}: ${counts}`, ...heads];
 }
 
 /**
@@ -309,6 +350,7 @@ export async function rehearse(options: RehearsalOptions): Promise<RehearsalRepo
     version: null,
     stopped: null,
     first: false,
+    lint: "not-run",
     check: "not-run",
     dir: null,
   };
@@ -487,10 +529,20 @@ export async function rehearse(options: RehearsalOptions): Promise<RehearsalRepo
     }
     if (failures.length > 0) return done(1, "edits");
 
-    // 6. The format of the runbook step of the first release.
-    if (!(await run("format", ["pnpm", "format"]))) return done(1, "format");
+    // 6. The format of the runbook step of the first release, at that release only.
+    if (report.first && !(await run("format", COPY_FORMAT))) return done(1, "format");
 
-    // 7. release-check, as the job check of ci.yml runs it on the pull request.
+    // 7. The lint of ci.yml, after each edit. It fails on an error or a warning.
+    log(`release-rehearsal: lint: ${COPY_LINT.join(" ")}`);
+    const lint = await exec(COPY_LINT[0] ?? "", COPY_LINT.slice(1), repo, false);
+    const lintFaults = lintFailures(lint);
+    report.lint = lintFaults.length === 0 ? "PASS" : "FAIL";
+    if (lintFaults.length > 0) {
+      failures.push(...lintFaults);
+      return done(1, "lint");
+    }
+
+    // 8. release-check, as the job check of ci.yml runs it on the pull request.
     // It starts the test servers of the copy, so the finally block takes them down.
     servers = true;
     const command = copyCheck(base);
