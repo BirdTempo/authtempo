@@ -13,9 +13,13 @@ import type { RouteKey } from "./route-list.js";
  * takes each `max` of length and of items, and 3 bytes for each UTF-16 unit
  * of a string: a character that is not a control character takes at most 3
  * bytes in UTF-8. A form value takes 9 bytes for each unit (`%XX%XX%XX`).
- * A control character other than a line break or a tab takes 6 bytes as a
- * `\u` escape. The count leaves it out, because no field of a route holds
- * one in normal use.
+ * The count leaves out two forms of 6 bytes for one unit: the `\u` escape
+ * of a control character other than a line break or a tab, and the `\u`
+ * escape that an ASCII-only encoder (such as the default of Python's
+ * `json.dumps`) writes for each unit that is not ASCII. No field of a route
+ * holds a control character in normal use. A body of such an encoder can
+ * take up to twice the count. When most of its text is not ASCII, it can
+ * pass the cap and answer 413: such a client must send UTF-8 for long text.
  *
  * Each route gets the next power of two above its own largest valid body,
  * and at least `BODY_CAP_FLOOR`. The test emits the table and fails when a

@@ -50,7 +50,8 @@ const most = (all: Measure[]): Measure => ({
  * The largest valid value of `node` as compact JSON, with `unit` bytes for
  * each UTF-16 unit of a string. A node that no schema bounds (a string or an
  * array with no max, a record, an unknown, an open object) adds its least
- * size and its path to `open`: the cap is its bound.
+ * size and its path to `open`: the cap is its bound. A zod type with no
+ * rule here throws.
  */
 export function measure(node: ZodNode, path: string, unit: number, open: string[]): Measure {
   const def = node._zod.def;
@@ -94,6 +95,10 @@ export function measure(node: ZodNode, path: string, unit: number, open: string[
     case "record":
       open.push(`${path}{}`);
       return { bytes: 2, depth: 1, items: 1 };
+    case "unknown":
+    case "any":
+      open.push(`${path}: ${def.type}`);
+      return scalar(0);
     case "optional":
     case "nullable":
     case "default":
@@ -122,8 +127,9 @@ export function measure(node: ZodNode, path: string, unit: number, open: string[
     case "int":
       return scalar(NUMBER_MAX);
     default:
-      open.push(`${path}: ${def.type}`);
-      return scalar(0);
+      // A new zod type (a tuple, an intersection, a lazy) has no rule here.
+      // Counted as 0 it would pass silently, so the derivation stops (ruling 46 Low 2).
+      throw new Error(`body-limits: no rule for the zod type ${def.type} at ${path}`);
   }
 }
 
