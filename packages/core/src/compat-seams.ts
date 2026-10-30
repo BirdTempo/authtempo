@@ -33,6 +33,8 @@ const recordVerifies = new WeakSet<Request>();
 const scimCallers = new WeakMap<Request, ScimCaller>();
 /** The user of an SSO manager write that a compat package counted before its own read. */
 const ssoManageCounted = new WeakMap<Request, string>();
+/** The user of an SSO connection write whose large read a compat package counted (ruling 69). */
+const largeReadCounted = new WeakMap<Request, string>();
 
 export function setConfigDomainRecord(input: object, record: DomainRecordOf): void {
   configRecords.set(input, record);
@@ -79,12 +81,23 @@ export function markSsoManageCounted(request: Request, userId: string): void {
   ssoManageCounted.set(request, userId);
 }
 
-/** Moves the mark of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
+/**
+ * Marks `request` as one SSO connection write of `userId` whose large body
+ * read core's limit counted already (ruling 69 of the 12j lane). Only
+ * `countSsoManageWrite` sets the mark, after both counts.
+ */
+export function markLargeReadCounted(request: Request, userId: string): void {
+  largeReadCounted.set(request, userId);
+}
+
+/** Moves the marks of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
 export function moveSsoManageCounted(from: Request, to: Request): void {
-  const userId = ssoManageCounted.get(from);
-  if (userId === undefined) return;
-  ssoManageCounted.delete(from);
-  ssoManageCounted.set(to, userId);
+  for (const marks of [ssoManageCounted, largeReadCounted]) {
+    const userId = marks.get(from);
+    if (userId === undefined) continue;
+    marks.delete(from);
+    marks.set(to, userId);
+  }
 }
 
 /**
@@ -94,5 +107,12 @@ export function moveSsoManageCounted(from: Request, to: Request): void {
 export function takeSsoManageCounted(request: Request, userId: string): boolean {
   const marked = ssoManageCounted.get(request) === userId;
   ssoManageCounted.delete(request);
+  return marked;
+}
+
+/** True when `request` holds the large-read mark of a write of `userId`. The mark goes at the read. */
+export function takeLargeReadCounted(request: Request, userId: string): boolean {
+  const marked = largeReadCounted.get(request) === userId;
+  largeReadCounted.delete(request);
   return marked;
 }

@@ -25,6 +25,8 @@ import {
   LARGE_READ_MIN_RATE,
   LARGE_READ_SHARE,
   LARGE_READ_USER_BUDGET,
+  LARGE_READ_USER_MIN_RATE,
+  LARGE_READS_PER_USER,
   largeReadDeadlineMs,
   largeShareOf,
   REQUEST_BODY_MAX,
@@ -34,7 +36,9 @@ import { readJson, readOptionalJson } from "../src/http/json.js";
 import type { RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
+import { SSO_LARGE_READ_PER_USER } from "../src/http/routes/sso.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
+import type { AuthEvent } from "../src/observe/port.js";
 import { newId } from "../src/primitives/ids.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { largestBodies } from "./body-limits.js";
@@ -992,7 +996,7 @@ describe("the share of one client of the large reads (ruling 59 Major 1 of the 1
     }
   });
 
-  it("keys a read after a session by its user: one user from two IPs holds at most the user half", {
+  it("keys a read after a session by its user: one user from two IPs runs one large read", {
     timeout: 30_000,
   }, async () => {
     const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
@@ -1005,7 +1009,7 @@ describe("the share of one client of the large reads (ruling 59 Major 1 of the 1
     try {
       const held = write(ada.token, "203.0.113.1", first.stream);
       await first.atGate;
-      // The same user from another IP: past the user half, with the anonymous half free.
+      // The same user from another IP: a second large read of the user, refused before any byte (ruling 69).
       const outcome = await Promise.race([
         write(ada.token, "203.0.113.2", second.stream).then((r) => r.status),
         second.atGate.then(() => "read past the share of the user"),
@@ -1388,5 +1392,177 @@ describe("the kind of a body chunk, not its realm (ruling 66 Low 1 of the 12j la
     const used = streamPost("/auth/scim/v2/Users", chunkBody([]), "application/scim+json");
     await used.text();
     expect(await detailOf(await readScimBody(used))).toEqual([400, "the body was read before"]);
+  });
+});
+
+/** An engine of the SSO writes whose sink keeps each event, with the raw IP, so a test reads the events. */
+function observedSso() {
+  const batches: AuthEvent[][] = [];
+  const w = ssoAuth({
+    sso: { saml: true },
+    password: { hash: FAST, uniformSignUp: false },
+    observe: { sink: { write: (b) => void batches.push([...b]) }, include: { ip: "raw" } },
+  });
+  const events = async () => {
+    await w.config.observe.flush();
+    return batches.flat();
+  };
+  return { w, events };
+}
+
+/** The request events of the SSO connection create: the fields that show an operator the pattern. */
+const writeEvents = (events: AuthEvent[]) =>
+  events
+    .filter((e) => e.name === "request" && e.route === "POST /sso/connections/create")
+    .map((e) => ({ status: e.status, code: e.code, ip: e.ip }));
+
+describe("the bounds of the large reads of one user (ruling 69 of the 12j lane)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("derives the rate of a user, one read at a time, and 6 reads per hour", () => {
+    expect(LARGE_READ_USER_MIN_RATE).toBe(256 * 1024);
+    // A write of the cap in 32 s, and the largest valid write in 18 s.
+    expect(largeReadDeadlineMs(REQUEST_BODY_MAX, LARGE_READ_USER_MIN_RATE)).toBe(32_000);
+    const largest = largestBodies()[0]?.bytes ?? Number.POSITIVE_INFINITY;
+    expect(Math.ceil(largest / LARGE_READ_USER_MIN_RATE)).toBe(18);
+    // A read before a session keeps its own rate and its own deadline.
+    expect(largeReadDeadlineMs(REQUEST_BODY_MAX)).toBe(64_000);
+    expect(largeReadDeadlineMs(SAML_FORM_MAX)).toBe(LARGE_READ_DEADLINE_FLOOR_MS);
+    expect(LARGE_READS_PER_USER).toBe(1);
+    expect(SSO_LARGE_READ_PER_USER).toEqual({ seconds: 3600, max: 6 });
+    // So one account holds the user half at most 6 times 32 s, 192 s, each hour.
+    expect(
+      SSO_LARGE_READ_PER_USER.max * largeReadDeadlineMs(REQUEST_BODY_MAX, LARGE_READ_USER_MIN_RATE),
+    ).toBe(192_000);
+  });
+
+  it("runs one large read of a user at a time: a second answers BodyBusy before any byte", {
+    timeout: 30_000,
+  }, async () => {
+    const first = gatedBody(REQUEST_BODY_MAX, 65_536);
+    const held = readBodyText(streamPost("/x", first.stream), REQUEST_BODY_MAX, "user:ada");
+    held.catch(() => {});
+    try {
+      await first.atGate;
+      const second = countedForm(1_048_576);
+      await expect(
+        readBodyText(streamPost("/x", second.stream), REQUEST_BODY_MAX, "user:ada"),
+      ).rejects.toBeInstanceOf(BodyBusy);
+      // At most the chunks that a stream fills ahead of a reader: no read ran.
+      expect(second.pulled()).toBeLessThanOrEqual(2 * 65_536);
+      // Another user reads at once, and the same user reads a body at the floor.
+      expect(
+        await readBodyText(streamPost("/x", spaceStream(131_072)), REQUEST_BODY_MAX, "user:bea"),
+      ).toHaveLength(131_072);
+      expect(
+        await readBodyText(streamPost("/x", spaceStream(1000)), BODY_CAP_FLOOR, "user:ada"),
+      ).toHaveLength(1000);
+    } finally {
+      first.open();
+    }
+    expect(await held).toHaveLength(REQUEST_BODY_MAX);
+    // The read ended, so the user reads again.
+    expect(
+      await readBodyText(streamPost("/x", spaceStream(100_000)), REQUEST_BODY_MAX, "user:ada"),
+    ).toHaveLength(100_000);
+  });
+
+  it("ends a read of a user at the time of its cap at LARGE_READ_USER_MIN_RATE", {
+    timeout: 30_000,
+  }, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // 192 KiB each second: under the rate of a user, so the read of the cap ends at 32 s, not at 64 s.
+    const end = watch(
+      readBodyText(
+        streamPost("/x", trickleBody(REQUEST_BODY_MAX, 196_608, 1000)),
+        REQUEST_BODY_MAX,
+        "user:ada",
+      ),
+    );
+    const deadline = largeReadDeadlineMs(REQUEST_BODY_MAX, LARGE_READ_USER_MIN_RATE);
+    await vi.advanceTimersByTimeAsync(deadline - 1);
+    expect(end()).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(end()).toBe("BodyTimeout");
+  });
+
+  it("answers 503 body_busy to a second SSO write of one account before any byte, with the request event", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    const first = gatedBody(REQUEST_BODY_MAX, 1_048_576);
+    try {
+      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream);
+      await first.atGate;
+      // The same account from another IP: its second write gets no byte read.
+      const second = countedForm(1_048_576);
+      expect(await statusOf(await ssoWrite(w, ada.token, "203.0.113.2", second.stream))).toBe(
+        "503 body_busy",
+      );
+      expect(second.pulled()).toBeLessThanOrEqual(2 * 65_536);
+      // Another account writes at once: the read runs, and the schema refuses the body.
+      expect((await ssoWrite(w, bea.token, "203.0.113.3", "{}")).status).toBe(400);
+      first.open();
+      expect((await held).status).toBe(400);
+    } finally {
+      first.open();
+    }
+    // The request event carries the code, the route, and the IP of the refusal.
+    expect(writeEvents(await events())).toEqual([
+      { status: 503, code: "body_busy", ip: "203.0.113.2" },
+      { status: 400, code: "invalid_body", ip: "203.0.113.3" },
+      { status: 400, code: "invalid_body", ip: "203.0.113.1" },
+    ]);
+  });
+
+  it("answers 408 body_timeout to a stalled SSO write of a user, with the request event", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = gatedBody(REQUEST_BODY_MAX, 1_048_576);
+    let answered: Response | null = null;
+    void ssoWrite(w, ada.token, "203.0.113.1", stalled.stream).then((res) => {
+      answered = res;
+    });
+    try {
+      // The session check runs WebCrypto, which no fake timer moves: wait for the read itself.
+      await stalled.atGate;
+      await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS - 1);
+      expect(answered).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((answered as Response | null)?.status).toBe(408);
+    } finally {
+      stalled.open();
+    }
+    expect(writeEvents(await events())).toEqual([
+      { status: 408, code: "body_timeout", ip: "203.0.113.1" },
+    ]);
+  });
+
+  it("answers rate_limited to the seventh large read of one user in an hour, before any byte", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+    const seventh = countedForm(1_048_576);
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", seventh.stream);
+    expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
+    expect(seventh.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    expect((await events()).filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
+      "sso-large-read:user",
+    ]);
+    // The limit is the user's own: another account writes, and the user writes in the next hour.
+    expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}")).status).toBe(400);
+    w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
   });
 });

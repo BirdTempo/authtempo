@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { isRecordVerify, takeSsoManageCounted } from "../../compat-seams.js";
+import { isRecordVerify, takeLargeReadCounted, takeSsoManageCounted } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
@@ -30,7 +30,14 @@ import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-s
 import { limit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { BodyTooLarge, bindBodyClient, parseBodyForm, readBodyBytes } from "../body-cap.js";
+import {
+  BODY_CAP_FLOOR,
+  BodyTooLarge,
+  bindBodyClient,
+  bodyCapOfRequest,
+  parseBodyForm,
+  readBodyBytes,
+} from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
@@ -70,6 +77,24 @@ export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promis
   return limit(config, "sso-manage:user", userId, SSO_MANAGE_PER_USER);
 }
 
+/**
+ * The large body reads of one person at the SSO connection writes: 6 per
+ * hour, counted at the start of each read, after `sso-manage:user` (ruling
+ * 69 of the 12j lane). A read past the limit answers 429 before any byte.
+ *
+ * The derivation, done 2026-10-30. One read holds the user half of the body
+ * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`), and a user runs one
+ * read at a time (`LARGE_READS_PER_USER`). So one account holds that half at
+ * most 6 times 32 s, 192 s, in each hour. A setup of one connection is one
+ * create and a few updates.
+ */
+export const SSO_LARGE_READ_PER_USER = { seconds: 3600, max: 6 };
+
+/** Counts one large body read of the user at an SSO connection write. True when the read is within the limit. */
+export function ssoLargeReadAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return limit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER);
+}
+
 /** The life of the binding cookie: the life of the state row. */
 const BIND_MAX_AGE_SECONDS = 600;
 
@@ -95,7 +120,8 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * the two cannot drift. A write that a compat package counted before its
  * own read (`countSsoManageWrite`) is not counted again (ruling 51 Minor 1
  * of the 12j lane). After the session, a body read counts on the share of
- * the user (ruling 59).
+ * the user (ruling 59). A route whose cap is above the floor also counts
+ * the read on `sso-large-read:user` before any byte (ruling 69).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -116,6 +142,13 @@ export async function managedCall<T, V>(
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
   const counted = takeSsoManageCounted(ctx.request, resolved.user.id);
   if (!counted && !(await ssoManageAllowed(config, resolved.user.id)))
+    return send(respond(fail("rate_limited")), renewed);
+  // A large read counts at its start, unless the compat package counted it before its own read (ruling 69).
+  if (
+    bodyCapOfRequest(ctx.request) > BODY_CAP_FLOOR &&
+    !takeLargeReadCounted(ctx.request, resolved.user.id) &&
+    !(await ssoLargeReadAllowed(config, resolved.user.id))
+  )
     return send(respond(fail("rate_limited")), renewed);
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);

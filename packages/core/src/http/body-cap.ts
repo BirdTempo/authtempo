@@ -137,9 +137,25 @@ export const LARGE_READ_BUDGET = 2 * 8_388_608;
  * of an SSO write. So this half holds one SSO write of the largest valid
  * body (4 705 616 bytes). A second such write at the same time answers 503,
  * and its client sends it again after `Retry-After`. One account that
- * stalls a write holds this half for at most 64 s (`largeReadDeadlineMs`).
+ * stalls a write holds this half for at most 32 s
+ * (`LARGE_READ_USER_MIN_RATE`), with one read at a time
+ * (`LARGE_READS_PER_USER`), 6 times in an hour (`SSO_LARGE_READ_PER_USER`
+ * in routes/sso.ts, ruling 69 of the 12j lane).
  */
 export const LARGE_READ_USER_BUDGET = 8_388_608;
+
+/**
+ * The most large reads that one signed-in user runs at once (ruling 69 of
+ * the 12j lane). A second read of the same user, while one runs, answers
+ * 503 `body_busy` before any byte.
+ *
+ * The derivation, done 2026-10-30. The user half holds one SSO write of the
+ * cap, and a person who sets up SSO sends one write at a time. So a second
+ * read of one account at once serves no setup. One read at a time,
+ * `LARGE_READ_USER_MIN_RATE`, and the limit of 6 reads per hour bound one
+ * account to 6 holds of at most 32 s in an hour.
+ */
+export const LARGE_READS_PER_USER = 1;
 
 /**
  * The most bytes that every other large read holds at once in one isolate:
@@ -185,24 +201,43 @@ export const LARGE_READ_IDLE_MS = 10_000;
  * seconds cannot hold its bytes of the budget for long.
  *
  * The derivation, done 2026-10-30. 128 KiB per second is 1 Mbit/s, the
- * upload rate of a slow mobile link. At this rate the largest valid SSO
- * connection write (4 705 616 bytes) takes 36 s of its 64 s, and a SAML
- * form of `SAML_FORM_MAX` (1 081 519 bytes) takes 8.3 s of its 10 s. A
- * client that is slower than this for a large body gets 408.
+ * upload rate of a slow mobile link. At this rate a SAML form of
+ * `SAML_FORM_MAX` (1 081 519 bytes) takes 8.3 s of its 10 s. A client that
+ * is slower than this for a large body gets 408. The reads of a signed-in
+ * user take `LARGE_READ_USER_MIN_RATE` in place of this rate.
  */
 export const LARGE_READ_MIN_RATE = 131_072;
+
+/**
+ * The slowest rate, in bytes per second, at which a large read of a
+ * signed-in user may arrive in all (ruling 69 of the 12j lane). Such a read
+ * is an SSO connection write: no other route above the floor reads after a
+ * session check.
+ *
+ * The derivation, done 2026-10-30. At `LARGE_READ_MIN_RATE`, one free
+ * account that stalled a write of the cap held the user half for 64 s. At
+ * 256 KiB per second (2 Mbit/s), a write of the cap (8 MiB) takes 32 s, and
+ * the largest valid write (4 705 616 bytes) takes 18 s. So one stall holds
+ * the user half for at most 32 s. An admin whose link is slower than this
+ * gets 408 for a large write, and the limits page says so.
+ */
+export const LARGE_READ_USER_MIN_RATE = 262_144;
 
 /**
  * The least time that a read above the floor may take in all: the idle
  * limit, so a read of a small cap never ends sooner than a read that only
  * waits. The SAML form, the Apple callback, and the SCIM body each get this
- * time; an SSO connection write gets 64 s (2026-10-30).
+ * time; an SSO connection write of a user gets 32 s (2026-10-30, ruling 69).
  */
 export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
 
-/** The time in ms that a whole read above the floor of a cap of `cap` bytes may take. */
-export function largeReadDeadlineMs(cap: number): number {
-  return Math.max(LARGE_READ_DEADLINE_FLOOR_MS, Math.ceil((cap * 1000) / LARGE_READ_MIN_RATE));
+/**
+ * The time in ms that a whole read above the floor of a cap of `cap` bytes
+ * may take at `rate` bytes per second: `LARGE_READ_MIN_RATE` for a read
+ * before a session, `LARGE_READ_USER_MIN_RATE` for a read of a user.
+ */
+export function largeReadDeadlineMs(cap: number, rate: number = LARGE_READ_MIN_RATE): number {
+  return Math.max(LARGE_READ_DEADLINE_FLOOR_MS, Math.ceil((cap * 1000) / rate));
 }
 
 /**
@@ -262,6 +297,9 @@ const heldIn = { user: 0, anon: 0 };
 
 /** The bytes that the reads above the floor of each client hold now. An entry goes at 0. */
 const heldBy = new Map<string, number>();
+
+/** The large reads that each user runs now (`LARGE_READS_PER_USER`). An entry goes at 0. */
+const readsOf = new Map<string, number>();
 
 /** The cap of a route: its entry of `BODY_CAPS`, else the floor. */
 export function bodyCapOf(key: RouteKey | undefined): number {
@@ -326,7 +364,8 @@ export class BodyTooLarge extends Error {
 /**
  * A read above the floor while the reads of its half of the isolate hold
  * that half (`LARGE_READ_USER_BUDGET` or `LARGE_READ_ANON_BUDGET`), or
- * while the reads of its client hold its share (`largeShareOf`). The router
+ * while the reads of its client hold its share (`largeShareOf`), or while
+ * its user runs another large read (`LARGE_READS_PER_USER`). The router
  * answers it 503 `body_busy` with `Retry-After` for every route, and the
  * SCIM routes answer their own 503.
  */
@@ -378,10 +417,12 @@ export function bodyReadable(request: Request): boolean {
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against the
  * half of `client` and against the share of `client` until it ends, and
- * throws `BodyBusy` past either one (ruling 66). It throws `BodyTimeout`
- * when it gets no chunk for `LARGE_READ_IDLE_MS`, or when it does not end
- * within `largeReadDeadlineMs` of its cap. Each end frees its bytes (ruling
- * 59 of the 12j lane). Workers, Node, Bun, and Deno each give
+ * throws `BodyBusy` past either one (ruling 66). A user runs one such read
+ * at a time: a second throws `BodyBusy` before any byte (ruling 69). It
+ * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
+ * when it does not end within `largeReadDeadlineMs` of its cap, at the rate
+ * of a user for a user (ruling 69). Each end frees its bytes (ruling 59 of
+ * the 12j lane). Workers, Node, Bun, and Deno each give
  * `request.body` as a stream. Null when the body was read or locked before,
  * such as by app middleware, and at a chunk that is not bytes: each reader
  * answers it `invalid_body`, not 500 (ruling 46 Low 1, ruling 51 Low 3, and
@@ -396,6 +437,12 @@ export async function readBodyBytes(
   if (body === false) return null;
   const length = request.headers.get("content-length");
   const large = cap > BODY_CAP_FLOOR;
+  const user = isUserClient(client);
+  // One large read of a user at a time: a second gets no byte and answers body_busy (ruling 69).
+  if (large && user && (readsOf.get(client) ?? 0) >= LARGE_READS_PER_USER) {
+    body?.cancel().catch(() => {});
+    throw new BodyBusy();
+  }
   let held = 0;
   let busy = false;
   // A read above the floor stops at its deadlines, so a stalled client frees its bytes.
@@ -412,10 +459,13 @@ export async function readBodyBytes(
     if (request.signal.aborted) stop.abort();
     else request.signal.addEventListener("abort", abort, { once: true });
     idle = setTimeout(expire(LARGE_READ_IDLE_MS), LARGE_READ_IDLE_MS);
-    const deadline = largeReadDeadlineMs(cap);
+    const deadline = largeReadDeadlineMs(
+      cap,
+      user ? LARGE_READ_USER_MIN_RATE : LARGE_READ_MIN_RATE,
+    );
     whole = setTimeout(expire(deadline), deadline);
   }
-  const half = isUserClient(client) ? "user" : "anon";
+  const half = user ? "user" : "anon";
   const share = largeShareOf(client, cap);
   const release = () => {
     if (held === 0) return;
@@ -440,6 +490,8 @@ export async function readBodyBytes(
     held += bytes;
     return true;
   };
+  const counted = large && user;
+  if (counted) readsOf.set(client, (readsOf.get(client) ?? 0) + 1);
   try {
     const read = await readCappedOutcome(
       new Response(body, length === null ? {} : { headers: { "content-length": length } }),
@@ -458,6 +510,11 @@ export async function readBodyBytes(
     clearTimeout(whole);
     request.signal.removeEventListener("abort", abort);
     release();
+    if (counted) {
+      const left = (readsOf.get(client) ?? 1) - 1;
+      if (left > 0) readsOf.set(client, left);
+      else readsOf.delete(client);
+    }
   }
 }
 

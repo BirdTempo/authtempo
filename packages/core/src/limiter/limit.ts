@@ -99,6 +99,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "oauth-credentials:client",
   // Plan 12d: the SSO manager routes, the domain proof, the sign-in, and the SCIM server.
   "sso-manage:user",
+  // Ruling 69 of the 12j lane: the large body reads of one person at the SSO connection writes.
+  "sso-large-read:user",
   "sso-domain-verify:org",
   "sso-discover:ip",
   "sso-start:ip",

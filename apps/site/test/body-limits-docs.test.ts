@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, 56, 59, and 66 of the
-// 12j lane). The errors page, the limits page, the Express and Fastify pages, the
+// The request body limits of core (rulings 43, 46, 51, 56, 59, 66, and 69 of
+// the 12j lane). The errors page, the limits page, the Express and Fastify pages, the
 // SCIM guide, the core README, and the Express README state the caps and the
 // scan limits by hand. This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
@@ -15,6 +15,8 @@ const BODY_CAP = `${REPO}packages/core/src/http/body-cap.ts`;
 const source = readFileSync(BODY_CAP, "utf8");
 /** The SCIM routes of core: the SCIM item limit of the shape scan (ruling 56). */
 const scimSource = readFileSync(`${REPO}packages/core/src/http/routes/scim.ts`, "utf8");
+/** The SSO routes of core: the limit of the large reads of one user (ruling 69). */
+const ssoSource = readFileSync(`${REPO}packages/core/src/http/routes/sso.ts`, "utf8");
 
 /** The text of a file with each run of white space as one space: a README line wraps. */
 function textOf(file: string): string {
@@ -44,6 +46,15 @@ function numberOf(text: string): number {
 function constant(name: string, text: string = source): number {
   const m = new RegExp(`export const ${name} = ([0-9_ *]+);`).exec(text);
   if (!m) throw new Error(`no constant ${name} in the source`);
+  return numberOf(m[1] ?? "");
+}
+
+/** The `max` of `export const NAME = { seconds: <n>, max: <n> };` in routes/sso.ts. */
+function limitMax(name: string): number {
+  const m = new RegExp(`export const ${name} = \\{ seconds: [0-9_ *]+, max: ([0-9_]+) \\};`).exec(
+    ssoSource,
+  );
+  if (!m) throw new Error(`no limit ${name} in routes/sso.ts`);
   return numberOf(m[1] ?? "");
 }
 
@@ -233,7 +244,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     () => constant("LARGE_READ_DEADLINE_FLOOR_MS") / 1000,
     [
       ["errors", /That time is at least (\d+) s\./],
-      ["limits", /bytes per second, and at least (\d+) s:/],
+      ["limits", /for a signed-in user, and at least (\d+) s:/],
       // The anonymous reads (ACS, Apple, SCIM) each take the least time (ruling 66).
       ["limits", /Such a read ends within (\d+) s, so/],
       ["limits", /must send \d+ MiB each (\d+) s to keep the half full/],
@@ -241,16 +252,41 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     ],
   ],
   [
+    "the least rate of a large read of a signed-in user",
+    () => constant("LARGE_READ_USER_MIN_RATE"),
+    [
+      ["errors", /For a signed-in user, the rate is (\d+) bytes per second/],
+      ["errors", /or (\d+) (KiB) per second for a signed-in user/],
+      ["limits", /or at (\d+) for a signed-in user/],
+      ["limits", /an admin must send it at (\d+) (KiB) per second or more/],
+      ["readme", /read of a signed-in user takes (\d+) (KiB) per second/],
+    ],
+  ],
+  [
     "the time of an SSO connection write, in seconds",
     () =>
       Math.max(
         constant("LARGE_READ_DEADLINE_FLOOR_MS"),
-        Math.ceil((capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_MIN_RATE")),
+        Math.ceil(
+          (capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_USER_MIN_RATE"),
+        ),
       ) / 1000,
     [
       ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
       ["limits", /fills the user half for at most (\d+) s/],
-      ["readme", /An SSO connection write gets (\d+) s\./],
+      ["limits", /delay the SSO connection writes of others by up to (\d+) s/],
+      ["limits", /A write that takes more than (\d+) s gets 408/],
+      ["limits", /the user half of the body budget at most \d+ times (\d+) s in an hour/],
+      ["readme", /so an SSO connection write gets (\d+) s\./],
+    ],
+  ],
+  [
+    "the large reads of one user in an hour",
+    () => limitMax("SSO_LARGE_READ_PER_USER"),
+    [
+      ["limits", /and starts at most (\d+) in an hour/],
+      ["limits", /by up to \d+ s, (\d+) times per hour/],
+      ["limits", /the user half of the body budget at most (\d+) times/],
     ],
   ],
   [
@@ -268,7 +304,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, and 66 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, and 69 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();

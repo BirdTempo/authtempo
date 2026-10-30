@@ -1,3 +1,4 @@
+import { createMemoryLimiter } from "@authtempo/core";
 import { createTestIdp } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthClient } from "../src/client/create-auth-client.js";
@@ -852,13 +853,20 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     expect((await domainsOf(app))[0]?.verified).toBe(false);
   });
   it("refuses each update field and each sign-in key with no core feature", async () => {
-    const app = await owned();
+    // The register and the 6 updates are 7 large reads of the owner, one past core's limit of
+    // an hour (ruling 69 of the 12j lane). So the limiter's clock moves an hour after the register.
+    let later = 0;
+    const app = await owned(undefined, {
+      ...memory(),
+      limiter: createMemoryLimiter({ now: () => new Date(Date.now() + later) }),
+    });
     await app.register({
       providerId: "acme",
       issuer: "https://idp.acme.example",
       domain: "acme.example",
       oidcConfig: OIDC,
     });
+    later = 3_600_000;
     const updates: [Record<string, unknown>, number, string][] = [
       [{ samlConfig: {} }, 501, "samlConfig"],
       [{ oidcConfig: { pkce: false } }, 501, "oidcConfig.pkce"],

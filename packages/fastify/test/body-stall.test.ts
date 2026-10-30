@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import net from "node:net";
-import { createAuth, createMemoryAdapter } from "@authtempo/core";
+import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "@authtempo/core";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes } from "../src/index.js";
@@ -123,6 +123,221 @@ describe("a stalled client at the SAML ACS through the Fastify binding (ruling 5
       for (const p of posts) p.socket.destroy();
       app.server.closeAllConnections();
       await app.close();
+    }
+  });
+});
+
+// The bounds of ruling 69 of the 12j lane, over real sockets. One free account
+// stalled one SSO connection write of 8 MiB, held the user half of the budget
+// for 64 s, and could do so 30 times in 15 minutes. Now a user runs one large
+// read at a time, a read of a user ends at 256 KiB per second (32 s for the
+// cap), and a user starts at most 6 large reads in an hour.
+
+const SSO_WRITE = "/auth/sso/connections/create";
+/** The cap of an SSO connection write, core's REQUEST_BODY_MAX. */
+const SSO_CAP = 8_388_608;
+/** Core's largeReadDeadlineMs of the cap at LARGE_READ_USER_MIN_RATE (256 KiB per second). */
+const USER_DEADLINE_MS = 32_000;
+/** Core's SSO_LARGE_READ_PER_USER.max: the large reads of one user in an hour. */
+const LARGE_READS_PER_HOUR = 6;
+
+/** An app of core with SAML and the password sign-up on, on a real port. */
+async function startApp() {
+  const auth = createAuth({
+    baseURL: "http://localhost",
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [],
+    storage: createMemoryAdapter(),
+    mail: { send: async () => {} },
+    organizations: {},
+    sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
+  });
+  const app = Fastify();
+  await app.register(authRoutes({ auth }));
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const port = (app.server.address() as AddressInfo).port;
+  return {
+    port,
+    close: async () => {
+      app.server.closeAllConnections();
+      await app.close();
+    },
+  };
+}
+
+/** A sign-up and a sign-in of `email` from `ip`: the session cookie. No organization, no role. */
+async function signedIn(port: number, email: string, ip: string): Promise<string> {
+  const headers = {
+    "content-type": "application/json",
+    origin: "http://localhost",
+    "cf-connecting-ip": ip,
+  };
+  const body = JSON.stringify({ email, password: "correct horse battery staple 42" });
+  await fetch(`http://127.0.0.1:${port}/auth/password/sign-up`, { method: "POST", headers, body });
+  const res = await fetch(`http://127.0.0.1:${port}/auth/password/sign-in`, {
+    method: "POST",
+    headers,
+    body,
+  });
+  const cookie = res.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0] ?? "")
+    .find((c) => c.includes("tempo_session"));
+  if (cookie === undefined) throw new Error(`no session: ${res.status}`);
+  return cookie;
+}
+
+/**
+ * A raw POST of `declared` bytes to `path` that sends `send` bytes at once.
+ * Its first answer chunk and the time that it came, from the start of the post.
+ */
+function rawPost(
+  port: number,
+  path: string,
+  o: { headers: Record<string, string>; type: string; declared: number; send: number },
+) {
+  const socket = net.connect(port, "127.0.0.1");
+  socket.on("error", () => {});
+  const startedAt = performance.now();
+  const st: { raw: string | null; at: number; closed: boolean } = {
+    raw: null,
+    at: 0,
+    closed: false,
+  };
+  socket.on("data", (chunk: Buffer) => {
+    if (st.raw === null) st.at = Math.round(performance.now() - startedAt);
+    st.raw = (st.raw ?? "") + chunk.toString("latin1");
+  });
+  socket.on("close", () => {
+    st.closed = true;
+    if (st.raw === null) st.at = Math.round(performance.now() - startedAt);
+  });
+  const head = Object.entries(o.headers)
+    .map(([k, v]) => `${k}: ${v}\r\n`)
+    .join("");
+  const sent = new Promise<void>((resolve) =>
+    socket.once("connect", () => {
+      socket.write(
+        `POST ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: ${o.type}\r\n${head}Content-Length: ${o.declared}\r\n\r\n`,
+      );
+      const chunk = Buffer.alloc(65_536, 0x20);
+      for (let at = 0; at < o.send; at += chunk.length)
+        socket.write(at + chunk.length <= o.send ? chunk : chunk.subarray(0, o.send - at));
+      resolve();
+    }),
+  );
+  /** The status line of the answer and its JSON body, "closed", or null while neither came. */
+  const answer = () => {
+    const json = /\{[^}]*\}/.exec(st.raw ?? "")?.[0];
+    if (st.raw !== null && json !== undefined) return `${st.raw.split("\r\n")[0]} ${json}`;
+    return st.closed ? "closed" : null;
+  };
+  return { socket, sent, answer, at: () => st.at };
+}
+
+/** An SSO connection write of the session `cookie` from `ip`, raw. */
+const ssoPost = (port: number, cookie: string, ip: string, send: number) =>
+  rawPost(port, SSO_WRITE, {
+    headers: { cookie, origin: "http://localhost", "cf-connecting-ip": ip },
+    type: "application/json",
+    declared: SSO_CAP,
+    send,
+  });
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits until `post` has an answer, at most `limitMs`. */
+async function answered(post: ReturnType<typeof rawPost>, limitMs: number) {
+  const started = performance.now();
+  while (post.answer() === null && performance.now() - started < limitMs) await sleep(50);
+  return post.answer();
+}
+
+describe("the large reads of one user through the Fastify binding (ruling 69 of the 12j lane)", () => {
+  it("answers 503 body_busy to a second write of an account that holds one, before any byte", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    const posts: ReturnType<typeof rawPost>[] = [];
+    try {
+      const cookie = await signedIn(port, "x@probe.example", "203.0.113.1");
+      const held = ssoPost(port, cookie, "203.0.113.1", 1_048_576);
+      posts.push(held);
+      await held.sent;
+      await sleep(500);
+      expect(held.answer()).toBeNull();
+      // The same account from another IP sends only its head: the answer comes with no byte read.
+      const second = ssoPost(port, cookie, "203.0.113.2", 0);
+      posts.push(second);
+      await second.sent;
+      expect(await answered(second, 5000)).toBe(
+        'HTTP/1.1 503 Service Unavailable {"error":"body_busy"}',
+      );
+      expect(held.answer()).toBeNull();
+    } finally {
+      for (const p of posts) p.socket.destroy();
+      await close();
+    }
+  });
+
+  it("ends a write of a user that trickles under 256 KiB per second with 408 at 32 s", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    let post: ReturnType<typeof rawPost> | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    try {
+      const cookie = await signedIn(port, "y@probe.example", "203.0.113.3");
+      // 48 KiB each 250 ms: 192 KiB per second. At the rate of a read before a session, 128 KiB
+      // per second, the cap had 64 s, and this body ends at 43 s and reads whole.
+      post = ssoPost(port, cookie, "203.0.113.3", 49_152);
+      const p = post;
+      await p.sent;
+      const chunk = Buffer.alloc(49_152, 0x20);
+      timer = setInterval(() => {
+        if (p.answer() === null) p.socket.write(chunk);
+      }, 250);
+      const line = await answered(p, USER_DEADLINE_MS + 10_000);
+      console.log(`body-stall: the trickled write of a user answered at ${p.at()} ms`);
+      expect(line).toBe('HTTP/1.1 408 Request Timeout {"error":"body_timeout"}');
+      expect(p.at()).toBeGreaterThanOrEqual(USER_DEADLINE_MS);
+      expect(p.at()).toBeLessThan(USER_DEADLINE_MS + 4_000);
+    } finally {
+      clearInterval(timer);
+      post?.socket.destroy();
+      await close();
+    }
+  });
+
+  it("answers the limit to the seventh large read of one user in an hour, before any byte", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    let seventh: ReturnType<typeof rawPost> | undefined;
+    try {
+      const cookie = await signedIn(port, "z@probe.example", "203.0.113.4");
+      const write = () =>
+        fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            cookie,
+            "cf-connecting-ip": "203.0.113.4",
+          },
+          body: "{}",
+        });
+      for (let i = 0; i < LARGE_READS_PER_HOUR; i++) expect((await write()).status).toBe(400);
+      // The seventh sends only its head: the limit answers with no byte read.
+      seventh = ssoPost(port, cookie, "203.0.113.4", 0);
+      await seventh.sent;
+      expect(await answered(seventh, 5000)).toBe(
+        'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}',
+      );
+    } finally {
+      seventh?.socket.destroy();
+      await close();
     }
   });
 });

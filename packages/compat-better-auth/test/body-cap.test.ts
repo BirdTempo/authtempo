@@ -166,6 +166,8 @@ function countedBody(bytes: number) {
 
 /** Core's SSO_MANAGE_PER_USER.max: the SSO manager writes of one user in 15 minutes. */
 const SSO_MANAGE_MAX = 30;
+/** Core's SSO_LARGE_READ_PER_USER.max: the large reads of one user in an hour (ruling 69). */
+const SSO_LARGE_READ_MAX = 6;
 
 const OIDC = {
   clientId: "acme-client",
@@ -184,11 +186,15 @@ describe("core's limit of the user before the large read of an SSO write (ruling
   }, async () => {
     const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
     const { cookie } = await person("ada@example.com");
-    // Small writes through the shim's label check: each counts once, as in core.
+    // Domain writes at the floor leave as many manager writes as large reads (ruling 69 of the
+    // 12j lane), so a second count on either limit shows below.
+    for (let i = 0; i < SSO_MANAGE_MAX - SSO_LARGE_READ_MAX; i++)
+      expect((await auth.handler(post("/sso/domains/update", 64, cookie))).status).toBe(400);
+    // Small writes through the shim's label check: each counts once on each limit, as in core.
     const statuses: number[] = [];
-    for (let i = 0; i <= SSO_MANAGE_MAX; i++)
+    for (let i = 0; i <= SSO_LARGE_READ_MAX; i++)
       statuses.push((await auth.handler(post("/sso/connections/update", 64, cookie))).status);
-    expect(statuses.indexOf(429)).toBe(SSO_MANAGE_MAX);
+    expect(statuses.indexOf(429)).toBe(SSO_LARGE_READ_MAX);
     for (const path of SSO_WRITES) {
       const parse = vi.spyOn(JSON, "parse");
       const body = countedBody(SSO_CAP);
@@ -228,10 +234,15 @@ describe("core's limit of the user before the large read of an SSO write (ruling
       owner.cookie,
     );
     expect(reg.status).toBe(200);
-    // The register made three writes of core: the connection, the domain, and its route.
+    // The register made one large read, the shim's: core's read of the connection counted no more.
     let left = 0;
     while ((await app.call("/sso/connections/update", {}, owner.cookie)).status === 400) left++;
-    expect(left).toBe(SSO_MANAGE_MAX - 3);
+    expect(left).toBe(SSO_LARGE_READ_MAX - 1);
+    // It made three manager writes of core: the connection, the domain, and its route. Each
+    // update above counted one more, and so did the update that the large-read limit refused.
+    let rest = 0;
+    while ((await app.call("/sso/domains/update", {}, owner.cookie)).status === 400) rest++;
+    expect(rest).toBe(SSO_MANAGE_MAX - 3 - SSO_LARGE_READ_MAX);
   });
 });
 
@@ -404,5 +415,38 @@ describe("the share of one client of the large reads through the shim (ruling 59
       for (const g of [...anon, ...(mine ? [mine] : [])]) g.open();
     }
     expect((await mine?.read)?.length).toBe(SSO_CAP);
+  });
+});
+
+describe("one large read of a user at a time through the shim (ruling 69 of the 12j lane)", () => {
+  it("answers 503 SERVICE_UNAVAILABLE to an SSO write of a user whose large read runs, with no byte read", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const ada = await person("ada@example.com");
+    // A large read of Ada's runs and holds little: the user half has room, Ada has none.
+    const mine = gatedRead(`user:${ada.user.id}`, SSO_CAP, 65_536);
+    try {
+      await mine.atGate;
+      const body = countedBody(1_000_000);
+      const res = await auth.handler(
+        new Request(`${BASE}/api/auth/sso/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie: ada.cookie },
+          body: body.stream,
+          duplex: "half",
+        } as RequestInit),
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Service unavailable",
+      });
+      // No reader took the body: at most the first chunks that a stream fills ahead.
+      expect(body.pulled()).toBeLessThan(4 * 65_536);
+    } finally {
+      mine.open();
+    }
+    expect((await mine.read)?.length).toBe(SSO_CAP);
   });
 });

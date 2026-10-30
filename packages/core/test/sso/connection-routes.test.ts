@@ -313,9 +313,10 @@ describe("the body cap of the connection writes (ruling 46 of the 12j lane)", ()
       expect(res.status).toBe(401);
       expect(anonymous.bodyUsed).toBe(false);
     }
-    // The limit of the user: each write before it reads its body, the next one does not.
+    // The limit of the user: each write before it reads its body, the next one does not. A
+    // domain write spends the count at the floor, so the limit of the large reads takes no part.
     for (let i = 0; i < SSO_MANAGE_PER_USER.max; i++) {
-      const res = await w.handle(rawPost("/sso/connections/update", "{}", w.owner.token));
+      const res = await w.handle(rawPost("/sso/domains/update", "{}", w.owner.token));
       expect(res.status).toBe(400);
     }
     const limited = rawPost("/sso/connections/create", text, w.owner.token);

@@ -1763,9 +1763,10 @@ writes each value under version 1.
   and its user after one.
 - Such a read that gets no bytes for 10 s stops and frees its bytes
   (`LARGE_READ_IDLE_MS`). So does a read that runs past the time of its
-  cap at 128 KiB per second, at least 10 s (`LARGE_READ_MIN_RATE`). An
-  SSO connection write gets 64 s. Each answers 408 `body_timeout`, and
-  no parse runs.
+  cap at 128 KiB per second, at least 10 s (`LARGE_READ_MIN_RATE`). The
+  read of a signed-in user takes 256 KiB per second
+  (`LARGE_READ_USER_MIN_RATE`), so an SSO connection write gets 32 s.
+  Each answers 408 `body_timeout`, and no parse runs.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a
