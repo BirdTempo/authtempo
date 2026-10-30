@@ -53,4 +53,27 @@ describe("the supported Better Auth range (spec 33 item 1.6)", () => {
     expect(() => inRange("1.7.7", "^1.7.0")).toThrow();
     expect(() => inRange("1.7.7", ">=1.7.0")).toThrow();
   });
+
+  it("refuses a leading zero, as Semantic Versioning does", () => {
+    for (const v of ["01.7.7", "1.07.7", "1.7.07"])
+      expect([v, inRange(v, BETTER_AUTH_RANGE)]).toEqual([v, false]);
+    expect(inRange("1.7.10", BETTER_AUTH_RANGE)).toBe(true);
+    expect(() => inRange("1.7.7", ">=01.7.7 <1.8.0")).toThrow(/not of the form/);
+  });
+
+  it("ignores a build part, as Semantic Versioning does", () => {
+    expect(inRange("1.7.7+build.1", BETTER_AUTH_RANGE)).toBe(true);
+    expect(inRange("1.7.9+sha.5114f85", BETTER_AUTH_RANGE)).toBe(true);
+    expect(inRange("1.8.0+build.1", BETTER_AUTH_RANGE)).toBe(false);
+    expect(inRange("1.7.6+build.1", BETTER_AUTH_RANGE)).toBe(false);
+    // A build part keeps the prerelease rule, and an empty build part is no version.
+    expect(inRange("1.7.7-beta.1+build.1", BETTER_AUTH_RANGE)).toBe(false);
+    expect(inRange("1.7.7+", BETTER_AUTH_RANGE)).toBe(false);
+  });
+
+  it("throws on an empty range", () => {
+    expect(() => inRange("1.7.7", ">=1.8.0 <1.7.0")).toThrow(/is empty/);
+    expect(() => inRange("1.7.7", ">=1.7.7 <1.7.7")).toThrow(/is empty/);
+    expect(inRange("1.7.7", ">=1.7.7 <1.7.8")).toBe(true);
+  });
 });
