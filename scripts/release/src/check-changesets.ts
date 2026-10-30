@@ -6,6 +6,7 @@ import { parseChangeset } from "./lib/changeset-file.ts";
 import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
+import { UNPUBLISHED_FILES } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 export { parseChangeset };
@@ -37,6 +38,10 @@ export interface ChangesetsInput {
   commits: number;
   /** The version of the group in the working tree. */
   version: string;
+  /** The version of the group at the merge base, or null when no released package is there. */
+  baseVersion?: string | null;
+  /** UNPUBLISHED_FILES: each packed file with the note "not on a registry yet" at 0.0.0. */
+  unpublished?: readonly string[];
 }
 
 /**
@@ -171,6 +176,17 @@ export function checkChangesets(input: ChangesetsInput): Report {
         files[name] = undefined;
       }
 
+  // The version branch moves the group version, and it rewrites the note of
+  // each file of UNPUBLISHED_FILES with no code change (ruling 47 of the plan
+  // 12j lane). Its changesets are gone there, so without this exemption the
+  // branch fails. A packed file of the list needs a changeset on any other
+  // branch, as each packed file does. check-pack holds the rewrite on the tarballs.
+  const versionStep =
+    input.baseVersion !== undefined &&
+    input.baseVersion !== null &&
+    input.baseVersion !== input.version;
+  const unpublished = new Set(versionStep ? (input.unpublished ?? []) : []);
+
   let changed = 0;
   let covered = 0;
   let exempt = 0;
@@ -178,6 +194,10 @@ export function checkChangesets(input: ChangesetsInput): Report {
   for (const file of input.changed) {
     const owner = ownerOf(file.path, input.dirs);
     if (owner === undefined || !released.has(owner[0])) continue;
+    if (unpublished.has(file.path)) {
+      exempt++;
+      continue;
+    }
     const [name, dir] = owner;
     const inner = file.path.slice(dir.length + 1);
     let label = file.path;
@@ -249,8 +269,14 @@ export function readInput(root: string, ref: string): ChangesetsInput {
   const workspace = readWorkspace(root);
   const released = releasedNames(root);
   // check-packages holds one version for the group, so the first one is the group version.
-  const version = workspace.find((p) => released.includes(p.name))?.manifest.version;
-  if (version === undefined) throw new Error("no released package is in the workspace");
+  const first = workspace.find((p) => released.includes(p.name));
+  if (first === undefined) throw new Error("no released package is in the workspace");
+  const version = first.manifest.version;
+  const baseManifest = showAt(root, base, `${first.dir}/package.json`);
+  const baseVersion =
+    baseManifest === null
+      ? null
+      : String((JSON.parse(baseManifest) as { version?: unknown }).version);
   return {
     changed,
     changesets,
@@ -259,6 +285,8 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
     commits: commitCount(root, base),
     version,
+    baseVersion,
+    unpublished: UNPUBLISHED_FILES,
   };
 }
 

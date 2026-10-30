@@ -164,6 +164,39 @@ describe("check-changesets", () => {
     );
   });
 
+  it("exempts a file of UNPUBLISHED_FILES on the version branch only (ruling 47)", () => {
+    // The import worker README is packed by the files field, as each skill of the MCP package is.
+    const listed = "packages/import/worker/README.md";
+    const other = "packages/import/worker/wrangler.jsonc";
+    const step = (baseVersion: string | null, changed: string[]) =>
+      checkChangesets({
+        changed: paths(...changed),
+        changesets: [],
+        released,
+        dirs,
+        files,
+        commits: 1,
+        version: "0.1.0",
+        baseVersion,
+        unpublished: [listed],
+      });
+    // The version branch: the group moves from 0.0.0, and the note is rewritten with no changeset.
+    const branch = step("0.0.0", [listed]);
+    expect(branch.failures).toEqual([]);
+    expect(summaryLine(branch)).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    // Another packed file on the version branch still needs a changeset.
+    expect(step("0.0.0", [listed, other]).failures).toEqual([
+      `@authtempo/import changes and no changeset names it: ${other}`,
+    ]);
+    // On a branch that keeps the version, the listed file is a packed file like any other.
+    for (const base of ["0.1.0", null])
+      expect(step(base, [listed]).failures).toEqual([
+        `@authtempo/import changes and no changeset names it: ${listed}`,
+      ]);
+  });
+
   it("needs a changeset for a file that the files field packs", () => {
     // The import tarball ships its worker proof and the worker README.
     const r = run(
@@ -386,6 +419,8 @@ describe("check-changesets", () => {
     expect(summaryLine(checkChangesets(readInput(repo.root, "main")))).toBe(
       "check-changesets: PASS changed=0 covered=0 exempt=2 empty=0 failures=0",
     );
+    // The entry reads the group version at the merge base and in the working tree.
+    expect(readInput(repo.root, "main")).toMatchObject({ baseVersion: "0.0.0", version: "0.1.0" });
   });
 
   it("needs a changeset for a CHANGELOG.md below the package root", () => {

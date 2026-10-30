@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readWorkspace } from "./workspace.ts";
 
 /** The parts of .changeset/config.json that the release checks read. */
 export interface ChangesetConfig {
@@ -36,4 +37,15 @@ export function releasedNames(root: string): string[] {
   const group = readChangesetConfig(root).fixed[0];
   if (group === undefined) throw new Error(".changeset/config.json: fixed has no group");
   return [...group];
+}
+
+/**
+ * The group version of the tree at `root`: the version of the first released
+ * package. check-packages holds every released package at one version.
+ */
+export function groupVersion(root: string): string {
+  const [first] = releasedNames(root);
+  const p = readWorkspace(root).find((w) => w.name === first);
+  if (p === undefined) throw new Error(`${first} is released and is not a workspace package`);
+  return p.manifest.version;
 }

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -17,6 +18,14 @@ import {
 import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
+import {
+  UNPUBLISHED_LISTS,
+  UNPUBLISHED_MARK,
+  // The version of every package on main. No release carries it (spec 33 item 11).
+  UNPUBLISHED_VERSION,
+  type UnpublishedLists,
+  unpublishedFailures,
+} from "./lib/unpublished.ts";
 import { type Manifest, readWorkspace } from "./lib/workspace.ts";
 
 /** One release tarball and the sources that check-pack holds it to. */
@@ -41,9 +50,6 @@ export interface PackInput {
   /** The scripts of the workspace manifest. pnpm 12.8.1 pack strips the publish scripts from the packed one. */
   scripts: Record<string, unknown>;
 }
-
-/** The version of every package on main. No release carries it (spec 33 item 11). */
-const UNPUBLISHED_VERSION = "0.0.0";
 
 /** The package whose manifest carries the upgrade facts (spec 33 item 10.5). prepare writes them. */
 export const CORE = "@authtempo/core";
@@ -245,6 +251,20 @@ export function readTarball(path: string): Tarball {
   };
 }
 
+/**
+ * Each file of a tarball whose text holds `mark`. readTarball has refused
+ * each link and each path with a ".." part, so the files stay in the folder.
+ */
+export function filesWith(path: string, files: readonly string[], mark: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), "authtempo-check-pack-text-"));
+  try {
+    execFileSync("tar", ["-xzf", path, "-C", dir]);
+    return files.filter((f) => readFileSync(join(dir, "package", f), "utf8").includes(mark));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** A key that names a registry or a proxy, such as registry, registries, @authtempo:registry, httpsProxy, or https-proxy. */
 const REGISTRY_KEY = /registr|proxy/i;
 
@@ -311,8 +331,16 @@ export function configFailures(root: string, released: readonly { dir: string }[
  * Checks each tarball against the tree at `root`: the released list, the
  * package folder, release/pack-needs.json, release/repository.json, the root
  * LICENSE, release/deprecations.json, and the config files of configFailures.
+ * It reads the text of each packed file for the note of `lists` (ruling 47 of
+ * the plan 12j lane). `marked` counts each packed file with the note, except
+ * the code files of the lists, and `listed` counts the files of the list. The
+ * dry run reads both from the summary line.
  */
-export function checkTarballs(root: string, paths: string[]): Report {
+export function checkTarballs(
+  root: string,
+  paths: string[],
+  lists: UnpublishedLists = UNPUBLISHED_LISTS,
+): Report {
   const released = new Set(releasedNames(root));
   const packages = readWorkspace(root).filter((p) => released.has(p.name));
   const dirs = new Map(packages.map((p) => [p.name, p.dir]));
@@ -335,6 +363,9 @@ export function checkTarballs(root: string, paths: string[]): Report {
   failures.push(...configFailures(root, packages));
   const seen = new Set<string>();
   let files = 0;
+  /** Each packed file and each packed file with the note, by the path from the root. */
+  const packed: string[] = [];
+  const marked: string[] = [];
   for (const path of paths) {
     let t: Tarball;
     try {
@@ -367,11 +398,33 @@ export function checkTarballs(root: string, paths: string[]): Report {
     });
     files += t.files.length;
     for (const f of r.failures) failures.push(`${name}@${t.manifest.version}: ${f}`);
+    packed.push(...t.files.map((f) => `${dir}/${f}`));
+    marked.push(...filesWith(path, t.files, UNPUBLISHED_MARK).map((f) => `${dir}/${f}`));
   }
+  const code = new Set(lists.code.map((c) => c.path));
+  failures.push(
+    ...unpublishedFailures({
+      version: versions[0] ?? "",
+      packed,
+      marked,
+      lists,
+      exists: (p) => existsSync(join(root, p)),
+    }),
+  );
   // A dry run that packs 23 of 24 packages must fail here, not on npm.
   for (const name of released) if (!seen.has(name)) failures.push(`${name}: no tarball`);
   return requireCounts(
-    { name: "check-pack", counts: { tarballs: seen.size, files }, failures, notes: [] },
+    {
+      name: "check-pack",
+      counts: {
+        tarballs: seen.size,
+        files,
+        marked: marked.filter((p) => !code.has(p)).length,
+        listed: lists.files.length,
+      },
+      failures,
+      notes: [],
+    },
     ["tarballs", "files"],
   );
 }
@@ -381,14 +434,18 @@ export function checkTarballs(root: string, paths: string[]): Report {
  * such as a missing or bad release/deprecations.json, gives a FAIL summary
  * line with the reason, not a stack.
  */
-export function entry(root: string, paths: string[]): { lines: string[]; code: number } {
+export function entry(
+  root: string,
+  paths: string[],
+  lists: UnpublishedLists = UNPUBLISHED_LISTS,
+): { lines: string[]; code: number } {
   let report: Report;
   try {
-    report = checkTarballs(root, paths);
+    report = checkTarballs(root, paths, lists);
   } catch (error) {
     report = unreadReport(
       "check-pack",
-      ["tarballs", "files"],
+      ["tarballs", "files", "marked", "listed"],
       error instanceof Error ? error.message : String(error),
     );
   }

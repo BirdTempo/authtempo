@@ -1,11 +1,14 @@
 import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,9 +26,20 @@ import {
 } from "../src/check-pack.ts";
 import { readDeprecations } from "../src/lib/deprecations.ts";
 import { FORBIDDEN_PACK_NAMES } from "../src/lib/pack-rules.ts";
-import { releasedNames } from "../src/lib/released.ts";
+import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
-import type { Manifest } from "../src/lib/workspace.ts";
+import {
+  listedNoteFailure,
+  listedNotePath,
+  missingNoteFailure,
+  UNPUBLISHED_CODE,
+  UNPUBLISHED_FILES,
+  UNPUBLISHED_MARK,
+  type UnpublishedCode,
+  type UnpublishedLists,
+  unpublishedFailures,
+} from "../src/lib/unpublished.ts";
+import { type Manifest, readWorkspace } from "../src/lib/workspace.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const fixture = (path: string) =>
@@ -40,6 +54,11 @@ const MANIFEST = JSON.parse(readText("root/packages/fixture/package.json")) as M
 /** The root LICENSE: prepare copies these bytes into each package folder. */
 const ROOT_LICENSE = readFileSync(join(root, "LICENSE"), "utf8");
 const NEEDS = ["package.json", "README.md", "LICENSE", "dist/index.js", "dist/errors.js"];
+
+/** The note lists of a fixture tree with no note: the lists of the repository name files it lacks. */
+const NO_NOTES: UnpublishedLists = { files: [], code: [] };
+const checkFixture = (root: string, paths: string[], lists = NO_NOTES) =>
+  checkTarballs(root, paths, lists);
 
 /** The input of a release tarball that passes. Each test changes one part of it. */
 function input(change: Partial<PackInput> = {}): PackInput {
@@ -326,7 +345,7 @@ describe("check-pack", () => {
       const [tarball = ""] = readdirSync(out);
       const path = join(out, tarball);
       expect(readTarball(path).manifest.scripts).toEqual({});
-      expect(checkTarballs(tree, [path]).failures).toEqual([
+      expect(checkFixture(tree, [path]).failures).toEqual([
         "@authtempo/fixture@0.1.0: scripts.prepack runs at pack or publish",
       ]);
     } finally {
@@ -374,7 +393,7 @@ describe("check-pack", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
     try {
       const path = pack(fixture("root/packages/fixture"), out);
-      expect(checkTarballs(tree, [path]).failures).toEqual([
+      expect(checkFixture(tree, [path]).failures).toEqual([
         ".npmrc: an .npmrc, which can name a registry, a proxy, or a token",
         "docs/.npmrc: an .npmrc, which can name a registry, a proxy, or a token",
         "packages/fixture/.npmrc: an .npmrc, which can name a registry, a proxy, or a token",
@@ -385,7 +404,7 @@ describe("check-pack", () => {
         "pnpm-workspace.yaml: line 6: the key registries names a registry or a proxy",
       ]);
       // The same tarball passes against the tree with none of these files.
-      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([]);
+      expect(checkFixture(fixture("root"), [path]).failures).toEqual([]);
     } finally {
       rmSync(out, { recursive: true, force: true });
       rmSync(tree, { recursive: true, force: true });
@@ -548,7 +567,7 @@ describe("check-pack", () => {
     try {
       const path = join(out, "other.tgz");
       writeTar(path, [manifestEntry("@authtempo/other")]);
-      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([
+      expect(checkFixture(fixture("root"), [path]).failures).toEqual([
         `${path}: @authtempo/other is not a released package`,
         "@authtempo/fixture: no tarball",
         "read 0 tarballs",
@@ -566,12 +585,12 @@ describe("check-pack", () => {
       const path = pack(fixture("root/packages/fixture"), out);
       const noNeeds = copyRoot((dir) => writeFileSync(join(dir, "release/pack-needs.json"), "{}"));
       roots.push(noNeeds);
-      expect(checkTarballs(noNeeds, [path]).failures).toEqual([
+      expect(checkFixture(noNeeds, [path]).failures).toEqual([
         "@authtempo/fixture: no entry in release/pack-needs.json",
       ]);
       const twoVersions = copyRoot((dir) => addReleased(dir, "@authtempo/second", "0.2.0"));
       roots.push(twoVersions);
-      expect(checkTarballs(twoVersions, [path]).failures).toEqual([
+      expect(checkFixture(twoVersions, [path]).failures).toEqual([
         "the released packages hold 2 versions: 0.1.0, 0.2.0",
         "@authtempo/second: no tarball",
       ]);
@@ -588,24 +607,26 @@ describe("check-pack", () => {
       const path = pack(fixture("root/packages/fixture"), out);
       // Before plan 12j Task 9 an absent register read as no item. Now it is the
       // one source of core's authtempo.deprecations, so a tree without it stops.
-      expect(() => checkTarballs(noRegister, [path])).toThrow("release/deprecations.json");
-      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([]);
+      expect(() => checkFixture(noRegister, [path])).toThrow("release/deprecations.json");
+      expect(checkFixture(fixture("root"), [path]).failures).toEqual([]);
       // The entry prints a FAIL summary line and the reason, not a stack.
-      const missing = entry(noRegister, [path]);
+      const missing = entry(noRegister, [path], NO_NOTES);
       expect(missing.lines).toHaveLength(2);
-      expect(missing.lines[0]).toBe("check-pack: FAIL tarballs=0 files=0 failures=1");
+      expect(missing.lines[0]).toBe(
+        "check-pack: FAIL tarballs=0 files=0 marked=0 listed=0 failures=1",
+      );
       expect(missing.lines[1]).toMatch(/^ {2}ENOENT: .*release\/deprecations\.json'$/);
       expect(missing.code).toBe(1);
       writeFileSync(join(badRegister, "release/deprecations.json"), "{}");
-      expect(entry(badRegister, [path])).toEqual({
+      expect(entry(badRegister, [path], NO_NOTES)).toEqual({
         lines: [
-          "check-pack: FAIL tarballs=0 files=0 failures=1",
+          "check-pack: FAIL tarballs=0 files=0 marked=0 listed=0 failures=1",
           "  release/deprecations.json: the register is not a list",
         ],
         code: 1,
       });
-      expect(entry(fixture("root"), [path])).toEqual({
-        lines: ["check-pack: PASS tarballs=1 files=9 failures=0"],
+      expect(entry(fixture("root"), [path], NO_NOTES)).toEqual({
+        lines: ["check-pack: PASS tarballs=1 files=9 marked=0 listed=0 failures=0"],
         code: 0,
       });
     } finally {
@@ -657,7 +678,7 @@ describe("check-pack", () => {
       const folder = tarball("folder.tgz", { name: "package/dist/", type: "5" });
       expect(readTarball(folder).files).toEqual(["package.json"]);
       // The entry turns a refusal into a failure line, so the summary line still prints.
-      expect(checkTarballs(fixture("root"), [symlink]).failures).toEqual([
+      expect(checkFixture(fixture("root"), [symlink]).failures).toEqual([
         `${symlink}: package/dist/leak.js is not a regular file`,
         "@authtempo/fixture: no tarball",
         "read 0 tarballs",
@@ -686,10 +707,10 @@ describe("check-pack", () => {
       // The entry reads the released list, the folder, the needs, the
       // repository, and the LICENSE of the tree at fixtures/pack/root.
       const path = join(out, tarball);
-      expect(summaryLine(checkTarballs(fixture("root"), [path]))).toBe(
-        "check-pack: PASS tarballs=1 files=9 failures=0",
+      expect(summaryLine(checkFixture(fixture("root"), [path]))).toBe(
+        "check-pack: PASS tarballs=1 files=9 marked=0 listed=0 failures=0",
       );
-      expect(checkTarballs(fixture("root"), [path, path]).failures).toEqual([
+      expect(checkFixture(fixture("root"), [path, path]).failures).toEqual([
         `${path}: a second tarball of @authtempo/fixture`,
       ]);
       // Probe A of the Task 5 review: the tree and its package at 0.0.0.
@@ -702,7 +723,7 @@ describe("check-pack", () => {
       });
       try {
         const packed = pack(join(zero, "packages/fixture"), out);
-        expect(checkTarballs(zero, [packed]).failures).toEqual([
+        expect(checkFixture(zero, [packed]).failures).toEqual([
           "@authtempo/fixture@0.0.0: the version is 0.0.0, which the scaffold reads as unpublished",
         ]);
       } finally {
@@ -711,17 +732,187 @@ describe("check-pack", () => {
       // Probe B of the Task 5 review: two released packages and one tarball.
       const two = copyRoot((dir) => addReleased(dir, "@authtempo/second", "0.1.0"));
       try {
-        expect(checkTarballs(two, [path]).failures).toEqual(["@authtempo/second: no tarball"]);
+        expect(checkFixture(two, [path]).failures).toEqual(["@authtempo/second: no tarball"]);
       } finally {
         rmSync(two, { recursive: true, force: true });
       }
-      expect(checkTarballs(fixture("root"), []).failures).toEqual([
+      expect(checkFixture(fixture("root"), []).failures).toEqual([
         "@authtempo/fixture: no tarball",
         "read 0 tarballs",
         "read 0 files",
       ]);
     } finally {
       rmSync(out, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () => {
+  const README = "packages/x/README.md";
+  const SKILL = "packages/x/skills/a/SKILL.md";
+  const INDEX = "packages/x/dist/index.js";
+  const CODE: UnpublishedCode = {
+    path: "packages/x/dist/templates.js",
+    reason: "the code shows the note only at 0.0.0",
+    proof: "packages/x/test/templates.test.ts",
+  };
+  const LISTS: UnpublishedLists = { files: [README, SKILL], code: [CODE] };
+  const PACKED = [README, SKILL, INDEX, CODE.path];
+  const rule = (
+    version: string,
+    marked: string[],
+    lists: UnpublishedLists = LISTS,
+    packed: string[] = PACKED,
+  ) =>
+    unpublishedFailures({
+      version,
+      packed,
+      marked,
+      lists,
+      exists: (p) => p === CODE.proof,
+    });
+
+  it("holds each listed file to the note at 0.0.0, and no other packed file", () => {
+    expect(rule("0.0.0", [README, SKILL, CODE.path])).toEqual([]);
+    expect(rule("0.0.0", [README, CODE.path])).toEqual([missingNoteFailure(SKILL)]);
+    expect(missingNoteFailure(SKILL)).toBe(
+      `${SKILL} is in UNPUBLISHED_FILES and lacks the note "not on a registry yet" at 0.0.0`,
+    );
+    // A new packed file with the note cannot hide: it joins the list.
+    expect(rule("0.0.0", [README, SKILL, INDEX, CODE.path])).toEqual([
+      `${INDEX} holds the note "not on a registry yet" at 0.0.0, and UNPUBLISHED_FILES lacks it`,
+    ]);
+  });
+
+  it("fails each packed file with the note above 0.0.0, listed or not", () => {
+    expect(rule("0.1.0", [CODE.path])).toEqual([]);
+    expect(rule("0.1.0", [README, CODE.path])).toEqual([listedNoteFailure(README, "0.1.0")]);
+    expect(listedNoteFailure(README, "0.1.0")).toBe(
+      `${README} still holds the note "not on a registry yet" at 0.1.0; the version branch rewrites each file of UNPUBLISHED_FILES`,
+    );
+    expect(rule("0.2.0", [INDEX, CODE.path])).toEqual([
+      `${INDEX} holds the note "not on a registry yet" at 0.2.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
+    ]);
+  });
+
+  it("exempts a code file of the lists at every version, and fails a stale entry", () => {
+    // The code file holds the note at each version, and it fails at none.
+    for (const version of ["0.0.0", "0.1.0"])
+      expect(rule(version, version === "0.0.0" ? [README, SKILL, CODE.path] : [CODE.path])).toEqual(
+        [],
+      );
+    expect(rule("0.1.0", [])).toEqual([
+      `UNPUBLISHED_CODE lists ${CODE.path}, which does not hold the note; remove the entry`,
+    ]);
+    expect(rule("0.1.0", [], LISTS, [README, SKILL, INDEX])).toEqual([
+      `UNPUBLISHED_CODE lists ${CODE.path}, which no tarball holds`,
+    ]);
+    expect(
+      rule("0.1.0", [CODE.path], { files: LISTS.files, code: [{ ...CODE, proof: "gone.ts" }] }),
+    ).toEqual([`UNPUBLISHED_CODE: the proof gone.ts of ${CODE.path} does not exist`]);
+    expect(
+      rule("0.1.0", [CODE.path], { files: [README, "packages/x/gone.md"], code: [CODE] }),
+    ).toEqual(["UNPUBLISHED_FILES lists packages/x/gone.md, which no tarball holds"]);
+    expect(rule("0.1.0", [CODE.path], { files: [README, README], code: [CODE] })).toEqual([
+      `UNPUBLISHED_FILES lists ${README} twice`,
+    ]);
+    expect(rule("0.1.0", [CODE.path], { files: [README, CODE.path], code: [CODE] })).toEqual([
+      `${CODE.path} is in UNPUBLISHED_FILES and in UNPUBLISHED_CODE`,
+    ]);
+  });
+
+  it("reads back the failure of a listed file, and no other line", () => {
+    expect(listedNotePath(listedNoteFailure(SKILL, "0.1.0"))).toEqual({
+      path: SKILL,
+      version: "0.1.0",
+    });
+    expect(listedNotePath(missingNoteFailure(SKILL))).toBeNull();
+    expect(listedNotePath(`${INDEX} holds the note "${UNPUBLISHED_MARK}" at 0.1.0`)).toBeNull();
+    expect(
+      listedNotePath(listedNoteFailure(SKILL, "0.1.0").replace(UNPUBLISHED_MARK, "another note")),
+    ).toBeNull();
+  });
+
+  it("reads the note in the text of each packed file of a tarball", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const cleanOut = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const tree = copyRoot((dir) => {
+      appendFileSync(
+        join(dir, "packages/fixture/README.md"),
+        `\nThe packages are ${UNPUBLISHED_MARK}.\n`,
+      );
+      appendFileSync(join(dir, "packages/fixture/dist/errors.js"), `// ${UNPUBLISHED_MARK}\n`);
+    });
+    try {
+      const path = pack(join(tree, "packages/fixture"), out);
+      const readme = "packages/fixture/README.md";
+      const errors = "packages/fixture/dist/errors.js";
+      const gate: UnpublishedCode = {
+        path: errors,
+        reason: "a gate",
+        proof: "packages/fixture/package.json",
+      };
+      // The release tarball at 0.1.0 still holds the note of a listed file.
+      const listed = checkFixture(tree, [path], { files: [readme], code: [gate] });
+      expect(listed.failures).toEqual([listedNoteFailure(readme, "0.1.0")]);
+      expect(summaryLine(listed)).toBe(
+        "check-pack: FAIL tarballs=1 files=9 marked=1 listed=1 failures=1",
+      );
+      // With no list, each packed file with the note fails, the code file too.
+      expect(checkFixture(tree, [path]).failures).toEqual([
+        `${readme} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
+        `${errors} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
+      ]);
+      // The tarball of the tree with no note passes, and the code entry is stale there.
+      const clean = pack(fixture("root/packages/fixture"), cleanOut);
+      expect(checkFixture(fixture("root"), [clean], { files: [], code: [gate] }).failures).toEqual([
+        `UNPUBLISHED_CODE lists ${errors}, which does not hold the note; remove the entry`,
+      ]);
+    } finally {
+      for (const dir of [out, cleanOut, tree]) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("holds UNPUBLISHED_FILES to the shipped text of the tree", () => {
+    // The shipped text of each released package: package.json, README.md, and
+    // each files entry but dist. A build writes dist, and the dry run reads it
+    // in the tarballs. So a new note in a README or a skill fails here first.
+    const released = new Set(releasedNames(root));
+    const packed: string[] = [];
+    const add = (path: string) => {
+      if (!existsSync(join(root, path))) return;
+      if (!statSync(join(root, path)).isDirectory()) packed.push(path);
+      else for (const name of readdirSync(join(root, path)).sort()) add(`${path}/${name}`);
+    };
+    for (const p of readWorkspace(root)) {
+      if (!released.has(p.name)) continue;
+      for (const f of ["package.json", "README.md", ...(p.manifest.files ?? [])])
+        if (f !== "dist" && !f.startsWith("dist/")) add(`${p.dir}/${f}`);
+    }
+    const marked = packed.filter((p) =>
+      readFileSync(join(root, p), "utf8").includes(UNPUBLISHED_MARK),
+    );
+    const version = groupVersion(root);
+    expect(
+      unpublishedFailures({
+        version,
+        packed,
+        marked,
+        lists: { files: UNPUBLISHED_FILES, code: [] },
+        exists: (p) => existsSync(join(root, p)),
+      }),
+    ).toEqual([]);
+    // At 0.0.0 the list names each file with the note; the version branch then rewrites each one.
+    expect(marked.sort()).toEqual(version === "0.0.0" ? [...UNPUBLISHED_FILES].sort() : []);
+    // Each code entry is a dist file of a released package, and its proof exists.
+    for (const c of UNPUBLISHED_CODE) {
+      expect(existsSync(join(root, c.proof)), c.proof).toBe(true);
+      expect(
+        readWorkspace(root).some(
+          (p) => released.has(p.name) && c.path.startsWith(`${p.dir}/dist/`),
+        ),
+        c.path,
+      ).toBe(true);
     }
   });
 });

@@ -24,6 +24,7 @@ import {
 import { SCOPE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
+import { listedNotePath, UNPUBLISHED_MARK, UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 export interface RunResult {
@@ -308,6 +309,54 @@ function reportOf(stdout: string): { summary: string; failures: string[] } | nul
   return { summary: all[at] ?? "", failures };
 }
 
+/** The count of `key` in a summary line, or null when the line has none. */
+function countOf(summary: string, key: string): number | null {
+  const m = new RegExp(`\\s${key}=(\\d+)(\\s|$)`).exec(summary);
+  return m?.[1] === undefined ? null : Number(m[1]);
+}
+
+/**
+ * The verdict on the note of UNPUBLISHED_FILES in a check-pack run on a copy
+ * whose source is at 0.0.0 (ruling 47 of plan 12j). On main, each listed file
+ * holds the note "not on a registry yet", as it must at 0.0.0. The copy is at
+ * the next version, so check-pack fails each of them: the version branch
+ * rewrites them, and the dry run cannot. So the dry run reads these failures
+ * as the state of its source. It reads them only when every failure line of
+ * check-pack has that form, and when the counts of the summary line agree:
+ * `failures` is the count of the lines, and `marked` and `listed` equal it.
+ * So each listed file holds the note at 0.0.0, and no other packed file does.
+ * The job check of release.yml runs check-pack on a tagged commit, where no
+ * such reading exists. Gives null when another failure is in the run.
+ */
+export function sourceNotes(checked: {
+  summary: string;
+  failures: readonly string[];
+}): { paths: string[]; problems: string[] } | null {
+  const paths: string[] = [];
+  for (const line of checked.failures) {
+    const note = listedNotePath(line);
+    if (note === null) return null;
+    paths.push(note.path);
+  }
+  const problems: string[] = [];
+  const [failures, marked, listed] = ["failures", "marked", "listed"].map((key) =>
+    countOf(checked.summary, key),
+  );
+  if (failures === null || marked === null || listed === null)
+    problems.push(`check-pack printed no failures, marked, or listed count: ${checked.summary}`);
+  else {
+    if (failures !== paths.length)
+      problems.push(
+        `check-pack counts ${failures} failures and prints ${paths.length} failure lines`,
+      );
+    if (marked !== listed || paths.length !== listed)
+      problems.push(
+        `at ${UNPUBLISHED_VERSION}, each of the ${listed} files of UNPUBLISHED_FILES holds the note "${UNPUBLISHED_MARK}", and no other packed file does; check-pack finds the note in ${marked} packed files, ${paths.length} of them listed: ${paths.join(", ") || "none"}`,
+      );
+  }
+  return { paths, problems };
+}
+
 /**
  * The dry run of spec 33 item 4.1, in a copy of `git archive HEAD` under a new
  * temp folder. It stops at the first step that fails. It never commits, tags,
@@ -318,6 +367,7 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
   const log = options.log ?? (() => {});
   const counts = { packages: 0, released: 0, tarballs: 0, files: 0, smoke: 0 };
   const failures: string[] = [];
+  const notes: string[] = [];
   const lines: string[] = [];
   let version: string | null = null;
   let dir: string | null = null;
@@ -325,7 +375,7 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     name: "release-dry-run",
     counts,
     failures,
-    notes: [],
+    notes,
     exit: failures.length === 0 ? exit : exit === 0 ? 1 : exit,
     version,
     dir,
@@ -433,6 +483,16 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     for (const name of names) if (!folders.has(name)) failures.push(`${name}: no workspace folder`);
     if (failures.length > 0) return 1;
 
+    // The group version of HEAD, before changeset version moves it.
+    const sources = [
+      ...new Set(
+        readWorkspace(repo)
+          .filter((p) => names.includes(p.name))
+          .map((p) => p.manifest.version),
+      ),
+    ];
+    const source = sources.length === 1 ? sources[0] : undefined;
+
     // The commands of src/lib/release-copy.ts, which the job check of release.yml also runs.
     const copyStep = (label: string, command: readonly string[]) =>
       step(label, command[0] ?? "", command.slice(1), repo);
@@ -493,7 +553,23 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     const [node = "", ...checkArgs] = COPY_CHECK_PACK;
     const check = run(node, [...checkArgs, ...tarballs.map((t) => t.path)], repo, env);
     const checked = reportOf(check.stdout);
-    if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
+    const held =
+      source === UNPUBLISHED_VERSION &&
+      checked !== null &&
+      checked.summary.startsWith("check-pack: ")
+        ? sourceNotes(checked)
+        : null;
+    if (held !== null && (held.paths.length > 0 || check.status === 0)) {
+      if (held.problems.length > 0) {
+        failures.push(...held.problems.map((p) => `check-pack: ${p}`));
+        for (const t of tarballs) bad.add(t.name);
+        return settle();
+      }
+      if (held.paths.length > 0)
+        notes.push(
+          `check-pack: ${held.paths.length} packed files hold the note "${UNPUBLISHED_MARK}", as each file of UNPUBLISHED_FILES must at ${UNPUBLISHED_VERSION}; the version branch rewrites them: ${held.paths.join(", ")}`,
+        );
+    } else if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
       failures.push(`check-pack exited ${check.status}: ${checked?.summary ?? firstLine(check)}`);
       for (const l of checked?.failures ?? []) {
         failures.push(`check-pack: ${l}`);
@@ -606,6 +682,7 @@ if (import.meta.main) {
   for (const line of report.lines) console.log(line);
   console.log(dryRunLine(report));
   for (const failure of report.failures) console.log(`  ${failure}`);
+  for (const note of report.notes) console.log(`  note: ${note}`);
   if (keep && report.dir !== null) console.log(`  note: the temp folder stays at ${report.dir}`);
   process.exit(report.exit);
 }
