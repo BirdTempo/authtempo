@@ -107,6 +107,10 @@ describe("the init templates (spec 19, the one-source rule)", () => {
       Object.fromEntries(
         Object.entries(deps).map(([k, v]) => [k, v === "workspace:*" ? VERSION : v]),
       );
+    // A published scaffold also takes the CLI at its version as a dev dependency.
+    const cli = UNPUBLISHED ? {} : { "@authtempo/cli": VERSION };
+    const dev = (deps: Record<string, string> | undefined) =>
+      deps || !UNPUBLISHED ? { devDependencies: { ...pinned(deps), ...cli } } : {};
     for (const stack of STACKS) {
       const dir = join(REPO, "examples", STACK_INFO[stack].example);
       for (const path of exampleFiles(dir)) {
@@ -122,7 +126,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
             ...pkg,
             name: "my-app",
             ...(pkg.dependencies ? { dependencies: pinned(pkg.dependencies) } : {}),
-            ...(pkg.devDependencies ? { devDependencies: pinned(pkg.devDependencies) } : {}),
+            ...dev(pkg.devDependencies),
             scripts: {
               ...pkg.scripts,
               ...(stack === "workers-d1" || stack === "mcp-server" ? { test: "vitest run" } : {}),
@@ -221,8 +225,10 @@ describe("authtempo init (spec 19)", () => {
     const dir = fresh("init-mcp-server");
     const r = runBin(["init", dir, "--stack", "mcp-server"]);
     expect(r.status, r.stderr).toBe(0);
+    // A published scaffold runs each authtempo step with pnpm exec (spec 33 item 11).
+    const migrate = `${UNPUBLISHED ? "" : "pnpm exec "}authtempo migrate --target d1`;
     expect(r.stdout).toContain(
-      `\nNext:\n  cd ${dir}\n  pnpm install\n  cp .dev.vars.example .dev.vars\n  authtempo migrate --target d1\n  pnpm dev\n`,
+      `\nNext:\n  cd ${dir}\n  pnpm install\n  cp .dev.vars.example .dev.vars\n  ${migrate}\n  pnpm dev\n`,
     );
     expect(linesOf(r.stdout).at(-1)).toBe("Docs: https://authtempo.com/docs/start/mcp-server/");
     for (const path of [

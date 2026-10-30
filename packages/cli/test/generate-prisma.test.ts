@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type ModelName, schema } from "@authtempo/core";
 import { columnName, indexName, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertFreshBuild, PKG, runBin } from "./support/bin.js";
+import { assertFreshBuild, PKG, runBin, versionSlot } from "./support/bin.js";
 
 // `authtempo generate --format prisma` (plan 12g Task 7). The names of each
 // printed model are held to core's naming rules, and prisma validate 7.10.0
@@ -107,7 +107,9 @@ describe("authtempo generate --format prisma (plan 12g Task 7)", () => {
           expected(m),
         );
       // The snapshot comes last, so a lost name fails the name compare first.
-      await expect(text).toMatchFileSnapshot(`__snapshots__/generate-prisma-${d}.prisma.snap`);
+      await expect(versionSlot(text)).toMatchFileSnapshot(
+        `__snapshots__/generate-prisma-${d}.prisma.snap`,
+      );
     }
   });
 

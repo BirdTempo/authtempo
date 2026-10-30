@@ -8,7 +8,7 @@ import { COMMON_FLAGS, type HelpText, pageUrl, renderHelp } from "../src/help/ty
 import { VERSION_JSON_KEYS } from "../src/json.js";
 import { COMMANDS, makeMain } from "../src/main.js";
 import { NAME_ONLY_FLAGS, SECRETISH_FLAG } from "../src/secrets.js";
-import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
+import { assertFreshBuild, ESC, linesOf, runBin, VERSION } from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
 
 beforeAll(() => {
@@ -96,11 +96,11 @@ describe("the common rules (spec 19)", () => {
   it("prints the version of the CLI and the schema version of its core", () => {
     const r = runBin(["--version"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe("authtempo 0.0.0 (schema version 15)\n");
+    expect(r.stdout).toBe(`authtempo ${VERSION} (schema version 15)\n`);
     const j = runBin(["--version", "--json"]);
     const doc = JSON.parse(j.stdout) as Record<string, unknown>;
     expect(Object.keys(doc).sort()).toEqual(Object.keys(VERSION_JSON_KEYS).sort());
-    expect(doc).toEqual({ cli: "0.0.0", schemaVersion: 15 });
+    expect(doc).toEqual({ cli: VERSION, schemaVersion: 15 });
   });
 
   it("prints the short help on stderr and exits 2 with no command", () => {
