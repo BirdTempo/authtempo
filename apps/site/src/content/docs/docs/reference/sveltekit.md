@@ -76,9 +76,9 @@ sidebar:
 
 ## The body limit of the Node adapter
 
-- `@sveltejs/adapter-node` 6.0.0 refuses a request body over `BODY_SIZE_LIMIT` with its own 413, before the hook runs. The default is `512K`, 524288 bytes (read 2026-10-30).
+- `@sveltejs/adapter-node` 6.0.0 limits a request body to `BODY_SIZE_LIMIT`. The default is `512K`, 524288 bytes (read 2026-10-30). The hook still runs: with `@sveltejs/kit` 3.0.1, the body stream fails only when a reader passes the limit.
 - Three bodies of core can pass 512K: an SSO connection write, an ACS form, and a SCIM body of up to 1 MiB.
-- Such a body gets the 413 of SvelteKit, not the [`body_too_large`](/docs/reference/errors/#body_too_large) of core. Then an SSO setup, a SAML sign-in, or a SCIM write fails.
+- Core reads such a body until its stream fails, and refuses the valid body as a body past its cap. An SSO connection write of 600000 bytes got the [`body_too_large`](/docs/reference/errors/#body_too_large) of core at `512K` (measured 2026-10-31). Then an SSO setup, a SAML sign-in, or a SCIM write fails.
 - Set `BODY_SIZE_LIMIT` to `8M` in the environment of the server. That is 8 MiB, the largest cap of core. Core then reads at most the cap of each route.
 
 ## Cross-site form posts
