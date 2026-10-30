@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { type Deprecation, readDeprecations } from "./lib/deprecations.ts";
@@ -239,20 +240,29 @@ export interface Tarball {
   manifest: Manifest;
   license: string | null;
   changelog: string | null;
+  /** The bytes of the tarball, read once. Each read of the check uses them. */
+  bytes: Buffer;
+  /** The SHA-256 of those bytes, which SHA256SUMS holds. */
+  sha256: string;
 }
 
 /**
  * Reads a pnpm or npm tarball through the system tar. It refuses an entry
  * that is not a regular file or a folder, such as a link, and a path with a
  * ".." part. pnpm pack writes neither, so a foreign tarball is the reach.
+ * It reads the file once, and tar reads those bytes from its input. So the
+ * SHA-256 names the bytes that the check read, not a second read of the
+ * path (ruling 67 of plan 12j, Low 4).
  */
 export function readTarball(path: string): Tarball {
+  const bytes = readFileSync(path);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const tar = (args: string[]) =>
-    execFileSync("tar", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    execFileSync("tar", args, { input: bytes, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const lines = (args: string[]) => tar(args).split("\n").slice(0, -1);
-  const names = lines(["-tzf", path]);
+  const names = lines(["-tzf", "-"]);
   // The first character of each long line is the entry type, in bsdtar and in GNU tar.
-  const types = lines(["-tvzf", path]).map((l) => l.charAt(0));
+  const types = lines(["-tvzf", "-"]).map((l) => l.charAt(0));
   if (types.length !== names.length)
     throw new Error(`${path}: tar lists ${names.length} names and ${types.length} entries`);
   const files = names
@@ -268,7 +278,7 @@ export function readTarball(path: string): Tarball {
     })
     .sort();
   const read = (file: string) =>
-    files.includes(file) ? tar(["-xzOf", path, `package/${file}`]) : null;
+    files.includes(file) ? tar(["-xzOf", "-", `package/${file}`]) : null;
   const manifest = read("package.json");
   if (manifest === null) throw new Error(`${path}: the tarball has no package.json`);
   return {
@@ -276,18 +286,21 @@ export function readTarball(path: string): Tarball {
     manifest: JSON.parse(manifest) as Manifest,
     license: read("LICENSE"),
     changelog: read(CHANGELOG_FILE),
+    bytes,
+    sha256,
   };
 }
 
 /**
- * The text of each file of a tarball, from one extraction. readTarball has
- * refused each link and each path with a ".." part, so the files stay in the
- * folder. A binary file reads as text with no harm: the rules look for words.
+ * The text of each file of the bytes of a tarball, from one extraction.
+ * readTarball has refused each link and each path with a ".." part, so the
+ * files stay in the folder. A binary file reads as text with no harm: the
+ * rules look for words.
  */
-export function packedTexts(path: string, files: readonly string[]): Map<string, string> {
+export function packedTexts(bytes: Buffer, files: readonly string[]): Map<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "authtempo-check-pack-text-"));
   try {
-    execFileSync("tar", ["-xzf", path, "-C", dir]);
+    execFileSync("tar", ["-xzf", "-", "-C", dir], { input: bytes });
     return new Map(files.map((f) => [f, readFileSync(join(dir, "package", f), "utf8")]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -383,6 +396,8 @@ export function checkTarballs(
   root: string,
   paths: string[],
   lists: UnpublishedLists = UNPUBLISHED_LISTS,
+  /** Gets the SHA-256 of each tarball that the check read, by its file name. */
+  sums?: Map<string, string>,
 ): Report {
   const released = new Set(releasedNames(root));
   const packages = readWorkspace(root).filter((p) => released.has(p.name));
@@ -417,6 +432,9 @@ export function checkTarballs(
       failures.push(error instanceof Error ? error.message : String(error));
       continue;
     }
+    if (sums?.has(basename(path)) === true)
+      failures.push(`${path}: a second tarball with the file name ${basename(path)}`);
+    sums?.set(basename(path), t.sha256);
     const name = t.manifest.name;
     const dir = dirs.get(name);
     if (dir === undefined) {
@@ -427,7 +445,7 @@ export function checkTarballs(
     seen.add(name);
     const need = needs[name];
     if (need === undefined) failures.push(`${name}: no entry in release/pack-needs.json`);
-    const texts = packedTexts(path, t.files);
+    const texts = packedTexts(t.bytes, t.files);
     const constant = VERSION_CONSTANTS[name];
     const r = checkPack({
       files: t.files,
@@ -484,18 +502,33 @@ export function checkTarballs(
 }
 
 /**
+ * The SHA-256 list of the tarballs in the form of sha256sum: the hash, two
+ * spaces, and the file name, one line each, in name order.
+ */
+export const sumsText = (sums: ReadonlyMap<string, string>): string =>
+  [...sums]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([file, sha]) => `${sha}  ${file}\n`)
+    .join("");
+
+/**
  * Runs the check on the tree at `root`. A source that the check cannot read,
  * such as a missing or bad release/deprecations.json, gives a FAIL summary
- * line with the reason, not a stack.
+ * line with the reason, not a stack. With `sumsFile`, a PASS writes the
+ * SHA-256 list of the bytes that the check read there (ruling 67 of plan
+ * 12j, Low 4), and a FAIL leaves no list.
  */
 export function entry(
   root: string,
   paths: string[],
   lists: UnpublishedLists = UNPUBLISHED_LISTS,
+  sumsFile?: string,
 ): { lines: string[]; code: number } {
   let report: Report;
+  const sums = new Map<string, string>();
+  if (sumsFile !== undefined) rmSync(sumsFile, { force: true });
   try {
-    report = checkTarballs(root, paths, lists);
+    report = checkTarballs(root, paths, lists, sums);
   } catch (error) {
     report = unreadReport(
       "check-pack",
@@ -503,13 +536,27 @@ export function entry(
       error instanceof Error ? error.message : String(error),
     );
   }
-  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+  const code = report.failures.length > 0 ? 1 : 0;
+  if (sumsFile !== undefined && code === 0) writeFileSync(sumsFile, sumsText(sums));
+  return { lines: reportLines(report), code };
 }
 
 if (import.meta.main) {
+  // node check-pack.ts [--sums <file>] <tarball>...
+  const args = process.argv.slice(2);
+  const at = args.indexOf("--sums");
+  const sumsFile = at === -1 ? undefined : args[at + 1];
+  if (at !== -1 && (sumsFile === undefined || sumsFile.startsWith("--"))) {
+    console.log("check-pack: FAIL tarballs=0 files=0 marked=0 listed=0 failures=1");
+    console.log("  --sums needs the path of the SHA-256 list");
+    process.exit(2);
+  }
+  const paths = at === -1 ? args : args.filter((_a, i) => i !== at && i !== at + 1);
   const { lines, code } = entry(
     fileURLToPath(new URL("../../../", import.meta.url)),
-    process.argv.slice(2),
+    paths,
+    UNPUBLISHED_LISTS,
+    sumsFile,
   );
   for (const line of lines) console.log(line);
   process.exit(code);

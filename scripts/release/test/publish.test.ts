@@ -15,6 +15,7 @@ import {
   REGISTRY_ARGS,
   readView,
   type Seams,
+  SUMS_ENV,
   type Tarball,
   type ViewAnswer,
   viewArgs,
@@ -67,6 +68,10 @@ function downloaded(version: string, react = false): string {
   return out;
 }
 
+/** publish with the SHA-256 list that the job check exports: the SHA256SUMS of the folder. */
+const publishOut = (out: string, seams: Seams, listed?: string) =>
+  publish(out, seams, listed ?? readFileSync(join(out, "SHA256SUMS"), "utf8"));
+
 const CORE = (v: string) => `authtempo-core-${v}.tgz`;
 const CLIENT = (v: string) => `authtempo-client-${v}.tgz`;
 const REACT = (v: string) => `authtempo-react-${v}.tgz`;
@@ -101,7 +106,7 @@ describe("publish", () => {
   it("publishes each tarball that the registry lacks, with latest", () => {
     const out = downloaded("0.1.0");
     const f = fake({});
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(outcome.failures).toEqual([]);
     // Core first: the client depends on it.
     expect(f.calls.filter((c) => c[1] === "publish")).toEqual([
@@ -152,7 +157,7 @@ describe("publish", () => {
         },
       });
     const f = held(integrity);
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(f.published()).toEqual([CLIENT("0.1.0")]);
     expect(publishLines(outcome)).toEqual([
       "publish: PASS published=1 skipped=1 failures=0",
@@ -161,7 +166,7 @@ describe("publish", () => {
     ]);
     // Other bytes at the held version, such as a publish by hand, fail, and nothing publishes (ruling 67 of plan 12j, Low 2).
     const other = held("sha512-b3RoZXI=");
-    expect(publishLines(publish(out, other.seams))).toEqual([
+    expect(publishLines(publishOut(out, other.seams))).toEqual([
       "publish: FAIL published=0 skipped=0 failures=1",
       `  @authtempo/core@0.1.0: the registry holds this version with dist.integrity sha512-b3RoZXI=, not ${integrity} of the tarball`,
     ]);
@@ -175,7 +180,7 @@ describe("publish", () => {
     bytes[bytes.length - 1] = (bytes[bytes.length - 1] ?? 0) ^ 1;
     writeFileSync(path, bytes);
     const f = fake({});
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(f.published()).toEqual([]);
     expect(outcome.failures).toEqual([`the SHA-256 of ${CLIENT("0.1.0")} differs from SHA256SUMS`]);
     expect(publishLines(outcome)[0]).toBe("publish: FAIL published=0 skipped=0 failures=1");
@@ -186,7 +191,7 @@ describe("publish", () => {
     const lines = readFileSync(join(out, "SHA256SUMS"), "utf8").split("\n");
     writeFileSync(join(out, "SHA256SUMS"), `${lines[0]}\n${"0".repeat(64)}  other.tgz\n`);
     const f = fake({});
-    expect(publish(out, f.seams).failures).toEqual([
+    expect(publishOut(out, f.seams).failures).toEqual([
       `${CORE("0.1.0")} has no line in SHA256SUMS`,
       "SHA256SUMS names other.tgz, and the folder has no such tarball",
     ]);
@@ -196,11 +201,11 @@ describe("publish", () => {
   it("refuses an npm below 11.5.1", () => {
     const out = downloaded("0.1.0");
     const f = fake({ npm: "11.5.0" });
-    expect(publish(out, f.seams).failures).toEqual([
+    expect(publishOut(out, f.seams).failures).toEqual([
       "npm 11.5.0 is below 11.5.1, the floor of trusted publishing",
     ]);
     expect(f.published()).toEqual([]);
-    expect(publish(out, fake({ npm: "11.5.1" }).seams).failures).toEqual([]);
+    expect(publishOut(out, fake({ npm: "11.5.1" }).seams).failures).toEqual([]);
   });
 
   it("tags an older minor with release-<major>.<minor>", () => {
@@ -209,7 +214,7 @@ describe("publish", () => {
       view: (_spec, field) =>
         field === "dist-tags.latest" ? { found: "0.2.0" } : { missing: true },
     });
-    expect(publish(out, f.seams).failures).toEqual([]);
+    expect(publishOut(out, f.seams).failures).toEqual([]);
     expect(f.calls.filter((c) => c[1] === "publish").map((c) => c[c.indexOf("--tag") + 1])).toEqual(
       ["release-0.1", "release-0.1"],
     );
@@ -221,7 +226,7 @@ describe("publish", () => {
       view: (spec) =>
         spec.startsWith("@authtempo/client") ? { error: "ETIMEDOUT" } : { missing: true },
     });
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(f.published()).toEqual([]);
     expect(outcome.failures).toEqual([
       "@authtempo/client: the registry answered ETIMEDOUT; nothing is published",
@@ -231,7 +236,7 @@ describe("publish", () => {
   it("stops at the first npm publish that fails", () => {
     const out = downloaded("0.1.0");
     const f = fake({ publishCode: (file) => (file.endsWith(CORE("0.1.0")) ? 1 : 0) });
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(f.published()).toEqual([CORE("0.1.0")]);
     expect(publishLines(outcome)).toEqual([
       "publish: FAIL published=0 skipped=0 failures=1",
@@ -245,7 +250,7 @@ describe("publish", () => {
     // core publishes, the client fails, and react, which needs the client, gets no call.
     const out = downloaded("0.1.0", true);
     const f = fake({ publishCode: (file) => (file.endsWith(CLIENT("0.1.0")) ? 1 : 0) });
-    const outcome = publish(out, f.seams);
+    const outcome = publishOut(out, f.seams);
     expect(f.published()).toEqual([CORE("0.1.0"), CLIENT("0.1.0")]);
     expect(publishLines(outcome)).toEqual([
       "publish: FAIL published=1 skipped=0 failures=1",
@@ -260,7 +265,7 @@ describe("publish", () => {
   it("publishes with --access public and no --provenance flag", () => {
     const out = downloaded("0.1.0");
     const f = fake({});
-    publish(out, f.seams);
+    publishOut(out, f.seams);
     for (const call of f.calls.filter((c) => c[1] === "publish")) {
       expect(call).toContain("--access");
       expect(call[call.indexOf("--access") + 1]).toBe("public");
@@ -360,7 +365,7 @@ describe("publish", () => {
     const bad = (lines[0] ?? "").replace("  ", " ");
     writeFileSync(join(out, "SHA256SUMS"), `${bad}\n${lines[1]}\n`);
     const f = fake({});
-    expect(publish(out, f.seams).failures).toEqual([
+    expect(publishOut(out, f.seams).failures).toEqual([
       `SHA256SUMS: the line ${bad} is not <sha256>  <file>`,
       `${CLIENT("0.1.0")} has no line in SHA256SUMS`,
     ]);
@@ -369,9 +374,10 @@ describe("publish", () => {
 
   it("prints a FAIL line, not a stack, when SHA256SUMS is missing", () => {
     const out = downloaded("0.1.0");
+    const listed = readFileSync(join(out, "SHA256SUMS"), "utf8");
     rmSync(join(out, "SHA256SUMS"));
     const f = fake({});
-    expect(publishLines(publish(out, f.seams))).toEqual([
+    expect(publishLines(publishOut(out, f.seams, listed))).toEqual([
       "publish: FAIL published=0 skipped=0 failures=1",
       "  the folder has no SHA256SUMS; the job check writes it",
     ]);
@@ -394,7 +400,7 @@ describe("publish", () => {
     );
     writeFileSync(join(out, "SHA256SUMS"), sums.join(""));
     const f = fake({});
-    expect(publishLines(publish(out, f.seams))).toEqual([
+    expect(publishLines(publishOut(out, f.seams))).toEqual([
       "publish: FAIL published=0 skipped=0 failures=2",
       `  ${CLIENT("0.1.0")}: incorrect header check`,
       `  ${CORE("0.1.0")}: the tarball has no package/package.json`,
@@ -413,13 +419,37 @@ describe("publish", () => {
   });
 
   it("fails when it reads zero tarballs", () => {
-    const out = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
-    folders.push(out);
-    writeFileSync(join(out, "SHA256SUMS"), "");
-    expect(publishLines(publish(out, fake({}).seams))).toEqual([
+    expect(
+      publishPlan({ tarballs: [], sums: new Map(), registry: {}, npmVersion: "11.19.1" }).failures,
+    ).toEqual(["read 0 tarballs"]);
+  });
+
+  // The list and the tarballs were one artifact, so whoever replaced the
+  // artifact replaced both (ruling 67 of plan 12j, Low 4).
+  it("holds the tarballs to the list of the job output, not to the list of the artifact", () => {
+    const out = downloaded("0.1.0");
+    const listed = readFileSync(join(out, "SHA256SUMS"), "utf8");
+    // A replaced artifact: another core tarball with its own SHA256SUMS line.
+    const core = join(out, CORE("0.1.0"));
+    writeFileSync(core, Buffer.concat([readFileSync(core), Buffer.from([0])]));
+    const sha = createHash("sha256").update(readFileSync(core)).digest("hex");
+    writeFileSync(
+      join(out, "SHA256SUMS"),
+      listed.replace(/^[0-9a-f]{64}(?= {2}authtempo-core-)/m, sha),
+    );
+    const f = fake({});
+    expect(publishLines(publish(out, f.seams, listed))).toEqual([
       "publish: FAIL published=0 skipped=0 failures=1",
-      "  read 0 tarballs",
+      "  SHA256SUMS of the artifact differs from RELEASE_SHA256SUMS, the output of the job check",
     ]);
+    // With no list from the job check, nothing publishes either.
+    expect(publishLines(publish(out, f.seams, ""))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      "  RELEASE_SHA256SUMS is empty; the job check exports the SHA-256 list as its output sums",
+    ]);
+    expect(f.views).toEqual([]);
+    expect(f.published()).toEqual([]);
+    expect(SUMS_ENV).toBe("RELEASE_SHA256SUMS");
   });
 
   it("publishes each released package after each package that it needs, peers too", () => {

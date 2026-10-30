@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -12,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
@@ -712,6 +713,24 @@ describe("check-pack", () => {
     } finally {
       for (const dir of [out, noRegister, badRegister])
         rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes the SHA-256 list of the bytes that it read, and no list on a FAIL (ruling 67 of plan 12j, Low 4)", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const noRegister = copyRoot((dir) => rmSync(join(dir, "release/deprecations.json")));
+    try {
+      const path = pack(fixture("root/packages/fixture"), out);
+      const list = join(out, "SHA256SUMS");
+      expect(entry(fixture("root"), [path], NO_NOTES, list).code).toBe(0);
+      const sha = createHash("sha256").update(readFileSync(path)).digest("hex");
+      expect(readFileSync(list, "utf8")).toBe(`${sha}  ${basename(path)}\n`);
+      expect(readTarball(path).sha256).toBe(sha);
+      // A FAIL removes the list of an earlier run and writes none.
+      expect(entry(noRegister, [path], NO_NOTES, list).code).toBe(1);
+      expect(existsSync(list)).toBe(false);
+    } finally {
+      for (const dir of [out, noRegister]) rmSync(dir, { recursive: true, force: true });
     }
   });
 

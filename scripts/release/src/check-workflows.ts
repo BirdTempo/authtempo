@@ -219,6 +219,10 @@ interface Step {
   copy?: true;
   /** A checkout with the full history (fetch-depth: 0). */
   history?: true;
+  /** The id of a step whose output a job output reads. */
+  id?: string;
+  /** The env of the step, each value exact. */
+  env?: Record<string, string>;
 }
 
 const checkout = (history: boolean): Step =>
@@ -230,7 +234,19 @@ const NODE: Step = { uses: "actions/setup-node" };
 interface Job {
   keys: string[];
   steps: Step[];
+  /** The outputs of the job, each value exact. */
+  outputs?: Record<string, string>;
 }
+
+/**
+ * The SHA-256 list of the job check, from check-pack, as a job output
+ * (ruling 67 of plan 12j, Low 4). The job publish reads it through env, so a
+ * replaced artifact cannot bring its own list.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+const SUMS_OUTPUT = "${{ steps.sums.outputs.sums }}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+const SUMS_ENV = "${{ needs.check.outputs.sums }}";
 
 /**
  * The jobs of each file. A key that this table does not name fails. A step
@@ -253,7 +269,8 @@ const JOBS: Record<string, Record<string, Job>> = {
   },
   [WORKFLOW_FILE]: {
     check: {
-      keys: ["runs-on", "permissions", "steps"],
+      keys: ["runs-on", "permissions", "outputs", "steps"],
+      outputs: { sums: SUMS_OUTPUT },
       steps: [
         checkout(true),
         PNPM,
@@ -285,12 +302,19 @@ const JOBS: Record<string, Record<string, Job>> = {
           ].join("\n"),
           copy: true,
         },
-        { run: `${shellLine(COPY_CHECK_PACK)} out/*.tgz`, copy: true },
+        { run: `${shellLine(COPY_CHECK_PACK)} --sums out/SHA256SUMS out/*.tgz`, copy: true },
         // The smoke and both publish dry runs read these tarballs (ruling 67 of plan 12j, Major 1).
         { name: "Dry run the tarballs", run: `${shellLine(COPY_DRY_RUN)} out`, copy: true },
         {
-          name: "Write the SHA-256 list",
-          run: "cd out && sha256sum -- *.tgz > SHA256SUMS",
+          name: "Export the SHA-256 list",
+          id: "sums",
+          run: [
+            "{",
+            '  echo "sums<<SHA256SUMS_END"',
+            "  cat out/SHA256SUMS",
+            '  echo "SHA256SUMS_END"',
+            '} >> "$GITHUB_OUTPUT"',
+          ].join("\n"),
           copy: true,
         },
         { uses: "actions/upload-artifact" },
@@ -302,7 +326,10 @@ const JOBS: Record<string, Record<string, Job>> = {
         checkout(false),
         NODE,
         { uses: "actions/download-artifact" },
-        { run: "node scripts/release/src/publish.ts out" },
+        {
+          run: "node scripts/release/src/publish.ts out",
+          env: { RELEASE_SHA256SUMS: SUMS_ENV },
+        },
       ],
     },
   },
@@ -443,6 +470,9 @@ function checkJob(
   else if (!/^ubuntu-\d+\.\d+$/.test(runsOn.value ?? ""))
     fail(`${at}: runs-on ${runsOn.value} is not an ubuntu-<version> runner of GitHub`);
 
+  if (rule.outputs !== undefined && !same(e.outputs, rule.outputs))
+    fail(`${at}: the outputs are not ${JSON.stringify(rule.outputs)}`);
+
   const publishJob = file === WORKFLOW_FILE && name === PUBLISH_JOB;
   if (publishJob) {
     if (!same(e.permissions, { "id-token": "write", contents: "read" }))
@@ -517,6 +547,8 @@ function checkJob(
     const keys = want.uses !== undefined ? ["uses", "with"] : ["run"];
     if (want.name !== undefined) keys.push("name");
     if (want.copy === true) keys.push("working-directory");
+    if (want.id !== undefined) keys.push("id");
+    if (want.env !== undefined) keys.push("env");
     for (const key of Object.keys(s))
       if (!keys.includes(key))
         fail(`${at} step ${k + 1}: the key ${key} is not in the rule of the step`);
@@ -524,6 +556,10 @@ function checkJob(
       fail(`${at}: step ${k + 1} is not named ${want.name}`);
     if (want.copy === true && scalarOf(s["working-directory"]) !== COPY)
       fail(`${at}: step ${k + 1} is not in the release copy`);
+    if (want.id !== undefined && scalarOf(s.id) !== want.id)
+      fail(`${at}: the id of step ${k + 1} is not ${want.id}`);
+    if (want.env !== undefined && !same(s.env, want.env))
+      fail(`${at}: the env of step ${k + 1} is not ${JSON.stringify(want.env)}`);
   });
 }
 

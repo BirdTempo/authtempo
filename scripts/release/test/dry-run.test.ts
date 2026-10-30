@@ -462,14 +462,19 @@ describe("dry run", () => {
         return `${c.cmd} ${c.args.join(" ")}`;
       });
     // The job check then runs this dry run itself on its tarballs (ruling 67 of plan 12j, Major 1).
+    // The job check also writes the SHA-256 list of check-pack (ruling 67 of plan 12j, Low 4).
     const tarballRun = `${shellLine(COPY_DRY_RUN)} out`;
-    expect(lines).toEqual(releaseCopyLines().filter((l) => l !== tarballRun));
+    expect(lines).toEqual(
+      releaseCopyLines()
+        .filter((l) => l !== tarballRun)
+        .map((l) => l.replace(" --sums out/SHA256SUMS", "")),
+    );
     expect(releaseCopyLines()).toEqual([
       "pnpm install --frozen-lockfile --offline --ignore-scripts",
       "node scripts/release/src/prepare.ts",
       `pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
       'pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"',
-      "node scripts/release/src/check-pack.ts out/*.tgz",
+      "node scripts/release/src/check-pack.ts --sums out/SHA256SUMS out/*.tgz",
       "node scripts/release/src/dry-run.ts --tarballs out",
     ]);
   });

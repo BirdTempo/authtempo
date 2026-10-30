@@ -3,15 +3,20 @@
 //
 // The publish job runs no install, so this file imports only Node modules and
 // ./lib/release-facts.ts, which imports nothing. A test holds the import list.
-// It checks the npm floor, each SHA-256 against SHA256SUMS of the check job,
-// and the registry. Then it runs one npm publish for each version that the
-// registry lacks, in the order of the dependency graph.
+// It checks the npm floor, each SHA-256 against the SHA-256 list of the check
+// job, and the registry. Then it runs one npm publish for each version that
+// the registry lacks, in the order of the dependency graph. The list comes
+// from the job output of the check job through env, and the SHA256SUMS of the
+// artifact must equal it (ruling 67 of plan 12j, Low 4).
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { NPM_FLOOR, PUBLIC_REGISTRY, SCOPE } from "./lib/release-facts.ts";
+
+/** The env key of the SHA-256 list of the job check, which release.yml sets from its job output. */
+export const SUMS_ENV = "RELEASE_SHA256SUMS";
 
 /**
  * The registry arguments of each npm call. npm reads the project .npmrc of the
@@ -242,19 +247,30 @@ export interface Outcome {
   failures: string[];
 }
 
-/** Publishes each tarball of `dir` that the registry lacks. */
-export function publish(dir: string, seams: Seams): Outcome {
+/**
+ * Publishes each tarball of `dir` that the registry lacks. `listed` is the
+ * SHA-256 list of the job check, from its job output: the artifact can bring
+ * no list of its own.
+ */
+export function publish(dir: string, seams: Seams, listed: string): Outcome {
   const failures: string[] = [];
   const npm = seams.run("npm", ["--version"]);
   const npmVersion = npm.code === 0 ? npm.stdout.trim() : `(npm --version exited ${npm.code})`;
+  const stop = (failure: string): Outcome => ({
+    published: [],
+    pending: [],
+    skipped: [],
+    failures: [failure],
+  });
+  if (listed.trim() === "")
+    return stop(`${SUMS_ENV} is empty; the job check exports the SHA-256 list as its output sums`);
   if (!existsSync(join(dir, "SHA256SUMS")))
-    return {
-      published: [],
-      pending: [],
-      skipped: [],
-      failures: ["the folder has no SHA256SUMS; the job check writes it"],
-    };
-  const sums = readSums(readFileSync(join(dir, "SHA256SUMS"), "utf8"), failures);
+    return stop("the folder has no SHA256SUMS; the job check writes it");
+  // The artifact carries its own copy, which the token fallback of the runbook reads.
+  const copy = readFileSync(join(dir, "SHA256SUMS"), "utf8");
+  if (copy.trimEnd() !== listed.trimEnd())
+    return stop(`SHA256SUMS of the artifact differs from ${SUMS_ENV}, the output of the job check`);
+  const sums = readSums(listed, failures);
   const hashed = readdirSync(dir)
     .filter((f) => f.endsWith(".tgz"))
     .sort()
@@ -399,7 +415,7 @@ if (import.meta.main) {
     process.exit(2);
   }
   // The folder is relative to the working folder, the checkout of the publish job.
-  const outcome = publish(resolve(dir), npmSeams);
+  const outcome = publish(resolve(dir), npmSeams, process.env[SUMS_ENV] ?? "");
   for (const line of publishLines(outcome)) console.log(line);
   process.exit(outcome.failures.length > 0 ? 1 : 0);
 }

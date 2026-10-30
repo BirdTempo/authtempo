@@ -23,6 +23,11 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    # The SHA-256 list of the tarballs, from the step sums. The job publish
+    # reads it here, not from the artifact. Without it, whoever replaces the
+    # artifact replaces the tarballs and their list together.
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
     steps:
       # The tagged commit with the full history. Without fetch-depth 0, the
       # tag check and release:check find no origin/main and fail. The token
@@ -85,8 +90,10 @@ jobs:
           done
         working-directory: ${{ runner.temp }}/release-copy
       # The tarballs that npm receives, checked file by file. Without it, a
-      # tarball with a stray file or a missing entry publishes.
-      - run: node scripts/release/src/check-pack.ts out/*.tgz
+      # tarball with a stray file or a missing entry publishes. check-pack
+      # reads each tarball once and writes the SHA-256 of those bytes to
+      # SHA256SUMS, so no second read of the files makes the list.
+      - run: node scripts/release/src/check-pack.ts --sums out/SHA256SUMS out/*.tgz
         working-directory: ${{ runner.temp }}/release-copy
       # The smoke, npm publish --dry-run, and pnpm publish -r --dry-run on the
       # tarballs that npm receives, with no versioning. The dry run of
@@ -95,10 +102,17 @@ jobs:
       - name: Dry run the tarballs
         run: node scripts/release/src/dry-run.ts --tarballs out
         working-directory: ${{ runner.temp }}/release-copy
-      # The SHA-256 list. The job publish compares each tarball with it, so a
-      # tarball that changes between the two jobs never publishes.
-      - name: Write the SHA-256 list
-        run: cd out && sha256sum -- *.tgz > SHA256SUMS
+      # The SHA-256 list as the output sums of this job. The job publish
+      # compares each tarball with it, so a tarball that changes between the
+      # two jobs never publishes, also when the artifact changes as a whole.
+      - name: Export the SHA-256 list
+        id: sums
+        run: |
+          {
+            echo "sums<<SHA256SUMS_END"
+            cat out/SHA256SUMS
+            echo "SHA256SUMS_END"
+          } >> "$GITHUB_OUTPUT"
         working-directory: ${{ runner.temp }}/release-copy
       # The tarballs and their list for the job publish. Without it, the job
       # publish has nothing to publish and fails.
@@ -143,4 +157,8 @@ jobs:
       # 2026-10-20): a trusted publisher made after 2026-09-03 allows only npm
       # stage publish by default. The owner must select npm publish under
       # Allowed actions for each released package. Without it, this step fails.
+      # The SHA-256 list of the job check comes through env, never as an
+      # expression in the run line. Without it, publish.ts publishes nothing.
       - run: node scripts/release/src/publish.ts out
+        env:
+          RELEASE_SHA256SUMS: ${{ needs.check.outputs.sums }}

@@ -473,8 +473,9 @@ describe("check-workflows", () => {
   // The probes of the review of Task 8 (W1 to W21). Each adds one key that
   // the check does not name. Before the closed key lists, each one passed.
   const TAG_STEP = '        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"\n';
-  const PUBLISH_STEP = "      - run: node scripts/release/src/publish.ts out\n";
   const DOWNLOAD = "          name: tarballs\n          path: out\n";
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+  const SUMS_LINE = "          RELEASE_SHA256SUMS: ${{ needs.check.outputs.sums }}\n";
   const PUBLISH_CHECKOUT = `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      # Node with`;
   const probes: [string, () => string[], string[]][] = [
     [
@@ -550,13 +551,45 @@ describe("check-workflows", () => {
       "W8 env NODE_OPTIONS on the publish step",
       () =>
         releaseFailures(
+          swap(RELEASE, SUMS_LINE, `${SUMS_LINE}          NODE_OPTIONS: --import=./evil.mjs\n`),
+        ),
+      [
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+        'release.yml: jobs.publish: the env of step 4 is not {"RELEASE_SHA256SUMS":"${{ needs.check.outputs.sums }}"}',
+      ],
+    ],
+    [
+      "W8b the SHA-256 list of the artifact in place of the job output (ruling 67 of plan 12j, Low 4)",
+      () =>
+        releaseFailures(
           swap(
             RELEASE,
-            PUBLISH_STEP,
-            `${PUBLISH_STEP}        env:\n          NODE_OPTIONS: --import=./evil.mjs\n`,
+            SUMS_LINE,
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+            "          RELEASE_SHA256SUMS: ${{ needs.check.outputs.other }}\n",
           ),
         ),
-      ["release.yml: jobs.publish step 4: the key env is not in the rule of the step"],
+      [
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+        'release.yml: jobs.publish: the env of step 4 is not {"RELEASE_SHA256SUMS":"${{ needs.check.outputs.sums }}"}',
+      ],
+    ],
+    [
+      "W8c another output of the job check",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+            "      sums: ${{ steps.sums.outputs.sums }}\n",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+            "      sums: ${{ steps.pack.outputs.sums }}\n",
+          ),
+        ),
+      [
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+        'release.yml: jobs.check: the outputs are not {"sums":"${{ steps.sums.outputs.sums }}"}',
+      ],
     ],
     [
       "W9 container on jobs.publish",
