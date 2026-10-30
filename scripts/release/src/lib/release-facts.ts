@@ -30,7 +30,7 @@ export const TAG_PREFIX = "v";
  */
 export const SCOPE = "@authtempo";
 
-/** The public registry, where the publish job publishes. Read by publish. */
+/** The public registry, where the publish job publishes. Read by publish and verify-published. */
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org/";
 
 /** The lowest npm that publishes by trusted publishing. Read by publish, check-workflows, and the runbook test. */
