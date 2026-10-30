@@ -38,17 +38,41 @@ const twoMinors = (until: string): SupportRow[] => [
   current("0.2", "2027-01-01"),
 ];
 
+/** The group version of a table with rows: the version pull request moves it with the first row. */
+const versionOf = (rows: SupportRow[]) => (rows.length === 0 ? "0.0.0" : "0.2.0");
 const check = (
   rows: SupportRow[],
   today = "2027-02-01",
   migrations: Record<string, number[]> = FULL,
-) => checkSupport({ rows, today, schemaVersion: 11, migrations });
+  version = versionOf(rows),
+) => checkSupport({ rows, today, schemaVersion: 11, migrations, version });
 
 describe("check-support", () => {
   it("passes an empty table before the first release", () => {
     const r = check([]);
-    expect(summaryLine(r)).toBe("check-support: PASS minors=0 current=0 security=0 failures=0");
+    expect(summaryLine(r)).toBe(
+      "check-support: PASS minors=0 current=0 security=0 adapters=2 failures=0",
+    );
     expect(r.notes).toEqual(["no release exists"]);
+  });
+
+  it("fails an empty table above 0.0.0, and counts the adapters at 0.0.0 (ruling 47)", () => {
+    // A release with no support row is a release with no promise.
+    const released = check([], "2026-11-02", FULL, "0.1.0");
+    expect(released.failures).toEqual([
+      "the group is at 0.1.0, and release/support.json has no row; a release has a support row",
+    ]);
+    expect(released.notes).toEqual([]);
+    expect(summaryLine(released)).toBe(
+      "check-support: FAIL minors=0 current=0 security=0 adapters=2 failures=1",
+    );
+    // At 0.0.0 the empty table is the expected state; the adapters keep the count above zero.
+    const before = check([], "2026-11-02", FULL, "0.0.0");
+    expect(before.failures).toEqual([]);
+    expect(before.counts.adapters).toBe(2);
+    expect(check([], "2026-11-02", {}, "0.0.0").failures).toEqual(["read 0 adapters"]);
+    // The row of the first minor passes at its version.
+    expect(check([current("0.1", "2026-11-02")], "2026-11-02", FULL, "0.1.0").failures).toEqual([]);
   });
 
   it("fails two current minors", () => {
@@ -56,7 +80,9 @@ describe("check-support", () => {
     expect(r.failures).toEqual([
       "2 minors are current (0.1, 0.2); a released table has exactly one current minor",
     ]);
-    expect(summaryLine(r)).toBe("check-support: FAIL minors=2 current=2 security=0 failures=1");
+    expect(summaryLine(r)).toBe(
+      "check-support: FAIL minors=2 current=2 security=0 adapters=2 failures=1",
+    );
   });
 
   it("fails a released table with no current minor (review m3)", () => {
@@ -70,7 +96,9 @@ describe("check-support", () => {
     expect(r.failures).toEqual([
       "0 minors are current; a released table has exactly one current minor",
     ]);
-    expect(summaryLine(r)).toBe("check-support: FAIL minors=1 current=0 security=0 failures=1");
+    expect(summaryLine(r)).toBe(
+      "check-support: FAIL minors=1 current=0 security=0 adapters=2 failures=1",
+    );
   });
 
   it("fails a current minor that is not the newest minor (review m3)", () => {
@@ -127,7 +155,9 @@ describe("check-support", () => {
   it("fails a security date that is not 3 months after the next minor's release", () => {
     const ok = check(twoMinors("2027-04-02"));
     expect(ok.failures).toEqual([]);
-    expect(summaryLine(ok)).toBe("check-support: PASS minors=2 current=1 security=1 failures=0");
+    expect(summaryLine(ok)).toBe(
+      "check-support: PASS minors=2 current=1 security=1 adapters=2 failures=0",
+    );
     expect(check(twoMinors("2027-05-01")).failures).toEqual([
       "0.1 has security fixes until 2027-05-01; owner decision 3 needs 3 months after 0.2 released 2027-01-01, from 2027-04-01 to 2027-04-08",
     ]);
@@ -471,10 +501,10 @@ describe("check-support", () => {
     const { version } = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8"));
     const { lines, code } = entry(root, new Date().toISOString().slice(0, 10));
     if (version === "0.0.0") {
-      expect(lines.slice(0, 2)).toEqual([
-        "check-support: PASS minors=0 current=0 security=0 failures=0",
-        "  note: no release exists",
-      ]);
+      expect(lines[0]).toMatch(
+        /^check-support: PASS minors=0 current=0 security=0 adapters=[1-9]\d* failures=0$/,
+      );
+      expect(lines[1]).toBe("  note: no release exists");
       expect(lines).toHaveLength(3);
     } else {
       // The current minor is the minor of the group version.
@@ -483,7 +513,7 @@ describe("check-support", () => {
         version.split(".").slice(0, 2).join("."),
       );
       expect(lines[0]).toMatch(
-        /^check-support: PASS minors=[1-9]\d* current=1 security=\d+ failures=0$/,
+        /^check-support: PASS minors=[1-9]\d* current=1 security=\d+ adapters=[1-9]\d* failures=0$/,
       );
       expect(lines).toHaveLength(2);
     }

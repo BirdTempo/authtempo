@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Report, reportLines } from "./lib/report.ts";
+import { groupVersion } from "./lib/released.ts";
+import { type Report, reportLines, requireCounts } from "./lib/report.ts";
+import { UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 
 /** One minor of the support table, release/support.json (spec 33 item 7). */
 export interface SupportRow {
@@ -24,6 +26,8 @@ export interface SupportInput {
   schemaVersion: number;
   /** Each adapter folder name to the schema version that each of its migrations writes. */
   migrations: Readonly<Record<string, readonly number[]>>;
+  /** The group version: check-packages holds every released package at it. */
+  version: string;
 }
 
 const STATUSES = ["current", "security", "unsupported"] as const;
@@ -123,11 +127,20 @@ export function checkSupport(input: SupportInput): Report {
     return x[0] - y[0] || x[1] - y[1];
   });
   const currents = rows.filter((r) => r.status === "current");
+  const adapters = Object.keys(input.migrations).sort();
+  // The adapters count too, so the line before the first release reads more than zero items.
   const counts = {
     minors: rows.length,
     current: currents.length,
     security: rows.filter((r) => r.status === "security").length,
+    adapters: adapters.length,
   };
+  // A release with no support row is a release with no promise (ruling 47 of
+  // the plan 12j lane). The version pull request adds the row of its minor.
+  if (rows.length === 0 && input.version !== UNPUBLISHED_VERSION)
+    failures.push(
+      `the group is at ${input.version}, and release/support.json has no row; a release has a support row`,
+    );
   // The current minor gets every fix (owner decision 3). So after the first
   // release, one minor is current, and it is the newest one. A status typo on
   // a release day must not leave the table with no current minor.
@@ -186,8 +199,6 @@ export function checkSupport(input: SupportInput): Report {
       );
   }
 
-  const adapters = Object.keys(input.migrations).sort();
-  if (adapters.length === 0) failures.push("read 0 adapters");
   for (const row of rows) {
     if (row.status === "unsupported") continue;
     for (const from of row.schemaFrom) {
@@ -210,9 +221,10 @@ export function checkSupport(input: SupportInput): Report {
     }
   }
 
-  // An empty table is the state before the first release, not a check that read nothing.
-  const notes = rows.length === 0 ? ["no release exists"] : [];
-  return { name: "check-support", counts, failures, notes };
+  // At 0.0.0 an empty table is the state before the first release, not a check that read nothing.
+  const notes =
+    rows.length === 0 && input.version === UNPUBLISHED_VERSION ? ["no release exists"] : [];
+  return requireCounts({ name: "check-support", counts, failures, notes }, ["adapters"]);
 }
 
 /** The schema version that a migration file name writes: `0011_schema_v11.sql` writes 11. */
@@ -394,6 +406,7 @@ export function entry(root: string, today: string): { lines: string[]; code: num
     today,
     schemaVersion: schemaVersion ?? 0,
     migrations,
+    version: groupVersion(root),
   });
   report.failures.unshift(...support.failures, ...failures);
   if (schemaVersion === null)
