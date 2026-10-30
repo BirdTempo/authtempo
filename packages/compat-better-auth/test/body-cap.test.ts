@@ -125,6 +125,16 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
     },
   );
 
+  it("reads a body that a reader locked before the shim as no JSON, not 500 (ruling 51 Low 3)", async () => {
+    const auth = app();
+    for (const [path] of FIRST_READS) {
+      const request = post(path, 100);
+      request.body?.getReader();
+      const res = await auth.handler(request);
+      expect([path, res.status]).not.toEqual([path, 500]);
+    }
+  });
+
   it("reads a body at the cap of its route and passes it on", async () => {
     const auth = app();
     // At the floor, the body is read: the answer is not 413, whatever the route answers next.

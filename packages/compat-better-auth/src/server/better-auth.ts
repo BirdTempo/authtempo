@@ -14,7 +14,14 @@ import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
-import { BodyBusy, BodyTooLarge, bodyBusy, bodyTooLarge, readJsonOf } from "./body.js";
+import {
+  BodyBusy,
+  BodyTooLarge,
+  bodyBusy,
+  bodyReadable,
+  bodyTooLarge,
+  readJsonOf,
+} from "./body.js";
 import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
@@ -162,7 +169,8 @@ export function createHandler(
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
     if (sso) return sso;
-    const copy = req.method === "POST" ? req.clone() : null;
+    // A body read or locked before cannot be cloned: no copy, no policy code (ruling 51 Low 3).
+    const copy = req.method === "POST" && bodyReadable(req) ? req.clone() : null;
     // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
     // serve, then the calls that map onto core's operator routes. Null for every other request.
     const admin = plugins.has("admin")

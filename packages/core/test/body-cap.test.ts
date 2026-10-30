@@ -462,6 +462,46 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(res.status).toBe(400);
     expect(parse.mock.calls.filter(([t]) => t === deep)).toEqual([]);
   });
+  it("answers invalid_body, not 500, for a body that a reader locked before the route", async () => {
+    const schema = z.unknown();
+    // An app took a reader and read nothing: bodyUsed is false, and the stream is locked.
+    const locked = (request: Request) => {
+      request.body?.getReader();
+      expect([request.bodyUsed, request.body?.locked]).toEqual([false, true]);
+      return request;
+    };
+    const fail = { ok: false, code: "invalid_body", status: 400 };
+    expect(await readJson(locked(jsonPost("/x", "{}")), schema)).toEqual(fail);
+    expect(await readOptionalJson(locked(jsonPost("/x", "{}")), schema)).toEqual(fail);
+    const form = new Request(`${BASE_URL}/x`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "a=b",
+    });
+    expect(await readBody(locked(form), schema)).toEqual(fail);
+    // The SCIM body reads through the same reader: its own 400.
+    const { readScimBody } = await import("../src/http/routes/scim.js");
+    const scim = await readScimBody(
+      locked(
+        new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+          method: "POST",
+          headers: { "content-type": "application/scim+json" },
+          body: "{}",
+        }),
+      ),
+    );
+    expect(scim.ok ? 200 : scim.response.status).toBe(400);
+    // Through the router: the probe of the re-review answered 500 internal.
+    const { config, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    const res = await handle(
+      locked(jsonPost("/auth/magic-link/request", JSON.stringify({ email: "ada@example.com" }))),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_body" });
+    expect(mail).toHaveLength(0);
+  });
+
   it("answers invalid_body, not 500, for a body that was read before the route", async () => {
     const schema = z.unknown();
     const used = async (request: Request) => {

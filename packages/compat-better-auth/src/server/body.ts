@@ -3,6 +3,7 @@ import {
   BodyBusy,
   BodyTooLarge,
   bodyCapOf,
+  bodyReadable,
   parseBodyJson,
   readBodyText,
 } from "@authtempo/core/compat";
@@ -19,8 +20,8 @@ import { apiError } from "../errors.js";
  * The value, or null for a body that is not JSON.
  */
 export async function readJsonOf(request: Request, key?: RouteKey): Promise<unknown> {
-  // A body read before cannot be cloned: it reads as no JSON, as in core.
-  const text = request.bodyUsed ? null : await readBodyText(request.clone(), bodyCapOf(key));
+  // A body read or locked before cannot be cloned: it reads as no JSON, as in core (ruling 51 Low 3).
+  const text = bodyReadable(request) ? await readBodyText(request.clone(), bodyCapOf(key)) : null;
   const value = parseBodyJson(text);
   return value === undefined ? null : value;
 }
@@ -55,4 +56,4 @@ export function bodyBusy(): Response {
   });
 }
 
-export { BodyBusy, BodyTooLarge };
+export { BodyBusy, BodyTooLarge, bodyReadable };

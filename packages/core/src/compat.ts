@@ -28,6 +28,7 @@ export {
   BodyBusy,
   BodyTooLarge,
   bodyCapOf,
+  bodyReadable,
   parseBodyJson,
   readBodyText,
 } from "./http/body-cap.js";

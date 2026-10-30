@@ -19,7 +19,7 @@ const ALLOWED: readonly { file: string; read: string; why: string }[] = [
   {
     file: "src/http/body-cap.ts",
     read: "request.body",
-    why: "readBodyBytes: every route, the SAML form, and the SCIM body",
+    why: "freshBody: the stream of readBodyBytes for every route, the SAML form, and SCIM",
   },
   {
     file: "src/engine/social.ts",

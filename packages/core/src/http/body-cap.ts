@@ -162,7 +162,26 @@ export class BodyBusy extends Error {
 }
 
 /**
- * The request body as bytes, at most `cap`. The one raw read of a request
+ * The body stream of `request`, or false when the body was read before or
+ * a reader holds its lock. An app that called `getReader()` and read
+ * nothing leaves `bodyUsed` false, and a `Response` of a locked stream
+ * throws. The one raw read of a request body in core.
+ */
+function freshBody(request: Request): ReadableStream<Uint8Array> | null | false {
+  const body = request.body;
+  return request.bodyUsed || body?.locked === true ? false : body;
+}
+
+/**
+ * True when the body of `request` was not read or locked before, so a clone
+ * of it can be read. A compat package checks it before its clone.
+ */
+export function bodyReadable(request: Request): boolean {
+  return freshBody(request) !== false;
+}
+
+/**
+ * The request body as bytes, at most `cap`. The one read of a request
  * body in core: every reader of a route, the SAML ACS form, and the SCIM
  * body read through it. The read is a stream read that stops at the cap,
  * so a false or absent `content-length` cannot pass it. A declared length
@@ -171,11 +190,13 @@ export class BodyBusy extends Error {
  * aborts. A read with a cap above the floor holds its bytes against
  * `LARGE_READ_BUDGET` until it ends, and throws `BodyBusy` past it.
  * Workers, Node, Bun, and Deno each give `request.body` as a stream. Null
- * when the body was read before, such as by app middleware: each reader
- * answers it `invalid_body`, not 500 (ruling 46 Low 1 of the 12j lane).
+ * when the body was read or locked before, such as by app middleware: each
+ * reader answers it `invalid_body`, not 500 (ruling 46 Low 1 and ruling 51
+ * Low 3 of the 12j lane).
  */
 export async function readBodyBytes(request: Request, cap: number): Promise<Uint8Array | null> {
-  if (request.bodyUsed) return null;
+  const body = freshBody(request);
+  if (body === false) return null;
   const length = request.headers.get("content-length");
   let held = 0;
   let busy = false;
@@ -193,7 +214,7 @@ export async function readBodyBytes(request: Request, cap: number): Promise<Uint
   };
   try {
     const bytes = await readCappedBytes(
-      new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
+      new Response(body, length === null ? {} : { headers: { "content-length": length } }),
       cap,
       request.signal,
       cap > BODY_CAP_FLOOR ? take : undefined,
