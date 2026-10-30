@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
+import { bodyCapOf, REQUEST_BODY_MAX } from "@authtempo/core/bindings";
 import Fastify, { type FastifyServerOptions } from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes, authSession, getSession } from "../src/index.js";
@@ -550,5 +551,46 @@ describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
     await plain.register(authRoutes({ auth: s.auth }));
     await plain.inject({ method: "GET", url: "/auth/x" });
     expect(s.got).toEqual(["options", "none"]);
+  });
+});
+
+/** A JSON body of `bytes` bytes for the magic link request: the address, then spaces. */
+const padded = (bytes: number) => {
+  const json = JSON.stringify({ email: "ada@example.com" });
+  return json + " ".repeat(bytes - json.length);
+};
+/** The cap of the route of the tests below: core's floor. */
+const CAP = bodyCapOf("POST /magic-link/request");
+
+describe("the body cap through the Fastify binding (ruling 46 of the 12j lane)", () => {
+  /** The status, the body, and whether core answered: core sets its trace header on each answer. */
+  const send = async (app: Awaited<ReturnType<typeof makeApp>>["app"], bytes: number) => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/magic-link/request",
+      headers: { "content-type": "application/json", origin: BASE },
+      payload: padded(bytes),
+    });
+    return [res.statusCode, res.json(), res.headers["x-authtempo-trace"] !== undefined] as const;
+  };
+
+  it("answers core's 413 body_too_large one byte past the cap of the route", async () => {
+    const { app } = await makeApp();
+    expect((await send(app, CAP))[0]).toBe(200);
+    expect(await send(app, CAP + 1)).toEqual([413, { error: "body_too_large" }, true]);
+    await app.close();
+  });
+
+  it("buffers up to REQUEST_BODY_MAX, past the 1 MiB of Fastify, and answers past it in core's shape", async () => {
+    const { app } = await makeApp();
+    // Past Fastify's default bodyLimit: core reads it and answers its own cap.
+    expect(await send(app, 2 * 1024 * 1024)).toEqual([413, { error: "body_too_large" }, true]);
+    // Past the largest cap of core: Fastify stops the buffer, with core's code.
+    expect(await send(app, REQUEST_BODY_MAX + 1)).toEqual([
+      413,
+      { error: "body_too_large" },
+      false,
+    ]);
+    await app.close();
   });
 });

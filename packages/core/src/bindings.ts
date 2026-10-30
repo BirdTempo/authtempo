@@ -8,6 +8,14 @@ import { safeNext } from "./http/safe-next.js";
  * entries. A binding fits it to its framework; the rule itself lives here once.
  */
 
+/**
+ * The body caps of core (ruling 46 of the 12j lane). A binding whose
+ * framework buffers a body before core sets its own limit to
+ * `REQUEST_BODY_MAX`, the largest cap of any route, so the framework never
+ * answers a body that core would read. Core then answers each route's cap.
+ */
+export { bodyCapOf, REQUEST_BODY_MAX } from "./http/body-cap.js";
+
 /** The default `basePath`. `resolveConfig` and the OpenAPI document read this one copy (plan 11g). */
 export const DEFAULT_BASE_PATH = "/auth";
 

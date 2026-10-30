@@ -1,6 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { type AddressInfo, connect } from "node:net";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
+import { bodyCapOf } from "@authtempo/core/bindings";
 import express, { type RequestHandler } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { authHandler, authSession, getSession } from "../src/index.js";
@@ -520,5 +521,30 @@ describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
     expect(seen).toEqual([[s.work, "/own/x"]]);
     await (await fetch(`${base}/auth/x`)).text();
     expect(s.got).toEqual(["options", "none"]);
+  });
+});
+
+/** A JSON POST of `bytes` bytes to the magic link request: the address, then spaces. */
+const capBody = (bytes: number) => {
+  const json = JSON.stringify({ email: "ada@example.com" });
+  return json + " ".repeat(bytes - json.length);
+};
+/** The cap of the route of the test below: core's floor. */
+const CAP = bodyCapOf("POST /magic-link/request");
+
+describe("the body cap through the binding (ruling 46 of the 12j lane)", () => {
+  it("answers core's 413 body_too_large one byte past the cap of the route", async () => {
+    const { base } = await serve();
+    const send = (bytes: number) =>
+      fetch(`${base}/auth/magic-link/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: base },
+        body: capBody(bytes),
+      });
+    const at = await send(CAP);
+    expect(at.status).toBe(200);
+    const over = await send(CAP + 1);
+    expect(over.status).toBe(413);
+    expect(await over.json()).toEqual({ error: "body_too_large" });
   });
 });

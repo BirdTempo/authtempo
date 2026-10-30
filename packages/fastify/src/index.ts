@@ -5,6 +5,7 @@ import {
   DEFAULT_BASE_PATH,
   type GateAuth,
   handleOptions,
+  REQUEST_BODY_MAX,
   readGate,
 } from "@authtempo/core/bindings";
 import type {
@@ -168,6 +169,10 @@ export interface FastifyRoutesOptions {
 /**
  * The routes of core: `await app.register(authRoutes({ auth }))`. In the
  * plugin's own scope no parser of Fastify runs, so core reads the body as it came.
+ * The buffer takes up to `REQUEST_BODY_MAX`, the largest cap of core, and
+ * core answers the cap of each route (ruling 46 of the 12j lane). Fastify's
+ * default `bodyLimit` of 1 MiB would answer an SSO connection write first,
+ * in Fastify's own shape.
  */
 export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
   checkGateOptions({ basePath: options.basePath });
@@ -175,9 +180,17 @@ export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
   const basePath = options.basePath ?? own ?? DEFAULT_BASE_PATH;
   const plugin: FastifyPluginAsync = async (instance) => {
     instance.removeAllContentTypeParsers();
-    instance.addContentTypeParser("*", { parseAs: "buffer" }, (_request, body, done) =>
-      done(null, body),
+    instance.addContentTypeParser(
+      "*",
+      { parseAs: "buffer", bodyLimit: REQUEST_BODY_MAX },
+      (_request, body, done) => done(null, body),
     );
+    // A body past REQUEST_BODY_MAX is past the cap of every route: core's code, not Fastify's shape.
+    instance.setErrorHandler((error, _request, reply) => {
+      if ((error as { code?: unknown }).code === "FST_ERR_CTP_BODY_TOO_LARGE")
+        return reply.code(413).send({ error: "body_too_large" });
+      throw error;
+    });
     instance.route({
       // Every method core can get: a method left out would reach the app's other
       // routes under the base path, where the gate reads no session. Fastify adds HEAD to GET.

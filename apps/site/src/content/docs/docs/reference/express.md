@@ -56,6 +56,7 @@ sidebar:
 - The package takes `express` 5.2.1 or a later 5 release as a peer dependency.
 - The Express adapter of NestJS 12 pins Express 5.2.1, so the binding runs there too.
 - A body parser such as `express.json()` may run before the routes of core. The binding writes the parsed body again in its content type.
+- A body parser that runs first must allow the largest body cap of core, `REQUEST_BODY_MAX` (8388608 bytes), for example `express.json({ limit: 8388608 })`. The default limit of `express.json()` is 100 kB: it answers its own 413 before core, and an SSO connection write needs more. Mount the routes of core before the parser to skip it. Core answers the cap of each route with 413 [`body_too_large`](/docs/reference/errors/#body_too_large).
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
 - After the sliding refresh, the answer carries the renewed session cookie.
