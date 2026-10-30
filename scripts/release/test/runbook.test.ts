@@ -17,7 +17,7 @@ import {
 } from "../src/lib/release-facts.ts";
 import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
-import { copyCheck, PLAN_FILE } from "../src/rehearse.ts";
+import { copyCheck, PLAN_FILE, planFailures } from "../src/rehearse.ts";
 import { FALLBACK_FILE, type FallbackEntry, fallbackFaults } from "../src/verify-published.ts";
 
 // docs/release/RUNBOOK.md, the steps of the owner (plan 12j Task 13, spec 33
@@ -373,6 +373,16 @@ describe("docs/release/RUNBOOK.md", () => {
     const ci = readFileSync(new URL(`.github/workflows/${CI_FILE}`, ROOT), "utf8");
     expect(ci).toContain(`- run: ${run} --base ${CI_BASE}\n`);
     expect(step).toContain("Without it, the version pull request can fail its own check.");
+    // A FAIL can come from main, from the plan values, or from a dirty
+    // checkout, and only main is fixed on main (ruling 70 of plan 12j, Low 3).
+    expect(step).toContain(
+      `If it prints FAIL, stop. Fix what each failure line names: \`main\`, the plan values of \`${PLAN_FILE}\`, or the changes of the checkout. Then run it again.`,
+    );
+    expect(step).not.toContain("fix `main` first");
+    // Each fault of the plan values names the plan file.
+    const faults = [...planFailures([]), ...planFailures({ publish: "x", support: [], dates: 1 })];
+    expect(faults).toHaveLength(6);
+    for (const fault of faults) expect(fault, fault).toContain(PLAN_FILE);
     expect(orderFaults(swapSteps(TEXT, "At each release", 1, 2))).toEqual([
       "the version branch step comes before the rehearsal step",
     ]);
