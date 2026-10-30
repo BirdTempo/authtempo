@@ -43,8 +43,11 @@ export const BODY_CAPS: Readonly<Partial<Record<RouteKey, number>>> = Object.fre
 });
 
 /**
- * The largest cap of any route. A framework adapter that buffers a body
- * before core sets its own limit to this value (the Fastify `bodyLimit`).
+ * The largest cap of any route. No binding buffers a body before core: each
+ * passes the raw stream, and core reads at most the cap of the route. The
+ * Fastify binding sets no `bodyLimit` (ruling 51 Low 1 of the 12j lane). A
+ * host limit before core, such as `BODY_SIZE_LIMIT` of SvelteKit's Node
+ * adapter, must allow this value, or the host refuses a valid SSO write.
  */
 export const REQUEST_BODY_MAX = 8_388_608;
 

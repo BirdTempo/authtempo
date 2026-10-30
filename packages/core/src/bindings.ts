@@ -9,10 +9,11 @@ import { safeNext } from "./http/safe-next.js";
  */
 
 /**
- * The body caps of core (ruling 46 of the 12j lane). A binding whose
- * framework buffers a body before core sets its own limit to
- * `REQUEST_BODY_MAX`, the largest cap of any route, so the framework never
- * answers a body that core would read. Core then answers each route's cap.
+ * The body caps of core (rulings 46 and 51 of the 12j lane). No binding
+ * buffers a request body: each passes the raw stream to core, which reads
+ * at most the cap of each route (`bodyCapOf`) and answers 413 itself. A
+ * host limit before core must allow `REQUEST_BODY_MAX`, the largest cap of
+ * any route, or the host refuses a valid body before core reads it.
  */
 export { bodyCapOf, REQUEST_BODY_MAX } from "./http/body-cap.js";
 
