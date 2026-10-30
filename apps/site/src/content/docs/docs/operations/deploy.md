@@ -81,7 +81,7 @@ Use `GET`: a `HEAD` request to these routes answers 404.
 - The memory limiter counts per isolate. On Workers the real limit is the limit times the isolate count, so it is for tests only.
 - The default `clientIp` reads `cf-connecting-ip`. Only Cloudflare sets it, so off Workers a caller can set it.
 - A request with no client IP counts against one shared IP budget.
-- A host with no `clientIp` makes every caller with no client IP one client of 4 MiB in the budget of the large body reads. On Node or Bun, one caller that stalls large posts can hold that share. Then the SAML ACS, the Apple callback, and SCIM answer 503 to every caller with no client IP, while that caller sends 4 MiB each 10 s. The callers with an IP key still read.
+- A host with no `clientIp` makes every caller with no client IP one client of 4 MiB in the budget of the large body reads. On Node or Bun, one caller that stalls large posts can hold that share. Then the SAML ACS, the Apple callback, and SCIM answer 503 to every caller with no client IP. The 503 continues while that caller sends 4 MiB each 10 s. The callers with an IP key still read.
 - Keep the API on its own registrable domain. A sibling subdomain cannot set the `__Host-` session cookie, but it can set the trust cookie for the parent domain.
 
 :::caution
