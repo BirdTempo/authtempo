@@ -4,7 +4,14 @@ Run an app written for Better Auth 1.7 on authtempo. The app keeps its code
 and its tables. A package alias points the Better Auth package names at this
 package.
 
-Supported Better Auth versions: `>=1.7.0 <1.8.0`.
+Supported Better Auth versions: `>=1.7.7 <1.8.0`.
+
+The range starts at 1.7.7 because of the advisory GHSA-965c-763c-88jm. Better
+Auth below 1.7.7 accepts the state of an OAuth sign-in as a magic link, so an
+attacker can sign in as another user. The Better Auth system stays the
+rollback target during the move, so the rollback system must run 1.7.7 or
+later. The shim was read on the shapes of Better Auth 1.7.2 and on the API
+key plugin of 1.7.5.
 
 The range is `BETTER_AUTH_RANGE`, and `inRange(version, range)` reads it. A
 new Better Auth minor gets a compat change in an authtempo minor. The range

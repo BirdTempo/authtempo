@@ -25,8 +25,26 @@ describe("the supported Better Auth range (spec 33 item 1.6)", () => {
     expect(inRange(fixed.join("."), BETTER_AUTH_RANGE)).toBe(true);
   });
 
+  it("starts the range at the fixed version of GHSA-965c-763c-88jm", () => {
+    // Each version below 1.7.7 has the advisory (ruling 45 of plan 12j).
+    expect(inRange("1.7.7", BETTER_AUTH_RANGE)).toBe(true);
+    for (const v of ["1.7.0", "1.7.2", "1.7.5", "1.7.6"])
+      expect([v, inRange(v, BETTER_AUTH_RANGE)]).toEqual([v, false]);
+  });
+
+  it("names the advisory and the rollback floor where it names the range", () => {
+    const page = read("../../../apps/site/src/content/docs/docs/reference/compat-better-auth.md");
+    // A line break of the README may fall inside a sentence, so the test reads words.
+    for (const text of [read("../README.md"), page]) {
+      const words = text.split(/\s+/).join(" ");
+      expect(words).toContain("GHSA-965c-763c-88jm");
+      expect(words).toContain("the rollback system must run");
+      expect(words).toContain("1.7.7 or later");
+    }
+  });
+
   it("reads the range grammar", () => {
-    expect(inRange("1.7.0", BETTER_AUTH_RANGE)).toBe(true);
+    expect(inRange("1.7.0", ">=1.7.0 <1.8.0")).toBe(true);
     expect(inRange("1.7.10", BETTER_AUTH_RANGE)).toBe(true);
     expect(inRange("1.8.0", BETTER_AUTH_RANGE)).toBe(false);
     expect(inRange("1.6.22", BETTER_AUTH_RANGE)).toBe(false);

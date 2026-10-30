@@ -3,8 +3,13 @@
  * A new Better Auth minor gets a compat change in an authtempo minor; the
  * range never changes in a patch. package.json holds the same value in
  * `authtempo.betterAuth`, and a test holds the two equal.
+ *
+ * The range starts at 1.7.7, not 1.7.0 (ruling 45 of plan 12j, a plan
+ * deviation): GHSA-965c-763c-88jm affects each version below 1.7.7, and the
+ * rollback system must run 1.7.7 or later. The shim was read on the 1.7.2
+ * shapes and on the API key plugin of 1.7.5.
  */
-export const BETTER_AUTH_RANGE = ">=1.7.0 <1.8.0";
+export const BETTER_AUTH_RANGE = ">=1.7.7 <1.8.0";
 
 /** A plain release version: three numbers and no prerelease or build part. */
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
