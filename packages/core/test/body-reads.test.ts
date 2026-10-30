@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rawBodyReads } from "../../../scripts/body-reads.mjs";
+import turboText from "../../../turbo.json?raw";
 
 /**
  * Every read of a request body in core goes through a capped reader (ruling
@@ -149,5 +150,23 @@ describe("the raw body reads of the bindings, verify, handoff, and mcp (ruling 6
         ]).toEqual([pkg, a.count]);
     }
     console.log(lines.join("\n"));
+  });
+
+  it("names the sources of each scanned package and the scan as inputs of core's test in turbo.json (ruling 73)", () => {
+    // Turbo reads turbo.json as JSONC. The file holds comments on whole lines only.
+    const text = turboText.replace(/^\s*\/\/.*$/gm, "");
+    type Task = { dependsOn?: string[]; cache?: boolean; inputs?: string[] };
+    const tasks = (JSON.parse(text) as { tasks: Record<string, Task> }).tasks;
+    const core = tasks["@authtempo/core#test"];
+    expect(core?.inputs).toEqual([
+      "$TURBO_DEFAULT$",
+      "$TURBO_ROOT$/scripts/body-reads.mjs",
+      ...OTHER_PACKAGES.flatMap((pkg) => [
+        `$TURBO_ROOT$/packages/${pkg}/src/**`,
+        `$TURBO_ROOT$/packages/${pkg}/tsconfig.json`,
+      ]),
+    ]);
+    // The task keeps the rule of every test: it waits for its own build, with no cache.
+    expect([core?.dependsOn, core?.cache]).toEqual([tasks.test?.dependsOn, tasks.test?.cache]);
   });
 });
