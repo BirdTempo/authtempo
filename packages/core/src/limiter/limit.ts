@@ -103,8 +103,6 @@ export const LIMIT_FAMILIES = Object.freeze([
   "sso-manage:user",
   // Ruling 69 of the 12j lane: the large body reads of one person at the SSO connection writes.
   "sso-large-read:user",
-  // Ruling 72 Low 2 of the 12j lane: those reads of every person of the deployment together.
-  "sso-large-read:deployment",
   "sso-domain-verify:org",
   "sso-discover:ip",
   "sso-start:ip",

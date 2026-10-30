@@ -94,46 +94,9 @@ export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promis
  */
 export const SSO_LARGE_READ_PER_USER = { seconds: 3600, max: 6 };
 
-/**
- * The large body reads of every person of the deployment at the SSO
- * connection writes: 60 per hour, counted after `sso-large-read:user`, so a
- * read past the limit of its user spends none of this count (ruling 72 Low 2
- * of the 12j lane). A read past it answers 429 before any byte.
- *
- * The derivation, done 2026-10-30. It is 6 reads of one person
- * (`SSO_LARGE_READ_PER_USER`) times 10 admins who set up SSO in one hour.
- * One read holds the user half of the body budget for at most 32 s, so the
- * reads of all accounts together hold it at most 60 times 32 s, 1920 s, in
- * a window. Before this bound, 19 free accounts, at 6 times 32 s each, held
- * the half for the whole hour. The limiter counts in fixed windows: a
- * window opens at the first count, and its count starts again when it ends.
- * So up to 120 reads can start in a short span across the end of a window.
- * The bound has a cost: 10 accounts can spend it with small writes, and
- * then every SSO connection write answers 429 until the window ends. The
- * limits page states both residuals.
- */
-export const SSO_LARGE_READ_PER_DEPLOYMENT = { seconds: 3600, max: 60 };
-
-/** The one subject of `sso-large-read:deployment`: one count for the deployment. */
-const DEPLOYMENT_SUBJECT = "all";
-
-/**
- * Counts one large body read of the user at an SSO connection write: on the
- * limit of the user, then on the limit of the deployment (ruling 72 Low 2).
- * A read past the limit of its user does not count on the deployment. True
- * when the read is within both limits.
- */
-export async function ssoLargeReadAllowed(
-  config: ResolvedConfig,
-  userId: string,
-): Promise<boolean> {
-  if (!(await limit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER))) return false;
-  return limit(
-    config,
-    "sso-large-read:deployment",
-    DEPLOYMENT_SUBJECT,
-    SSO_LARGE_READ_PER_DEPLOYMENT,
-  );
+/** Counts one large body read of the user at an SSO connection write. True when the read is within the limit. */
+export function ssoLargeReadAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return limit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER);
 }
 
 /** The life of the binding cookie: the life of the state row. */

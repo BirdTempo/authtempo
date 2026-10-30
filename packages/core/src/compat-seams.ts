@@ -89,8 +89,9 @@ export function markSsoManageCounted(request: Request, userId: string): void {
  * read core's limits counted already (ruling 69 of the 12j lane), with the
  * outcome of those counts. Only `countSsoManageWrite` sets the mark, after
  * the counts. A refused count marks too, so core answers 429 and counts the
- * read no more (ruling 72 Low 2): a second count would spend one more read
- * of the user when only the deployment refused.
+ * read no more (ruling 72 Low 2). A shim that passes a refused write to
+ * core then gives one `limit.hit`, not two. Ruling 75 of the 12j lane
+ * removed the count of the deployment that this mark first served.
  */
 export function markLargeReadCounted(request: Request, userId: string, allowed: boolean): void {
   largeReadCounted.set(request, { userId, allowed });

@@ -397,46 +397,44 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
   });
 });
 
-/** Core's SSO_LARGE_READ_PER_DEPLOYMENT.max: the large reads of every account in an hour. */
-const DEPLOYMENT_READS_PER_HOUR = 60;
-
-describe("the large reads of a deployment through the Fastify binding (ruling 72 Low 2 of the 12j lane)", () => {
-  it("answers the limit to the sixty-first user-keyed start of the deployment in an hour, before any byte", {
+// Ruling 75 of the 12j lane withdrew a count of the large reads of the
+// whole deployment (60 per hour). With it, 10 free accounts spent the 60
+// reads with small writes in seconds, and every SSO connection write of the
+// deployment answered 429 until the window ended.
+describe("the large reads of one account do not limit another (ruling 75 of the 12j lane)", () => {
+  it("reads the SSO write of an eleventh account after ten accounts spend their large reads", {
     timeout: 60_000,
   }, async () => {
     const { port, close } = await startApp();
-    let late: ReturnType<typeof rawPost> | undefined;
     try {
-      const people = DEPLOYMENT_READS_PER_HOUR / LARGE_READS_PER_HOUR;
-      const statuses: number[] = [];
-      for (let i = 0; i < people; i++) {
+      /** A small SSO connection write of `cookie` from `ip`: "<status> <body>". */
+      const write = async (cookie: string, ip: string) => {
+        const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            cookie,
+            "cf-connecting-ip": ip,
+          },
+          body: "{}",
+        });
+        return `${res.status} ${await res.text()}`;
+      };
+      const answers: string[] = [];
+      for (let i = 0; i < 10; i++) {
         const ip = `203.0.113.${20 + i}`;
         const cookie = await signedIn(port, `p${i}@probe.example`, ip);
-        for (let n = 0; n < LARGE_READS_PER_HOUR; n++) {
-          const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              origin: "http://localhost",
-              cookie,
-              "cf-connecting-ip": ip,
-            },
-            body: "{}",
-          });
-          statuses.push(res.status);
-        }
+        for (let n = 0; n < LARGE_READS_PER_HOUR; n++) answers.push(await write(cookie, ip));
       }
-      // Ten accounts start 6 large reads each: 60, each a write that the schema refuses.
-      expect(statuses).toEqual(Array(DEPLOYMENT_READS_PER_HOUR).fill(400));
-      // An eleventh account with each read of its own hour left sends only its head.
-      const cookie = await signedIn(port, "late@probe.example", "203.0.113.40");
-      late = ssoPost(port, cookie, "203.0.113.40", 0);
-      await late.sent;
-      expect(await answered(late, 5000)).toBe(
-        'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}',
+      // Ten accounts start 6 large reads each, 60 in all: each reads, and the schema refuses it.
+      expect(answers).toEqual(
+        Array(10 * LARGE_READS_PER_HOUR).fill('400 {"error":"invalid_body"}'),
       );
+      // The large reads of an eleventh account are its own: its write reads at once.
+      const cookie = await signedIn(port, "late@probe.example", "203.0.113.40");
+      expect(await write(cookie, "203.0.113.40")).toBe('400 {"error":"invalid_body"}');
     } finally {
-      late?.socket.destroy();
       await close();
     }
   });

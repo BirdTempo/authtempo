@@ -38,11 +38,7 @@ import { readJson, readOptionalJson } from "../src/http/json.js";
 import type { RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
-import {
-  SSO_LARGE_READ_PER_DEPLOYMENT,
-  SSO_LARGE_READ_PER_USER,
-  SSO_MANAGE_PER_USER,
-} from "../src/http/routes/sso.js";
+import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../src/http/routes/sso.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { newId } from "../src/primitives/ids.js";
@@ -1851,53 +1847,5 @@ describe("a large read that cannot start spends no count (ruling 72 Minor 1 of t
     expect(
       writeEvents(all).filter((e) => e.ip === "203.0.113.2" && e.code === "body_busy"),
     ).toHaveLength(tries);
-  });
-});
-
-describe("the large reads of every account of a deployment (ruling 72 Low 2 of the 12j lane)", () => {
-  it("derives 60 large reads per hour: 6 of one person times 10 admins, 1920 s of holds", () => {
-    expect(SSO_LARGE_READ_PER_DEPLOYMENT).toEqual({ seconds: 3600, max: 60 });
-    expect(SSO_LARGE_READ_PER_DEPLOYMENT.max).toBe(10 * SSO_LARGE_READ_PER_USER.max);
-    expect(SSO_LARGE_READ_PER_DEPLOYMENT.seconds).toBe(SSO_LARGE_READ_PER_USER.seconds);
-    // The holds of every account together, each at most the time of the cap at the rate of a user.
-    expect(
-      SSO_LARGE_READ_PER_DEPLOYMENT.max *
-        largeReadDeadlineMs(REQUEST_BODY_MAX, LARGE_READ_USER_MIN_RATE),
-    ).toBe(1_920_000);
-  });
-
-  it("answers rate_limited to the 61st large read of the deployment in an hour, before any byte", {
-    timeout: 60_000,
-  }, async () => {
-    const { w, events } = observedSso();
-    const people = SSO_LARGE_READ_PER_DEPLOYMENT.max / SSO_LARGE_READ_PER_USER.max;
-    const spenders = [];
-    for (let i = 0; i < people; i++) spenders.push(await verifiedSession(w, `p${i}@acme.example`));
-    // The sign-ups of the helper have no IP: 10 per hour. The next hour lets one more sign up.
-    w.clock.advance(3600 * 1000);
-    const late = await verifiedSession(w, "late@acme.example");
-    const [first] = spenders;
-    if (first === undefined) throw new Error("no person");
-    // The first person tries once past the limit of a user: that 429 spends no read of the deployment.
-    const tries: number[] = [];
-    for (let i = 0; i <= SSO_LARGE_READ_PER_USER.max; i++)
-      tries.push((await ssoWrite(w, first.token, "203.0.113.1", "{}")).status);
-    expect(tries).toEqual([...Array(SSO_LARGE_READ_PER_USER.max).fill(400), 429]);
-    // The other people spend their reads: 60 reads of the deployment in all.
-    for (const p of spenders.slice(1))
-      for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
-        expect((await ssoWrite(w, p.token, "203.0.113.2", "{}")).status).toBe(400);
-    // The 61st: a person with every read of its own hour left gets 429 with no byte read.
-    const body = countedForm(1_048_576);
-    const res = await ssoWrite(w, late.token, "203.0.113.3", body.stream);
-    expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
-    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
-    expect((await events()).filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
-      "sso-large-read:user",
-      "sso-large-read:deployment",
-    ]);
-    // The window of the deployment ends an hour after its first count: the person writes then.
-    w.clock.advance(SSO_LARGE_READ_PER_DEPLOYMENT.seconds * 1000);
-    expect((await ssoWrite(w, late.token, "203.0.113.3", "{}")).status).toBe(400);
   });
 });

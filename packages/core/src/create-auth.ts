@@ -1228,9 +1228,9 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
  * and the package answers 429 with no read. Within the limit it binds the
  * client of `request` to the user, so the read counts on the share of the
  * user (ruling 59 of the 12j lane). It also counts the large read of the
- * package on `sso-large-read:user` and on `sso-large-read:deployment`, and
- * marks it with the outcome, so core counts it once (rulings 69 and 72 Low
- * 2). Past any limit it answers false. Before the counts, it
+ * package on `sso-large-read:user`, and marks it with the outcome, so core
+ * counts it once (ruling 69, and ruling 72 Low 2 for the outcome). Past
+ * either limit it answers false. Before the counts, it
  * throws `BodyBusy` when the large read of the user cannot start, so a
  * retry after `Retry-After` spends no count (ruling 72 Minor 1). Throws a
  * TypeError for an Auth that `createAuth` did not make.

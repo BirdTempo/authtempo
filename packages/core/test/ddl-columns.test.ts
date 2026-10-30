@@ -76,8 +76,6 @@ function longestPart(expr: string): string {
   if (expr === "CAP_SUBJECT") return "deployment";
   // The one subject of the daily cap of the passkey-first sign-up (ruling 38 M3).
   if (expr === "SIGN_UP_CAP_SUBJECT") return "deployment";
-  // The one subject of the large SSO reads of the deployment (ruling 72 Low 2 of the 12j lane).
-  if (expr === "DEPLOYMENT_SUBJECT") return "all";
   // The actor of an operator route: `secret:` and a name of 32, or `user:` and an id of 64.
   if (expr === "actorSubject(actor)") return `user:${"i".repeat(64)}`;
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
@@ -260,8 +258,7 @@ describe("the column map (plan 12g)", () => {
     // Task 5 adds 1: the per-actor count of the operator create. Ruling 69 of
     // the 12j lane adds 1: the large body reads of one person at the SSO writes.
     // Ruling 68 Minor 2 of the 12j lane adds 1: the callback form posts of an IP.
-    // Ruling 72 Low 2 of the 12j lane adds 1: the large body reads of the deployment.
-    expect(sites.length).toBe(115);
+    expect(sites.length).toBe(114);
     expect(sites).toContain('engine/social.ts "social-callback:ip" ipKey(ip)');
     expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
     expect(sites).toContain('http/routes/operator.ts "operator-create:actor" actorSubject(actor)');

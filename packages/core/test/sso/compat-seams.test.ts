@@ -12,12 +12,9 @@ import { createConnection, updateConnection } from "../../src/engine/sso/connect
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
 import { createRouter, type Route } from "../../src/http/router.js";
-import {
-  SSO_LARGE_READ_PER_DEPLOYMENT,
-  SSO_LARGE_READ_PER_USER,
-  SSO_MANAGE_PER_USER,
-} from "../../src/http/routes/sso.js";
+import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../../src/http/routes/sso.js";
 import { createMemoryLimiter } from "../../src/limiter/memory.js";
+import type { AuthEvent } from "../../src/observe/port.js";
 import { systemClock } from "../../src/primitives/clock.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { BASE_URL, get } from "../helpers.js";
@@ -352,8 +349,9 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     );
   });
 
-  it("takes a refusal of the deployment count from the package, and counts the user once (ruling 72 Low 2)", async () => {
+  it("takes a refusal of the package's large-read count, and gives one limit.hit (ruling 72 Low 2)", async () => {
     const sent: string[] = [];
+    const batches: AuthEvent[][] = [];
     const limiter = createMemoryLimiter(systemClock);
     const auth = createAuth({
       baseURL: BASE_URL,
@@ -364,6 +362,7 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
       mail: { send: async (m) => void sent.push(m.text) },
       organizations: {},
       sso: { oidc: true, dns: [fakeDns("a", {})] },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
     });
     await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
     const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "");
@@ -376,19 +375,24 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: "{}",
       });
-    // Other accounts spent the 60 large reads of the deployment in this hour.
-    for (let i = 0; i < SSO_LARGE_READ_PER_DEPLOYMENT.max; i++)
-      expect(
-        await limiter.allow("sso-large-read:deployment:all", SSO_LARGE_READ_PER_DEPLOYMENT),
-      ).toBe(true);
-    // The package counts the write: the user has room, the deployment has none.
+    // The user spent the large reads of this hour.
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
+        true,
+      );
+    // The package counts the write, and the limit of the user refuses it.
     const r = write();
     expect(await countSsoManageWrite(auth, r, user.id)).toBe(false);
-    // The shim passes such a write to core: core answers 429 and counts no read of the user again.
+    // The shim passes such a write to core: core answers 429 and does not count it again.
     const res = await auth.handle(r);
     expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
-    let left = 0;
-    while (await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)) left++;
-    expect(left).toBe(SSO_LARGE_READ_PER_USER.max - 1);
+    await auth.observe.flush();
+    // One limit.hit: the count of the package. Core did not count the write a second time.
+    expect(
+      batches
+        .flat()
+        .filter((e) => e.name === "limit.hit")
+        .map((e) => e.family),
+    ).toEqual(["sso-large-read:user"]);
   });
 });
