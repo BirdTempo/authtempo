@@ -326,7 +326,9 @@ describe("docs/release/RUNBOOK.md", () => {
       "Set the row of the previous minor to `security`, with `securityUntil` 3 months after that day.",
       "`unsupported`",
       "`SECURITY.md`",
-      "Without it, `check-support` and `check-security-policy` fail the pull request.",
+      // Without the row, check-security-policy fails only after step 6 (ruling 65 of plan 12j, m1).
+      "Without it, `check-support` fails the pull request.",
+      "At the first release, `check-security-policy` also fails after the edits of step 6.",
     ])
       expect(step, part).toContain(part);
     expect(stepOf(TEXT, "At each release", 4)).toContain("`RELEASE_DATES`");
