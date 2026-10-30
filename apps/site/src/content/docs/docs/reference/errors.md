@@ -502,7 +502,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="body_too_large"><code>body_too_large</code> 413</h3>
 
 - **Meaning:** The request body is longer than the cap of its route. Core stopped the read at the cap, so no handler parsed the body. A false or absent `content-length` does not change the count. The cap is 65536 bytes, 262144 bytes for `POST /social/apple/callback`, and 8388608 bytes for the two SSO connection writes. The router answers it for every route that reads a body.
-- **Do:** Send a smaller body. Each cap is the next power of two above the largest valid body of its route. A client that gets this code sends a wrong body.
+- **Do:** Send a smaller body. Each cap is the next power of two above the largest valid body of its route. A client that gets this code sends a wrong body. An SSO connection write whose read ran more than 8 s before this code spends the rest of the window of `sso-large-read:user`.
 
 | Routes |
 | --- |
@@ -511,7 +511,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="body_busy"><code>body_busy</code> 503</h3>
 
 - **Meaning:** The body reads of the routes with a cap above 65536 bytes hold at most 16777216 bytes in this isolate, in two halves. Now the reads of signed-in users hold their half, 8388608 bytes, or the other reads hold theirs, 8388608 bytes. Or the reads of one client hold its share: 4194304 bytes for an IP, or the cap of the read for a user. Or the user runs another large read: a user runs one at a time. A client is its IP before a session and its user after one. Core stopped the read, so no handler parsed the body. The answer carries `Retry-After: 1`.
-- **Do:** Send the request again after the seconds of `Retry-After`. An SSO connection write that gets this code counts on no limit of its user. A burst of large bodies at once gets this code. A body at the floor of 65536 bytes never gets it.
+- **Do:** Send the request again after the seconds of `Retry-After`. An SSO connection write with a declared length that cannot start gets this code before any count of its user. A write with no length counts at its start, and can then get this code at its first chunk. A write that gets this code in the middle of its read has counted too. A write whose read ran more than 8 s before this code spends the rest of the window of `sso-large-read:user`. A burst of large bodies at once gets this code. A body at the floor of 65536 bytes never gets it.
 
 | Routes |
 | --- |
@@ -520,7 +520,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="body_timeout"><code>body_timeout</code> 408</h3>
 
 - **Meaning:** A body read of a route with a cap above the floor stopped at a deadline. It got no bytes for 10 s, or it ran past the time of its cap at 131072 bytes per second. For a signed-in user, the rate is 262144 bytes per second. That time is at least 10 s. Core freed the bytes of the read, so no handler parsed the body.
-- **Do:** Send the whole body again, with no pause. A link slower than 128 KiB per second, or 256 KiB per second for a signed-in user, can get this code for a large body. An SSO connection write that gets this code spends the rest of the large reads of its user in the window of `sso-large-read:user`. So does such a write that reads whole after more than 8 s. Until that window ends, each SSO connection write of the user answers 429 `rate_limited`. Send it again in the next window, on a faster link. A body at the floor never gets it.
+- **Do:** Send the whole body again, with no pause. A link slower than 128 KiB per second, or 256 KiB per second for a signed-in user, can get this code for a large body. An SSO connection write that gets this code spends the rest of the large reads of its user in the window of `sso-large-read:user`. So does such a write whose read ran more than 8 s and then ended in another way. The read can end whole, at a 413 past its cap, at a 503 `body_busy`, or at a closed socket. The spend lands in the window in which the read ends. So a read that ends after its window ended fills the next window. Until that window ends, up to 1 hour from the end of that read, each SSO connection write of the user answers 429 `rate_limited`. Send it again in the next window, on a faster link. A body at the floor never gets it.
 
 | Routes |
 | --- |

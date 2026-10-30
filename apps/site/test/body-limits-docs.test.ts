@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, 69, 72, 75, and 79 of the 12j lane). The errors page, the limits page, the Express,
+// 68, 69, 72, 75, 79, and 84 of the 12j lane). The errors page, the limits page, the Express,
 // Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
 // README, and the deploy page state the caps and the scan limits by hand.
 // This test reads each constant from the source of core
@@ -374,7 +374,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     slowSeconds,
     [
       ["limits", /A read that takes more than (\d+) s spends the rest of the window/],
-      ["errors", /So does such a write that reads whole after more than (\d+) s/],
+      // Each end of a slow read spends: a 413 past its cap and a 503 too (ruling 84 Low 1).
+      ["errors", /So does such a write whose read ran more than (\d+) s and then ended/],
+      ["errors", /whose read ran more than (\d+) s before this code spends/],
       // The residual of the spend of slow reads (ruling 79).
       ["limits", /A large read of a user that takes more than (\d+) s spends the rest/],
       ["limits", /A careful account ends each read within (\d+) s and spends nothing/],
@@ -398,6 +400,15 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     "the window of the large reads of one user, in seconds",
     () => limitSeconds("SSO_LARGE_READ_PER_USER"),
     [["limits", /takes \d+ reads, (\d+) s \/ \d+ s, from/]],
+  ],
+  [
+    // The spend lands in the window in which the read ends, so the wait is up to a window (ruling 84 Low 1).
+    "the window of the large reads of one user, in hours",
+    () => limitSeconds("SSO_LARGE_READ_PER_USER") / 3600,
+    [
+      ["errors", /window ends, up to (\d+) hour from the end of that read/],
+      ["limits", /window ends, up to (\d+) hour from the end of that read/],
+    ],
   ],
   [
     "the reads within the time of no spend that hold the user half for the hour",
@@ -482,6 +493,91 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   ],
 ];
 
+/**
+ * The sentences of ruling 84 Low 1, word for word, with the times that each
+ * page states them. A write with a declared length that cannot start answers
+ * 503 before any count of its user (rr-bodycap789 p1). A write with no length
+ * counts at its start and can get the 503 at its first chunk (p9). A slow read
+ * spends at each end, a 503 in the middle of the read too (p2, p2b). The spend
+ * lands in the window in which the read ends (p8).
+ */
+const NARROWED: [FileKey, string, number][] = [
+  [
+    "errors",
+    "An SSO connection write with a declared length that cannot start gets this code before any count of its user.",
+    1,
+  ],
+  [
+    "errors",
+    "A write with no length counts at its start, and can then get this code at its first chunk.",
+    1,
+  ],
+  ["errors", "A write that gets this code in the middle of its read has counted too.", 1],
+  [
+    "errors",
+    "A write whose read ran more than 8 s before this code spends the rest of the window of `sso-large-read:user`.",
+    1,
+  ],
+  [
+    "errors",
+    "An SSO connection write whose read ran more than 8 s before this code spends the rest of the window of `sso-large-read:user`.",
+    1,
+  ],
+  ["errors", "So does such a write whose read ran more than 8 s and then ended in another way.", 1],
+  [
+    "errors",
+    "The read can end whole, at a 413 past its cap, at a 503 `body_busy`, or at a closed socket.",
+    1,
+  ],
+  ["errors", "The spend lands in the window in which the read ends.", 1],
+  ["errors", "So a read that ends after its window ended fills the next window.", 1],
+  [
+    "errors",
+    "Until that window ends, up to 1 hour from the end of that read, each SSO connection write of the user answers 429 `rate_limited`.",
+    1,
+  ],
+  [
+    "limits",
+    "A write with a declared length whose read cannot start answers 503 `body_busy` before this count and `sso-manage:user`, and counts on neither.",
+    1,
+  ],
+  [
+    "limits",
+    "A write with no length counts at its start, and can then get that 503 at its first chunk.",
+    1,
+  ],
+  [
+    "limits",
+    "A write with a declared length that gets that 503 before its read starts counts on no limit of its user.",
+    1,
+  ],
+  [
+    "limits",
+    "So an admin who sends such a write again after `Retry-After` loses no write of the hour.",
+    1,
+  ],
+  [
+    "limits",
+    "A write with no length counts at its start, and can then get the 503 at its first chunk.",
+    1,
+  ],
+  [
+    "limits",
+    "It spends at each end: whole, a 408, a 413 past its cap, a 503 in the middle of the read, and a closed socket.",
+    2,
+  ],
+  ["limits", "The spend lands in the window in which the read ends.", 2],
+  ["limits", "So a read that ends after its window ended fills the next window.", 2],
+  [
+    "limits",
+    "The account then starts no large read until the window ends, up to 1 hour from the end of that read.",
+    2,
+  ],
+];
+
+/** A promise that a 503 costs a write no count of its user (ruling 84 Low 1). */
+const NO_COUNT = /counts on (no limit|neither)|before any count/;
+
 /** The plan of the body limits: each page that states them cites it (spec 18 rule 4, ruling 64 Low 3). */
 const PLAN = "docs/superpowers/plans/2026-10-14-12j-release-program.md";
 const PLAN_PAGES = [
@@ -499,7 +595,7 @@ const PLAN_PAGES = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, 72, 75, and 79 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, 72, 75, 79, and 84 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();
@@ -512,6 +608,26 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
             got: want,
           });
     });
+
+  it("states the 503 and the spend of an SSO connection write as core measures them (ruling 84 Low 1)", () => {
+    for (const [file, sentence, times] of NARROWED) {
+      const got = textOf(FILES[file]).split(sentence).length - 1;
+      expect({ file, sentence, got }).toEqual({ file, sentence, got: times });
+    }
+  });
+
+  it("promises no count at a 503 only to a write with a declared length (ruling 84 Low 1)", () => {
+    for (const file of Object.keys(FILES) as FileKey[])
+      for (const sentence of textOf(FILES[file]).split(/(?<=\.) (?=[A-Z])/))
+        if (NO_COUNT.test(sentence))
+          expect({ file, sentence, declared: sentence.includes("with a declared length") }).toEqual(
+            {
+              file,
+              sentence,
+              declared: true,
+            },
+          );
+  });
 
   it("states the key of no IP and of a text that is not an IP as ipKey gives them (ruling 69)", () => {
     const limits = textOf(FILES.limits);
