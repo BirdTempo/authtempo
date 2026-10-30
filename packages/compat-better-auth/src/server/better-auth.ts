@@ -31,7 +31,7 @@ import { type Mapped, mapOptions, mappedFor } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
 import { signInAdditionsRoute } from "./sign-in-additions.js";
-import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
+import { scimRoute, ssoAcsRoute, ssoConnectionWrite, ssoRoute } from "./sso-routes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
@@ -168,11 +168,23 @@ export function createHandler(
       const held = await placeholderChange(auth, base, req, true);
       if (held) return held;
     }
+    // Core's SSO connection writes: the label rule of the shim, and one read of the body. A
+    // write that passes goes to core as a new request of the same text (ruling 68 Minor 1).
+    const write = await ssoConnectionWrite(auth, mapped, req);
+    if (write instanceof Response) return write;
+    if (write) req = write;
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
     if (sso) return sso;
-    // A body read or locked before cannot be cloned: no copy, no policy code (ruling 51 Low 3).
-    const copy = req.method === "POST" && bodyReadable(req) ? req.clone() : null;
+    // A copy only for a path whose policy code reads it (ruling 68 Minor 1). A clone is a tee:
+    // the branch that no one reads keeps each chunk of the body. A body read or locked before
+    // cannot be cloned: no copy, no policy code (ruling 51 Low 3).
+    const copy =
+      req.method === "POST" &&
+      Object.hasOwn(PASSWORD_FIELD, pathname.slice(mapped.basePath.length)) &&
+      bodyReadable(req)
+        ? req.clone()
+        : null;
     // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
     // serve, then the calls that map onto core's operator routes. Null for every other request.
     const admin = plugins.has("admin")

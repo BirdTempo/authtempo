@@ -145,6 +145,34 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
   });
 });
 
+describe("one read of each body through the shim (ruling 68 Minor 1 of the 12j lane)", () => {
+  it("clones no body of an SSO write, the ACS, or SCIM, and clones the body of a password path", async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const { cookie } = await person("ada@example.com");
+    // A clone is a tee: the branch that no one reads keeps each chunk of a large body.
+    const clone = vi.spyOn(Request.prototype, "clone");
+    const clones = async (request: Request) => {
+      clone.mockClear();
+      const res = await auth.handler(request);
+      return [new URL(request.url).pathname, res.status === 500, clone.mock.calls.length];
+    };
+    for (const path of SSO_WRITES)
+      expect(await clones(post(path, BODY_CAP_FLOOR + 1, cookie))).toEqual([
+        `/api/auth${path}`,
+        false,
+        0,
+      ]);
+    for (const path of ["/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs", "/scim/v2/Users"])
+      expect(await clones(post(path, 100))).toEqual([`/api/auth${path}`, false, 0]);
+    // The policy code of a password path reads the copy, so that path keeps its one clone.
+    expect(await clones(post("/password/sign-up", 100))).toEqual([
+      "/api/auth/password/sign-up",
+      false,
+      1,
+    ]);
+  });
+});
+
 /**
  * A JSON body of `bytes` bytes, `{}` and spaces, in chunks of 64 KiB. It
  * counts the bytes that a reader pulled, so a test sees that no read ran.

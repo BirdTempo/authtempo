@@ -32,6 +32,28 @@ export async function readJsonOf(request: Request, key?: RouteKey): Promise<unkn
   return value === undefined ? null : value;
 }
 
+/**
+ * The text of `request` itself, not of a clone, by core's capped reader at the
+ * cap of the core route `key`, for the share of its client (ruling 68 Minor 1
+ * of the 12j lane). A clone is a tee: the branch that no one reads keeps each
+ * chunk that the read pulls, so a large body is held twice and the budget
+ * counts it once. A path that sends core no request of this body reads it
+ * here. Null for a body read or locked before.
+ */
+export async function readOwnTextOf(request: Request, key?: RouteKey): Promise<string | null> {
+  return bodyReadable(request)
+    ? await readBodyText(request, bodyCapOf(key), bodyClientOf(request))
+    : null;
+}
+
+/** The JSON object of a text of `readOwnTextOf`, or null for no object. */
+export function objectOfText(text: string | null): Record<string, unknown> | null {
+  const v = parseBodyJson(text);
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
 /** The JSON object of a request, as `readJsonOf` reads it, or null for no object. */
 export async function readObjectOf(
   request: Request,
