@@ -38,6 +38,7 @@ import {
   BODY_DEPTH_MAX,
   BodyBusy,
   BodyTooLarge,
+  bodyReadable,
   jsonShapeFits,
   readBodyBytes,
 } from "../body-cap.js";
@@ -84,7 +85,8 @@ const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]
  * must be `application/scim+json` or `application/json`, else 400
  * `invalidSyntax`. At most `SCIM_BODY_MAX` bytes through `readBodyBytes`,
  * else 413. A body that is not UTF-8 answers 400 `invalidSyntax`, as does
- * JSON that does not parse or a body read before. So 413 means a long body
+ * JSON that does not parse, a body read before, or a body chunk that is not
+ * bytes. Each names its cause (ruling 66 Low 1). So 413 means a long body
  * only. The read holds its bytes against the budget of the large reads, and
  * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane). A body
  * nested deeper than `BODY_DEPTH_MAX` or with more than `SCIM_ITEMS_MAX`
@@ -103,6 +105,12 @@ export async function readScimBody(
         "invalidSyntax",
       ),
     };
+  // The read gives null for both a body read before and a bad chunk: this check tells them apart.
+  if (!bodyReadable(request))
+    return {
+      ok: false,
+      response: scimError(400, "the body was read before", "invalidSyntax"),
+    };
   let bytes: Uint8Array | null;
   try {
     bytes = await readBodyBytes(request, SCIM_BODY_MAX);
@@ -120,7 +128,7 @@ export async function readScimBody(
   if (bytes === null)
     return {
       ok: false,
-      response: scimError(400, "the body was read before", "invalidSyntax"),
+      response: scimError(400, "the body holds a chunk that is not bytes", "invalidSyntax"),
     };
   let text: string;
   try {

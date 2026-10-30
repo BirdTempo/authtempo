@@ -1331,3 +1331,62 @@ describe("a body chunk that is not bytes (ruling 59 Low 1 of the 12j lane)", () 
     expect(strings).toBeNull();
   });
 });
+
+/** The `vm` module of Node. A specifier in a constant keeps it out of the typecheck of core, which has no Node types. */
+const VM_MODULE = "node:vm";
+
+/** A body stream of `chunks`, of any kind, one chunk at each pull. */
+function chunkBody(chunks: unknown[]): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    pull(c) {
+      const next = chunks.shift();
+      if (next === undefined) c.close();
+      else c.enqueue(next);
+    },
+  }) as unknown as ReadableStream<Uint8Array>;
+}
+
+describe("the kind of a body chunk, not its realm (ruling 66 Low 1 of the 12j lane)", () => {
+  it("reads a Uint8Array of another realm and a Buffer, and refuses each other kind of chunk", async () => {
+    const vm = (await import(/* @vite-ignore */ VM_MODULE)) as {
+      runInNewContext(code: string): unknown;
+    };
+    const other = vm.runInNewContext("new Uint8Array([123, 125])") as Uint8Array;
+    // `instanceof` refused this chunk before the fix.
+    expect(other instanceof Uint8Array).toBe(false);
+    expect(await readBodyText(streamPost("/x", chunkBody([other])), BODY_CAP_FLOOR)).toBe("{}");
+    const { Buffer } = globalThis as unknown as { Buffer: { from(text: string): Uint8Array } };
+    expect(
+      await readBodyText(streamPost("/x", chunkBody([Buffer.from("{}")])), BODY_CAP_FLOOR),
+    ).toBe("{}");
+    // A view that claims the tag of a Uint8Array is still a DataView.
+    const claims = new DataView(new ArrayBuffer(2));
+    Object.defineProperty(claims, Symbol.toStringTag, { value: "Uint8Array" });
+    expect(Object.prototype.toString.call(claims)).toBe("[object Uint8Array]");
+    const refused = [
+      "{}",
+      new ArrayBuffer(2),
+      new DataView(new ArrayBuffer(2)),
+      claims,
+      new Uint8ClampedArray(2),
+      { byteLength: 2 },
+    ];
+    for (const chunk of refused)
+      expect(await readBodyText(streamPost("/x", chunkBody([chunk])), BODY_CAP_FLOOR)).toBeNull();
+  });
+
+  it("names a bad chunk at the SCIM read, apart from a body read before", async () => {
+    const { readScimBody } = await import("../src/http/routes/scim.js");
+    const detailOf = async (read: Awaited<ReturnType<typeof readScimBody>>) => {
+      if (read.ok) throw new Error("SCIM read the body");
+      return [read.response.status, ((await read.response.json()) as { detail: string }).detail];
+    };
+    const bad = await readScimBody(
+      streamPost("/auth/scim/v2/Users", stringBody(4).stream, "application/scim+json"),
+    );
+    expect(await detailOf(bad)).toEqual([400, "the body holds a chunk that is not bytes"]);
+    const used = streamPost("/auth/scim/v2/Users", chunkBody([]), "application/scim+json");
+    await used.text();
+    expect(await detailOf(await readScimBody(used))).toEqual([400, "the body was read before"]);
+  });
+});

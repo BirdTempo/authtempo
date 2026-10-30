@@ -44,9 +44,29 @@ export async function readCappedBytes(
 }
 
 /**
+ * The `Symbol.toStringTag` getter of the typed arrays. It reads the internal
+ * slot of its value, so it names the kind of a typed array of any realm. A
+ * string, an `ArrayBuffer`, a `DataView`, or an object with its own tag gives
+ * `undefined`.
+ */
+const typedArrayKind = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get;
+
+/**
+ * True for a `Uint8Array` of any realm, such as a chunk that a stream of
+ * another realm makes: the check tests the kind, not the realm (ruling 66
+ * Low 1 of the 12j lane). `instanceof` refused such a chunk.
+ */
+function isBytes(value: unknown): value is Uint8Array {
+  return ArrayBuffer.isView(value) && typedArrayKind?.call(value) === "Uint8Array";
+}
+
+/**
  * Why a capped read gave no bytes: `cap` past `max` or at a false answer of
- * `take`, `chunk` at a chunk that is not a `Uint8Array`, and `error` at a
- * read error or an abort.
+ * `take`, `chunk` at a chunk that is not a `Uint8Array` of any realm, and
+ * `error` at a read error or an abort.
  */
 export type CappedRefusal = "cap" | "chunk" | "error";
 
@@ -82,7 +102,7 @@ export async function readCappedOutcome(
     for (;;) {
       const { done, value } = await Promise.race([reader.read(), aborted]);
       if (done) break;
-      if (!((value as unknown) instanceof Uint8Array)) {
+      if (!isBytes(value)) {
         reader.cancel().catch(() => {});
         return "chunk";
       }
