@@ -3,10 +3,11 @@ import { ipKey } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, 56, 59, 66, and 69 of
-// the 12j lane). The errors page, the limits page, the Express and Fastify
-// pages, the SCIM guide, the core README, the Express README, and the deploy
-// page state the caps and the scan limits by hand. This test reads each constant from the source of core
+// The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
+// 68, and 69 of the 12j lane). The errors page, the limits page, the Express,
+// Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
+// README, and the deploy page state the caps and the scan limits by hand.
+// This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
 // new derivation that changes a constant fails here until each line says the
 // new value. A cap number in one of the files that no fact holds fails too,
@@ -33,6 +34,7 @@ const FILES = {
   readme: `${REPO}packages/core/README.md`,
   deploy: `${DOCS}docs/operations/deploy.md`,
   expressReadme: `${REPO}packages/express/README.md`,
+  sveltekit: `${DOCS}docs/reference/sveltekit.md`,
 } as const;
 type FileKey = keyof typeof FILES;
 
@@ -124,7 +126,11 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   [
     "the largest cap",
     () => constant("REQUEST_BODY_MAX"),
-    [["readme", /and (\d+) (MiB) for the two SSO connection writes \(`REQUEST_BODY_MAX`\)/]],
+    [
+      ["readme", /and (\d+) (MiB) for the two SSO connection writes \(`REQUEST_BODY_MAX`\)/],
+      // The BODY_SIZE_LIMIT of SvelteKit's Node adapter must pass it (ruling 68 Low 3).
+      ["sveltekit", /That is (\d+) (MiB), the largest cap of core/],
+    ],
   ],
   [
     "the depth limit",
@@ -162,6 +168,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /\| One SCIM request body \| (\d+) (MiB) \| SCIM 413 \|/],
       ["scim", /\| A body over (\d+) (MiB) \| 413 \|/],
       ["readme", /SCIM keeps its own (\d+) (MiB) cap/],
+      ["sveltekit", /a SCIM body of up to (\d+) (MiB)/],
     ],
   ],
   [
@@ -336,6 +343,7 @@ const PLAN_PAGES = [
   FILES.fastify,
   FILES.scim,
   FILES.deploy,
+  FILES.sveltekit,
   `${DOCS}docs/reference/routes.md`,
   `${DOCS}docs/reference/api.md`,
 ];
