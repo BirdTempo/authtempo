@@ -203,12 +203,16 @@ These counts live in their rows, so they hold under every limiter.
 | The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap, in two halves that do not lend bytes to each other. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The bytes that the body reads above the floor of signed-in users hold at once, in each isolate | 8388608, the user half of the budget. A read counts here after a session check names its user: the SSO connection writes | 503 `body_busy` with `Retry-After: 1` |
 | The bytes that every other body read above the floor holds at once, in each isolate | 8388608, the anonymous half of the budget: the SAML ACS, the Apple callback, and SCIM | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
-| The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A client is its IP before a session and its user after one | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A client is its IP before a session and its user after one. A request with no client IP has no share of its own: it counts in the anonymous half only | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout` |
 | The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, and at least 10 s: 64 s for an SSO connection write, 10 s for the others | 408 `body_timeout` |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
 | The metadata XML of a provider | 100 KB | `invalid_body` |
+
+The halves of the body budget leave two limits by design. The anonymous half holds the shares of 2 IPs of 4 MiB each. Such a read ends within 10 s, so 2 IPs must send 8 MiB each 10 s to keep the half full. While it is full, the SAML ACS, the Apple callback, and SCIM answer 503 to every client before a session. An IPv6 client keys by its `/64` prefix, so a `/63` prefix gives 2 keys. One account that stalls an SSO connection write of 8 MiB fills the user half for at most 64 s. Then the SSO connection writes of other users answer 503.
+
+Off Workers, pass `clientIp`, as [Deploy](/docs/operations/deploy/) says. Without it, every request with no `cf-connecting-ip` header is one client, `unknown`. That client has no share of its own, so one caller can fill the anonymous half alone. A caller can also set the header to any key, and so pick its own share.
 
 ## The lives
 

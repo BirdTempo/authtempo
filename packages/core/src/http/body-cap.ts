@@ -1,3 +1,4 @@
+import { ipKey } from "../limiter/ip-key.js";
 import { readCappedOutcome } from "../primitives/read-capped.js";
 import type { RouteKey } from "./route-list.js";
 
@@ -212,6 +213,7 @@ export function largeReadDeadlineMs(cap: number): number {
  * `body_busy`, as a read past its half does. So 16 stalled posts of one IP
  * hold at most half of the anonymous half, and the other IPs keep the rest.
  * A user has no such share: it may hold the cap of its read in its half.
+ * A request with no client IP has none either (ruling 66 Minor 1).
  *
  * The derivation, done 2026-10-30. 4 MiB is 3 SAML forms of
  * `SAML_FORM_MAX` (1 081 519 bytes), 16 Apple callbacks, or 4 SCIM bodies
@@ -219,13 +221,30 @@ export function largeReadDeadlineMs(cap: number): number {
  */
 export const LARGE_READ_SHARE = 4_194_304;
 
-/** The bytes that `client` may hold in a read of `cap`: the cap for a user, else `LARGE_READ_SHARE`. */
+/**
+ * The bytes that `client` may hold in a read of `cap`: the cap for a user,
+ * `LARGE_READ_SHARE` for an IP, and the whole anonymous half for a request
+ * with no client IP, which so has no share of its own.
+ */
 export function largeShareOf(client: string, cap: number): number {
+  if (client === UNKNOWN_CLIENT) return LARGE_READ_ANON_BUDGET;
   return isUserClient(client) ? cap : LARGE_READ_SHARE;
 }
 
-/** The client of a request that no bind names: one shared client, as the limiter keys no IP. */
-const UNKNOWN_CLIENT = "ip:unknown";
+/** The client of a read before a session from `ip`: `ip:` and the key of `ipKey`, as the limiter keys an IP. */
+export function ipBodyClient(ip: string | null): string {
+  return `ip:${ipKey(ip)}`;
+}
+
+/**
+ * The client of a request with no client IP, or with no bind: `ip:unknown`,
+ * as the limiter keys it. It takes no share of its own, and its reads count
+ * in the anonymous half only (ruling 66 Minor 1 of the 12j lane). On a host
+ * with no `clientIp`, every request without the header is this one client.
+ * With a share, 4 stalled posts of one such caller left no room to every
+ * other caller with no header (Minor 1 of rr-12j-bodycap4).
+ */
+const UNKNOWN_CLIENT = ipBodyClient(null);
 
 /** The start of the client of a signed-in user: `managedCall` and `countSsoManageWrite` bind `user:<id>`. */
 const USER_CLIENT = "user:";
@@ -281,8 +300,9 @@ export function bindBodyClient(request: Request, client: string): void {
 }
 
 /**
- * The client of `request` for its share of the budget. A request with no
- * bind is `ip:unknown`, one shared client, so it fails closed.
+ * The client of `request` for its half and its share of the budget. A
+ * request with no bind is `ip:unknown`, the client with no IP, whose reads
+ * count in the anonymous half.
  */
 export function bodyClientOf(request: Request): string {
   return CLIENT_OF.get(request) ?? UNKNOWN_CLIENT;

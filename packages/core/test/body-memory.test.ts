@@ -266,9 +266,9 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
         .join("\n"),
     );
     for (const l of lines) {
-      // The user half answers one read; each other read answers BodyBusy at once (ruling 66).
-      // The reads with no client keep the share of one client, so none of them reads whole.
-      expect(l.answers.filter((a) => a !== "BodyBusy")).toEqual(["invalid_body"]);
+      // Each half answers one read; each other read answers BodyBusy at once (ruling 66).
+      // A read with no client has no share of its own, so one of them fills the anonymous half.
+      expect(l.answers.filter((a) => a !== "BodyBusy")).toEqual(Array(count).fill("invalid_body"));
       // Heap and array buffers together, garbage included, stay within the isolate.
       expect(l.peakHeapPlusArrayBuffersMB).toBeLessThan(HEAP_MB);
       // The live growth over the base, with no garbage, stays within half of it.

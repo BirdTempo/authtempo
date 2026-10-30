@@ -176,6 +176,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /Now the reads of signed-in users hold their half, (\d+) bytes/],
       ["limits", /of signed-in users hold at once, in each isolate \| (\d+), the user half/],
+      ["limits", /stalls an SSO connection write of (\d+) (MiB) fills the user half/],
     ],
   ],
   [
@@ -184,6 +185,15 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /or the other reads hold theirs, (\d+) bytes/],
       ["limits", /every other body read above the floor holds at once, in each isolate \| (\d+), /],
+      ["limits", /so \d+ IPs must send (\d+) (MiB) each/],
+    ],
+  ],
+  [
+    "the IPs whose shares fill the anonymous half",
+    () => constant("LARGE_READ_ANON_BUDGET") / constant("LARGE_READ_SHARE"),
+    [
+      ["limits", /The anonymous half holds the shares of (\d+) IPs of/],
+      ["limits", /within \d+ s, so (\d+) IPs must send/],
     ],
   ],
   [
@@ -224,6 +234,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /That time is at least (\d+) s\./],
       ["limits", /bytes per second, and at least (\d+) s:/],
+      // The anonymous reads (ACS, Apple, SCIM) each take the least time (ruling 66).
+      ["limits", /Such a read ends within (\d+) s, so/],
+      ["limits", /must send \d+ MiB each (\d+) s to keep the half full/],
       ["readme", /per second, at least (\d+) s \(`LARGE_READ_MIN_RATE`\)/],
     ],
   ],
@@ -236,6 +249,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ) / 1000,
     [
       ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
+      ["limits", /fills the user half for at most (\d+) s/],
       ["readme", /An SSO connection write gets (\d+) s\./],
     ],
   ],
@@ -245,6 +259,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /Or the reads of one client hold its share: (\d+) bytes for an IP/],
       ["limits", /hold at once \| (\d+), a quarter of the budget/],
+      ["limits", /the shares of \d+ IPs of (\d+) (MiB) each/],
       ["readme", /One client holds at most (\d+) (MiB) of it/],
     ],
   ],
