@@ -34,7 +34,7 @@ The rules (`check-changesets`, plan 12j Task 4):
 1. A change to a released package needs a changeset that names the package.
 2. A test, a proof, a typetest, a fixture, and the README need no changeset. The `CHANGELOG.md` at a package root needs none: `changeset version` writes it on the release branch, and `check-records` holds it.
 3. A file that the `files` field of the package packs always needs a changeset, also a proof or a README. A package with no `files` field packs each file. Each `files` entry is a plain path, with no glob and no `./`.
-4. A change to `package.json` needs a changeset only when a runtime key changes. The runtime keys are `dependencies`, `peerDependencies`, `peerDependenciesMeta`, `optionalDependencies`, `exports`, `imports`, `main`, `types`, `type`, `bin`, `files`, or `engines`.
+4. A change to `package.json` needs a changeset only when a runtime key changes. The runtime keys are `dependencies`, `peerDependencies`, `peerDependenciesMeta`, `optionalDependencies`, `exports`, `imports`, `main`, `types`, `typesVersions`, `type`, `bin`, `files`, or `engines`.
 5. A changeset never names an unreleased package.
 6. An empty changeset (no package lines) needs the body line `No release: <reason>`.
 7. The body is Simplified Technical English. It names the change, not a plan number.

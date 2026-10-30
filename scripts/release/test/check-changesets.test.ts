@@ -254,6 +254,12 @@ describe("check-changesets", () => {
       );
   });
 
+  it("needs a changeset for a change of typesVersions (ruling 64 of plan 12j, Minor 3)", () => {
+    expect(run([manifest("base", "types-versions")], []).failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/package.json (typesVersions)",
+    ]);
+  });
+
   it("needs a changeset for a change of type or imports", () => {
     expect(run([manifest("base", "type"), manifest("base", "imports")], []).failures).toEqual([
       "@authtempo/core changes and no changeset names it: packages/core/package.json (type), packages/core/package.json (imports)",
@@ -263,7 +269,7 @@ describe("check-changesets", () => {
   it("needs a changeset for a new or a removed manifest", () => {
     const text = read("manifests/base.json");
     const all =
-      "dependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, exports, imports, main, types, type, bin, files, engines";
+      "dependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, exports, imports, main, types, typesVersions, type, bin, files, engines";
     expect(
       run([{ path: "packages/core/package.json", base: null, head: text }], []).failures,
     ).toEqual([
@@ -286,6 +292,7 @@ describe("check-changesets", () => {
       "imports",
       "main",
       "types",
+      "typesVersions",
       "type",
       "bin",
       "files",

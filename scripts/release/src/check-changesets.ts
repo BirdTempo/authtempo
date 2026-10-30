@@ -79,8 +79,9 @@ function packedBy(inner: string, files: readonly string[] | undefined): boolean 
 
 /**
  * The keys of package.json that change what an app installs or loads. `type`
- * and `imports` change how Node loads dist. Rule 4 of .changeset/README.md
- * names the same keys, and a test holds the two lists equal.
+ * and `imports` change how Node loads dist. `typesVersions` changes which
+ * types TypeScript reads (ruling 64 of plan 12j, Minor 3). Rule 4 of
+ * .changeset/README.md names the same keys, and a test holds the two lists equal.
  */
 export const RUNTIME_KEYS = [
   "dependencies",
@@ -91,6 +92,7 @@ export const RUNTIME_KEYS = [
   "imports",
   "main",
   "types",
+  "typesVersions",
   "type",
   "bin",
   "files",
