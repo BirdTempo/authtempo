@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { guardHint, guardReports } from "../scripts/lib/guard.ts";
+import { distMissing, guardHint, guardReports } from "../scripts/lib/guard.ts";
 import { SITE } from "../scripts/lib/paths.ts";
 import type { CheckReport } from "../scripts/lib/report.ts";
 
@@ -65,5 +68,27 @@ describe("the deploy guard", () => {
     expect(
       guardHint({ reports: [report("check-csp", []), feed], headers: "h", feed: null }),
     ).toMatch(/^run `pnpm --filter/);
+  });
+
+  // Final review D of plan 12j, L2: with no dist, the guard stopped with a
+  // stack of readdirSync. It now prints one FAIL line that names the build.
+  it("prints a FAIL line that names the build when dist is missing", () => {
+    expect(distMissing(true)).toBeNull();
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-guard-")));
+    try {
+      // The guard and each module that it imports, in a tree with no dist.
+      for (const dir of ["scripts", "src/data"])
+        cpSync(`${SITE}${dir}`, join(tmp, "apps/site", dir), { recursive: true });
+      writeFileSync(join(tmp, "pnpm-workspace.yaml"), "packages: []\n");
+      const r = spawnSync(process.execPath, [join(tmp, "apps/site/scripts/guard-deploy.ts")], {
+        encoding: "utf8",
+      });
+      expect(r.stderr).toBe(`guard-deploy: FAIL ${distMissing(false)}\n`);
+      expect(r.stdout).toBe("");
+      expect(r.status).toBe(1);
+      expect(distMissing(false)).toMatch(/^apps\/site\/dist does not exist; run `pnpm --filter/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
