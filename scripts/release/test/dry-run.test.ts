@@ -465,7 +465,7 @@ describe("dry run", () => {
     const tarballRun = `${shellLine(COPY_DRY_RUN)} out`;
     expect(lines).toEqual(releaseCopyLines().filter((l) => l !== tarballRun));
     expect(releaseCopyLines()).toEqual([
-      "pnpm install --frozen-lockfile --offline",
+      "pnpm install --frozen-lockfile --offline --ignore-scripts",
       "node scripts/release/src/prepare.ts",
       `pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
       'pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"',
@@ -686,8 +686,12 @@ describe("dry run", () => {
   it("runs no script at pack or publish", async () => {
     const { report, calls } = await passingRun();
     expect(report.exit).toBe(0);
-    const scripted = calls.filter((c) => c.kind === "pnpm pack" || c.kind === "pnpm publish");
+    const scripted = calls.filter(
+      (c) => c.kind === "install" || c.kind === "pnpm pack" || c.kind === "pnpm publish",
+    );
+    // The install of the copy runs no install script either (ruling 64 of plan 12j, Minor 3).
     expect(scripted.map((c) => [c.kind, c.args.includes("--ignore-scripts")])).toEqual([
+      ["install", true],
       ["pnpm pack", true],
       ["pnpm pack", true],
       ["pnpm publish", true],

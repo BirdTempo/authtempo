@@ -5,8 +5,19 @@
 /** The file at the root of each release copy. prepare refuses a folder without it. */
 export const RELEASE_COPY_MARKER = ".release-copy";
 
-/** The install of the copy from the store of the first install. */
-export const COPY_INSTALL = ["pnpm", "install", "--frozen-lockfile", "--offline"] as const;
+/**
+ * The install of the copy from the store of the first install. It runs no
+ * install script: the build of the released packages is tsc and two node
+ * scripts of the repository, and no dependency script needs to run a second
+ * time in the copy (ruling 32 and ruling 64 of plan 12j, Minor 3).
+ */
+export const COPY_INSTALL = [
+  "pnpm",
+  "install",
+  "--frozen-lockfile",
+  "--offline",
+  "--ignore-scripts",
+] as const;
 
 /** The release fields from their one source each. */
 export const COPY_PREPARE = ["node", "scripts/release/src/prepare.ts"] as const;
