@@ -14,6 +14,7 @@ sources:
   - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 7"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 3"
 ---
 
 **For:** a developer who moves an app of Better Auth 1.7 to authtempo and keeps the app's code.
@@ -23,6 +24,10 @@ sources:
 ## Before you start
 
 - The app runs Better Auth 1.7. [From Better Auth](/docs/migrate/better-auth/) tells how to move it.
+
+Supported Better Auth versions: `>=1.7.0 <1.8.0`.
+
+The package exports the range as `BETTER_AUTH_RANGE`. A new Better Auth minor gets a compat change in an authtempo minor, never in a patch.
 
 ## The rule
 

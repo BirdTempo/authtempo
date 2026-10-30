@@ -55,3 +55,4 @@ export {
 } from "./storage/migration.js";
 export { type NamingOptions, resolveNames } from "./storage/names.js";
 export type * from "./types.js";
+export { BETTER_AUTH_RANGE, inRange } from "./version.js";

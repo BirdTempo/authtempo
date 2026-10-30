@@ -29,7 +29,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && node scripts/copy-migrations.mjs && tsc -p tsconfig.json",

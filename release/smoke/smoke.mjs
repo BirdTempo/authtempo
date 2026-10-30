@@ -12,6 +12,11 @@
 // not give: React, Electron, a browser, or workerd. For such an entry, the
 // smoke checks that its target file exists, and does not import it.
 //
+// The conformance kits of core and client import vitest, an optional peer of
+// each package. An adapter, a limiter, or an SDK installs vitest for its own
+// test run, so this app installs it too, and the smoke imports each kit
+// (ruling 14 of the plan 12j lane).
+//
 // Then it runs the packed CLI three times: `authtempo --help`,
 // `authtempo init <tmp>/node --stack node --json`, and
 // `authtempo init <tmp>/workers-d1 --stack workers-d1 --json`. The node stack

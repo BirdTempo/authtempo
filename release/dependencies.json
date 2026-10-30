@@ -1095,6 +1095,14 @@
     "read": "2026-10-20"
   },
   {
+    "name": "vitest",
+    "kind": "peer",
+    "versions": ["^5.0.3"],
+    "users": ["@authtempo/client", "@authtempo/core"],
+    "reason": "The conformance kits of core and client import vitest. An adapter, a limiter, or an SDK runs a kit in its own test run, which brings vitest. The peer is optional.",
+    "read": "2026-10-30"
+  },
+  {
     "name": "vue",
     "kind": "dev",
     "versions": ["3.5.43"],

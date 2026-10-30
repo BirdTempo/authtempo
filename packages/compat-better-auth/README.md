@@ -4,6 +4,12 @@ Run an app written for Better Auth 1.7 on authtempo. The app keeps its code
 and its tables. A package alias points the Better Auth package names at this
 package.
 
+Supported Better Auth versions: `>=1.7.0 <1.8.0`.
+
+The range is `BETTER_AUTH_RANGE`, and `inRange(version, range)` reads it. A
+new Better Auth minor gets a compat change in an authtempo minor. The range
+never changes in a patch.
+
 ## The alias
 
 pnpm and npm, in the app's `package.json`:
