@@ -794,7 +794,7 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
   const CODE: UnpublishedCode = {
     path: "packages/x/dist/templates.js",
     reason: "the code shows the note only at 0.0.0",
-    proof: "packages/x/test/templates.test.ts",
+    proof: { file: "packages/x/test/templates.test.ts", title: "shows the note at 0.0.0 only" },
   };
   /** A listed file with one note of `form`. */
   const listed = (path: string, form = UNPUBLISHED_MARK): UnpublishedFile => ({
@@ -817,7 +817,7 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
       packed,
       marked,
       lists,
-      exists: (p) => p === CODE.proof,
+      exists: (p) => p === CODE.proof.file,
     });
 
   it("holds each listed file to the form of its note at 0.0.0, and no other packed file", () => {
@@ -867,7 +867,7 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
     expect(
       rule("0.1.0", marks(CODE.path), {
         files: LISTS.files,
-        code: [{ ...CODE, proof: "gone.ts" }],
+        code: [{ ...CODE, proof: { ...CODE.proof, file: "gone.ts" } }],
       }),
     ).toEqual([`UNPUBLISHED_CODE: the proof gone.ts of ${CODE.path} does not exist`]);
     expect(
@@ -922,7 +922,7 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
       const gate: UnpublishedCode = {
         path: at("dist/errors.js"),
         reason: "a gate",
-        proof: "packages/fixture/package.json",
+        proof: { file: "packages/fixture/package.json", title: "a gate" },
       };
       // With no list, each packed file with a form fails, the code file too.
       expect(checkFixture(tree, [path]).failures).toEqual(
@@ -1001,9 +1001,12 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
             2,
           );
       }
-    // Each code entry is a dist file of a released package, and its proof exists.
+    // Each code entry is a dist file of a released package. Its proof file
+    // holds one test of its title; release-check runs it by that title.
     for (const c of UNPUBLISHED_CODE) {
-      expect(existsSync(join(root, c.proof)), c.proof).toBe(true);
+      expect(existsSync(join(root, c.proof.file)), c.proof.file).toBe(true);
+      const source = readFileSync(join(root, c.proof.file), "utf8");
+      expect(source.split(`it(${JSON.stringify(c.proof.title)},`), c.proof.title).toHaveLength(2);
       expect(
         readWorkspace(root).some(
           (p) => released.has(p.name) && c.path.startsWith(`${p.dir}/dist/`),

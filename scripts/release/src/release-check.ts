@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { OSV_BATCH_URL } from "./check-osv.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
+import { type ProofTest, UNPUBLISHED_CODE } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 // The release check of spec 33 item 12 (plan 12j Task 14). A release that
@@ -32,7 +33,7 @@ export type Exec = (
   echo: boolean,
 ) => Promise<RunResult>;
 
-/** The oldest and the newest change time of the files under a folder, or null when it has none. */
+/** The oldest and the newest modification time (mtime) of the files under a folder, or null when it has none. */
 export type Stat = (dir: string) => { files: number; oldest: number; newest: number } | null;
 
 /** The steps of spec 33 item 12, in order. */
@@ -82,11 +83,54 @@ export const CHECKS: readonly { name: string; base?: true }[] = [
   { name: "check-osv" },
 ];
 
+/**
+ * Each check of src/ that release-check does not run, with its reason. A test
+ * holds CHECKS and this list to the check-*.ts files of src/, so a new check
+ * runs here or names its reason (review Minor 4 of plan 12j Task 14).
+ */
+export const CHECK_EXEMPT: Readonly<Record<string, string>> = {
+  "check-pack":
+    "it reads tarballs: the dry run of step 4 runs it on the copy, and release.yml on the release copy",
+  "check-tag": "it reads the pushed tag: the job check of release.yml runs it first",
+};
+
 /** The check of the site that the site run prints (spec 33 item 12.3). */
 export const SITE_CHECK = "check-security-policy";
 
 /** The vitest reporter of the conformance counts (plan 12g, ruling 7). */
 const REPORTER = "conformance-count-reporter";
+
+/** The proof tests of UNPUBLISHED_CODE, each once (review Low 1 of plan 12j Task 14). */
+export function proofTests(code = UNPUBLISHED_CODE): ProofTest[] {
+  const seen = new Map<string, ProofTest>();
+  for (const c of code) seen.set(`${c.proof.file}\n${c.proof.title}`, c.proof);
+  return [...seen.values()];
+}
+
+/**
+ * The command of one proof test: vitest in the folder of its package, with
+ * only the test of its title, through the test servers of the checkout.
+ * The title is a regex for vitest, so each special character is escaped.
+ */
+export function proofRun(proof: ProofTest): string[] {
+  const [top = "", pkg = "", ...rest] = proof.file.split("/");
+  const pattern = proof.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [
+    "node",
+    "scripts/test-servers.mjs",
+    "run",
+    "--",
+    "pnpm",
+    "--dir",
+    `${top}/${pkg}`,
+    "exec",
+    "vitest",
+    "run",
+    rest.join("/"),
+    "-t",
+    pattern,
+  ];
+}
 
 /** Removes the colour codes of a terminal, which Turbo and vitest can write into a log. */
 export function stripColours(text: string): string {
@@ -162,8 +206,22 @@ export function readTurboRun(
       `the log has ${bare.length} ::group:: tasks with no "<package>:<task>: " prefix, such as ${bare[0]}; Turbo drops the prefix under GITHUB_ACTIONS=true unless it runs with --log-prefix=task`,
     );
 
-  const tasks = / Tasks:\s+(\d+) successful, (\d+) total/.exec(clean);
-  const cached = /Cached:\s+(\d+) cached, (\d+) total/.exec(clean);
+  // The Turbo summary, read only from a line that starts with its form
+  // (review Minor 2). Each line of a task starts with its prefix, so a line
+  // of the same form inside a task block never counts. The first match of
+  // the whole log could be such a line, and it would hide the real summary.
+  const lines = clean.split(/\r?\n/);
+  const summaryOf = (form: RegExp, label: string) => {
+    const found = lines.flatMap((l) => {
+      const m = form.exec(l);
+      return m === null ? [] : [m];
+    });
+    if (found.length > 1)
+      failures.push(`the log has ${found.length} Turbo summary lines of ${label}, not 1`);
+    return found[0] ?? null;
+  };
+  const tasks = summaryOf(/^\s*Tasks:\s+(\d+) successful, (\d+) total/, "Tasks:");
+  const cached = summaryOf(/^\s*Cached:\s+(\d+) cached, (\d+) total/, "Cached:");
   const successful = Number(tasks?.[1] ?? 0);
   const total = Number(tasks?.[2] ?? 0);
   const cachedCount = Number(cached?.[1] ?? 0);
@@ -209,6 +267,10 @@ export function readTurboRun(
         }
         if (failed > 0) {
           failures.push(`${name}:test: ${kind} ${vitest[2].trim()}`);
+          bad = true;
+        } else if (kind === "Tests" && (counts.passed ?? 0) === 0) {
+          // A vitest run that passed no test gives no evidence, also when each test skipped (review Minor 1).
+          failures.push(`${name}:test: read 0 passed tests: Tests ${vitest[2].trim()}`);
           bad = true;
         }
         continue;
@@ -338,7 +400,7 @@ export function buildFailures(
   return failures;
 }
 
-/** The change times of the files under `dir`, without node_modules. */
+/** The modification times (mtime) of the files under `dir`, without node_modules. */
 export const fileStat: Stat = (dir) => {
   if (!existsSync(dir)) return null;
   let files = 0;
@@ -468,7 +530,7 @@ export async function releaseCheck(options: ReleaseCheckOptions): Promise<Releas
     packages: 0,
     withTest: 0,
     checks: 0,
-    checksTotal: CHECKS.length + 1,
+    checksTotal: CHECKS.length + 1 + proofTests().length,
   };
   const report: ReleaseCheckReport = {
     name: "release-check",
@@ -576,6 +638,34 @@ export async function releaseCheck(options: ReleaseCheckOptions): Promise<Releas
     }
     counts.checks = (counts.checks ?? 0) + 1;
   }
+  // Each proof test of UNPUBLISHED_CODE runs by its title and passes one
+  // test. A proof that is gone, renamed, or skipped reads no passed test.
+  for (const proof of proofTests()) {
+    const [cmd = "", ...args] = proofRun(proof);
+    log(`release-check: proof ${proof.file}: ${proof.title}`);
+    const r = await exec(cmd, args, root, false);
+    const lines = stripColours(`${r.stdout}\n${r.stderr}`)
+      .split(/\r?\n/)
+      .flatMap((l) => {
+        const m = /^\s*Tests\s{2,}(.+)$/.exec(l);
+        return m?.[1] === undefined ? [] : [m[1].trim()];
+      });
+    const at = `the proof "${proof.title}" of ${proof.file}`;
+    const [line] = lines;
+    if (lines.length !== 1 || line === undefined) {
+      failures.push(
+        `${at} exited ${r.status} and printed ${lines.length} vitest Tests lines, not 1`,
+      );
+      continue;
+    }
+    const counts = vitestCounts(line);
+    if (r.status !== 0 || (counts.failed ?? 0) > 0 || counts.passed !== 1) {
+      failures.push(`${at} exited ${r.status}: Tests ${line}; it must pass 1 test`);
+      continue;
+    }
+    notes.push(`proof ${proof.file}: Tests ${line}`);
+    report.counts.checks = (report.counts.checks ?? 0) + 1;
+  }
   const site = [...taskBlocks(evidenceLog)]
     .filter(([key]) => key.endsWith(":test"))
     .flatMap(([, lines]) =>
@@ -612,10 +702,19 @@ export async function releaseCheck(options: ReleaseCheckOptions): Promise<Releas
     for (const l of lines.slice(lines.indexOf(summary) + 1))
       if (l.startsWith("  ") && !l.trim().startsWith("note:"))
         failures.push(`dry run: ${l.trim()}`);
-  } else if (shas.length !== released.size || Number(m[2]) !== released.size)
-    failures.push(
-      `the dry run printed ${shas.length} SHA-256 lines for ${released.size} released packages`,
-    );
+  } else {
+    // Each released name has one SHA-256 line, and no other name has one (review Low 2).
+    const named = shas.map((l) => /^(\S+)@[^@\s]+ /.exec(l)?.[1] ?? "");
+    for (const name of [...released].sort()) {
+      const n = named.filter((x) => x === name).length;
+      if (n !== 1) failures.push(`the dry run printed ${n} SHA-256 lines for ${name}, not 1`);
+    }
+    for (const name of [...new Set(named)].sort())
+      if (!released.has(name))
+        failures.push(`the dry run printed a SHA-256 line for ${name}, which is not released`);
+    if (Number(m[2]) !== released.size)
+      failures.push(`the dry run counts ${m[2]} packages for ${released.size} released packages`);
+  }
   notes.push(...shas, ...(summary === undefined ? [] : [summary]));
   notes.push(
     ...lines

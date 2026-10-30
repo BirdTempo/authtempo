@@ -1,14 +1,18 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { OSV_BATCH_URL } from "../src/check-osv.ts";
+import { UNPUBLISHED_CODE } from "../src/lib/unpublished.ts";
 import {
   buildFailures,
+  CHECK_EXEMPT,
   CHECKS,
   EVIDENCE_RUN,
   type Exec,
   parseArgs,
+  proofRun,
+  proofTests,
   type RunResult,
   readConformance,
   readTurboRun,
@@ -65,6 +69,8 @@ function withoutBlock(key: string): string {
 }
 
 const ok = (stdout = ""): RunResult => ({ status: 0, stdout, stderr: "" });
+/** The vitest summary of one proof test run by its title: one test passes, and the rest of its file skips. */
+const PROOF_PASS = " Test Files  1 passed (1)\n      Tests  1 passed | 11 skipped (12)\n";
 const SHA = "a".repeat(64);
 const DRY_RUN = [
   `@authtempo/adapter-sqlite@0.1.0 ${SHA} files=40`,
@@ -76,8 +82,9 @@ const DRY_RUN = [
 function fakeExec(change: Record<string, (args: readonly string[]) => RunResult> = {}) {
   const calls: string[] = [];
   const exec: Exec = async (cmd, args, _cwd, echo) => {
-    const label =
-      cmd === EVIDENCE_RUN[0] && args[0] === EVIDENCE_RUN[1]
+    const label = args.includes("-t")
+      ? "proof"
+      : cmd === EVIDENCE_RUN[0] && args[0] === EVIDENCE_RUN[1]
         ? "evidence run"
         : (args[0]?.split("/").pop()?.replace(/\.ts$/, "") ?? cmd);
     calls.push(echo ? `${label} (echo)` : label);
@@ -85,6 +92,7 @@ function fakeExec(change: Record<string, (args: readonly string[]) => RunResult>
     if (changed !== undefined) return changed(args);
     if (label === "evidence run") return ok(PASS);
     if (label === "dry-run") return ok(`${DRY_RUN}\n`);
+    if (label === "proof") return ok(PROOF_PASS);
     return ok(`${label}: PASS items=1 failures=0\n`);
   };
   return { exec, calls };
@@ -132,7 +140,7 @@ describe("release-check", () => {
     const report = await check({ exec: f.exec });
     expect(report.failures).toEqual([]);
     expect(releaseCheckLine(report)).toBe(
-      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=9 of 9 dry-run=PASS load=1.50 failures=0",
+      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=10 of 10 dry-run=PASS load=1.50 failures=0",
     );
     expect(report.notes).toContain(
       "check-security-policy: PASS sections=7 rows=0 channels=2 failures=0",
@@ -183,7 +191,7 @@ describe("release-check", () => {
     const f = fakeExec({ "evidence run": () => ok(cached) });
     const report = await check({ exec: f.exec });
     expect(releaseCheckLine(report)).toBe(
-      "release-check: FAIL tasks=33 of 33 cached=1 packages=5 of 5 checks=0 of 9 dry-run=not-run load=1.50 failures=1",
+      "release-check: FAIL tasks=33 of 33 cached=1 packages=5 of 5 checks=0 of 10 dry-run=not-run load=1.50 failures=1",
     );
   });
 
@@ -241,7 +249,12 @@ describe("release-check", () => {
     // The order: the evidence run, the conformance counts, the release checks, the dry run.
     const full = fakeExec();
     await check({ exec: full.exec });
-    expect(full.calls).toEqual(["evidence run (echo)", ...CHECKS.map((c) => c.name), "dry-run"]);
+    expect(full.calls).toEqual([
+      "evidence run (echo)",
+      ...CHECKS.map((c) => c.name),
+      "proof",
+      "dry-run",
+    ]);
 
     const evidence = fakeExec({ "evidence run": () => ({ status: 1, stdout: PASS, stderr: "" }) });
     const r1 = await check({ exec: evidence.exec });
@@ -284,8 +297,8 @@ describe("release-check", () => {
       "check-workflows exited 1 and printed no summary line",
     ]);
     // Each check runs, so the run names each failing check; the dry run does not start.
-    expect(checks.calls).toEqual(["evidence run (echo)", ...CHECKS.map((c) => c.name)]);
-    expect(releaseCheckLine(r3)).toMatch(/ checks=7 of 9 dry-run=not-run /);
+    expect(checks.calls).toEqual(["evidence run (echo)", ...CHECKS.map((c) => c.name), "proof"]);
+    expect(releaseCheckLine(r3)).toMatch(/ checks=8 of 10 dry-run=not-run /);
 
     const dry = fakeExec({
       "dry-run": () => ({
@@ -305,7 +318,9 @@ describe("release-check", () => {
     // A PASS line needs one SHA-256 line for each released package.
     const oneSha = fakeExec({ "dry-run": () => ok(DRY_RUN.split("\n").slice(1).join("\n")) });
     const r5 = await check({ exec: oneSha.exec });
-    expect(r5.failures).toEqual(["the dry run printed 1 SHA-256 lines for 2 released packages"]);
+    expect(r5.failures).toEqual([
+      "the dry run printed 0 SHA-256 lines for @authtempo/adapter-sqlite, not 1",
+    ]);
   });
 
   it("prints a skipped check as not run, and refuses another OSV_URL", async () => {
@@ -313,7 +328,7 @@ describe("release-check", () => {
     const report = await check({ exec: f.exec, osv: false, dryRun: false });
     expect(report.failures).toEqual([]);
     expect(releaseCheckLine(report)).toBe(
-      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=8 of 9 dry-run=not-run load=1.50 failures=0",
+      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=9 of 10 dry-run=not-run load=1.50 failures=0",
     );
     expect(report.notes).toContain("not run: check-osv (--no-osv)");
     expect(report.notes).toContain("not run: dry run (--no-dry-run)");
@@ -340,6 +355,145 @@ describe("release-check", () => {
     expect(parseArgs([])).toEqual({ osv: true, dryRun: true, base: "main" });
     expect(() => parseArgs(["--base"])).toThrow("unknown argument --base");
     expect(() => parseArgs(["--osv"])).toThrow("unknown argument --osv");
+  });
+
+  it("fails a vitest package that passed no test, also when each test skipped (review Minor 1)", () => {
+    // Probe C of the review: every test of authtempo-release skipped. The two
+    // summary lines of its block are colour coded, so the change reads by line.
+    const all = PASS.split("\n")
+      .map((l) =>
+        l.startsWith("authtempo-release:test: ") && /Test Files|Tests/.test(stripColours(l))
+          ? l.replace(/(\d+) passed/, "$1 skipped")
+          : l,
+      )
+      .join("\n");
+    expect(stripColours(all)).toContain("authtempo-release:test:       Tests  326 skipped (326)");
+    expect(read(all).failures).toEqual([
+      "authtempo-release:test: read 0 passed tests: Tests 326 skipped (326)",
+    ]);
+    expect(read(all).counts.packages).toBe(4);
+    // A package that also passes tests keeps its skip as a note (breach-check skips 1).
+    expect(read(PASS).failures).toEqual([]);
+  });
+
+  it("reads the Turbo summary only outside the task blocks, once (review Minor 2)", () => {
+    // Probe D of the review: a task prints a summary of 0 cached before the real one of 1 cached.
+    const inner = change(
+      "authtempo-release:test: $ vitest run",
+      "authtempo-release:test: Cached:    0 cached, 33 total\nauthtempo-release:test:  Tasks:    33 successful, 33 total\nauthtempo-release:test: $ vitest run",
+    );
+    const real = inner
+      .split("\n Tasks:    33 successful, 33 total\nCached:    0 cached, 33 total\n")
+      .join("\n Tasks:    32 successful, 33 total\nCached:    1 cached, 33 total\n");
+    expect(real).not.toBe(inner);
+    expect(read(real).failures).toEqual([
+      "Turbo ran 32 of 33 tasks successfully",
+      "the run has 1 cached tasks; a cached task is not evidence",
+    ]);
+    // A second summary outside the blocks fails.
+    const twice = change(
+      "  Time:    48.338s",
+      " Tasks:    33 successful, 33 total\n  Time:    48.338s",
+    );
+    expect(read(twice).failures).toEqual(["the log has 2 Turbo summary lines of Tasks:, not 1"]);
+  });
+
+  it("fails a Failed line and an ERROR line of Turbo (review Minor 3)", () => {
+    // The forms of a failed run of Turbo 2.11.7 (a run of 2026-10-30 with --continue).
+    expect(
+      read(change("  Time:    48.338s", "  Time:    48.338s\nFailed:    authtempo-release#test"))
+        .failures,
+    ).toEqual(["Turbo failed: authtempo-release#test"]);
+    expect(
+      read(
+        change(
+          " Tasks:    33 successful",
+          "authtempo-release#test:  ERROR  command (/work/authtempo/scripts/release) /usr/bin/pnpm run test exited (1)\n\n Tasks:    33 successful",
+        ),
+      ).failures,
+    ).toEqual([
+      "authtempo-release#test: ERROR command (/work/authtempo/scripts/release) /usr/bin/pnpm run test exited (1)",
+    ]);
+  });
+
+  it("runs or names each check of src/ (review Minor 4)", () => {
+    const src = fileURLToPath(new URL("../src/", import.meta.url));
+    const files = readdirSync(src)
+      .filter((f) => /^check-[\w-]+\.ts$/.test(f))
+      .map((f) => f.replace(/\.ts$/, ""))
+      .sort();
+    const run = CHECKS.map((c) => c.name);
+    const exempt = Object.keys(CHECK_EXEMPT);
+    expect([...run, ...exempt].sort()).toEqual(files);
+    for (const name of exempt) expect(run, name).not.toContain(name);
+    expect(exempt.sort()).toEqual(["check-pack", "check-tag"]);
+  });
+
+  it("runs each proof test of UNPUBLISHED_CODE by its title (review Low 1)", async () => {
+    expect(proofTests()).toEqual([UNPUBLISHED_CODE[0]?.proof]);
+    expect(
+      proofRun({ file: "packages/cli/test/x.test.ts", title: "runs at 0.1.0 (a: b)" }),
+    ).toEqual([
+      "node",
+      "scripts/test-servers.mjs",
+      "run",
+      "--",
+      "pnpm",
+      "--dir",
+      "packages/cli",
+      "exec",
+      "vitest",
+      "run",
+      "test/x.test.ts",
+      "-t",
+      "runs at 0\\.1\\.0 \\(a: b\\)",
+    ]);
+    const report = await check();
+    expect(report.notes).toContain(
+      `proof ${UNPUBLISHED_CODE[0]?.proof.file}: Tests 1 passed | 11 skipped (12)`,
+    );
+    // A proof that is gone or skipped reads no passed test, and a failed proof fails.
+    const at = `the proof "${UNPUBLISHED_CODE[0]?.proof.title}" of ${UNPUBLISHED_CODE[0]?.proof.file}`;
+    const gone = await check({
+      exec: fakeExec({
+        proof: () => ok(" Test Files  1 skipped (1)\n      Tests  12 skipped (12)\n"),
+      }).exec,
+    });
+    expect(gone.failures).toEqual([`${at} exited 0: Tests 12 skipped (12); it must pass 1 test`]);
+    expect(gone.stopped).toBe("release checks");
+    const failed = await check({
+      exec: fakeExec({
+        proof: () => ({
+          status: 1,
+          stdout: "      Tests  1 failed | 11 skipped (12)\n",
+          stderr: "",
+        }),
+      }).exec,
+    });
+    expect(failed.failures).toEqual([
+      `${at} exited 1: Tests 1 failed | 11 skipped (12); it must pass 1 test`,
+    ]);
+    const silent = await check({
+      exec: fakeExec({ proof: () => ({ status: 1, stdout: "", stderr: "x" }) }).exec,
+    });
+    expect(silent.failures).toEqual([`${at} exited 1 and printed 0 vitest Tests lines, not 1`]);
+  });
+
+  it("matches each SHA-256 line of the dry run to a released name (review Low 2)", async () => {
+    const [first = "", , summary = ""] = DRY_RUN.split("\n");
+    // Two lines for one package and none for the other: the count alone passed this.
+    const doubled = fakeExec({ "dry-run": () => ok(`${first}\n${first}\n${summary}\n`) });
+    expect((await check({ exec: doubled.exec })).failures).toEqual([
+      "the dry run printed 2 SHA-256 lines for @authtempo/adapter-sqlite, not 1",
+      "the dry run printed 0 SHA-256 lines for @authtempo/breach-check, not 1",
+    ]);
+    const other = fakeExec({
+      "dry-run": () => ok(`${DRY_RUN.replace("@authtempo/breach-check@", "@authtempo/other@")}\n`),
+    });
+    expect((await check({ exec: other.exec })).failures).toEqual([
+      "the dry run printed 0 SHA-256 lines for @authtempo/breach-check, not 1",
+      "the dry run printed a SHA-256 line for @authtempo/other, which is not released",
+    ]);
   });
 
   it("finds each package of the conformance reporter in the workspace", () => {

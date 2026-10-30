@@ -137,15 +137,28 @@ for \`--help\` only. After the first release, install the CLI with
   installNote("verify", "when the package is on npm"),
 ];
 
+/** The test that holds the gate of a code file. release-check runs it by its title. */
+export interface ProofTest {
+  /** The test file, from the repository root, under the test folder of its package. */
+  file: string;
+  /** The exact title of the test in its file. */
+  title: string;
+}
+
 /** A packed code file that holds the note as a value and shows it only at 0.0.0. */
 export interface UnpublishedCode {
   /** The packed path from the repository root. */
   path: string;
   /** Why the file may hold the note at every version. */
   reason: string;
-  /** The test file, from the repository root, that holds the gate. */
-  proof: string;
+  proof: ProofTest;
 }
+
+/** The test of the CLI that runs init from a built CLI at 0.1.0 and finds no note. */
+const CLI_GATE: ProofTest = {
+  file: "packages/cli/test/init-scaffold.test.ts",
+  title: "runs init from a built CLI at 0.1.0 that keeps private: true",
+};
 
 /**
  * The packed code files that may hold the note at every version. The CLI
@@ -153,19 +166,21 @@ export interface UnpublishedCode {
  * prints the note and writes it into a scaffold only when its own version is
  * 0.0.0 (isUnpublished). Without this list, the first release fails on code
  * that never shows the note. An entry fails when no tarball holds its path,
- * when the file no longer holds the note, and when its proof does not exist.
+ * when the file no longer holds the note, and when its proof file does not
+ * exist. release-check runs each proof test by its title, so a proof that is
+ * gone, renamed, or skipped fails there (review Low 1 of plan 12j Task 14).
  */
 export const UNPUBLISHED_CODE: readonly UnpublishedCode[] = [
   {
     path: "packages/cli/dist/templates.js",
     reason:
       "UNPUBLISHED_NOTE of src/templates.ts; the CLI shows it only at 0.0.0, and the build renders dist/templates.json without it above 0.0.0",
-    proof: "packages/cli/test/init-scaffold.test.ts",
+    proof: CLI_GATE,
   },
   {
     path: "packages/cli/dist/templates.d.ts",
     reason: "the declaration of UNPUBLISHED_NOTE, whose type is its text",
-    proof: "packages/cli/test/init-scaffold.test.ts",
+    proof: CLI_GATE,
   },
 ];
 
@@ -204,7 +219,7 @@ export interface UnpublishedInput {
   /** Each packed file that holds a note form, with the forms that noteForms finds in it. */
   marked: ReadonlyMap<string, readonly string[]>;
   lists: UnpublishedLists;
-  /** True when the proof file exists, by its path from the repository root. */
+  /** True when a proof file exists, by its path from the repository root. */
   exists: (path: string) => boolean;
 }
 
@@ -238,8 +253,10 @@ export function unpublishedFailures(input: UnpublishedInput): string[] {
       failures.push(
         `UNPUBLISHED_CODE lists ${entry.path}, which does not hold the note; remove the entry`,
       );
-    if (!input.exists(entry.proof))
-      failures.push(`UNPUBLISHED_CODE: the proof ${entry.proof} of ${entry.path} does not exist`);
+    if (!input.exists(entry.proof.file))
+      failures.push(
+        `UNPUBLISHED_CODE: the proof ${entry.proof.file} of ${entry.path} does not exist`,
+      );
   }
   const unreleased = version === UNPUBLISHED_VERSION;
   for (const path of [...packed].sort()) {
