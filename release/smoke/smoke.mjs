@@ -29,7 +29,7 @@
 // has no authtempo step. The workers-d1 stack has one, so the rule for the
 // steps can fail (ruling 14a of the plan 12j lane).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,11 +99,28 @@ for (const [name, subpaths] of Object.entries(kits))
     if (exempt[name] !== undefined && subpath in exempt[name])
       failures.push(`${name} ${subpath} is in exempt.json and in kits.json`);
   }
+/**
+ * Where the install of this app holds `tool`, or null. pnpm puts each package
+ * of an install under node_modules/.pnpm, and hoists each one into its hidden
+ * node_modules/.pnpm/node_modules. A dependency then resolves the tool from
+ * there, so a copy that a dependency brings counts too (rr-task3b N1 of plan 12j).
+ */
+function installedAt(tool) {
+  if (existsSync(join(here, "node_modules", tool))) return "node_modules";
+  const store = join(here, "node_modules", ".pnpm");
+  if (existsSync(join(store, "node_modules", tool))) return "the hidden hoist of pnpm";
+  const folder = `${tool.replace("/", "+")}@`;
+  if (existsSync(store) && readdirSync(store).some((f) => f.startsWith(folder)))
+    return "the store folder of pnpm";
+  return null;
+}
 // A tool in the apps phase would let a main entry load through it.
 if (phase === "apps")
-  for (const tool of tools)
-    if (existsSync(join(here, "node_modules", tool)))
-      failures.push(`${tool} is installed, so the apps phase proves nothing`);
+  for (const tool of tools) {
+    const at = installedAt(tool);
+    if (at !== null)
+      failures.push(`${tool} is installed in ${at}, so the apps phase proves nothing`);
+  }
 if (phase === "kits")
   for (const tool of tools)
     if (own.devDependencies?.[tool] === undefined)
@@ -183,9 +200,20 @@ function runCli() {
   const cliVersion = existsSync(join(here, "node_modules/@authtempo/cli/package.json"))
     ? readJson(join(here, "node_modules/@authtempo/cli/package.json")).version
     : null;
+  // A CLI that does not start gives an error and no output. The line of the
+  // failure then names the error, never a stack.
   const run = (args, cwd) => {
     cliRuns++;
-    return spawnSync(cli, args, { cwd, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } });
+    const r = spawnSync(cli, args, {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    return {
+      status: r.status,
+      stdout: r.stdout ?? "",
+      stderr: `${r.stderr ?? ""}${r.error === undefined ? "" : String(r.error)}`,
+    };
   };
   const help = run(["--help"], here);
   if (help.status !== 0 || !help.stdout.includes("authtempo"))
