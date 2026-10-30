@@ -46,3 +46,10 @@ export async function typedReads<T extends Request>(generic: T, sub: SubRequest)
   await generic[key]();
   return [computed, Reflect.get(sub, "body")];
 }
+
+// The note of rr-12j-bodycap4: an alias of Reflect.get, which the scan of ruling 59 missed.
+export function aliasedReflect(request: Request, response: Response) {
+  const { get } = Reflect;
+  const read = Reflect.get;
+  return [get(request, "body"), read(request, "text"), get(response, "body")];
+}

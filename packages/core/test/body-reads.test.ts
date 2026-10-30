@@ -77,6 +77,9 @@ describe("the raw body reads of core (ruling 46 of the 12j lane)", () => {
       "{ body } = generic",
       "generic.arrayBuffer",
       "sub.body",
+      // The note of rr-12j-bodycap4: an alias of Reflect.get. The read of a Response passes.
+      "request.body",
+      "request.text",
     ]);
   });
 });

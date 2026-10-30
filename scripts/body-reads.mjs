@@ -14,7 +14,8 @@
 // the forms of the next re-review: a type parameter that extends Request,
 // a class or an interface that extends it, a computed name with a literal
 // in a pattern, an element access by a value of a string literal type, and
-// `Reflect.get` with a literal name.
+// `Reflect.get` with a literal name. The note of rr-12j-bodycap4 adds an
+// alias of `Reflect.get`, such as `const { get } = Reflect`.
 
 import { dirname, relative } from "node:path";
 
@@ -72,6 +73,17 @@ export function rawBodyReads(ts, tsconfig, files) {
       .map((/** @type {any} */ t) => t.value);
   };
   /**
+   * True for the type of the function `get` of the namespace `Reflect`, by its
+   * declaration, so `Reflect.get` and any alias of it count.
+   * @param {any} type
+   * @returns {boolean}
+   */
+  const isReflectGet = (type) =>
+    (type.getSymbol()?.declarations ?? []).some(
+      (/** @type {any} */ d) =>
+        d.name?.text === "get" && d.parent?.parent?.name?.text === "Reflect",
+    );
+  /**
    * The member names of a property access, or of an element access by a literal or a literal type.
    * @param {any} node
    * @returns {string[]}
@@ -107,12 +119,10 @@ export function rawBodyReads(ts, tsconfig, files) {
       if (members.length > 0 && isRequest(checker.getTypeAtLocation(node.expression)))
         for (const member of members)
           reads.push(`${where(node)} ${node.expression.getText()}.${member}`);
-      // `Reflect.get(request, "body")`.
+      // `Reflect.get(request, "body")`, or a call of an alias of it: `const { get } = Reflect`.
       if (
         ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.expression.getText() === "Reflect" &&
-        node.expression.name.text === "get" &&
+        isReflectGet(checker.getTypeAtLocation(node.expression)) &&
         node.arguments.length >= 2 &&
         isRequest(checker.getTypeAtLocation(node.arguments[0]))
       )
