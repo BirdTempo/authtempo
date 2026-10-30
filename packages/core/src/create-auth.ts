@@ -1228,8 +1228,9 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
  * and the package answers 429 with no read. Within the limit it binds the
  * client of `request` to the user, so the read counts on the share of the
  * user (ruling 59 of the 12j lane). It also counts the large read of the
- * package on `sso-large-read:user`, and marks it, so core counts it once
- * (ruling 69). Past either limit it answers false. Before both counts, it
+ * package on `sso-large-read:user` and on `sso-large-read:deployment`, and
+ * marks it with the outcome, so core counts it once (rulings 69 and 72 Low
+ * 2). Past any limit it answers false. Before the counts, it
  * throws `BodyBusy` when the large read of the user cannot start, so a
  * retry after `Retry-After` spends no count (ruling 72 Minor 1). Throws a
  * TypeError for an Auth that `createAuth` did not make.
@@ -1248,8 +1249,10 @@ export async function countSsoManageWrite(
   if (!(await ssoManageAllowed(config, userId))) return false;
   markSsoManageCounted(request, userId);
   // The read of the package is a large read of the user: it counts at its start (ruling 69).
-  if (!(await ssoLargeReadAllowed(config, userId))) return false;
-  markLargeReadCounted(request, userId);
+  // Core takes this outcome and counts no more, a refusal too (ruling 72 Low 2).
+  const allowed = await ssoLargeReadAllowed(config, userId);
+  markLargeReadCounted(request, userId, allowed);
+  if (!allowed) return false;
   // The compat package reads the body next: it counts on the share of the user (ruling 59).
   bindBodyClient(request, `user:${userId}`);
   return true;

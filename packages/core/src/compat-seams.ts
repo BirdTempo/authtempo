@@ -33,8 +33,11 @@ const recordVerifies = new WeakSet<Request>();
 const scimCallers = new WeakMap<Request, ScimCaller>();
 /** The user of an SSO manager write that a compat package counted before its own read. */
 const ssoManageCounted = new WeakMap<Request, string>();
-/** The user of an SSO connection write whose large read a compat package counted (ruling 69). */
-const largeReadCounted = new WeakMap<Request, string>();
+/**
+ * The user of an SSO connection write whose large read a compat package
+ * counted, and whether the counts allowed it (rulings 69 and 72 Low 2).
+ */
+const largeReadCounted = new WeakMap<Request, { userId: string; allowed: boolean }>();
 
 export function setConfigDomainRecord(input: object, record: DomainRecordOf): void {
   configRecords.set(input, record);
@@ -83,21 +86,28 @@ export function markSsoManageCounted(request: Request, userId: string): void {
 
 /**
  * Marks `request` as one SSO connection write of `userId` whose large body
- * read core's limit counted already (ruling 69 of the 12j lane). Only
- * `countSsoManageWrite` sets the mark, after both counts.
+ * read core's limits counted already (ruling 69 of the 12j lane), with the
+ * outcome of those counts. Only `countSsoManageWrite` sets the mark, after
+ * the counts. A refused count marks too, so core answers 429 and counts the
+ * read no more (ruling 72 Low 2): a second count would spend one more read
+ * of the user when only the deployment refused.
  */
-export function markLargeReadCounted(request: Request, userId: string): void {
-  largeReadCounted.set(request, userId);
+export function markLargeReadCounted(request: Request, userId: string, allowed: boolean): void {
+  largeReadCounted.set(request, { userId, allowed });
+}
+
+/** Moves the mark of `from` in `marks` to `to`. No mark, no move. */
+function moveMark<V>(marks: WeakMap<Request, V>, from: Request, to: Request): void {
+  const value = marks.get(from);
+  if (value === undefined) return;
+  marks.delete(from);
+  marks.set(to, value);
 }
 
 /** Moves the marks of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
 export function moveSsoManageCounted(from: Request, to: Request): void {
-  for (const marks of [ssoManageCounted, largeReadCounted]) {
-    const userId = marks.get(from);
-    if (userId === undefined) continue;
-    marks.delete(from);
-    marks.set(to, userId);
-  }
+  moveMark(ssoManageCounted, from, to);
+  moveMark(largeReadCounted, from, to);
 }
 
 /**
@@ -110,9 +120,17 @@ export function takeSsoManageCounted(request: Request, userId: string): boolean 
   return marked;
 }
 
-/** True when `request` holds the large-read mark of a write of `userId`. The mark goes at the read. */
-export function takeLargeReadCounted(request: Request, userId: string): boolean {
-  const marked = largeReadCounted.get(request) === userId;
+/**
+ * The outcome of the large-read counts of a compat package for a write of
+ * `userId`: "allowed", "refused", or null when it counted none for that
+ * user. The mark goes at the read.
+ */
+export function takeLargeReadCounted(
+  request: Request,
+  userId: string,
+): "allowed" | "refused" | null {
+  const mark = largeReadCounted.get(request);
   largeReadCounted.delete(request);
-  return marked;
+  if (mark?.userId !== userId) return null;
+  return mark.allowed ? "allowed" : "refused";
 }

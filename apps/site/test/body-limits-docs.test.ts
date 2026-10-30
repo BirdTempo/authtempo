@@ -79,6 +79,19 @@ function stated(file: FileKey, re: RegExp): number[] {
   return found;
 }
 
+/** The time of an SSO connection write in seconds: the cap at the rate of a user, at least the floor. */
+const ssoWriteSeconds = () =>
+  Math.max(
+    constant("LARGE_READ_DEADLINE_FLOOR_MS"),
+    Math.ceil(
+      (capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_USER_MIN_RATE"),
+    ),
+  ) / 1000;
+
+/** The accounts whose holds, each at most 6 of an SSO write's time, fill one hour (ruling 72 Low 2). */
+const accountsForAnHour = () =>
+  Math.ceil(3600 / (limitMax("SSO_LARGE_READ_PER_USER") * ssoWriteSeconds()));
+
 // Each fact: its value in the source, and the lines that state it.
 const facts: [string, () => number, [FileKey, RegExp][]][] = [
   [
@@ -293,14 +306,12 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   ],
   [
     "the time of an SSO connection write, in seconds",
-    () =>
-      Math.max(
-        constant("LARGE_READ_DEADLINE_FLOOR_MS"),
-        Math.ceil(
-          (capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_USER_MIN_RATE"),
-        ),
-      ) / 1000,
+    ssoWriteSeconds,
     [
+      // The holds of every account in a window, and of the accounts with no deployment bound (ruling 72).
+      ["limits", /together hold the user half at most \d+ times (\d+) s, \d+ s, in a window/],
+      ["limits", /hold the user half of the body budget at most \d+ times (\d+) s in a window/],
+      ["limits", /accounts at \d+ times (\d+) s, \d+ s, held it/],
       ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
       ["limits", /fills the user half for at most (\d+) s/],
       ["limits", /delay the SSO connection writes of others by up to (\d+) s/],
@@ -315,8 +326,44 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /and starts at most (\d+) in an hour/],
       ["limits", /by up to \d+ s, (\d+) times per hour/],
-      ["limits", /the user half of the body budget at most (\d+) times/],
+      ["limits", /the user half of the body budget at most (\d+) times \d+ s in an hour/],
+      ["limits", /accounts at (\d+) times \d+ s, \d+ s, held it/],
     ],
+  ],
+  [
+    "the large reads of the deployment in an hour",
+    () => limitMax("SSO_LARGE_READ_PER_DEPLOYMENT"),
+    [
+      ["limits", /the deployment starts at most (\d+) large reads in an hour/],
+      ["limits", /together hold the user half at most (\d+) times \d+ s, \d+ s, in a window/],
+      ["limits", /hold the user half of the body budget at most (\d+) times \d+ s in a window/],
+      ["limits", /accounts can start their (\d+) reads with small writes/],
+    ],
+  ],
+  [
+    "the seconds of the holds of every account in a window",
+    () => limitMax("SSO_LARGE_READ_PER_DEPLOYMENT") * ssoWriteSeconds(),
+    [["limits", /at most \d+ times \d+ s, (\d+) s, in a window/]],
+  ],
+  [
+    "the accounts that spend the large reads of the deployment",
+    () => limitMax("SSO_LARGE_READ_PER_DEPLOYMENT") / limitMax("SSO_LARGE_READ_PER_USER"),
+    [["limits", /The bound has a cost: (\d+) accounts can start/]],
+  ],
+  [
+    "the accounts that held the user half for the whole hour with no deployment bound",
+    accountsForAnHour,
+    [["limits", /Without that bound, (\d+) accounts at/]],
+  ],
+  [
+    "the seconds of the holds of those accounts",
+    () => accountsForAnHour() * limitMax("SSO_LARGE_READ_PER_USER") * ssoWriteSeconds(),
+    [["limits", /accounts at \d+ times \d+ s, (\d+) s, held it/]],
+  ],
+  [
+    "the large reads that can start across the end of a window of the deployment",
+    () => 2 * limitMax("SSO_LARGE_READ_PER_DEPLOYMENT"),
+    [["limits", /So up to (\d+) reads can start in a short span across the end of a window/]],
   ],
   [
     "the share of one client",

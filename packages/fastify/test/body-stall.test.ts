@@ -397,6 +397,51 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
   });
 });
 
+/** Core's SSO_LARGE_READ_PER_DEPLOYMENT.max: the large reads of every account in an hour. */
+const DEPLOYMENT_READS_PER_HOUR = 60;
+
+describe("the large reads of a deployment through the Fastify binding (ruling 72 Low 2 of the 12j lane)", () => {
+  it("answers the limit to the sixty-first user-keyed start of the deployment in an hour, before any byte", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    let late: ReturnType<typeof rawPost> | undefined;
+    try {
+      const people = DEPLOYMENT_READS_PER_HOUR / LARGE_READS_PER_HOUR;
+      const statuses: number[] = [];
+      for (let i = 0; i < people; i++) {
+        const ip = `203.0.113.${20 + i}`;
+        const cookie = await signedIn(port, `p${i}@probe.example`, ip);
+        for (let n = 0; n < LARGE_READS_PER_HOUR; n++) {
+          const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "http://localhost",
+              cookie,
+              "cf-connecting-ip": ip,
+            },
+            body: "{}",
+          });
+          statuses.push(res.status);
+        }
+      }
+      // Ten accounts start 6 large reads each: 60, each a write that the schema refuses.
+      expect(statuses).toEqual(Array(DEPLOYMENT_READS_PER_HOUR).fill(400));
+      // An eleventh account with each read of its own hour left sends only its head.
+      const cookie = await signedIn(port, "late@probe.example", "203.0.113.40");
+      late = ssoPost(port, cookie, "203.0.113.40", 0);
+      await late.sent;
+      expect(await answered(late, 5000)).toBe(
+        'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}',
+      );
+    } finally {
+      late?.socket.destroy();
+      await close();
+    }
+  });
+});
+
 /** An ACS post of 8 KB with `cf-connecting-ip: ip`, or with no such header: "302", or "<status> <body>". */
 async function acsFrom(port: number, ip: string | null): Promise<string> {
   const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };

@@ -90,13 +90,15 @@ function stated(file: string, re: RegExp): number[] {
 
 describe("the SSO and SCIM limits of the engine and the docs (ruling 74 m1)", () => {
   // Ruling 69 of the 12j lane adds the eighth: the large reads of one user at the SSO writes.
-  it("are the eight limiter keys of the SSO and SCIM files", () => {
+  // Ruling 72 Low 2 adds the ninth: those reads of every user of the deployment together.
+  it("are the nine limiter keys of the SSO and SCIM files", () => {
     expect([...engineLimits().keys()].sort()).toEqual([
       "scim-auth:ip",
       "scim:token",
       "sso-acs:ip",
       "sso-discover:ip",
       "sso-domain-verify:org",
+      "sso-large-read:deployment",
       "sso-large-read:user",
       "sso-manage:user",
       "sso-start:ip",
