@@ -48,12 +48,20 @@ export interface Tarball {
   name: string;
   version: string;
   sha256: string;
+  /** The SHA-512 of its bytes in the form of dist.integrity: `sha512-<base64>`. */
+  integrity: string;
   /** The names of its dependencies, peer dependencies, and optional dependencies. */
   dependencies: string[];
 }
 
-/** The registry state of one package: the version of the tarball is held, and the latest dist-tag. */
-export type RegistryState = { held: boolean; latest: string | null } | { error: string };
+/**
+ * The registry state of one package: the version of the tarball is held, the
+ * latest dist-tag, and for a held version its dist.integrity, or null when
+ * the registry gives none.
+ */
+export type RegistryState =
+  | { held: boolean; latest: string | null; integrity?: string | null }
+  | { error: string };
 
 export interface Plan {
   publish: { file: string; tag: string }[];
@@ -152,8 +160,16 @@ export function publishPlan(input: {
     if (state === undefined) failures.push(`${t.name}: no registry answer`);
     else if ("error" in state)
       failures.push(`${t.name}: the registry answered ${state.error}; nothing is published`);
-    else if (state.held) plan.skip.push(`${t.name}@${t.version}`);
-    else {
+    else if (state.held) {
+      // A held version with other bytes is a publish by hand or a token
+      // before "disallow tokens". The job must not report it as this release
+      // (ruling 67 of plan 12j, Low 2).
+      if (state.integrity !== t.integrity)
+        failures.push(
+          `${t.name}@${t.version}: the registry holds this version with dist.integrity ${state.integrity ?? "none"}, not ${t.integrity} of the tarball`,
+        );
+      else plan.skip.push(`${t.name}@${t.version}`);
+    } else {
       const m = VERSION.exec(t.version);
       const older = state.latest !== null && compare(t.version, state.latest) < 0;
       const tag = older && m !== null ? `release-${m[1]}.${m[2]}` : "latest";
@@ -264,6 +280,7 @@ export function publish(dir: string, seams: Seams): Outcome {
       name: String(manifest.name),
       version: String(manifest.version),
       sha256,
+      integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
       dependencies: dependencyNames(manifest),
     });
   }
@@ -274,11 +291,18 @@ export function publish(dir: string, seams: Seams): Outcome {
     const latest = seams.npmView(t.name, "dist-tags.latest");
     if ("error" in held) registry[t.name] = { error: held.error };
     else if ("error" in latest) registry[t.name] = { error: latest.error };
-    else
-      registry[t.name] = {
-        held: "found" in held && held.found === t.version,
-        latest: "found" in latest ? latest.found : null,
-      };
+    else if ("found" in held && held.found === t.version) {
+      // npm view <spec> dist.integrity gives the SHA-512 of the tarball that the registry holds.
+      const integrity = seams.npmView(`${t.name}@${t.version}`, "dist.integrity");
+      registry[t.name] =
+        "error" in integrity
+          ? { error: integrity.error }
+          : {
+              held: true,
+              latest: "found" in latest ? latest.found : null,
+              integrity: "found" in integrity ? integrity.found : null,
+            };
+    } else registry[t.name] = { held: false, latest: "found" in latest ? latest.found : null };
   }
   const plan = publishPlan({ tarballs, sums, registry, npmVersion });
   if (failures.length > 0 || plan.failures.length > 0)

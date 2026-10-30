@@ -138,13 +138,20 @@ describe("publish", () => {
   it("skips a version that the registry holds", () => {
     // A rerun after a partial publish: core 0.1.0 is on the registry.
     const out = downloaded("0.1.0");
-    const f = fake({
-      view: (spec, field) => {
-        if (spec === "@authtempo/core@0.1.0" && field === "version") return { found: "0.1.0" };
-        if (spec === "@authtempo/core" && field === "dist-tags.latest") return { found: "0.1.0" };
-        return { missing: true };
-      },
-    });
+    const integrity = `sha512-${createHash("sha512")
+      .update(readFileSync(join(out, CORE("0.1.0"))))
+      .digest("base64")}`;
+    const held = (registryIntegrity: string) =>
+      fake({
+        view: (spec, field) => {
+          if (spec === "@authtempo/core@0.1.0" && field === "version") return { found: "0.1.0" };
+          if (spec === "@authtempo/core@0.1.0" && field === "dist.integrity")
+            return { found: registryIntegrity };
+          if (spec === "@authtempo/core" && field === "dist-tags.latest") return { found: "0.1.0" };
+          return { missing: true };
+        },
+      });
+    const f = held(integrity);
     const outcome = publish(out, f.seams);
     expect(f.published()).toEqual([CLIENT("0.1.0")]);
     expect(publishLines(outcome)).toEqual([
@@ -152,6 +159,13 @@ describe("publish", () => {
       "  published: @authtempo/client@0.1.0 is on the registry",
       "  skipped: @authtempo/core@0.1.0 is on the registry",
     ]);
+    // Other bytes at the held version, such as a publish by hand, fail, and nothing publishes (ruling 67 of plan 12j, Low 2).
+    const other = held("sha512-b3RoZXI=");
+    expect(publishLines(publish(out, other.seams))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      `  @authtempo/core@0.1.0: the registry holds this version with dist.integrity sha512-b3RoZXI=, not ${integrity} of the tarball`,
+    ]);
+    expect(other.published()).toEqual([]);
   });
 
   it("refuses a tarball whose SHA-256 differs", () => {
@@ -268,6 +282,7 @@ describe("publish", () => {
       name,
       version,
       sha256: "a".repeat(64),
+      integrity: "sha512-a",
       dependencies: [],
     });
     const plan = (tarballs: Tarball[], registry: Parameters<typeof publishPlan>[0]["registry"]) =>
@@ -309,6 +324,7 @@ describe("publish", () => {
       name,
       version,
       sha256: "a".repeat(64),
+      integrity: "sha512-a",
       dependencies,
     });
     const plan = (tarballs: Tarball[]) =>
@@ -420,6 +436,7 @@ describe("publish", () => {
       name: String(m.name),
       version: "0.1.0",
       sha256: "a".repeat(64),
+      integrity: "sha512-a",
       dependencies: dependencyNames(m),
     }));
     const plan = publishPlan({
