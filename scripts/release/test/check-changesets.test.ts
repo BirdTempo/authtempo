@@ -343,7 +343,8 @@ describe("check-changesets", () => {
   });
 
   it("refuses a changeset that names an unreleased package", () => {
-    expect(run(paths("examples/node/src/app.ts"), ["unreleased.md"]).failures).toEqual([
+    // examples/node is a root input of the CLI (ROOT_INPUTS), so the change here is of another example.
+    expect(run(paths("examples/express/src/app.ts"), ["unreleased.md"]).failures).toEqual([
       ".changeset/unreleased.md names authtempo-example-node, which is not a released package",
     ]);
   });
@@ -468,6 +469,59 @@ describe("check-changesets", () => {
     const changelog = readFileSync(join(repo.root, "packages/a/CHANGELOG.md"), "utf8");
     expect(changelog).toContain("\n  Breaking: `foo` is gone. Use `bar`.\n");
     expect(breakingByMinor(changelog)).toEqual({ "0.1": ["Breaking: `foo` is gone. Use `bar`."] });
+  });
+
+  // A root input changes the tarballs of its names, though no released folder
+  // holds it (ruling 67 of plan 12j, Minor 1). Before the rule, a change of
+  // tsconfig.base.json passed with changed=0.
+  it("needs a changeset that names each package of a root input", () => {
+    const inputs = [
+      { path: "tsconfig.base.json", names: "all" as const, reason: "each build" },
+      { path: "release/deprecations.json", names: ["@authtempo/core"], reason: "prepare" },
+      { path: "package.json", names: "all" as const, keys: ["license"], reason: "prepare" },
+      {
+        path: "packages/core/migrations/",
+        names: ["@authtempo/cli"],
+        reason: "a build of another package copies it",
+      },
+    ];
+    const check = (changed: ChangedFile[], names: string[]) =>
+      checkChangesets({
+        changed,
+        changesets: names.map(changeset),
+        released,
+        dirs,
+        files,
+        commits: 1,
+        version: "0.0.0",
+        rootInputs: inputs,
+      });
+    expect(check(paths("tsconfig.base.json"), []).failures).toEqual(
+      released.map((n) => `${n} changes and no changeset names it: tsconfig.base.json`),
+    );
+    expect(summaryLine(check(paths("release/deprecations.json"), ["core-patch.md"]))).toBe(
+      "check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0",
+    );
+    // Only the keys of the row count in a JSON root input.
+    const root = (base: object, head: object): ChangedFile => ({
+      path: "package.json",
+      base: JSON.stringify(base),
+      head: JSON.stringify(head),
+    });
+    expect(
+      summaryLine(check([root({ license: "MIT" }, { license: "MIT", scripts: { x: "y" } })], [])),
+    ).toBe("check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0");
+    expect(check([root({ license: "MIT" }, { license: "ISC" })], []).failures).toHaveLength(
+      released.length,
+    );
+    // A root input inside a released folder needs its own package and the packages of its row.
+    expect(check(paths("packages/core/migrations/0002.sql"), ["core-patch.md"]).failures).toEqual([
+      "@authtempo/cli changes and no changeset names it: packages/core/migrations/0002.sql",
+    ]);
+    expect(check(paths("packages/core/migrations/0002.sql"), []).failures).toEqual([
+      "@authtempo/cli changes and no changeset names it: packages/core/migrations/0002.sql",
+      "@authtempo/core changes and no changeset names it: packages/core/migrations/0002.sql",
+    ]);
   });
 
   it("needs a changeset for a CHANGELOG.md below the package root", () => {

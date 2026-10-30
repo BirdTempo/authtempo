@@ -6,6 +6,7 @@ import { parseChangeset } from "./lib/changeset-file.ts";
 import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
+import { ROOT_INPUTS, type RootInput, rootInputOf } from "./lib/root-inputs.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { rewrittenPaths } from "./rewrite-unpublished.ts";
 
@@ -42,6 +43,8 @@ export interface ChangesetsInput {
   baseVersion?: string | null;
   /** Each file that rewrite-unpublished writes on the version branch, by its path from the root. */
   unpublished?: readonly string[];
+  /** The root inputs of the release. The default is ROOT_INPUTS. */
+  rootInputs?: readonly RootInput[];
 }
 
 /**
@@ -109,6 +112,14 @@ function runtimeChanges(base: string | null, head: string | null): string[] {
   const b = JSON.parse(head) as Record<string, unknown>;
   // The key order of `exports` decides which condition matches, so compare the JSON text.
   return RUNTIME_KEYS.filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+}
+
+/** The keys of `keys` whose value differs between two JSON texts. A new or removed file changes each key. */
+function keysChanged(keys: readonly string[], base: string | null, head: string | null): string[] {
+  if (base === null || head === null) return [...keys];
+  const a = JSON.parse(base) as Record<string, unknown>;
+  const b = JSON.parse(head) as Record<string, unknown>;
+  return keys.filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
 }
 
 /** The workspace package that holds `path`: the longest folder that is a prefix. */
@@ -216,6 +227,31 @@ export function checkChangesets(input: ChangesetsInput): Report {
   const missing = new Map<string, string[]>();
   for (const file of input.changed) {
     const owner = ownerOf(file.path, input.dirs);
+    // A root input changes the tarballs of its names when prepare or a build
+    // reads it (ruling 67 of plan 12j, Minor 1). One inside a released folder,
+    // such as the D1 migrations that the SQLite build copies, changes its own
+    // package too.
+    const root = rootInputOf(file.path, input.rootInputs ?? ROOT_INPUTS);
+    if (root !== undefined) {
+      let label = file.path;
+      if (root.keys !== undefined) {
+        if (file.base === undefined || file.head === undefined)
+          throw new Error(`${file.path}: the input needs the base and head texts of the file`);
+        const keys = keysChanged(root.keys, file.base, file.head);
+        if (keys.length === 0) {
+          exempt++;
+          continue;
+        }
+        label = `${file.path} (${keys.join(", ")})`;
+      }
+      changed++;
+      const names = new Set(root.names === "all" ? input.released : root.names);
+      if (owner !== undefined && released.has(owner[0])) names.add(owner[0]);
+      const unnamed = [...names].filter((n) => !named.has(n));
+      if (unnamed.length === 0) covered++;
+      for (const name of unnamed) missing.set(name, [...(missing.get(name) ?? []), label]);
+      continue;
+    }
     if (owner === undefined || !released.has(owner[0])) continue;
     if (unpublished.has(file.path)) {
       exempt++;
@@ -278,7 +314,7 @@ export function readInput(root: string, ref: string): ChangesetsInput {
   const paths = changedFiles(root, base);
   const changed = paths.map(
     (path): ChangedFile =>
-      path.endsWith("/package.json")
+      path.endsWith("/package.json") || rootInputOf(path)?.keys !== undefined
         ? { path, base: showAt(root, base, path), head: readHead(path) }
         : { path },
   );
