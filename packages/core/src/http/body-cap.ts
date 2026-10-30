@@ -82,7 +82,12 @@ export const BODY_ITEMS_MAX = 4096;
  * 2026-10-30: the form route with the most fields is `POST /oauth/token`,
  * 12. The next power of two is 16. The limit is 8 times that, as for the
  * items, for the fields that a client adds and a route ignores. At this
- * limit a form of `SAML_FORM_MAX` parses in about 2 ms on Node 26.
+ * limit a form of `SAML_FORM_MAX` in 128 pairs of long keys with no `=`
+ * parses in about 2 ms on Node 26 (1.4 ms in a run of 2026-10-30). The
+ * pair count does not bound each cost: one key of `+` at `SAML_FORM_MAX`
+ * parses in 23 to 27 ms and peaks at 60 MB of heap, as Node turns each
+ * `+` into a space (ruling 59 Low 2). The `form-plus` shape of
+ * `body-memory.test.ts` bounds that heap.
  */
 export const FORM_PAIRS_MAX = 128;
 

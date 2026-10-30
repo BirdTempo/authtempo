@@ -157,6 +157,8 @@ const FORM_SHAPES = {
   "form-escapes": () => formFill("%41&"),
   // Short pairs.
   "form-pairs": () => formFill("a=b&"),
+  // One key of "+": Node's URLSearchParams turns each "+" into a space (ruling 59 Low 2).
+  "form-plus": () => formFill("+"),
   // One value to the cap, as an IdP posts it.
   "form-value": () => `SAMLResponse=${"a".repeat(cap - 26)}&RelayState=x`,
   // FORM_PAIRS_MAX pairs, each long, to the cap.

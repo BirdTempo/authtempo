@@ -67,9 +67,20 @@ const FORM_SHAPES = [
   "form-empty",
   "form-escapes",
   "form-pairs",
+  "form-plus",
   "form-value",
   "form-at-limit",
 ];
+/**
+ * The heap bound of the ACS form of one key of "+" (ruling 59 Low 2 of the
+ * 12j lane). Node's URLSearchParams turns each "+" into a space. At
+ * `SAML_FORM_MAX` that form peaked at 60 MB in five runs (2026-10-30, Node
+ * 26.10.0, load 42), and at 59 MB in the re-review. Each other form shape
+ * peaks at 27 to 28 MB. The bound is that peak and a third more, so a
+ * parse that grows fails here, and 48 MB of the isolate stay for the other
+ * requests.
+ */
+const FORM_PLUS_HEAP_MB = 80;
 /** A SCIM write: its body at `SCIM_BODY_MAX`, through readScimBody and its shape scan. */
 const SCIM = "POST /scim/v2/Users";
 /** The SCIM shapes past the depth or the item limit: each answers 400 before the parse. */
@@ -207,6 +218,8 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
     // SCIM refuses each shape past its limits, and reads one string and each shape at them.
     for (const l of lines.filter((l) => l.route === SCIM))
       expect([l.shape, l.answer]).toEqual([l.shape, SCIM_PAST.includes(l.shape) ? "400" : "ok"]);
+    const plus = lines.find((l) => l.route === ACS && l.shape === "form-plus");
+    expect(plus?.peakHeapMB).toBeLessThan(FORM_PLUS_HEAP_MB);
   });
 
   it("walks a parsed array of 4 million zeros for bad text in a heap of 128 MB", {
