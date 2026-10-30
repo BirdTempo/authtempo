@@ -26,6 +26,8 @@ export interface SupportInput {
   schemaVersion: number;
   /** Each adapter folder name to the schema version that each of its migrations writes. */
   migrations: Readonly<Record<string, readonly number[]>>;
+  /** Each chain of the compat tables to the schema version that each of its migrations writes (readCompat). */
+  compat?: Readonly<Record<string, readonly number[]>>;
   /** The group version: check-packages holds every released package at it. */
   version: string;
 }
@@ -118,7 +120,8 @@ export function readSupport(text: string): { rows: SupportRow[]; failures: strin
  * newest minor. The previous minor gets security fixes for
  * 3 months after the next minor ships. A minor past that date is unsupported.
  * From each schema version of a supported minor, each adapter has a chain of
- * migrations to SCHEMA_VERSION, so one `authtempo migrate` reaches it.
+ * migrations to SCHEMA_VERSION, so one `authtempo migrate` reaches it. Each
+ * compat chain of `authtempo migrate --tables compat` holds the same rule.
  */
 export function checkSupport(input: SupportInput): Report {
   const failures: string[] = [];
@@ -134,6 +137,7 @@ export function checkSupport(input: SupportInput): Report {
     current: currents.length,
     security: rows.filter((r) => r.status === "security").length,
     adapters: adapters.length,
+    compat: Object.keys(input.compat ?? {}).length,
   };
   // A release with no support row is a release with no promise (ruling 47 of
   // the plan 12j lane). The version pull request adds the row of its minor.
@@ -219,8 +223,9 @@ export function checkSupport(input: SupportInput): Report {
         );
         continue;
       }
-      for (const adapter of adapters) {
-        const have = new Set(input.migrations[adapter]);
+      const chains = { ...input.migrations, ...(input.compat ?? {}) };
+      for (const adapter of Object.keys(chains).sort()) {
+        const have = new Set(chains[adapter]);
         for (let v = from + 1; v <= input.schemaVersion; v++)
           if (!have.has(v)) {
             failures.push(
@@ -399,6 +404,69 @@ export function readMigrations(root: string): {
   return { migrations, failures };
 }
 
+/** The migrations folder of the compat package, from the repository root. */
+export const COMPAT_MIGRATIONS = "packages/compat-better-auth/migrations";
+
+/**
+ * Each folder of COMPAT_MIGRATIONS: a chain (null), or an overlay with the
+ * name of its chain. `authtempo migrate --tables compat` runs these files,
+ * and owner decision 3 holds them as it holds the adapters (ruling 26 of
+ * plan 12j, L5, held by ruling 64, Minor 3). A chain holds each schema
+ * version. An overlay holds only the files that differ for older tables:
+ * the compat README says to copy "the file of the same name" from it. A new
+ * folder fails until it has its row here.
+ */
+export const COMPAT_FOLDERS: Readonly<Record<string, string | null>> = {
+  d1: null,
+  "d1-before-1.7": "d1",
+};
+
+/** A compat migration: the base `0001_compat_better_auth.sql`, or a step `00NN_compat_schema_v<n>.sql` to core schema n. */
+const COMPAT_FILE = /^\d{4}_compat_(?:better_auth|schema_v(\d+))\.sql$/;
+
+/** Each compat chain, as `compat-better-auth/<folder>`, to the schema version of each step file. */
+export function readCompat(root: string): {
+  compat: Record<string, number[]>;
+  failures: string[];
+} {
+  const failures: string[] = [];
+  const compat: Record<string, number[]> = {};
+  const dir = join(root, COMPAT_MIGRATIONS);
+  if (!existsSync(dir)) return { compat, failures: [`${COMPAT_MIGRATIONS} does not exist`] };
+  const folders = readdirSync(dir)
+    .filter((f) => statSync(join(dir, f)).isDirectory())
+    .sort();
+  for (const folder of folders)
+    if (!Object.hasOwn(COMPAT_FOLDERS, folder))
+      failures.push(
+        `${COMPAT_MIGRATIONS}/${folder} is neither a chain nor an overlay of COMPAT_FOLDERS`,
+      );
+  for (const [folder, chain] of Object.entries(COMPAT_FOLDERS)) {
+    const at = `${COMPAT_MIGRATIONS}/${folder}`;
+    if (!folders.includes(folder)) {
+      failures.push(`${at} does not exist, and COMPAT_FOLDERS names it`);
+      continue;
+    }
+    const files = readdirSync(join(dir, folder)).sort();
+    const bad = files.filter((f) => !COMPAT_FILE.test(f));
+    for (const f of bad) failures.push(`${at}: ${f} is not a compat migration file name`);
+    if (chain === null) {
+      const versions = files.flatMap((f) => {
+        const v = COMPAT_FILE.exec(f)?.[1];
+        return v === undefined ? [] : [Number(v)];
+      });
+      if (versions.length === 0) failures.push(`${at} has no compat migration`);
+      else compat[`compat-better-auth/${folder}`] = versions;
+    } else {
+      const own = existsSync(join(dir, chain)) ? readdirSync(join(dir, chain)) : [];
+      for (const f of files)
+        if (!own.includes(f))
+          failures.push(`${at}: ${f} has no file of the same name in its chain ${chain}`);
+    }
+  }
+  return { compat, failures };
+}
+
 /** SCHEMA_VERSION of packages/core/src/schema.ts, or null when the line is not there. */
 export function readSchemaVersion(root: string): number | null {
   const m = /^export const SCHEMA_VERSION = (\d+);$/m.exec(
@@ -411,20 +479,23 @@ export function readSchemaVersion(root: string): number | null {
 export function entry(root: string, today: string): { lines: string[]; code: number } {
   const support = readSupport(readFileSync(join(root, "release/support.json"), "utf8"));
   const { migrations, failures } = readMigrations(root);
+  const compat = readCompat(root);
   const schemaVersion = readSchemaVersion(root);
   const report = checkSupport({
     rows: support.rows,
     today,
     schemaVersion: schemaVersion ?? 0,
     migrations,
+    compat: compat.compat,
     version: groupVersion(root),
   });
-  report.failures.unshift(...support.failures, ...failures);
+  report.failures.unshift(...support.failures, ...failures, ...compat.failures);
   if (schemaVersion === null)
     report.failures.unshift("packages/core/src/schema.ts holds no SCHEMA_VERSION line");
   const adapters = Object.keys(migrations);
+  const chains = Object.keys(compat.compat);
   report.notes.push(
-    `adapters=${adapters.length} (${adapters.join(", ")}), SCHEMA_VERSION ${schemaVersion ?? "unread"}`,
+    `adapters=${adapters.length} (${adapters.join(", ")}), compat=${chains.length} (${chains.join(", ")}), SCHEMA_VERSION ${schemaVersion ?? "unread"}`,
   );
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
