@@ -235,36 +235,54 @@ describe("core's limit of the user before the large read of an SSO write (ruling
   });
 });
 
+/** Core's LARGE_READ_SHARE: the bytes that the large reads of one IP hold at once. */
+const IP_SHARE = 4 * 1_048_576;
+
+/**
+ * A large read of core for `client`: `bytes` spaces at the cap of the SSO
+ * writes, which stop after `before` bytes until `open` runs. `atGate`
+ * resolves when the reader asks for the first chunk past `before`.
+ */
+function gatedRead(client: string, bytes: number, before: number) {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let reached = () => {};
+  const atGate = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (sent >= bytes) return c.close();
+      if (sent >= before) {
+        reached();
+        await gate;
+      }
+      const n = Math.min(65_536, (sent < before ? before : bytes) - sent);
+      c.enqueue(new Uint8Array(n).fill(0x20));
+      sent += n;
+    },
+  });
+  const read = readBodyText(
+    new Request(`${BASE}/x`, { method: "POST", body: stream, duplex: "half" } as RequestInit),
+    SSO_CAP,
+    client,
+  );
+  read.catch(() => {});
+  return { read, atGate, open };
+}
+
 describe("the budget of the large reads through the shim (ruling 51 Minor 2 of the 12j lane)", () => {
-  it("answers 503 SERVICE_UNAVAILABLE with Retry-After to an SSO write past the budget", {
+  it("answers 503 SERVICE_UNAVAILABLE with Retry-After to an SSO write past the user half", {
     timeout: 60_000,
   }, async () => {
     const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
     const { cookie } = await person("ada@example.com");
-    // Two reads of 8 MiB that stop one chunk before their end hold the budget of core.
-    let open = () => {};
-    const gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    // Each held read has its own client, so the budget and not one share stops the write (ruling 59).
-    const held = Array.from({ length: 2 }, (_, i) => {
-      let sent = 0;
-      const stream = new ReadableStream<Uint8Array>({
-        async pull(c) {
-          if (sent >= SSO_CAP) return c.close();
-          if (sent >= SSO_CAP - 65_536) await gate;
-          c.enqueue(new Uint8Array(65_536).fill(0x20));
-          sent += 65_536;
-        },
-      });
-      const request = new Request(`${BASE}/x`, {
-        method: "POST",
-        body: stream,
-        duplex: "half",
-      } as RequestInit);
-      return readBodyText(request, SSO_CAP, `hold:${i}`);
-    });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // A read of another user that stops one chunk before 8 MiB holds the user half of core (ruling 66).
+    const held = gatedRead("user:hold", SSO_CAP, SSO_CAP - 65_536);
+    await held.atGate;
     const res = await auth.handler(
       new Request(`${BASE}/api/auth/sso/register`, {
         method: "POST",
@@ -279,8 +297,8 @@ describe("the budget of the large reads through the shim (ruling 51 Minor 2 of t
       code: "SERVICE_UNAVAILABLE",
       message: "Service unavailable",
     });
-    open();
-    expect((await Promise.all(held)).map((t) => t?.length)).toEqual([SSO_CAP, SSO_CAP]);
+    held.open();
+    expect((await held.read)?.length).toBe(SSO_CAP);
   });
 });
 
@@ -349,40 +367,19 @@ describe("the deadlines of the large reads through the shim (ruling 59 Major 1 o
 });
 
 describe("the share of one client of the large reads through the shim (ruling 59 Major 1 of the 12j lane)", () => {
-  it("counts the shim's read of an SSO write on the share of the user", {
+  it("counts the shim's read of an SSO write in the user half, which holds every user", {
     timeout: 60_000,
   }, async () => {
     const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
     const ada = await person("ada@example.com");
     const bea = await person("bea@example.com");
-    // A read of Ada's that holds 5 MiB of her share and stalls.
-    let open = () => {};
-    const gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    let reached = () => {};
-    const atGate = new Promise<void>((resolve) => {
-      reached = resolve;
-    });
-    let sent = 0;
-    const stream = new ReadableStream<Uint8Array>({
-      async pull(c) {
-        if (sent >= 5 * 1_048_576) {
-          reached();
-          await gate;
-        }
-        if (sent >= SSO_CAP) return c.close();
-        c.enqueue(new Uint8Array(65_536).fill(0x20));
-        sent += 65_536;
-      },
-    });
-    const held = readBodyText(
-      new Request(`${BASE}/x`, { method: "POST", body: stream, duplex: "half" } as RequestInit),
-      SSO_CAP,
-      `user:${ada.user.id}`,
+    // Two IPs that each hold their share fill the anonymous half of core (ruling 66).
+    const anon = ["ip:203.0.113.1", "ip:203.0.113.2"].map((client) =>
+      gatedRead(client, IP_SHARE, IP_SHARE - 65_536),
     );
+    let mine: ReturnType<typeof gatedRead> | undefined;
     try {
-      await atGate;
+      await Promise.all(anon.map((a) => a.atGate));
       const register = (cookie: string) =>
         auth.handler(
           new Request(`${BASE}/api/auth/sso/register`, {
@@ -392,18 +389,20 @@ describe("the share of one client of the large reads through the shim (ruling 59
             duplex: "half",
           } as RequestInit),
         );
-      // Ada's register passes her share, with half the budget free: 503 at the shim's read.
-      const mine = await register(ada.cookie);
-      expect(mine.status).toBe(503);
-      expect(await mine.json()).toEqual({
+      // Bea's register reads its body in the user half, and the shim refuses its fields.
+      expect((await register(bea.cookie)).status).toBe(400);
+      // A read of Ada's holds 5 MiB of the user half: Bea's register passes the half, 503 at the shim.
+      mine = gatedRead(`user:${ada.user.id}`, SSO_CAP, 5 * 1_048_576);
+      await mine.atGate;
+      const late = await register(bea.cookie);
+      expect(late.status).toBe(503);
+      expect(await late.json()).toEqual({
         code: "SERVICE_UNAVAILABLE",
         message: "Service unavailable",
       });
-      // Bea's register reads its body, and the shim refuses its fields.
-      expect((await register(bea.cookie)).status).toBe(400);
     } finally {
-      open();
+      for (const g of [...anon, ...(mine ? [mine] : [])]) g.open();
     }
-    expect((await held)?.length).toBe(SSO_CAP);
+    expect((await mine?.read)?.length).toBe(SSO_CAP);
   });
 });

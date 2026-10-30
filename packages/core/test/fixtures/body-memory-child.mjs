@@ -28,7 +28,8 @@ if (route === "budget") {
   // `shape` reads of REQUEST_BODY_MAX at once, each streamed in chunks of 64 KiB with a
   // turn of the loop between chunks, as a slow client sends them (ruling 51 Minor 2).
   // With "live" after it, each sample runs a GC first: the live memory, with no garbage.
-  // Each read has its own client, so the budget and not the share of one client stops them (ruling 59).
+  // Each even read is a user of its own, in the user half. Each odd read has no client, as on a
+  // host with no client IP: it counts in the anonymous half (ruling 66 of the 12j lane).
   const live = process.argv[4] === "live";
   const { REQUEST_BODY_MAX } = await import(new URL("http/body-cap.js", dist).href);
   const SSO = "POST /sso/connections/update";
@@ -67,7 +68,7 @@ if (route === "budget") {
         duplex: "half",
       });
       bindBodyRoute(request, SSO);
-      bindBodyClient(request, `user:${i}`);
+      if (i % 2 === 0) bindBodyClient(request, `user:${i}`);
       try {
         const result = await readJson(request, ROUTE_CONTRACT[SSO].body.schema);
         sample();

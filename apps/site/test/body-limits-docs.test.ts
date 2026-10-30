@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, 56, and 59 of the 12j
-// lane). The errors page, the limits page, the Express and Fastify pages, the
+// The request body limits of core (rulings 43, 46, 51, 56, 59, and 66 of the
+// 12j lane). The errors page, the limits page, the Express and Fastify pages, the
 // SCIM guide, the core README, and the Express README state the caps and the
 // scan limits by hand. This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
@@ -165,9 +165,25 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     "the budget of the large reads",
     () => constant("LARGE_READ_BUDGET"),
     [
-      ["errors", /bytes hold (\d+) bytes in this isolate now/],
+      ["errors", /bytes hold at most (\d+) bytes in this isolate, in two halves/],
       ["limits", /hold at once in one isolate \| (\d+), /],
       ["readme", /hold at most (\d+) (MiB) at once in one isolate/],
+    ],
+  ],
+  [
+    "the user half of the budget",
+    () => constant("LARGE_READ_USER_BUDGET"),
+    [
+      ["errors", /Now the reads of signed-in users hold their half, (\d+) bytes/],
+      ["limits", /of signed-in users hold at once, in each isolate \| (\d+), the user half/],
+    ],
+  ],
+  [
+    "the anonymous half of the budget",
+    () => constant("LARGE_READ_ANON_BUDGET"),
+    [
+      ["errors", /or the other reads hold theirs, (\d+) bytes/],
+      ["limits", /every other body read above the floor holds at once, in each isolate \| (\d+), /],
     ],
   ],
   [
@@ -227,7 +243,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     "the share of one client",
     () => constant("LARGE_READ_SHARE"),
     [
-      ["errors", /Or the reads of one client hold its share: (\d+) bytes/],
+      ["errors", /Or the reads of one client hold its share: (\d+) bytes for an IP/],
       ["limits", /hold at once \| (\d+), a quarter of the budget/],
       ["readme", /One client holds at most (\d+) (MiB) of it/],
     ],
@@ -237,7 +253,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, and 59 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, and 66 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();

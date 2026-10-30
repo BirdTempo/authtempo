@@ -200,8 +200,10 @@ These counts live in their rows, so they hold under every limiter.
 | Pairs of one form request body | 128, one more than its `&` separators. The OAuth token route has the most fields, 12, and the limit is 8 times the next power of two | 400 `invalid_body`, the `invalid_request` of an OAuth form route, or `sso_failed` at the SAML ACS |
 | One SCIM request body | 1 MB | SCIM 413 |
 | Nesting and items of one SCIM request body | 16 levels of `[` and `{`, and 65536 items of `[`, `{`, and `,` outside its strings | SCIM 400 `invalidSyntax` |
-| The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
-| The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, or the cap of the read when that is more. A client is its IP before a session and its user after one | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap, in two halves that do not lend bytes to each other. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads above the floor of signed-in users hold at once, in each isolate | 8388608, the user half of the budget. A read counts here after a session check names its user: the SSO connection writes | 503 `body_busy` with `Retry-After: 1` |
+| The bytes that every other body read above the floor holds at once, in each isolate | 8388608, the anonymous half of the budget: the SAML ACS, the Apple callback, and SCIM | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A client is its IP before a session and its user after one | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout` |
 | The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, and at least 10 s: 64 s for an SSO connection write, 10 s for the others | 408 `body_timeout` |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |

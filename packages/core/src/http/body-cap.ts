@@ -95,9 +95,10 @@ export const FORM_PAIRS_MAX = 128;
  * The most bytes that the request reads above the floor may hold at once in
  * one isolate (ruling 51 Minor 2 of the 12j lane): the reads of
  * `BODY_CAPS`, of the SAML ACS form, and of the SCIM body. The limit of the
- * SSO writes bounds their rate, not how many run at once. A read past the
- * budget answers 503 `body_busy` with `Retry-After`. A read counts the bytes
- * that it holds, so a small body at a route of a large cap holds little.
+ * SSO writes bounds their rate, not how many run at once. A read past its
+ * half of the budget answers 503 `body_busy` with `Retry-After`. A read
+ * counts the bytes that it holds, so a small body at a route of a large cap
+ * holds little.
  *
  * The derivation, measured 2026-10-30 (Node 26.10.0, load about 4, a
  * child with a heap of 128 MB, K reads of 8 MiB at once in chunks of 64
@@ -110,11 +111,50 @@ export const FORM_PAIRS_MAX = 128;
  * 112 to 118 MB over a base of 21 MB, past the 128 MB of an isolate. A
  * budget of 2 reads holds the live growth at 20 MB, and the growth with
  * garbage at 97 MB or less for every K up to 60. So the budget is 2 reads
- * of `REQUEST_BODY_MAX`. Three SSO writes of the largest valid body
- * (4 705 616 bytes) still fit at once. `body-memory.test.ts` runs the
- * budget's reads at once and one more, and a burst of 30, and measures them.
+ * of `REQUEST_BODY_MAX`. `body-memory.test.ts` runs the budget's reads at
+ * once and one more, and a burst of 30, and measures them.
+ *
+ * The budget is two halves that do not lend bytes to each other (ruling 66
+ * Major 1 of the 12j lane): `LARGE_READ_USER_BUDGET` for the reads of
+ * signed-in users, and `LARGE_READ_ANON_BUDGET` for every other read. The
+ * two halves add up to the budget, and the test holds it.
  */
 export const LARGE_READ_BUDGET = 2 * 8_388_608;
+
+/**
+ * The most bytes that the large reads of signed-in users hold at once in
+ * one isolate: half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
+ * lane). A read counts here when its client is a user (`user:<id>`), which
+ * `managedCall` and `countSsoManageWrite` bind after the session check.
+ * Each user may hold up to the cap of its read in this half
+ * (`largeShareOf`). So the reads of any count of accounts cannot reach the
+ * other half: SAML sign-in, the Apple callback, and SCIM writes keep it.
+ *
+ * The derivation, done 2026-10-30. Before the halves, two free accounts
+ * each held 8 MiB of one SSO write for 64 s, and together they filled the
+ * budget (Major 1 of rr-12j-bodycap4). Half of the budget is 8 MiB, the cap
+ * of an SSO write. So this half holds one SSO write of the largest valid
+ * body (4 705 616 bytes). A second such write at the same time answers 503,
+ * and its client sends it again after `Retry-After`. One account that
+ * stalls a write holds this half for at most 64 s (`largeReadDeadlineMs`).
+ */
+export const LARGE_READ_USER_BUDGET = 8_388_608;
+
+/**
+ * The most bytes that every other large read holds at once in one isolate:
+ * the other half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
+ * lane). A read counts here when its client is an IP (`ip:<key>`), or when
+ * no bind names its client. So stalled anonymous posts cannot reach the
+ * half of the users, and the SSO write of a signed-in user still reads.
+ *
+ * The derivation, done 2026-10-30. 8 MiB holds 7 SAML forms of
+ * `SAML_FORM_MAX` (1 081 519 bytes), 32 Apple callbacks at their cap, or 8
+ * SCIM bodies at once. Each of these reads ends within 10 s
+ * (`largeReadDeadlineMs`). So 2 IPs that each hold `LARGE_READ_SHARE` fill
+ * this half for 10 s, and must send 8 MiB each 10 s to keep it full. The
+ * limits page states this residual limit.
+ */
+export const LARGE_READ_ANON_BUDGET = 8_388_608;
 
 /** The seconds of `Retry-After` of `body_busy`: a large read in flight ends within about this time. */
 export const BODY_BUSY_RETRY_SECONDS = 1;
@@ -165,32 +205,41 @@ export function largeReadDeadlineMs(cap: number): number {
 }
 
 /**
- * The most bytes of the budget that one client holds at once (ruling 59
- * Major 1 of the 12j lane): a quarter of `LARGE_READ_BUDGET`. A client is
- * its IP for a read before a session, and its user after one
- * (`bindBodyClient`). A read past the share of its client answers 503
- * `body_busy`, as a read past the budget does. So 16 stalled posts of one
- * client hold at most a quarter, and the other clients keep the rest.
+ * The most bytes that the large reads of one IP hold at once (rulings 59
+ * and 66 Major 1 of the 12j lane): a quarter of `LARGE_READ_BUDGET`, half
+ * of `LARGE_READ_ANON_BUDGET`. A client is its IP for a read before a
+ * session (`bindBodyClient`). A read past the share of its IP answers 503
+ * `body_busy`, as a read past its half does. So 16 stalled posts of one IP
+ * hold at most half of the anonymous half, and the other IPs keep the rest.
+ * A user has no such share: it may hold the cap of its read in its half.
  *
- * The derivation, done 2026-10-30. A quarter is 4 MiB: 3 SAML forms of
- * `SAML_FORM_MAX` (1 081 519 bytes), 16 Apple callbacks, or 4 SCIM
- * bodies from one IP at once. The largest valid SSO connection write is
- * 4 705 616 bytes, more than a quarter. So a read whose cap passes the
- * share may hold its cap instead (`largeShareOf`). A user can then always
- * send one SSO write of the largest valid body, and holds at most half.
+ * The derivation, done 2026-10-30. 4 MiB is 3 SAML forms of
+ * `SAML_FORM_MAX` (1 081 519 bytes), 16 Apple callbacks, or 4 SCIM bodies
+ * from one IP at once.
  */
 export const LARGE_READ_SHARE = 4_194_304;
 
-/** The bytes that one client may hold in a read of `cap`: the share, or the cap when it is more. */
-export function largeShareOf(cap: number): number {
-  return Math.max(LARGE_READ_SHARE, cap);
+/** The bytes that `client` may hold in a read of `cap`: the cap for a user, else `LARGE_READ_SHARE`. */
+export function largeShareOf(client: string, cap: number): number {
+  return isUserClient(client) ? cap : LARGE_READ_SHARE;
 }
 
 /** The client of a request that no bind names: one shared client, as the limiter keys no IP. */
 const UNKNOWN_CLIENT = "ip:unknown";
 
-/** The bytes that the reads above the floor hold now, in this isolate. */
-let largeHeld = 0;
+/** The start of the client of a signed-in user: `managedCall` and `countSsoManageWrite` bind `user:<id>`. */
+const USER_CLIENT = "user:";
+
+/** True when the reads of `client` count in `LARGE_READ_USER_BUDGET`, else in `LARGE_READ_ANON_BUDGET`. */
+function isUserClient(client: string): boolean {
+  return client.startsWith(USER_CLIENT);
+}
+
+/** The bytes that each half of the budget allows (ruling 66). */
+const HALF_BUDGET = { user: LARGE_READ_USER_BUDGET, anon: LARGE_READ_ANON_BUDGET } as const;
+
+/** The bytes that the reads above the floor of each half hold now, in this isolate. */
+const heldIn = { user: 0, anon: 0 };
 
 /** The bytes that the reads above the floor of each client hold now. An entry goes at 0. */
 const heldBy = new Map<string, number>();
@@ -221,9 +270,11 @@ export function bodyCapOfRequest(request: Request): number {
 const CLIENT_OF = new WeakMap<Request, string>();
 
 /**
- * Binds `request` to its client for `LARGE_READ_SHARE`: `ip:<key>` by the
+ * Binds `request` to its client for the large reads: `ip:<key>` by the
  * router before each handler (the key of `ipKey`), and `user:<id>` after a
- * session check. A later bind takes the place of an earlier one.
+ * session check. The reads of a user count in `LARGE_READ_USER_BUDGET`, the
+ * others in `LARGE_READ_ANON_BUDGET`. A later bind takes the place of an
+ * earlier one.
  */
 export function bindBodyClient(request: Request, client: string): void {
   CLIENT_OF.set(request, client);
@@ -253,14 +304,15 @@ export class BodyTooLarge extends Error {
 }
 
 /**
- * A read above the floor while the reads of the isolate hold
- * `LARGE_READ_BUDGET` bytes, or while the reads of its client hold its
- * share (`largeShareOf`). The router answers it 503 `body_busy` with
- * `Retry-After` for every route, and the SCIM routes answer their own 503.
+ * A read above the floor while the reads of its half of the isolate hold
+ * that half (`LARGE_READ_USER_BUDGET` or `LARGE_READ_ANON_BUDGET`), or
+ * while the reads of its client hold its share (`largeShareOf`). The router
+ * answers it 503 `body_busy` with `Retry-After` for every route, and the
+ * SCIM routes answer their own 503.
  */
 export class BodyBusy extends Error {
   constructor() {
-    super(`the large request reads of this isolate hold ${LARGE_READ_BUDGET} bytes`);
+    super("the large request reads of its half of this isolate, or of its client, are full");
     this.name = "BodyBusy";
   }
 }
@@ -304,9 +356,9 @@ export function bodyReadable(request: Request): boolean {
  * so a false or absent `content-length` cannot pass it. A declared length
  * past the cap stops the read before the first byte. It throws
  * `BodyTooLarge` past the cap, on a read error, and when the request
- * aborts. A read with a cap above the floor holds its bytes against
- * `LARGE_READ_BUDGET` and against the share of `client` until it ends, and
- * throws `BodyBusy` past either one. It throws `BodyTimeout` when it gets
+ * aborts. A read with a cap above the floor holds its bytes against the
+ * half of `client` and against the share of `client` until it ends, and
+ * throws `BodyBusy` past either one (ruling 66). It throws `BodyTimeout` when it gets
  * no chunk for `LARGE_READ_IDLE_MS`, or when it does not end within
  * `largeReadDeadlineMs` of its cap. Each end frees its bytes (ruling 59 of
  * the 12j lane). Workers, Node, Bun, and Deno each give `request.body` as a
@@ -343,10 +395,11 @@ export async function readBodyBytes(
     const deadline = largeReadDeadlineMs(cap);
     whole = setTimeout(expire(deadline), deadline);
   }
-  const share = largeShareOf(cap);
+  const half = isUserClient(client) ? "user" : "anon";
+  const share = largeShareOf(client, cap);
   const release = () => {
     if (held === 0) return;
-    largeHeld -= held;
+    heldIn[half] -= held;
     const left = (heldBy.get(client) ?? 0) - held;
     if (left > 0) heldBy.set(client, left);
     else heldBy.delete(client);
@@ -356,13 +409,13 @@ export async function readBodyBytes(
     clearTimeout(idle);
     idle = setTimeout(expire(LARGE_READ_IDLE_MS), LARGE_READ_IDLE_MS);
     const mine = heldBy.get(client) ?? 0;
-    if (largeHeld + bytes > LARGE_READ_BUDGET || mine + bytes > share) {
+    if (heldIn[half] + bytes > HALF_BUDGET[half] || mine + bytes > share) {
       // Free the bytes of this read at once, so no other read in flight meets a full budget.
       release();
       busy = true;
       return false;
     }
-    largeHeld += bytes;
+    heldIn[half] += bytes;
     heldBy.set(client, mine + bytes);
     held += bytes;
     return true;

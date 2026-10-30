@@ -509,7 +509,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="body_busy"><code>body_busy</code> 503</h3>
 
-- **Meaning:** The body reads of the routes with a cap above 65536 bytes hold 16777216 bytes in this isolate now. Or the reads of one client hold its share: 4194304 bytes, or the cap of the read when that is more. A client is its IP before a session and its user after one. Core stopped the read, so no handler parsed the body. The answer carries `Retry-After: 1`.
+- **Meaning:** The body reads of the routes with a cap above 65536 bytes hold at most 16777216 bytes in this isolate, in two halves. Now the reads of signed-in users hold their half, 8388608 bytes, or the other reads hold theirs, 8388608 bytes. Or the reads of one client hold its share: 4194304 bytes for an IP, or the cap of the read for a user. A client is its IP before a session and its user after one. Core stopped the read, so no handler parsed the body. The answer carries `Retry-After: 1`.
 - **Do:** Send the request again after the seconds of `Retry-After`. A burst of large bodies at once gets this code. A body at the floor of 65536 bytes never gets it.
 
 | Routes |
