@@ -5,7 +5,7 @@
  * `authtempo.betterAuth`, and a test holds the two equal.
  *
  * The range starts at 1.7.7, not 1.7.0 (ruling 45 of plan 12j, a plan
- * deviation): GHSA-965c-763c-88jm affects each version below 1.7.7, and the
+ * deviation): GHSA-965c-763c-88jm affects >=1.4.0-beta.18 <1.7.7, and the
  * rollback system must run 1.7.7 or later. The shim was read on the 1.7.2
  * shapes and on the API key plugin of 1.7.5.
  */

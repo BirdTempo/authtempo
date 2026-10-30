@@ -26,7 +26,7 @@ describe("the supported Better Auth range (spec 33 item 1.6)", () => {
   });
 
   it("starts the range at the fixed version of GHSA-965c-763c-88jm", () => {
-    // Each version below 1.7.7 has the advisory (ruling 45 of plan 12j).
+    // The advisory covers >=1.4.0-beta.18 <1.7.7 (rulings 45 and 64 of plan 12j).
     expect(inRange("1.7.7", BETTER_AUTH_RANGE)).toBe(true);
     for (const v of ["1.7.0", "1.7.2", "1.7.5", "1.7.6"])
       expect([v, inRange(v, BETTER_AUTH_RANGE)]).toEqual([v, false]);
