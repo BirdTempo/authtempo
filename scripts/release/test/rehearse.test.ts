@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -27,6 +28,7 @@ import {
   COPY_LINT,
   checkFailures,
   copyCheck,
+  copyFormatJson,
   DATES_FILE,
   HAND_EDITS,
   lintFailures,
@@ -241,6 +243,30 @@ function fakeExec(
   return { calls, exec };
 }
 
+/** Moves the version of each fixture package from `from` to `to`. */
+function moveVersions(dir: string, from: string, to: string): void {
+  for (const name of ["packages/client/package.json", "packages/core/package.json"]) {
+    const file = join(dir, name);
+    const text = readFileSync(file, "utf8");
+    expect(text, name).toContain(`"version": "${from}"`);
+    writeFileSync(file, text.replace(`"version": "${from}"`, `"version": "${to}"`));
+  }
+}
+
+/**
+ * The text that Biome writes for `text` as release/support.json, by the Biome
+ * and the config of the tree.
+ */
+function biomeForm(text: string): string {
+  const r = spawnSync(
+    join(ROOT, "node_modules/.bin/biome"),
+    ["format", "--stdin-file-path=release/support.json"],
+    { cwd: ROOT, input: text, encoding: "utf8" },
+  );
+  expect(r.status, r.stderr).toBe(0);
+  return r.stdout;
+}
+
 /** A new parent folder of the copy, and a source tree of the fixture packages at 0.0.0 with the site files. */
 function folders(): { tmp: string; source: string } {
   const tmp = mkdtempSync(join(tmpdir(), "authtempo-rehearse-test-"));
@@ -270,6 +296,7 @@ describe("rehearse", () => {
       "pnpm install --frozen-lockfile --offline",
       "pnpm changeset version",
       "node scripts/release/src/rewrite-unpublished.ts",
+      copyFormatJson(["release/support.json"]).join(" "),
       "pnpm format",
       "pnpm lint --error-on-warnings",
       copyCheck(base).join(" "),
@@ -396,18 +423,10 @@ describe("rehearse", () => {
   it("runs no format at a later release, and runs the lint there too", async () => {
     const { tmp, source } = folders();
     // The tree after the first release, and a patch: 0.1.0 to 0.1.1.
-    const at = (dir: string, from: string, to: string) => {
-      for (const name of ["packages/client/package.json", "packages/core/package.json"]) {
-        const file = join(dir, name);
-        const text = readFileSync(file, "utf8");
-        expect(text, name).toContain(`"version": "${from}"`);
-        writeFileSync(file, text.replace(`"version": "${from}"`, `"version": "${to}"`));
-      }
-    };
-    at(source, "0.0.0", "0.1.0");
+    moveVersions(source, "0.0.0", "0.1.0");
     const { calls, exec } = fakeExec(source, (line, cwd) => {
       if (line !== "pnpm changeset version") return undefined;
-      at(cwd, "0.1.0", "0.1.1");
+      moveVersions(cwd, "0.1.0", "0.1.1");
       return { status: 0, stdout: "" };
     });
     const r = await rehearse({ root: source, exec, tmp });
@@ -417,11 +436,93 @@ describe("rehearse", () => {
     );
     expect(calls).not.toContain(COPY_FORMAT.join(" "));
     expect(calls).not.toContain("node scripts/release/src/rewrite-unpublished.ts");
+    // A patch writes no JSON file, so the format of the edits does not run.
+    expect(calls.filter((l) => l.startsWith(copyFormatJson([]).join(" ")))).toEqual([]);
     expect(calls.slice(-3)).toEqual([
       COPY_LINT.join(" "),
       copyCheck("a".repeat(40)).join(" "),
       "node scripts/test-servers.mjs down",
     ]);
+  });
+
+  // Ruling 80 of plan 12j: a later release has no format step, so the edits
+  // write each JSON file in the form of Biome, and the lint of a new minor passes.
+  it("writes release/support.json of a new minor in the form of Biome", async () => {
+    const { tmp, source } = folders();
+    // The tree after the first release: 0.1.0, its support row, and its table.
+    moveVersions(source, "0.0.0", "0.1.0");
+    const [hand] = HAND.filter((e) => HAND_EDITS[e.file] === "support");
+    const security = SECURITY.replace(`${CHANNELS_CLOSED}\n\n`, "");
+    writeFileSync(
+      join(source, "SECURITY.md"),
+      withSupportTable(security, PLAN.support, hand?.sentence ?? ""),
+    );
+    writeFileSync(
+      join(source, "release/support.json"),
+      biomeForm(`${JSON.stringify(PLAN.support, null, 2)}\n`),
+    );
+    // The planned values of 0.2.0: the new minor is current, and 0.1 gets security fixes.
+    const plan: RehearsalPlan = {
+      ...PLAN,
+      publish: "2027-01-05T15:00:00Z",
+      support: [
+        { minor: "0.2", status: "current", released: "2027-01-05", schemaFrom: [15, 16] },
+        { ...(PLAN.support[0] as SupportRow), status: "security", securityUntil: "2027-04-05" },
+      ],
+    };
+    writeFileSync(join(source, PLAN_FILE), `${JSON.stringify(plan)}\n`);
+    const format = copyFormatJson(["release/support.json"]).join(" ");
+    const { calls, exec } = fakeExec(source, (line, cwd) => {
+      if (line === "pnpm changeset version") {
+        moveVersions(cwd, "0.1.0", "0.2.0");
+        return { status: 0, stdout: "" };
+      }
+      if (line !== format) return undefined;
+      // The format writes the file as the Biome of the tree does.
+      const file = join(cwd, "release/support.json");
+      writeFileSync(file, biomeForm(readFileSync(file, "utf8")));
+      return { status: 0, stdout: "Formatted 1 file in 1ms. Fixed 1 file.\n" };
+    });
+    const r = await rehearse({ root: source, exec, tmp, keep: true });
+    expect(r.failures).toEqual([]);
+    expect(rehearsalLine(r)).toBe(
+      "release-rehearsal: PASS version=0.2.0 first=no dates=2 support=2 resources=0 removed=0 lint=PASS release-check=PASS failures=0",
+    );
+    // The written file equals its form of Biome. The form of JSON.stringify is another text.
+    const copy = (path: string) => readFileSync(join(r.dir ?? "", path), "utf8");
+    const written = copy("release/support.json");
+    expect(written).toBe(biomeForm(written));
+    expect(written).not.toBe(`${JSON.stringify(plan.support, null, 2)}\n`);
+    expect(written).toBe(
+      [
+        "[",
+        "  {",
+        '    "minor": "0.2",',
+        '    "status": "current",',
+        '    "released": "2027-01-05",',
+        '    "schemaFrom": [15, 16]',
+        "  },",
+        "  {",
+        '    "minor": "0.1",',
+        '    "status": "security",',
+        '    "released": "2026-11-02",',
+        '    "schemaFrom": [15],',
+        '    "securityUntil": "2027-04-05"',
+        "  }",
+        "]",
+        "",
+      ].join("\n"),
+    );
+    expect(JSON.parse(written)).toEqual(plan.support);
+    expect(copy("SECURITY.md")).toContain(supportTable(plan.support));
+    // The format of the edits runs before the lint. The format step of the first release does not run.
+    expect(calls.slice(-4)).toEqual([
+      format,
+      COPY_LINT.join(" "),
+      copyCheck("a".repeat(40)).join(" "),
+      "node scripts/test-servers.mjs down",
+    ]);
+    expect(calls).not.toContain(COPY_FORMAT.join(" "));
   });
 
   it("stops at a lint fault with its place and rule, and starts no server", async () => {

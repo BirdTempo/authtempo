@@ -25,11 +25,12 @@ import { removeParagraph } from "./rewrite-unpublished.ts";
 // (final review D of plan 12j, C1). This script makes that state in a copy of
 // HEAD. It runs `changeset version`, the rewrite of the first release, and the
 // scripted forms of the edits by hand, with the planned values of
-// release/rehearsal.json. It runs the format at the first release only, and
-// the lint of ci.yml at each release (ruling 77 of plan 12j). Then it runs
-// release-check --no-osv --no-dry-run in the copy, through the test servers
-// of the copy, and prints one summary line. It never commits, tags, pushes, or publishes, and it leaves the
-// checkout unchanged.
+// release/rehearsal.json. The edits write each JSON file in the form of
+// Biome (ruling 80 of plan 12j). It runs the format at the first release
+// only, and the lint of ci.yml at each release (ruling 77 of plan 12j). Then
+// it runs release-check --no-osv --no-dry-run in the copy, through the test
+// servers of the copy, and prints one summary line. It never commits, tags,
+// pushes, or publishes, and it leaves the checkout unchanged.
 
 /** The planned values of the next release, by the path from the root. */
 export const PLAN_FILE = "release/rehearsal.json";
@@ -83,6 +84,23 @@ export const COPY_FORMAT: readonly string[] = ["pnpm", "format"];
  * too, which the lint of ci.yml lets pass.
  */
 export const COPY_LINT: readonly string[] = ["pnpm", "lint", "--error-on-warnings"];
+
+/**
+ * The format of each JSON file that the edits write, such as
+ * release/support.json at a new minor. JSON.stringify puts each item of an
+ * array on its own line, and Biome puts a short array on one line. A later
+ * release has no format step, so without this format the lint of the copy
+ * fails at each new minor after the first (ruling 80 of plan 12j). Biome
+ * writes the form itself, so a long array wraps as the lint expects.
+ */
+export const copyFormatJson = (paths: readonly string[]): readonly string[] => [
+  "pnpm",
+  "exec",
+  "biome",
+  "format",
+  "--write",
+  ...paths,
+];
 
 /** The release check in the copy, with the merge base of the version branch given by --base. */
 export const copyCheck = (base: string): readonly string[] => [
@@ -465,7 +483,12 @@ export async function rehearse(options: RehearsalOptions): Promise<RehearsalRepo
     // 5. The edits by hand of the runbook, from the planned values.
     log("release-rehearsal: edits");
     const read = (path: string) => readFileSync(join(repo, path), "utf8");
-    const write = (path: string, text: string) => writeFileSync(join(repo, path), text);
+    /** The JSON files that the edits write, for the format after the edits. */
+    const json: string[] = [];
+    const write = (path: string, text: string) => {
+      writeFileSync(join(repo, path), text);
+      if (path.endsWith(".json") && !json.includes(path)) json.push(path);
+    };
     try {
       // One row of RELEASE_DATES for each released package (step 4 of the runbook).
       const keys = names.map((name) => entryKey(name, version));
@@ -537,6 +560,8 @@ export async function rehearse(options: RehearsalOptions): Promise<RehearsalRepo
       failures.push(`edits: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (failures.length > 0) return done(1, "edits");
+    // Each JSON file of the edits in the form of Biome, so the lint passes at a later minor too.
+    if (json.length > 0 && !(await run("edits", copyFormatJson(json)))) return done(1, "edits");
 
     // 6. The format of the runbook step of the first release, at that release only.
     if (report.first && !(await run("format", COPY_FORMAT))) return done(1, "format");
