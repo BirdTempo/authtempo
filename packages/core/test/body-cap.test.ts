@@ -28,6 +28,7 @@ import {
   LARGE_READ_USER_BUDGET,
   LARGE_READ_USER_MIN_RATE,
   LARGE_READS_PER_USER,
+  largeReadCanStart,
   largeReadDeadlineMs,
   largeShareOf,
   REQUEST_BODY_MAX,
@@ -37,7 +38,7 @@ import { readJson, readOptionalJson } from "../src/http/json.js";
 import type { RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { magicLinkRoutes } from "../src/http/routes/magic-link.js";
-import { SSO_LARGE_READ_PER_USER } from "../src/http/routes/sso.js";
+import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../src/http/routes/sso.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { newId } from "../src/primitives/ids.js";
@@ -1763,5 +1764,88 @@ describe("the bounds of the large reads of one user (ruling 69 of the 12j lane)"
     expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}")).status).toBe(400);
     w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000);
     expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+  });
+});
+
+/** An SSO connection write of `token` from `ip` with a body of `bytes` bytes and its content-length. */
+const sizedSsoWrite = (w: ReturnType<typeof ssoAuth>, token: string, ip: string, bytes: number) =>
+  w.handle(
+    new Request(`${BASE_URL}/auth/sso/connections/create`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(bytes),
+        origin: BASE_URL,
+        cookie: `__Host-tempo_session=${token}`,
+        "cf-connecting-ip": ip,
+      },
+      body: padded("{}", bytes),
+    }),
+  );
+
+describe("a large read that cannot start spends no count (ruling 72 Minor 1 of the 12j lane)", () => {
+  it("knows before any byte whether a read can start: the one read of a user, its half, and its share", {
+    timeout: 30_000,
+  }, async () => {
+    const first = gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 16);
+    const held = readBodyText(streamPost("/x", first.stream), REQUEST_BODY_MAX, "user:ada");
+    held.catch(() => {});
+    try {
+      await first.atGate;
+      await settle();
+      // The user runs a read: no second read of the user starts, whatever its size.
+      expect(largeReadCanStart("user:ada", REQUEST_BODY_MAX, "2")).toBe(false);
+      // The user half holds 16 bytes less than its bytes: a read of 16 starts, one of 17 does not.
+      expect(largeReadCanStart("user:bea", REQUEST_BODY_MAX, "16")).toBe(true);
+      expect(largeReadCanStart("user:bea", REQUEST_BODY_MAX, "17")).toBe(false);
+      // A body with no length needs 1 byte. A length past the cap starts: it answers 413 at once.
+      expect(largeReadCanStart("user:bea", REQUEST_BODY_MAX, null)).toBe(true);
+      expect(largeReadCanStart("user:bea", REQUEST_BODY_MAX, String(REQUEST_BODY_MAX + 1))).toBe(
+        true,
+      );
+      // The anonymous half is apart: an IP starts a read of its share, and not one byte more.
+      expect(largeReadCanStart("ip:a", REQUEST_BODY_MAX, String(LARGE_READ_SHARE))).toBe(true);
+      expect(largeReadCanStart("ip:a", REQUEST_BODY_MAX, String(LARGE_READ_SHARE + 1))).toBe(false);
+    } finally {
+      first.open();
+    }
+    expect(await held).toHaveLength(REQUEST_BODY_MAX);
+    expect(largeReadCanStart("user:ada", REQUEST_BODY_MAX, "2")).toBe(true);
+  });
+
+  it("answers 503 to each retry of another admin while one account holds the user half, and counts none", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    // Ada holds the user half less 16 bytes, as the probe of rr-bodycap56 did.
+    const first = gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 16);
+    const tries = SSO_MANAGE_PER_USER.max + 1;
+    try {
+      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream);
+      await first.atGate;
+      await settle();
+      // Bea sends a write of 4 KiB again and again: more than both limits of a user allow.
+      const answers: string[] = [];
+      for (let i = 0; i < tries; i++)
+        answers.push(await statusOf(await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)));
+      expect(answers).toEqual(Array(tries).fill("503 body_busy"));
+      first.open();
+      expect((await held).status).toBe(400);
+    } finally {
+      first.open();
+    }
+    // No refused try counted: Bea still has each large read of the hour, then the limit.
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)).status).toBe(400);
+    expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)).status).toBe(429);
+    const all = await events();
+    expect(all.filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
+      "sso-large-read:user",
+    ]);
+    expect(
+      writeEvents(all).filter((e) => e.ip === "203.0.113.2" && e.code === "body_busy"),
+    ).toHaveLength(tries);
   });
 });

@@ -478,3 +478,51 @@ describe("one large read of a user at a time through the shim (ruling 69 of the 
     expect((await mine.read)?.length).toBe(SSO_CAP);
   });
 });
+
+/** A JSON POST to `path` of `{}` and spaces to `bytes` bytes, with its content-length, as a browser fetch sends. */
+function sizedPost(path: string, bytes: number, cookie: string): Request {
+  return new Request(`${BASE}/api/auth${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(bytes),
+      origin: BASE,
+      cookie,
+    },
+    body: `{}${" ".repeat(bytes - 2)}`,
+  });
+}
+
+describe("a large read that cannot start spends no count through the shim (ruling 72 Minor 1 of the 12j lane)", () => {
+  it("answers 503 to each retry of an SSO write while the user half is full, and counts none", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const { cookie } = await person("ada@example.com");
+    // Another account holds the user half of core less 16 bytes.
+    const held = gatedRead("user:hold", SSO_CAP, SSO_CAP - 16);
+    const tries = Math.ceil((SSO_MANAGE_MAX + 1) / SSO_WRITES.length);
+    try {
+      await held.atGate;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Ada sends each write of 4 KiB again and again: more tries than both limits of a user allow.
+      for (const path of SSO_WRITES)
+        for (let i = 0; i < tries; i++) {
+          const res = await auth.handler(sizedPost(path, 4096, cookie));
+          expect([path, res.status, res.headers.get("retry-after")]).toEqual([path, 503, "1"]);
+        }
+    } finally {
+      held.open();
+    }
+    expect((await held.read)?.length).toBe(SSO_CAP);
+    // No refused try counted: each path reads now, and Ada has the rest of the hour's reads.
+    const after: number[] = [];
+    for (const path of SSO_WRITES)
+      after.push((await auth.handler(sizedPost(path, 4096, cookie))).status);
+    expect(after.filter((s) => s === 429 || s === 503)).toEqual([]);
+    let left = 0;
+    while ((await auth.handler(sizedPost("/sso/connections/update", 4096, cookie))).status !== 429)
+      left++;
+    expect(left).toBe(SSO_LARGE_READ_MAX - SSO_WRITES.length);
+  });
+});

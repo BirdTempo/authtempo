@@ -307,6 +307,11 @@ const heldBy = new Map<string, number>();
 /** The large reads that each user runs now (`LARGE_READS_PER_USER`). An entry goes at 0. */
 const readsOf = new Map<string, number>();
 
+/** True when `client` is a user that runs all the large reads that it may run at once. */
+function userReadsFull(client: string): boolean {
+  return isUserClient(client) && (readsOf.get(client) ?? 0) >= LARGE_READS_PER_USER;
+}
+
 /** The cap of a route: its entry of `BODY_CAPS`, else the floor. */
 export function bodyCapOf(key: RouteKey | undefined): number {
   return (key === undefined ? undefined : BODY_CAPS[key]) ?? BODY_CAP_FLOOR;
@@ -396,6 +401,29 @@ export class BodyTimeout extends Error {
 }
 
 /**
+ * True when a large read of `client` at the cap `cap` can start now, for a
+ * body that declares `length` bytes (ruling 72 Minor 1 of the 12j lane).
+ * False while the user runs a large read (`LARGE_READS_PER_USER`), or when
+ * the half or the share of `client` has no room for the declared bytes. A
+ * body with no length needs 1 byte. A length past `cap` gives true: that
+ * read answers 413 before any byte. The SSO connection writes check it
+ * before the counts of the user, so a read that cannot start answers 503
+ * and spends no count. Before this, a retry after `Retry-After` spent the
+ * hour's count. A body with no length meets a full half at its first chunk.
+ */
+export function largeReadCanStart(client: string, cap: number, length: string | null): boolean {
+  if (userReadsFull(client)) return false;
+  const declared = length === null ? 0 : Number(length);
+  if (declared > cap) return true;
+  const bytes = declared >= 1 ? declared : 1;
+  const half = isUserClient(client) ? "user" : "anon";
+  return (
+    heldIn[half] + bytes <= HALF_BUDGET[half] &&
+    (heldBy.get(client) ?? 0) + bytes <= largeShareOf(client, cap)
+  );
+}
+
+/**
  * The body stream of `request`, or false when the body was read before or
  * a reader holds its lock. An app that called `getReader()` and read
  * nothing leaves `bodyUsed` false, and a `Response` of a locked stream
@@ -445,7 +473,7 @@ export async function readBodyBytes(
   const large = cap > BODY_CAP_FLOOR;
   const user = isUserClient(client);
   // One large read of a user at a time: a second gets no byte and answers body_busy (ruling 69).
-  if (large && user && (readsOf.get(client) ?? 0) >= LARGE_READS_PER_USER) {
+  if (large && userReadsFull(client)) {
     body?.cancel().catch(() => {});
     throw new BodyBusy();
   }

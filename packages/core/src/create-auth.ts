@@ -308,7 +308,7 @@ import {
   usernameAvailable,
 } from "./engine/username.js";
 import { ERRORS } from "./errors.js";
-import { bindBodyClient } from "./http/body-cap.js";
+import { BodyBusy, bindBodyClient, bodyCapOf, largeReadCanStart } from "./http/body-cap.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { ssoLargeReadAllowed, ssoManageAllowed } from "./http/routes/sso.js";
@@ -1229,8 +1229,10 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
  * client of `request` to the user, so the read counts on the share of the
  * user (ruling 59 of the 12j lane). It also counts the large read of the
  * package on `sso-large-read:user`, and marks it, so core counts it once
- * (ruling 69). Past either limit it answers false. Throws a TypeError for
- * an Auth that `createAuth` did not make.
+ * (ruling 69). Past either limit it answers false. Before both counts, it
+ * throws `BodyBusy` when the large read of the user cannot start, so a
+ * retry after `Retry-After` spends no count (ruling 72 Minor 1). Throws a
+ * TypeError for an Auth that `createAuth` did not make.
  */
 export async function countSsoManageWrite(
   auth: Auth,
@@ -1239,6 +1241,10 @@ export async function countSsoManageWrite(
 ): Promise<boolean> {
   const config = configs.get(auth);
   if (!config) throw new TypeError("countSsoManageWrite takes an Auth from createAuth");
+  // The package reads at the cap of the connection writes. A read that cannot start counts nothing.
+  const cap = bodyCapOf("POST /sso/connections/create");
+  if (!largeReadCanStart(`user:${userId}`, cap, request.headers.get("content-length")))
+    throw new BodyBusy();
   if (!(await ssoManageAllowed(config, userId))) return false;
   markSsoManageCounted(request, userId);
   // The read of the package is a large read of the user: it counts at its start (ruling 69).

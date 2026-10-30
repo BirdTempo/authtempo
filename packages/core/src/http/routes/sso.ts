@@ -32,9 +32,11 @@ import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import {
   BODY_CAP_FLOOR,
+  BodyBusy,
   BodyTooLarge,
   bindBodyClient,
   bodyCapOfRequest,
+  largeReadCanStart,
   parseBodyForm,
   readBodyBytes,
 } from "../body-cap.js";
@@ -81,6 +83,8 @@ export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promis
  * The large body reads of one person at the SSO connection writes: 6 per
  * hour, counted at the start of each read, after `sso-manage:user` (ruling
  * 69 of the 12j lane). A read past the limit answers 429 before any byte.
+ * A read that cannot start answers 503 before this count, and spends none
+ * (ruling 72 Minor 1).
  *
  * The derivation, done 2026-10-30. One read holds the user half of the body
  * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`), and a user runs one
@@ -121,7 +125,10 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * own read (`countSsoManageWrite`) is not counted again (ruling 51 Minor 1
  * of the 12j lane). After the session, a body read counts on the share of
  * the user (ruling 59). A route whose cap is above the floor also counts
- * the read on `sso-large-read:user` before any byte (ruling 69).
+ * the read on `sso-large-read:user` before any byte (ruling 69). Before
+ * any count, a large read that cannot start (`largeReadCanStart`) answers
+ * 503 `body_busy`, so a client that sends again after `Retry-After` spends
+ * no count of the hour (ruling 72 Minor 1).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -138,14 +145,20 @@ export async function managedCall<T, V>(
   const resolved = await sessionFromRequest(config, ctx.request);
   if (!resolved) return json({ error: "unauthorized" }, 401);
   // After the session, a large read counts on the share of the user, not of the IP (ruling 59).
-  bindBodyClient(ctx.request, `user:${resolved.user.id}`);
+  const client = `user:${resolved.user.id}`;
+  bindBodyClient(ctx.request, client);
+  const cap = bodyCapOfRequest(ctx.request);
+  const large = cap > BODY_CAP_FLOOR;
+  // A large read that cannot start answers 503 before any count, so a retry spends none (ruling 72).
+  if (large && !largeReadCanStart(client, cap, ctx.request.headers.get("content-length")))
+    throw new BodyBusy();
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
   const counted = takeSsoManageCounted(ctx.request, resolved.user.id);
   if (!counted && !(await ssoManageAllowed(config, resolved.user.id)))
     return send(respond(fail("rate_limited")), renewed);
   // A large read counts at its start, unless the compat package counted it before its own read (ruling 69).
   if (
-    bodyCapOfRequest(ctx.request) > BODY_CAP_FLOOR &&
+    large &&
     !takeLargeReadCounted(ctx.request, resolved.user.id) &&
     !(await ssoLargeReadAllowed(config, resolved.user.id))
   )

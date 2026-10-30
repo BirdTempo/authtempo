@@ -348,6 +348,55 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
   });
 });
 
+describe("a large read that cannot start through the Fastify binding (ruling 72 Minor 1 of the 12j lane)", () => {
+  it("answers 503 to seven retries of another account while one holds the user half, and no 429", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    let held: ReturnType<typeof rawPost> | undefined;
+    try {
+      const holder = await signedIn(port, "hold@probe.example", "203.0.113.5");
+      const admin = await signedIn(port, "admin@probe.example", "203.0.113.6");
+      /** A write of 4 KiB by the admin, as a browser fetch sends it: "<status> <body>". */
+      const write = async () => {
+        const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost",
+            cookie: admin,
+            "cf-connecting-ip": "203.0.113.6",
+          },
+          body: `{}${" ".repeat(4094)}`,
+        });
+        return `${res.status} ${await res.text()}`;
+      };
+      // The holder sends 8 MiB less 16 bytes of a write and stalls: the user half is full.
+      held = ssoPost(port, holder, "203.0.113.5", SSO_CAP - 16);
+      await held.sent;
+      await sleep(1000);
+      expect(held.answer()).toBeNull();
+      // Seven tries, one more than the large reads of an hour: each answers 503 and counts none.
+      const tries: string[] = [];
+      for (let i = 0; i <= LARGE_READS_PER_HOUR; i++) tries.push(await write());
+      console.log(`body-stall: the admin's tries during the hold ${JSON.stringify(tries)}`);
+      expect(tries).toEqual(Array(LARGE_READS_PER_HOUR + 1).fill('503 {"error":"body_busy"}'));
+      expect(held.answer()).toBeNull();
+      // The holder goes away: the admin's write reads, and the schema refuses the body. No 429.
+      held.socket.destroy();
+      let after = await write();
+      for (let i = 0; i < 50 && after.startsWith("503 "); i++) {
+        await sleep(100);
+        after = await write();
+      }
+      expect(after).toBe('400 {"error":"invalid_body"}');
+    } finally {
+      held?.socket.destroy();
+      await close();
+    }
+  });
+});
+
 /** An ACS post of 8 KB with `cf-connecting-ip: ip`, or with no such header: "302", or "<status> <body>". */
 async function acsFrom(port: number, ip: string | null): Promise<string> {
   const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
