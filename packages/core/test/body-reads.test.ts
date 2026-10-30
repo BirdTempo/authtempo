@@ -70,6 +70,13 @@ describe("the raw body reads of core (ruling 46 of the 12j lane)", () => {
       "{ body } of Request",
       "{ body } = request",
       "{ body } of Request",
+      // Ruling 59 Low 3: a type parameter, a class that extends Request, a
+      // computed name, an element access by a literal type, and Reflect.get.
+      "generic.json",
+      "sub.text",
+      "{ body } = generic",
+      "generic.arrayBuffer",
+      "sub.body",
     ]);
   });
 });

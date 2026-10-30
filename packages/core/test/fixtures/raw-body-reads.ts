@@ -33,3 +33,16 @@ export async function moreReads(request: Request, tagged: Request & { tag?: 1 })
 }
 
 export const fromParameter = ({ body }: Request) => body;
+
+// The forms of ruling 59 Low 3, which the scan of ruling 51 missed.
+class SubRequest extends Request {}
+
+export async function typedReads<T extends Request>(generic: T, sub: SubRequest) {
+  await generic.json();
+  await sub.text();
+  // biome-ignore lint/complexity/useLiteralKeys: the scan must find a computed name with a literal.
+  const { ["body"]: computed } = generic;
+  const key = "arrayBuffer" as const;
+  await generic[key]();
+  return [computed, Reflect.get(sub, "body")];
+}
