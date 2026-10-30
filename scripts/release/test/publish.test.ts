@@ -362,6 +362,31 @@ describe("publish", () => {
     expect(f.published()).toEqual([]);
   });
 
+  it("prints a FAIL line, not a stack, for a tarball that it cannot read (ruling 64 of plan 12j, Minor 3)", () => {
+    const out = downloaded("0.1.0");
+    // A tarball with no package/package.json, and a file that is not gzip.
+    const empty = join(out, "..", "empty");
+    mkdirSync(join(empty, "package"), { recursive: true });
+    writeFileSync(join(empty, "package/README.md"), "# none\n");
+    execFileSync("tar", ["-czf", join(out, CORE("0.1.0")), "-C", empty, "package"]);
+    writeFileSync(join(out, CLIENT("0.1.0")), "not a tarball\n");
+    const sums = [CLIENT("0.1.0"), CORE("0.1.0")].map(
+      (file) =>
+        `${createHash("sha256")
+          .update(readFileSync(join(out, file)))
+          .digest("hex")}  ${file}\n`,
+    );
+    writeFileSync(join(out, "SHA256SUMS"), sums.join(""));
+    const f = fake({});
+    expect(publishLines(publish(out, f.seams))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=2",
+      `  ${CLIENT("0.1.0")}: incorrect header check`,
+      `  ${CORE("0.1.0")}: the tarball has no package/package.json`,
+    ]);
+    expect(f.views).toEqual([]);
+    expect(f.published()).toEqual([]);
+  });
+
   it("reads each answer of npm view, and an answer that is not JSON is an error", () => {
     expect(readView(0, '"0.1.0"\n', "")).toEqual({ found: "0.1.0" });
     expect(readView(0, "\n", "")).toEqual({ missing: true });

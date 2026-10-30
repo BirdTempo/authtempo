@@ -249,16 +249,25 @@ export function publish(dir: string, seams: Seams): Outcome {
   // The bytes of a tarball are read only after its hash matches.
   failures.push(...sumFailures(hashed, sums));
   if (failures.length > 0) return { published: [], pending: [], skipped: [], failures };
-  const tarballs: Tarball[] = hashed.map(({ file, bytes, sha256 }) => {
-    const manifest = readManifest(bytes);
-    return {
+  // A tarball that it cannot read gives a failure line, never a stack (ruling 64 of plan 12j, Minor 3).
+  const tarballs: Tarball[] = [];
+  for (const { file, bytes, sha256 } of hashed) {
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = readManifest(bytes);
+    } catch (error) {
+      failures.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    tarballs.push({
       file,
       name: String(manifest.name),
       version: String(manifest.version),
       sha256,
       dependencies: dependencyNames(manifest),
-    };
-  });
+    });
+  }
+  if (failures.length > 0) return { published: [], pending: [], skipped: [], failures };
   const registry: Record<string, RegistryState> = {};
   for (const t of tarballs) {
     const held = seams.npmView(`${t.name}@${t.version}`, "version");
