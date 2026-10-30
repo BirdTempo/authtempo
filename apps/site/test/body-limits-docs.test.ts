@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, and 56 of the 12j
+// The request body limits of core (rulings 43, 46, 51, 56, and 59 of the 12j
 // lane). The errors page, the limits page, the Express and Fastify pages, the
 // SCIM guide, the core README, and the Express README state the caps and the
 // scan limits by hand. This test reads each constant from the source of core
@@ -184,12 +184,60 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["readme", /answers 503 `body_busy` with `Retry-After: (\d+)`/],
     ],
   ],
+  [
+    "the idle limit of a large read, in seconds",
+    () => constant("LARGE_READ_IDLE_MS") / 1000,
+    [
+      ["errors", /It got no bytes for (\d+) s, or it ran past/],
+      ["limits", /\| The wait of a body read above the floor for its next bytes \| (\d+) s \|/],
+      ["readme", /Such a read that gets no bytes for (\d+) s stops and frees its bytes/],
+    ],
+  ],
+  [
+    "the least rate of a large read",
+    () => constant("LARGE_READ_MIN_RATE"),
+    [
+      ["errors", /the time of its cap at (\d+) bytes per second/],
+      ["limits", /\| The time of its cap at (\d+) bytes per second/],
+      ["readme", /cap at (\d+) (KiB) per second/],
+    ],
+  ],
+  [
+    "the least time of a large read, in seconds",
+    () => constant("LARGE_READ_DEADLINE_FLOOR_MS") / 1000,
+    [
+      ["errors", /That time is at least (\d+) s\./],
+      ["limits", /bytes per second, and at least (\d+) s:/],
+      ["readme", /per second, at least (\d+) s \(`LARGE_READ_MIN_RATE`\)/],
+    ],
+  ],
+  [
+    "the time of an SSO connection write, in seconds",
+    () =>
+      Math.max(
+        constant("LARGE_READ_DEADLINE_FLOOR_MS"),
+        Math.ceil((capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_MIN_RATE")),
+      ) / 1000,
+    [
+      ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
+      ["readme", /An SSO connection write gets (\d+) s\./],
+    ],
+  ],
+  [
+    "the share of one client",
+    () => constant("LARGE_READ_SHARE"),
+    [
+      ["errors", /Or the reads of one client hold its share: (\d+) bytes/],
+      ["limits", /hold at once \| (\d+), a quarter of the budget/],
+      ["readme", /One client holds at most (\d+) (MiB) of it/],
+    ],
+  ],
 ];
 
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, and 56 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, and 59 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();
