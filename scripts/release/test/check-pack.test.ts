@@ -51,7 +51,7 @@ function input(change: Partial<PackInput> = {}): PackInput {
     groupVersion: "0.1.0",
     rootLicense: ROOT_LICENSE,
     repository: {
-      url: "git+https://github.com/authtempo/authtempo.git",
+      url: "git+https://github.com/BirdTempo/authtempo.git",
       directory: "packages/fixture",
     },
     breaking: {},
@@ -454,7 +454,7 @@ describe("check-pack", () => {
     ).toEqual(["the manifest has no repository.url"]);
     expect(
       withManifest((m) => {
-        m.repository = { type: "git", url: "git+https://github.com/authtempo/authtempo.git" };
+        m.repository = { type: "git", url: "git+https://github.com/BirdTempo/authtempo.git" };
       }),
     ).toEqual(["the manifest has no repository.directory"]);
     expect(failuresOf({ files: PACKED.filter((p) => p !== "CHANGELOG.md") })).toEqual([
@@ -466,7 +466,7 @@ describe("check-pack", () => {
         repository: { url: "git+https://github.com/x/y.git", directory: "packages/x" },
       }),
     ).toEqual([
-      "repository.url is git+https://github.com/authtempo/authtempo.git, not git+https://github.com/x/y.git",
+      "repository.url is git+https://github.com/BirdTempo/authtempo.git, not git+https://github.com/x/y.git",
       "repository.directory is packages/fixture, not packages/x",
     ]);
   });

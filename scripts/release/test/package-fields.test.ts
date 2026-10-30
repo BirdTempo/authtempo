@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 // copyright line of plan 12j. The test compares words, not line breaks.
 const MIT_TEXT = `MIT License
 
-Copyright (c) 2026 the authtempo authors
+Copyright (c) 2026 BirdTempo
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction,

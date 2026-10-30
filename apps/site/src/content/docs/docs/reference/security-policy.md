@@ -19,7 +19,7 @@ sources:
 
 ## The policy
 
-The full policy is on the [security page](/security/) of this site, and in [SECURITY.md](https://github.com/authtempo/authtempo/blob/main/SECURITY.md) at the repository root.
+The full policy is on the [security page](/security/) of this site, and in [SECURITY.md](https://github.com/BirdTempo/authtempo/blob/main/SECURITY.md) at the repository root.
 
 ## How to report
 
@@ -27,7 +27,7 @@ Until the first release, the two channels are not open, and the times of this po
 
 Report a fault through one of the two channels, in this order:
 
-1. [GitHub private vulnerability reporting](https://github.com/authtempo/authtempo/security/advisories/new) on the repository.
+1. [GitHub private vulnerability reporting](https://github.com/BirdTempo/authtempo/security/advisories/new) on the repository.
 2. [security@authtempo.com](mailto:security@authtempo.com), when you have no GitHub account.
 
 Do not open a public issue for a fault. Do not include a real user's data in the report.

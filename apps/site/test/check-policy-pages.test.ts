@@ -84,7 +84,7 @@ describe("check-policy-pages", () => {
     expect(REAL.versioning.includes("## The versions today\n")).toBe(UNRELEASED);
     expect(REAL.security.includes(CLOSED)).toBe(UNRELEASED);
     expect(REAL.security.includes(NONE)).toBe(UNRELEASED);
-    expect(REAL.repository.url).toBe("https://github.com/authtempo/authtempo");
+    expect(REAL.repository.url).toBe("https://github.com/BirdTempo/authtempo");
     const r = checkPolicyPages(REAL);
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
@@ -415,17 +415,17 @@ describe("check-policy-pages", () => {
 
   it("fails a missing link", () => {
     expect(failures(withText("securityPage", "](/security/)", "](/docs/)"))).toEqual([
-      'docs/reference/security-policy.md, section "The policy", states "The full policy is on the [security page](/docs/) of this site, and in [SECURITY.md](https://github.com/authtempo/authtempo/blob/main/SECURITY.md) at the repository root.", which no source holds',
+      'docs/reference/security-policy.md, section "The policy", states "The full policy is on the [security page](/docs/) of this site, and in [SECURITY.md](https://github.com/BirdTempo/authtempo/blob/main/SECURITY.md) at the repository root.", which no source holds',
       'docs/reference/security-policy.md, section "The policy", does not link /security/',
     ]);
     const other = withText(
       "securityPage",
-      "](https://github.com/authtempo/authtempo/blob/main/SECURITY.md)",
+      "](https://github.com/BirdTempo/authtempo/blob/main/SECURITY.md)",
       "](https://github.com/someone/authtempo/blob/main/SECURITY.md)",
     );
     expect(failures(other)).toEqual([
       'docs/reference/security-policy.md, section "The policy", states "The full policy is on the [security page](/security/) of this site, and in [SECURITY.md](https://github.com/someone/authtempo/blob/main/SECURITY.md) at the repository root.", which no source holds',
-      'docs/reference/security-policy.md, section "The policy", does not link https://github.com/authtempo/authtempo/blob/main/SECURITY.md',
+      'docs/reference/security-policy.md, section "The policy", does not link https://github.com/BirdTempo/authtempo/blob/main/SECURITY.md',
     ]);
     expect(
       failures(

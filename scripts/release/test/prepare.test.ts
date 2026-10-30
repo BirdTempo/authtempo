@@ -12,7 +12,7 @@ import { changesetVersion, copyFixture, RELEASE_COPY_FIXTURE } from "./support/r
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const fixturePath = (path: string) => fileURLToPath(new URL(`./fixtures/${path}`, import.meta.url));
 const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Manifest;
-const URL_OF_REPO = "https://github.com/authtempo/authtempo";
+const URL_OF_REPO = "https://github.com/BirdTempo/authtempo";
 
 const made: string[] = [];
 afterEach(() => {
@@ -48,7 +48,7 @@ describe("prepare", () => {
     expect(out.license).toBe("MIT");
     expect(out.repository).toEqual({
       type: "git",
-      url: "git+https://github.com/authtempo/authtempo.git",
+      url: "git+https://github.com/BirdTempo/authtempo.git",
       directory: "packages/client",
     });
     expect(out.publishConfig).toEqual({ access: "public", provenance: true });

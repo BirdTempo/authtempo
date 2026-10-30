@@ -14,8 +14,8 @@ import { SITE } from "../src/data/site.ts";
 const real = readPolicyInput(readRepoFile);
 const TEXT = real.text ?? "";
 const REPOSITORY = {
-  url: "https://github.com/authtempo/authtempo",
-  owner: "authtempo",
+  url: "https://github.com/BirdTempo/authtempo",
+  owner: "BirdTempo",
   name: "authtempo",
 };
 /** The origin of the site. check.ts passes SITE.origin; the test types the value. */
@@ -89,7 +89,7 @@ describe("check-security-policy", () => {
   it("fails a file that it could not read", () => {
     const files: Record<string, string> = {
       "release/support.json": "{",
-      "release/repository.json": '{"url":"https://github.com/authtempo/authtempo"}',
+      "release/repository.json": '{"url":"https://github.com/BirdTempo/authtempo"}',
     };
     const input = readPolicyInput((path) => files[path] ?? null);
     expect(input.text).toBeNull();
@@ -170,7 +170,7 @@ describe("check-security-policy", () => {
   });
 
   it("fails a placeholder channel", () => {
-    const advisory = "https://github.com/authtempo/authtempo/security/advisories/new";
+    const advisory = "https://github.com/BirdTempo/authtempo/security/advisories/new";
     const mail = "mailto:security@authtempo.com";
     expect(check(textWith(mail, "mailto:security@example.com")).failures).toEqual([
       'SECURITY.md holds the placeholder "example.com"',
@@ -186,21 +186,21 @@ describe("check-security-policy", () => {
     ).toEqual([
       'SECURITY.md holds the placeholder "<"',
       "SECURITY.md links the repository <owner>/<name>; release/repository.json names authtempo/authtempo",
-      "the first channel is https://github.com/<owner>/<name>/security/advisories/new; it must be https://github.com/authtempo/authtempo/security/advisories/new, from release/repository.json",
+      "the first channel is https://github.com/<owner>/<name>/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     expect(
       check(textWith(advisory, "https://github.com/someone/fork/security/advisories/new")).failures,
     ).toEqual([
       "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
-      "the first channel is https://github.com/someone/fork/security/advisories/new; it must be https://github.com/authtempo/authtempo/security/advisories/new, from release/repository.json",
+      "the first channel is https://github.com/someone/fork/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     // The same owner with another name is another repository.
     expect(
-      check(textWith(advisory, "https://github.com/authtempo/other/security/advisories/new"))
+      check(textWith(advisory, "https://github.com/BirdTempo/other/security/advisories/new"))
         .failures,
     ).toEqual([
       "SECURITY.md links the repository authtempo/other; release/repository.json names authtempo/authtempo",
-      "the first channel is https://github.com/authtempo/other/security/advisories/new; it must be https://github.com/authtempo/authtempo/security/advisories/new, from release/repository.json",
+      "the first channel is https://github.com/BirdTempo/other/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     // A third channel, or one channel only.
     expect(
@@ -209,10 +209,10 @@ describe("check-security-policy", () => {
   });
 
   it("fails a GitHub link of another host form, and an http link", () => {
-    const advisory = "https://github.com/authtempo/authtempo/security/advisories/new";
+    const advisory = "https://github.com/BirdTempo/authtempo/security/advisories/new";
     const channel = (to: string) =>
       `the first channel is ${to}; it must be ${advisory}, from release/repository.json`;
-    const www = "https://www.github.com/authtempo/authtempo/security/advisories/new";
+    const www = "https://www.github.com/BirdTempo/authtempo/security/advisories/new";
     expect(check(textWith(advisory, www)).failures).toEqual([
       `SECURITY.md links ${www}; a GitHub link uses the host github.com`,
       channel(www),
@@ -223,7 +223,7 @@ describe("check-security-policy", () => {
       "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
       channel(fork),
     ]);
-    const http = "http://github.com/authtempo/authtempo/security/advisories/new";
+    const http = "http://github.com/BirdTempo/authtempo/security/advisories/new";
     expect(check(textWith(advisory, http)).failures).toEqual([
       `SECURITY.md links ${http}; each link uses https`,
       channel(http),
@@ -298,9 +298,9 @@ describe("check-security-policy", () => {
   });
 
   it("links the advisory record of the repository", () => {
-    const link = "https://github.com/authtempo/authtempo/blob/main/docs/security/advisories.md";
+    const link = "https://github.com/BirdTempo/authtempo/blob/main/docs/security/advisories.md";
     expect(
-      check(textWith(link, "https://github.com/authtempo/authtempo/blob/main/docs/advisories.md"))
+      check(textWith(link, "https://github.com/BirdTempo/authtempo/blob/main/docs/advisories.md"))
         .failures,
     ).toEqual([`the section "Supplier advisories" does not link ${link}`]);
   });

@@ -14,7 +14,7 @@ Until the first release, the two channels are not open, and the times of this po
 
 Report a fault through one of the two channels, in this order:
 
-1. [GitHub private vulnerability reporting](https://github.com/authtempo/authtempo/security/advisories/new) on the repository.
+1. [GitHub private vulnerability reporting](https://github.com/BirdTempo/authtempo/security/advisories/new) on the repository.
 2. [security@authtempo.com](mailto:security@authtempo.com), when you have no GitHub account.
 
 Do not open a public issue for a fault. Do not include a real user's data in the report.
@@ -47,7 +47,7 @@ The changeset of the fix has a line that starts with `Security:` and names the a
 
 ## Supplier advisories
 
-The owner reads each advisory of a runtime dependency of a released package. The owner also reads each advisory of the library whose API the compat package answers, in the range of versions that the compat package supports. Each read advisory is a dated entry in [the advisory record](https://github.com/authtempo/authtempo/blob/main/docs/security/advisories.md). The record is append-only. Each entry states whether the advisory affects authtempo, and why.
+The owner reads each advisory of a runtime dependency of a released package. The owner also reads each advisory of the library whose API the compat package answers, in the range of versions that the compat package supports. Each read advisory is a dated entry in [the advisory record](https://github.com/BirdTempo/authtempo/blob/main/docs/security/advisories.md). The record is append-only. Each entry states whether the advisory affects authtempo, and why.
 
 ## Out of scope
 
