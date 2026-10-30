@@ -59,3 +59,17 @@ Each entry states the advisory and the dates of each read. It quotes the text th
   - "refuses a JSON body with more than BODY_ITEMS_MAX items before JSON.parse"
 - The test of the compat package: `packages/compat-better-auth/test/body-cap.test.ts`.
 - The fix for an app: the same as in the corrected entry.
+
+## 2026-10-30: correction of the test names and the code lines of three entries
+
+- This entry corrects three entries above: "2026-10-14: Better Auth 1.7.7, a magic link takeover", "2026-10-14: GHSA-qq9h-g4jm-xgf3, an account hijack before the account exists", and "2026-10-30: zod below 4.6.6, memory on an oversized constrained collection". Those entries stay as they were written.
+- What was wrong: the two entries of 2026-10-14 name code by a line number. Main moved those lines between commit f44660d and commit 79daeb0b. The zod entry names two tests that ruling 46 of the 12j lane renamed. The final review C of the 12j lane found it on 2026-10-30.
+- The code of the first entry, by a stable name: the purpose condition of the `findOne` call in `consumeVerification` (`packages/core/src/engine/verification.ts`). The entry says line 36. On commit 476a1b92 it is line 37, and line 36 is the hash condition.
+- The test of the first entry fails when the purpose condition of `consumeVerification` is deleted. This break ran on 2026-10-30 on commit 476a1b92: 1 test failed of 1.
+- The magic link verify of the first entry: the `consumeVerification` call in `verifyMagicLink` (`packages/core/src/engine/magic-link.ts`) passes only the purpose `magic-link`. The entry says line 94.
+- The claim rule of the second entry: the function `claimEmail` in `packages/core/src/engine/users.ts`. The entry says lines 157 to 176. On commit 476a1b92 the function starts at line 173.
+- The renamed tests, each with its name now, in `packages/core/test/body-cap.test.ts`:
+  - "refuses a body one byte over the cap and parses nothing" is now "refuses a body one byte over the floor of a request with no route, and parses nothing".
+  - "reads a body of exactly the cap" is now "reads a body of exactly the floor".
+- Each other test name of the three entries is the name on commit 476a1b92. The test `scripts/release/test/advisories.test.ts` holds each test name that an entry cites to a test title of its file. So a later rename fails there until a new entry names it.
+- The CVE id of the zod entry: read again on 2026-10-30 at 13:57 UTC at https://api.osv.dev/v1/vulns/GHSA-mrhx-c7xc-m3w5. The OSV record still gives the alias CVE-2023-54404, with the NVD publication date 2026-10-01. So the zod entry is right on this point.
