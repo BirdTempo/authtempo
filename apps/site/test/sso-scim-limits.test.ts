@@ -73,12 +73,16 @@ function limitRows(): Map<string, Limit[]> {
   return out;
 }
 
-/** The number that `re` captures in `file`, at each match. A unit of KB or MB counts in bytes. */
+/**
+ * The number that `re` captures in `file`, at each match. A unit of KB or MB
+ * counts in bytes, as do KiB and MiB (ruling 64 Low 2 of the 12j lane).
+ */
 function stated(file: string, re: RegExp): number[] {
   const text = page(file);
   const found = [...text.matchAll(new RegExp(re, "g"))].map((m) => {
     const n = Number((m[1] ?? "").replaceAll(" ", ""));
-    return m[2] === "MB" ? n * 1_048_576 : m[2] === "KB" ? n * 1024 : n;
+    if (m[2] === "MB" || m[2] === "MiB") return n * 1_048_576;
+    return m[2] === "KB" || m[2] === "KiB" ? n * 1024 : n;
   });
   if (found.length === 0) throw new Error(`no match of ${re} in ${file}`);
   return found;
@@ -187,8 +191,8 @@ describe("the SSO and SCIM limits of the engine and the docs (ruling 74 m1)", ()
       "one SCIM request body",
       () => constant("http/routes/scim.ts", "SCIM_BODY_MAX"),
       [
-        ["reference/limits.md", /\| One SCIM request body \| (\d+) (MB) \|/],
-        ["guides/scim.mdx", /\| A body over (\d+) (MB) \|/],
+        ["reference/limits.md", /\| One SCIM request body \| (\d+) (MiB) \|/],
+        ["guides/scim.mdx", /\| A body over (\d+) (MiB) \|/],
       ],
     ],
     [
