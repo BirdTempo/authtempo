@@ -48,17 +48,27 @@ function releasedManifests() {
 }
 
 /**
- * An import of vitest or of a vitest subpath: `import ... from`, `export ...
- * from`, a side-effect `import "vitest"`, and a dynamic `import("vitest")`.
+ * An import of vitest or of a vitest subpath that loads it at run time:
+ * `import ... from`, `export ... from`, a side-effect `import "vitest"`, and a
+ * dynamic `import("vitest")`. `import type`, `export type`, and `typeof
+ * import(...)` load nothing, so they stay out (rr-task3b N2 of plan 12j).
  * `@vitest/expect` and `vitest-environment-x` are other packages.
  */
-const VITEST_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']vitest(?:\/[^"']*)?["']/;
+const VITEST_IMPORT =
+  /(?:\b(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*|(?<!\btypeof\s+)\bimport\s*\(?\s*)["']vitest(?:\/[^"']*)?["']/;
+
+/** The text of a .ts file with its comments removed, so a comment never reads as an import. */
+const codeOf = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+
+/** True when the code of `text` imports vitest at run time. */
+const importsVitestText = (text: string): boolean => VITEST_IMPORT.test(codeOf(text));
 
 /** True when a .ts file under `dir` imports vitest. */
 function importsVitest(dir: string): boolean {
   if (!existsSync(dir)) return false;
   return readdirSync(dir, { recursive: true, encoding: "utf8" }).some(
-    (file) => file.endsWith(".ts") && VITEST_IMPORT.test(readFileSync(join(dir, file), "utf8")),
+    (file) => file.endsWith(".ts") && importsVitestText(readFileSync(join(dir, file), "utf8")),
   );
 }
 
@@ -147,8 +157,22 @@ describe("package fields", () => {
     ["subpath", 'import { vi } from "vitest/node";'],
     ["side-effect subpath", 'import "vitest/globals";'],
     ["dynamic subpath", 'const c = await import("vitest/config");'],
+    ["inline type specifier", 'import { type Mock, vi } from "vitest";'],
+    ["multi-line", 'import {\n  describe,\n  it,\n} from "vitest";'],
   ])("reads the %s import form of vitest", (_form, text) => {
-    expect(VITEST_IMPORT.test(text)).toBe(true);
+    expect(importsVitestText(text)).toBe(true);
+  });
+
+  it("reads no type import and no comment as an import of vitest (rr-task3b N2)", () => {
+    const no = [
+      'import type { Mock } from "vitest";',
+      'export type { Mock } from "vitest";',
+      'type V = typeof import("vitest");',
+      '// const v = await import("vitest");',
+      '/* import { it } from "vitest"; */',
+      '/**\n * See import("vitest") for the runner.\n */',
+    ];
+    expect(no.filter((t) => importsVitestText(t))).toEqual([]);
   });
 
   it("reads no other package as vitest", () => {
@@ -158,7 +182,7 @@ describe("package fields", () => {
       'const name = "vitest";',
       'import { a } from "./vitest.js";',
     ];
-    expect(no.filter((t) => VITEST_IMPORT.test(t))).toEqual([]);
+    expect(no.filter((t) => importsVitestText(t))).toEqual([]);
   });
 
   it("gives vitest as an optional peer to each package whose source imports it", () => {
