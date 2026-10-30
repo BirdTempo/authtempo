@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { checkResources, DEMO_PATH } from "../../../apps/site/scripts/check-resources.ts";
 import { RESOURCES_EMPTY } from "../../../apps/site/src/data/unpublished.ts";
 import { checkTag } from "../src/check-tag.ts";
+import { CI_BASE } from "../src/check-workflows.ts";
 import { COPY_DRY_RUN, shellLine } from "../src/lib/release-copy.ts";
 import {
   CI_FILE,
@@ -198,6 +199,12 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(stepOf(TEXT, "Once, before the first release", 3)).toContain(
       'Select "Do not allow bypassing the above settings", so the rule holds for administrators too.',
     );
+    // check-tag accepts a tag on a release branch, so those branches take the
+    // same rule (ruling 67 of plan 12j, Minor 3). The pattern of GitHub is a
+    // fnmatch pattern, and its * does not match a slash (read 2026-10-30).
+    expect(stepOf(TEXT, "Once, before the first release", 3)).toContain(
+      'Add the same rule for the branch name pattern "release/*", the branches of a patch of an older minor.',
+    );
     expect(stepOf(TEXT, "At each release", 7)).toContain(`the job \`check\` of \`${CI_FILE}\``);
   });
 
@@ -364,7 +371,7 @@ describe("docs/release/RUNBOOK.md", () => {
     const run = `pnpm release:check ${flags.slice(0, 2).join(" ")}`;
     expect(step).toContain(`\`${run}\` in the copy`);
     const ci = readFileSync(new URL(`.github/workflows/${CI_FILE}`, ROOT), "utf8");
-    expect(ci).toContain(`- run: ${run} --base origin/main\n`);
+    expect(ci).toContain(`- run: ${run} --base ${CI_BASE}\n`);
     expect(step).toContain("Without it, the version pull request can fail its own check.");
     expect(orderFaults(swapSteps(TEXT, "At each release", 1, 2))).toEqual([
       "the version branch step comes before the rehearsal step",

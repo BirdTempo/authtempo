@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkWorkflows, entry, readYaml } from "../src/check-workflows.ts";
+import { CI_BASE, checkWorkflows, entry, readYaml } from "../src/check-workflows.ts";
 import { NODE_FLOOR, NPM_FLOOR } from "../src/lib/release-facts.ts";
 import { summaryLine } from "../src/lib/report.ts";
 
@@ -320,7 +320,7 @@ describe("check-workflows", () => {
       "ci.yml: the jobs are not check",
     );
     const install = "      - run: pnpm install --frozen-lockfile\n";
-    const gate = "      - run: pnpm release:check --no-osv --no-dry-run --base origin/main\n";
+    const gate = `      - run: pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}\n`;
     expect(ciFailures(swap(CI, install, ""))).toEqual([
       "ci.yml: jobs.check: 4 steps, not the 5 steps of the rule",
     ]);
@@ -329,7 +329,7 @@ describe("check-workflows", () => {
     ]);
     expect(ciFailures(swap(swap(CI, gate, ""), install, `${gate}${install}`))).toEqual([
       "ci.yml: jobs.check: step 4 is not pnpm install --frozen-lockfile",
-      "ci.yml: jobs.check: step 5 is not pnpm release:check --no-osv --no-dry-run --base origin/main",
+      `ci.yml: jobs.check: step 5 is not pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}`,
     ]);
     // The servers come from release-check, so a docker step starts a set that no test reads (ruling 50).
     const docker = "      - run: docker compose up -d --wait\n";

@@ -41,8 +41,12 @@ jobs:
       # installs and no check sees it.
       - run: pnpm install --frozen-lockfile
       # Every release check with the cache off, against the merge base with
-      # origin/main. Without it, this workflow proves nothing. The OSV read
-      # and the dry run run in release.yml at the tag. release-check starts
-      # the test servers of the checkout through scripts/test-servers.mjs, so
-      # no step starts docker compose (ruling 50 of plan 12j).
-      - run: pnpm release:check --no-osv --no-dry-run --base origin/main
+      # the base branch of the pull request: main, or release/<major>.<minor>
+      # for a patch of an older minor. A push to main has no base branch, so
+      # the base is main. GitHub sets GITHUB_BASE_REF on a pull request only.
+      # Without it, a pull request into a release branch is held to main.
+      # Without this step, this workflow proves nothing. The OSV read and the
+      # dry run run in release.yml at the tag. release-check starts the test
+      # servers of the checkout through scripts/test-servers.mjs, so no step
+      # starts docker compose (ruling 50 of plan 12j).
+      - run: pnpm release:check --no-osv --no-dry-run --base "origin/${GITHUB_BASE_REF:-main}"

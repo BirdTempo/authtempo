@@ -204,6 +204,14 @@ const entriesOf = (node: YamlNode | undefined): Record<string, YamlNode> =>
 const scalarOf = (node: YamlNode | undefined): string | null | undefined =>
   node?.kind === "scalar" ? node.value : undefined;
 
+/**
+ * The --base of ci.yml: the base branch of a pull request through the env of
+ * GitHub, or main on a push to main. GitHub sets GITHUB_BASE_REF only on a
+ * pull_request event (docs.github.com, variables, read 2026-10-30).
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a shell expansion of the run line, not a template.
+export const CI_BASE = '"origin/${GITHUB_BASE_REF:-main}"';
+
 /** The release copy of release.yml, where prepare, the build, and the pack run. */
 // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
 const COPY = "${{ runner.temp }}/release-copy";
@@ -263,7 +271,8 @@ const JOBS: Record<string, Record<string, Job>> = {
         PNPM,
         NODE,
         { run: "pnpm install --frozen-lockfile" },
-        { run: "pnpm release:check --no-osv --no-dry-run --base origin/main" },
+        // The base branch of a pull request, or main on a push (ruling 67 of plan 12j, Minor 3).
+        { run: `pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}` },
       ],
     },
   },
