@@ -61,8 +61,11 @@ export const SCIM_BODY_MAX = 1_048_576;
  * as for a route body (ruling 56 of the 12j lane). The scan runs before the
  * parse. Measured 2026-10-30 (Node 26, a heap of 128 MB, body-memory.test.ts):
  * before the scan, 1 MB of nesting kept 54 MB of heap, and 1 MB of `{}`
- * items 56 MB. With it, each shape past the limits peaks at 26 MB, and the
- * worst shape at them, 65536 keys, at 35 MB.
+ * items 56 MB. With it, each shape past the limits peaks at 26 MB. The worst
+ * shape at them, 65536 distinct keys, peaks at 35 to 36 MB (measured again
+ * 2026-10-30, Node 26.10.0, load 3 to 4: five runs alone, then the test).
+ * The first measure padded each key with a base-36 digit, so 1296 keys
+ * repeated and the body held 64240 keys (rr-12j-bodycap3b).
  *
  * The derivation, done 2026-10-30. The largest valid body by the bounds of
  * the engine is a Group PATCH of `PATCH_OPS_MAX` operations that name

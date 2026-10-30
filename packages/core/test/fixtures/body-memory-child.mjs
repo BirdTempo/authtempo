@@ -113,6 +113,19 @@ function fill(head, unit, tail, size = cap) {
 /** `text` with spaces after it, to exactly `cap` bytes of ASCII. */
 const pad = (text) => text + " ".repeat(cap - text.length);
 
+/**
+ * An object of `n` keys, each of the same width, to exactly `cap` bytes. A key
+ * is its index in base 36, padded with "_", which is no base-36 digit. So no
+ * two keys are equal. A pad of "k" made 1296 of 65536 keys repeat (the Low of
+ * rr-12j-bodycap3b). It throws when two keys are equal.
+ */
+function keysAtLimit(n) {
+  const width = Math.floor((cap - 2) / n) - 5;
+  const keys = Array.from({ length: n }, (_, i) => i.toString(36).padStart(width, "_"));
+  if (new Set(keys).size !== n) throw new Error(`keys-at-limit: ${n} keys are not distinct`);
+  return pad(`{${keys.map((k) => `"${k}":0`).join(",")}}`);
+}
+
 /** A chain of arrays `depth` deep, inside the outer object and array: `[[...]]`. */
 const chain = (depth) => `${"[".repeat(depth - 2)}${"]".repeat(depth - 2)}`;
 
@@ -144,13 +157,8 @@ const JSON_SHAPES = {
     }
     return `{${parts.join(",")}}`;
   },
-  // As many keys as the item limit allows, each long, to the cap.
-  "keys-at-limit": () => {
-    const n = BODY_ITEMS_MAX - 1;
-    const width = Math.floor((cap - 2) / n) - 5;
-    const keys = Array.from({ length: n }, (_, i) => `"${i.toString(36).padStart(width, "k")}":0`);
-    return pad(`{${keys.join(",")}}`);
-  },
+  // As many distinct keys as the item limit allows, each long, to the cap.
+  "keys-at-limit": () => keysAtLimit(BODY_ITEMS_MAX - 1),
 };
 
 // The ACS form at SAML_FORM_MAX (ruling 51 Major 1): the probes of the re-review.
@@ -194,13 +202,8 @@ const SCIM_SHAPES = {
     const n = Math.floor(SCIM_ITEMS_MAX / BODY_DEPTH_MAX);
     return pad(`[${Array.from({ length: n }, () => chain(BODY_DEPTH_MAX + 1)).join(",")}]`);
   },
-  // SCIM_ITEMS_MAX keys, each long, to the cap.
-  "keys-at-limit": () => {
-    const n = SCIM_ITEMS_MAX;
-    const width = Math.floor((cap - 2) / n) - 5;
-    const keys = Array.from({ length: n }, (_, i) => `"${i.toString(36).padStart(width, "k")}":0`);
-    return pad(`{${keys.join(",")}}`);
-  },
+  // SCIM_ITEMS_MAX distinct keys, each long, to the cap.
+  "keys-at-limit": () => keysAtLimit(SCIM_ITEMS_MAX),
 };
 
 const SHAPES = route === ACS ? FORM_SHAPES : route === SCIM ? SCIM_SHAPES : JSON_SHAPES;
