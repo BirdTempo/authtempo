@@ -31,6 +31,7 @@ import { limit } from "../../limiter/limit.js";
 import { readCappedBytes } from "../../primitives/read-capped.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { parseBodyForm } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
@@ -125,8 +126,9 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 
 /**
  * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
- * cap, a body that is not UTF-8, a NUL or a lone surrogate, or another
- * media type gives an empty form. `completeSaml` refuses an empty form at the step `form`.
+ * cap, a body that is not UTF-8, a form of more than `FORM_PAIRS_MAX`
+ * pairs, a NUL or a lone surrogate, or another media type gives an empty
+ * form. `completeSaml` refuses an empty form at the step `form`.
  */
 async function acsForm(request: Request): Promise<URLSearchParams> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
@@ -138,12 +140,15 @@ async function acsForm(request: Request): Promise<URLSearchParams> {
     request.signal,
   );
   if (bytes === null) return new URLSearchParams();
-  let form: URLSearchParams;
+  let text: string;
   try {
-    form = new URLSearchParams(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return new URLSearchParams();
   }
+  // More than FORM_PAIRS_MAX pairs gives an empty form before the parse (ruling 51 of the 12j lane).
+  const form = parseBodyForm(text);
+  if (form === null) return new URLSearchParams();
   // A NUL or a lone surrogate gives an empty form too (plan 12g, holdsBadText).
   return holdsBadText([...form]) ? new URLSearchParams() : form;
 }

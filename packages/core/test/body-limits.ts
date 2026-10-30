@@ -6,7 +6,8 @@ import type { RouteContract } from "../src/http/contract/types.js";
  * lane). It walks the body schema of each route of `ROUTE_CONTRACT` and
  * computes three numbers of its largest valid body: the bytes, the depth of
  * nesting, and the items (each `[`, `{`, and `,` outside a string, as the
- * scan of `body-cap.ts` counts them).
+ * scan of `body-cap.ts` counts them). A form route also gets its fields,
+ * the most pairs of a valid form (ruling 51).
  */
 
 /** UTF-8 bytes of one UTF-16 unit of a JSON string: 3 for a character that is not a control character. */
@@ -133,12 +134,38 @@ export function measure(node: ZodNode, path: string, unit: number, open: string[
   }
 }
 
+/**
+ * The most fields of a form body by its schema: the keys of its object, or
+ * of the largest object of a union (ruling 51 of the 12j lane). A form takes
+ * one pair for each field. A form schema that takes any key, or a zod type
+ * with no rule here, throws: its pairs have no bound.
+ */
+export function formFields(node: ZodNode, path: string): number {
+  const def = node._zod.def;
+  switch (def.type) {
+    case "object": {
+      const rest = def.catchall as ZodNode | undefined;
+      if (rest !== undefined && rest._zod.def.type !== "never")
+        throw new Error(`body-limits: the form of ${path} takes any key`);
+      return Object.keys(def.shape as object).length;
+    }
+    case "pipe":
+      return formFields(def.in as ZodNode, path);
+    case "union":
+      return Math.max(...(def.options as ZodNode[]).map((o) => formFields(o, path)));
+    default:
+      throw new Error(`body-limits: no form rule for the zod type ${def.type} at ${path}`);
+  }
+}
+
 /** The largest valid body of one route. */
 export interface RouteBody extends Measure {
   key: string;
   media: string;
   /** The paths of the nodes that no schema bounds. */
   open: string[];
+  /** The most pairs of a valid form body: its fields. 0 for a route that takes no form. */
+  pairs: number;
 }
 
 /** The largest valid body of each route with a body, largest first. */
@@ -159,6 +186,7 @@ export function largestBodies(): RouteBody[] {
       depth: json.depth,
       items: json.items,
       open,
+      pairs: c.body.media.includes("form") ? formFields(schema, key) : 0,
     });
   }
   return rows.sort((a, b) => b.bytes - a.bytes);

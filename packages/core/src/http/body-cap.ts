@@ -68,6 +68,19 @@ export const BODY_DEPTH_MAX = 16;
  */
 export const BODY_ITEMS_MAX = 4096;
 
+/**
+ * The most pairs of a form body: one more than its `&` separators, as
+ * `URLSearchParams` splits the text (ruling 51 Major 1 of the 12j lane).
+ * Node's `URLSearchParams` takes time of the pairs times the length for a
+ * key with no `=`: 540 759 pairs of `a&` at `SAML_FORM_MAX` took 5.2 s,
+ * and a form of `=&` pairs kept 64 to 80 MB of heap. The derivation, done
+ * 2026-10-30: the form route with the most fields is `POST /oauth/token`,
+ * 12. The next power of two is 16. The limit is 8 times that, as for the
+ * items, for the fields that a client adds and a route ignores. At this
+ * limit a form of `SAML_FORM_MAX` parses in about 2 ms on Node 26.
+ */
+export const FORM_PAIRS_MAX = 128;
+
 /** The cap of a route: its entry of `BODY_CAPS`, else the floor. */
 export function bodyCapOf(key: RouteKey | undefined): number {
   return (key === undefined ? undefined : BODY_CAPS[key]) ?? BODY_CAP_FLOOR;
@@ -172,4 +185,23 @@ export function parseBodyJson(text: string | null): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * True when the form text has at most `FORM_PAIRS_MAX` pairs. One pass over
+ * the text, before `URLSearchParams`, so the parse never meets more pairs.
+ */
+export function formPairsFit(text: string): boolean {
+  let pairs = 1;
+  for (let at = text.indexOf("&"); at !== -1; at = text.indexOf("&", at + 1))
+    if (++pairs > FORM_PAIRS_MAX) return false;
+  return true;
+}
+
+/**
+ * The pairs of a form body text, or null for text with more than
+ * `FORM_PAIRS_MAX` pairs, or for a body read before (null).
+ */
+export function parseBodyForm(text: string | null): URLSearchParams | null {
+  return text !== null && formPairsFit(text) ? new URLSearchParams(text) : null;
 }

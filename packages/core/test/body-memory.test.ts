@@ -8,7 +8,10 @@ import type { RouteKey } from "../src/http/route-list.js";
  * each distinct route cap, a child Node process with a heap of 128 MB (the
  * memory of a Workers isolate) reads the worst shapes at that cap: the read,
  * the shape scan, the parse, the text walk, and zod. A fatal out-of-memory
- * stops a child with no answer, so each child must answer.
+ * stops a child with no answer, so each child must answer. The SAML ACS
+ * form at `SAML_FORM_MAX` and the SCIM body at `SCIM_BODY_MAX` join it with
+ * their own worst shapes (ruling 51). Each child records the peak of its
+ * heap and of its array buffers.
  *
  * The child imports the build of core, so the first test fails when a
  * source file is newer than its build. A turbo run of `test` builds first.
@@ -56,6 +59,19 @@ const SHAPES = [
   "keys",
   "keys-at-limit",
 ];
+/** The SAML ACS: its form at `SAML_FORM_MAX`, through createAuth with no sign-in. */
+const ACS = "POST /sso/:connectionId/acs";
+const FORM_SHAPES = [
+  "form-keys",
+  "form-empty",
+  "form-escapes",
+  "form-pairs",
+  "form-value",
+  "form-at-limit",
+];
+/** A SCIM write: its body at `SCIM_BODY_MAX`, through readScimBody, which has no shape scan. */
+const SCIM = "POST /scim/v2/Users";
+const SCIM_SHAPES = ["nesting", "zeros", "empties", "objects", "string", "keys"];
 
 interface ChildLine {
   route: string;
@@ -63,7 +79,9 @@ interface ChildLine {
   cap: number;
   bytes: number;
   answer: string;
+  ms: number;
   peakHeapMB: number;
+  peakArrayBuffersMB: number;
   readRssMB: number;
 }
 
@@ -131,24 +149,37 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
     ][])
       if (contract.body !== undefined && !byCap.has(bodyCapOf(key))) byCap.set(bodyCapOf(key), key);
     expect([...byCap.keys()].sort((a, b) => a - b)).toEqual([65_536, 262_144, 8_388_608]);
+    const jobs: [string, string][] = [
+      ...[...byCap.values()].flatMap((route) =>
+        SHAPES.map((shape): [string, string] => [route, shape]),
+      ),
+      ...FORM_SHAPES.map((shape): [string, string] => [ACS, shape]),
+      ...SCIM_SHAPES.map((shape): [string, string] => [SCIM, shape]),
+    ];
     const lines = await inBatches(
-      [...byCap.values()].flatMap((route) => SHAPES.map((shape) => () => runChild([route, shape]))),
+      jobs.map((job) => () => runChild(job)),
       4,
     );
     console.log(
       lines
         .map(
           (l) =>
-            `body-memory: cap=${l.cap} shape=${l.shape} bytes=${l.bytes} answer=${l.answer} peakHeapMB=${l.peakHeapMB} readRssMB=${l.readRssMB}`,
+            `body-memory: ${l.route} cap=${l.cap} shape=${l.shape} bytes=${l.bytes} answer=${l.answer} ms=${l.ms} peakHeapMB=${l.peakHeapMB} peakArrayBuffersMB=${l.peakArrayBuffersMB} readRssMB=${l.readRssMB}`,
         )
         .join("\n"),
     );
-    expect(lines).toHaveLength(byCap.size * SHAPES.length);
+    expect(lines).toHaveLength(jobs.length);
     for (const l of lines) {
       // Each body fills its cap: no shape is smaller than the cap less one unit of it.
       expect(l.bytes).toBeGreaterThan(l.cap - 32);
       expect(l.bytes).toBeLessThanOrEqual(l.cap);
       expect(l.peakHeapMB).toBeLessThan(HEAP_MB);
+    }
+    // The ACS refuses each form at the form step, or later for the one long value.
+    // Before the pair limit a form of "a&" pairs took 5.2 s; the margin here is wide.
+    for (const l of lines.filter((l) => l.route === ACS)) {
+      expect([l.shape, l.answer]).toEqual([l.shape, "302 sso_failed"]);
+      expect(l.ms).toBeLessThan(1000);
     }
   });
 

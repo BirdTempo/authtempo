@@ -74,7 +74,7 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
-import { parseBodyJson, readBodyText } from "../body-cap.js";
+import { parseBodyForm, parseBodyJson, readBodyText } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -105,13 +105,16 @@ async function readObject(request: Request): Promise<Record<string, unknown> | n
     : null;
 }
 
-/** A form body whose fields each come once (RFC 6749 section 3.1), or null. The read stops at the cap of the route. */
+/**
+ * A form body whose fields each come once (RFC 6749 section 3.1), or null.
+ * The read stops at the cap of the route. A form of more than
+ * `FORM_PAIRS_MAX` pairs is null before the parse (ruling 51 of the 12j lane).
+ */
 async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
-  const text = await readBodyText(request);
-  if (text === null) return null;
-  const params = new URLSearchParams(text);
+  const params = parseBodyForm(await readBodyText(request));
+  if (params === null) return null;
   for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
   if (holdsBadText([...params])) return null;
   return params;

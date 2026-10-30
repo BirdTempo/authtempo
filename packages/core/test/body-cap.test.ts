@@ -10,6 +10,8 @@ import {
   BODY_ITEMS_MAX,
   BodyTooLarge,
   bodyCapOf,
+  FORM_PAIRS_MAX,
+  formPairsFit,
   jsonShapeFits,
   REQUEST_BODY_MAX,
 } from "../src/http/body-cap.js";
@@ -70,8 +72,32 @@ function spySchema() {
   return { schema: { safeParse: parse } as unknown as z.ZodType<object>, parse };
 }
 
+/**
+ * Puts a `URLSearchParams` in place that records the pairs of each text it
+ * parses, so a test sees that no form past `FORM_PAIRS_MAX` reached it.
+ */
+function recordForms(): number[] {
+  const pairs: number[] = [];
+  const Real = URLSearchParams;
+  vi.stubGlobal(
+    "URLSearchParams",
+    class extends Real {
+      constructor(init?: ConstructorParameters<typeof Real>[0]) {
+        if (typeof init === "string") pairs.push(init.split("&").length);
+        super(init);
+      }
+    },
+  );
+  return pairs;
+}
+
+/** A form of `pairs` pairs: `a=b`, then a distinct empty key for each other pair. */
+const formOf = (pairs: number) =>
+  ["a=b", ...Array.from({ length: pairs - 1 }, (_, i) => `k${i}=`)].join("&");
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
@@ -90,7 +116,7 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
       table
         .map(
           (r) =>
-            `body-cap: ${r.key} largest=${r.bytes} depth=${r.depth} items=${r.items} cap=${r.cap}`,
+            `body-cap: ${r.key} largest=${r.bytes} depth=${r.depth} items=${r.items} pairs=${r.pairs} cap=${r.cap}`,
         )
         .join("\n"),
     );
@@ -134,6 +160,64 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(most).toMatchObject({ key: "POST /sso/connections/update", items: 230 });
     expect(most.open).toEqual(["POST /sso/connections/update.scimRoles{}"]);
     expect(BODY_ITEMS_MAX).toBe(8 * 2 ** Math.ceil(Math.log2(withRoles)));
+  });
+
+  it("derives FORM_PAIRS_MAX as 8 times the next power of two above the most fields of a form route", () => {
+    const forms = largestBodies().filter((r) => r.media.includes("form"));
+    const most = forms.reduce((a, b) => (b.pairs > a.pairs ? b : a));
+    console.log(
+      `body-cap: form routes=${forms.length}, most fields ${most.key} ${most.pairs}, limit=${FORM_PAIRS_MAX}`,
+    );
+    expect(forms.every((r) => r.pairs > 0)).toBe(true);
+    expect(most).toMatchObject({ key: "POST /oauth/token", pairs: 12 });
+    expect(FORM_PAIRS_MAX).toBe(8 * 2 ** Math.ceil(Math.log2(most.pairs)));
+  });
+
+  it("refuses a form of more than FORM_PAIRS_MAX pairs before URLSearchParams", async () => {
+    const pairs = recordForms();
+    const schema = z.object({ a: z.string() });
+    const formPost = (body: string) =>
+      new Request(`${BASE_URL}/x`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    expect(await readBody(formPost(formOf(FORM_PAIRS_MAX)), schema)).toEqual({
+      ok: true,
+      value: { a: "b" },
+    });
+    expect(await readBody(formPost(formOf(FORM_PAIRS_MAX + 1)), schema)).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+    // The probe of the re-review: keys with no "=", to the floor.
+    const keys = "a&".repeat(BODY_CAP_FLOOR / 2);
+    expect(await readBody(formPost(keys), schema)).toMatchObject({ code: "invalid_body" });
+    expect(pairs).toEqual([FORM_PAIRS_MAX]);
+    // An empty pair counts, as URLSearchParams splits it.
+    expect(formPairsFit("&".repeat(FORM_PAIRS_MAX - 1))).toBe(true);
+    expect(formPairsFit("&".repeat(FORM_PAIRS_MAX))).toBe(false);
+  });
+
+  it("answers invalid_request at the OAuth form routes for a form of more than FORM_PAIRS_MAX pairs", async () => {
+    const { auth } = oauthHandle();
+    const pairs = recordForms();
+    for (const path of ["/auth/oauth/token", "/auth/oauth/revoke", "/auth/oauth/introspect"]) {
+      const res = await auth.handle(
+        new Request(`${BASE_URL}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: `grant_type=authorization_code&${formOf(FORM_PAIRS_MAX)}`,
+        }),
+      );
+      expect([path, res.status, await res.json()]).toEqual([
+        path,
+        400,
+        { error: "invalid_request" },
+      ]);
+    }
+    expect(pairs.filter((n) => n > FORM_PAIRS_MAX)).toEqual([]);
   });
 
   it("refuses a body one byte over the floor of a request with no route, and parses nothing", async () => {

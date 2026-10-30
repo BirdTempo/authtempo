@@ -1750,7 +1750,9 @@ writes each value under version 1.
   for the Apple callback, and 8 MiB for the two SSO connection writes
   (`REQUEST_BODY_MAX`). A longer body answers 413 `body_too_large`, and
   no parse runs. A JSON body nested deeper than 16 or with more than 4096
-  items answers `invalid_body` before the parse. SCIM keeps its own 1 MB cap.
+  items answers `invalid_body` before the parse. A form body of more than
+  128 pairs gets the refusal of a bad form before the parse, the SAML ACS
+  form too. SCIM keeps its own 1 MB cap.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a
