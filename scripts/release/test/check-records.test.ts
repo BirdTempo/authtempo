@@ -2,6 +2,8 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkRecords, entry, RECORD_GLOBS, readInput, recordOf } from "../src/check-records.ts";
+import { isAncestor } from "../src/lib/git.ts";
+import { RECORDS_BASE } from "../src/lib/release-facts.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
 
@@ -154,6 +156,9 @@ describe("check-records", () => {
     repo.write("packages/core/src/schema.ts", "export const SCHEMA_VERSION = 1;\n");
     repo.commit("first");
     repo.git(["checkout", "--quiet", "-b", "work"]);
+    // One commit on the branch, so the merge base is before HEAD, as in a pull request.
+    repo.write("packages/core/src/schema.ts", "export const SCHEMA_VERSION = 2;\n");
+    repo.commit("work");
     // A change that is not committed counts, and so does a removal.
     repo.write(CHANGELOG, read("changelog/edited.md"));
     rmSync(join(repo.root, MIGRATION));
@@ -168,5 +173,93 @@ describe("check-records", () => {
     expect(summaryLine(r)).toBe(
       "check-records: FAIL files=3 changelogs=1 migrations=2 advisories=0 failures=2",
     );
+  });
+});
+
+// A push to main and a tag of a main commit have a merge base equal to HEAD.
+// The check then compared HEAD with itself and printed PASS (ruling 67 of
+// plan 12j, Major 2, the probe of final review A).
+describe("check-records at a merge base equal to HEAD", () => {
+  /** A repository on main with a changelog and a migration, and the sha of that first commit. */
+  function released(): { repo: Repo; first: string } {
+    const r = makeRepo();
+    r.write(CHANGELOG, read("changelog/0.1.0.md"));
+    r.write(MIGRATION, read("migration/0001_schema_v1.sql"));
+    r.commit("first");
+    return { repo: r, first: r.git(["rev-parse", "HEAD"]).trim() };
+  }
+
+  it("compares with the newest release tag before HEAD", () => {
+    const made = released();
+    repo = made.repo;
+    repo.git(["tag", "v0.1.0"]);
+    // A commit on main that edits a shipped migration, then the tag of the next release on it.
+    repo.write(MIGRATION, read("migration/0001_schema_v1-edited.sql"));
+    repo.commit("edit");
+    repo.git(["tag", "v0.2.0"]);
+    expect(entry(repo.root, "main", made.first)).toEqual({
+      lines: [
+        "check-records: FAIL files=2 changelogs=1 migrations=1 advisories=0 failures=1",
+        "  packages/adapter-d1/migrations/0001_schema_v1.sql: the migration differs from v0.1.0",
+        "  note: the merge base with main is HEAD, so the base is v0.1.0, the newest release tag",
+      ],
+      code: 1,
+    });
+  });
+
+  it("compares with RECORDS_BASE while no release tag exists", () => {
+    const made = released();
+    repo = made.repo;
+    repo.write(CHANGELOG, read("changelog/edited.md"));
+    repo.commit("edit");
+    const short = made.first.slice(0, 8);
+    expect(entry(repo.root, "main", made.first)).toEqual({
+      lines: [
+        "check-records: FAIL files=2 changelogs=1 migrations=1 advisories=0 failures=1",
+        `  packages/core/CHANGELOG.md: the section ## 0.1.0 differs from RECORDS_BASE ${short}`,
+        `  note: the merge base with main is HEAD and no release tag exists, so the base is RECORDS_BASE ${short}`,
+      ],
+      code: 1,
+    });
+  });
+
+  it("holds a change that is not committed against HEAD too", () => {
+    const made = released();
+    repo = made.repo;
+    // The advisory record is new after RECORDS_BASE, so only HEAD holds its old entry.
+    repo.write(ADVISORIES, read("advisories/base.md"));
+    repo.commit("advisory");
+    repo.write(ADVISORIES, read("advisories/edited.md"));
+    expect(entry(repo.root, "main", made.first).lines.slice(0, 2)).toEqual([
+      "check-records: FAIL files=3 changelogs=1 migrations=1 advisories=1 failures=1",
+      "  docs/security/advisories.md: the text at HEAD is not the start of the text now; a new entry goes at the end",
+    ]);
+  });
+
+  it("never prints PASS with no compare", () => {
+    const made = released();
+    repo = made.repo;
+    // RECORDS_BASE that this history lacks, and RECORDS_BASE equal to HEAD.
+    const gone = "0123456789abcdef0123456789abcdef01234567";
+    expect(entry(repo.root, "main", gone)).toEqual({
+      lines: [
+        "check-records: FAIL files=0 changelogs=0 migrations=0 advisories=0 failures=1",
+        `  the merge base with main is HEAD, no release tag exists, and RECORDS_BASE ${gone} is not an ancestor of HEAD; fetch the full history (fetch-depth: 0)`,
+      ],
+      code: 1,
+    });
+    expect(entry(repo.root, "main", made.first)).toEqual({
+      lines: [
+        "check-records: FAIL files=0 changelogs=0 migrations=0 advisories=0 failures=1",
+        "  the merge base with main and RECORDS_BASE are both HEAD, so no record was compared; set RECORDS_BASE to a commit before HEAD",
+      ],
+      code: 1,
+    });
+  });
+
+  it("holds RECORDS_BASE to an ancestor of HEAD of this repository", () => {
+    const root = new URL("../../../", import.meta.url).pathname;
+    expect(RECORDS_BASE).toMatch(/^[0-9a-f]{40}$/);
+    expect(isAncestor(decodeURIComponent(root), RECORDS_BASE)).toBe(true);
   });
 });

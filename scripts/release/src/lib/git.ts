@@ -48,6 +48,45 @@ export function changedFiles(root: string, base: string): string[] {
   return [...new Set([...changed, ...untracked].filter((p) => p !== ""))].sort();
 }
 
+/** The commit of HEAD. */
+export function headCommit(root: string): string {
+  return git(root, ["rev-parse", "HEAD"]).trim();
+}
+
+/** The commit of `ref`, or null when the checkout lacks it. */
+export function commitOf(root: string, ref: string): string | null {
+  try {
+    return git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** True when the commit `ref` is HEAD or an ancestor of HEAD. */
+export function isAncestor(root: string, ref: string): boolean {
+  try {
+    git(root, ["merge-base", "--is-ancestor", ref, "HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The newest release tag `<prefix><major>.<minor>.<patch>` that HEAD holds,
+ * in the version order, or null. A tag of the commit of HEAD is not before
+ * HEAD, so it never counts.
+ */
+export function lastReleaseTag(root: string, prefix: string): string | null {
+  const own = new Set(git(root, ["tag", "--points-at", "HEAD"]).split("\n"));
+  const form = new RegExp(`^${prefix}\\d+\\.\\d+\\.\\d+$`);
+  return (
+    git(root, ["tag", "--merged", "HEAD", "--sort=-v:refname"])
+      .split("\n")
+      .find((t) => form.test(t) && !own.has(t)) ?? null
+  );
+}
+
 /** The count of commits on HEAD since `base`. */
 export function commitCount(root: string, base: string): number {
   return Number(git(root, ["rev-list", "--count", `${base}..HEAD`]).trim());

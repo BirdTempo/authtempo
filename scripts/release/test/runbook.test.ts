@@ -193,6 +193,11 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(stepOf(TEXT, "Once, before the first release", 3)).toContain(
       `Require a pull request and the job \`check\` of \`${CI_FILE}\`.`,
     );
+    // An administrator passes the rule by default, so a push to main skips
+    // the check of the pull request (ruling 67 of plan 12j, Major 2).
+    expect(stepOf(TEXT, "Once, before the first release", 3)).toContain(
+      'Select "Do not allow bypassing the above settings", so the rule holds for administrators too.',
+    );
     expect(stepOf(TEXT, "At each release", 7)).toContain(`the job \`check\` of \`${CI_FILE}\``);
   });
 

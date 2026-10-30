@@ -20,8 +20,20 @@ export const ENVIRONMENT = "release";
  */
 export const FIRST_RELEASE = "0.1.0";
 
-/** The prefix of the release tag `v<version>`. Read by check-tag, check-workflows, and the runbook test. */
+/** The prefix of the release tag `v<version>`. Read by check-tag, check-workflows, check-records, and the runbook test. */
 export const TAG_PREFIX = "v";
+
+/**
+ * The base of check-records on main before the first release tag (ruling 67
+ * of plan 12j, Major 2). A push to main and a tag of a main commit have a
+ * merge base equal to HEAD, so a compare with it reads no change. Then
+ * check-records compares with the newest release tag before HEAD, or with
+ * this commit while no tag exists. Until the merge of plan 12j it is main
+ * 79daeb0b, the base of the 12j lane. The lead sets the 12j merge commit on
+ * main here at the merge, so the advisory record of the lane counts too. A
+ * test holds it to an ancestor of HEAD.
+ */
+export const RECORDS_BASE = "79daeb0bc8a4176debbd12cd7204090ce695e781";
 
 /**
  * The scope of each released name. Read by dry-run and publish. npm and pnpm
