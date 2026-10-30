@@ -216,7 +216,7 @@ async function answerOf() {
       organizations: {},
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     });
-    // No sign-in and no connection: the ACS reads the form before any check.
+    // No sign-in and no connection: past its IP limit and its SAML check, the ACS reads the form.
     const res = await auth.handle(
       new Request("https://auth.test/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs", {
         method: "POST",

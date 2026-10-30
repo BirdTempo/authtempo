@@ -141,6 +141,8 @@ export function managedBody<T>(schema: z.ZodType<T>) {
  * gives an empty form. `completeSaml` refuses an empty form at the step
  * `form`. The read holds its bytes against the budget of the large reads,
  * and past it the router answers `body_busy` (ruling 51 of the 12j lane).
+ * `completeSaml` calls it only after the ACS limit and the SAML check
+ * (ruling 59).
  */
 async function acsForm(request: Request): Promise<URLSearchParams> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
@@ -320,7 +322,8 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const r = await completeSaml(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
-          form: await acsForm(ctx.request),
+          // The read runs after the limit and the SAML check of completeSaml (ruling 59 of the 12j lane).
+          readForm: () => acsForm(ctx.request),
           bindToken: readCookie(ctx.request, bindName),
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),

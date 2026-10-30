@@ -659,7 +659,7 @@ describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 
     timeout: 30_000,
   }, async () => {
     const { reads, open } = await holdBudget();
-    // The budget holds 128 KiB more. The SAML ACS reads its form above the floor, before any check.
+    // The budget holds 128 KiB more. The SAML ACS reads its form above the floor, with no sign-in.
     const auth = createAuth({
       baseURL: BASE_URL,
       secret: "0123456789abcdef0123456789abcdef",
@@ -1005,5 +1005,59 @@ describe("the share of one client of the large reads (ruling 59 Major 1 of the 1
       first.open();
       second.open();
     }
+  });
+});
+
+/** A form body of `bytes` bytes in chunks of 64 KiB that counts the bytes a reader pulled. */
+function countedForm(bytes: number) {
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(c) {
+      if (sent >= bytes) return c.close();
+      const n = Math.min(65_536, bytes - sent);
+      c.enqueue(new Uint8Array(n).fill(0x61));
+      sent += n;
+    },
+  });
+  return { stream, pulled: () => sent };
+}
+
+describe("the ACS reads no byte before its limit and its SAML check (ruling 59 Major 1 of the 12j lane)", () => {
+  /** The `auth_error` of a redirect of the ACS. */
+  const errorOf = (res: Response) =>
+    new URL(res.headers.get("location") ?? "x:").searchParams.get("auth_error");
+
+  it("answers sso_not_configured with SAML off, and reads no byte of the form", async () => {
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+      sso: { oidc: true, dns: [{ name: "a", txt: async () => [] }] },
+    });
+    const body = countedForm(1_048_576);
+    const res = await auth.handle(acsPost("203.0.113.7", body.stream));
+    expect([res.status, errorOf(res)]).toEqual([302, "sso_not_configured"]);
+    // At most the chunks that a stream fills ahead of a reader: no read ran.
+    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
+  });
+
+  it("answers rate_limited past the ACS limit of an IP, and reads no byte of the form", async () => {
+    const auth = samlAuth();
+    // The ACS limit is 60 posts of one IP in 15 minutes (Behavior 2 of plan 12d Task 8).
+    for (let i = 0; i < 60; i++)
+      expect(errorOf(await auth.handle(acsPost("203.0.113.7", "SAMLResponse=x")))).toBe(
+        "sso_failed",
+      );
+    const body = countedForm(1_048_576);
+    const res = await auth.handle(acsPost("203.0.113.7", body.stream));
+    expect([res.status, errorOf(res)]).toEqual([302, "rate_limited"]);
+    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    // Another IP still reads its form.
+    const other = countedForm(1_048_576);
+    expect(errorOf(await auth.handle(acsPost("198.51.100.9", other.stream)))).toBe("sso_failed");
+    expect(other.pulled()).toBe(1_048_576);
   });
 });
