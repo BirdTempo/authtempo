@@ -635,18 +635,18 @@ describe("check-workflows", () => {
     ]);
   });
 
-  it("skips each file that a later task adds, and fails an entry whose file exists", () => {
-    // release-check.ts (Task 14) is not in the tree yet. Task 6 added prepare.ts
-    // and removed its entry, so the exists rule holds it now.
-    expect(TREE.exists("scripts/release/src/prepare.ts")).toBe(true);
-    expect(TREE.exists("scripts/release/src/release-check.ts")).toBe(false);
+  it("holds release-check.ts, which Task 14 adds, to the exists rule", () => {
+    // Task 14 added release-check.ts and removed the last entry of LATER, so
+    // the list went with it. Each node path of a run line and of a root script now exists.
+    expect(TREE.exists("scripts/release/src/release-check.ts")).toBe(true);
     expect(check(CI, RELEASE).failures).toEqual([]);
-    const plus = (made: string) => ({
+    const without = (gone: string) => ({
       ...TREE,
-      exists: (p: string) => p === made || TREE.exists(p),
+      exists: (p: string) => p !== gone && TREE.exists(p),
     });
-    expect(check(CI, RELEASE, plus("scripts/release/src/release-check.ts")).failures).toEqual([
-      "the file scripts/release/src/release-check.ts exists; Task 14 (plan line 941) removes its entry from LATER",
+    expect(check(CI, RELEASE, without("scripts/release/src/release-check.ts")).failures).toEqual([
+      "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
+      "release.yml: jobs.check step 7: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
     ]);
   });
 

@@ -336,15 +336,6 @@ export interface Tree {
   scripts: Record<string, string>;
 }
 
-/**
- * The files that a workflow calls and a later task of plan 12j adds. The
- * exists rule skips each one. An entry whose file exists fails as stale, so
- * the task that adds the file removes its entry.
- */
-const LATER: { path: string; task: string }[] = [
-  { path: "scripts/release/src/release-check.ts", task: "Task 14 (plan line 941)" },
-];
-
 /** The pnpm commands of the workflows that are not root scripts. */
 const PNPM_COMMANDS = ["install", "turbo"];
 
@@ -357,9 +348,7 @@ const nodePaths = (text: string) =>
  */
 function pathFailures(run: string, tree: Tree): string[] {
   const out: string[] = [];
-  const later = (path: string) => LATER.some((l) => l.path === path);
-  for (const path of nodePaths(run))
-    if (!later(path) && !tree.exists(path)) out.push(`${path} does not exist`);
+  for (const path of nodePaths(run)) if (!tree.exists(path)) out.push(`${path} does not exist`);
   for (const m of run.matchAll(/\bpnpm\s+([^\s-]\S*)/g)) {
     const name = m[1] ?? "";
     if (PNPM_COMMANDS.includes(name)) continue;
@@ -367,8 +356,7 @@ function pathFailures(run: string, tree: Tree): string[] {
     if (script === undefined) out.push(`pnpm ${name} is not a root script of package.json`);
     else
       for (const path of nodePaths(script))
-        if (!later(path) && !tree.exists(path))
-          out.push(`pnpm ${name} runs ${path}, which does not exist`);
+        if (!tree.exists(path)) out.push(`pnpm ${name} runs ${path}, which does not exist`);
   }
   return out;
 }
@@ -599,9 +587,6 @@ export function checkWorkflows(input: {
     }
     checkFile(name, text, input.tree, counts, fail);
   }
-  for (const { path, task } of LATER)
-    if (input.tree.exists(path))
-      failures.push(`the file ${path} exists; ${task} removes its entry from LATER`);
   return requireCounts({ name: "check-workflows", counts, failures, notes: [] }, ["files"]);
 }
 

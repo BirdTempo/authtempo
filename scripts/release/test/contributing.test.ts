@@ -58,7 +58,8 @@ function namedPaths(text: string): string[] {
 /**
  * The paths that a later task of plan 12j adds. The exists rule skips each
  * one. An entry whose file exists fails as stale, so the task that adds the
- * file removes its entry (the LATER form of check-workflows).
+ * file removes its entry. check-workflows had the same form until Task 14
+ * removed its last entry.
  */
 // Task 13b added docs/release/RUNBOOK.md, so the list is empty (plan 12j).
 const LATER: { path: string; task: string }[] = [];
