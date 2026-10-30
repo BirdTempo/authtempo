@@ -523,7 +523,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| `POST /social/apple/callback`, `POST /sso/connections/create`, `POST /sso/connections/update`, `POST /sso/:connectionId/acs`, and each SCIM route that takes a body. See [Limits](/docs/reference/limits/). |
+| `POST /social/apple/callback`, `POST /sso/connections/create`, `POST /sso/connections/update`, and `POST /sso/:connectionId/acs`. The SCIM routes answer their own SCIM 408. See [Limits](/docs/reference/limits/). |
 
 <h3 id="anonymous_refused"><code>anonymous_refused</code> 403</h3>
 

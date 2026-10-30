@@ -37,6 +37,7 @@ import {
   BODY_BUSY_RETRY_SECONDS,
   BODY_DEPTH_MAX,
   BodyBusy,
+  BodyTimeout,
   BodyTooLarge,
   bodyReadable,
   jsonShapeFits,
@@ -88,9 +89,11 @@ const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]
  * JSON that does not parse, a body read before, or a body chunk that is not
  * bytes. Each names its cause (ruling 66 Low 1). So 413 means a long body
  * only. The read holds its bytes against the budget of the large reads, and
- * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane). A body
- * nested deeper than `BODY_DEPTH_MAX` or with more than `SCIM_ITEMS_MAX`
- * items answers 400 `invalidSyntax` before the parse (ruling 56).
+ * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane). A read
+ * that stalls past its deadline answers 408 (ruling 63 b). Each is in the
+ * SCIM error form, never core's JSON form. A body nested deeper than
+ * `BODY_DEPTH_MAX` or with more than `SCIM_ITEMS_MAX` items answers 400
+ * `invalidSyntax` before the parse (ruling 56).
  */
 export async function readScimBody(
   request: Request,
@@ -120,6 +123,9 @@ export async function readScimBody(
         ok: false,
         response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
       };
+    // A stalled body: the read stopped at its deadline and freed its bytes (ruling 63 b).
+    if (e instanceof BodyTimeout)
+      return { ok: false, response: scimError(408, "the body did not arrive in time") };
     if (!(e instanceof BodyBusy)) throw e;
     const response = scimError(503, "the large request reads of the server are busy");
     response.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));

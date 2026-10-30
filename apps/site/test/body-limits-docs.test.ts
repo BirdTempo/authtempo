@@ -256,6 +256,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // The anonymous reads (ACS, Apple, SCIM) each take the least time (ruling 66).
       ["limits", /Such a read ends within (\d+) s, so/],
       ["limits", /must send \d+ MiB each (\d+) s to keep the half full/],
+      // A SCIM body takes the least time, and a stalled one gets a SCIM 408 (ruling 63 b).
+      ["scim", /A body that does not arrive within (\d+) s/],
       ["readme", /per second, at least (\d+) s \(`LARGE_READ_MIN_RATE`\)/],
     ],
   ],

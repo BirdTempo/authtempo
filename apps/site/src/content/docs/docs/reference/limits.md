@@ -205,8 +205,8 @@ These counts live in their rows, so they hold under every limiter.
 | The bytes that the body reads above the floor of signed-in users hold at once, in each isolate | 8388608, the user half of the budget. A read counts here after a session check names its user: the SSO connection writes | 503 `body_busy` with `Retry-After: 1` |
 | The bytes that every other body read above the floor holds at once, in each isolate | 8388608, the anonymous half of the budget: the SAML ACS, the Apple callback, and SCIM | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A user runs one large read at a time: a second answers 503 before any byte. A client is its IP before a session and its user after one. A request with no client IP is one client, `unknown`, with the share of one IP | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
-| The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout` |
-| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, or at 262144 for a signed-in user, and at least 10 s: 32 s for an SSO connection write, 10 s for the others | 408 `body_timeout` |
+| The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout`, SCIM 408 |
+| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, or at 262144 for a signed-in user, and at least 10 s: 32 s for an SSO connection write, 10 s for the others | 408 `body_timeout`, SCIM 408 |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
 | The metadata XML of a provider | 100 KB | `invalid_body` |

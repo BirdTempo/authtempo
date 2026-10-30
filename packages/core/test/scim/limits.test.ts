@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PATCH_MEMBERS_MAX } from "../../src/engine/scim/limits.js";
 import { PATCH_OPS_MAX, PATCH_VALUE_DEPTH_MAX, parsePatch } from "../../src/engine/scim/patch.js";
 import { readUser, SCIM_DATA_MAX } from "../../src/engine/scim/users.js";
-import { BODY_DEPTH_MAX, BODY_ITEMS_MAX, jsonShapeFits } from "../../src/http/body-cap.js";
-import { SCIM_ITEMS_MAX } from "../../src/http/routes/scim.js";
+import {
+  BODY_DEPTH_MAX,
+  BODY_ITEMS_MAX,
+  jsonShapeFits,
+  LARGE_READ_IDLE_MS,
+} from "../../src/http/body-cap.js";
+import { SCIM_BODY_MAX, SCIM_ITEMS_MAX } from "../../src/http/routes/scim.js";
 import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
-import { scim, type ScimTokenWorld as World, scimTokenWorld as world } from "./helpers.js";
+import { SCIM_IP, scim, type ScimTokenWorld as World, scimTokenWorld as world } from "./helpers.js";
 
 // The limits of the SCIM server (plan 12d Task 12): the per-token limit of
 // Task 9, the body and operation caps of Tasks 9 and 10, and the member cap
@@ -29,6 +34,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const patch = (...ops: Record<string, unknown>[]) => ({ schemas: [PATCH_URN], Operations: ops });
@@ -64,6 +70,35 @@ const fullMember = (value: string, i: number) => ({
   $ref: `${BASE_URL}/auth/scim/v2/Users/${value}`,
   type: "User",
 });
+
+/**
+ * A stream of `bytes` spaces that sends `before` bytes in chunks of 64 KiB,
+ * then waits until `open` runs. `atGate` settles when it waits.
+ */
+function stalledBody(bytes: number, before: number) {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let reached = () => {};
+  const atGate = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (sent >= bytes) return c.close();
+      if (sent >= before) {
+        reached();
+        await gate;
+      }
+      const n = Math.min(65_536, (sent < before ? before : bytes) - sent);
+      c.enqueue(new Uint8Array(n).fill(0x20));
+      sent += n;
+    },
+  });
+  return { stream, open, atGate };
+}
 
 /** A SCIM User through the route: its id. */
 async function user(w: World, local: string): Promise<string> {
@@ -149,6 +184,50 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
     },
     LONG_TEST_MS,
   );
+
+  it("answers 408 in the SCIM error form to a stalled write, and frees its read for the next write", async () => {
+    const w = await world();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = stalledBody(SCIM_BODY_MAX, 65_536);
+    let answered: Response | null = null;
+    void w
+      .handle(
+        new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/scim+json",
+            authorization: `Bearer ${w.token}`,
+            "cf-connecting-ip": SCIM_IP,
+          },
+          body: stalled.stream,
+          duplex: "half",
+        } as RequestInit),
+      )
+      .then((res) => {
+        answered = res;
+      });
+    await stalled.atGate;
+    await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS - 1);
+    expect(answered).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    const res = answered as Response | null;
+    expect(res?.status).toBe(408);
+    expect(res?.headers.get("content-type")).toBe("application/scim+json");
+    expect(res?.headers.get("retry-after")).toBeNull();
+    expect(await res?.json()).toEqual({
+      schemas: [ERROR_URN],
+      status: "408",
+      detail: "the body did not arrive in time",
+    });
+    stalled.open();
+    vi.useRealTimers();
+    // The stalled read freed its bytes: the next write of the same IP reads whole.
+    const next = await status(w, "POST", "/Users", {
+      schemas: [USER_URN],
+      userName: "next@acme.example",
+    });
+    expect(next.status).toBe(201);
+  });
 
   it("answers 400 invalidSyntax before JSON.parse to a body past the depth or the item limit", async () => {
     const w = await world();
