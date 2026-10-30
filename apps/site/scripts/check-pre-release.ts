@@ -92,6 +92,12 @@ export function checkPreRelease(input: PreReleaseInput): CheckReport {
   const global = new RegExp(input.pattern.source, `${input.pattern.flags.replace("g", "")}g`);
   const exemptSeen = new Set<string>();
   for (const e of exempt) {
+    // An empty text is in each file, so it exempts each match and proves
+    // nothing. The span loop below once read it with no end (rr-r57 of plan 12j).
+    if (e.text === "") {
+      r.failures.push(`PRE_RELEASE_EXEMPT: an entry of ${e.file} has an empty text`);
+      continue;
+    }
     const key = `${e.file}\n${e.text}`;
     if (exemptSeen.has(key))
       r.failures.push(`PRE_RELEASE_EXEMPT lists twice, in ${e.file}: ${e.text}`);
@@ -117,12 +123,15 @@ export function checkPreRelease(input: PreReleaseInput): CheckReport {
     const spans = [
       ...listed.filter((e) => e.file === file).map((e) => e.sentence),
       ...exempt.filter((e) => e.file === file).map((e) => e.text),
-    ].flatMap((part) => {
-      const out: [number, number][] = [];
-      for (let i = text.indexOf(part); i !== -1; i = text.indexOf(part, i + 1))
-        out.push([i, i + part.length]);
-      return out;
-    });
+    ]
+      // An empty text has no span; its entry fails above.
+      .filter((part) => part !== "")
+      .flatMap((part) => {
+        const out: [number, number][] = [];
+        for (let i = text.indexOf(part); i !== -1; i = text.indexOf(part, i + 1))
+          out.push([i, i + part.length]);
+        return out;
+      });
     for (const m of text.matchAll(global)) {
       const at = m.index ?? 0;
       if (spans.some(([from, to]) => at >= from && at + m[0].length <= to)) continue;

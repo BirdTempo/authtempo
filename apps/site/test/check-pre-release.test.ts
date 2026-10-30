@@ -179,6 +179,14 @@ describe("check-pre-release", () => {
     ]);
   });
 
+  it("fails an exempt entry with an empty text, and ends (rr-r57 of plan 12j)", () => {
+    const page = `${DOCS_DIR}docs/resources.md`;
+    const input = inputOf("0.0.0", fixtureTexts());
+    expect(
+      failures({ ...input, exempt: [{ file: page, text: "", reason: "an empty text" }] }),
+    ).toEqual([`PRE_RELEASE_EXEMPT: an entry of ${page} has an empty text`]);
+  });
+
   it("fails a listed file that does not exist, a text listed twice, and an empty read", () => {
     const [first] = PRE_RELEASE_SENTENCES;
     if (first === undefined) throw new Error("PRE_RELEASE_SENTENCES is empty");
