@@ -362,11 +362,14 @@ describe("docs/release/RUNBOOK.md", () => {
   // The LATER lists left with plan 12j Task 14, which added the last file and
   // the last name (ruling 52 of plan 12j). So each target exists now.
   it("names root scripts and files that exist", () => {
+    const pnpmCommands = new Set(["install", "add"]);
     let targets = 0;
     for (const m of TEXT.matchAll(/`pnpm ([a-z:-]+)/g)) {
       const name = m[1] ?? "";
-      // pnpm install, a flag, or a binary of a root dev dependency (turbo) is no root script.
-      if (name === "install" || name.startsWith("-") || name in ROOT_PACKAGE.devDependencies)
+      // A command of pnpm itself, a flag, or a binary of a root dev dependency
+      // (turbo) is no root script. The quote of the README install line of
+      // PRE_RELEASE_SENTENCES names pnpm add (ruling 58 of plan 12j, item 5).
+      if (pnpmCommands.has(name) || name.startsWith("-") || name in ROOT_PACKAGE.devDependencies)
         continue;
       expect(Object.keys(SCRIPTS), `pnpm ${name}`).toContain(name);
       for (const target of (SCRIPTS[name] ?? "").matchAll(/\bnode (\S+\.(?:ts|mjs|js))\b/g)) {
