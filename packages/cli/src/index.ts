@@ -4,6 +4,8 @@
 
 // The docs site holds the version of its Better Auth cautions to this export.
 export { BETTER_AUTH_FIXED } from "./better-auth-version.js";
+// The docs site holds the anchors of its changelog page to this link (plan 12j Task 13).
+export { changelogLink } from "./changelog-link.js";
 export {
   ALL_CHECK_CODES,
   CHECK_CODES,

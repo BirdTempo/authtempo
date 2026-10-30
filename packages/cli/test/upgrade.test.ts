@@ -177,8 +177,12 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
     const io = appIo(fixture("app.package.json"));
     expect(await main(["upgrade", "app", "--to", "0.3.0"], io)).toBe(1);
     const out = io.stdout.join("\n");
-    for (const minor of ["0.2", "0.3"]) {
-      expect(io.stdout).toContain(`${minor}: https://authtempo.com/docs/changelog/`);
+    // Each link names the anchor of the heading <minor>.0 on the changelog page.
+    for (const [minor, anchor] of [
+      ["0.2", "020"],
+      ["0.3", "030"],
+    ] as const) {
+      expect(io.stdout).toContain(`${minor}: https://authtempo.com/docs/changelog/#${anchor}`);
       for (const line of BREAKING[minor] ?? []) expect(io.stdout).toContain(`  ${line}`);
     }
     // The minor of the installed version is not crossed.
@@ -332,7 +336,7 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
       expect(io.files.get(APP), facts).toBe(text);
       expect(io.stdout, facts).toContain(notice);
       expect(io.stdout, facts).toContain("wrote nothing");
-      expect(io.stdout, facts).toContain("0.2: https://authtempo.com/docs/changelog/");
+      expect(io.stdout, facts).toContain("0.2: https://authtempo.com/docs/changelog/#020");
       expect(io.stdout.join("\n"), facts).not.toContain(`wrote ${APP}`);
     }
     const json = appIo(fixture("app.package.json"), {
@@ -375,7 +379,7 @@ describe("authtempo upgrade (spec 33 item 10)", () => {
     const io = appIo(text, { docs });
     expect(await main(["upgrade", "app"], io), io.stderr.join("\n")).toBe(0);
     expect(io.files.get(APP)).toBe(text.replaceAll('"0.9.0"', '"0.10.0"'));
-    expect(io.stdout).toContain("0.10: https://authtempo.com/docs/changelog/");
+    expect(io.stdout).toContain("0.10: https://authtempo.com/docs/changelog/#0100");
     // The fake core at 0.9.0 and 0.10.0 names no schema version.
     expect(io.stdout).toContain("next: authtempo migrate (the registry names no schema version)");
     const down = fixture("app.package.json").replaceAll('"0.1.0"', '"0.10.0"');

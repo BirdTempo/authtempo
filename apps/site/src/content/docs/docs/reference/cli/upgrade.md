@@ -73,7 +73,7 @@ The command runs no install and no other program. It prints the install command 
 
 - One line for each package, from the installed version to the target, with its section, such as `(dependencies)`.
 - One line for each `@authtempo` peer range that excludes the target, or that the command cannot read. The command does not change a peer range.
-- For each crossed minor: the changelog link, and each Breaking line of that minor.
+- For each crossed minor: the changelog link with the anchor of that minor, such as `https://authtempo.com/docs/changelog/#020` for 0.2, and each Breaking line of that minor.
 - Each deprecated item that the range removes, with its docs link.
 - The next steps: the install, and `authtempo migrate` when the schema version changes. The command also prints `authtempo migrate` when the registry names no schema version for the installed core or the target core. Then migrate is the safe step. [Upgrades and schema versions](/docs/operations/upgrades/) tells the order of the migration and the deploy.
 

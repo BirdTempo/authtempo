@@ -9,6 +9,7 @@ import { printJson, sayer } from "../output.js";
 import {
   CHANGELOG_PAGE,
   CORE,
+  changelogLink,
   EXACT,
   installOf,
   planUpgrade,
@@ -99,7 +100,7 @@ export const upgradeCommand: Command = {
           : `  peer ${p.name} ${p.range}: upgrade cannot read the range; check that it holds ${plan.to}`,
       );
     for (const b of plan.breaking) {
-      say(`${b.minor}: ${CHANGELOG_PAGE}`);
+      say(`${b.minor}: ${changelogLink(b.minor)}`);
       for (const line of b.lines) say(`  ${line}`);
     }
     if (!plan.breakingKnown) {

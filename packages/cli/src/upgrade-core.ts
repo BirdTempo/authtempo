@@ -28,7 +28,8 @@ export const REGISTRY_TIMEOUT_MS = 10_000;
 export const REGISTRY_BODY_CAP_BYTES = 64 * 1024 * 1024;
 const SITE = "https://authtempo.com";
 export const UPGRADES_PAGE = `${SITE}/docs/operations/upgrades/`;
-export const CHANGELOG_PAGE = `${SITE}/docs/changelog/`;
+export { CHANGELOG_PAGE, changelogLink } from "./changelog-link.js";
+
 /** The two lists that the command reads and writes, in this order. */
 const SECTIONS = ["dependencies", "devDependencies"] as const;
 export type Section = (typeof SECTIONS)[number];
