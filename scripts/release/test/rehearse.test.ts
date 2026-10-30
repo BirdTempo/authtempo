@@ -427,8 +427,15 @@ describe("rehearse", () => {
   it("stops at a lint fault with its place and rule, and starts no server", async () => {
     const { tmp, source } = folders();
     // The output of Biome 2.5.15 on a warning, a lint error, a format fault,
-    // and an import order fault (2026-10-31), cut to the heads and one line each.
+    // and an import order fault, beside the two infos of the tree (2026-10-31).
+    // It is cut to the heads and one line each. An info is no fault.
     const stderr = [
+      "biome.json:5:13 deserialize  DEPRECATED  ━━━━━━━━",
+      "",
+      "  i The use of the recommended field has been deprecated.",
+      "packages/core/test/sessions.test.ts:40:41 lint/style/useTemplate  FIXABLE  ━━━━━━━━",
+      "",
+      "  i Template literals are preferred over string concatenation.",
       "probe/warn.ts:2:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━",
       "",
       "  ! This variable unused is unused.",
