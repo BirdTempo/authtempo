@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, 69, and 72 of the 12j lane). The errors page, the limits page, the Express,
+// 68, 69, 72, and 75 of the 12j lane). The errors page, the limits page, the Express,
 // Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
 // README, and the deploy page state the caps and the scan limits by hand.
 // This test reads each constant from the source of core
@@ -62,6 +62,45 @@ function limitMax(name: string): number {
   return numberOf(m[1] ?? "");
 }
 
+/** The `seconds` of `export const NAME = { seconds: <n>, max: <n> };` in routes/sso.ts. */
+function limitSeconds(name: string): number {
+  const m = new RegExp(`export const ${name} = \\{ seconds: ([0-9_]+), max: [0-9_ *]+ \\};`).exec(
+    ssoSource,
+  );
+  if (!m) throw new Error(`no limit ${name} in routes/sso.ts`);
+  return numberOf(m[1] ?? "");
+}
+
+/** The password sign-ups of one IP in an hour: `SIGN_UP_PER_IP` of engine/password.ts. */
+function signUpsPerIpHour(): number {
+  const text = readFileSync(`${REPO}packages/core/src/engine/password.ts`, "utf8");
+  const m = /const SIGN_UP_PER_IP = \{ seconds: ([0-9_]+), max: ([0-9_]+) \};/.exec(text);
+  if (!m) throw new Error("no SIGN_UP_PER_IP in engine/password.ts");
+  // The page says "per hour".
+  if (numberOf(m[1] ?? "") !== 3600) throw new Error("SIGN_UP_PER_IP is not per hour");
+  return numberOf(m[2] ?? "");
+}
+
+/** The time of an SSO connection write in seconds: the cap at the rate of a user, at least the floor. */
+const ssoWriteSeconds = () =>
+  Math.max(
+    constant("LARGE_READ_DEADLINE_FLOOR_MS"),
+    Math.ceil(
+      (capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_USER_MIN_RATE"),
+    ),
+  ) / 1000;
+
+/** The accounts whose single stalls, one per window, fill the window (ruling 75). */
+const accountsOfStalls = () =>
+  Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / ssoWriteSeconds());
+
+/** The accounts whose 6 holds each fill the window: before the spend, and with whole writes. */
+const accountsOfHolds = () =>
+  Math.ceil(
+    limitSeconds("SSO_LARGE_READ_PER_USER") /
+      (limitMax("SSO_LARGE_READ_PER_USER") * ssoWriteSeconds()),
+  );
+
 /** The cap of a route of `BODY_CAPS` in body-cap.ts. */
 function capOf(route: string): number {
   const m = new RegExp(`"${route}": ([0-9_]+),`).exec(source);
@@ -112,6 +151,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["errors", /and (\d+) bytes for the two SSO connection writes/],
       ["limits", /and (\d+) for the two SSO connection writes/],
+      // The holds of the accounts that send each write whole (ruling 75).
+      ["limits", /each with \d+ holds of (\d+) (MiB), still hold it/],
       ["readme", /and (\d+) (MiB) for the two SSO connection writes/],
       // The measure of ruling 56: a parser at this cap on the two SSO paths stopped a process.
       ["express", /with their cap of (\d+) (MiB) as its limit/],
@@ -293,19 +334,18 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /or (\d+) (KiB) per second for a signed-in user/],
       ["limits", /or at (\d+) for a signed-in user/],
       ["limits", /an admin must send it at (\d+) (KiB) per second or more/],
+      ["limits", /still hold it for the hour, at about (\d+) (KiB) per second/],
       ["readme", /read of a signed-in user takes (\d+) (KiB) per second/],
     ],
   ],
   [
     "the time of an SSO connection write, in seconds",
-    () =>
-      Math.max(
-        constant("LARGE_READ_DEADLINE_FLOOR_MS"),
-        Math.ceil(
-          (capOf("POST /sso/connections/create") * 1000) / constant("LARGE_READ_USER_MIN_RATE"),
-        ),
-      ) / 1000,
+    ssoWriteSeconds,
     [
+      // The residual of the stall spend (ruling 75).
+      ["limits", /About \d+ accounts, \d+ s \/ (\d+) s, each with one stall/],
+      ["limits", /\d+ accounts at \d+ times (\d+) s, \d+ s, held it/],
+      ["limits", /An account that sends each write whole within (\d+) s spends nothing/],
       ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
       ["limits", /fills the user half for at most (\d+) s/],
       ["limits", /delay the SSO connection writes of others by up to (\d+) s/],
@@ -321,7 +361,43 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /and starts at most (\d+) in an hour/],
       ["limits", /by up to \d+ s, (\d+) times per hour/],
       ["limits", /the user half of the body budget at most (\d+) times/],
+      // The residual of the stall spend (ruling 75).
+      ["limits", /\d+ accounts at (\d+) times \d+ s, \d+ s, held it/],
+      ["limits", /each with (\d+) holds of \d+ MiB/],
     ],
+  ],
+  [
+    "the window of the large reads of one user, in seconds",
+    () => limitSeconds("SSO_LARGE_READ_PER_USER"),
+    [["limits", /About \d+ accounts, (\d+) s \/ \d+ s, each with one stall/]],
+  ],
+  [
+    "the accounts whose one stall in each window holds the user half for the hour",
+    accountsOfStalls,
+    [["limits", /About (\d+) accounts, \d+ s \/ \d+ s, each with one stall/]],
+  ],
+  [
+    "the password sign-ups of one IP in an hour",
+    signUpsPerIpHour,
+    [["limits", /At (\d+) password sign-ups per IP per hour/]],
+  ],
+  [
+    "the IPs of those accounts",
+    () => Math.ceil(accountsOfStalls() / signUpsPerIpHour()),
+    [["limits", /per IP per hour, they come from (\d+) IPs/]],
+  ],
+  [
+    "the accounts whose 6 holds each fill the hour",
+    accountsOfHolds,
+    [
+      ["limits", /Before the spend, (\d+) accounts at/],
+      ["limits", /So (\d+) such accounts, each with \d+ holds/],
+    ],
+  ],
+  [
+    "the seconds of the holds of those accounts",
+    () => accountsOfHolds() * limitMax("SSO_LARGE_READ_PER_USER") * ssoWriteSeconds(),
+    [["limits", /accounts at \d+ times \d+ s, (\d+) s, held it/]],
   ],
   [
     "the share of one client",
@@ -357,7 +433,7 @@ const PLAN_PAGES = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, and 72 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, 72, and 75 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();
