@@ -1,7 +1,14 @@
+import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { checkPreRelease, type PreReleaseInput } from "../scripts/check-pre-release.ts";
+import {
+  checkSecurityPolicy,
+  readPolicyInput,
+  type SupportRow,
+} from "../scripts/check-security-policy.ts";
 import { docsPages, readRepoFile } from "../scripts/lib/load.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
+import { SITE } from "../src/data/site.ts";
 import {
   PRE_RELEASE_PATTERN,
   PRE_RELEASE_SENTENCES,
@@ -116,5 +123,59 @@ describe("check-pre-release", () => {
       "read 0 listed",
       "read 0 pages",
     ]);
+  });
+});
+
+describe("the quotes of docs/release/RUNBOOK.md", () => {
+  const runbook = readRepoFile("docs/release/RUNBOOK.md") ?? "";
+  const start = runbook.indexOf("\n### The first release\n");
+  const part = runbook.slice(start, runbook.indexOf("\n### ", start + 1));
+  /** The fenced blocks of the section "The first release", each with its language. */
+  const fences = [...part.matchAll(/^```(\w+)\n([\s\S]*?)^```$/gm)].map((m) => ({
+    lang: m[1] ?? "",
+    body: m[2] ?? "",
+  }));
+
+  it("quotes each text of PRE_RELEASE_SENTENCES under its file, in the order of the list", () => {
+    expect(start).toBeGreaterThan(-1);
+    const files = [...new Set(PRE_RELEASE_SENTENCES.map((e) => e.file))];
+    const block = files
+      .flatMap((file) => [
+        file,
+        ...PRE_RELEASE_SENTENCES.filter((e) => e.file === file).map((e) => `  ${e.sentence}`),
+      ])
+      .join("\n");
+    expect(fences.map((f) => f.body)).toContain(`${block}\n`);
+    expect(part).toContain("- `check-pre-release`: remove each text of `PRE_RELEASE_SENTENCES`");
+  });
+
+  it("quotes a support row and a table that check-security-policy takes after the edits", () => {
+    const json = fences.find((f) => f.lang === "json");
+    const table = fences.find((f) => f.lang === "text" && f.body.startsWith("| Minor |"));
+    if (json === undefined || table === undefined)
+      throw new Error("the runbook lacks the row or the table");
+    const rows = JSON.parse(json.body) as SupportRow[];
+    const [row] = rows;
+    expect(rows).toHaveLength(1);
+    // The minor of FIRST_RELEASE, current, from the schema version of core.
+    const facts = readRepoFile("scripts/release/src/lib/release-facts.ts") ?? "";
+    const first = /^export const FIRST_RELEASE = "(\d+\.\d+)\.\d+";$/m.exec(facts)?.[1];
+    expect(row?.minor).toBe(first);
+    expect(row?.status).toBe("current");
+    expect(row?.schemaFrom).toEqual([SCHEMA_VERSION]);
+    // SECURITY.md after the edits: the table in the place of the first text, and no other text.
+    const [support, ...others] = PRE_RELEASE_SENTENCES.filter((e) => e.file === "SECURITY.md");
+    if (support === undefined)
+      throw new Error("PRE_RELEASE_SENTENCES names no text of SECURITY.md");
+    const policy = readPolicyInput(readRepoFile);
+    let text = (policy.text ?? "").replace(support.sentence, table.body.trimEnd());
+    for (const e of others) text = text.replace(`${e.sentence}\n\n`, "");
+    const check = (t: string, r: readonly SupportRow[]) =>
+      checkSecurityPolicy({ text: t, rows: r, repository: policy.repository, origin: SITE.origin })
+        .failures;
+    expect(check(text, rows)).toEqual([]);
+    // The quotes are evidence only while each half fails alone.
+    expect(check(text, [])).not.toEqual([]);
+    expect(check(policy.text ?? "", rows)).not.toEqual([]);
   });
 });
