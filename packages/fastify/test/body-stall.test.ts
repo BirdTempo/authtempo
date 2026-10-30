@@ -227,10 +227,16 @@ function rawPost(
       resolve();
     }),
   );
-  /** The status line of the answer and its JSON body, "closed", or null while neither came. */
+  /**
+   * The status line of the answer and its JSON body, the status line of a
+   * redirect, "closed", or null while none of them came.
+   */
   const answer = () => {
-    const json = /\{[^}]*\}/.exec(st.raw ?? "")?.[0];
-    if (st.raw !== null && json !== undefined) return `${st.raw.split("\r\n")[0]} ${json}`;
+    const raw = st.raw ?? "";
+    const status = raw.split("\r\n")[0] ?? "";
+    const json = /\{[^}]*\}/.exec(raw)?.[0];
+    if (json !== undefined) return `${status} ${json}`;
+    if (raw.includes("\r\n\r\n") && / 3\d\d /.test(status)) return status;
     return st.closed ? "closed" : null;
   };
   return { socket, sent, answer, at: () => st.at };
@@ -390,6 +396,49 @@ describe("the client with no IP through the Fastify binding (ruling 69 of the 12
       // A client with an IP key reads its form at once; a caller with no header has no room.
       expect(await acsFrom(port, "198.51.100.9")).toBe("302");
       expect(await acsFrom(port, null)).toBe('503 {"error":"body_busy"}');
+    } finally {
+      for (const p of posts) p.socket.destroy();
+      await close();
+    }
+  });
+
+  it("gives a header text unknown and a text that is not an IP each the share of one IP, not the key of no IP", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    const posts: ReturnType<typeof rawPost>[] = [];
+    try {
+      for (const text of ["unknown", "not-an-ip"]) {
+        const mine: ReturnType<typeof rawPost>[] = [];
+        for (let i = 0; i <= SHARE_POSTS; i++) {
+          const p = stalledAcs(port, { "cf-connecting-ip": text });
+          mine.push(p);
+          posts.push(p);
+          await p.sent;
+        }
+        await sleep(1500);
+        const during = mine.map((p) => p.answer());
+        // The text holds the share of one IP, and its next post answers 503.
+        expect(
+          during.filter((a) => a === null),
+          text,
+        ).toHaveLength(SHARE_POSTS);
+        expect(
+          during.filter((a) => a !== null),
+          text,
+        ).toEqual(['HTTP/1.1 503 Service Unavailable {"error":"body_busy"}']);
+        // A caller with no IP header is another client: it reads its form. Before ruling 69 the
+        // text unknown held the share of every caller with no IP header.
+        expect(await acsFrom(port, null), text).toBe("302");
+        // The posts of the text close, and their reads end: the text reads a form again.
+        for (const p of mine) p.socket.destroy();
+        let again = await acsFrom(port, text);
+        for (let i = 0; i < 50 && again !== "302"; i++) {
+          await sleep(100);
+          again = await acsFrom(port, text);
+        }
+        expect(again, text).toBe("302");
+      }
     } finally {
       for (const p of posts) p.socket.destroy();
       await close();

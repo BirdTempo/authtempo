@@ -137,7 +137,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `id-token-nonce:ip:<ip>` | 15 minutes | 60 | The nonce of the ID-token route, before the nonce write |
 | `id-token:ip:<ip>` | 15 minutes | 30 | The ID-token sign-in, before the nonce spend and the token verify |
 
-For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
+For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP keys `text:` and the value, for example the answer of a custom `clientIp`. So no header text gets the key `unknown` or the key of an address, and each text is a client of its own. Core exports `ipKey`, so an app's own limiter can key the same way.
 
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 

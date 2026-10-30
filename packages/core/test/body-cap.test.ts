@@ -1164,7 +1164,13 @@ const acsPostNoIp = (body: ReadableStream<Uint8Array> | string) =>
 
 describe("a read with no client IP (rulings 66 Minor 1 and 69 of the 12j lane)", () => {
   it("keys a request with no client IP as ip:unknown, with the share of one IP", () => {
-    expect([ipBodyClient(null), ipBodyClient("")]).toEqual(["ip:unknown", "ip:unknown"]);
+    expect(ipBodyClient(null)).toBe("ip:unknown");
+    // Ruling 69: no header text gives the client with no IP, the text unknown included.
+    expect([ipBodyClient(""), ipBodyClient("unknown"), ipBodyClient("not-an-ip")]).toEqual([
+      "ip:text:",
+      "ip:text:unknown",
+      "ip:text:not-an-ip",
+    ]);
     expect(ipBodyClient("2001:db8:1:2:3:4:5:6")).toBe("ip:2001:db8:1:2::/64");
     expect(bodyClientOf(new Request(`${BASE_URL}/x`))).toBe("ip:unknown");
     // Ruling 69: the share of one IP, not the whole anonymous half.
@@ -1212,6 +1218,50 @@ describe("a read with no client IP (rulings 66 Minor 1 and 69 of the 12j lane)",
       for (const g of stalls) g.open();
     }
     await Promise.all(ends);
+  });
+});
+
+describe("a header text that is not an IP (ruling 68 Low 4 and ruling 69 of the 12j lane)", () => {
+  it("gives the text unknown and a text that is not an IP each the share of one IP, apart from no IP", {
+    timeout: 30_000,
+  }, async () => {
+    const auth = samlAuth();
+    const share = LARGE_READ_SHARE / 1_048_576;
+    for (const text of ["unknown", "not-an-ip"]) {
+      const stalls = Array.from({ length: share + 1 }, () => gatedBody(SAML_FORM_MAX, 1_048_576));
+      const ends: Promise<unknown>[] = [];
+      const answers: (() => string)[] = [];
+      try {
+        for (const g of stalls) {
+          let answer = "open";
+          const res = auth.handle(acsPost(text, g.stream)).then(async (r) => {
+            answer = await statusOf(r);
+          });
+          ends.push(res);
+          answers.push(() => answer);
+          await Promise.race([g.atGate, res]);
+          await settle();
+        }
+        // The header text holds the share of one IP, 4 MiB, and no more.
+        expect(
+          answers.map((a) => a()),
+          text,
+        ).toEqual([...Array(share).fill("open"), "503 body_busy"]);
+        // A caller with no IP is another client: it reads a whole form. Before the fix, the
+        // text unknown held the share of every caller with no IP.
+        const none = await auth.handle(acsPostNoIp(gatedBody(SAML_FORM_MAX, SAML_FORM_MAX).stream));
+        expect(
+          [
+            none.status,
+            new URL(none.headers.get("location") ?? "x:").searchParams.get("auth_error"),
+          ],
+          text,
+        ).toEqual([302, "sso_failed"]);
+      } finally {
+        for (const g of stalls) g.open();
+      }
+      await Promise.all(ends);
+    }
   });
 });
 

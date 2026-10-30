@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { ipKey } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
@@ -322,6 +323,13 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
             got: want,
           });
     });
+
+  it("states the key of no IP and of a text that is not an IP as ipKey gives them (ruling 69)", () => {
+    const limits = textOf(FILES.limits);
+    const noIp = /A request with no client IP keys `([^`]+)`\./.exec(limits)?.[1];
+    const text = /A value that is not an IP keys `([^`]+)` and the value/.exec(limits)?.[1];
+    expect({ noIp, text: `${text}x` }).toEqual({ noIp: ipKey(null), text: ipKey("x") });
+  });
 
   it("states no cap number in bytes that no fact holds", () => {
     for (const file of Object.keys(FILES) as FileKey[]) {
