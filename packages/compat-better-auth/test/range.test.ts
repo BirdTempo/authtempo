@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BETTER_AUTH_RANGE, inRange } from "../src/version.js";
 
@@ -34,13 +34,30 @@ describe("the supported Better Auth range (spec 33 item 1.6)", () => {
 
   it("names the advisory and the rollback floor where it names the range", () => {
     const page = read("../../../apps/site/src/content/docs/docs/reference/compat-better-auth.md");
+    // The affected range of the advisory record, the one source: "Affected
+    // versions ">= 1.4.0-beta.18, < 1.7.7"" becomes `>=1.4.0-beta.18 <1.7.7`.
+    // "below 1.7.7" named a wider range (ruling 64 of plan 12j, Minor 6).
+    const record = read("../../../docs/security/advisories.md");
+    const entry = record.slice(record.indexOf("GHSA-965c-763c-88jm"));
+    const m = /Affected versions ">= ([^,"]+), < ([^"]+)"/.exec(entry);
+    expect(m, "the affected range of GHSA-965c-763c-88jm in the advisory record").not.toBeNull();
+    const affected = `>=${m?.[1]} <${m?.[2]}`;
+    expect(affected).toBe(">=1.4.0-beta.18 <1.7.7");
     // A line break of the README may fall inside a sentence, so the test reads words.
     for (const text of [read("../README.md"), page]) {
       const words = text.split(/\s+/).join(" ");
       expect(words).toContain("GHSA-965c-763c-88jm");
       expect(words).toContain("the rollback system must run");
       expect(words).toContain("1.7.7 or later");
+      expect(words).toContain(`Better Auth \`${affected}\``);
+      expect(words).not.toContain("below 1.7.7 has the advisory");
+      expect(words).not.toContain("Better Auth below 1.7.7");
     }
+    // The pending changeset becomes a record of the compat changelog at the version branch.
+    const changeset = new URL("../../../.changeset/compat-better-auth-range.md", import.meta.url);
+    const changelog = new URL("../CHANGELOG.md", import.meta.url);
+    const source = existsSync(changeset) ? changeset : changelog;
+    expect(readFileSync(source, "utf8")).toContain(`Better Auth \`${affected}\``);
   });
 
   it("reads the range grammar", () => {

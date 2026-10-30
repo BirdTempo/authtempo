@@ -7,8 +7,8 @@ package.
 Supported Better Auth versions: `>=1.7.7 <1.8.0`.
 
 The range starts at 1.7.7 because of the advisory GHSA-965c-763c-88jm. Better
-Auth below 1.7.7 accepts the state of an OAuth sign-in as a magic link, so an
-attacker can sign in as another user. The Better Auth system stays the
+Auth `>=1.4.0-beta.18 <1.7.7` accepts the state of an OAuth sign-in as a magic
+link, so an attacker can sign in as another user. The Better Auth system stays the
 rollback target during the move, so the rollback system must run 1.7.7 or
 later. The shim was read on the shapes of Better Auth 1.7.2 and on the API
 key plugin of 1.7.5.

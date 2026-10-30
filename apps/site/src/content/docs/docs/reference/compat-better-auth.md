@@ -27,7 +27,7 @@ sources:
 
 Supported Better Auth versions: `>=1.7.7 <1.8.0`.
 
-Warning: the rollback system must run Better Auth 1.7.7 or later. Better Auth below 1.7.7 has the advisory GHSA-965c-763c-88jm. Those versions accept the state of an OAuth sign-in as a magic link, so an attacker can sign in as another user. The old system stays the rollback target during the move.
+Warning: the rollback system must run Better Auth 1.7.7 or later. The advisory GHSA-965c-763c-88jm affects Better Auth `>=1.4.0-beta.18 <1.7.7`. Those versions accept the state of an OAuth sign-in as a magic link, so an attacker can sign in as another user. The old system stays the rollback target during the move.
 
 The shim was read on the shapes of Better Auth 1.7.2 and on the `@better-auth/api-key` plugin of 1.7.5. The package exports the range as `BETTER_AUTH_RANGE`. A new Better Auth minor gets a compat change in an authtempo minor, never in a patch.
 
