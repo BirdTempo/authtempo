@@ -5,7 +5,9 @@
   "fixed": [
     [
       "@authtempo/adapter-d1",
+      "@authtempo/adapter-mysql",
       "@authtempo/adapter-postgres",
+      "@authtempo/adapter-sqlite",
       "@authtempo/astro",
       "@authtempo/breach-check",
       "@authtempo/captcha-turnstile",
@@ -21,6 +23,7 @@
       "@authtempo/legacy-hashes",
       "@authtempo/mcp",
       "@authtempo/next",
+      "@authtempo/observe",
       "@authtempo/react",
       "@authtempo/react-router",
       "@authtempo/solid",

@@ -6,7 +6,22 @@
     "dist/index.js",
     "migrations/"
   ],
+  "@authtempo/adapter-mysql": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
   "@authtempo/adapter-postgres": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
+  "@authtempo/adapter-sqlite": [
+    "package.json",
+    "README.md",
+    "dist/index.d.ts",
+    "dist/index.js",
+    "dist/node.d.ts",
+    "dist/node.js",
+    "dist/better-sqlite3.d.ts",
+    "dist/better-sqlite3.js",
+    "dist/bun.d.ts",
+    "dist/bun.js",
+    "dist/libsql.d.ts",
+    "dist/libsql.js"
+  ],
   "@authtempo/astro": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
   "@authtempo/breach-check": [
     "package.json",
@@ -147,6 +162,16 @@
     "skills/"
   ],
   "@authtempo/next": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
+  "@authtempo/observe": [
+    "package.json",
+    "README.md",
+    "dist/workers-logs.d.ts",
+    "dist/workers-logs.js",
+    "dist/analytics-engine.d.ts",
+    "dist/analytics-engine.js",
+    "dist/otlp.d.ts",
+    "dist/otlp.js"
+  ],
   "@authtempo/react": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
   "@authtempo/react-router": ["package.json", "README.md", "dist/index.d.ts", "dist/index.js"],
   "@authtempo/solid": [
