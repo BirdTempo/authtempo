@@ -64,7 +64,7 @@ describe("check-dependencies", () => {
     const r = checkDependencies(real());
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-dependencies: PASS rows=112 runtime=37 peer=17 dev=49 platform=9 packages=53 closure=65 skipped=8 exempt=1 builds=5 failures=0",
+      "check-dependencies: PASS rows=113 runtime=37 peer=17 dev=50 platform=9 packages=53 closure=65 skipped=8 exempt=1 builds=5 failures=0",
     );
   });
 
