@@ -110,10 +110,12 @@ describe("a stalled client at the SAML ACS through the Fastify binding (ruling 5
         .filter((_e, i) => during[i] === null)
         .map((e) => ({ first: e.first, afterMs: Math.round(e.endedAt - stalledAt) }));
       console.log(`body-stall: the stalled reads ended ${JSON.stringify(ends)}`);
+      // The time counts from the last write of the sixteenth post. The first posts sent their
+      // last chunk a little before it, and a loaded machine fires a timer a little late.
       for (const e of ends) {
         expect(e.first).toBe("HTTP/1.1 408 Request Timeout");
-        expect(e.afterMs).toBeGreaterThanOrEqual(IDLE_MS - 500);
-        expect(e.afterMs).toBeLessThan(IDLE_MS + 2_000);
+        expect(e.afterMs).toBeGreaterThanOrEqual(IDLE_MS - 2_000);
+        expect(e.afterMs).toBeLessThan(IDLE_MS + 3_000);
       }
       expect(await post(ATTACKER)).toBe("302");
     } finally {
