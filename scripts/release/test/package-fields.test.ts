@@ -47,17 +47,40 @@ function releasedManifests() {
   return found;
 }
 
+/**
+ * An import of vitest or of a vitest subpath: `import ... from`, `export ...
+ * from`, a side-effect `import "vitest"`, and a dynamic `import("vitest")`.
+ * `@vitest/expect` and `vitest-environment-x` are other packages.
+ */
+const VITEST_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']vitest(?:\/[^"']*)?["']/;
+
 /** True when a .ts file under `dir` imports vitest. */
 function importsVitest(dir: string): boolean {
   if (!existsSync(dir)) return false;
   return readdirSync(dir, { recursive: true, encoding: "utf8" }).some(
-    (file) => file.endsWith(".ts") && /from "vitest"/.test(readFileSync(join(dir, file), "utf8")),
+    (file) => file.endsWith(".ts") && VITEST_IMPORT.test(readFileSync(join(dir, file), "utf8")),
   );
 }
 
+/** The three numbers of a floor `>=a`, `>=a.b`, or `>=a.b.c`, or null for another form. */
+function floorOf(range: string | undefined): [number, number, number] | null {
+  const m = /^>=(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(range ?? "");
+  return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
+}
+
+/** True when floor `a` is below floor `b`. */
+function below(a: readonly number[], b: readonly number[]): boolean {
+  for (const [i, x] of a.entries()) {
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
 // spec 33 item 1 and plan 12j deviation 12: a floor of Node 22 or higher in 22.
-// A package with a higher floor, such as the CLI's 22.13, keeps it.
-const NODE_FLOOR = /^>=22(\.\d+){0,2}$/;
+// A package with a higher floor, such as the CLI's 22.13, keeps it. The name
+// differs from NODE_FLOOR of the release facts, the Node version of CI.
+const PACKAGE_FLOOR = /^>=22(\.\d+){0,2}$/;
 
 describe("package fields", () => {
   it("holds the root license to MIT", () => {
@@ -70,9 +93,40 @@ describe("package fields", () => {
 
   it("gives each released package an engine floor", () => {
     const missing = releasedManifests()
-      .filter((p) => !NODE_FLOOR.test(String(p.manifest.engines?.node)))
+      .filter((p) => !PACKAGE_FLOOR.test(String(p.manifest.engines?.node)))
       .map((p) => `${p.name}: engines.node is ${String(p.manifest.engines?.node)}`);
     expect(missing).toEqual([]);
+  });
+
+  it("gives no released package a floor below the floor of a package it needs", () => {
+    // npm warns, and engine-strict fails the install, when a package needs a
+    // package with a higher floor (ruling 45 of plan 12j, m1). A package needs
+    // each workspace dependency and each peer that is not optional.
+    const dir = fileURLToPath(root);
+    const floors = new Map(readWorkspace(dir).map((p) => [p.name, p.manifest.engines?.node]));
+    const bad: string[] = [];
+    let pairs = 0;
+    for (const p of releasedManifests()) {
+      const own = floorOf(p.manifest.engines?.node);
+      const meta = (p.manifest.peerDependenciesMeta ?? {}) as Record<
+        string,
+        { optional?: unknown } | undefined
+      >;
+      const needs = [
+        ...Object.keys(p.manifest.dependencies ?? {}),
+        ...Object.keys(p.manifest.peerDependencies ?? {}).filter((n) => meta[n]?.optional !== true),
+      ].filter((n) => floors.has(n));
+      for (const need of needs) {
+        const theirs = floorOf(floors.get(need));
+        if (theirs === null) continue;
+        pairs++;
+        if (own === null || below(own, theirs))
+          bad.push(`${p.name} ${p.manifest.engines?.node} needs ${need} ${floors.get(need)}`);
+      }
+    }
+    // The CLI needs core, so a read of no pair proves nothing.
+    expect(pairs).toBeGreaterThan(0);
+    expect(bad).toEqual([]);
   });
 
   it("lists CHANGELOG.md in the files of each released package", () => {
@@ -81,6 +135,30 @@ describe("package fields", () => {
       .filter((p) => p.manifest.files?.at(-1) !== "CHANGELOG.md")
       .map((p) => `${p.name}: files is ${JSON.stringify(p.manifest.files)}`);
     expect(missing).toEqual([]);
+  });
+
+  it.each([
+    ["static", 'import { describe } from "vitest";'],
+    ["static, single quotes", "import { expect } from 'vitest';"],
+    ["export", 'export { expect } from "vitest";'],
+    ["side-effect", 'import "vitest";'],
+    ["dynamic", 'const v = await import("vitest");'],
+    ["dynamic, spaces", "await import( 'vitest' )"],
+    ["subpath", 'import { vi } from "vitest/node";'],
+    ["side-effect subpath", 'import "vitest/globals";'],
+    ["dynamic subpath", 'const c = await import("vitest/config");'],
+  ])("reads the %s import form of vitest", (_form, text) => {
+    expect(VITEST_IMPORT.test(text)).toBe(true);
+  });
+
+  it("reads no other package as vitest", () => {
+    const no = [
+      'import { expect } from "@vitest/expect";',
+      'import x from "vitest-environment-x";',
+      'const name = "vitest";',
+      'import { a } from "./vitest.js";',
+    ];
+    expect(no.filter((t) => VITEST_IMPORT.test(t))).toEqual([]);
   });
 
   it("gives vitest as an optional peer to each package whose source imports it", () => {
