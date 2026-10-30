@@ -34,6 +34,7 @@ import {
   spawnRun,
   type ToolPaths,
 } from "../src/dry-run.ts";
+import { VERSION_CONSTANTS } from "../src/lib/pack-rules.ts";
 import { buildCommand } from "../src/lib/release-copy.ts";
 import { reportLines } from "../src/lib/report.ts";
 import {
@@ -169,6 +170,19 @@ function fake(
         const r = prepare(cwd);
         return fromReport(reportLines(r), r.failures.length > 0);
       }
+      case "turbo run build":
+        // The build writes the version module of each package of
+        // VERSION_CONSTANTS from its package.json (scripts/write-version.mjs),
+        // so check-pack reads the version of the copy (ruling 65 of plan 12j, M2).
+        for (const p of readWorkspace(cwd)) {
+          const constant = VERSION_CONSTANTS[p.name];
+          if (constant === undefined) continue;
+          writeFileSync(
+            join(cwd, p.dir, constant.file),
+            `export const ${constant.name} = ${JSON.stringify(p.manifest.version)};\n`,
+          );
+        }
+        return ok();
       case "pnpm pack":
         return ok(
           execFileSync("pnpm", args, {
@@ -360,12 +374,12 @@ describe("dry run", () => {
     expect(failuresOf(report)).toEqual([]);
     expect(report.exit).toBe(0);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=2 failures=0",
+      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=11 smoke=2 failures=0",
     );
     const lines = report.lines.filter((l) => l.startsWith("@authtempo/"));
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^@authtempo\/client@0\.1\.0 [0-9a-f]{64} files=5$/);
-    expect(lines[1]).toMatch(/^@authtempo\/core@0\.1\.0 [0-9a-f]{64} files=5$/);
+    expect(lines[1]).toMatch(/^@authtempo\/core@0\.1\.0 [0-9a-f]{64} files=6$/);
   });
 
   it("installs no kit tool in the apps phase", async () => {
@@ -405,7 +419,7 @@ describe("dry run", () => {
       "smoke: @authtempo/core does not load: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest'",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=2",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("smoke install kits");
   });
@@ -463,7 +477,7 @@ describe("dry run", () => {
     ]);
     expect(report.exit).toBe(1);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
@@ -484,7 +498,7 @@ describe("dry run", () => {
     ]);
     expect(report.exit).toBe(1);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=2 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
@@ -519,7 +533,7 @@ describe("dry run", () => {
       "@authtempo/core@0.1.0: npm publish --dry-run exited 1: npm error code E403",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
   });
 
@@ -534,12 +548,12 @@ describe("dry run", () => {
     const f = fake();
     const report = await dryRun({ root, run: f.run, tmp });
     expect(failuresOf(report)).toEqual([
-      "check-pack exited 1: check-pack: FAIL tarballs=2 files=9 marked=0 listed=0 failures=2",
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 marked=0 listed=0 failures=2",
       "check-pack: @authtempo/core@0.1.0: the tarball has no CHANGELOG.md",
       "check-pack: @authtempo/core@0.1.0: the needed file CHANGELOG.md of release/pack-needs.json is not in the tarball",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=9 smoke=0 failures=3",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=3",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("npm publish");
 
@@ -553,7 +567,7 @@ describe("dry run", () => {
       /^check-pack exited 1: Error: ENOENT: no such file or directory, open '.*\/release\/pack-needs\.json'$/,
     );
     expect(dryRunLine(r2)).toBe(
-      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
   });
 
@@ -576,7 +590,7 @@ describe("dry run", () => {
       "@authtempo/core@0.1.0: npm publish --dry-run does not print + @authtempo/core@0.1.0",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("pnpm publish");
   });
@@ -688,11 +702,11 @@ describe("dry run", () => {
     const scriptRun = await dryRun({ root, run: f.run, tmp });
     expect(ran).toBe(false);
     expect(failuresOf(scriptRun)).toEqual([
-      "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 marked=0 listed=0 failures=1",
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=11 marked=0 listed=0 failures=1",
       "check-pack: @authtempo/core@0.1.0: scripts.prepack runs at pack or publish",
     ]);
     expect(dryRunLine(scriptRun)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=2",
     );
   });
 
@@ -898,7 +912,7 @@ describe("dry run", () => {
       "@authtempo/core@0.1.0: npm publish --dry-run names the registry https://registry.npmjs.org/, not http://127.0.0.1:9",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=1",
     );
 
     // An npm answer that names no registry is not proof of the dead one.
@@ -927,7 +941,7 @@ describe("dry run", () => {
       "pnpm publish -r --dry-run names the registry https://registry.npmjs.org/ for @authtempo/core@0.1.0, not http://127.0.0.1:9",
     ]);
     expect(dryRunLine(r3)).toBe(
-      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=11 smoke=0 failures=2",
     );
     expect(g.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
@@ -1231,7 +1245,7 @@ describe("the notes of a source at 0.0.0 in the dry run (rulings 47 and 50 of pl
       "scripts/release/src/rewrite-unpublished.ts",
     ]);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=2 failures=0",
+      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=11 smoke=2 failures=0",
     );
     // The dry run writes only its copy: the checkout keeps the note.
     expect(readFileSync(join(root, CLIENT), "utf8")).toContain(NOTE);
@@ -1243,7 +1257,7 @@ describe("the notes of a source at 0.0.0 in the dry run (rulings 47 and 50 of pl
     const f = fake();
     const report = await dryRun({ root, run: f.run, tmp });
     expect(failuresOf(report)).toEqual([
-      "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 marked=1 listed=0 failures=1",
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=11 marked=1 listed=0 failures=1",
       `check-pack: ${CLIENT} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
     ]);
     expect(report.exit).toBe(1);
@@ -1282,7 +1296,7 @@ describe("the notes of a source at 0.0.0 in the dry run (rulings 47 and 50 of pl
     expect(report.version).toBe("0.1.0");
     expect(kinds(f.calls)).not.toContain("node rewrite-unpublished.ts");
     expect(failuresOf(report)).toEqual([
-      "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 marked=1 listed=1 failures=1",
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=11 marked=1 listed=1 failures=1",
       `check-pack: ${listedNoteFailure(CLIENT, [UNPUBLISHED_MARK], "0.1.0")}`,
     ]);
     expect(report.notes).toEqual([]);
