@@ -88,19 +88,21 @@ describe("check-security-policy", () => {
     expect(r.failures).toEqual([
       'the section "The disclosure window" is missing',
       'the section "The disclosure window" does not state "90 days" (owner decision 4)',
+      'the section "The disclosure window" does not state "whichever comes first" (owner decision 4)',
     ]);
     expect(summaryLine(r)).toBe(
-      "check-security-policy: FAIL sections=6 rows=0 channels=2 failures=2",
+      "check-security-policy: FAIL sections=6 rows=0 channels=2 failures=3",
     );
     expect(check(textWith("## Out of scope\n", "## Not ours\n")).failures).toEqual([
       'the section "Out of scope" is missing',
       'the section "Not ours" is not a section of the policy',
+      'the section "Out of scope" lists no item; OUT_OF_SCOPE gives the data of the demo sandbox; the static files of the hosted site; a fault that needs an app secret that the attacker already has',
     ]);
   });
 
   it("fails a text that it reads nothing in", () => {
     expect(summaryLine(check(""))).toBe(
-      "check-security-policy: FAIL sections=0 rows=0 channels=0 failures=18",
+      "check-security-policy: FAIL sections=0 rows=0 channels=0 failures=23",
     );
     expect(check("").failures.slice(-2)).toEqual(["read 0 sections", "read 0 channels"]);
   });
@@ -313,6 +315,26 @@ describe("check-security-policy", () => {
     ]);
     expect(check(textWith("90 days after", "120 days after")).failures).toEqual([
       'the section "The disclosure window" does not state "90 days" (owner decision 4)',
+    ]);
+  });
+
+  it("states the other rules of spec 33 item 7 and the out-of-scope items (ruling 26 of plan 12j, L4)", () => {
+    expect(check(textWith("Do not open a public issue for a fault. ", "")).failures).toEqual([
+      'the section "How to report" does not state "Do not open a public issue for a fault." (spec 33 item 7)',
+    ]);
+    expect(
+      check(textWith(" Do not include a real user's data in the report.", "")).failures,
+    ).toEqual([
+      `the section "How to report" does not state "Do not include a real user's data in the report." (spec 33 item 7)`,
+    ]);
+    expect(check(textWith(", whichever comes first", "")).failures).toEqual([
+      'the section "The disclosure window" does not state "whichever comes first" (owner decision 4)',
+    ]);
+    expect(check(textWith(", with a CVE request through GitHub", "")).failures).toEqual([
+      'the section "The advisory format" does not state "with a CVE request through GitHub" (spec 33 item 7)',
+    ]);
+    expect(check(textWith("- the static files of the hosted site\n", "")).failures).toEqual([
+      'the section "Out of scope" lists the data of the demo sandbox; a fault that needs an app secret that the attacker already has; OUT_OF_SCOPE gives the data of the demo sandbox; the static files of the hosted site; a fault that needs an app secret that the attacker already has',
     ]);
   });
 

@@ -49,6 +49,46 @@ const TIMES: readonly {
   { section: "The disclosure window", text: "90 days", source: "owner decision 4" },
 ];
 
+/**
+ * Each other statement that a section must hold, with its source (ruling 26
+ * of plan 12j, L4, held by ruling 64, Minor 3). Without this list, an edit
+ * could drop the no-public-issue rule or the CVE request, and every check
+ * still passed.
+ */
+const STATEMENTS: readonly {
+  section: (typeof SECURITY_SECTIONS)[number];
+  text: string;
+  source: string;
+}[] = [
+  {
+    section: "How to report",
+    text: "Do not open a public issue for a fault.",
+    source: "spec 33 item 7",
+  },
+  {
+    section: "How to report",
+    text: "Do not include a real user's data in the report.",
+    source: "spec 33 item 7",
+  },
+  { section: "The disclosure window", text: "whichever comes first", source: "owner decision 4" },
+  {
+    section: "The advisory format",
+    text: "with a CVE request through GitHub",
+    source: "spec 33 item 7",
+  },
+];
+
+/**
+ * The out-of-scope items of the policy, one list item each, in this order
+ * (spec 33 item 7 names the section, and plan 12j Task 12 wrote the items).
+ * A change of the list is a change of the promise, so it changes here too.
+ */
+export const OUT_OF_SCOPE = [
+  "the data of the demo sandbox",
+  "the static files of the hosted site",
+  "a fault that needs an app secret that the attacker already has",
+] as const;
+
 /** Text that only a draft holds. A `<` is a template part such as `<owner>`. */
 const PLACEHOLDERS = ["example.com", "TODO", "<"];
 
@@ -188,9 +228,18 @@ export function checkSecurityPolicy(input: {
       `the second channel is ${channels[1]}; it must be ${mailbox}, at the host of ${origin}`,
     );
 
-  for (const t of TIMES)
+  for (const t of [...TIMES, ...STATEMENTS])
     if (!body(t.section).includes(t.text))
       failures.push(`the section "${t.section}" does not state "${t.text}" (${t.source})`);
+
+  const items = body("Out of scope")
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2).trim());
+  if (items.join("\n") !== OUT_OF_SCOPE.join("\n"))
+    failures.push(
+      `the section "Out of scope" lists ${items.join("; ") || "no item"}; OUT_OF_SCOPE gives ${OUT_OF_SCOPE.join("; ")}`,
+    );
 
   const record = `${repository.url}/blob/main/docs/security/advisories.md`;
   if (!linksOf(body("Supplier advisories")).includes(record))
