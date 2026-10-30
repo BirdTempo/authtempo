@@ -20,6 +20,14 @@ export const PACK_SCRIPTS = [
 ] as const;
 
 /**
+ * The scripts that npm and pnpm run at each install of an app. No released
+ * package holds one: it would run code on the machine of each app, with no
+ * read by the app (ruling 67 of plan 12j, Low 1). pnpm 12.8.1 refuses a build
+ * script that no allowBuilds names, but that is a default of a supplier.
+ */
+export const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"] as const;
+
+/**
  * Names that never ship, each with what it holds. A name that ends in "/" is a
  * folder at the start of a path or after any "/". A name that starts with "*"
  * matches the file name. Any other name matches a path part that starts with it.

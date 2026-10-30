@@ -303,6 +303,19 @@ describe("check-pack", () => {
     ).toEqual(["the manifest holds private"]);
   });
 
+  it("fails each script that runs at an install of an app (ruling 67 of plan 12j, Low 1)", () => {
+    // Before the rule, postinstall, preinstall, and install each passed check-pack.
+    for (const script of ["preinstall", "install", "postinstall"]) {
+      const line = `scripts.${script} runs at each install of an app; a released package runs no install script`;
+      const packed = withManifest((m) => {
+        m.scripts = { [script]: "node x.mjs" };
+      });
+      expect([script, "packed", packed]).toEqual([script, "packed", [line]]);
+      const source = failuresOf({ scripts: { [script]: "node x.mjs" } });
+      expect([script, "workspace", source]).toEqual([script, "workspace", [line]]);
+    }
+  });
+
   it("fails each script that runs at pack or publish", () => {
     // One script per row, typed here. pnpm 12.8.1 pack strips the publish
     // scripts from the packed manifest, so the workspace manifest counts too.
@@ -324,10 +337,8 @@ describe("check-pack", () => {
       const source = failuresOf({ scripts: { [script]: "node x.mjs" } });
       expect([script, "workspace", source]).toEqual([script, "workspace", [line]]);
     }
-    // A script that no pack and no publish runs passes.
-    expect(failuresOf({ scripts: { build: "tsc", test: "vitest run", postinstall: "x" } })).toEqual(
-      [],
-    );
+    // A script that no pack, no publish, and no install runs passes.
+    expect(failuresOf({ scripts: { build: "tsc", test: "vitest run" } })).toEqual([]);
   });
 
   it("reads the scripts of the workspace manifest, which pnpm pack strips", () => {

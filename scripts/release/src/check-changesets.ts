@@ -80,8 +80,10 @@ function packedBy(inner: string, files: readonly string[] | undefined): boolean 
 /**
  * The keys of package.json that change what an app installs or loads. `type`
  * and `imports` change how Node loads dist. `typesVersions` changes which
- * types TypeScript reads (ruling 64 of plan 12j, Minor 3). Rule 4 of
- * .changeset/README.md names the same keys, and a test holds the two lists equal.
+ * types TypeScript reads (ruling 64 of plan 12j, Minor 3). `scripts` ships in
+ * the packed manifest, and an install script runs on each app (ruling 67 of
+ * plan 12j, Low 1). Rule 4 of .changeset/README.md names the same keys, and a
+ * test holds the two lists equal.
  */
 export const RUNTIME_KEYS = [
   "dependencies",
@@ -97,6 +99,7 @@ export const RUNTIME_KEYS = [
   "bin",
   "files",
   "engines",
+  "scripts",
 ] as const;
 
 /** The runtime keys whose value differs between two manifest texts. A new or removed manifest changes each key. */

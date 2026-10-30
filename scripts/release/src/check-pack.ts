@@ -12,6 +12,7 @@ import {
   CHANGELOG_FILE,
   DECLARED_BINARIES,
   forbiddenMatch,
+  INSTALL_SCRIPTS,
   PACK_SCRIPTS,
   RELEASE_LICENSE,
   repositoryFor,
@@ -127,6 +128,11 @@ export function checkPack(input: PackInput): Report {
   for (const script of PACK_SCRIPTS)
     if (script in packed || script in input.scripts)
       failures.push(`scripts.${script} runs at pack or publish`);
+  for (const script of INSTALL_SCRIPTS)
+    if (script in packed || script in input.scripts)
+      failures.push(
+        `scripts.${script} runs at each install of an app; a released package runs no install script`,
+      );
   // The scaffold reads 0.0.0 as unpublished, so a CLI at 0.0.0 on npm tells
   // each app to run a clone. This is ruling 13 of the plan 12j lane.
   if (manifest.version === UNPUBLISHED_VERSION)

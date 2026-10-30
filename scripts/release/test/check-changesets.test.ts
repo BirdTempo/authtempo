@@ -248,10 +248,13 @@ describe("check-changesets", () => {
     expect(() => run([{ path: "packages/core/package.json" }], [])).toThrow(
       "packages/core/package.json: the input needs the base and head texts of the manifest",
     );
-    for (const head of ["dev-dependencies", "scripts"])
-      expect(summaryLine(run([manifest("base", head)], []))).toBe(
-        "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
-      );
+    expect(summaryLine(run([manifest("base", "dev-dependencies")], []))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    // The scripts ship in the packed manifest, and an install script runs on each app (ruling 67 of plan 12j, Low 1).
+    expect(run([manifest("base", "scripts")], []).failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/package.json (scripts)",
+    ]);
   });
 
   it("needs a changeset for a change of typesVersions (ruling 64 of plan 12j, Minor 3)", () => {
@@ -269,7 +272,7 @@ describe("check-changesets", () => {
   it("needs a changeset for a new or a removed manifest", () => {
     const text = read("manifests/base.json");
     const all =
-      "dependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, exports, imports, main, types, typesVersions, type, bin, files, engines";
+      "dependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, exports, imports, main, types, typesVersions, type, bin, files, engines, scripts";
     expect(
       run([{ path: "packages/core/package.json", base: null, head: text }], []).failures,
     ).toEqual([
@@ -297,6 +300,7 @@ describe("check-changesets", () => {
       "bin",
       "files",
       "engines",
+      "scripts",
     ];
     expect([...RUNTIME_KEYS]).toEqual(keys);
     // The rule line of the README is the list that a contributor reads.
