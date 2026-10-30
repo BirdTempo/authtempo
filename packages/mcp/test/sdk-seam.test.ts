@@ -26,6 +26,29 @@ function walk(dir: string, keep: (name: string) => boolean, out: string[] = []):
 
 const rel = (path: string) => relative(REPO, path);
 
+/**
+ * The manifest of each workspace package, from the `packages` list of
+ * pnpm-workspace.yaml, the one source. A list of folders here missed
+ * scripts/release (ruling 64 of plan 12j, Minor 3). An entry `<dir>/*`
+ * names each folder of <dir> with a package.json, and any other entry names
+ * its own folder.
+ */
+function workspaceManifests(): string[] {
+  const yaml = readFileSync(join(REPO, "pnpm-workspace.yaml"), "utf8");
+  const block = /^packages:\n((?:[ \t]+(?:-.*|#.*)\n)+)/m.exec(yaml)?.[1] ?? "";
+  const entries = [...block.matchAll(/^[ \t]+-[ \t]+["']?([^"'\s#]+)["']?/gm)].map(
+    (m) => m[1] ?? "",
+  );
+  expect(entries.length, "the packages list of pnpm-workspace.yaml").toBeGreaterThan(0);
+  return entries.flatMap((entry) => {
+    if (!entry.endsWith("/*")) return [join(REPO, entry, "package.json")];
+    const dir = entry.slice(0, -2);
+    return readdirSync(join(REPO, dir), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && existsSync(join(REPO, dir, e.name, "package.json")))
+      .map((e) => join(REPO, dir, e.name, "package.json"));
+  });
+}
+
 describe("the SDK seam", () => {
   it("lets only protocol.ts and the example's mcp.ts import the SDK", () => {
     const files = ["packages/mcp/src", "examples/mcp-server/src"].flatMap((d) =>
@@ -40,16 +63,17 @@ describe("the SDK seam", () => {
   });
 
   it("lets only packages/mcp and examples/mcp-server depend on an SDK package", () => {
-    // The workspace packages: pnpm-workspace.yaml lists packages/*, examples/*, and apps/*.
-    const manifests = ["packages", "examples", "apps"].flatMap((d) =>
-      readdirSync(join(REPO, d), { withFileTypes: true })
-        .filter((e) => e.isDirectory() && existsSync(join(REPO, d, e.name, "package.json")))
-        .map((e) => join(REPO, d, e.name, "package.json")),
-    );
+    const manifests = workspaceManifests();
     manifests.push(join(REPO, "package.json"));
-    // The cli and verify are named in the review; each must be in the walk.
-    for (const pkg of ["packages/cli/package.json", "packages/verify/package.json"])
+    // The cli and verify are named in the review, and the release package is a
+    // workspace package of its own; each must be in the walk.
+    for (const pkg of [
+      "packages/cli/package.json",
+      "packages/verify/package.json",
+      "scripts/release/package.json",
+    ])
       expect(manifests.map(rel)).toContain(pkg);
+    for (const file of manifests) expect(existsSync(file), rel(file)).toBe(true);
     const dependents = manifests
       .filter((f) => {
         const json = JSON.parse(readFileSync(f, "utf8")) as Record<string, unknown>;
