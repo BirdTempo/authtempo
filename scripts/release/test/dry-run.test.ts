@@ -714,10 +714,11 @@ describe("dry run", () => {
     const { root, tmp } = setup();
     const seen: string[] = [];
     const f = fake();
-    const run: Run = (cmd, args, cwd, env) => {
+    // childEnv is the env that the dry run gives a child, not the process env.
+    const run: Run = (cmd, args, cwd, childEnv) => {
       for (const key of ["NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG"])
-        seen.push(`${key}=${JSON.stringify(readFileSync(env[key] ?? "", "utf8"))}`);
-      return f.run(cmd, args, cwd, env);
+        seen.push(`${key}=${JSON.stringify(readFileSync(childEnv[key] ?? "", "utf8"))}`);
+      return f.run(cmd, args, cwd, childEnv);
     };
     const report = await dryRun({ root, run, tmp });
     expect(report.exit).toBe(0);
