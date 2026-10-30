@@ -141,7 +141,7 @@ function isDay(text: unknown): boolean {
 }
 
 /** The faults of the fallback file: each entry has a version, a real day, and a reason, once. */
-function fallbackFaults(entries: readonly FallbackEntry[]): string[] {
+export function fallbackFaults(entries: readonly FallbackEntry[]): string[] {
   const faults: string[] = [];
   const seen = new Set<string>();
   entries.forEach((e, i) => {

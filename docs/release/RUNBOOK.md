@@ -83,14 +83,14 @@ Do these steps in this order, before step 1 of "At each release". Step 8 of "At 
    - These facts come from docs.npmjs.com/trusted-publishers, last edited 2026-10-06 and read 2026-10-30.
 9. Tag the merge commit on `main` with `v<version>`, and push the tag. A tag on the version branch before the merge fails `check-tag`.
 10. Wait for the job `check` of `release.yml`. Then approve the job `publish` in the environment `release`. After a new trusted publisher of step 8, approve it within 2 days of that step.
-11. On `main`, run `node scripts/release/src/verify-published.ts`. It reads each released name from `.changeset/config.json`, and fails on a version with no provenance attestation on npm. It also fails an attestation of another repository or another workflow than `release.yml`. If it prints FAIL, stop, and read "A failed publish".
+11. Wait until the job `publish` ends. Then run `node scripts/release/src/verify-published.ts <version>`, with the version of the tag. A run before the end reads a half release, and it sends you to "A failed publish" with no fault. Without the version, it reads the group version of the checkout, which differs for a patch of an older minor. It reads each released name from `.changeset/config.json`, and fails on a version with no provenance attestation on npm. It also fails an attestation of another repository or another workflow than `release.yml`. If it prints FAIL, stop, and read "A failed publish".
 12. In a new empty folder, install `@authtempo/core` and `@authtempo/cli` at the new version, and run `npm audit signatures`. If it prints an invalid or a missing signature, stop. Do not compare its counts with the released packages: it counts each installed package, such as each dependency.
 13. Run `npm view @authtempo/core@<version> authtempo --json`. If the output has no `breaking` key, `authtempo upgrade` stops for each app with exit 1. Then follow "A bad version", and release a patch.
 14. Run `npm view @authtempo/core time --json`, and read the time of the new version. If its day differs from the rows of step 4, correct each row by a pull request. At a new minor, also correct the day `released` of step 5 in `release/support.json` and in `SECURITY.md`.
 15. Append one dated evidence line to `docs/superpowers/plans/README.md`, on a new branch, and merge it by a pull request. The protection of `main` refuses a direct push. Name the version, the tagged commit, the `release-dry-run` line, and the `verify-published` line.
 16. Publish the site: run `pnpm turbo run build --filter=@authtempo/site --force`, then `pnpm --filter @authtempo/site exec wrangler deploy`. Without the build, the deploy guard refuses the folder `dist`. The hold of 2026-10-11 stays until you lift it.
 
-Do not run `authtempo init` from the version branch between step 3 and the end of the job `publish`. In that time the scaffold names a version that is not on npm yet. A failed publish keeps that state until the rerun.
+Do not run `authtempo init` from the version branch between step 3 and the end of the job `publish`. Do not run it from `main` between the merge of step 7 and the end of the job `publish` either. In that time the scaffold names a version that is not on npm yet, and the texts of `PRE_RELEASE_SENTENCES` and `UNPUBLISHED_FILES` have their published form. A failed publish keeps that state until the rerun, and the token fallback keeps it until its reviewed change.
 
 The commands of steps 9, 11, and 12:
 
@@ -98,7 +98,7 @@ The commands of steps 9, 11, and 12:
 git switch main && git pull --ff-only
 git tag v0.1.0 && git push origin v0.1.0
 
-node scripts/release/src/verify-published.ts
+node scripts/release/src/verify-published.ts 0.1.0
 
 mkdir /tmp/authtempo-audit && cd /tmp/authtempo-audit
 npm init -y
@@ -186,7 +186,11 @@ This branch is a stop: it needs a reviewed change before any publish. `check-wor
 - This is the one publish by hand; every other publish goes through the workflow. Take the tarballs of the job `check`. Compare each SHA-256 with `SHA256SUMS`, and run `node scripts/release/src/check-pack.ts` on each tarball first.
 - Publish each tarball after the tarballs of its dependencies, so core goes first. Use `npm publish <tarball> --access public --provenance=false` for each tarball.
 - A tarball holds `publishConfig.provenance` true, and npm takes the flag of the command over `publishConfig` (npm 11.19.1, `lib/commands/publish.js`, read 2026-10-30). Without the flag, npm asks for provenance outside CI, and the publish fails.
-- A version that you publish this way has no attestation. Add its version, the date, and the reason to `release/fallback-published.json` by a pull request. Without the entry, `verify-published` fails at step 11.
+- A version that you publish this way has no attestation. Add its version, the date, and the reason to `release/fallback-published.json` by a pull request. Without the entry, `verify-published` fails at step 11. One entry has this form, with the UTC day of the publish in the form `YYYY-MM-DD`:
+
+```json
+[{ "version": "0.1.0", "date": "2026-11-02", "reason": "npm offered no trusted publisher for a package with no version." }]
+```
 
 ## Once, after the first publish
 

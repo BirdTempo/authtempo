@@ -13,6 +13,7 @@ import {
 } from "../src/lib/release-facts.ts";
 import { releasedNames } from "../src/lib/released.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
+import { FALLBACK_FILE, type FallbackEntry, fallbackFaults } from "../src/verify-published.ts";
 
 // docs/release/RUNBOOK.md, the steps of the owner (plan 12j Task 13, spec 33
 // item 4.3). A runbook runs on a person, so this test holds each value that
@@ -200,6 +201,8 @@ describe("docs/release/RUNBOOK.md", () => {
     const step = stepOf(TEXT, "At each release", 4);
     expect(step).toContain("`RELEASE_DATES`");
     expect(step).toContain(`The key is \`${form}\`.`);
+    // The values row of the key holds the same form (review N1 of plan 12j Task 13b).
+    expect(TEXT).toContain(`| The key of a release date | \`${form}\` |`);
     // The example time has the row form of check-feed: YYYY-MM-DDTHH:MM:SSZ.
     expect(step).toContain("in the form `YYYY-MM-DDTHH:MM:SSZ`");
     const example = /such as `([^`]+)`/.exec(step)?.[1] ?? "";
@@ -342,7 +345,12 @@ describe("docs/release/RUNBOOK.md", () => {
 
   it("runs verify-published after the publish, with no list of names", () => {
     const step = stepOf(TEXT, "At each release", 11);
-    expect(step).toContain("`node scripts/release/src/verify-published.ts`");
+    // The version of the tag, after the end of the job publish (review N2 of plan 12j Task 13b).
+    expect(step).toMatch(/^11\. Wait until the job `publish` ends\./);
+    expect(step).toContain(
+      "`node scripts/release/src/verify-published.ts <version>`, with the version of the tag.",
+    );
+    expect(TEXT).toContain("\nnode scripts/release/src/verify-published.ts 0.1.0\n");
     // verify-published reads releasedNames, so the step names no package.
     expect(step).not.toMatch(/@authtempo\//);
     expect(existsSync(new URL("release/fallback-published.json", ROOT))).toBe(true);
@@ -382,6 +390,29 @@ describe("docs/release/RUNBOOK.md", () => {
     );
     expect(names.size).toBeGreaterThan(10);
     for (const name of names) expect(exports(files, name), name).toBe(true);
+  });
+
+  it("quotes the form of an entry of the fallback file (review N4 of plan 12j Task 13b)", () => {
+    const part = TEXT.slice(TEXT.indexOf("### The token fallback"));
+    const block = /```json\n([\s\S]*?)```/.exec(part.slice(0, part.indexOf("\n## ")))?.[1];
+    expect(block, "the token fallback has a json block").toBeDefined();
+    const entries = JSON.parse(block ?? "[]") as FallbackEntry[];
+    expect(entries).toHaveLength(1);
+    expect(Object.keys(entries[0] ?? {})).toEqual(["version", "date", "reason"]);
+    expect(fallbackFaults(entries)).toEqual([]);
+    expect(part).toContain(`\`${FALLBACK_FILE}\``);
+    expect(part).toContain("in the form `YYYY-MM-DD`");
+  });
+
+  it("names main and the version branch as the places of the published texts (review N5)", () => {
+    const line = TEXT.split("\n").find((l) => l.startsWith("Do not run `authtempo init`")) ?? "";
+    expect(line).toContain(
+      "from the version branch between step 3 and the end of the job `publish`",
+    );
+    expect(TEXT).toContain(
+      "Do not run it from `main` between the merge of step 7 and the end of the job `publish` either.",
+    );
+    expect(stepOf(TEXT, "At each release", 7)).toContain("Then merge it.");
   });
 
   it("names each released package with its Node floor", () => {
