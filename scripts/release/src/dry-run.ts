@@ -99,6 +99,14 @@ export const PNPM_PUBLISH_ARGS: readonly string[] = [
 /** The body of the one temporary changeset. */
 export const CHANGESET_BODY = "Dry run of the next release.";
 
+/**
+ * The phases of the smoke, in order (ruling 45 of plan 12j). In the apps
+ * phase, an app with no kit tool loads each entry that is not a kit, and runs
+ * the CLI. In the kits phase, the tools are added and each kit loads. So a
+ * main entry that imports vitest fails the apps phase.
+ */
+export const SMOKE_PHASES = ["apps", "kits"] as const;
+
 export interface DryRunOptions {
   /** The checkout. The dry run reads it with git and never writes to it. */
   root: string;
@@ -385,11 +393,13 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     if (options.keep !== true || dir === null) rmSync(temp, { recursive: true, force: true });
   }
 
-  /** The steps in the temp folder: the copy in repo/, the tarballs in out/, the smoke app in smoke/. */
+  /**
+   * The steps in the temp folder: the copy in repo/, the tarballs in out/, and
+   * one smoke app for each phase in smoke-<phase>/.
+   */
   function steps(temp: string): 0 | 1 {
     const repo = join(temp, "repo");
     const out = join(temp, "out");
-    const smoke = join(temp, "smoke");
     mkdirSync(repo);
     mkdirSync(out);
     const archive = join(temp, "head.tar");
@@ -547,38 +557,44 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
         failures.push(`pnpm publish -r --dry-run lists ${id}, which has no tarball`);
     if (failures.length > 0) return settle();
 
-    // The smoke app is outside the workspace of the copy, as an app is. Each
+    // Each smoke app is outside the workspace of the copy, as an app is. Each
     // @authtempo name resolves to its tarball through an override, because the
     // exact versions are on no registry yet (the form of Task 5).
-    cpSync(join(repo, "release/smoke"), smoke, { recursive: true });
-    const manifest = JSON.parse(readFileSync(join(smoke, "package.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
     const deps = Object.fromEntries(tarballs.map((t) => [t.name, `file:${t.path}`]));
-    manifest.dependencies = deps;
-    writeFileSync(join(smoke, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    writeFileSync(
-      join(smoke, "pnpm-workspace.yaml"),
-      `overrides:\n${Object.entries(deps)
-        .map(([k, v]) => `  "${k}": "${v}"`)
-        .join("\n")}\n`,
-    );
-    if (!step("smoke install", "pnpm", ["install", "--offline"], smoke)) {
-      for (const t of tarballs) bad.add(t.name);
-      return settle();
+    for (const phase of SMOKE_PHASES) {
+      const smoke = join(temp, `smoke-${phase}`);
+      cpSync(join(repo, "release/smoke"), smoke, { recursive: true });
+      const manifest = JSON.parse(readFileSync(join(smoke, "package.json"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      manifest.dependencies = deps;
+      // The devDependencies of release/smoke are the tools of the kits, such
+      // as vitest. The apps phase installs none, as an app that runs no kit.
+      if (phase === "apps") delete manifest.devDependencies;
+      writeFileSync(join(smoke, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+      writeFileSync(
+        join(smoke, "pnpm-workspace.yaml"),
+        `overrides:\n${Object.entries(deps)
+          .map(([k, v]) => `  "${k}": "${v}"`)
+          .join("\n")}\n`,
+      );
+      if (!step(`smoke install ${phase}`, "pnpm", ["install", "--offline"], smoke)) {
+        for (const t of tarballs) bad.add(t.name);
+        return settle();
+      }
+      log(`dry-run: node smoke.mjs ${phase}`);
+      const s = run("node", ["smoke.mjs", join(repo, ".changeset/config.json"), phase], smoke, env);
+      const smoked = reportOf(s.stdout);
+      if (s.status !== 0 || smoked === null || !smoked.summary.startsWith("smoke: PASS")) {
+        failures.push(`node smoke.mjs exited ${s.status}: ${smoked?.summary ?? firstLine(s)}`);
+        for (const l of smoked?.failures ?? []) failures.push(`smoke: ${l}`);
+        for (const t of tarballs) bad.add(t.name);
+        return settle();
+      }
+      lines.push(smoked.summary);
+      counts.smoke++;
     }
-    log("dry-run: node smoke.mjs");
-    const s = run("node", ["smoke.mjs", join(repo, ".changeset/config.json")], smoke, env);
-    const smoked = reportOf(s.stdout);
-    if (s.status !== 0 || smoked === null || !smoked.summary.startsWith("smoke: PASS")) {
-      failures.push(`node smoke.mjs exited ${s.status}: ${smoked?.summary ?? firstLine(s)}`);
-      for (const l of smoked?.failures ?? []) failures.push(`smoke: ${l}`);
-      for (const t of tarballs) bad.add(t.name);
-      return settle();
-    }
-    lines.push(smoked.summary);
-    counts.smoke = 1;
     return settle();
   }
 }

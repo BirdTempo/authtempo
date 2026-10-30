@@ -89,9 +89,11 @@ function kindOf(cmd: string, args: readonly string[], cwd: string): string {
   if (cmd === "git") return `git ${a}`;
   if (cmd === "tar") return "extract";
   if (cmd === "npm" && a === "publish") return "npm publish";
-  if (cmd === "node") return a.endsWith("smoke.mjs") ? "smoke" : `node ${a.split("/").pop()}`;
+  if (cmd === "node")
+    return a.endsWith("smoke.mjs") ? `smoke ${args[2]}` : `node ${a.split("/").pop()}`;
+  const smokeApp = /\/smoke-([a-z]+)$/.exec(cwd);
   if (cmd === "pnpm" && a === "install")
-    return cwd.endsWith("/smoke") ? "smoke install" : "install";
+    return smokeApp === null ? "install" : `smoke install ${smokeApp[1]}`;
   if (cmd === "pnpm" && a === "turbo") return `turbo ${b} ${args[2] ?? ""}`;
   if (cmd === "pnpm" && args.includes("pack")) return "pnpm pack";
   if (cmd === "pnpm") return `pnpm ${a}`;
@@ -107,9 +109,15 @@ function kindOf(cmd: string, args: readonly string[], cwd: string): string {
 function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}) {
   const calls: Call[] = [];
   const changesets: string[] = [];
+  /** The package.json of each smoke app at its install, by phase. */
+  const smokeManifests: Record<string, Record<string, unknown>> = {};
   const run: Run = (cmd, args, cwd, env) => {
     const call = { kind: kindOf(cmd, args, cwd), cmd, args: [...args], cwd, env: { ...env } };
     calls.push(call);
+    if (call.kind.startsWith("smoke install "))
+      smokeManifests[call.kind.slice("smoke install ".length)] = JSON.parse(
+        readFileSync(join(cwd, "package.json"), "utf8"),
+      ) as Record<string, unknown>;
     const changed = change[call.kind]?.(call);
     if (changed !== undefined) return changed;
     switch (call.kind) {
@@ -168,29 +176,36 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
       }
       case "pnpm publish":
         return ok(pnpmPublishLines(cwd).join("\n"));
-      case "smoke": {
+      case "smoke apps":
+      case "smoke kits": {
         // The real smoke.mjs reads the released list from the config of the copy.
         const config = join(cwd, "../repo/.changeset/config.json");
+        const phase = args[2];
         if (
-          args.length !== 2 ||
+          args.length !== 3 ||
           args[0] !== "smoke.mjs" ||
           args[1] !== config ||
-          !existsSync(config)
+          !existsSync(config) ||
+          !cwd.endsWith(`/smoke-${phase}`)
         )
           return fromReport(
             [
-              "smoke: FAIL packages=2 released=0 entries=0 exempt=0 cli=0 failures=1",
+              `smoke: FAIL phase=${phase} packages=2 released=0 entries=0 kits=0 exempt=0 cli=0 failures=1`,
               "  give the path of .changeset/config.json, whose fixed[0] is the released list",
             ],
             true,
           );
-        return ok("smoke: PASS packages=2 released=2 entries=2 exempt=0 cli=0 failures=0\n");
+        return ok(
+          phase === "apps"
+            ? "smoke: PASS phase=apps packages=2 released=2 entries=2 kits=1 exempt=0 cli=3 failures=0\n"
+            : "smoke: PASS phase=kits packages=2 released=2 entries=1 kits=1 exempt=0 cli=0 failures=0\n",
+        );
       }
       default:
         return ok();
     }
   };
-  return { run, calls, changesets };
+  return { run, calls, changesets, smokeManifests };
 }
 
 /**
@@ -302,27 +317,74 @@ describe("dry run", () => {
       "npm publish",
       "npm publish",
       "pnpm publish",
-      "smoke install",
-      "smoke",
+      "smoke install apps",
+      "smoke apps",
+      "smoke install kits",
+      "smoke kits",
     ]);
     expect(changesets).toEqual([
       '---\n"@authtempo/client": minor\n"@authtempo/core": minor\n---\n\nDry run of the next release.\n',
     ]);
     // smoke.mjs reads the released list from the config path (review of Task 6, L1).
-    const smoke = calls.find((c) => c.kind === "smoke");
-    expect([smoke?.cwd, smoke?.args]).toEqual([
-      `${report.dir}/smoke`,
-      ["smoke.mjs", `${report.dir}/repo/.changeset/config.json`],
-    ]);
+    // The phase is the third argument, and each phase has its own app (ruling 45).
+    const smokes = calls.filter((c) => c.kind.startsWith("smoke ") && c.cmd === "node");
+    expect(smokes.map((c) => [c.cwd, c.args])).toEqual(
+      ["apps", "kits"].map((phase) => [
+        `${report.dir}/smoke-${phase}`,
+        ["smoke.mjs", `${report.dir}/repo/.changeset/config.json`, phase],
+      ]),
+    );
     expect(failuresOf(report)).toEqual([]);
     expect(report.exit).toBe(0);
     expect(dryRunLine(report)).toBe(
-      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=1 failures=0",
+      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=2 failures=0",
     );
     const lines = report.lines.filter((l) => l.startsWith("@authtempo/"));
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^@authtempo\/client@0\.1\.0 [0-9a-f]{64} files=5$/);
     expect(lines[1]).toMatch(/^@authtempo\/core@0\.1\.0 [0-9a-f]{64} files=5$/);
+  });
+
+  it("installs no kit tool in the apps phase", async () => {
+    // The apps phase is an app that runs no kit, so a main entry that imports
+    // vitest fails there. The kits phase adds the tools (ruling 45 of plan 12j).
+    const { report, smokeManifests } = await passingRun();
+    expect(report.exit).toBe(0);
+    expect(Object.keys(smokeManifests)).toEqual(["apps", "kits"]);
+    expect(smokeManifests.apps?.devDependencies).toBeUndefined();
+    expect(smokeManifests.kits?.devDependencies).toEqual({ vitest: "5.0.3" });
+    for (const phase of ["apps", "kits"])
+      expect(Object.keys(smokeManifests[phase]?.dependencies ?? {})).toEqual([
+        "@authtempo/client",
+        "@authtempo/core",
+      ]);
+    expect(report.lines.filter((l) => l.startsWith("smoke: "))).toEqual([
+      "smoke: PASS phase=apps packages=2 released=2 entries=2 kits=1 exempt=0 cli=3 failures=0",
+      "smoke: PASS phase=kits packages=2 released=2 entries=1 kits=1 exempt=0 cli=0 failures=0",
+    ]);
+  });
+
+  it("stops before the kits phase when the apps phase fails", async () => {
+    const { root, tmp } = setup();
+    const f = fake({
+      "smoke apps": () =>
+        fromReport(
+          [
+            "smoke: FAIL phase=apps packages=2 released=2 entries=2 kits=1 exempt=0 cli=3 failures=1",
+            "  @authtempo/core does not load: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest'",
+          ],
+          true,
+        ),
+    });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "node smoke.mjs exited 1: smoke: FAIL phase=apps packages=2 released=2 entries=2 kits=1 exempt=0 cli=3 failures=1",
+      "smoke: @authtempo/core does not load: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest'",
+    ]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+    );
+    expect(f.calls.map((c) => c.kind)).not.toContain("smoke install kits");
   });
 
   it("runs the release copy steps of release.yml", async () => {
@@ -380,7 +442,7 @@ describe("dry run", () => {
     expect(dryRunLine(report)).toBe(
       "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
     );
-    expect(f.calls.map((c) => c.kind)).not.toContain("smoke");
+    expect(f.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
 
   it("fails when the pnpm publish list names a package with no tarball", async () => {
@@ -401,7 +463,7 @@ describe("dry run", () => {
     expect(dryRunLine(report)).toBe(
       "release-dry-run: FAIL packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
     );
-    expect(f.calls.map((c) => c.kind)).not.toContain("smoke");
+    expect(f.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
 
   it("fails when it reads zero packages", async () => {
@@ -560,8 +622,10 @@ describe("dry run", () => {
       ["--config.fetch-retries=0"],
     ]);
     // Each install reads the store only.
-    const installs = calls.filter((c) => c.kind === "install" || c.kind === "smoke install");
-    expect(installs).toHaveLength(2);
+    const installs = calls.filter(
+      (c) => c.kind === "install" || c.kind.startsWith("smoke install"),
+    );
+    expect(installs).toHaveLength(3);
     for (const c of installs)
       expect([c.kind, c.args.includes("--offline")]).toEqual([c.kind, true]);
     // No other call names a host.
@@ -656,7 +720,7 @@ describe("dry run", () => {
     const { report, calls } = await passingRun(parent);
     expect(report.exit).toBe(0);
     const dir = report.dir ?? "";
-    expect(calls).toHaveLength(18);
+    expect(calls).toHaveLength(20);
     const fixed = {
       PATH: "/bin",
       TMPDIR: "/tmp/person",
@@ -841,7 +905,7 @@ describe("dry run", () => {
     expect(dryRunLine(r3)).toBe(
       "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
     );
-    expect(g.calls.map((c) => c.kind)).not.toContain("smoke");
+    expect(g.calls.map((c) => c.kind)).not.toContain("smoke apps");
   });
 
   it("writes only under the temp folder", async () => {
