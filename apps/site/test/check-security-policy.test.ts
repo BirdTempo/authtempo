@@ -185,13 +185,13 @@ describe("check-security-policy", () => {
         .failures,
     ).toEqual([
       'SECURITY.md holds the placeholder "<"',
-      "SECURITY.md links the repository <owner>/<name>; release/repository.json names authtempo/authtempo",
+      "SECURITY.md links the repository <owner>/<name>; release/repository.json names BirdTempo/authtempo",
       "the first channel is https://github.com/<owner>/<name>/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     expect(
       check(textWith(advisory, "https://github.com/someone/fork/security/advisories/new")).failures,
     ).toEqual([
-      "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
+      "SECURITY.md links the repository someone/fork; release/repository.json names BirdTempo/authtempo",
       "the first channel is https://github.com/someone/fork/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     // The same owner with another name is another repository.
@@ -199,7 +199,7 @@ describe("check-security-policy", () => {
       check(textWith(advisory, "https://github.com/BirdTempo/other/security/advisories/new"))
         .failures,
     ).toEqual([
-      "SECURITY.md links the repository authtempo/other; release/repository.json names authtempo/authtempo",
+      "SECURITY.md links the repository BirdTempo/other; release/repository.json names BirdTempo/authtempo",
       "the first channel is https://github.com/BirdTempo/other/security/advisories/new; it must be https://github.com/BirdTempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
     // A third channel, or one channel only.
@@ -220,7 +220,7 @@ describe("check-security-policy", () => {
     const fork = "https://www.github.com/someone/fork/security/advisories/new";
     expect(check(textWith(advisory, fork)).failures).toEqual([
       `SECURITY.md links ${fork}; a GitHub link uses the host github.com`,
-      "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
+      "SECURITY.md links the repository someone/fork; release/repository.json names BirdTempo/authtempo",
       channel(fork),
     ]);
     const http = "http://github.com/BirdTempo/authtempo/security/advisories/new";
