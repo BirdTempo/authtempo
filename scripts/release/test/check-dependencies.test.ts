@@ -71,7 +71,7 @@ describe("check-dependencies", () => {
   it("fails a dependency with no row", () => {
     const input = real();
     const client = manifestOf(input, "@authtempo/client");
-    client.dependencies = { ...client.dependencies, zod: "4.6.5" };
+    client.dependencies = { ...client.dependencies, zod: "4.6.6" };
     const r = checkDependencies(input);
     expect(r.failures).toEqual([
       "zod: @authtempo/client takes it and no row names that user (kind runtime)",
@@ -409,7 +409,7 @@ describe("check-dependencies", () => {
     const input = real();
     input.workspaceYaml = input.workspaceYaml.replace(
       /^minimumReleaseAge: 1440$/m,
-      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - jose\n  - zod@4.6.5",
+      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - jose\n  - zod@4.6.6",
     );
     expect(checkDependencies(input).failures).toEqual([]);
     // jose has a dev row and a runtime row: one of them with a reason holds the entry.
@@ -419,7 +419,7 @@ describe("check-dependencies", () => {
     delete rowOf(input, "zod", "runtime").read;
     expect(checkDependencies(input).failures).toEqual([
       "minimumReleaseAgeExclude: jose has no row in release/dependencies.json",
-      "minimumReleaseAgeExclude: zod@4.6.5 has no row in release/dependencies.json",
+      "minimumReleaseAgeExclude: zod@4.6.6 has no row in release/dependencies.json",
       "jose: the dev row has no reason",
       "jose: the runtime row has no reason",
       "zod: the runtime row has no read date in the form YYYY-MM-DD",
