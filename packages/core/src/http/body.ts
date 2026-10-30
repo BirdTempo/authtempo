@@ -15,7 +15,9 @@ export async function readBody<T>(request: Request, schema: z.ZodType<T>): Promi
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type === "application/json") return readJson(request, schema);
   if (type !== "application/x-www-form-urlencoded") return fail("invalid_body");
-  const params = new URLSearchParams(await readBodyText(request));
+  const text = await readBodyText(request);
+  if (text === null) return fail("invalid_body");
+  const params = new URLSearchParams(text);
   const raw: Record<string, string> = Object.create(null);
   for (const [key, value] of params) {
     if (key in raw) return fail("invalid_body");

@@ -12,7 +12,9 @@ import { apiError } from "../errors.js";
  * The value, or null for a body that is not JSON.
  */
 export async function readJsonOf(request: Request, key?: RouteKey): Promise<unknown> {
-  const value = parseBodyJson(await readBodyText(request.clone(), bodyCapOf(key)));
+  // A body read before cannot be cloned: it reads as no JSON, as in core.
+  const text = request.bodyUsed ? null : await readBodyText(request.clone(), bodyCapOf(key));
+  const value = parseBodyJson(text);
   return value === undefined ? null : value;
 }
 

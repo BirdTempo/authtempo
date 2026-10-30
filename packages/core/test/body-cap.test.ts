@@ -352,4 +352,32 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(res.status).toBe(400);
     expect(parse.mock.calls.filter(([t]) => t === deep)).toEqual([]);
   });
+  it("answers invalid_body, not 500, for a body that was read before the route", async () => {
+    const schema = z.unknown();
+    const used = async (request: Request) => {
+      await request.text();
+      expect(request.bodyUsed).toBe(true);
+      return request;
+    };
+    const fail = { ok: false, code: "invalid_body", status: 400 };
+    expect(await readJson(await used(jsonPost("/x", "{}")), schema)).toEqual(fail);
+    expect(await readOptionalJson(await used(jsonPost("/x", "{}")), schema)).toEqual(fail);
+    const form = new Request(`${BASE_URL}/x`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "a=b",
+    });
+    expect(await readBody(await used(form), schema)).toEqual(fail);
+    // Through the router: app middleware read the body first.
+    const { config, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    const res = await handle(
+      await used(
+        jsonPost("/auth/magic-link/request", JSON.stringify({ email: "ada@example.com" })),
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_body" });
+    expect(mail).toHaveLength(0);
+  });
 });

@@ -109,12 +109,15 @@ export class BodyTooLarge extends Error {
  * past the cap, on a read error, and when the request aborts. The decode is
  * that of `request.text()`: UTF-8, with a replacement character for a bad
  * byte and a leading BOM removed. Workers, Node, Bun, and Deno each give
- * `request.body` as a stream.
+ * `request.body` as a stream. Null when the body was read before, such as
+ * by app middleware: each reader answers it `invalid_body`, not 500
+ * (ruling 46 Low 1 of the 12j lane).
  */
 export async function readBodyText(
   request: Request,
   cap: number = bodyCapOfRequest(request),
-): Promise<string> {
+): Promise<string | null> {
+  if (request.bodyUsed) return null;
   const length = request.headers.get("content-length");
   // The SCIM body read wraps the stream the same way (routes/scim.ts).
   const bytes = await readCappedBytes(
@@ -154,9 +157,12 @@ export function jsonShapeFits(text: string): boolean {
   return true;
 }
 
-/** The value of a JSON body text, or `undefined` for text that is not JSON or does not fit the shape limits. */
-export function parseBodyJson(text: string): unknown {
-  if (!jsonShapeFits(text)) return undefined;
+/**
+ * The value of a JSON body text, or `undefined` for text that is not JSON,
+ * that does not fit the shape limits, or for a body read before (null).
+ */
+export function parseBodyJson(text: string | null): unknown {
+  if (text === null || !jsonShapeFits(text)) return undefined;
   try {
     return JSON.parse(text);
   } catch {

@@ -109,7 +109,9 @@ async function readObject(request: Request): Promise<Record<string, unknown> | n
 async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
-  const params = new URLSearchParams(await readBodyText(request));
+  const text = await readBodyText(request);
+  if (text === null) return null;
+  const params = new URLSearchParams(text);
   for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
   if (holdsBadText([...params])) return null;
   return params;
