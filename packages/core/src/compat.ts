@@ -20,9 +20,12 @@ export {
  * The capped body read of core (ruling 46 of the 12j lane). A compat
  * package reads each request body with it, at the cap of the core route
  * that the body goes to, so no read of the package is unbounded. A read
- * past the cap throws `BodyTooLarge`.
+ * past the cap throws `BodyTooLarge`. A read above the floor past the
+ * budget of the large reads of the isolate throws `BodyBusy` (ruling 51).
  */
 export {
+  BODY_BUSY_RETRY_SECONDS,
+  BodyBusy,
   BodyTooLarge,
   bodyCapOf,
   parseBodyJson,

@@ -1753,6 +1753,9 @@ writes each value under version 1.
   items answers `invalid_body` before the parse. A form body of more than
   128 pairs gets the refusal of a bad form before the parse, the SAML ACS
   form too. SCIM keeps its own 1 MB cap.
+- The body reads of the routes with a cap above 64 KiB hold at most
+  16 MiB at once in one isolate (`LARGE_READ_BUDGET`). A read past it
+  answers 503 `body_busy` with `Retry-After: 1`, and SCIM its own 503.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyCapOf } from "../src/http/body-cap.js";
+import { bodyCapOf, LARGE_READ_BUDGET, REQUEST_BODY_MAX } from "../src/http/body-cap.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteKey } from "../src/http/route-list.js";
 
@@ -72,6 +72,19 @@ const FORM_SHAPES = [
 /** A SCIM write: its body at `SCIM_BODY_MAX`, through readScimBody, which has no shape scan. */
 const SCIM = "POST /scim/v2/Users";
 const SCIM_SHAPES = ["nesting", "zeros", "empties", "objects", "string", "keys"];
+
+/** The line of a child that runs reads of `REQUEST_BODY_MAX` at once. */
+interface BudgetLine {
+  live: boolean;
+  reads: number;
+  answers: string[];
+  ms: number;
+  baseHeapMB: number;
+  baseArrayBuffersMB: number;
+  peakHeapMB: number;
+  peakArrayBuffersMB: number;
+  peakHeapPlusArrayBuffersMB: number;
+}
 
 interface ChildLine {
   route: string;
@@ -189,5 +202,53 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
     const line = await runChild(["POST /sso/connections/update", "zeros", "walk"]);
     expect(line).toMatchObject({ cap: 8_388_608, answer: "clean" });
     expect(line.peakHeapMB).toBeLessThan(HEAP_MB);
+  });
+
+  it("runs the budget's large reads at once and one more, and a burst, under 128 MB", {
+    timeout: 60_000,
+  }, async () => {
+    const count = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
+    const { execFile } = await node();
+    const budget = (args: string[]) =>
+      new Promise<BudgetLine>((resolve, reject) =>
+        execFile(
+          NODE,
+          [`--max-old-space-size=${HEAP_MB}`, "--expose-gc", CHILD, "budget", ...args],
+          { maxBuffer: 1 << 20 },
+          (error, stdout, stderr) => {
+            const line = stdout.split("\n").find((l) => l.startsWith("{"));
+            if (error || line === undefined)
+              return reject(
+                new Error(`budget ${args.join(" ")}: no answer ${stderr.slice(0, 400)}`),
+              );
+            resolve(JSON.parse(line) as BudgetLine);
+          },
+        ),
+      );
+    const lines = await inBatches(
+      [[String(count + 1)], [String(count + 1), "live"], ["30"], ["30", "live"]].map(
+        (args) => () => budget(args),
+      ),
+      2,
+    );
+    console.log(
+      lines
+        .map(
+          (l) =>
+            `body-memory: budget=${LARGE_READ_BUDGET} reads=${l.reads} live=${l.live} busy=${l.answers.filter((a) => a === "BodyBusy").length} ms=${l.ms} baseMB=${l.baseHeapMB + l.baseArrayBuffersMB} peakHeapMB=${l.peakHeapMB} peakArrayBuffersMB=${l.peakArrayBuffersMB} peakHeapPlusArrayBuffersMB=${l.peakHeapPlusArrayBuffersMB}`,
+        )
+        .join("\n"),
+    );
+    for (const l of lines) {
+      // The budget's count of reads answers; each other read answers BodyBusy at once.
+      expect(l.answers.filter((a) => a !== "BodyBusy")).toEqual(Array(count).fill("invalid_body"));
+      // Heap and array buffers together, garbage included, stay within the isolate.
+      expect(l.peakHeapPlusArrayBuffersMB).toBeLessThan(HEAP_MB);
+      // The live growth over the base, with no garbage, stays within half of it.
+      if (l.live)
+        expect(l.peakHeapPlusArrayBuffersMB - l.baseHeapMB - l.baseArrayBuffersMB).toBeLessThan(
+          HEAP_MB / 2,
+        );
+    }
   });
 });

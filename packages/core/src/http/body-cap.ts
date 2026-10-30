@@ -81,6 +81,37 @@ export const BODY_ITEMS_MAX = 4096;
  */
 export const FORM_PAIRS_MAX = 128;
 
+/**
+ * The most bytes that the request reads above the floor may hold at once in
+ * one isolate (ruling 51 Minor 2 of the 12j lane): the reads of
+ * `BODY_CAPS`, of the SAML ACS form, and of the SCIM body. The limit of the
+ * SSO writes bounds their rate, not how many run at once. A read past the
+ * budget answers 503 `body_busy` with `Retry-After`. A read counts the bytes
+ * that it holds, so a small body at a route of a large cap holds little.
+ *
+ * The derivation, measured 2026-10-30 (Node 26.10.0, load about 4, a
+ * child with a heap of 128 MB, K reads of 8 MiB at once in chunks of 64
+ * KiB: `body-memory-child.mjs budget K`). With no budget, the live heap and
+ * array buffers, sampled after a GC, grew by 11 MB for K = 1, 35 MB for 4,
+ * 68 MB for 8, 132 MB for 16, and 245 MB for 30. Each read in flight holds
+ * about 8 MB of chunks, so a heap limit cannot see this memory. Sampled
+ * with no GC, the garbage of the reads that ended counts too. A budget of 4
+ * reads held the live growth at 36 MB, but its growth with garbage reached
+ * 112 to 118 MB over a base of 21 MB, past the 128 MB of an isolate. A
+ * budget of 2 reads holds the live growth at 20 MB, and the growth with
+ * garbage at 97 MB or less for every K up to 60. So the budget is 2 reads
+ * of `REQUEST_BODY_MAX`. Three SSO writes of the largest valid body
+ * (4 705 616 bytes) still fit at once. `body-memory.test.ts` runs the
+ * budget's reads at once and one more, and a burst of 30, and measures them.
+ */
+export const LARGE_READ_BUDGET = 2 * 8_388_608;
+
+/** The seconds of `Retry-After` of `body_busy`: a large read in flight ends within about this time. */
+export const BODY_BUSY_RETRY_SECONDS = 1;
+
+/** The bytes that the reads above the floor hold now, in this isolate. */
+let largeHeld = 0;
+
 /** The cap of a route: its entry of `BODY_CAPS`, else the floor. */
 export function bodyCapOf(key: RouteKey | undefined): number {
   return (key === undefined ? undefined : BODY_CAPS[key]) ?? BODY_CAP_FLOOR;
@@ -119,31 +150,74 @@ export class BodyTooLarge extends Error {
 }
 
 /**
+ * A read above the floor while the reads of the isolate hold
+ * `LARGE_READ_BUDGET` bytes. The router answers it 503 `body_busy` with
+ * `Retry-After` for every route, and the SCIM routes answer their own 503.
+ */
+export class BodyBusy extends Error {
+  constructor() {
+    super(`the large request reads of this isolate hold ${LARGE_READ_BUDGET} bytes`);
+    this.name = "BodyBusy";
+  }
+}
+
+/**
+ * The request body as bytes, at most `cap`. The one raw read of a request
+ * body in core: every reader of a route, the SAML ACS form, and the SCIM
+ * body read through it. The read is a stream read that stops at the cap,
+ * so a false or absent `content-length` cannot pass it. A declared length
+ * past the cap stops the read before the first byte. It throws
+ * `BodyTooLarge` past the cap, on a read error, and when the request
+ * aborts. A read with a cap above the floor holds its bytes against
+ * `LARGE_READ_BUDGET` until it ends, and throws `BodyBusy` past it.
+ * Workers, Node, Bun, and Deno each give `request.body` as a stream. Null
+ * when the body was read before, such as by app middleware: each reader
+ * answers it `invalid_body`, not 500 (ruling 46 Low 1 of the 12j lane).
+ */
+export async function readBodyBytes(request: Request, cap: number): Promise<Uint8Array | null> {
+  if (request.bodyUsed) return null;
+  const length = request.headers.get("content-length");
+  let held = 0;
+  let busy = false;
+  const take = (bytes: number) => {
+    if (largeHeld + bytes > LARGE_READ_BUDGET) {
+      // Free the bytes of this read at once, so no other read in flight meets a full budget.
+      largeHeld -= held;
+      held = 0;
+      busy = true;
+      return false;
+    }
+    largeHeld += bytes;
+    held += bytes;
+    return true;
+  };
+  try {
+    const bytes = await readCappedBytes(
+      new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
+      cap,
+      request.signal,
+      cap > BODY_CAP_FLOOR ? take : undefined,
+    );
+    if (busy) throw new BodyBusy();
+    if (bytes === null) throw new BodyTooLarge(cap);
+    return bytes;
+  } finally {
+    largeHeld -= held;
+  }
+}
+
+/**
  * The request body as text, at most `cap` bytes (the cap of the request's
- * route by default). The read is a stream read that stops at the cap, so a
- * false or absent `content-length` cannot pass it. A declared length past
- * the cap stops the read before the first byte. It throws `BodyTooLarge`
- * past the cap, on a read error, and when the request aborts. The decode is
- * that of `request.text()`: UTF-8, with a replacement character for a bad
- * byte and a leading BOM removed. Workers, Node, Bun, and Deno each give
- * `request.body` as a stream. Null when the body was read before, such as
- * by app middleware: each reader answers it `invalid_body`, not 500
- * (ruling 46 Low 1 of the 12j lane).
+ * route by default), by `readBodyBytes`. The decode is that of
+ * `request.text()`: UTF-8, with a replacement character for a bad byte and
+ * a leading BOM removed. Null when the body was read before.
  */
 export async function readBodyText(
   request: Request,
   cap: number = bodyCapOfRequest(request),
 ): Promise<string | null> {
-  if (request.bodyUsed) return null;
-  const length = request.headers.get("content-length");
-  // The SCIM body read wraps the stream the same way (routes/scim.ts).
-  const bytes = await readCappedBytes(
-    new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
-    cap,
-    request.signal,
-  );
-  if (bytes === null) throw new BodyTooLarge(cap);
-  return new TextDecoder().decode(bytes);
+  const bytes = await readBodyBytes(request, cap);
+  return bytes === null ? null : new TextDecoder().decode(bytes);
 }
 
 /**

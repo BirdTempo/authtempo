@@ -22,6 +22,77 @@ const ACS = "POST /sso/:connectionId/acs";
 const SCIM = "POST /scim/v2/Users";
 
 const [route, shape] = process.argv.slice(2);
+
+if (route === "budget") {
+  // `shape` reads of REQUEST_BODY_MAX at once, each streamed in chunks of 64 KiB with a
+  // turn of the loop between chunks, as a slow client sends them (ruling 51 Minor 2).
+  // With "live" after it, each sample runs a GC first: the live memory, with no garbage.
+  const live = process.argv[4] === "live";
+  const { REQUEST_BODY_MAX } = await import(new URL("http/body-cap.js", dist).href);
+  const SSO = "POST /sso/connections/update";
+  const stream = () => {
+    let sent = 0;
+    return new ReadableStream({
+      async pull(c) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (sent >= REQUEST_BODY_MAX) return c.close();
+        const chunk = new Uint8Array(Math.min(65_536, REQUEST_BODY_MAX - sent)).fill(0x61);
+        if (sent === 0) chunk.set(new TextEncoder().encode('{"idpMetadata":"'));
+        if (sent + chunk.length === REQUEST_BODY_MAX) chunk.set([0x22, 0x7d], chunk.length - 2);
+        sent += chunk.length;
+        c.enqueue(chunk);
+      },
+    });
+  };
+  globalThis.gc();
+  const base = process.memoryUsage();
+  const peak = { heap: 0, arrayBuffers: 0, sum: 0 };
+  const sample = () => {
+    if (live) globalThis.gc();
+    const m = process.memoryUsage();
+    peak.heap = Math.max(peak.heap, m.heapUsed);
+    peak.arrayBuffers = Math.max(peak.arrayBuffers, m.arrayBuffers);
+    peak.sum = Math.max(peak.sum, m.heapUsed + m.arrayBuffers);
+  };
+  const sampler = setInterval(sample, 1);
+  const started = performance.now();
+  const answers = await Promise.all(
+    Array.from({ length: Number(shape) }, async () => {
+      const request = new Request("https://auth.test/auth/x", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stream(),
+        duplex: "half",
+      });
+      bindBodyRoute(request, SSO);
+      try {
+        const result = await readJson(request, ROUTE_CONTRACT[SSO].body.schema);
+        sample();
+        return result.ok ? "ok" : result.code;
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e);
+      }
+    }),
+  );
+  clearInterval(sampler);
+  sample();
+  const mb = (x) => Math.round(x / 2 ** 20);
+  console.log(
+    JSON.stringify({
+      route,
+      live,
+      reads: Number(shape),
+      answers: answers.sort(),
+      ms: Math.round(performance.now() - started),
+      baseHeapMB: mb(base.heapUsed),
+      baseArrayBuffersMB: mb(base.arrayBuffers),
+      peakHeapMB: mb(peak.heap),
+      peakArrayBuffersMB: mb(peak.arrayBuffers),
+      peakHeapPlusArrayBuffersMB: mb(peak.sum),
+    }),
+  );
+  process.exit(0);
+}
 const cap = route === ACS ? SAML_FORM_MAX : route === SCIM ? SCIM_BODY_MAX : bodyCapOf(route);
 
 /** `head`, then `unit` as many times as fits, then `tail`: at most `size` bytes of ASCII. */

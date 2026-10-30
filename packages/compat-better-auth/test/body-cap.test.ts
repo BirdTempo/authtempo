@@ -1,4 +1,4 @@
-import { bodyCapOf } from "@authtempo/core/compat";
+import { BODY_BUSY_RETRY_SECONDS, bodyCapOf, readBodyText } from "@authtempo/core/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { admin, emailOTP, organization, twoFactor, username } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -222,5 +222,53 @@ describe("core's limit of the user before the large read of an SSO write (ruling
     let left = 0;
     while ((await app.call("/sso/connections/update", {}, owner.cookie)).status === 400) left++;
     expect(left).toBe(SSO_MANAGE_MAX - 3);
+  });
+});
+
+describe("the budget of the large reads through the shim (ruling 51 Minor 2 of the 12j lane)", () => {
+  it("answers 503 SERVICE_UNAVAILABLE with Retry-After to an SSO write past the budget", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const { cookie } = await person("ada@example.com");
+    // Two reads of 8 MiB that stop one chunk before their end hold the budget of core.
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const held = Array.from({ length: 2 }, () => {
+      let sent = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          if (sent >= SSO_CAP) return c.close();
+          if (sent >= SSO_CAP - 65_536) await gate;
+          c.enqueue(new Uint8Array(65_536).fill(0x20));
+          sent += 65_536;
+        },
+      });
+      const request = new Request(`${BASE}/x`, {
+        method: "POST",
+        body: stream,
+        duplex: "half",
+      } as RequestInit);
+      return readBodyText(request, SSO_CAP);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const res = await auth.handler(
+      new Request(`${BASE}/api/auth/sso/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, cookie },
+        body: countedBody(1_000_000).stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe(String(BODY_BUSY_RETRY_SECONDS));
+    expect(await res.json()).toEqual({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Service unavailable",
+    });
+    open();
+    expect((await Promise.all(held)).map((t) => t?.length)).toEqual([SSO_CAP, SSO_CAP]);
   });
 });

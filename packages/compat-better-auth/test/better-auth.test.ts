@@ -508,6 +508,8 @@ describe("betterAuth", () => {
       not_ready: "NOT_READY",
       // 12j ruling 43: better-call's status name, since Better Auth names no code.
       body_too_large: "PAYLOAD_TOO_LARGE",
+      // 12j ruling 51: better-call's status name, since Better Auth names no code.
+      body_busy: "SERVICE_UNAVAILABLE",
     });
     expect([
       passwordPolicyCode("1234567", 8),

@@ -110,6 +110,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   phone_taken: "Another account has this phone number. Use another number.",
   anonymous_refused: "A guest account cannot do this. Sign in or create an account first.",
   body_too_large: "The request was too large. Send less data.",
+  body_busy: "The server is busy with large requests. Try again in a moment.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

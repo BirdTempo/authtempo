@@ -14,7 +14,7 @@ import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
-import { BodyTooLarge, bodyTooLarge, readJsonOf } from "./body.js";
+import { BodyBusy, BodyTooLarge, bodyBusy, bodyTooLarge, readJsonOf } from "./body.js";
 import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
@@ -206,11 +206,13 @@ export function createHandler(
     const work: Promise<unknown>[] = [];
     // A read of the shim past the cap of its route throws core's BodyTooLarge.
     // It answers 413 PAYLOAD_TOO_LARGE at that first read (ruling 46 of the 12j lane).
+    // A large read past the budget of the isolate throws BodyBusy: 503 (ruling 51).
     const res = await serve(
       request,
       host ? { waitUntil: (p) => void work.push(p) } : undefined,
     ).catch((e: unknown) => {
       if (e instanceof BodyTooLarge) return bodyTooLarge();
+      if (e instanceof BodyBusy) return bodyBusy();
       throw e;
     });
     if (host) {

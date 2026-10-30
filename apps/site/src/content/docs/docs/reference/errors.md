@@ -507,6 +507,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | Every route with a body, except the SCIM routes, which answer their own SCIM 413 past 1 MB. See [Limits](/docs/reference/limits/). |
 
+<h3 id="body_busy"><code>body_busy</code> 503</h3>
+
+- **Meaning:** The body reads of the routes with a cap above 65536 bytes hold 16777216 bytes in this isolate now. Core stopped the read, so no handler parsed the body. The answer carries `Retry-After: 1`.
+- **Do:** Send the request again after the seconds of `Retry-After`. A burst of large bodies at once gets this code. A body at the floor of 65536 bytes never gets it.
+
+| Routes |
+| --- |
+| `POST /social/apple/callback`, `POST /sso/connections/create`, `POST /sso/connections/update`, and `POST /sso/:connectionId/acs`. The SCIM routes answer their own SCIM 503. See [Limits](/docs/reference/limits/). |
+
 <h3 id="anonymous_refused"><code>anonymous_refused</code> 403</h3>
 
 - **Meaning:** An anonymous session called a route that needs a way in, or that would change the anonymous user in place. At `POST /anonymous/delete`, a session that is not anonymous called it. The route did nothing.

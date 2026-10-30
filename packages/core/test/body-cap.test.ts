@@ -4,16 +4,20 @@ import { createAuth } from "../src/create-auth.js";
 import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
 import { readBody } from "../src/http/body.js";
 import {
+  BODY_BUSY_RETRY_SECONDS,
   BODY_CAP_FLOOR,
   BODY_CAPS,
   BODY_DEPTH_MAX,
   BODY_ITEMS_MAX,
+  BodyBusy,
   BodyTooLarge,
   bodyCapOf,
   FORM_PAIRS_MAX,
   formPairsFit,
   jsonShapeFits,
+  LARGE_READ_BUDGET,
   REQUEST_BODY_MAX,
+  readBodyText,
 } from "../src/http/body-cap.js";
 import { readJson, readOptionalJson } from "../src/http/json.js";
 import type { RouteKey } from "../src/http/route-list.js";
@@ -485,5 +489,148 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "invalid_body" });
     expect(mail).toHaveLength(0);
+  });
+});
+
+/**
+ * A body of `bytes` spaces in chunks of 64 KiB that stops after `before`
+ * bytes until `open` runs. `atGate` resolves when the reader asks for the
+ * first chunk past `before`.
+ */
+function gatedBody(bytes: number, before: number) {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let reached = () => {};
+  const atGate = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (sent >= bytes) return c.close();
+      if (sent >= before) {
+        reached();
+        await gate;
+      }
+      const n = Math.min(65_536, (sent < before ? before : bytes) - sent);
+      c.enqueue(new Uint8Array(n).fill(0x20));
+      sent += n;
+    },
+  });
+  return { stream, open, atGate };
+}
+
+/** A POST to `path` with a streamed body and no content-length. */
+const streamPost = (path: string, body: ReadableStream<Uint8Array>, type = "application/json") =>
+  new Request(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": type, origin: BASE_URL },
+    body,
+    duplex: "half",
+  } as RequestInit);
+
+/** Lets each read in flight take the chunks that wait in its stream. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 12j lane)", () => {
+  /** The count of reads of REQUEST_BODY_MAX that the budget holds at once. */
+  const COUNT = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
+
+  /** COUNT reads of REQUEST_BODY_MAX that stop one chunk before their end, and their promises. */
+  async function holdBudget() {
+    const held = Array.from({ length: COUNT }, () =>
+      gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 65_536),
+    );
+    const reads = held.map((h) =>
+      readBodyText(streamPost("/x", h.stream), REQUEST_BODY_MAX).then(
+        (t) => t?.length,
+        (e: unknown) => e,
+      ),
+    );
+    await Promise.all(held.map((h) => h.atGate));
+    await settle();
+    return { reads, open: () => held.forEach((h) => h.open()) };
+  }
+
+  it("derives LARGE_READ_BUDGET as 2 reads of REQUEST_BODY_MAX", () => {
+    expect(COUNT).toBe(2);
+    expect(LARGE_READ_BUDGET).toBe(2 * REQUEST_BODY_MAX);
+    // Three SSO writes of the largest valid body fit at once.
+    const largest = largestBodies()[0]?.bytes ?? 0;
+    expect(3 * largest).toBeLessThanOrEqual(LARGE_READ_BUDGET);
+  });
+
+  it("reads the budget's count of large bodies at once, and answers BodyBusy to one more", {
+    timeout: 30_000,
+  }, async () => {
+    const { reads, open } = await holdBudget();
+    // One more read above the floor: its first chunks pass the budget.
+    const more = gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX);
+    await expect(
+      readBodyText(streamPost("/x", more.stream), REQUEST_BODY_MAX),
+    ).rejects.toBeInstanceOf(BodyBusy);
+    // A read at the floor takes no part in the budget.
+    expect(
+      await readBodyText(streamPost("/x", gatedBody(1000, 1000).stream), BODY_CAP_FLOOR),
+    ).toHaveLength(1000);
+    open();
+    expect(await Promise.all(reads)).toEqual(Array(COUNT).fill(REQUEST_BODY_MAX));
+    // Each read freed its bytes at its end: the budget's count reads again.
+    const again = Array.from({ length: COUNT }, () =>
+      gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX),
+    );
+    expect(
+      await Promise.all(
+        again.map((g) => readBodyText(streamPost("/x", g.stream), REQUEST_BODY_MAX)),
+      ),
+    ).toHaveLength(COUNT);
+  });
+
+  it("answers 503 body_busy with Retry-After at the routes above the floor, and SCIM its own 503", {
+    timeout: 30_000,
+  }, async () => {
+    const { reads, open } = await holdBudget();
+    // The budget holds 128 KiB more. The SAML ACS reads its form above the floor, before any check.
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    });
+    const acs = await auth.handle(
+      streamPost(
+        "/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs",
+        gatedBody(1_000_000, 1_000_000).stream,
+        "application/x-www-form-urlencoded",
+      ),
+    );
+    expect(acs.status).toBe(503);
+    expect(acs.headers.get("retry-after")).toBe(String(BODY_BUSY_RETRY_SECONDS));
+    expect(await acs.json()).toEqual({ error: "body_busy" });
+    const { readScimBody } = await import("../src/http/routes/scim.js");
+    const scim = await readScimBody(
+      streamPost(
+        "/auth/scim/v2/Users",
+        gatedBody(1_000_000, 1_000_000).stream,
+        "application/scim+json",
+      ),
+    );
+    if (scim.ok) throw new Error("SCIM read the body");
+    expect(scim.response.status).toBe(503);
+    expect(scim.response.headers.get("retry-after")).toBe(String(BODY_BUSY_RETRY_SECONDS));
+    // A route at the floor reads as before.
+    const { config, mail } = makeAuth();
+    const handle = createRouter(config, magicLinkRoutes(config));
+    const floor = await handle(
+      jsonPost("/auth/magic-link/request", JSON.stringify({ email: "ada@example.com" })),
+    );
+    expect([floor.status, mail.length]).toEqual([200, 1]);
+    open();
+    await Promise.all(reads);
   });
 });

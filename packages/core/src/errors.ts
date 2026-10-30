@@ -132,6 +132,9 @@ export const ERRORS = {
   anonymous_refused: 403,
   // 12j ruling 43: a request body past REQUEST_BODY_MAX. The router answers it, and no parse runs.
   body_too_large: 413,
+  // 12j ruling 51 Minor 2: a read above the floor past LARGE_READ_BUDGET of the isolate.
+  // The router answers it with Retry-After, and no parse runs.
+  body_busy: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

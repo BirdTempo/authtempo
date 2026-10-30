@@ -37,7 +37,7 @@ describe("checkRoutes", () => {
     expect(routes).toHaveLength(6);
     const r = checkRoutes(page, routes, doc);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ routes: 6, anchors: 6, cells: 18, rules: 8 });
+    expect(r.counts).toEqual({ routes: 6, anchors: 6, cells: 18, rules: 9 });
   });
 
   it("refuses a route with no anchor, an anchor with no route, and a heading that names another route", () => {
@@ -224,7 +224,7 @@ describe("checkRoutes", () => {
       "the page lacks the rule: A POST with an Origin header that is not baseURL and not in trustedOrigins answers 403 origin_not_trusted. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
       "the document lacks the rule: A POST with an Origin header that is not baseURL and not in trustedOrigins answers 403 origin_not_trusted.",
     ]);
-    expect(r.counts.rules).toBe(7);
+    expect(r.counts.rules).toBe(8);
   });
 
   it("holds a rule of the cells to the page only", () => {

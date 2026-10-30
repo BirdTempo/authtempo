@@ -28,10 +28,9 @@ import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
 import { limit } from "../../limiter/limit.js";
-import { readCappedBytes } from "../../primitives/read-capped.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { parseBodyForm } from "../body-cap.js";
+import { BodyTooLarge, parseBodyForm, readBodyBytes } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
@@ -134,19 +133,22 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 
 /**
  * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
- * cap, a body that is not UTF-8, a form of more than `FORM_PAIRS_MAX`
- * pairs, a NUL or a lone surrogate, or another media type gives an empty
- * form. `completeSaml` refuses an empty form at the step `form`.
+ * cap, a body read before, a body that is not UTF-8, a form of more than
+ * `FORM_PAIRS_MAX` pairs, a NUL or a lone surrogate, or another media type
+ * gives an empty form. `completeSaml` refuses an empty form at the step
+ * `form`. The read holds its bytes against the budget of the large reads,
+ * and past it the router answers `body_busy` (ruling 51 of the 12j lane).
  */
 async function acsForm(request: Request): Promise<URLSearchParams> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return new URLSearchParams();
-  const length = request.headers.get("content-length");
-  const bytes = await readCappedBytes(
-    new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
-    SAML_FORM_MAX,
-    request.signal,
-  );
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await readBodyBytes(request, SAML_FORM_MAX);
+  } catch (e) {
+    if (e instanceof BodyTooLarge) return new URLSearchParams();
+    throw e;
+  }
   if (bytes === null) return new URLSearchParams();
   let text: string;
   try {

@@ -16,9 +16,11 @@ const TSCONFIG = pathOf("../tsconfig.json");
 
 /** Each raw read that core may make, with the reason. Each entry must match one read. */
 const ALLOWED: readonly { file: string; read: string; why: string }[] = [
-  { file: "src/http/body-cap.ts", read: "request.body", why: "the capped reader of every route" },
-  { file: "src/http/routes/scim.ts", read: "request.body", why: "the SCIM body, at SCIM_BODY_MAX" },
-  { file: "src/http/routes/sso.ts", read: "request.body", why: "the SAML form, at SAML_FORM_MAX" },
+  {
+    file: "src/http/body-cap.ts",
+    read: "request.body",
+    why: "readBodyBytes: every route, the SAML form, and the SCIM body",
+  },
   {
     file: "src/engine/social.ts",
     read: "own.arrayBuffer",

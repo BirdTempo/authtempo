@@ -32,8 +32,8 @@ import {
   scimReplaceUser,
 } from "../../engine/scim/users.js";
 import { withSecrets } from "../../observe/observer.js";
-import { readCappedBytes } from "../../primitives/read-capped.js";
 import type { ScimScope } from "../../schema.js";
+import { BODY_BUSY_RETRY_SECONDS, BodyBusy, BodyTooLarge, readBodyBytes } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
 import { json } from "../json.js";
@@ -53,9 +53,11 @@ const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]
 /**
  * The JSON body of a SCIM request (plan 12d Task 9 Behavior 5). The type
  * must be `application/scim+json` or `application/json`, else 400
- * `invalidSyntax`. At most `SCIM_BODY_MAX` bytes through `readCappedBytes`,
+ * `invalidSyntax`. At most `SCIM_BODY_MAX` bytes through `readBodyBytes`,
  * else 413. A body that is not UTF-8 answers 400 `invalidSyntax`, as does
- * JSON that does not parse. So 413 means a long body only.
+ * JSON that does not parse or a body read before. So 413 means a long body
+ * only. The read holds its bytes against the budget of the large reads, and
+ * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane).
  */
 export async function readScimBody(
   request: Request,
@@ -70,16 +72,24 @@ export async function readScimBody(
         "invalidSyntax",
       ),
     };
-  const length = request.headers.get("content-length");
-  const bytes = await readCappedBytes(
-    new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
-    SCIM_BODY_MAX,
-    request.signal,
-  );
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await readBodyBytes(request, SCIM_BODY_MAX);
+  } catch (e) {
+    if (e instanceof BodyTooLarge)
+      return {
+        ok: false,
+        response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
+      };
+    if (!(e instanceof BodyBusy)) throw e;
+    const response = scimError(503, "the large request reads of the server are busy");
+    response.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));
+    return { ok: false, response };
+  }
   if (bytes === null)
     return {
       ok: false,
-      response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
+      response: scimError(400, "the body was read before", "invalidSyntax"),
     };
   let text: string;
   try {

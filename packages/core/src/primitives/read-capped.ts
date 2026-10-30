@@ -27,11 +27,16 @@ export async function readCapped(
  * The read does not wait for a cancel. A body that is one branch of a tee,
  * such as a request that an app cloned, settles its cancel only when the
  * other branch ends too. A wait there never ends (ruling 43 of the 12j lane).
+ *
+ * `take`, when given, gets the bytes of each chunk before the read keeps
+ * it. A false answer stops the read, which then answers null too. The
+ * budget of the large request reads uses it (ruling 51 of the 12j lane).
  */
 export async function readCappedBytes(
   res: Response,
   max: number,
   signal: AbortSignal,
+  take?: (bytes: number) => boolean,
 ): Promise<Uint8Array | null> {
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > max) {
@@ -53,7 +58,7 @@ export async function readCappedBytes(
       const { done, value } = await Promise.race([reader.read(), aborted]);
       if (done) break;
       total += value.byteLength;
-      if (total > max) {
+      if (total > max || (take !== undefined && !take(value.byteLength))) {
         reader.cancel().catch(() => {});
         return null;
       }

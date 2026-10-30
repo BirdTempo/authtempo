@@ -2984,6 +2984,15 @@ export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
 export const BODY_CODE = "body_too_large" as const satisfies ErrorCode;
 
 /**
+ * The code that the router answers, with `Retry-After`, for a read above
+ * the floor past `LARGE_READ_BUDGET` of the isolate (ruling 51 Minor 2 of
+ * the 12j lane). Only the routes of `BODY_CAPS` and the SAML ACS can answer
+ * it. No entry declares it, and the OpenAPI document states it in its
+ * rules, as it states `BODY_CODE`. The SCIM routes answer their own SCIM 503.
+ */
+export const BUSY_CODE = "body_busy" as const satisfies ErrorCode;
+
+/**
  * The codes of the operator routes that only a request with a session gets
  * (plan 12f): `operator_self` for the act of a platform operator on their
  * own user, and `impersonation_session` for a request of an impersonation

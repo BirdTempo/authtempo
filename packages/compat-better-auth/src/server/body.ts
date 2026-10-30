@@ -1,4 +1,11 @@
-import { BodyTooLarge, bodyCapOf, parseBodyJson, readBodyText } from "@authtempo/core/compat";
+import {
+  BODY_BUSY_RETRY_SECONDS,
+  BodyBusy,
+  BodyTooLarge,
+  bodyCapOf,
+  parseBodyJson,
+  readBodyText,
+} from "@authtempo/core/compat";
 import type { RouteKey } from "@authtempo/core/routes";
 import { apiError } from "../errors.js";
 
@@ -35,4 +42,17 @@ export function bodyTooLarge(): Response {
   return Response.json(e.body, { status: e.statusCode });
 }
 
-export { BodyTooLarge };
+/**
+ * The answer to a large read past the budget of the isolate, in Better
+ * Auth's shape: 503 `SERVICE_UNAVAILABLE`, with core's `Retry-After`
+ * (ruling 51 Minor 2 of the 12j lane).
+ */
+export function bodyBusy(): Response {
+  const e = apiError("body_busy", 503);
+  return Response.json(e.body, {
+    status: e.statusCode,
+    headers: { "retry-after": String(BODY_BUSY_RETRY_SECONDS) },
+  });
+}
+
+export { BodyBusy, BodyTooLarge };
