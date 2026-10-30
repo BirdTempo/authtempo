@@ -141,6 +141,17 @@ export function checkSupport(input: SupportInput): Report {
     failures.push(
       `the group is at ${input.version}, and release/support.json has no row; a release has a support row`,
     );
+  // The minor of the group version has its row too (ruling 52 of the plan 12j
+  // lane). A table of older minors only makes no promise for the version on
+  // npm, so the version pull request of each new minor adds its row.
+  const groupMinor = /^(\d+)\.(\d+)\.\d+$/.exec(input.version);
+  if (rows.length > 0 && input.version !== UNPUBLISHED_VERSION) {
+    const minor = groupMinor === null ? null : `${groupMinor[1]}.${groupMinor[2]}`;
+    if (minor === null || !rows.some((r) => minorParts(r.minor).join(".") === minor))
+      failures.push(
+        `the group is at ${input.version}, and release/support.json has no row of its minor ${minor ?? "(no x.y.z version)"}; each release minor has a support row`,
+      );
+  }
   // The current minor gets every fix (owner decision 3). So after the first
   // release, one minor is current, and it is the newest one. A status typo on
   // a release day must not leave the table with no current minor.

@@ -38,8 +38,15 @@ const twoMinors = (until: string): SupportRow[] => [
   current("0.2", "2027-01-01"),
 ];
 
-/** The group version of a table with rows: the version pull request moves it with the first row. */
-const versionOf = (rows: SupportRow[]) => (rows.length === 0 ? "0.0.0" : "0.2.0");
+/**
+ * The group version of a table: 0.0.0 with no row, and else the first patch of
+ * the newest minor. The version pull request of a minor adds its row.
+ */
+const versionOf = (rows: SupportRow[]) => {
+  const minors = rows.map((r) => r.minor.split(".").map(Number) as [number, number]);
+  const newest = minors.sort((a, b) => a[0] - b[0] || a[1] - b[1]).at(-1);
+  return newest === undefined ? "0.0.0" : `${newest[0]}.${newest[1]}.0`;
+};
 const check = (
   rows: SupportRow[],
   today = "2027-02-01",
@@ -73,6 +80,19 @@ describe("check-support", () => {
     expect(check([], "2026-11-02", {}, "0.0.0").failures).toEqual(["read 0 adapters"]);
     // The row of the first minor passes at its version.
     expect(check([current("0.1", "2026-11-02")], "2026-11-02", FULL, "0.1.0").failures).toEqual([]);
+  });
+
+  it("fails a table with no row of the minor of the group version (ruling 52)", () => {
+    // The version pull request of 0.2.0 that forgot the row of 0.2.
+    expect(check([current("0.1", "2026-11-02")], "2027-01-01", FULL, "0.2.0").failures).toEqual([
+      "the group is at 0.2.0, and release/support.json has no row of its minor 0.2; each release minor has a support row",
+    ]);
+    // A patch of an older minor reads the row of that minor, also with the status security.
+    expect(check(twoMinors("2027-04-01"), "2027-02-01", FULL, "0.1.3").failures).toEqual([]);
+    expect(check(twoMinors("2027-04-01"), "2027-02-01", FULL, "0.2.4").failures).toEqual([]);
+    expect(check(twoMinors("2027-04-01"), "2027-02-01", FULL, "0.3.0").failures).toEqual([
+      "the group is at 0.3.0, and release/support.json has no row of its minor 0.3; each release minor has a support row",
+    ]);
   });
 
   it("fails two current minors", () => {

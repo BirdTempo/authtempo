@@ -53,7 +53,7 @@ The released packages are the fixed group of `.changeset/config.json`. Every rel
 
 ## Once, before the first release
 
-Do these steps in this order, before step 1 of "At each release". Step 7 of "At each release" adds the trusted publishers, and it needs the environment of step 4.
+Do these steps in this order, before step 1 of "At each release". Step 8 of "At each release" adds the trusted publishers, and it needs the environment of step 4.
 
 1. Create the npm organization `authtempo` on npmjs.com, with your account as the owner. Without it, npm refuses each `@authtempo` name, and the job `publish` fails.
 2. WARNING: Read the whole git history for secrets before you make the repository public. A public history cannot become private again, because each clone and each fork keeps a copy. Read the output of `git log --all -p` for a key, a token, or a password. Then make the repository `BirdTempo/authtempo` public. Without it, npm refuses the provenance of each tarball, and the job `publish` fails. The npm docs say: "Provenance generation is not supported for private repositories" (read 2026-10-30).
@@ -69,28 +69,29 @@ Do these steps in this order, before step 1 of "At each release". Step 7 of "At 
 1. On a clean checkout of `main`, run `docker compose up -d --wait`, then `pnpm install --frozen-lockfile`, then `pnpm release:check`. The first command starts Postgres, as the workflows do. Without it, the adapter tests fail. If the check prints FAIL, stop. The job `check` of `release.yml` runs the same commands and fails at the same step.
 2. Make the version branch: `git switch -c version/<version>`. Do not name it `release/<major>.<minor>`. `check-tag` keeps that name for a patch of an older minor.
 3. Run `pnpm changeset version`. Read each version change and each new changelog section. If a section is wrong, discard the output of this step first, because the step deletes each changeset. Run `git restore .` and `git clean -f -- 'packages/*/CHANGELOG.md'`. Then change the changeset, and run this step again.
-4. Add one row for each released package to `RELEASE_DATES` in `apps/site/src/data/releases.ts`. The key is `<name>@<version>`. The value is the planned UTC time of the publish in the form `YYYY-MM-DDTHH:MM:SSZ`, such as `2026-11-02T15:00:00Z`. Without it, `check-feed` fails the pull request, and the site build of `main` fails after the merge. Step 13 corrects a wrong day.
-5. At the first release only, do the edits of "The first release" below. Each edit has a check that fails until it is done.
-6. Push the branch with `git push -u origin version/<version>`. Open the pull request, and wait for the job `check` of `ci.yml`. If it fails, fix the branch. Then merge it.
-7. On npmjs.com, add a trusted publisher to each released package that has none. At the first release, that is each package. Without it, the job `publish` gets no npm token, and npm refuses each tarball.
+4. Add one row for each released package to `RELEASE_DATES` in `apps/site/src/data/releases.ts`. The key is `<name>@<version>`. The value is the planned UTC time of the publish in the form `YYYY-MM-DDTHH:MM:SSZ`, such as `2026-11-02T15:00:00Z`. Without it, `check-feed` fails the pull request, and the site build of `main` fails after the merge. Step 14 corrects a wrong day.
+5. At a new minor, add its support row. In `release/support.json`, add the row of the minor with the status `current`. Write the UTC day of step 4 in `released`, and each supported schema version in `schemaFrom`. Set the row of the previous minor to `security`, with `securityUntil` 3 months after that day. Set each row past its `securityUntil` day to `unsupported`. Write the same rows in the table of the section "Supported versions" of `SECURITY.md`. Without it, `check-support` and `check-security-policy` fail the pull request. A patch keeps the table.
+6. At the first release only, do the edits of "The first release" below. Each edit has a check that fails until it is done.
+7. Push the branch with `git push -u origin version/<version>`. Open the pull request, and wait for the job `check` of `ci.yml`. If it fails, fix the branch. Then merge it.
+8. On npmjs.com, add a trusted publisher to each released package that has none. At the first release, that is each package. Without it, the job `publish` gets no npm token, and npm refuses each tarball.
    - Organization or user: `BirdTempo`. Repository: `authtempo`. Workflow filename: `release.yml`. Environment name: `release`.
    - Under Allowed actions, select `npm publish`. A configuration made after 2026-09-03 allows only `npm stage publish` by default, and the job `publish` then fails.
-   - A new configuration expires when its first publish does not succeed within 2 days. So do this step after the merge of step 6, at most 2 days before the tag of step 8.
+   - A new configuration expires when its first publish does not succeed within 2 days. So do this step after the merge of step 7, at most 2 days before the tag of step 9.
    - The job `publish` passes `--tag` to `npm publish`. On the day, read whether `--tag` also needs Allow npm dist-tag. The npm docs (read 2026-10-20 and 2026-10-30) say that dist-tag access is a separate action.
    - If npm offers no trusted publisher for a package with no version, stop. Record the answer of npm and the date. Go to "The token fallback".
    - These facts come from docs.npmjs.com/trusted-publishers, last edited 2026-10-06 and read 2026-10-30.
-8. Tag the merge commit on `main` with `v<version>`, and push the tag. A tag on the version branch before the merge fails `check-tag`.
-9. Wait for the job `check` of `release.yml`. Then approve the job `publish` in the environment `release`. After a new trusted publisher of step 7, approve it within 2 days of that step.
-10. On `main`, run `node scripts/release/src/verify-published.ts`. It reads each released name from `.changeset/config.json`, and fails on a version with no provenance attestation on npm. If it prints FAIL, stop, and read "A failed publish".
-11. In a new empty folder, install `@authtempo/core` and `@authtempo/cli` at the new version, and run `npm audit signatures`. If it prints an invalid or a missing signature, stop. Do not compare its counts with the released packages: it counts each installed package, such as each dependency.
-12. Run `npm view @authtempo/core@<version> authtempo --json`. If the output has no `breaking` key, `authtempo upgrade` stops for each app with exit 1. Then follow "A bad version", and release a patch.
-13. Run `npm view @authtempo/core time --json`, and read the time of the new version. If its day differs from the rows of step 4, correct each row by a pull request. At the first release, also correct the day `released` in `release/support.json` and in `SECURITY.md`.
-14. Append one dated evidence line to `docs/superpowers/plans/README.md`, on a new branch, and merge it by a pull request. The protection of `main` refuses a direct push. Name the version, the tagged commit, the `release-dry-run` line, and the `verify-published` line.
-15. Publish the site: run `pnpm turbo run build --filter=@authtempo/site --force`, then `pnpm --filter @authtempo/site exec wrangler deploy`. Without the build, the deploy guard refuses the folder `dist`. The hold of 2026-10-11 stays until you lift it.
+9. Tag the merge commit on `main` with `v<version>`, and push the tag. A tag on the version branch before the merge fails `check-tag`.
+10. Wait for the job `check` of `release.yml`. Then approve the job `publish` in the environment `release`. After a new trusted publisher of step 8, approve it within 2 days of that step.
+11. On `main`, run `node scripts/release/src/verify-published.ts`. It reads each released name from `.changeset/config.json`, and fails on a version with no provenance attestation on npm. It also fails an attestation of another repository or another workflow than `release.yml`. If it prints FAIL, stop, and read "A failed publish".
+12. In a new empty folder, install `@authtempo/core` and `@authtempo/cli` at the new version, and run `npm audit signatures`. If it prints an invalid or a missing signature, stop. Do not compare its counts with the released packages: it counts each installed package, such as each dependency.
+13. Run `npm view @authtempo/core@<version> authtempo --json`. If the output has no `breaking` key, `authtempo upgrade` stops for each app with exit 1. Then follow "A bad version", and release a patch.
+14. Run `npm view @authtempo/core time --json`, and read the time of the new version. If its day differs from the rows of step 4, correct each row by a pull request. At a new minor, also correct the day `released` of step 5 in `release/support.json` and in `SECURITY.md`.
+15. Append one dated evidence line to `docs/superpowers/plans/README.md`, on a new branch, and merge it by a pull request. The protection of `main` refuses a direct push. Name the version, the tagged commit, the `release-dry-run` line, and the `verify-published` line.
+16. Publish the site: run `pnpm turbo run build --filter=@authtempo/site --force`, then `pnpm --filter @authtempo/site exec wrangler deploy`. Without the build, the deploy guard refuses the folder `dist`. The hold of 2026-10-11 stays until you lift it.
 
 Do not run `authtempo init` from the version branch between step 3 and the end of the job `publish`. In that time the scaffold names a version that is not on npm yet. A failed publish keeps that state until the rerun.
 
-The commands of steps 8, 10, and 11:
+The commands of steps 9, 11, and 12:
 
 ```sh
 git switch main && git pull --ff-only
@@ -114,7 +115,7 @@ The version pull request of `0.1.0` also makes these edits. Each check fails unt
 - Then run `pnpm format`. A rewritten cell of `apps/site/src/data/compare.ts` can pass the line width of Biome.
 - Read each changed file. The script changes only the listed texts. Correct the text around a note by a commit when it still names the clone.
 - `check-resources`: in `apps/site/src/content/docs/docs/resources.md`, remove the sentence `RESOURCES_EMPTY`. Add one row for each released package with its npm page, one row for each example folder, and one row for the demo at `/demo/`. The script leaves this text.
-- `check-support` and `check-security-policy`: add the row of the new minor to `release/support.json`. Write its table in `SECURITY.md` in the place of the first text below, which the script leaves. The forms are below.
+- `check-support` and `check-security-policy`: step 5 adds the row of the first minor to `release/support.json`. Write its table in `SECURITY.md` in the place of the first text below, which the script leaves. The forms are below.
 
 The texts of `PRE_RELEASE_SENTENCES`, each under its file:
 
@@ -184,7 +185,7 @@ This branch is a stop: it needs a reviewed change before any publish. `check-wor
 - This is the one publish by hand; every other publish goes through the workflow. Take the tarballs of the job `check`. Compare each SHA-256 with `SHA256SUMS`, and run `node scripts/release/src/check-pack.ts` on each tarball first.
 - Publish each tarball after the tarballs of its dependencies, so core goes first. Use `npm publish <tarball> --access public --provenance=false` for each tarball.
 - A tarball holds `publishConfig.provenance` true, and npm takes the flag of the command over `publishConfig` (npm 11.19.1, `lib/commands/publish.js`, read 2026-10-30). Without the flag, npm asks for provenance outside CI, and the publish fails.
-- A version that you publish this way has no attestation. Add its version, the date, and the reason to `release/fallback-published.json` by a pull request. Without the entry, `verify-published` fails at step 10.
+- A version that you publish this way has no attestation. Add its version, the date, and the reason to `release/fallback-published.json` by a pull request. Without the entry, `verify-published` fails at step 11.
 
 ## Once, after the first publish
 
@@ -209,4 +210,4 @@ This branch is a stop: it needs a reviewed change before any publish. `check-wor
 
 - No CI job runs the floor of Node. `ci.yml` and `release.yml` run Node 26.10.0 only. The floor is 22.13 for `@authtempo/cli`, `@authtempo/mcp`, `@authtempo/compat-better-auth`, `@authtempo/import`, and `@authtempo/adapter-sqlite`. It is 22 for the other packages.
 - So a package can use a Node API that is newer than its floor, and every check still passes. An app on the floor then fails at load or at run time. A CI job on the floor is a follow-up of plan 12j.
-- Two paths stay outside the code: an edited tagged commit, and the publish by hand of "The token fallback". Steps 3, 4, and 5 of "Once, before the first release", step 7 of "At each release", and `verify-published` are the guards.
+- Two paths stay outside the code: an edited tagged commit, and the publish by hand of "The token fallback". Steps 3, 4, and 5 of "Once, before the first release", step 8 of "At each release", and `verify-published` are the guards.

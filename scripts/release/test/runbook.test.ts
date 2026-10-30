@@ -104,8 +104,12 @@ function orderFaults(text: string): string[] {
   const approve = stepIndex(text, "approve the job `publish`");
   const verify = stepIndex(text, "node scripts/release/src/verify-published.ts");
   const disallow = stepIndex(text, "Require two-factor authentication and disallow tokens");
+  const dates = stepIndex(text, "to `RELEASE_DATES` in");
+  const support = stepIndex(text, "add its support row");
   for (const [name, i] of Object.entries({
     environment,
+    dates,
+    support,
     merge,
     publisher,
     tag,
@@ -116,6 +120,9 @@ function orderFaults(text: string): string[] {
     if (i === -1) faults.push(`the runbook has no ${name} step`);
   if (publisher <= environment)
     faults.push("the trusted publisher step comes before the environment step");
+  // The support row reads the day of RELEASE_DATES, and the pull request needs it (ruling 52 of plan 12j).
+  if (support <= dates) faults.push("the support row step comes before the RELEASE_DATES step");
+  if (merge <= support) faults.push("the merge step comes before the support row step");
   if (tag <= merge) faults.push("the tag step comes before the merge step");
   if (publisher <= merge) faults.push("the trusted publisher step comes before the merge step");
   if (tag <= publisher) faults.push("the tag step comes before the trusted publisher step");
@@ -175,7 +182,7 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(stepOf(TEXT, "Once, before the first release", 3)).toContain(
       `Require a pull request and the job \`check\` of \`${CI_FILE}\`.`,
     );
-    expect(stepOf(TEXT, "At each release", 6)).toContain(`the job \`check\` of \`${CI_FILE}\``);
+    expect(stepOf(TEXT, "At each release", 7)).toContain(`the job \`check\` of \`${CI_FILE}\``);
   });
 
   it("names the key form of RELEASE_DATES that the feed reads", () => {
@@ -247,17 +254,17 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(orderFaults(TEXT)).toEqual([]);
     // The trusted publisher moved before the environment.
     const env = stepOf(TEXT, "Once, before the first release", 4);
-    const publisher = stepOf(TEXT, "At each release", 7);
+    const publisher = stepOf(TEXT, "At each release", 8);
     const early = TEXT.replace(env, "@@E@@").replace(publisher, env).replace("@@E@@", publisher);
     expect(orderFaults(early)).toContain(
       "the trusted publisher step comes before the environment step",
     );
     // The tag before the merge (ruling 21).
-    expect(orderFaults(swapSteps(TEXT, "At each release", 6, 8))).toContain(
+    expect(orderFaults(swapSteps(TEXT, "At each release", 7, 9))).toContain(
       "the tag step comes before the merge step",
     );
     // The verify step before the approval.
-    expect(orderFaults(swapSteps(TEXT, "At each release", 9, 10))).toEqual([
+    expect(orderFaults(swapSteps(TEXT, "At each release", 10, 11))).toEqual([
       "the verify step comes before the approval step",
     ]);
   });
@@ -281,6 +288,26 @@ describe("docs/release/RUNBOOK.md", () => {
     }
   });
 
+  it("adds the support row at each new minor, as check-support needs (ruling 52)", () => {
+    const step = stepOf(TEXT, "At each release", 5);
+    for (const part of [
+      "`release/support.json`",
+      "the status `current`",
+      "the UTC day of step 4 in `released`",
+      "`schemaFrom`",
+      "Set the row of the previous minor to `security`, with `securityUntil` 3 months after that day.",
+      "`unsupported`",
+      "`SECURITY.md`",
+      "Without it, `check-support` and `check-security-policy` fail the pull request.",
+    ])
+      expect(step, part).toContain(part);
+    expect(stepOf(TEXT, "At each release", 4)).toContain("`RELEASE_DATES`");
+    // The support row after the dates, as the order rule reads it.
+    expect(orderFaults(swapSteps(TEXT, "At each release", 4, 5))).toEqual([
+      "the support row step comes before the RELEASE_DATES step",
+    ]);
+  });
+
   it("discards the output of changeset version with a glob that covers each changelog", () => {
     const step = stepOf(TEXT, "At each release", 3);
     const glob = "packages/*/CHANGELOG.md";
@@ -296,7 +323,7 @@ describe("docs/release/RUNBOOK.md", () => {
   });
 
   it("runs verify-published after the publish, with no list of names", () => {
-    const step = stepOf(TEXT, "At each release", 10);
+    const step = stepOf(TEXT, "At each release", 11);
     expect(step).toContain("`node scripts/release/src/verify-published.ts`");
     // verify-published reads releasedNames, so the step names no package.
     expect(step).not.toMatch(/@authtempo\//);
