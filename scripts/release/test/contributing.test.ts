@@ -60,15 +60,18 @@ function namedPaths(text: string): string[] {
  * one. An entry whose file exists fails as stale, so the task that adds the
  * file removes its entry (the LATER form of check-workflows).
  */
-const LATER: { path: string; task: string }[] = [
-  { path: "docs/release/RUNBOOK.md", task: "Task 13b" },
-];
+// Task 13b added docs/release/RUNBOOK.md, so the list is empty (plan 12j).
+const LATER: { path: string; task: string }[] = [];
 
 /** The fault of each named path: a missing file, or a stale LATER entry. */
-function pathFaults(paths: readonly string[], exists: (path: string) => boolean): string[] {
-  const later = new Set(LATER.map((l) => l.path));
-  const faults = paths.filter((p) => !later.has(p) && !exists(p)).map((p) => `${p} does not exist`);
-  for (const { path, task } of LATER)
+function pathFaults(
+  paths: readonly string[],
+  exists: (path: string) => boolean,
+  later: readonly { path: string; task: string }[] = LATER,
+): string[] {
+  const skip = new Set(later.map((l) => l.path));
+  const faults = paths.filter((p) => !skip.has(p) && !exists(p)).map((p) => `${p} does not exist`);
+  for (const { path, task } of later)
     if (exists(path)) faults.push(`the file ${path} exists; ${task} removes its entry from LATER`);
   return faults;
 }
@@ -151,8 +154,8 @@ describe("CONTRIBUTING.md", () => {
     expect(pathFaults(["docs/no-such-file.md"], () => false)).toEqual([
       "docs/no-such-file.md does not exist",
     ]);
-    expect(pathFaults([], () => true)).toEqual([
-      "the file docs/release/RUNBOOK.md exists; Task 13b removes its entry from LATER",
+    expect(pathFaults([], () => true, [{ path: "docs/x.md", task: "Task 99" }])).toEqual([
+      "the file docs/x.md exists; Task 99 removes its entry from LATER",
     ]);
   });
 
