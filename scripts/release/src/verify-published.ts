@@ -9,12 +9,13 @@
 // cannot take this place. It counts the attestations of every installed
 // package, such as zod and each peer. So its count never equals the released
 // count. A version that the owner published by hand (the token fallback of the
-// runbook) has no attestation. Only a version that release/fallback-published.json
-// lists, with its date and reason, may lack one.
+// runbook) has no attestation. Only a package version that
+// release/fallback-published.json lists by `<name>@<version>`, with its date
+// and reason, may lack one (ruling 67 of plan 12j, Low 2).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PUBLIC_REGISTRY, WORKFLOW_FILE } from "./lib/release-facts.ts";
+import { PUBLIC_REGISTRY, TAG_PREFIX, WORKFLOW_FILE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
@@ -37,6 +38,8 @@ export const FALLBACK_FILE = "release/fallback-published.json";
 const TIMEOUT_MS = 20_000;
 
 const VERSION = /^\d+\.\d+\.\d+$/;
+/** `<name>@<major>.<minor>.<patch>`, the key of a fallback entry. */
+const PACKAGE_VERSION = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const COUNTS = ["packages", "attested", "fallback"] as const;
 
@@ -48,8 +51,12 @@ export type RegistryGet = (
 
 /** One entry of release/fallback-published.json. Only the owner writes one. */
 export interface FallbackEntry {
-  /** The group version that the owner published by hand. */
-  version: string;
+  /**
+   * The package version that the owner published by hand, as
+   * `<name>@<version>`. A key of the version alone let one entry pass every
+   * package of that version with no attestation (ruling 67 of plan 12j, Low 2).
+   */
+  package: string;
   /** The day of that publish, YYYY-MM-DD. */
   date: string;
   /** Why the workflow could not publish it. */
@@ -88,14 +95,15 @@ export const purlOf = (name: string, version: string): string =>
  * reason that it has none. The answer holds one attestation for each
  * predicate type. The SLSA one carries an in-toto statement as the base64
  * payload of its DSSE envelope, with the workflow under
- * predicate.buildDefinition.externalParameters (read 2026-10-30 04:33 UTC). The
+ * predicate.buildDefinition.externalParameters (read 2026-10-30 04:33 UTC):
+ * its repository, its path, and its ref. The
  * statement must name `purl` as a subject. This read does not check the
  * signature: step 12 of the runbook runs `npm audit signatures` for that.
  */
 export function provenanceWorkflow(
   body: unknown,
   purl: string,
-): { repository: string; path: string } | string {
+): { repository: string; path: string; ref: string } | string {
   const list = (body as { attestations?: unknown } | null)?.attestations;
   if (!Array.isArray(list)) return "the attestations answer has no attestations list";
   const slsa = list.filter(
@@ -111,7 +119,9 @@ export function provenanceWorkflow(
     subject?: unknown;
     predicate?: {
       buildDefinition?: {
-        externalParameters?: { workflow?: { repository?: unknown; path?: unknown } };
+        externalParameters?: {
+          workflow?: { repository?: unknown; path?: unknown; ref?: unknown };
+        };
       };
     };
   };
@@ -130,7 +140,8 @@ export function provenanceWorkflow(
   const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
   if (typeof workflow?.repository !== "string" || typeof workflow.path !== "string")
     return "the statement names no workflow repository and path";
-  return { repository: workflow.repository, path: workflow.path };
+  if (typeof workflow.ref !== "string") return "the statement names no workflow ref";
+  return { repository: workflow.repository, path: workflow.path, ref: workflow.ref };
 }
 
 /** True for a real calendar day in the form YYYY-MM-DD. */
@@ -140,16 +151,16 @@ function isDay(text: unknown): boolean {
   return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === text;
 }
 
-/** The faults of the fallback file: each entry has a version, a real day, and a reason, once. */
+/** The faults of the fallback file: each entry has a package version, a real day, and a reason, once. */
 export function fallbackFaults(entries: readonly FallbackEntry[]): string[] {
   const faults: string[] = [];
   const seen = new Set<string>();
   entries.forEach((e, i) => {
     const at = `${FALLBACK_FILE} entry ${i + 1}`;
-    if (typeof e.version !== "string" || !VERSION.test(e.version))
-      faults.push(`${at}: the version ${String(e.version)} is not <major>.<minor>.<patch>`);
-    else if (seen.has(e.version)) faults.push(`${at}: the version ${e.version} is listed twice`);
-    else seen.add(e.version);
+    if (typeof e.package !== "string" || !PACKAGE_VERSION.test(e.package))
+      faults.push(`${at}: the package ${String(e.package)} is not <name>@<major>.<minor>.<patch>`);
+    else if (seen.has(e.package)) faults.push(`${at}: the package ${e.package} is listed twice`);
+    else seen.add(e.package);
     if (!isDay(e.date)) faults.push(`${at}: the date ${String(e.date)} is not a real YYYY-MM-DD`);
     if (typeof e.reason !== "string" || e.reason.trim() === "")
       faults.push(`${at}: it has no reason`);
@@ -212,14 +223,17 @@ export async function verifyPublished(input: VerifyInput): Promise<Report> {
   if (failures.length > 0)
     return requireCounts({ name: "verify-published", counts, failures, notes }, ["packages"]);
 
-  const byHand = input.fallback.find((e) => e.version === version);
-  if (byHand !== undefined)
-    notes.push(
-      `${FALLBACK_FILE} lists ${version} (${byHand.date}: ${byHand.reason}), so a missing attestation passes`,
-    );
+  const listed = new Map(input.fallback.map((e) => [e.package, e]));
+  // The ref of the provenance: the release workflow runs on the push of the tag (ruling 67 of plan 12j, Low 3).
+  const tagRef = `refs/tags/${TAG_PREFIX}${version}`;
 
   for (const name of input.names) {
     const at = `${name}@${version}`;
+    const byHand = listed.get(at);
+    if (byHand !== undefined)
+      notes.push(
+        `${FALLBACK_FILE} lists ${at} (${byHand.date}: ${byHand.reason}), so a missing attestation of it passes`,
+      );
     let answer: { status: number; body: unknown };
     try {
       answer = await readDocument(input, versionUrl(registry, name, version));
@@ -248,18 +262,23 @@ export async function verifyPublished(input: VerifyInput): Promise<Report> {
       );
       continue;
     }
-    const predicate = doc.dist?.attestations?.provenance?.predicateType;
+    const attestations = doc.dist?.attestations;
+    const predicate = attestations?.provenance?.predicateType;
     // A version of the fallback file passes only with no attestation at all
-    // (review N3 of plan 12j Task 13b). Another predicate fails at every version.
-    if (predicate === undefined && byHand !== undefined) {
+    // (review N3 of plan 12j Task 13b). An attestation with no provenance
+    // predicate is not that state, so it fails at every version (ruling 61 of
+    // plan 12j, B). Another predicate fails at every version too.
+    if (attestations === undefined && byHand !== undefined) {
       counts.fallback += 1;
       continue;
     }
     if (predicate !== PROVENANCE_PREDICATE) {
       failures.push(
-        predicate === undefined
+        attestations === undefined
           ? `${at}: the registry holds no provenance attestation`
-          : `${at}: the provenance predicate is ${String(predicate)}, not ${PROVENANCE_PREDICATE}`,
+          : predicate === undefined
+            ? `${at}: the registry holds an attestation with no provenance predicate`
+            : `${at}: the provenance predicate is ${String(predicate)}, not ${PROVENANCE_PREDICATE}`,
       );
       continue;
     }
@@ -293,6 +312,8 @@ export async function verifyPublished(input: VerifyInput): Promise<Report> {
       failures.push(
         `${at}: the provenance names the workflow ${source.path}, not ${input.workflow}`,
       );
+    else if (source.ref !== tagRef)
+      failures.push(`${at}: the provenance names the ref ${source.ref}, not ${tagRef}`);
     else counts.attested += 1;
   }
   return requireCounts({ name: "verify-published", counts, failures, notes }, ["packages"]);

@@ -527,7 +527,11 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(block, "the token fallback has a json block").toBeDefined();
     const entries = JSON.parse(block ?? "[]") as FallbackEntry[];
     expect(entries).toHaveLength(1);
-    expect(Object.keys(entries[0] ?? {})).toEqual(["version", "date", "reason"]);
+    expect(Object.keys(entries[0] ?? {})).toEqual(["package", "date", "reason"]);
+    // One entry passes one package (ruling 67 of plan 12j, Low 2).
+    expect(part).toContain(
+      "The key of an entry is `<name>@<version>`, so one entry passes one package only.",
+    );
     expect(fallbackFaults(entries)).toEqual([]);
     expect(part).toContain(`\`${FALLBACK_FILE}\``);
     expect(part).toContain("in the form `YYYY-MM-DD`");

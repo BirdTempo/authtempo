@@ -129,11 +129,14 @@ const allAttested = () =>
     };
   });
 
-const FALLBACK: FallbackEntry = {
-  version: "0.1.0",
+/** One entry of the fallback file for `spec`, `<name>@<version>` (ruling 67 of plan 12j, Low 2). */
+const FALLBACK = (spec: string): FallbackEntry => ({
+  package: spec,
   date: "2026-11-02",
   reason: "npm offered no trusted publisher for a name with no version.",
-};
+});
+const BOTH = [FALLBACK("@authtempo/cli@0.1.0"), FALLBACK("@authtempo/core@0.1.0")];
+const REF = "refs/tags/v0.1.0";
 
 describe("verify-published", () => {
   it("passes when each released name has a provenance attestation", async () => {
@@ -176,18 +179,30 @@ describe("verify-published", () => {
     // A type-only check passed each of these.
     expect(
       await run((n, v) =>
-        bundle(n, v, { repository: "https://github.com/other/fork", path: WORKFLOW_PATH }),
+        bundle(n, v, {
+          repository: "https://github.com/other/fork",
+          path: WORKFLOW_PATH,
+          ref: REF,
+        }),
       ),
     ).toEqual([
       `${at}: the provenance names the repository https://github.com/other/fork, not ${REPOSITORY}`,
     ]);
     expect(
       await run((n, v) =>
-        bundle(n, v, { repository: REPOSITORY, path: ".github/workflows/ci.yml" }),
+        bundle(n, v, { repository: REPOSITORY, path: ".github/workflows/ci.yml", ref: REF }),
       ),
     ).toEqual([
       `${at}: the provenance names the workflow .github/workflows/ci.yml, not ${WORKFLOW_PATH}`,
     ]);
+    // The release workflow runs on the push of the tag, so another ref fails (ruling 67 of plan 12j, Low 3).
+    for (const ref of ["refs/heads/some-branch", "refs/tags/v9.9.9"])
+      expect(
+        await run((n, v) => bundle(n, v, { repository: REPOSITORY, path: WORKFLOW_PATH, ref })),
+      ).toEqual([`${at}: the provenance names the ref ${ref}, not ${REF}`]);
+    expect(
+      await run((n, v) => bundle(n, v, { repository: REPOSITORY, path: WORKFLOW_PATH })),
+    ).toEqual([`${at}: the statement names no workflow ref`]);
     expect(await run((_n, v) => bundle("@authtempo/client", v))).toEqual([
       `${at}: the statement names pkg:npm/%40authtempo/client@0.1.0, not pkg:npm/%40authtempo/core@0.1.0`,
     ]);
@@ -295,7 +310,7 @@ describe("verify-published", () => {
     ]);
   });
 
-  it("passes a missing attestation only for a version of the fallback file", async () => {
+  it("passes a missing attestation only for a package version of the fallback file", async () => {
     const { get } = fake((url) => {
       const { name, version } = specOf(url);
       return { status: 200, body: bare(name, version) };
@@ -303,19 +318,32 @@ describe("verify-published", () => {
     const listed = await verify({
       names: NAMES,
       version: "0.1.0",
-      fallback: [FALLBACK],
+      fallback: BOTH,
       get,
     });
     expect(summaryLine(listed)).toBe(
       "verify-published: PASS packages=2 attested=0 fallback=2 failures=0",
     );
-    expect(listed.notes).toEqual([
-      `${FALLBACK_FILE} lists 0.1.0 (2026-11-02: npm offered no trusted publisher for a name with no version.), so a missing attestation passes`,
+    expect(listed.notes).toEqual(
+      NAMES.map(
+        (n) =>
+          `${FALLBACK_FILE} lists ${n}@0.1.0 (2026-11-02: npm offered no trusted publisher for a name with no version.), so a missing attestation of it passes`,
+      ),
+    );
+    // One entry passes its own package only, never each package of its version (ruling 67 of plan 12j, Low 2).
+    const one = await verify({
+      names: NAMES,
+      version: "0.1.0",
+      fallback: [FALLBACK("@authtempo/core@0.1.0")],
+      get,
+    });
+    expect(one.failures).toEqual([
+      "@authtempo/cli@0.1.0: the registry holds no provenance attestation",
     ]);
     const other = await verify({
       names: NAMES,
       version: "0.2.0",
-      fallback: [FALLBACK],
+      fallback: BOTH,
       get,
     });
     expect(other.failures).toEqual([
@@ -334,13 +362,32 @@ describe("verify-published", () => {
         await verify({
           names: ["@authtempo/core"],
           version: "0.1.0",
-          fallback: [FALLBACK],
+          fallback: BOTH,
           get: v02.get,
         })
       ).failures,
     ).toEqual([
       "@authtempo/core@0.1.0: the provenance predicate is https://slsa.dev/provenance/v0.2, not https://slsa.dev/provenance/v1",
     ]);
+    // An attestation with no provenance predicate is no fallback either (ruling 61 of plan 12j, B).
+    for (const attestations of [{ url: "u" }, { url: "u", provenance: {} }]) {
+      const partial = fake((url) => {
+        const { name, version } = specOf(url);
+        return { status: 200, body: { name, version, dist: { attestations } } };
+      });
+      expect(
+        (
+          await verify({
+            names: ["@authtempo/core"],
+            version: "0.1.0",
+            fallback: BOTH,
+            get: partial.get,
+          })
+        ).failures,
+      ).toEqual([
+        "@authtempo/core@0.1.0: the registry holds an attestation with no provenance predicate",
+      ]);
+    }
   });
 
   it("fails a fallback entry with no real date, no reason, a bad version, or a version twice", async () => {
@@ -349,17 +396,19 @@ describe("verify-published", () => {
       names: NAMES,
       version: "0.1.0",
       fallback: [
-        FALLBACK,
-        { ...FALLBACK, date: "2026-02-30", reason: " " },
-        { ...FALLBACK, version: "v0.2.0" },
+        FALLBACK("@authtempo/core@0.1.0"),
+        { ...FALLBACK("@authtempo/core@0.1.0"), date: "2026-02-30", reason: " " },
+        FALLBACK("0.2.0"),
+        FALLBACK("@authtempo/core@v0.2.0"),
       ],
       get,
     });
     expect(r.failures).toEqual([
-      `${FALLBACK_FILE} entry 2: the version 0.1.0 is listed twice`,
+      `${FALLBACK_FILE} entry 2: the package @authtempo/core@0.1.0 is listed twice`,
       `${FALLBACK_FILE} entry 2: the date 2026-02-30 is not a real YYYY-MM-DD`,
       `${FALLBACK_FILE} entry 2: it has no reason`,
-      `${FALLBACK_FILE} entry 3: the version v0.2.0 is not <major>.<minor>.<patch>`,
+      `${FALLBACK_FILE} entry 3: the package 0.2.0 is not <name>@<major>.<minor>.<patch>`,
+      `${FALLBACK_FILE} entry 4: the package @authtempo/core@v0.2.0 is not <name>@<major>.<minor>.<patch>`,
     ]);
     // A bad file stops the run before any read.
     expect(urls).toEqual([]);

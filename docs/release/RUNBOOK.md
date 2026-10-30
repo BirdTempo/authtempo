@@ -196,10 +196,10 @@ This branch is a stop: it needs a reviewed change before any publish. `check-wor
 - This is the one publish by hand; every other publish goes through the workflow. Take the tarballs of the job `check`. Compare each SHA-256 with `SHA256SUMS`, and run `node scripts/release/src/check-pack.ts` on each tarball first.
 - Publish each tarball after the tarballs of its dependencies, so core goes first. Use `npm publish <tarball> --access public --provenance=false` for each tarball.
 - A tarball holds `publishConfig.provenance` true, and npm takes the flag of the command over `publishConfig` (npm 11.19.1, `lib/commands/publish.js`, read 2026-10-30). Without the flag, npm asks for provenance outside CI, and the publish fails.
-- A version that you publish this way has no attestation. Add its version, the date, and the reason to `release/fallback-published.json` by a pull request. Without the entry, `verify-published` fails at step 11. One entry has this form, with the UTC day of the publish in the form `YYYY-MM-DD`:
+- A version that you publish this way has no attestation. Add one entry for each package that you publish this way to `release/fallback-published.json` by a pull request. The key of an entry is `<name>@<version>`, so one entry passes one package only. Without the entry, `verify-published` fails at step 11. One entry has this form, with the UTC day of the publish in the form `YYYY-MM-DD`:
 
 ```json
-[{ "version": "0.1.0", "date": "2026-11-02", "reason": "npm offered no trusted publisher for a package with no version." }]
+[{ "package": "@authtempo/core@0.1.0", "date": "2026-11-02", "reason": "npm offered no trusted publisher for a package with no version." }]
 ```
 
 ## Once, after the first publish
