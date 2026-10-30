@@ -192,6 +192,10 @@ export const BETTER_AUTH_CODES = {
   // So the name is core's own. At /delete-anonymous-user the shim answers
   // Better Auth's USER_IS_NOT_ANONYMOUS (plan 12i Task 16, ruling 42 L4).
   anonymous_refused: "ANONYMOUS_REFUSED",
+  // 12j ruling 43: core's body cap. Better Auth 1.7.7 names no code for a long
+  // body (its dist, read 2026-10-30). So the name is better-call's status
+  // name (better-call 1.4.0 dist/error.mjs:69).
+  body_too_large: "PAYLOAD_TOO_LARGE",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",
@@ -316,6 +320,8 @@ const STATUS_NAMES: Record<number, string> = {
   404: "NOT_FOUND",
   405: "METHOD_NOT_ALLOWED",
   409: "CONFLICT",
+  // better-call 1.4.0 dist/error.mjs:69, for core's 413 body_too_large.
+  413: "PAYLOAD_TOO_LARGE",
   429: "TOO_MANY_REQUESTS",
   500: "INTERNAL_SERVER_ERROR",
   501: "NOT_IMPLEMENTED",
@@ -339,6 +345,7 @@ const REASONS: Record<number, string> = {
   404: "Not Found",
   405: "Method Not Allowed",
   409: "Conflict",
+  413: "Payload Too Large",
   429: "Too Many Requests",
   500: "Internal Server Error",
   501: "Not Implemented",

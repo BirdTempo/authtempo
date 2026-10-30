@@ -74,6 +74,7 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
+import { readBodyText } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -92,10 +93,11 @@ export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
   return r.ok ? json(r.value, status) : json({ error: r.error }, r.status);
 }
 
-/** A JSON object body, or null. */
+/** A JSON object body, or null. The read stops at `REQUEST_BODY_MAX` (ruling 43 of the 12j lane). */
 async function readObject(request: Request): Promise<Record<string, unknown> | null> {
+  const text = await readBodyText(request);
   try {
-    const value: unknown = await request.json();
+    const value: unknown = JSON.parse(text);
     if (holdsBadText(value)) return null;
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -105,16 +107,11 @@ async function readObject(request: Request): Promise<Record<string, unknown> | n
   }
 }
 
-/** A form body whose fields each come once (RFC 6749 section 3.1), or null. */
+/** A form body whose fields each come once (RFC 6749 section 3.1), or null. The read stops at `REQUEST_BODY_MAX`. */
 async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(await request.text());
-  } catch {
-    return null;
-  }
+  const params = new URLSearchParams(await readBodyText(request));
   for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
   if (holdsBadText([...params])) return null;
   return params;

@@ -1745,6 +1745,9 @@ writes each value under version 1.
 
 ## Limits in version 1
 
+- Core reads at most 8 MiB (`REQUEST_BODY_MAX`) of a request body, by a
+  stream read that stops at the cap. A longer body answers 413
+  `body_too_large`, and no parse runs. SCIM keeps its own 1 MB cap.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a

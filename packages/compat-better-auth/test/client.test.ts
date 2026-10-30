@@ -250,6 +250,26 @@ describe("createAuthClient", () => {
     ).toHaveLength(2);
   });
 
+  it("answers core's body cap as PAYLOAD_TOO_LARGE with the status 413 (12j ruling 43)", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    // More than the 8 MiB of core's REQUEST_BODY_MAX.
+    const long = await c.sendVerificationEmail({ email: `${"x".repeat(9_000_000)}@example.com` });
+    expect(long).toEqual({
+      data: null,
+      error: {
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Payload too large",
+        status: 413,
+        statusText: "Payload Too Large",
+      },
+    });
+  });
+
   it("answers Better Auth's error shape with core's status (Review Focus 5)", async () => {
     const s = server();
     const onError = vi.fn();

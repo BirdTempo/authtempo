@@ -2975,6 +2975,15 @@ export type RouterCode = (typeof ROUTER_CODES)[number];
 export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
 
 /**
+ * The code that the router answers for a request body past
+ * `REQUEST_BODY_MAX` (ruling 43 of the 12j lane). Each route with a body in
+ * its contract can answer it. No entry declares it, and the OpenAPI
+ * document states it in its rules, as it states `HOST_CODE`. The SCIM
+ * routes answer their own SCIM 413.
+ */
+export const BODY_CODE = "body_too_large" as const satisfies ErrorCode;
+
+/**
  * The codes of the operator routes that only a request with a session gets
  * (plan 12f): `operator_self` for the act of a platform operator on their
  * own user, and `impersonation_session` for a request of an impersonation

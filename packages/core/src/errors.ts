@@ -130,6 +130,8 @@ export const ERRORS = {
   phone_taken: 409,
   // plan 12i Task 6: a route of ANONYMOUS_REFUSED and an anonymous session (spec 32 item 8)
   anonymous_refused: 403,
+  // 12j ruling 43: a request body past REQUEST_BODY_MAX. The router answers it, and no parse runs.
+  body_too_large: 413,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

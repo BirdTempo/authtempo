@@ -20,6 +20,7 @@ const FS_MODULE = "node:fs";
  * The verdict is `ok`, or one failure text, by three rules:
  * 1. A code is in the entry's `codes` or `oauthCodes`, or in `ROUTER_CODES`,
  *    or is `HOST_CODE` (plan 12i Task 18), with the status of its table. A redirect carries its code in `Location`.
+ *    `BODY_CODE` (ruling 43 of the 12j lane) holds only for a route with a body in its contract.
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
@@ -55,7 +56,9 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
   const { answerKinds } = await import("../../src/http/contract/types.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
-  const { HOST_CODE, ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
+  const { BODY_CODE, HOST_CODE, ROUTER_CODES, ROUTES } = await import(
+    "../../src/http/route-list.js"
+  );
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
   type AnswerKind = RouteContract["answer"];
   type RouteKey = import("../../src/http/route-list.js").RouteKey;
@@ -143,6 +146,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (code === "invalid_client" && entry.auth.includes("clientSecretBasic"))
       statuses.push(INVALID_CLIENT_NO_HEADER);
     if (ROUTER.has(code)) statuses.push(ERRORS[code as keyof typeof ERRORS]);
+    if (code === BODY_CODE && CONTRACT[key]?.body !== undefined) statuses.push(ERRORS[BODY_CODE]);
     if (statuses.length === 0) return `the code ${code} is not declared`;
     if (redirected) return "ok";
     if (!statuses.includes(status))

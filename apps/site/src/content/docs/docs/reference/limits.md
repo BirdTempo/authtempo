@@ -4,6 +4,7 @@ description: Every rate limit of core with its key, window, and maximum, and the
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - packages/core/src/http/body-cap.ts
   - packages/core/README.md "Limits in version 1"
   - packages/core/README.md "Limits"
   - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
@@ -193,6 +194,7 @@ These counts live in their rows, so they hold under every limiter.
 | Members of a group that one SCIM request takes away | 1000 | SCIM 400 `invalidValue` |
 | Members whose role one rename or delete of a mapped SCIM group computes | 1000 | SCIM 400 `invalidValue` |
 | Results of one SCIM list page | 100 | The page ends there |
+| One request body of any other route | 8388608 bytes, by a stream read that stops at the cap. The cap is derived from the largest valid body of the route contracts | 413 `body_too_large` |
 | One SCIM request body | 1 MB | SCIM 413 |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |

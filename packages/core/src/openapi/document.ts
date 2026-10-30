@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DOCS_ORIGIN, routeAnchor } from "../http/anchors.js";
+import { REQUEST_BODY_MAX } from "../http/body-cap.js";
 import { ROUTE_CONTRACT } from "../http/contract/index.js";
 import { RESET_PAGE_ERRORS } from "../http/contract/password.js";
 import * as shapes from "../http/contract/shapes.js";
@@ -59,6 +60,7 @@ const RULES = [
   "- With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.",
   "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
   '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.',
+  `- A request body of more than ${REQUEST_BODY_MAX} bytes answers 413 \`body_too_large\`, and no parse runs. The SCIM routes answer their own SCIM 413 past 1 MB.`,
   "- An unhandled error answers 500 `internal` and writes one log line.",
   "- An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.",
   "- Every answer to a trusted origin carries the CORS headers with credentials.",

@@ -23,6 +23,10 @@ export async function readCapped(
  * The body as bytes, or null past `max` bytes, on a read error, or when
  * `signal` aborts. A caller that must tell a long body from a body that is
  * not UTF-8 decodes the bytes itself, as the SCIM body read does.
+ *
+ * The read does not wait for a cancel. A body that is one branch of a tee,
+ * such as a request that an app cloned, settles its cancel only when the
+ * other branch ends too. A wait there never ends (ruling 43 of the 12j lane).
  */
 export async function readCappedBytes(
   res: Response,
@@ -31,7 +35,7 @@ export async function readCappedBytes(
 ): Promise<Uint8Array | null> {
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > max) {
-    await res.body?.cancel();
+    res.body?.cancel().catch(() => {});
     return null;
   }
   if (!res.body) return new Uint8Array(0);
@@ -50,13 +54,13 @@ export async function readCappedBytes(
       if (done) break;
       total += value.byteLength;
       if (total > max) {
-        await reader.cancel();
+        reader.cancel().catch(() => {});
         return null;
       }
       chunks.push(value);
     }
   } catch {
-    await reader.cancel().catch(() => {});
+    reader.cancel().catch(() => {});
     return null;
   }
   const out = new Uint8Array(total);

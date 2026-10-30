@@ -5,6 +5,7 @@ type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10
   - packages/core/src/errors.ts
+  - packages/core/src/http/body-cap.ts
   - packages/core/src/storage/port.ts
   - packages/core/README.md "Organizations"
   - packages/core/src/http/impersonation-rules.ts
@@ -496,6 +497,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | Every route, and `auth.wellKnown`, while `baseURL` is a list. See [the base URL list](/docs/guides/base-url-list/). |
+
+<h3 id="body_too_large"><code>body_too_large</code> 413</h3>
+
+- **Meaning:** The request body has more than 8388608 bytes. Core stopped the read at the cap, so no handler parsed the body. A false or absent `content-length` does not change the count. The router answers it for every route that reads a body.
+- **Do:** Send a smaller body. No valid body of a core route comes near the cap, so a client that gets this code sends a wrong body.
+
+| Routes |
+| --- |
+| Every route with a body, except the SCIM routes, which answer their own SCIM 413 past 1 MB. See [Limits](/docs/reference/limits/). |
 
 <h3 id="anonymous_refused"><code>anonymous_refused</code> 403</h3>
 
