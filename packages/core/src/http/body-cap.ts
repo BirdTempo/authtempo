@@ -169,7 +169,9 @@ export const LARGE_READS_PER_USER = 1;
  * SCIM bodies at once. Each of these reads ends within 10 s
  * (`largeReadDeadlineMs`). So 2 IPs that each hold `LARGE_READ_SHARE` fill
  * this half for 10 s, and must send 8 MiB each 10 s to keep it full. The
- * limits page states this residual limit.
+ * limits page states this residual limit. Ruling 69 of the 12j lane
+ * corrects the 4 keys at 16 MiB of ruling 66 to these 2 keys at 8 MiB. The
+ * client with no IP is one such key (ruling 69).
  */
 export const LARGE_READ_ANON_BUDGET = 8_388_608;
 

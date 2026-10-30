@@ -1110,7 +1110,7 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
     }
   });
 
-  it("leaves an SSO write open while 4 IPs fill the anonymous half, and answers 503 to a fifth IP", {
+  it("leaves an SSO write open while 2 of 4 IPs fill the anonymous half, and answers 503 to a fifth IP", {
     timeout: 30_000,
   }, async () => {
     const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
@@ -1138,7 +1138,8 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
         ...Array(2 * per).fill("open"),
         ...Array(2 * per).fill("503 body_busy"),
       ]);
-      // A fifth IP gets 503 too: the residual limit that the limits page states.
+      // A fifth IP gets 503 too: the residual limit that the limits page states, 2 keys of 4 MiB
+      // fill the half of 8 MiB (ruling 69 corrects the 4 keys at 16 MiB of ruling 66).
       expect(await statusOf(await w.handle(acsPost("198.51.100.9", "SAMLResponse=x")))).toBe(
         "503 body_busy",
       );

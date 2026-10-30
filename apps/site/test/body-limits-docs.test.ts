@@ -207,7 +207,13 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /The anonymous half holds the shares of (\d+) IPs of/],
       ["limits", /within \d+ s, so (\d+) IPs must send/],
+      ["limits", /so a `\/\d+` prefix gives (\d+) keys/],
     ],
+  ],
+  [
+    "the IPv6 prefix whose /64 keys fill the anonymous half",
+    () => 64 - Math.log2(constant("LARGE_READ_ANON_BUDGET") / constant("LARGE_READ_SHARE")),
+    [["limits", /so a `\/(\d+)` prefix gives \d+ keys/]],
   ],
   [
     "the budget in reads of the largest cap",
