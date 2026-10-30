@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { checkResources, DEMO_PATH } from "../../../apps/site/scripts/check-resources.ts";
+import { RESOURCES_EMPTY } from "../../../apps/site/src/data/unpublished.ts";
 import { checkTag } from "../src/check-tag.ts";
 import {
   CI_FILE,
@@ -11,7 +13,7 @@ import {
   TAG_PREFIX,
   WORKFLOW_FILE,
 } from "../src/lib/release-facts.ts";
-import { releasedNames } from "../src/lib/released.ts";
+import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import { copyCheck, PLAN_FILE } from "../src/rehearse.ts";
 import { FALLBACK_FILE, type FallbackEntry, fallbackFaults } from "../src/verify-published.ts";
@@ -361,6 +363,65 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(orderFaults(swapSteps(TEXT, "At each release", 1, 2))).toEqual([
       "the version branch step comes before the rehearsal step",
     ]);
+  });
+
+  // Ruling 65 of plan 12j, L1: the bullet named no link form, and the
+  // owner of final review D learned the forms from 50 failure lines.
+  it("gives the link form of each Resources row that check-resources reads", () => {
+    const bullet =
+      section(TEXT, "At each release")
+        .split("\n")
+        .find((l) => l.startsWith("- `check-resources`:")) ?? "";
+    const forms = [...bullet.matchAll(/ row links `([^`]+)`/g)].map((m) => m[1] ?? "");
+    expect(forms).toEqual([
+      "https://www.npmjs.com/package/<name>",
+      `${REPOSITORY.url}/tree/main/examples/<folder>`,
+      DEMO_PATH,
+    ]);
+    // While no release exists, the planned rows of the rehearsal use these
+    // forms, and check-resources passes them at the first release.
+    if (groupVersion(ROOT_PATH) !== "0.0.0") return;
+    const { resources } = JSON.parse(readFileSync(new URL(PLAN_FILE, ROOT), "utf8")) as {
+      resources: string[];
+    };
+    const links = resources.flatMap((l) => [...l.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]));
+    const pattern = (form: string) =>
+      new RegExp(
+        `^${form
+          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          .replace("<name>", "@authtempo/[a-z0-9-]+")
+          .replace("<folder>", "[a-z0-9-]+")}$`,
+      );
+    for (const link of links)
+      expect(
+        forms.some((f) => pattern(f).test(link ?? "")),
+        link,
+      ).toBe(true);
+    // The example folders of check-resources: each folder whose package release/unreleased.json names.
+    const unreleased = Object.keys(
+      JSON.parse(readFileSync(new URL("release/unreleased.json", ROOT), "utf8")) as object,
+    );
+    const examples = readdirSync(new URL("examples/", ROOT))
+      .filter((folder) => {
+        const file = new URL(`examples/${folder}/package.json`, ROOT);
+        if (!existsSync(file)) return false;
+        const { name } = JSON.parse(readFileSync(file, "utf8")) as { name?: string };
+        return name !== undefined && unreleased.includes(name);
+      })
+      .sort();
+    const contribute = ["CONTRIBUTING.md", "SECURITY.md"]
+      .map((f) => `- [${f}](${REPOSITORY.url}/blob/main/${f})`)
+      .join("\n");
+    const r = checkResources({
+      version: FIRST_RELEASE,
+      source: `${resources.join("\n")}\n\n${contribute}\n`,
+      released: releasedNames(ROOT_PATH),
+      examples,
+      repoUrl: REPOSITORY.url,
+      empty: RESOURCES_EMPTY,
+    });
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toMatchObject({ examples: examples.length, demo: 1 });
   });
 
   it("discards the output of changeset version with a glob that covers each changelog", () => {
