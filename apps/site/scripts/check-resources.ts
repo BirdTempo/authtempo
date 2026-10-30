@@ -4,7 +4,8 @@
 // it states RESOURCES_EMPTY and lists nothing. Above 0.0.0, it lists each
 // released package by its npm page, each example folder, and the demo, both
 // ways. So the version pull request of the first release adds the three
-// lists, or this check fails.
+// lists, or this check fails. A package, an example, or the demo with two
+// links fails at every version.
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The page, by its path under src/content/docs/. */
@@ -49,6 +50,15 @@ export function checkResources(input: ResourcesInput): CheckReport {
     },
     failures: [],
   };
+  for (const [kind, items] of [
+    ["the package", packages],
+    ["the example", folders],
+    ["the demo", links.filter((l) => l === DEMO_PATH)],
+  ] as const)
+    for (const item of new Set(items)) {
+      const n = items.filter((i) => i === item).length;
+      if (n > 1) r.failures.push(`the page links ${kind} ${item} ${n} times`);
+    }
   for (const file of ["CONTRIBUTING.md", "SECURITY.md"]) {
     if (links.includes(`${repoUrl}/blob/main/${file}`)) r.counts.links = (r.counts.links ?? 0) + 1;
     else r.failures.push(`the page does not link ${file} (${repoUrl}/blob/main/${file})`);

@@ -77,6 +77,20 @@ describe("check-resources", () => {
     );
   });
 
+  it("fails a package, an example, or the demo with two links", () => {
+    const twice = [
+      RELEASE_PAGE,
+      "| [`@authtempo/core`](https://www.npmjs.com/package/@authtempo/core) |",
+      `| [examples/node](${URL}/tree/main/examples/node) |`,
+      "| [The demo](/demo/) |",
+    ].join("\n");
+    expect(failures({ ...RELEASED, source: twice })).toEqual([
+      "the page links the package @authtempo/core 2 times",
+      "the page links the example node 2 times",
+      "the page links the demo /demo/ 2 times",
+    ]);
+  });
+
   it("links CONTRIBUTING.md and SECURITY.md at every version", () => {
     for (const input of [AT_ZERO, RELEASED]) {
       const without = input.source.replace(`(${URL}/blob/main/CONTRIBUTING.md)`, "(/docs/)");

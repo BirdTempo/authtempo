@@ -53,6 +53,20 @@ describe("check-unpublished", () => {
     ]);
   });
 
+  it("matches the mark with no regard to case", () => {
+    const upper = "Not on a registry yet: the CLI.";
+    expect(failures({ ...BASE, pages: [...BASE.pages, page("docs/d.md", upper)] })).toEqual([
+      `docs/d.md: holds the note "${UNPUBLISHED_MARK}", and UNPUBLISHED_PAGES lacks it`,
+    ]);
+    const pages = [
+      page("docs/a.md", REGISTRY_INSTALL),
+      page("docs/b.mdx", `${REGISTRY_INSTALL} ${upper}`),
+    ];
+    expect(failures({ ...BASE, version: "0.1.0", pages })).toEqual([
+      `docs/b.mdx: core is at 0.1.0, and the page still holds "${UNPUBLISHED_MARK}"`,
+    ]);
+  });
+
   it("fails a listed path that is not a page, and a path listed twice", () => {
     expect(failures({ ...BASE, listed: [...BASE.listed, "docs/a.md", "docs/gone.md"] })).toEqual([
       "UNPUBLISHED_PAGES lists docs/a.md twice",

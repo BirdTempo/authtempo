@@ -3,7 +3,8 @@
 // of UNPUBLISHED_PAGES holds it, and no other docs page does. Above 0.0.0, no
 // docs page holds it, and each listed page holds REGISTRY_INSTALL. So the
 // release branch cannot ship a stale note, and it cannot drop a note with no
-// install text in its place.
+// install text in its place. The mark matches with no regard to case, so a
+// note that starts a sentence ("Not on a registry yet") counts too.
 import type { Page } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
@@ -33,8 +34,9 @@ export function checkUnpublished(input: UnpublishedInput): CheckReport {
     if (!byPath.has(path)) r.failures.push(`UNPUBLISHED_PAGES lists ${path}, which is not a page`);
   }
   const unreleased = version === "0.0.0";
+  const lowerMark = mark.toLowerCase();
   for (const p of pages) {
-    const holds = p.source.includes(mark);
+    const holds = p.source.toLowerCase().includes(lowerMark);
     if (holds) r.counts.marked = (r.counts.marked ?? 0) + 1;
     if (unreleased) {
       if (seen.has(p.path) && !holds)

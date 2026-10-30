@@ -42,6 +42,14 @@ describe("check-dependencies-page", () => {
     expect(failures({ ...REAL, rows: moved })).toHaveLength(1);
   });
 
+  it("fails a row that the table holds twice", () => {
+    expect(
+      failures({ ...REAL, source: source.replace(`${line}\n`, `${line}\n${line}\n`) }),
+    ).toEqual([
+      `docs/reference/dependencies.md has the row | \`${runtime.name}\` | runtime | 2 times`,
+    ]);
+  });
+
   it("lists a peer row of a released package, and no dev row or example-only row", () => {
     expect(
       pageRow(

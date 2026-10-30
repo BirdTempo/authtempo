@@ -63,6 +63,13 @@ function tableRows(source: string): string[] {
 /** The key of a table row: its first two cells, the name and the kind. */
 const keyOf = (line: string) => line.split(" | ").slice(0, 2).join(" | ");
 
+/** How many times each item occurs, in the order of its first one. */
+function countOf(items: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+  return counts;
+}
+
 export function checkDependenciesPage(input: DependenciesPageInput): CheckReport {
   const { rows, released, source } = input;
   const expected = rows.flatMap((row) => pageRow(row, released) ?? []);
@@ -74,6 +81,9 @@ export function checkDependenciesPage(input: DependenciesPageInput): CheckReport
   };
   if (source === "") r.failures.push(`${DEPENDENCIES_PAGE} does not exist`);
   const byKey = new Map(found.map((l) => [keyOf(l), l]));
+  // A row twice passes each test above, and the counts then differ, so it fails here.
+  for (const [key, n] of countOf(found.map(keyOf)))
+    if (n > 1) r.failures.push(`${DEPENDENCIES_PAGE} has the row ${key} | ${n} times`);
   for (const line of expected) {
     const on = byKey.get(keyOf(line));
     if (on === undefined) r.failures.push(`${DEPENDENCIES_PAGE} lacks the row ${keyOf(line)} |`);

@@ -62,6 +62,28 @@ describe("check-deprecations-page", () => {
     ]);
   });
 
+  it("fails a section twice, and a section with two since or removeIn lines", () => {
+    const [first] = register;
+    if (first === undefined) throw new Error("the register is empty");
+    // The first section, copied after itself.
+    const start = source.indexOf(`### ${first.id}\n`);
+    const end = source.indexOf("\n### ", start + 1);
+    const block = source.slice(start, end + 1);
+    const twice = `${source.slice(0, end + 1)}${block}${source.slice(end + 1)}`;
+    expect(failures({ ...REAL, source: twice })).toEqual([
+      `docs/reference/deprecations.md has the section "### ${first.id}" twice`,
+    ]);
+    const removed = `- Removed in: \`${first.removeIn}\``;
+    const two = source.replace(removed, `${removed}\n- Removed in: \`9.9.0\``);
+    expect(failures({ ...REAL, source: two })).toEqual([
+      `${first.id}: the section has 2 lines "- Removed in:"; it has one`,
+    ]);
+    const since = `- Deprecated since: \`${first.since}\``;
+    expect(failures({ ...REAL, source: source.replace(since, `${since}\n${since}`) })).toEqual([
+      `${first.id}: the section has 2 lines "- Deprecated since:"; it has one`,
+    ]);
+  });
+
   it("fails a missing page and an empty register", () => {
     expect(failures({ register: [], source: "", built: "" })).toEqual([
       "docs/reference/deprecations.md does not exist",

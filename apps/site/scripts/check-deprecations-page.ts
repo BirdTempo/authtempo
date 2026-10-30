@@ -3,7 +3,8 @@
 // both ways. Each entry has its section `### <id>` under "The entries", with
 // its `what` text, its since, and its removeIn, and the built page has the
 // anchor that the register's `docs` field and `authtempo upgrade` link. Each
-// section of the page is an entry of the register.
+// section of the page is an entry of the register. A section twice, or a
+// section with two since or two removeIn lines, fails.
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The page, by its path under src/content/docs/. */
@@ -27,19 +28,20 @@ export interface DeprecationsPageInput {
   built: string;
 }
 
-/** The text of each `### ` section under ENTRIES, by its heading. */
-function sections(source: string): Map<string, string> {
-  const out = new Map<string, string>();
+/** Each `### ` section under ENTRIES, with its heading, in page order. */
+function sections(source: string): { heading: string; body: string }[] {
   const start = source.indexOf(`\n${ENTRIES}\n`);
-  if (start === -1) return out;
+  if (start === -1) return [];
   const rest = source.slice(start + ENTRIES.length + 2);
   const end = rest.search(/^## /m);
   const part = end === -1 ? rest : rest.slice(0, end);
-  for (const block of part.split(/^### /m).slice(1)) {
-    const [heading = "", ...body] = block.split("\n");
-    out.set(heading.trim(), body.join("\n").trim());
-  }
-  return out;
+  return part
+    .split(/^### /m)
+    .slice(1)
+    .map((block) => {
+      const [heading = "", ...body] = block.split("\n");
+      return { heading: heading.trim(), body: body.join("\n").trim() };
+    });
 }
 
 export function checkDeprecationsPage(input: DeprecationsPageInput): CheckReport {
@@ -50,8 +52,14 @@ export function checkDeprecationsPage(input: DeprecationsPageInput): CheckReport
     failures: [],
   };
   if (source === "") r.failures.push(`${DEPRECATIONS_PAGE} does not exist`);
-  const found = sections(source);
-  r.counts.sections = found.size;
+  const list = sections(source);
+  r.counts.sections = list.length;
+  const found = new Map<string, string>();
+  for (const { heading, body } of list) {
+    if (found.has(heading))
+      r.failures.push(`${DEPRECATIONS_PAGE} has the section "### ${heading}" twice`);
+    else found.set(heading, body);
+  }
   for (const e of register) {
     const body = found.get(e.id);
     if (body === undefined) {
@@ -65,6 +73,10 @@ export function checkDeprecationsPage(input: DeprecationsPageInput): CheckReport
       r.failures.push(`${e.id}: the page does not state "- Deprecated since: \`${e.since}\`"`);
     if (!lines.includes(`- Removed in: \`${e.removeIn}\``))
       r.failures.push(`${e.id}: the page does not state "- Removed in: \`${e.removeIn}\`"`);
+    for (const lead of ["- Deprecated since:", "- Removed in:"]) {
+      const n = lines.filter((l) => l.startsWith(lead)).length;
+      if (n > 1) r.failures.push(`${e.id}: the section has ${n} lines "${lead}"; it has one`);
+    }
     if (built.includes(`id="${e.id}"`)) r.counts.anchors = (r.counts.anchors ?? 0) + 1;
     else r.failures.push(`${e.id}: the built page has no anchor #${e.id}`);
   }
