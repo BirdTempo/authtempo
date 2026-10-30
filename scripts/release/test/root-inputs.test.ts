@@ -2,8 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { checkChangesets } from "../src/check-changesets.ts";
 import { REGISTER_FILE } from "../src/lib/deprecations.ts";
-import { releasedNames } from "../src/lib/released.ts";
+import { readChangesetConfig, releasedNames } from "../src/lib/released.ts";
+import { summaryLine } from "../src/lib/report.ts";
 import { ROOT_INPUTS, rootInputOf } from "../src/lib/root-inputs.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 
@@ -87,6 +89,37 @@ describe("ROOT_INPUTS", () => {
       return row === undefined ? [`${p} (read by prepare) has no row in ROOT_INPUTS`] : [];
     });
     expect(faults).toEqual([]);
+  });
+
+  // Ruling 77 of plan 12j: the row counted each key, so a new unreleased
+  // package in ignore needed a changeset of every released package.
+  it("counts only the fixed group of .changeset/config.json", () => {
+    const path = ".changeset/config.json";
+    const text = read(path);
+    const config = JSON.parse(text) as { fixed: string[][]; ignore: string[] };
+    const check = (head: object) =>
+      checkChangesets({
+        changed: [{ path, base: text, head: `${JSON.stringify(head, null, 2)}\n` }],
+        changesets: [],
+        released: RELEASED,
+        dirs: {},
+        files: {},
+        commits: 1,
+        version: "0.1.0",
+      });
+    // A new unreleased package: no tarball changes, and no changeset is needed.
+    const ignore = check({ ...config, ignore: [...config.ignore, "authtempo-example-new"] });
+    expect(summaryLine(ignore)).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    // A released package leaves the group: each released name needs a changeset.
+    const fewer = check({ ...config, fixed: [(config.fixed[0] ?? []).slice(1)] });
+    expect(fewer.failures).toEqual(
+      RELEASED.map((n) => `${n} changes and no changeset names it: ${path} (fixed)`),
+    );
+    // The release reads only fixed[0] of the file as the released list.
+    expect(RELEASED).toEqual(readChangesetConfig(ROOT).fixed[0]);
+    expect(rootInputOf(path)?.keys).toEqual(["fixed"]);
   });
 
   it("holds each example that the CLI build renders, and each migration source", () => {

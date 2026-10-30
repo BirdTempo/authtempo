@@ -54,6 +54,11 @@ export const ROOT_INPUTS: readonly RootInput[] = [
   {
     path: ".changeset/config.json",
     names: "all",
+    // Each new unreleased package adds its name to ignore (check-packages).
+    // With each key counted, that edit needed a changeset of every released
+    // package, which writes a false entry in each changelog (ruling 77 of
+    // plan 12j). Only fixed changes a tarball.
+    keys: ["fixed"],
     reason: "its fixed group is the released list of prepare, the build, and the pack",
   },
   {
