@@ -28,6 +28,49 @@ const ALLOWED: readonly { file: string; read: string; why: string }[] = [
   },
 ];
 
+/**
+ * The packages beside core and the shim whose sources take a request (ruling
+ * 68 Low 2 of the 12j lane): the ten bindings, verify, handoff, and mcp. Each
+ * raw read that one may make, with the reason. Each entry must match its count.
+ */
+const OTHER_PACKAGES = [
+  "hono",
+  "express",
+  "fastify",
+  "next",
+  "astro",
+  "sveltekit",
+  "react-router",
+  "solid",
+  "tanstack-start",
+  "vue",
+  "verify",
+  "handoff",
+  "mcp",
+] as const;
+const OTHER_ALLOWED: readonly {
+  pkg: (typeof OTHER_PACKAGES)[number];
+  file: string;
+  read: string;
+  count: number;
+  why: string;
+}[] = [
+  {
+    pkg: "express",
+    file: "src/index.ts",
+    read: "req.body",
+    count: 1,
+    why: "the value of an Express parser that ran first: Express names its own type Request, and core caps the text it gets",
+  },
+  {
+    pkg: "mcp",
+    file: "src/worker.ts",
+    read: "request.body",
+    count: 2,
+    why: "readCapped: the one read of the MCP worker, with its own cap of LIMITS.bodyBytes",
+  },
+];
+
 const compilerApi = async (): Promise<unknown> =>
   ((await import(/* @vite-ignore */ TS_MODULE)) as { default: unknown }).default;
 
@@ -81,5 +124,30 @@ describe("the raw body reads of core (ruling 46 of the 12j lane)", () => {
       "request.body",
       "request.text",
     ]);
+  });
+});
+
+describe("the raw body reads of the bindings, verify, handoff, and mcp (ruling 68 Low 2 of the 12j lane)", () => {
+  it("reads a request body only in the allowed reader of each package", {
+    timeout: 300_000,
+  }, async () => {
+    const ts = await compilerApi();
+    const lines: string[] = [];
+    for (const pkg of OTHER_PACKAGES) {
+      const { files, reads } = rawBodyReads(ts, pathOf(`../../${pkg}/tsconfig.json`));
+      lines.push(`body-reads: ${pkg} files=${files} reads=${reads.length}`);
+      // Each package has source files: a tsconfig that the scan cannot read fails here.
+      expect([pkg, files > 0]).toEqual([pkg, true]);
+      const mine = OTHER_ALLOWED.filter((a) => a.pkg === pkg);
+      const allowed = (r: string) =>
+        mine.some((a) => r.startsWith(`${a.file}:`) && r.endsWith(` ${a.read}`));
+      expect([pkg, reads.filter((r) => !allowed(r))]).toEqual([pkg, []]);
+      for (const a of mine)
+        expect([
+          pkg,
+          reads.filter((r) => r.startsWith(`${a.file}:`) && r.endsWith(` ${a.read}`)).length,
+        ]).toEqual([pkg, a.count]);
+    }
+    console.log(lines.join("\n"));
   });
 });
