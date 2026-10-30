@@ -58,9 +58,10 @@ sidebar:
 - A body parser such as `express.json()` may run before the routes of core. The binding writes the parsed body again in its content type.
 - Mount the routes of core before the body parser of the app. Core then reads each body itself, at the cap of its route, and answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large) past it. The parser of the app keeps its default limit for the other routes.
 - A parser that must run first answers its own 413 before core past its limit. The default limit of `express.json()` is 100 kB, and an SSO connection write can need more.
-- Such a parser can skip the base path of core, so core reads those bodies at their caps: `app.use((req, res, next) => (req.path.startsWith("/auth/") ? next() : json(req, res, next)))`, with `const json = express.json()`.
-- If it must parse the two SSO connection writes, give it 8388608 bytes on those two paths only: `app.use(["/auth/sso/connections/create", "/auth/sso/connections/update"], express.json({ limit: 8388608 }))`. Mount it before the parser of the other routes.
-- That parser reads those two bodies before core checks the session, and it has no depth or item limit. On 2026-10-30, one body of 8 MiB of nested arrays with no sign-in stopped a process with a heap of 256 MB.
+- Make such a parser skip the base path of core, so core reads those bodies at their caps: `app.use((req, res, next) => (req.path.startsWith("/auth/") ? next() : json(req, res, next)))`, with `const json = express.json()`.
+- These are the two setups. Do not give a parser the bodies of core's routes, not even on the two SSO connection paths only.
+- A parser reads a body before core checks the session, and it has no depth or item limit.
+- On 2026-10-30, a parser ran on the two SSO connection paths only, with their cap of 8 MiB as its limit. One body of nested arrays at that limit, with no sign-in, stopped a process with a heap of 256 MB.
 - Never raise the limit of a parser for every route: the same body then stops the process at any route.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.

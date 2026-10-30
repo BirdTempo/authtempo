@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, and 51 of the 12j lane).
-// The errors page, the limits page, the Express and Fastify pages, and the
-// core README state the caps and the scan limits by hand. This test reads
-// each constant from the source of core and each number from the pages, in
-// the form of sso-scim-limits.test.ts. A new derivation that changes a
-// constant fails here until each line says the new value. A cap number in
-// one of the files that no fact holds fails too, so no line drifts unseen.
+// The request body limits of core (rulings 43, 46, 51, and 56 of the 12j
+// lane). The errors page, the limits page, the Express and Fastify pages, the
+// core README, and the Express README state the caps and the scan limits by
+// hand. This test reads each constant from the source of core and each
+// number from the pages, in the form of sso-scim-limits.test.ts. A new
+// derivation that changes a constant fails here until each line says the new
+// value. A cap number in one of the files that no fact holds fails too, so no
+// line drifts unseen.
 
 const BODY_CAP = `${REPO}packages/core/src/http/body-cap.ts`;
 const source = readFileSync(BODY_CAP, "utf8");
@@ -24,6 +25,7 @@ const FILES = {
   express: `${DOCS}docs/reference/express.md`,
   fastify: `${DOCS}docs/reference/fastify.md`,
   readme: `${REPO}packages/core/README.md`,
+  expressReadme: `${REPO}packages/express/README.md`,
 } as const;
 type FileKey = keyof typeof FILES;
 
@@ -93,9 +95,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /and (\d+) bytes for the two SSO connection writes/],
       ["limits", /and (\d+) for the two SSO connection writes/],
       ["readme", /and (\d+) (MiB) for the two SSO connection writes/],
-      ["express", /give it (\d+) bytes on those two paths only/],
-      ["express", /express\.json\(\{ limit: (\d+) \}\)/],
-      ["express", /one body of (\d+) (MiB) of nested arrays/],
+      // The measure of ruling 56: a parser at this cap on the two SSO paths stopped a process.
+      ["express", /with their cap of (\d+) (MiB) as its limit/],
+      ["expressReadme", /with their cap of (\d+) (MiB) as its limit/],
     ],
   ],
   [
@@ -106,7 +108,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   [
     "the largest cap",
     () => constant("REQUEST_BODY_MAX"),
-    [["express", /give it (\d+) bytes on those two paths only/]],
+    [["readme", /and (\d+) (MiB) for the two SSO connection writes \(`REQUEST_BODY_MAX`\)/]],
   ],
   [
     "the depth limit",
@@ -168,7 +170,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, and 51 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, and 56 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();

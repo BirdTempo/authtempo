@@ -12,8 +12,12 @@ the same there. The Express adapter of NestJS 12 pins Express 5.2.1.
 - A body parser such as `express.json()` may run before the routes of core:
   the binding writes the parsed body again in its content type. Such a
   parser reads each body before core's cap and before its session check, and
-  it has no depth or item limit. Mount core first, or let the parser skip the
-  base path of core. Never raise its limit for every route
+  it has no depth or item limit. Mount core first, or make the parser skip
+  the base path of core. Do not give a parser the bodies of core's routes,
+  not even on the two SSO connection paths only. On 2026-10-30, a parser ran
+  on those two paths only, with their cap of 8 MiB as its limit. One body of
+  nested arrays at that limit, with no sign-in, stopped a process with a
+  heap of 256 MB. Never raise the limit of a parser for every route
   (https://authtempo.com/docs/reference/express/).
 - `authSession` reads no session for a route of core, and adds the renewed
   cookie to the answer after the sliding refresh.
