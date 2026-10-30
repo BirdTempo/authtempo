@@ -215,6 +215,17 @@ const README_ALIASES = `    "better-auth": "npm:@authtempo/compat-better-auth@0.
 /** A code sample at the new version: each 0.0.0 becomes VERSION_SLOT. */
 const atVersion = (sample: string) => sample.replaceAll("0.0.0", VERSION_SLOT);
 
+/** The install line of the section Packages of the root README, before the first release. */
+const README_INSTALL =
+  "After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.";
+
+/** The owner check of the ID token route on the routes page, with its three steps. */
+const ID_TOKEN_OWNER_CHECK = `Owner check before the first release with this route. Core's tests use test keys, not real tokens. Run these checks on a real device:
+
+1. Sign in once with Google One Tap. Give it \`providerNonce\`, and confirm that the token's \`nonce\` claim is that value.
+2. Sign in once with the native Apple sheet. Give it \`providerNonce\`, and confirm that the token's \`nonce\` claim is that value.
+3. On the Apple token, confirm that \`exp\` minus \`iat\` is 86400 seconds or less. Core refuses a token with a longer life.`;
+
 /**
  * Each text that is true only while no release exists (review M2 and L7 of
  * plan 12j Task 13b). check-pre-release holds each one in its file while core
@@ -226,7 +237,10 @@ const atVersion = (sample: string) => sample.replaceAll("0.0.0", VERSION_SLOT);
  * The note of the root README and the code samples that pin 0.0.0 joined it
  * (ruling 52 of plan 12j), so the list holds each pre-release text of a file
  * outside the packed notes and the page notes. docs/release/RUNBOOK.md quotes
- * each entry, and a site test holds the quotes.
+ * each entry, and a site test holds the quotes. Ruling 58 of plan 12j added
+ * "before the first release" and "after the first release" to
+ * PRE_RELEASE_PATTERN, with their two texts: the install line of the root
+ * README and the owner check of the routes page (`git grep -i`, 2026-10-30).
  */
 export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
   // The support row step writes the support table in its place.
@@ -272,6 +286,12 @@ export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
   },
   { file: "README.md", sentence: "The packages are not on a registry yet.", published: "" },
   {
+    file: "README.md",
+    sentence: README_INSTALL,
+    published:
+      "Add the packages with `pnpm add @authtempo/core @authtempo/adapter-d1`, then run `npm audit signatures`.",
+  },
+  {
     file: "apps/site/src/content/docs/docs/migrate/better-auth.mdx",
     sentence: PAGE_ALIASES,
     published: atVersion(PAGE_ALIASES),
@@ -281,7 +301,34 @@ export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
     sentence: README_ALIASES,
     published: atVersion(README_ALIASES),
   },
+  // The owner runs the checks on a real device, then removes the text: the
+  // check-pre-release step of "The first release" in docs/release/RUNBOOK.md.
+  // A script cannot run them, and a removal by the script drops the gate.
+  {
+    file: "apps/site/src/content/docs/docs/reference/routes.md",
+    sentence: ID_TOKEN_OWNER_CHECK,
+    published: null,
+  },
 ];
 
 /** The words of a text that holds only before the first release. */
-export const PRE_RELEASE_PATTERN = /no release|until the first release/i;
+export const PRE_RELEASE_PATTERN = /no release|(?:until|before|after) the first release/i;
+
+/** A text that holds PRE_RELEASE_PATTERN and stays true at every version. */
+export interface PreReleaseExempt {
+  file: string;
+  /** The whole text, as in its file. */
+  text: string;
+  /** Why the text stays after the first release. */
+  reason: string;
+}
+
+/**
+ * The texts that hold PRE_RELEASE_PATTERN and stay at every version, each
+ * with its reason (ruling 58 of plan 12j, item 5). check-pre-release passes
+ * a match inside one of them. It fails an entry whose file lacks the text,
+ * an entry with no reason, a text that PRE_RELEASE_SENTENCES also lists, and
+ * a text with no match of the pattern. A `git grep -i` of the pattern on
+ * 2026-10-30 found no such text, so the list is empty.
+ */
+export const PRE_RELEASE_EXEMPT: readonly PreReleaseExempt[] = [];

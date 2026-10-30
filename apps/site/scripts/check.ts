@@ -23,6 +23,7 @@ import { REPO_ROOT } from "../src/data/repo.ts";
 import { SITE } from "../src/data/site.ts";
 import {
   CHANGELOG_EMPTY,
+  PRE_RELEASE_EXEMPT,
   PRE_RELEASE_PATTERN,
   PRE_RELEASE_SENTENCES,
   REGISTRY_INSTALL,
@@ -538,6 +539,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         read: readRepoFile,
         pages: docsPages(),
         pattern: PRE_RELEASE_PATTERN,
+        exempt: PRE_RELEASE_EXEMPT,
       }),
   },
   {

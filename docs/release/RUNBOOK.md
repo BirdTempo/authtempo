@@ -117,6 +117,7 @@ The version pull request of `0.1.0` also makes these edits. Each check fails unt
 - Read each changed file. The script changes only the listed texts. Correct the text around a note by a commit when it still names the clone.
 - `check-resources`: in `apps/site/src/content/docs/docs/resources.md`, remove the sentence `RESOURCES_EMPTY`. Add one row for each released package with its npm page, one row for each example folder, and one row for the demo at `/demo/`. The script leaves this text.
 - `check-support` and `check-security-policy`: step 5 adds the row of the first minor to `release/support.json`. Write its table in `SECURITY.md` in the place of the first text below, which the script leaves. The forms are below.
+- `check-pre-release`: in `apps/site/src/content/docs/docs/reference/routes.md`, do the owner check of `POST /social/:provider/id-token` on a real device. If a check fails, stop the release. Then remove the paragraph and its three steps, the last text below. The script leaves this text.
 
 The texts of `PRE_RELEASE_SENTENCES`, each under its file:
 
@@ -138,6 +139,7 @@ apps/site/src/data/compare.ts
   No release notes yet.
 README.md
   The packages are not on a registry yet.
+  After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.
 apps/site/src/content/docs/docs/migrate/better-auth.mdx
       "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
       "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
@@ -162,6 +164,12 @@ packages/compat-better-auth/README.md
       "@authtempo/handoff": "0.0.0",
       "@authtempo/adapter-d1": "0.0.0",
       "@authtempo/adapter-postgres": "0.0.0"
+apps/site/src/content/docs/docs/reference/routes.md
+  Owner check before the first release with this route. Core's tests use test keys, not real tokens. Run these checks on a real device:
+
+  1. Sign in once with Google One Tap. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
+  2. Sign in once with the native Apple sheet. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
+  3. On the Apple token, confirm that `exp` minus `iat` is 86400 seconds or less. Core refuses a token with a longer life.
 ```
 
 The row of the first minor in `release/support.json`. Write the UTC day of the publish in `released`, and `SCHEMA_VERSION` of `packages/core/src/schema.ts` in `schemaFrom`:

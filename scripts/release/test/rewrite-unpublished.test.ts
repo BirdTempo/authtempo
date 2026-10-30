@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { checkPreRelease } from "../../../apps/site/scripts/check-pre-release.ts";
 import { checkUnpublished } from "../../../apps/site/scripts/check-unpublished.ts";
 import {
+  PRE_RELEASE_EXEMPT,
   PRE_RELEASE_PATTERN,
   PRE_RELEASE_SENTENCES,
   REGISTRY_INSTALL,
@@ -85,9 +86,9 @@ describe("rewrite-unpublished on the tree", () => {
   it("rewrites each listed text of the tree, and the checks pass at the new version", () => {
     const r = rewriteUnpublished(readTree, "0.1.0");
     expect(r.failures).toEqual([]);
-    // 12 packed files with 13 notes, 42 pages with 44 note lines, and 12 texts, 2 of them by hand.
+    // 12 packed files with 13 notes, 42 pages with 44 note lines, and 14 texts, 3 of them by hand.
     expect(summaryLine(r)).toBe(
-      "rewrite-unpublished: PASS files=12 notes=13 pages=42 lines=44 texts=10 hand=2 failures=0",
+      "rewrite-unpublished: PASS files=12 notes=13 pages=42 lines=44 texts=11 hand=3 failures=0",
     );
     // A listed file that the rewrite did not change fails here.
     expect([...r.texts.keys()].sort()).toEqual(rewrittenPaths());
@@ -129,7 +130,7 @@ describe("rewrite-unpublished on the tree", () => {
       }).failures,
     ).toEqual([]);
 
-    // check-pre-release at 0.1.0: only the two texts of the runbook steps stay.
+    // check-pre-release at 0.1.0: only the three texts of the runbook steps stay.
     expect(
       checkPreRelease({
         version: "0.1.0",
@@ -137,6 +138,7 @@ describe("rewrite-unpublished on the tree", () => {
         read: rewritten,
         pages,
         pattern: PRE_RELEASE_PATTERN,
+        exempt: PRE_RELEASE_EXEMPT,
       }).failures,
     ).toEqual(
       PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
@@ -145,7 +147,7 @@ describe("rewrite-unpublished on the tree", () => {
     );
     expect(r.notes).toEqual(
       PRE_RELEASE_SENTENCES.filter((e) => e.published === null).map(
-        (e) => `by hand: ${e.file}: ${e.sentence}`,
+        (e) => `by hand: ${e.file}: ${e.sentence.split("\n")[0]}`,
       ),
     );
   });

@@ -10,8 +10,10 @@ import { docsPages, readRepoFile } from "../scripts/lib/load.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
 import { SITE } from "../src/data/site.ts";
 import {
+  PRE_RELEASE_EXEMPT,
   PRE_RELEASE_PATTERN,
   PRE_RELEASE_SENTENCES,
+  type PreReleaseExempt,
   type PreReleaseSentence,
 } from "../src/data/unpublished.ts";
 
@@ -39,6 +41,7 @@ function inputOf(version: string, texts: ReadonlyMap<string, string>): PreReleas
       .filter(([path]) => path.startsWith(DOCS_DIR))
       .map(([path, source]) => ({ path: path.slice(DOCS_DIR.length), source })),
     pattern: PRE_RELEASE_PATTERN,
+    exempt: PRE_RELEASE_EXEMPT,
   };
 }
 
@@ -62,7 +65,7 @@ describe("check-pre-release", () => {
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toMatch(
       new RegExp(
-        `^check-pre-release: PASS listed=${PRE_RELEASE_SENTENCES.length} files=\\d+ pages=\\d+ present=${PRE_RELEASE_SENTENCES.length} failures=0$`,
+        `^check-pre-release: PASS listed=${PRE_RELEASE_SENTENCES.length} files=\\d+ pages=\\d+ present=${PRE_RELEASE_SENTENCES.length} exempt=${PRE_RELEASE_EXEMPT.length} failures=0$`,
       ),
     );
   });
@@ -106,6 +109,53 @@ describe("check-pre-release", () => {
     ]);
   });
 
+  // Ruling 58 of plan 12j, item 5: the words of the README install line and of the owner check.
+  it("fails a text with before or after the first release that the list lacks", () => {
+    const texts = realTexts();
+    const page = `${DOCS_DIR}docs/resources.md`;
+    for (const words of ["Before the first release", "AFTER THE FIRST RELEASE"]) {
+      const added = new Map(texts).set(page, `${texts.get(page)}\n${words}, read the repo.\n`);
+      const line = (added.get(page) ?? "").split("\n").length - 1;
+      const want = `${page}:${line}: holds "${words}", and PRE_RELEASE_SENTENCES lacks its text: ${words}, read the repo.`;
+      expect(failures(inputOf("0.0.0", added)), words).toEqual([want]);
+      expect(failures(inputOf("0.1.0", without(added))), words).toEqual([want]);
+    }
+  });
+
+  it("passes a text of PRE_RELEASE_EXEMPT at every version, and holds each entry", () => {
+    const texts = realTexts();
+    const page = `${DOCS_DIR}docs/resources.md`;
+    const text = "The upgrade command works after the first release.";
+    const added = new Map(texts).set(page, `${texts.get(page)}\n${text}\n`);
+    const entry: PreReleaseExempt = { file: page, text, reason: "true at every version" };
+    const withEntry = (
+      version: string,
+      map: ReadonlyMap<string, string>,
+      ...exempt: PreReleaseExempt[]
+    ) => failures({ ...inputOf(version, map), exempt });
+    expect(withEntry("0.0.0", added, entry)).toEqual([]);
+    expect(withEntry("0.1.0", without(added), entry)).toEqual([]);
+    expect(withEntry("0.0.0", added)).toHaveLength(1);
+    expect(
+      withEntry(
+        "0.0.0",
+        texts,
+        entry,
+        entry,
+        { ...entry, text: "A plain line with no match.", reason: " " },
+        { file: "SECURITY.md", text: PRE_RELEASE_SENTENCES[1]?.sentence ?? "", reason: "x" },
+      ),
+    ).toEqual([
+      `PRE_RELEASE_EXEMPT names ${page}, which lacks the text: ${text}`,
+      `PRE_RELEASE_EXEMPT lists twice, in ${page}: ${text}`,
+      `PRE_RELEASE_EXEMPT names ${page}, which lacks the text: ${text}`,
+      `PRE_RELEASE_EXEMPT names ${page}, which lacks the text: A plain line with no match.`,
+      `PRE_RELEASE_EXEMPT: the text of ${page} has no reason: A plain line with no match.`,
+      `PRE_RELEASE_EXEMPT: the text of ${page} does not hold the pattern, so it needs no entry: A plain line with no match.`,
+      `SECURITY.md: PRE_RELEASE_SENTENCES and PRE_RELEASE_EXEMPT both list the text: ${PRE_RELEASE_SENTENCES[1]?.sentence}`,
+    ]);
+  });
+
   it("fails a listed file that does not exist, a text listed twice, and an empty read", () => {
     const [first] = PRE_RELEASE_SENTENCES;
     if (first === undefined) throw new Error("PRE_RELEASE_SENTENCES is empty");
@@ -144,11 +194,12 @@ describe("the quotes of docs/release/RUNBOOK.md", () => {
     expect(start).toBeGreaterThan(-1);
     const files = [...new Set(PRE_RELEASE_SENTENCES.map((e) => e.file))];
     // Each line of a text, such as a line of a code sample, gets the indent.
+    // An empty line, such as one between a paragraph and a list, stays empty.
     const block = files
       .flatMap((file) => [
         file,
         ...PRE_RELEASE_SENTENCES.filter((e) => e.file === file).flatMap((e) =>
-          e.sentence.split("\n").map((line) => `  ${line}`),
+          e.sentence.split("\n").map((line) => (line === "" ? "" : `  ${line}`)),
         ),
       ])
       .join("\n");

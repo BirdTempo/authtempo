@@ -11,14 +11,18 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const README = readFileSync(join(root, "README.md"), "utf8");
 
 /**
- * The note of the section Packages while no release exists (plan 12j Task 14
- * Step 3): its entry of PRE_RELEASE_SENTENCES, which rewrite-unpublished removes.
+ * The two texts of the section Packages while no release exists, each with
+ * its entry of PRE_RELEASE_SENTENCES (plan 12j Task 14 Step 3, and ruling 58
+ * item 5): the note, which rewrite-unpublished removes, and the install line,
+ * which it replaces with the published install line.
  */
-const ENTRY = PRE_RELEASE_SENTENCES.find((e) => e.file === "README.md");
-const NOTE = ENTRY?.sentence ?? "";
-/** The install line of the section Packages. */
+const ENTRIES = PRE_RELEASE_SENTENCES.filter((e) => e.file === "README.md");
+const NOTE = ENTRIES.find((e) => noteForms(e.sentence).length > 0)?.sentence ?? "";
+/** The install line of the section Packages at 0.0.0. */
 const INSTALL =
   "After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.";
+/** The install line in its place above 0.0.0. */
+const PUBLISHED = ENTRIES.find((e) => e.sentence === INSTALL)?.published ?? "";
 
 /** The text of the section `## <name>`, up to the next `## ` heading. */
 function section(text: string, name: string): string | null {
@@ -30,47 +34,62 @@ function section(text: string, name: string): string | null {
 
 /**
  * The faults of the root README at the group version `version`. At 0.0.0 the
- * section Packages holds the note and the install line. Above 0.0.0 no line
- * holds a note form of UNPUBLISHED_FORMS, in any case, so the version branch
- * removes it, as it removes each note of UNPUBLISHED_FILES.
+ * section Packages holds the note and the install line. Above 0.0.0 it holds
+ * the published install line, no line holds the install line of 0.0.0, and
+ * no line holds a note form of UNPUBLISHED_FORMS, in any case. So the version
+ * branch rewrites both texts, as it rewrites each note of UNPUBLISHED_FILES.
  */
 function readmeFaults(text: string, version: string): string[] {
   const faults: string[] = [];
   const packages = section(text, "Packages");
   if (packages === null) return ["the README has no section Packages"];
-  if (!packages.includes(INSTALL)) faults.push("the section Packages lacks the install line");
   const forms = noteForms(text);
   if (version === UNPUBLISHED_VERSION) {
     if (!packages.includes(NOTE)) faults.push(`the section Packages lacks the note: ${NOTE}`);
-  } else if (forms.length > 0)
-    faults.push(
-      `the group is at ${version}, and the README still holds ${forms.map((f) => `"${f}"`).join(", ")}`,
-    );
+    if (!packages.includes(INSTALL)) faults.push("the section Packages lacks the install line");
+  } else {
+    if (forms.length > 0)
+      faults.push(
+        `the group is at ${version}, and the README still holds ${forms.map((f) => `"${f}"`).join(", ")}`,
+      );
+    if (text.includes(INSTALL))
+      faults.push(
+        `the group is at ${version}, and the README still holds the install line of 0.0.0`,
+      );
+    if (!packages.includes(PUBLISHED))
+      faults.push(
+        `the group is at ${version}, and the section Packages lacks the published install line`,
+      );
+  }
   return faults;
 }
 
-/** The README of the release day: rewrite-unpublished with the entry of the README only. */
+/** The README of the release day: rewrite-unpublished with the entries of the README only. */
 function released(text: string): string {
-  if (ENTRY === undefined) throw new Error("PRE_RELEASE_SENTENCES has no entry of README.md");
-  const lists = { files: [], pages: [], pageNotes: [], sentences: [ENTRY] };
+  const lists = { files: [], pages: [], pageNotes: [], sentences: ENTRIES };
   const r = rewriteUnpublished((p) => (p === "README.md" ? text : null), "0.1.0", lists);
   expect(r.failures).toEqual([]);
   return r.texts.get("README.md") ?? "";
 }
 
 describe("the root README", () => {
-  it("holds the note while the group is at 0.0.0, and the install line at each version", () => {
+  it("holds the note and the install line at 0.0.0, and the published install line above", () => {
+    expect(ENTRIES).toHaveLength(2);
     expect(noteForms(NOTE)).toEqual(["not on a registry yet"]);
+    expect(PUBLISHED).toContain("`pnpm add @authtempo/core @authtempo/adapter-d1`");
     expect(readmeFaults(README, groupVersion(root))).toEqual([]);
-    // Both ways: the release-day README has no note, and the README of main keeps it.
+    // Both ways: the release-day README has the published texts, and the README of main keeps them.
     const day = released(README);
-    expect(day).toBe(README.replace(`${NOTE}\n\n`, ""));
+    expect(day).toBe(README.replace(`${NOTE}\n\n`, "").replace(INSTALL, PUBLISHED));
     expect(readmeFaults(day, "0.1.0")).toEqual([]);
     expect(readmeFaults(README, "0.1.0")).toEqual([
       'the group is at 0.1.0, and the README still holds "not on a registry yet"',
+      "the group is at 0.1.0, and the README still holds the install line of 0.0.0",
+      "the group is at 0.1.0, and the section Packages lacks the published install line",
     ]);
     expect(readmeFaults(day, "0.0.0")).toEqual([
       "the section Packages lacks the note: The packages are not on a registry yet.",
+      "the section Packages lacks the install line",
     ]);
     // Each form counts, in any case (ruling 53, Major 1).
     expect(readmeFaults(`${day}\nWhen the package is published, run x.\n`, "0.1.0")).toEqual([

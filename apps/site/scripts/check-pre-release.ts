@@ -7,7 +7,9 @@
 // too, so a removed text with no support row also fails. The check also reads
 // each docs page and each listed file for PRE_RELEASE_PATTERN. A match outside
 // the list fails at every version, so a new text of this kind joins the list.
-import type { PreReleaseSentence } from "../src/data/unpublished.ts";
+// A text that stays true after the first release takes an entry of
+// PRE_RELEASE_EXEMPT with its reason instead (ruling 58 of plan 12j, item 5).
+import type { PreReleaseExempt, PreReleaseSentence } from "../src/data/unpublished.ts";
 import type { Page } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
@@ -25,6 +27,8 @@ export interface PreReleaseInput {
   pages: readonly Page[];
   /** PRE_RELEASE_PATTERN. */
   pattern: RegExp;
+  /** PRE_RELEASE_EXEMPT. */
+  exempt: readonly PreReleaseExempt[];
 }
 
 /** The line of a text that holds the index, trimmed and cut to 80 characters. */
@@ -40,10 +44,16 @@ function lineAt(text: string, index: number): { line: number; excerpt: string } 
 }
 
 export function checkPreRelease(input: PreReleaseInput): CheckReport {
-  const { version, listed, read, pages } = input;
+  const { version, listed, read, pages, exempt } = input;
   const r: CheckReport = {
     name: "check-pre-release",
-    counts: { listed: listed.length, files: 0, pages: pages.length, present: 0 },
+    counts: {
+      listed: listed.length,
+      files: 0,
+      pages: pages.length,
+      present: 0,
+      exempt: exempt.length,
+    },
     failures: [],
   };
   const unreleased = version === "0.0.0";
@@ -78,17 +88,41 @@ export function checkPreRelease(input: PreReleaseInput): CheckReport {
       );
   }
 
-  // Each match of the pattern lies inside a listed text of its file.
+  // Each exempt text is in its file at every version, with a reason and a match.
   const global = new RegExp(input.pattern.source, `${input.pattern.flags.replace("g", "")}g`);
+  const exemptSeen = new Set<string>();
+  for (const e of exempt) {
+    const key = `${e.file}\n${e.text}`;
+    if (exemptSeen.has(key))
+      r.failures.push(`PRE_RELEASE_EXEMPT lists twice, in ${e.file}: ${e.text}`);
+    exemptSeen.add(key);
+    const text = texts.get(e.file) ?? read(e.file);
+    if (text !== null) texts.set(e.file, text);
+    if (text === null || !text.includes(e.text))
+      r.failures.push(`PRE_RELEASE_EXEMPT names ${e.file}, which lacks the text: ${e.text}`);
+    if (e.reason.trim() === "")
+      r.failures.push(`PRE_RELEASE_EXEMPT: the text of ${e.file} has no reason: ${e.text}`);
+    if (listed.some((l) => l.file === e.file && l.sentence === e.text))
+      r.failures.push(
+        `${e.file}: PRE_RELEASE_SENTENCES and PRE_RELEASE_EXEMPT both list the text: ${e.text}`,
+      );
+    if ([...e.text.matchAll(global)].length === 0)
+      r.failures.push(
+        `PRE_RELEASE_EXEMPT: the text of ${e.file} does not hold the pattern, so it needs no entry: ${e.text}`,
+      );
+  }
+
+  // Each match of the pattern lies inside a listed or an exempt text of its file.
   for (const [file, text] of texts) {
-    const spans = listed
-      .filter((e) => e.file === file)
-      .flatMap((e) => {
-        const out: [number, number][] = [];
-        for (let i = text.indexOf(e.sentence); i !== -1; i = text.indexOf(e.sentence, i + 1))
-          out.push([i, i + e.sentence.length]);
-        return out;
-      });
+    const spans = [
+      ...listed.filter((e) => e.file === file).map((e) => e.sentence),
+      ...exempt.filter((e) => e.file === file).map((e) => e.text),
+    ].flatMap((part) => {
+      const out: [number, number][] = [];
+      for (let i = text.indexOf(part); i !== -1; i = text.indexOf(part, i + 1))
+        out.push([i, i + part.length]);
+      return out;
+    });
     for (const m of text.matchAll(global)) {
       const at = m.index ?? 0;
       if (spans.some(([from, to]) => at >= from && at + m[0].length <= to)) continue;
