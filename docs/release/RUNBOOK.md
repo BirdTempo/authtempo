@@ -110,12 +110,11 @@ Write the real version in place of `0.1.0`.
 
 The version pull request of `0.1.0` also makes these edits. Each check fails until its edit is done.
 
-- `check-unpublished`: on each page of `UNPUBLISHED_PAGES` in `apps/site/src/data/unpublished.ts`, replace the note "not on a registry yet" with `REGISTRY_INSTALL`. Change the page text around it to the published form.
-- `check-resources`: in `apps/site/src/content/docs/docs/resources.md`, remove the sentence `RESOURCES_EMPTY`. Add one row for each released package with its npm page, one row for each example folder, and one row for the demo at `/demo/`.
-- `check-policy-pages`: in `apps/site/src/content/docs/docs/versioning.md`, remove the section "The versions today".
-- `check-pre-release`: remove each text of `PRE_RELEASE_SENTENCES` in `apps/site/src/data/unpublished.ts` from its file. Where a text fills a cell of `/compare/`, write the state of the release in its place. The texts are below.
-- `check-support` and `check-security-policy`: add the row of the new minor to `release/support.json`, and its table to `SECURITY.md`. The forms are below.
-- `check-pack`: in each packed file of `UNPUBLISHED_FILES`, replace the note with the install text of the package. The forms of the note are "not on a registry yet", "It is not published", and "When the package is published". Each such file ships in a tarball and shows on npmjs.com.
+- Run `node scripts/release/src/rewrite-unpublished.ts`. It replaces each note of `UNPUBLISHED_FILES`, each note line of `PAGE_NOTES` on the pages of `UNPUBLISHED_PAGES`, and each text of `PRE_RELEASE_SENTENCES` with its published text. It also removes the section "The versions today" of the versioning page. If it prints FAIL, it writes no file. Then correct the list in the code, and run it again. Without it, `check-pack`, `check-unpublished`, `check-policy-pages`, and `check-pre-release` fail.
+- Then run `pnpm format`. A rewritten cell of `apps/site/src/data/compare.ts` can pass the line width of Biome.
+- Read each changed file. The script changes only the listed texts. Correct the text around a note by a commit when it still names the clone.
+- `check-resources`: in `apps/site/src/content/docs/docs/resources.md`, remove the sentence `RESOURCES_EMPTY`. Add one row for each released package with its npm page, one row for each example folder, and one row for the demo at `/demo/`. The script leaves this text.
+- `check-support` and `check-security-policy`: add the row of the new minor to `release/support.json`. Write its table in `SECURITY.md` in the place of the first text below, which the script leaves. The forms are below.
 
 The texts of `PRE_RELEASE_SENTENCES`, each under its file:
 
@@ -135,6 +134,32 @@ apps/site/src/content/docs/docs/resources.md
 apps/site/src/data/compare.ts
   No release yet.
   No release notes yet.
+README.md
+  The packages are not on a registry yet.
+apps/site/src/content/docs/docs/migrate/better-auth.mdx
+      "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@authtempo/core": "0.0.0",
+      "@authtempo/client": "0.0.0",
+      "@authtempo/handoff": "0.0.0",
+      "@authtempo/adapter-d1": "0.0.0",
+      "@authtempo/adapter-postgres": "0.0.0"
+packages/compat-better-auth/README.md
+      "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/sso": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@better-auth/scim": "npm:@authtempo/compat-better-auth@0.0.0",
+      "@authtempo/core": "0.0.0",
+      "@authtempo/client": "0.0.0",
+      "@authtempo/handoff": "0.0.0",
+      "@authtempo/adapter-d1": "0.0.0",
+      "@authtempo/adapter-postgres": "0.0.0"
 ```
 
 The row of the first minor in `release/support.json`. Write the UTC day of the publish in `released`, and `SCHEMA_VERSION` of `packages/core/src/schema.ts` in `schemaFrom`:

@@ -113,7 +113,11 @@ describe("check-pre-release", () => {
     expect(
       failures({
         ...input,
-        listed: [...PRE_RELEASE_SENTENCES, first, { file: "docs/gone.md", sentence: "x" }],
+        listed: [
+          ...PRE_RELEASE_SENTENCES,
+          first,
+          { file: "docs/gone.md", sentence: "x", published: "" },
+        ],
       }),
     ).toEqual([
       "PRE_RELEASE_SENTENCES names docs/gone.md, which does not exist",
@@ -139,14 +143,19 @@ describe("the quotes of docs/release/RUNBOOK.md", () => {
   it("quotes each text of PRE_RELEASE_SENTENCES under its file, in the order of the list", () => {
     expect(start).toBeGreaterThan(-1);
     const files = [...new Set(PRE_RELEASE_SENTENCES.map((e) => e.file))];
+    // Each line of a text, such as a line of a code sample, gets the indent.
     const block = files
       .flatMap((file) => [
         file,
-        ...PRE_RELEASE_SENTENCES.filter((e) => e.file === file).map((e) => `  ${e.sentence}`),
+        ...PRE_RELEASE_SENTENCES.filter((e) => e.file === file).flatMap((e) =>
+          e.sentence.split("\n").map((line) => `  ${line}`),
+        ),
       ])
       .join("\n");
     expect(fences.map((f) => f.body)).toContain(`${block}\n`);
-    expect(part).toContain("- `check-pre-release`: remove each text of `PRE_RELEASE_SENTENCES`");
+    // The rewrite script of the release package writes each text with a published form.
+    expect(part).toContain("- Run `node scripts/release/src/rewrite-unpublished.ts`.");
+    expect(part).toContain("each text of `PRE_RELEASE_SENTENCES` with its published text");
   });
 
   it("quotes a support row and a table that check-security-policy takes after the edits", () => {

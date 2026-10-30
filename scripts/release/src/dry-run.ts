@@ -24,7 +24,7 @@ import {
 import { SCOPE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
-import { listedNotePath, UNPUBLISHED_MARK, UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
+import { UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 export interface RunResult {
@@ -99,6 +99,17 @@ export const PNPM_PUBLISH_ARGS: readonly string[] = [
 
 /** The body of the one temporary changeset. */
 export const CHANGESET_BODY = "Dry run of the next release.";
+
+/**
+ * The rewrite of the pre-release texts, the command of the runbook step of
+ * the first release (ruling 50 of plan 12j). The dry run runs it in its copy
+ * when its source is at 0.0.0, so check-pack reads the tarballs of the first
+ * release with no rule of its own for the notes.
+ */
+export const COPY_REWRITE: readonly string[] = [
+  "node",
+  "scripts/release/src/rewrite-unpublished.ts",
+];
 
 /**
  * The phases of the smoke, in order (ruling 45 of plan 12j). In the apps
@@ -309,54 +320,6 @@ function reportOf(stdout: string): { summary: string; failures: string[] } | nul
   return { summary: all[at] ?? "", failures };
 }
 
-/** The count of `key` in a summary line, or null when the line has none. */
-function countOf(summary: string, key: string): number | null {
-  const m = new RegExp(`\\s${key}=(\\d+)(\\s|$)`).exec(summary);
-  return m?.[1] === undefined ? null : Number(m[1]);
-}
-
-/**
- * The verdict on the note of UNPUBLISHED_FILES in a check-pack run on a copy
- * whose source is at 0.0.0 (ruling 47 of plan 12j). On main, each listed file
- * holds the note "not on a registry yet", as it must at 0.0.0. The copy is at
- * the next version, so check-pack fails each of them: the version branch
- * rewrites them, and the dry run cannot. So the dry run reads these failures
- * as the state of its source. It reads them only when every failure line of
- * check-pack has that form, and when the counts of the summary line agree:
- * `failures` is the count of the lines, and `marked` and `listed` equal it.
- * So each listed file holds the note at 0.0.0, and no other packed file does.
- * The job check of release.yml runs check-pack on a tagged commit, where no
- * such reading exists. Gives null when another failure is in the run.
- */
-export function sourceNotes(checked: {
-  summary: string;
-  failures: readonly string[];
-}): { paths: string[]; problems: string[] } | null {
-  const paths: string[] = [];
-  for (const line of checked.failures) {
-    const note = listedNotePath(line);
-    if (note === null) return null;
-    paths.push(note.path);
-  }
-  const problems: string[] = [];
-  const [failures, marked, listed] = ["failures", "marked", "listed"].map((key) =>
-    countOf(checked.summary, key),
-  );
-  if (failures === null || marked === null || listed === null)
-    problems.push(`check-pack printed no failures, marked, or listed count: ${checked.summary}`);
-  else {
-    if (failures !== paths.length)
-      problems.push(
-        `check-pack counts ${failures} failures and prints ${paths.length} failure lines`,
-      );
-    if (marked !== listed || paths.length !== listed)
-      problems.push(
-        `at ${UNPUBLISHED_VERSION}, each of the ${listed} files of UNPUBLISHED_FILES holds the note "${UNPUBLISHED_MARK}", and no other packed file does; check-pack finds the note in ${marked} packed files, ${paths.length} of them listed: ${paths.join(", ") || "none"}`,
-      );
-  }
-  return { paths, problems };
-}
-
 /**
  * The dry run of spec 33 item 4.1, in a copy of `git archive HEAD` under a new
  * temp folder. It stops at the first step that fails. It never commits, tags,
@@ -516,6 +479,18 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       return 1;
     }
     version = versions[0] ?? null;
+    // A source at 0.0.0 holds the notes, and the version branch of the first
+    // release rewrites them. A source above 0.0.0 holds none, so no rewrite runs.
+    if (source === UNPUBLISHED_VERSION) {
+      const rewrite = copyStep("rewrite-unpublished", COPY_REWRITE);
+      if (rewrite === null) return 1;
+      const summary = reportOf(rewrite.stdout)?.summary;
+      if (summary?.startsWith("rewrite-unpublished: PASS ") !== true) {
+        failures.push(`rewrite-unpublished printed no PASS line: ${summary ?? firstLine(rewrite)}`);
+        return 1;
+      }
+      notes.push(summary);
+    }
     if (!copyStep("prepare", COPY_PREPARE)) return 1;
     if (!copyStep("turbo run build", buildCommand(names))) return 1;
 
@@ -553,23 +528,7 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     const [node = "", ...checkArgs] = COPY_CHECK_PACK;
     const check = run(node, [...checkArgs, ...tarballs.map((t) => t.path)], repo, env);
     const checked = reportOf(check.stdout);
-    const held =
-      source === UNPUBLISHED_VERSION &&
-      checked !== null &&
-      checked.summary.startsWith("check-pack: ")
-        ? sourceNotes(checked)
-        : null;
-    if (held !== null && (held.paths.length > 0 || check.status === 0)) {
-      if (held.problems.length > 0) {
-        failures.push(...held.problems.map((p) => `check-pack: ${p}`));
-        for (const t of tarballs) bad.add(t.name);
-        return settle();
-      }
-      if (held.paths.length > 0)
-        notes.push(
-          `check-pack: ${held.paths.length} packed files hold the note "${UNPUBLISHED_MARK}", as each file of UNPUBLISHED_FILES must at ${UNPUBLISHED_VERSION}; the version branch rewrites them: ${held.paths.join(", ")}`,
-        );
-    } else if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
+    if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
       failures.push(`check-pack exited ${check.status}: ${checked?.summary ?? firstLine(check)}`);
       for (const l of checked?.failures ?? []) {
         failures.push(`check-pack: ${l}`);

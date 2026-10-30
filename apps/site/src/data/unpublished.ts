@@ -3,13 +3,46 @@
  * item 11). The note stays page text, because a .md page cannot render a
  * component (plan 12j deviation 6). check-unpublished holds each page of
  * UNPUBLISHED_PAGES to the mark while core is at 0.0.0, and fails on any docs
- * page that holds the mark above 0.0.0. So the version pull request of the
- * first release replaces each note with REGISTRY_INSTALL, or the site
- * checks fail.
+ * page that holds the mark above 0.0.0. At the first release, the script
+ * scripts/release/src/rewrite-unpublished.ts replaces each note line of
+ * PAGE_NOTES and each text of PRE_RELEASE_SENTENCES with its published text
+ * (ruling 50 of plan 12j). So this file is the one list of the pre-release
+ * texts of the site, and the release package reads it.
  */
 
-/** The words that each note holds. */
-export const UNPUBLISHED_MARK = "not on a registry yet";
+/**
+ * The forms of the note, in lower case (ruling 53 of plan 12j, Major 1). A
+ * README can say "It is not published" or "When the package is published" in
+ * place of the first form. The last two forms were found by `git grep -i` on
+ * 2026-10-30, in the READMEs of observe and verify, the README of the CLI,
+ * and the init page. A text holds the note when its lower-case text holds a
+ * form, with each run of white space read as one space. So "Not on a
+ * registry yet" counts too, also across a line break. check-pack, the source
+ * test of the packed files, the README test, and rewrite-unpublished read
+ * this list.
+ */
+export const UNPUBLISHED_FORMS = [
+  "not on a registry yet",
+  "it is not published",
+  "when the package is published",
+  "when the package is on npm",
+  "until the packages are on a registry",
+] as const;
+
+/** One form of the note. */
+export type UnpublishedForm = (typeof UNPUBLISHED_FORMS)[number];
+
+/** The words that each note of a page holds: the first form. */
+export const UNPUBLISHED_MARK: UnpublishedForm = UNPUBLISHED_FORMS[0];
+
+/** Each form of the note that a text holds, with no regard to case or to a line break. */
+export function noteForms(text: string): UnpublishedForm[] {
+  const lower = text.toLowerCase().replace(/\s+/g, " ");
+  return UNPUBLISHED_FORMS.filter((form) => lower.includes(form));
+}
+
+/** The text of a published text that rewrite-unpublished replaces with the new version. */
+export const VERSION_SLOT = "<version>";
 
 /**
  * Each docs page that holds the note, by its path under src/content/docs/.
@@ -70,6 +103,52 @@ export const UNPUBLISHED_PAGES: readonly string[] = [
 export const REGISTRY_INSTALL =
   "The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.";
 
+/** A note line of the pages, and the line that takes its place at the first release. */
+export interface PageNote {
+  /** The whole line of the note. */
+  note: string;
+  /** The whole line in its place. */
+  published: string;
+}
+
+/** The run note of a CLI page: each command runs from a clone. */
+const RUN_NOTE =
+  "The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.";
+
+/**
+ * Each note line of the pages of UNPUBLISHED_PAGES, read from the tree on
+ * 2026-10-30. rewrite-unpublished replaces each whole line with its published
+ * line, and it fails on a page line with a note form that this list lacks. A
+ * line of a list keeps its list mark.
+ */
+export const PAGE_NOTES: readonly PageNote[] = [
+  { note: RUN_NOTE, published: REGISTRY_INSTALL },
+  {
+    note: `${RUN_NOTE} The pnpm filter form runs in \`examples/worker\` and exits 1 on any failure, so use it for \`--help\` only.`,
+    published: REGISTRY_INSTALL,
+  },
+  {
+    note: `${RUN_NOTE} Else the shell answers "command not found" at step 1.`,
+    published: REGISTRY_INSTALL,
+  },
+  {
+    note: "- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.",
+    published: `- ${REGISTRY_INSTALL}`,
+  },
+  {
+    note: "- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.",
+    published: `- ${REGISTRY_INSTALL}`,
+  },
+  {
+    note: "- Until the packages are on a registry, a new app installs only inside the pnpm workspace of the repo.",
+    published: "- A new app names each `@authtempo` package at the version of the CLI.",
+  },
+  {
+    note: "The `@authtempo` packages are private and at version `0.0.0`. They are not on a registry yet, and the owner decides when they publish. Until then, put your app in the pnpm workspace of the repo, in a folder under `examples/`. The `workspace:*` versions then link the packages, and Turbo builds them before your tests.",
+    published: REGISTRY_INSTALL,
+  },
+];
+
 /** The one sentence of the Resources page while no release exists (owner decision 6 of 2026-10-14). */
 export const RESOURCES_EMPTY =
   "No release exists yet, so no package, example, or demo is published; this page lists them from the first release.";
@@ -96,9 +175,45 @@ export const VERSIONS_TODAY =
 /** A text that holds only before the first release, with the repository path of its file. */
 export interface PreReleaseSentence {
   file: string;
-  /** One sentence, or the sentences of one paragraph that goes as a whole. */
+  /** One sentence, the sentences of one paragraph that goes as a whole, or one code sample. */
   sentence: string;
+  /**
+   * The text that rewrite-unpublished writes in its place at the first
+   * release, with VERSION_SLOT for the version. "" removes the paragraph, and
+   * a heading that the removal leaves with no text. null: the owner writes it
+   * in the step of docs/release/RUNBOOK.md that the comment of the entry names.
+   */
+  published: string | null;
 }
+
+/** The dependencies of the alias sample of the Better Auth migration page, at 0.0.0. */
+const PAGE_ALIASES = `    "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@authtempo/core": "0.0.0",
+    "@authtempo/client": "0.0.0",
+    "@authtempo/handoff": "0.0.0",
+    "@authtempo/adapter-d1": "0.0.0",
+    "@authtempo/adapter-postgres": "0.0.0"`;
+
+/** The dependencies of the alias sample of the compat README, at 0.0.0. */
+const README_ALIASES = `    "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/sso": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/scim": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@authtempo/core": "0.0.0",
+    "@authtempo/client": "0.0.0",
+    "@authtempo/handoff": "0.0.0",
+    "@authtempo/adapter-d1": "0.0.0",
+    "@authtempo/adapter-postgres": "0.0.0"`;
+
+/** A code sample at the new version: each 0.0.0 becomes VERSION_SLOT. */
+const atVersion = (sample: string) => sample.replaceAll("0.0.0", VERSION_SLOT);
 
 /**
  * Each text that is true only while no release exists (review M2 and L7 of
@@ -108,26 +223,64 @@ export interface PreReleaseSentence {
  * was read with `git grep -i` of "no release" and "until the first release"
  * on 2026-10-30. The check also fails on a text that matches
  * PRE_RELEASE_PATTERN in a docs page or a listed file, outside this list.
- * docs/release/RUNBOOK.md quotes each entry, and a site test holds the quotes.
+ * The note of the root README and the code samples that pin 0.0.0 joined it
+ * (ruling 52 of plan 12j), so the list holds each pre-release text of a file
+ * outside the packed notes and the page notes. docs/release/RUNBOOK.md quotes
+ * each entry, and a site test holds the quotes.
  */
 export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
-  { file: "SECURITY.md", sentence: NO_RELEASE_YET },
-  { file: "SECURITY.md", sentence: CHANNELS_CLOSED },
+  // The support row step writes the support table in its place.
+  { file: "SECURITY.md", sentence: NO_RELEASE_YET, published: null },
+  { file: "SECURITY.md", sentence: CHANNELS_CLOSED, published: "" },
   {
     file: "apps/site/src/content/docs/docs/reference/security-policy.md",
     sentence: CHANNELS_CLOSED,
+    published: "",
   },
-  { file: "apps/site/src/content/docs/docs/versioning.md", sentence: VERSIONS_TODAY },
-  { file: "apps/site/src/content/docs/docs/versioning.md", sentence: NO_RELEASE_YET },
+  {
+    file: "apps/site/src/content/docs/docs/versioning.md",
+    sentence: VERSIONS_TODAY,
+    published: "",
+  },
+  {
+    file: "apps/site/src/content/docs/docs/versioning.md",
+    sentence: NO_RELEASE_YET,
+    published: "",
+  },
   {
     file: "apps/site/src/content/docs/docs/changelog.mdx",
     sentence:
       "Until the first release, the plan index of the repo is the record of each change: `docs/superpowers/plans/README.md`. Each row names a plan, its spec sections, and the commit that merged it.",
+    published: "",
   },
-  { file: "apps/site/src/content/docs/docs/resources.md", sentence: RESOURCES_EMPTY },
+  // The owner adds the rows of the packages, the examples, and the demo in its place.
+  {
+    file: "apps/site/src/content/docs/docs/resources.md",
+    sentence: RESOURCES_EMPTY,
+    published: null,
+  },
   // The authtempo cells of the rows g10 and g11 of /compare/.
-  { file: "apps/site/src/data/compare.ts", sentence: "No release yet." },
-  { file: "apps/site/src/data/compare.ts", sentence: "No release notes yet." },
+  {
+    file: "apps/site/src/data/compare.ts",
+    sentence: "No release yet.",
+    published: `One version of every package, from ${VERSION_SLOT}.`,
+  },
+  {
+    file: "apps/site/src/data/compare.ts",
+    sentence: "No release notes yet.",
+    published: "A changelog page and a feed of each release.",
+  },
+  { file: "README.md", sentence: "The packages are not on a registry yet.", published: "" },
+  {
+    file: "apps/site/src/content/docs/docs/migrate/better-auth.mdx",
+    sentence: PAGE_ALIASES,
+    published: atVersion(PAGE_ALIASES),
+  },
+  {
+    file: "packages/compat-better-auth/README.md",
+    sentence: README_ALIASES,
+    published: atVersion(README_ALIASES),
+  },
 ];
 
 /** The words of a text that holds only before the first release. */

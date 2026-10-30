@@ -30,12 +30,14 @@ import { groupVersion, releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import {
   listedNoteFailure,
-  listedNotePath,
   missingNoteFailure,
+  noteForms,
   UNPUBLISHED_CODE,
   UNPUBLISHED_FILES,
+  UNPUBLISHED_FORMS,
   UNPUBLISHED_MARK,
   type UnpublishedCode,
+  type UnpublishedFile,
   type UnpublishedLists,
   unpublishedFailures,
 } from "../src/lib/unpublished.ts";
@@ -747,7 +749,7 @@ describe("check-pack", () => {
   });
 });
 
-describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () => {
+describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)", () => {
   const README = "packages/x/README.md";
   const SKILL = "packages/x/skills/a/SKILL.md";
   const INDEX = "packages/x/dist/index.js";
@@ -756,11 +758,19 @@ describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () =>
     reason: "the code shows the note only at 0.0.0",
     proof: "packages/x/test/templates.test.ts",
   };
-  const LISTS: UnpublishedLists = { files: [README, SKILL], code: [CODE] };
+  /** A listed file with one note of `form`. */
+  const listed = (path: string, form = UNPUBLISHED_MARK): UnpublishedFile => ({
+    path,
+    notes: [{ form, note: `The packages are ${form}.`, published: "Run pnpm add x." }],
+  });
+  const LISTS: UnpublishedLists = { files: [listed(README), listed(SKILL)], code: [CODE] };
   const PACKED = [README, SKILL, INDEX, CODE.path];
+  const MARK = [UNPUBLISHED_MARK];
+  /** The marked map of `paths`, each with the first form. */
+  const marks = (...paths: string[]) => new Map(paths.map((p) => [p, MARK]));
   const rule = (
     version: string,
-    marked: string[],
+    marked: ReadonlyMap<string, readonly string[]>,
     lists: UnpublishedLists = LISTS,
     packed: string[] = PACKED,
   ) =>
@@ -772,101 +782,136 @@ describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () =>
       exists: (p) => p === CODE.proof,
     });
 
-  it("holds each listed file to the note at 0.0.0, and no other packed file", () => {
-    expect(rule("0.0.0", [README, SKILL, CODE.path])).toEqual([]);
-    expect(rule("0.0.0", [README, CODE.path])).toEqual([missingNoteFailure(SKILL)]);
-    expect(missingNoteFailure(SKILL)).toBe(
-      `${SKILL} is in UNPUBLISHED_FILES and lacks the note "not on a registry yet" at 0.0.0`,
+  it("holds each listed file to the form of its note at 0.0.0, and no other packed file", () => {
+    expect(rule("0.0.0", marks(README, SKILL, CODE.path))).toEqual([]);
+    expect(rule("0.0.0", marks(README, CODE.path))).toEqual([
+      missingNoteFailure(SKILL, UNPUBLISHED_MARK),
+    ]);
+    expect(missingNoteFailure(SKILL, UNPUBLISHED_MARK)).toBe(
+      `${SKILL} is in UNPUBLISHED_FILES and lacks its note form "not on a registry yet" at 0.0.0`,
     );
-    // A new packed file with the note cannot hide: it joins the list.
-    expect(rule("0.0.0", [README, SKILL, INDEX, CODE.path])).toEqual([
+    // A listed file with another form than the form of its note fails (ruling 53, Major 1).
+    const other = new Map([...marks(README, CODE.path), [SKILL, ["it is not published"]]]);
+    expect(rule("0.0.0", other)).toEqual([missingNoteFailure(SKILL, UNPUBLISHED_MARK)]);
+    // A new packed file with a note form cannot hide: it joins the list.
+    expect(rule("0.0.0", marks(README, SKILL, INDEX, CODE.path))).toEqual([
       `${INDEX} holds the note "not on a registry yet" at 0.0.0, and UNPUBLISHED_FILES lacks it`,
     ]);
   });
 
-  it("fails each packed file with the note above 0.0.0, listed or not", () => {
-    expect(rule("0.1.0", [CODE.path])).toEqual([]);
-    expect(rule("0.1.0", [README, CODE.path])).toEqual([listedNoteFailure(README, "0.1.0")]);
-    expect(listedNoteFailure(README, "0.1.0")).toBe(
-      `${README} still holds the note "not on a registry yet" at 0.1.0; the version branch rewrites each file of UNPUBLISHED_FILES`,
+  it("fails each packed file with a note form above 0.0.0, listed or not", () => {
+    expect(rule("0.1.0", marks(CODE.path))).toEqual([]);
+    expect(rule("0.1.0", marks(README, CODE.path))).toEqual([
+      listedNoteFailure(README, MARK, "0.1.0"),
+    ]);
+    expect(listedNoteFailure(README, MARK, "0.1.0")).toBe(
+      `${README} still holds the note "not on a registry yet" at 0.1.0; rewrite-unpublished rewrites each note of UNPUBLISHED_FILES`,
     );
-    expect(rule("0.2.0", [INDEX, CODE.path])).toEqual([
-      `${INDEX} holds the note "not on a registry yet" at 0.2.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
+    expect(
+      rule("0.2.0", new Map([...marks(CODE.path), [INDEX, ["when the package is published"]]])),
+    ).toEqual([
+      `${INDEX} holds the note "when the package is published" at 0.2.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
     ]);
   });
 
   it("exempts a code file of the lists at every version, and fails a stale entry", () => {
     // The code file holds the note at each version, and it fails at none.
     for (const version of ["0.0.0", "0.1.0"])
-      expect(rule(version, version === "0.0.0" ? [README, SKILL, CODE.path] : [CODE.path])).toEqual(
-        [],
-      );
-    expect(rule("0.1.0", [])).toEqual([
+      expect(
+        rule(version, version === "0.0.0" ? marks(README, SKILL, CODE.path) : marks(CODE.path)),
+      ).toEqual([]);
+    expect(rule("0.1.0", marks())).toEqual([
       `UNPUBLISHED_CODE lists ${CODE.path}, which does not hold the note; remove the entry`,
     ]);
-    expect(rule("0.1.0", [], LISTS, [README, SKILL, INDEX])).toEqual([
+    expect(rule("0.1.0", marks(), LISTS, [README, SKILL, INDEX])).toEqual([
       `UNPUBLISHED_CODE lists ${CODE.path}, which no tarball holds`,
     ]);
     expect(
-      rule("0.1.0", [CODE.path], { files: LISTS.files, code: [{ ...CODE, proof: "gone.ts" }] }),
+      rule("0.1.0", marks(CODE.path), {
+        files: LISTS.files,
+        code: [{ ...CODE, proof: "gone.ts" }],
+      }),
     ).toEqual([`UNPUBLISHED_CODE: the proof gone.ts of ${CODE.path} does not exist`]);
     expect(
-      rule("0.1.0", [CODE.path], { files: [README, "packages/x/gone.md"], code: [CODE] }),
+      rule("0.1.0", marks(CODE.path), {
+        files: [listed(README), listed("packages/x/gone.md")],
+        code: [CODE],
+      }),
     ).toEqual(["UNPUBLISHED_FILES lists packages/x/gone.md, which no tarball holds"]);
-    expect(rule("0.1.0", [CODE.path], { files: [README, README], code: [CODE] })).toEqual([
-      `UNPUBLISHED_FILES lists ${README} twice`,
-    ]);
-    expect(rule("0.1.0", [CODE.path], { files: [README, CODE.path], code: [CODE] })).toEqual([
-      `${CODE.path} is in UNPUBLISHED_FILES and in UNPUBLISHED_CODE`,
-    ]);
-  });
-
-  it("reads back the failure of a listed file, and no other line", () => {
-    expect(listedNotePath(listedNoteFailure(SKILL, "0.1.0"))).toEqual({
-      path: SKILL,
-      version: "0.1.0",
-    });
-    expect(listedNotePath(missingNoteFailure(SKILL))).toBeNull();
-    expect(listedNotePath(`${INDEX} holds the note "${UNPUBLISHED_MARK}" at 0.1.0`)).toBeNull();
     expect(
-      listedNotePath(listedNoteFailure(SKILL, "0.1.0").replace(UNPUBLISHED_MARK, "another note")),
-    ).toBeNull();
+      rule("0.1.0", marks(CODE.path), { files: [listed(README), listed(README)], code: [CODE] }),
+    ).toEqual([`UNPUBLISHED_FILES lists ${README} twice`]);
+    expect(
+      rule("0.1.0", marks(CODE.path), {
+        files: [listed(README), listed(CODE.path)],
+        code: [CODE],
+      }),
+    ).toEqual([`${CODE.path} is in UNPUBLISHED_FILES and in UNPUBLISHED_CODE`]);
+    expect(
+      rule("0.1.0", marks(CODE.path), { files: [{ path: README, notes: [] }], code: [CODE] }),
+    ).toEqual([`UNPUBLISHED_FILES lists ${README} with no note`]);
   });
 
-  it("reads the note in the text of each packed file of a tarball", () => {
+  it("reads each form, with no regard to case or to a line break", () => {
+    for (const form of UNPUBLISHED_FORMS) {
+      expect(noteForms(`Text. ${form}.`), form).toEqual([form]);
+      expect(noteForms(`Text. ${form.toUpperCase()}.`), form).toEqual([form]);
+      expect(noteForms(`Text. ${form.replace(" ", "\n")}.`), form).toEqual([form]);
+    }
+    expect(noteForms("The packages are on npm.")).toEqual([]);
+  });
+
+  it("reads each form in the text of each packed file of a tarball", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
     const cleanOut = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    // The review probe of Major 1: the three forms of ruling 48 m4 and a form in capitals, one file each.
+    const extra = ["USAGE.md", "SKILL.md", "NOTE.md"];
     const tree = copyRoot((dir) => {
-      appendFileSync(
-        join(dir, "packages/fixture/README.md"),
-        `\nThe packages are ${UNPUBLISHED_MARK}.\n`,
-      );
-      appendFileSync(join(dir, "packages/fixture/dist/errors.js"), `// ${UNPUBLISHED_MARK}\n`);
+      const pkg = join(dir, "packages/fixture");
+      appendFileSync(join(pkg, "README.md"), "\nThe packages are not on a registry yet.\n");
+      writeFileSync(join(pkg, "USAGE.md"), "When the package is published, run pnpm add x.\n");
+      writeFileSync(join(pkg, "SKILL.md"), "The package is private. It is not published.\n");
+      writeFileSync(join(pkg, "NOTE.md"), "The packages are Not on a registry yet.\n");
+      appendFileSync(join(pkg, "dist/errors.js"), `// ${UNPUBLISHED_MARK}\n`);
+      const file = join(pkg, "package.json");
+      const manifest = JSON.parse(readFileSync(file, "utf8")) as Manifest;
+      manifest.files = [...(manifest.files ?? []), ...extra];
+      writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
     });
     try {
       const path = pack(join(tree, "packages/fixture"), out);
-      const readme = "packages/fixture/README.md";
-      const errors = "packages/fixture/dist/errors.js";
+      const at = (f: string) => `packages/fixture/${f}`;
       const gate: UnpublishedCode = {
-        path: errors,
+        path: at("dist/errors.js"),
         reason: "a gate",
         proof: "packages/fixture/package.json",
       };
-      // The release tarball at 0.1.0 still holds the note of a listed file.
-      const listed = checkFixture(tree, [path], { files: [readme], code: [gate] });
-      expect(listed.failures).toEqual([listedNoteFailure(readme, "0.1.0")]);
-      expect(summaryLine(listed)).toBe(
-        "check-pack: FAIL tarballs=1 files=9 marked=1 listed=1 failures=1",
+      // With no list, each packed file with a form fails, the code file too.
+      expect(checkFixture(tree, [path]).failures).toEqual(
+        [
+          ["NOTE.md", "not on a registry yet"],
+          ["README.md", "not on a registry yet"],
+          ["SKILL.md", "it is not published"],
+          ["USAGE.md", "when the package is published"],
+          ["dist/errors.js", "not on a registry yet"],
+        ].map(
+          ([f, form]) =>
+            `${at(f ?? "")} holds the note "${form}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
+        ),
       );
-      // With no list, each packed file with the note fails, the code file too.
-      expect(checkFixture(tree, [path]).failures).toEqual([
-        `${readme} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
-        `${errors} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
-      ]);
+      // The release tarball at 0.1.0 still holds the note of a listed file.
+      const one = checkFixture(tree, [path], {
+        files: [listed(at("README.md"))],
+        code: [gate],
+      });
+      expect(one.failures).toContain(listedNoteFailure(at("README.md"), MARK, "0.1.0"));
+      expect(summaryLine(one)).toBe(
+        "check-pack: FAIL tarballs=1 files=12 marked=4 listed=1 failures=4",
+      );
       // The tarball of the tree with no note passes, and the code entry is stale there.
       const clean = pack(fixture("root/packages/fixture"), cleanOut);
       expect(checkFixture(fixture("root"), [clean], { files: [], code: [gate] }).failures).toEqual([
-        `UNPUBLISHED_CODE lists ${errors}, which does not hold the note; remove the entry`,
+        `UNPUBLISHED_CODE lists ${gate.path}, which does not hold the note; remove the entry`,
       ]);
     } finally {
       for (const dir of [out, cleanOut, tree]) rmSync(dir, { recursive: true, force: true });
@@ -889,8 +934,10 @@ describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () =>
       for (const f of ["package.json", "README.md", ...(p.manifest.files ?? [])])
         if (f !== "dist" && !f.startsWith("dist/")) add(`${p.dir}/${f}`);
     }
-    const marked = packed.filter((p) =>
-      readFileSync(join(root, p), "utf8").includes(UNPUBLISHED_MARK),
+    const marked = new Map(
+      packed
+        .map((p) => [p, noteForms(readFileSync(join(root, p), "utf8"))] as const)
+        .filter(([, forms]) => forms.length > 0),
     );
     const version = groupVersion(root);
     expect(
@@ -902,8 +949,20 @@ describe("the note of UNPUBLISHED_FILES (ruling 47 of the plan 12j lane)", () =>
         exists: (p) => existsSync(join(root, p)),
       }),
     ).toEqual([]);
-    // At 0.0.0 the list names each file with the note; the version branch then rewrites each one.
-    expect(marked.sort()).toEqual(version === "0.0.0" ? [...UNPUBLISHED_FILES].sort() : []);
+    // At 0.0.0 the list names each file with a form, and each note is in its
+    // file once; rewrite-unpublished then replaces each one.
+    expect([...marked.keys()].sort()).toEqual(
+      version === "0.0.0" ? UNPUBLISHED_FILES.map((f) => f.path).sort() : [],
+    );
+    for (const file of UNPUBLISHED_FILES)
+      for (const n of file.notes) {
+        expect(noteForms(n.note), `${file.path}: ${n.note}`).toContain(n.form);
+        expect(noteForms(n.published), `${file.path}: ${n.published}`).toEqual([]);
+        if (version === "0.0.0")
+          expect(readFileSync(join(root, file.path), "utf8").split(n.note), file.path).toHaveLength(
+            2,
+          );
+      }
     // Each code entry is a dist file of a released package, and its proof exists.
     for (const c of UNPUBLISHED_CODE) {
       expect(existsSync(join(root, c.proof)), c.proof).toBe(true);

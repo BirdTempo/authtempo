@@ -23,6 +23,7 @@ import {
 } from "../src/check-changesets.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
+import { rewrittenPaths } from "../src/rewrite-unpublished.ts";
 import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
 
 // The changesets CLI of the repository root, the one that writes each release branch.
@@ -421,6 +422,8 @@ describe("check-changesets", () => {
     );
     // The entry reads the group version at the merge base and in the working tree.
     expect(readInput(repo.root, "main")).toMatchObject({ baseVersion: "0.0.0", version: "0.1.0" });
+    // The version branch exempts each file that rewrite-unpublished writes (ruling 50 of plan 12j).
+    expect(readInput(repo.root, "main").unpublished).toEqual(rewrittenPaths());
   });
 
   it("needs a changeset for a CHANGELOG.md below the package root", () => {

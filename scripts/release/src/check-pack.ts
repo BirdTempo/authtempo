@@ -19,8 +19,8 @@ import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 import {
+  noteForms,
   UNPUBLISHED_LISTS,
-  UNPUBLISHED_MARK,
   // The version of every package on main. No release carries it (spec 33 item 11).
   UNPUBLISHED_VERSION,
   type UnpublishedLists,
@@ -252,14 +252,15 @@ export function readTarball(path: string): Tarball {
 }
 
 /**
- * Each file of a tarball whose text holds `mark`. readTarball has refused
- * each link and each path with a ".." part, so the files stay in the folder.
+ * The text of each file of a tarball, from one extraction. readTarball has
+ * refused each link and each path with a ".." part, so the files stay in the
+ * folder. A binary file reads as text with no harm: the rules look for words.
  */
-export function filesWith(path: string, files: readonly string[], mark: string): string[] {
+export function packedTexts(path: string, files: readonly string[]): Map<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "authtempo-check-pack-text-"));
   try {
     execFileSync("tar", ["-xzf", path, "-C", dir]);
-    return files.filter((f) => readFileSync(join(dir, "package", f), "utf8").includes(mark));
+    return new Map(files.map((f) => [f, readFileSync(join(dir, "package", f), "utf8")]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -331,10 +332,10 @@ export function configFailures(root: string, released: readonly { dir: string }[
  * Checks each tarball against the tree at `root`: the released list, the
  * package folder, release/pack-needs.json, release/repository.json, the root
  * LICENSE, release/deprecations.json, and the config files of configFailures.
- * It reads the text of each packed file for the note of `lists` (ruling 47 of
- * the plan 12j lane). `marked` counts each packed file with the note, except
- * the code files of the lists, and `listed` counts the files of the list. The
- * dry run reads both from the summary line.
+ * It reads the text of each packed file for each form of the note, with no
+ * regard to case (rulings 47 and 53 of the plan 12j lane). `marked` counts
+ * each packed file with a form, except the code files of the lists, and
+ * `listed` counts the files of the list.
  */
 export function checkTarballs(
   root: string,
@@ -363,9 +364,9 @@ export function checkTarballs(
   failures.push(...configFailures(root, packages));
   const seen = new Set<string>();
   let files = 0;
-  /** Each packed file and each packed file with the note, by the path from the root. */
+  /** Each packed file, and each packed file with a note form, by the path from the root. */
   const packed: string[] = [];
-  const marked: string[] = [];
+  const marked = new Map<string, string[]>();
   for (const path of paths) {
     let t: Tarball;
     try {
@@ -399,7 +400,10 @@ export function checkTarballs(
     files += t.files.length;
     for (const f of r.failures) failures.push(`${name}@${t.manifest.version}: ${f}`);
     packed.push(...t.files.map((f) => `${dir}/${f}`));
-    marked.push(...filesWith(path, t.files, UNPUBLISHED_MARK).map((f) => `${dir}/${f}`));
+    for (const [f, text] of packedTexts(path, t.files)) {
+      const forms = noteForms(text);
+      if (forms.length > 0) marked.set(`${dir}/${f}`, forms);
+    }
   }
   const code = new Set(lists.code.map((c) => c.path));
   failures.push(
@@ -419,7 +423,7 @@ export function checkTarballs(
       counts: {
         tarballs: seen.size,
         files,
-        marked: marked.filter((p) => !code.has(p)).length,
+        marked: [...marked.keys()].filter((p) => !code.has(p)).length,
         listed: lists.files.length,
       },
       failures,

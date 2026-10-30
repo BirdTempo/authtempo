@@ -6,8 +6,8 @@ import { parseChangeset } from "./lib/changeset-file.ts";
 import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
-import { UNPUBLISHED_FILES } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
+import { rewrittenPaths } from "./rewrite-unpublished.ts";
 
 export { parseChangeset };
 
@@ -40,7 +40,7 @@ export interface ChangesetsInput {
   version: string;
   /** The version of the group at the merge base, or null when no released package is there. */
   baseVersion?: string | null;
-  /** UNPUBLISHED_FILES: each packed file with the note "not on a registry yet" at 0.0.0. */
+  /** Each file that rewrite-unpublished writes on the version branch, by its path from the root. */
   unpublished?: readonly string[];
 }
 
@@ -176,11 +176,12 @@ export function checkChangesets(input: ChangesetsInput): Report {
         files[name] = undefined;
       }
 
-  // The version branch moves the group version, and it rewrites the note of
-  // each file of UNPUBLISHED_FILES with no code change (ruling 47 of the plan
-  // 12j lane). Its changesets are gone there, so without this exemption the
-  // branch fails. A packed file of the list needs a changeset on any other
-  // branch, as each packed file does. check-pack holds the rewrite on the tarballs.
+  // The version branch moves the group version, and rewrite-unpublished
+  // rewrites each file of its lists with no code change (rulings 47 and 50 of
+  // the plan 12j lane). Its changesets are gone there, so without this
+  // exemption the branch fails. Such a packed file needs a changeset on any
+  // other branch, as each packed file does. check-pack holds the rewrite on
+  // the tarballs.
   const versionStep =
     input.baseVersion !== undefined &&
     input.baseVersion !== null &&
@@ -286,7 +287,7 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     commits: commitCount(root, base),
     version,
     baseVersion,
-    unpublished: UNPUBLISHED_FILES,
+    unpublished: rewrittenPaths(),
   };
 }
 

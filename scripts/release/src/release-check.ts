@@ -619,7 +619,7 @@ export async function releaseCheck(options: ReleaseCheckOptions): Promise<Releas
   notes.push(...shas, ...(summary === undefined ? [] : [summary]));
   notes.push(
     ...lines
-      .filter((l) => l.trim().startsWith("note: check-pack:"))
+      .filter((l) => l.trim().startsWith("note: rewrite-unpublished:"))
       .map((l) => `dry run ${l.trim()}`),
   );
   report.dryRun = failures.length === 0 ? "PASS" : "FAIL";

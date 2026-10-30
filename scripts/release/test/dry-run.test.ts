@@ -31,7 +31,6 @@ import {
   type RunResult,
   readEnv,
   readToolPaths,
-  sourceNotes,
   spawnRun,
   type ToolPaths,
 } from "../src/dry-run.ts";
@@ -40,10 +39,12 @@ import { reportLines } from "../src/lib/report.ts";
 import {
   listedNoteFailure,
   UNPUBLISHED_MARK,
+  type UnpublishedFile,
   type UnpublishedLists,
 } from "../src/lib/unpublished.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import { prepare } from "../src/prepare.ts";
+import { entry as rewriteEntry } from "../src/rewrite-unpublished.ts";
 import { changesetVersion, copyFixture } from "./support/release-copy.ts";
 
 /** What the three path reads print for a person, in the form of pnpm 12.8.1 and npm 11.19.1. */
@@ -153,6 +154,16 @@ function fake(
         changesets.push(text);
         changesetVersion(cwd, text.split("---\n").pop()?.trim() ?? "");
         return ok("🦋  All files have been updated.\n");
+      }
+      case "node rewrite-unpublished.ts": {
+        // The fixture has no site page and no pre-release text, so the rewrite reads its packed notes only.
+        const r = rewriteEntry(cwd, {
+          files: lists.files,
+          pages: [],
+          pageNotes: [],
+          sentences: [],
+        });
+        return fromReport(r.lines, r.code !== 0);
       }
       case "node prepare.ts": {
         const r = prepare(cwd);
@@ -320,6 +331,7 @@ describe("dry run", () => {
       "extract",
       "install",
       "pnpm changeset",
+      "node rewrite-unpublished.ts",
       "node prepare.ts",
       "turbo run build",
       "pnpm pack",
@@ -731,7 +743,8 @@ describe("dry run", () => {
     const { report, calls } = await passingRun(parent);
     expect(report.exit).toBe(0);
     const dir = report.dir ?? "";
-    expect(calls).toHaveLength(20);
+    // 20 calls, and the rewrite of a source at 0.0.0 (ruling 50 of plan 12j).
+    expect(calls).toHaveLength(21);
     const fixed = {
       PATH: "/bin",
       TMPDIR: "/tmp/person",
@@ -1191,50 +1204,41 @@ describe("dry run behind a proxy", () => {
   });
 });
 
-describe("the note of UNPUBLISHED_FILES in the dry run (ruling 47 of plan 12j)", () => {
+describe("the notes of a source at 0.0.0 in the dry run (rulings 47 and 50 of plan 12j)", () => {
   const CLIENT = "packages/client/README.md";
-  const CORE = "packages/core/README.md";
+  const NOTE = `The packages are ${UNPUBLISHED_MARK}.`;
+  const CLIENT_NOTE: UnpublishedFile = {
+    path: CLIENT,
+    notes: [{ form: UNPUBLISHED_MARK, note: NOTE, published: "Run `pnpm add @authtempo/client`." }],
+  };
   /** A checkout whose client README holds the note, as each listed file does on main. */
-  const noted = () =>
-    setup((d) => appendFileSync(join(d, CLIENT), `\nThe packages are ${UNPUBLISHED_MARK}.\n`));
+  const noted = () => setup((d) => appendFileSync(join(d, CLIENT), `\n${NOTE}\n`));
+  const kinds = (calls: readonly { kind: string }[]) => calls.map((c) => c.kind);
 
-  it("reads the notes of the listed files as the state of a source at 0.0.0", async () => {
+  it("rewrites each listed note in the copy before the pack, and check-pack passes", async () => {
     const { root, tmp } = noted();
-    const f = fake({}, { files: [CLIENT], code: [] });
+    const f = fake({}, { files: [CLIENT_NOTE], code: [] });
     const report = await dryRun({ root, run: f.run, tmp });
     expect(failuresOf(report)).toEqual([]);
     expect(report.exit).toBe(0);
     expect(report.notes).toEqual([
-      `check-pack: 1 packed files hold the note "${UNPUBLISHED_MARK}", as each file of UNPUBLISHED_FILES must at 0.0.0; the version branch rewrites them: ${CLIENT}`,
+      "rewrite-unpublished: PASS files=1 notes=1 pages=0 lines=0 texts=0 hand=0 failures=0",
+    ]);
+    // The rewrite runs after changeset version and before prepare, so each tarball holds its result.
+    const k = kinds(f.calls);
+    expect(k.indexOf("node rewrite-unpublished.ts")).toBe(k.indexOf("pnpm changeset") + 1);
+    expect(f.calls.find((c) => c.kind === "node rewrite-unpublished.ts")?.args).toEqual([
+      "scripts/release/src/rewrite-unpublished.ts",
     ]);
     expect(dryRunLine(report)).toBe(
       "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=2 failures=0",
     );
-    // The steps after check-pack run, as on a pass.
-    expect(f.calls.map((c) => c.kind)).toContain("smoke kits");
+    // The dry run writes only its copy: the checkout keeps the note.
+    expect(readFileSync(join(root, CLIENT), "utf8")).toContain(NOTE);
   });
 
-  it("fails a listed file that lacks the note at the source version 0.0.0", async () => {
-    const { root, tmp } = noted();
-    const f = fake({}, { files: [CLIENT, CORE], code: [] });
-    const report = await dryRun({ root, run: f.run, tmp });
-    expect(failuresOf(report)).toEqual([
-      `check-pack: at 0.0.0, each of the 2 files of UNPUBLISHED_FILES holds the note "${UNPUBLISHED_MARK}", and no other packed file does; check-pack finds the note in 1 packed files, 1 of them listed: ${CLIENT}`,
-    ]);
-    expect(dryRunLine(report)).toBe(
-      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
-    );
-    expect(f.calls.map((c) => c.kind)).not.toContain("npm publish");
-    // With no note in any listed file, check-pack passes, and the dry run still fails.
-    const clean = setup();
-    const g = fake({}, { files: [CORE], code: [] });
-    const r2 = await dryRun({ root: clean.root, run: g.run, tmp: clean.tmp });
-    expect(failuresOf(r2)).toEqual([
-      `check-pack: at 0.0.0, each of the 1 files of UNPUBLISHED_FILES holds the note "${UNPUBLISHED_MARK}", and no other packed file does; check-pack finds the note in 0 packed files, 0 of them listed: none`,
-    ]);
-  });
-
-  it("fails a packed file with the note that UNPUBLISHED_FILES lacks", async () => {
+  it("fails a note form that the rewrite misses, at check-pack (the P-note break)", async () => {
+    // The lists lack the note of the client README, as a list that misses a form does.
     const { root, tmp } = noted();
     const f = fake();
     const report = await dryRun({ root, run: f.run, tmp });
@@ -1243,12 +1247,28 @@ describe("the note of UNPUBLISHED_FILES in the dry run (ruling 47 of plan 12j)",
       `check-pack: ${CLIENT} holds the note "${UNPUBLISHED_MARK}" at 0.1.0, and UNPUBLISHED_FILES lacks it; no packed file holds it above 0.0.0`,
     ]);
     expect(report.exit).toBe(1);
+    expect(kinds(f.calls)).not.toContain("npm publish");
   });
 
-  it("fails the note of a listed file when the source is above 0.0.0", async () => {
-    // A checkout at 0.1.0: the note had to go on the version branch, so check-pack decides alone.
+  it("stops before the pack when a listed note is not in its file", async () => {
+    const { root, tmp } = setup();
+    const f = fake({}, { files: [CLIENT_NOTE], code: [] });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "rewrite-unpublished exited 1: rewrite-unpublished: FAIL files=1 notes=0 pages=0 lines=0 texts=0 hand=0 failures=1",
+      `rewrite-unpublished: ${CLIENT} holds a note of UNPUBLISHED_FILES 0 times, not once: ${NOTE}`,
+    ]);
+    expect(kinds(f.calls)).not.toContain("node prepare.ts");
+    // A rewrite that prints no PASS line stops the run too.
+    const silent = fake({ "node rewrite-unpublished.ts": () => ok() });
+    const r2 = await dryRun({ root, run: silent.run, tmp });
+    expect(failuresOf(r2)).toEqual(["rewrite-unpublished printed no PASS line: no output"]);
+  });
+
+  it("runs no rewrite for a source above 0.0.0, so check-pack decides alone", async () => {
+    // A checkout at 0.1.0: the note had to go on the version branch.
     const { root, tmp } = setup((d) => {
-      appendFileSync(join(d, CLIENT), `\nThe packages are ${UNPUBLISHED_MARK}.\n`);
+      appendFileSync(join(d, CLIENT), `\n${NOTE}\n`);
       for (const dir of ["packages/client", "packages/core"]) {
         const file = join(d, dir, "package.json");
         writeFileSync(
@@ -1257,42 +1277,14 @@ describe("the note of UNPUBLISHED_FILES in the dry run (ruling 47 of plan 12j)",
         );
       }
     });
-    const f = fake({}, { files: [CLIENT], code: [] });
+    const f = fake({}, { files: [CLIENT_NOTE], code: [] });
     const report = await dryRun({ root, run: f.run, tmp });
     expect(report.version).toBe("0.1.0");
+    expect(kinds(f.calls)).not.toContain("node rewrite-unpublished.ts");
     expect(failuresOf(report)).toEqual([
       "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 marked=1 listed=1 failures=1",
-      `check-pack: ${listedNoteFailure(CLIENT, "0.1.0")}`,
+      `check-pack: ${listedNoteFailure(CLIENT, [UNPUBLISHED_MARK], "0.1.0")}`,
     ]);
     expect(report.notes).toEqual([]);
-  });
-
-  it("reads the counts of the summary line, not the lines alone", () => {
-    const line = listedNoteFailure(CLIENT, "0.1.0");
-    expect(
-      sourceNotes({
-        summary: "check-pack: FAIL tarballs=2 files=10 marked=1 listed=1 failures=1",
-        failures: [line],
-      }),
-    ).toEqual({ paths: [CLIENT], problems: [] });
-    expect(
-      sourceNotes({
-        summary: "check-pack: FAIL tarballs=2 files=10 marked=1 listed=1 failures=2",
-        failures: [line],
-      })?.problems,
-    ).toEqual(["check-pack counts 2 failures and prints 1 failure lines"]);
-    expect(
-      sourceNotes({ summary: "check-pack: FAIL tarballs=2 files=10 failures=1", failures: [line] })
-        ?.problems,
-    ).toEqual([
-      "check-pack printed no failures, marked, or listed count: check-pack: FAIL tarballs=2 files=10 failures=1",
-    ]);
-    // Another failure line makes the run a plain failure of check-pack.
-    expect(
-      sourceNotes({
-        summary: "check-pack: FAIL tarballs=2 files=10 marked=1 listed=1 failures=2",
-        failures: [line, "@authtempo/core@0.1.0: the tarball has no LICENSE"],
-      }),
-    ).toBeNull();
   });
 });
