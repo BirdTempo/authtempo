@@ -78,4 +78,4 @@ A package of the runtime closure with an `os`, a `cpu`, or a `libc` field in `pn
 - `read`: the date that the owner read the advisory (YYYY-MM-DD), on or before the day of the run.
 - `expires`: the last day of the exemption (YYYY-MM-DD), on or after `read`, and at most 90 days after it.
 
-An entry that has expired, or that matches no package of the closure, fails.
+An entry that has expired, or that matches no package of the closure, fails. An entry fails as stale when OSV did not return its advisory id for its package and version.

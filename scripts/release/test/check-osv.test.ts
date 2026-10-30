@@ -163,6 +163,30 @@ describe("check-osv", () => {
     ]);
   });
 
+  it("fails an exemption of an advisory that OSV did not return for its package (ruling 64 of plan 12j, Minor 3)", async () => {
+    // OSV returns no advisory for lodash 4.17.20, as after a fix of the record.
+    const none = await checkOsv({
+      closure: CLOSURE,
+      exempt: [EXEMPTION],
+      query: noAdvisory().query,
+      today: "2026-10-20",
+    });
+    expect(none.failures).toEqual([
+      "GHSA-35jh-r3h4-6jhm: the exemption for lodash@4.17.20 names an advisory that OSV did not return for that package and version, so it is stale",
+    ]);
+    // A wrong id: OSV returns GHSA-35jh-r3h4-6jhm, and the exemption names another one.
+    const wrong = await checkOsv({
+      closure: CLOSURE,
+      exempt: [{ ...EXEMPTION, id: "GHSA-0000-0000-0000" }],
+      query: answering(ONE_ADVISORY).query,
+      today: "2026-10-20",
+    });
+    expect(wrong.failures).toEqual([
+      "GHSA-35jh-r3h4-6jhm: an open advisory for lodash@4.17.20 with no live exemption",
+      "GHSA-0000-0000-0000: the exemption for lodash@4.17.20 names an advisory that OSV did not return for that package and version, so it is stale",
+    ]);
+  });
+
   it("notes a URL other than the OSV batch query", async () => {
     const { calls, query } = noAdvisory();
     const r = await checkOsv({

@@ -155,6 +155,9 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
 
   let advisories = 0;
   let exempt = 0;
+  /** Each advisory id that OSV returned, with its package. */
+  const returned = new Set<string>();
+  let answered = true;
   for (let i = 0; i < packages.length; i += BATCH_SIZE) {
     const batch = packages.slice(i, i + BATCH_SIZE);
     let results: Awaited<ReturnType<typeof queryBatch>>;
@@ -164,6 +167,7 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
       failures.push(
         `no answer from OSV is not a pass: ${error instanceof Error ? error.message : String(error)}`,
       );
+      answered = false;
       break;
     }
     batch.forEach((p, j) => {
@@ -171,6 +175,7 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
       const at = `${p.name}@${p.version}`;
       for (const vuln of result.vulns ?? []) {
         advisories += 1;
+        returned.add(`${vuln.id}\0${at}`);
         if (live.has(`${vuln.id}\0${at}`)) exempt += 1;
         else failures.push(`${vuln.id}: an open advisory for ${at} with no live exemption`);
       }
@@ -178,6 +183,19 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
         failures.push(`${at}: OSV holds more advisories than one page; read them at osv.dev`);
     });
   }
+
+  // An exemption of an advisory that OSV did not return for its package and
+  // version exempts nothing. It stays in the file as a stale claim, such as
+  // after a fix or a wrong id (ruling 64 of plan 12j, Minor 3).
+  if (answered)
+    for (const e of input.exempt)
+      if (
+        live.has(`${e.id}\0${e.name}@${e.version}`) &&
+        !returned.has(`${e.id}\0${e.name}@${e.version}`)
+      )
+        failures.push(
+          `${e.id}: the exemption for ${e.name}@${e.version} names an advisory that OSV did not return for that package and version, so it is stale`,
+        );
 
   return requireCounts(
     {
