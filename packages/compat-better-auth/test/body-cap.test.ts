@@ -282,3 +282,67 @@ describe("the budget of the large reads through the shim (ruling 51 Minor 2 of t
     expect((await Promise.all(held)).map((t) => t?.length)).toEqual([SSO_CAP, SSO_CAP]);
   });
 });
+
+/** Core's LARGE_READ_IDLE_MS: a large read that gets no chunk for this time ends with 408. */
+const IDLE_MS = 10_000;
+
+describe("the deadlines of the large reads through the shim (ruling 59 Major 1 of the 12j lane)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("answers 408 REQUEST_TIMEOUT to an SSO write whose body stalls past the idle limit", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const { cookie } = await person("ada@example.com");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // 1 MB of a JSON body, then a stall.
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let reached = () => {};
+    const atGate = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (sent >= 1_048_576) {
+          reached();
+          await gate;
+        }
+        if (sent >= 2_097_152) return c.close();
+        c.enqueue(new Uint8Array(65_536).fill(0x20));
+        sent += 65_536;
+      },
+    });
+    let answered: Response | null = null;
+    void auth
+      .handler(
+        new Request(`${BASE}/api/auth/sso/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: BASE, cookie },
+          body: stream,
+          duplex: "half",
+        } as RequestInit),
+      )
+      .then((res) => {
+        answered = res;
+      });
+    try {
+      // The session check runs WebCrypto, which no fake timer moves: wait for the read itself.
+      await atGate;
+      await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+      expect(sent).toBe(1_048_576);
+      expect(answered).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      const res = answered as Response | null;
+      expect(res?.status).toBe(408);
+      expect(await res?.json()).toEqual({ code: "REQUEST_TIMEOUT", message: "Request timeout" });
+    } finally {
+      open();
+    }
+  });
+});

@@ -1,6 +1,7 @@
 import {
   BODY_BUSY_RETRY_SECONDS,
   BodyBusy,
+  BodyTimeout,
   BodyTooLarge,
   bodyCapOf,
   bodyReadable,
@@ -56,4 +57,13 @@ export function bodyBusy(): Response {
   });
 }
 
-export { BodyBusy, BodyTooLarge, bodyReadable };
+/**
+ * The answer to a large read past its deadlines, in Better Auth's shape: 408
+ * `REQUEST_TIMEOUT` (ruling 59 Major 1 of the 12j lane).
+ */
+export function bodyTimeout(): Response {
+  const e = apiError("body_timeout", 408);
+  return Response.json(e.body, { status: e.statusCode });
+}
+
+export { BodyBusy, BodyTimeout, BodyTooLarge, bodyReadable };

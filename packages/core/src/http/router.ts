@@ -5,13 +5,26 @@ import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
-import { BODY_BUSY_RETRY_SECONDS, BodyBusy, BodyTooLarge, bindBodyRoute } from "./body-cap.js";
+import {
+  BODY_BUSY_RETRY_SECONDS,
+  BodyBusy,
+  BodyTimeout,
+  BodyTooLarge,
+  bindBodyRoute,
+} from "./body-cap.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
-import { BODY_CODE, BUSY_CODE, HOST_CODE, type RouteKey, type RouterCode } from "./route-list.js";
+import {
+  BODY_CODE,
+  BUSY_CODE,
+  HOST_CODE,
+  type RouteKey,
+  type RouterCode,
+  TIMEOUT_CODE,
+} from "./route-list.js";
 import { withSessionBag } from "./session-answer.js";
 
 export interface RouteContext {
@@ -130,7 +143,7 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
 
 /** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
 function routerError(
-  code: RouterCode | typeof HOST_CODE | typeof BODY_CODE | typeof BUSY_CODE,
+  code: RouterCode | typeof HOST_CODE | typeof BODY_CODE | typeof BUSY_CODE | typeof TIMEOUT_CODE,
 ): Response {
   return json({ error: code }, ERRORS[code]);
 }
@@ -506,7 +519,8 @@ export function createRouter(
     // of the bag write, of the cookie move, of the CORS write, or of the
     // trace header answers `internal` with one log line. A `BodyTooLarge` of a
     // body read answers 413 `body_too_large` (rulings 43 and 46 of the 12j lane),
-    // and a `BodyBusy` 503 `body_busy` with `Retry-After` (ruling 51). The bag write of
+    // and a `BodyBusy` 503 `body_busy` with `Retry-After` (ruling 51). A
+    // `BodyTimeout` answers 408 `body_timeout` (ruling 59). The bag write of
     // multi-session (plan 12i Task 11) runs after every handler, so no
     // sign-in route can skip it.
     try {
@@ -530,6 +544,11 @@ export function createRouter(
       if (e instanceof BodyBusy) {
         const res = routerError(BUSY_CODE);
         res.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));
+        return withTrace(trusted ? cors(res, origin) : res, traceId);
+      }
+      // A client that stalled its body past a deadline: its fault, not an error of core.
+      if (e instanceof BodyTimeout) {
+        const res = routerError(TIMEOUT_CODE);
         return withTrace(trusted ? cors(res, origin) : res, traceId);
       }
       // The route key, never the raw path: a client chooses the path (ruling 1

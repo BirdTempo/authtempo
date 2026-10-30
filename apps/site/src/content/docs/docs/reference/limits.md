@@ -201,6 +201,8 @@ These counts live in their rows, so they hold under every limiter.
 | One SCIM request body | 1 MB | SCIM 413 |
 | Nesting and items of one SCIM request body | 16 levels of `[` and `{`, and 65536 items of `[`, `{`, and `,` outside its strings | SCIM 400 `invalidSyntax` |
 | The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout` |
+| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, and at least 10 s: 64 s for an SSO connection write, 10 s for the others | 408 `body_timeout` |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
 | The metadata XML of a provider | 100 KB | `invalid_body` |

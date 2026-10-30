@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createAuth } from "../src/create-auth.js";
 import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
+import { SAML_FORM_MAX } from "../src/engine/sso/saml-sp.js";
 import { readBody } from "../src/http/body.js";
 import {
   BODY_BUSY_RETRY_SECONDS,
@@ -16,6 +17,10 @@ import {
   formPairsFit,
   jsonShapeFits,
   LARGE_READ_BUDGET,
+  LARGE_READ_DEADLINE_FLOOR_MS,
+  LARGE_READ_IDLE_MS,
+  LARGE_READ_MIN_RATE,
+  largeReadDeadlineMs,
   REQUEST_BODY_MAX,
   readBodyText,
 } from "../src/http/body-cap.js";
@@ -684,5 +689,167 @@ describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 
     expect([floor.status, mail.length]).toEqual([200, 1]);
     open();
     await Promise.all(reads);
+  });
+});
+
+/** A stream of `bytes` spaces: one chunk of `chunk` bytes after each wait of `everyMs` (a fake timer in a test). */
+function trickleBody(bytes: number, chunk: number, everyMs: number): ReadableStream<Uint8Array> {
+  let sent = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (sent >= bytes) return c.close();
+      await new Promise((resolve) => setTimeout(resolve, everyMs));
+      const n = Math.min(chunk, bytes - sent);
+      c.enqueue(new Uint8Array(n).fill(0x20));
+      sent += n;
+    },
+  });
+}
+
+/** The end of `read`, or "open" while it runs: "ok", or the name of what it threw. */
+function watch(read: Promise<unknown>) {
+  let end = "open";
+  read.then(
+    () => {
+      end = "ok";
+    },
+    (e: unknown) => {
+      end = e instanceof Error ? e.name : String(e);
+    },
+  );
+  return () => end;
+}
+
+describe("the deadlines of the large reads (ruling 59 Major 1 of the 12j lane)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("derives the deadline of each cap above the floor from LARGE_READ_MIN_RATE, at least 10 s", async () => {
+    const { SCIM_BODY_MAX } = await import("../src/http/routes/scim.js");
+    expect(LARGE_READ_IDLE_MS).toBe(10_000);
+    expect(LARGE_READ_MIN_RATE).toBe(128 * 1024);
+    expect(LARGE_READ_DEADLINE_FLOOR_MS).toBe(LARGE_READ_IDLE_MS);
+    const caps = {
+      "SSO write": REQUEST_BODY_MAX,
+      "Apple callback": bodyCapOf("POST /social/apple/callback"),
+      "SAML form": SAML_FORM_MAX,
+      "SCIM body": SCIM_BODY_MAX,
+    };
+    const deadlines = Object.fromEntries(
+      Object.entries(caps).map(([name, cap]) => [name, largeReadDeadlineMs(cap)]),
+    );
+    console.log(`body-cap: deadlines ${JSON.stringify(deadlines)}`);
+    expect(deadlines).toEqual({
+      "SSO write": 64_000,
+      "Apple callback": 10_000,
+      "SAML form": 10_000,
+      "SCIM body": 10_000,
+    });
+    // The largest valid SSO write and a full SAML form each arrive in time at the least rate.
+    const largest = largestBodies()[0]?.bytes ?? Number.POSITIVE_INFINITY;
+    expect((largest * 1000) / LARGE_READ_MIN_RATE).toBeLessThan(deadlines["SSO write"] ?? 0);
+    expect((SAML_FORM_MAX * 1000) / LARGE_READ_MIN_RATE).toBeLessThan(deadlines["SAML form"] ?? 0);
+  });
+
+  it("ends a stalled read above the floor at LARGE_READ_IDLE_MS with BodyTimeout, and frees the budget", {
+    timeout: 30_000,
+  }, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Reads of REQUEST_BODY_MAX that stall one chunk before their end hold the budget.
+    const count = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
+    const held = Array.from({ length: count }, () =>
+      gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 65_536),
+    );
+    // A body that sends no byte at all: its read ends at the idle limit, not at 64 s.
+    const silent = gatedBody(REQUEST_BODY_MAX, 0);
+    try {
+      const ends = held.map((h, i) =>
+        watch(readBodyText(streamPost(`/hold/${i}`, h.stream), REQUEST_BODY_MAX)),
+      );
+      await Promise.all(held.map((h) => h.atGate));
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(
+        readBodyText(streamPost("/x", gatedBody(1_000_000, 1_000_000).stream), REQUEST_BODY_MAX),
+      ).rejects.toBeInstanceOf(BodyBusy);
+      const none = watch(readBodyText(streamPost("/x", silent.stream), REQUEST_BODY_MAX));
+      await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS - 1);
+      expect([...ends.map((end) => end()), none()]).toEqual(Array(count + 1).fill("open"));
+      await vi.advanceTimersByTimeAsync(1);
+      expect([...ends.map((end) => end()), none()]).toEqual(Array(count + 1).fill("BodyTimeout"));
+      // The stalled reads freed their bytes: the budget's count of reads passes again.
+      const again = Array.from({ length: count }, () =>
+        readBodyText(
+          streamPost("/x", gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX).stream),
+          REQUEST_BODY_MAX,
+        ),
+      );
+      expect((await Promise.all(again)).map((t) => t?.length)).toEqual(
+        Array(count).fill(REQUEST_BODY_MAX),
+      );
+    } finally {
+      // A failed check must not leave held reads behind for the next test.
+      for (const h of [...held, silent]) h.open();
+    }
+  });
+
+  it("ends a read above the floor that trickles past the time of its cap, though no wait reaches the idle limit", {
+    timeout: 30_000,
+  }, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // 1 KiB each second: a chunk well within the idle limit, a rate far under LARGE_READ_MIN_RATE.
+    const end = watch(
+      readBodyText(streamPost("/x", trickleBody(REQUEST_BODY_MAX, 1024, 1000)), REQUEST_BODY_MAX),
+    );
+    const deadline = largeReadDeadlineMs(REQUEST_BODY_MAX);
+    await vi.advanceTimersByTimeAsync(deadline - 1);
+    expect(end()).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(end()).toBe("BodyTimeout");
+    // A read at the floor has no deadline: it waits for its client.
+    const floor = watch(
+      readBodyText(streamPost("/x", trickleBody(BODY_CAP_FLOOR, 1024, 20_000)), BODY_CAP_FLOOR),
+    );
+    await vi.advanceTimersByTimeAsync(20_000 * 4);
+    expect(floor()).toBe("open");
+    await vi.advanceTimersByTimeAsync(20_000 * 64);
+    expect(floor()).toBe("ok");
+  });
+
+  it("answers 408 body_timeout through the router at the SAML ACS, with no sign-in", {
+    timeout: 30_000,
+  }, async () => {
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = gatedBody(SAML_FORM_MAX, 1_048_576);
+    let answered: Response | null = null;
+    void auth
+      .handle(
+        streamPost(
+          "/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs",
+          stalled.stream,
+          "application/x-www-form-urlencoded",
+        ),
+      )
+      .then((res) => {
+        answered = res;
+      });
+    await stalled.atGate;
+    await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS - 1);
+    expect(answered).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    const res = answered as Response | null;
+    expect(res?.status).toBe(408);
+    expect(res?.headers.get("retry-after")).toBeNull();
+    expect(await res?.json()).toEqual({ error: "body_timeout" });
+    stalled.open();
   });
 });

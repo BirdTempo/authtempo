@@ -516,6 +516,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | `POST /social/apple/callback`, `POST /sso/connections/create`, `POST /sso/connections/update`, and `POST /sso/:connectionId/acs`. The SCIM routes answer their own SCIM 503. See [Limits](/docs/reference/limits/). |
 
+<h3 id="body_timeout"><code>body_timeout</code> 408</h3>
+
+- **Meaning:** A body read of a route with a cap above the floor stopped at a deadline. It got no bytes for 10 s, or it ran past the time of its cap at 131072 bytes per second. That time is at least 10 s. Core freed the bytes of the read, so no handler parsed the body.
+- **Do:** Send the whole body again, with no pause. A link slower than 128 KiB per second can get this code for a large body. A body at the floor never gets it.
+
+| Routes |
+| --- |
+| `POST /social/apple/callback`, `POST /sso/connections/create`, `POST /sso/connections/update`, `POST /sso/:connectionId/acs`, and each SCIM route that takes a body. See [Limits](/docs/reference/limits/). |
+
 <h3 id="anonymous_refused"><code>anonymous_refused</code> 403</h3>
 
 - **Meaning:** An anonymous session called a route that needs a way in, or that would change the anonymous user in place. At `POST /anonymous/delete`, a session that is not anonymous called it. The route did nothing.

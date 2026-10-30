@@ -111,6 +111,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   anonymous_refused: "A guest account cannot do this. Sign in or create an account first.",
   body_too_large: "The request was too large. Send less data.",
   body_busy: "The server is busy with large requests. Try again in a moment.",
+  body_timeout: "The request took too long to send. Check the connection and try again.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

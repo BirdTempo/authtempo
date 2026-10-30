@@ -2993,6 +2993,15 @@ export const BODY_CODE = "body_too_large" as const satisfies ErrorCode;
 export const BUSY_CODE = "body_busy" as const satisfies ErrorCode;
 
 /**
+ * The code that the router answers for a read above the floor that got no
+ * chunk for `LARGE_READ_IDLE_MS`, or that ran past `largeReadDeadlineMs`
+ * (ruling 59 Major 1 of the 12j lane). The routes of `BODY_CAPS`, the SAML
+ * ACS, and the SCIM writes can answer it. No entry declares it, and the
+ * OpenAPI document states it in its rules, as it states `BUSY_CODE`.
+ */
+export const TIMEOUT_CODE = "body_timeout" as const satisfies ErrorCode;
+
+/**
  * The codes of the operator routes that only a request with a session gets
  * (plan 12f): `operator_self` for the act of a platform operator on their
  * own user, and `impersonation_session` for a request of an impersonation

@@ -114,6 +114,51 @@ export const LARGE_READ_BUDGET = 2 * 8_388_608;
 /** The seconds of `Retry-After` of `body_busy`: a large read in flight ends within about this time. */
 export const BODY_BUSY_RETRY_SECONDS = 1;
 
+/**
+ * The longest time that a read above the floor waits for its next chunk
+ * (ruling 59 Major 1 of the 12j lane). Past it, the read stops, frees its
+ * bytes of the budget, and answers 408 `body_timeout`. Before this limit, a
+ * client that sent most of a large body and stalled held its bytes of the
+ * budget while its socket lived: Fastify 5.12.5 sets no request timeout,
+ * and the Node http server ends a request only after 300 s.
+ *
+ * The derivation, done 2026-10-30. A client at `LARGE_READ_MIN_RATE` sends
+ * a chunk of 64 KiB each 0.5 s. A TCP sender that loses a segment tries
+ * again after 1 s, then 2 s, then 4 s (RFC 6298 sections 2.1 and 5.5: an
+ * initial timeout of 1 s, which doubles at each loss). So three lost tries
+ * in a row take 7 s, and 10 s keeps a margin over them.
+ */
+export const LARGE_READ_IDLE_MS = 10_000;
+
+/**
+ * The slowest rate, in bytes per second, at which a read above the floor
+ * may arrive in all (ruling 59 Major 1 of the 12j lane). A read must end
+ * within the time of its cap at this rate, and at least within
+ * `LARGE_READ_DEADLINE_FLOOR_MS` (`largeReadDeadlineMs`). Past it, the read
+ * stops as at the idle limit. So a client that sends a byte each few
+ * seconds cannot hold its bytes of the budget for long.
+ *
+ * The derivation, done 2026-10-30. 128 KiB per second is 1 Mbit/s, the
+ * upload rate of a slow mobile link. At this rate the largest valid SSO
+ * connection write (4 705 616 bytes) takes 36 s of its 64 s, and a SAML
+ * form of `SAML_FORM_MAX` (1 081 519 bytes) takes 8.3 s of its 10 s. A
+ * client that is slower than this for a large body gets 408.
+ */
+export const LARGE_READ_MIN_RATE = 131_072;
+
+/**
+ * The least time that a read above the floor may take in all: the idle
+ * limit, so a read of a small cap never ends sooner than a read that only
+ * waits. The SAML form, the Apple callback, and the SCIM body each get this
+ * time; an SSO connection write gets 64 s (2026-10-30).
+ */
+export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
+
+/** The time in ms that a whole read above the floor of a cap of `cap` bytes may take. */
+export function largeReadDeadlineMs(cap: number): number {
+  return Math.max(LARGE_READ_DEADLINE_FLOOR_MS, Math.ceil((cap * 1000) / LARGE_READ_MIN_RATE));
+}
+
 /** The bytes that the reads above the floor hold now, in this isolate. */
 let largeHeld = 0;
 
@@ -167,6 +212,19 @@ export class BodyBusy extends Error {
 }
 
 /**
+ * A read above the floor that got no chunk for `LARGE_READ_IDLE_MS`, or that
+ * did not end within `largeReadDeadlineMs` of its cap. The read stopped and
+ * freed its bytes of the budget. The router answers it 408 `body_timeout`
+ * for every route (ruling 59 Major 1 of the 12j lane).
+ */
+export class BodyTimeout extends Error {
+  constructor(ms: number) {
+    super(`the request body did not arrive within ${ms} ms`);
+    this.name = "BodyTimeout";
+  }
+}
+
+/**
  * The body stream of `request`, or false when the body was read before or
  * a reader holds its lock. An app that called `getReader()` and read
  * nothing leaves `bodyUsed` false, and a `Response` of a locked stream
@@ -193,7 +251,10 @@ export function bodyReadable(request: Request): boolean {
  * past the cap stops the read before the first byte. It throws
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against
- * `LARGE_READ_BUDGET` until it ends, and throws `BodyBusy` past it.
+ * `LARGE_READ_BUDGET` until it ends, and throws `BodyBusy` past it. It
+ * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
+ * when it does not end within `largeReadDeadlineMs` of its cap. Each end
+ * frees its bytes (ruling 59 of the 12j lane).
  * Workers, Node, Bun, and Deno each give `request.body` as a stream. Null
  * when the body was read or locked before, such as by app middleware: each
  * reader answers it `invalid_body`, not 500 (ruling 46 Low 1 and ruling 51
@@ -203,9 +264,29 @@ export async function readBodyBytes(request: Request, cap: number): Promise<Uint
   const body = freshBody(request);
   if (body === false) return null;
   const length = request.headers.get("content-length");
+  const large = cap > BODY_CAP_FLOOR;
   let held = 0;
   let busy = false;
+  // A read above the floor stops at its deadlines, so a stalled client frees its bytes.
+  const stop = new AbortController();
+  const abort = () => stop.abort();
+  let timedOut = 0;
+  const expire = (ms: number) => () => {
+    timedOut = ms;
+    stop.abort();
+  };
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  let whole: ReturnType<typeof setTimeout> | undefined;
+  if (large) {
+    if (request.signal.aborted) stop.abort();
+    else request.signal.addEventListener("abort", abort, { once: true });
+    idle = setTimeout(expire(LARGE_READ_IDLE_MS), LARGE_READ_IDLE_MS);
+    const deadline = largeReadDeadlineMs(cap);
+    whole = setTimeout(expire(deadline), deadline);
+  }
   const take = (bytes: number) => {
+    clearTimeout(idle);
+    idle = setTimeout(expire(LARGE_READ_IDLE_MS), LARGE_READ_IDLE_MS);
     if (largeHeld + bytes > LARGE_READ_BUDGET) {
       // Free the bytes of this read at once, so no other read in flight meets a full budget.
       largeHeld -= held;
@@ -221,13 +302,17 @@ export async function readBodyBytes(request: Request, cap: number): Promise<Uint
     const bytes = await readCappedBytes(
       new Response(body, length === null ? {} : { headers: { "content-length": length } }),
       cap,
-      request.signal,
-      cap > BODY_CAP_FLOOR ? take : undefined,
+      large ? stop.signal : request.signal,
+      large ? take : undefined,
     );
     if (busy) throw new BodyBusy();
+    if (timedOut > 0) throw new BodyTimeout(timedOut);
     if (bytes === null) throw new BodyTooLarge(cap);
     return bytes;
   } finally {
+    clearTimeout(idle);
+    clearTimeout(whole);
+    request.signal.removeEventListener("abort", abort);
     largeHeld -= held;
   }
 }

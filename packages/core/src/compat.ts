@@ -22,10 +22,12 @@ export {
  * that the body goes to, so no read of the package is unbounded. A read
  * past the cap throws `BodyTooLarge`. A read above the floor past the
  * budget of the large reads of the isolate throws `BodyBusy` (ruling 51).
+ * A read above the floor past its deadlines throws `BodyTimeout` (ruling 59).
  */
 export {
   BODY_BUSY_RETRY_SECONDS,
   BodyBusy,
+  BodyTimeout,
   BodyTooLarge,
   bodyCapOf,
   bodyReadable,

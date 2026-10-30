@@ -200,6 +200,10 @@ export const BETTER_AUTH_CODES = {
   // code for it. So the name is better-call's status name (better-call 1.4.0
   // dist/error.mjs:88, read 2026-10-30).
   body_busy: "SERVICE_UNAVAILABLE",
+  // 12j ruling 59: core's deadlines of a large read. Better Auth 1.7.7 names no
+  // code for it. So the name is better-call's status name (better-call 1.4.0
+  // dist/error.mjs:64, read 2026-10-30).
+  body_timeout: "REQUEST_TIMEOUT",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",
@@ -323,6 +327,8 @@ const STATUS_NAMES: Record<number, string> = {
   403: "FORBIDDEN",
   404: "NOT_FOUND",
   405: "METHOD_NOT_ALLOWED",
+  // better-call 1.4.0 dist/error.mjs:64, for core's 408 body_timeout.
+  408: "REQUEST_TIMEOUT",
   409: "CONFLICT",
   // better-call 1.4.0 dist/error.mjs:69, for core's 413 body_too_large.
   413: "PAYLOAD_TOO_LARGE",
@@ -350,6 +356,7 @@ const REASONS: Record<number, string> = {
   403: "Forbidden",
   404: "Not Found",
   405: "Method Not Allowed",
+  408: "Request Timeout",
   409: "Conflict",
   413: "Payload Too Large",
   429: "Too Many Requests",

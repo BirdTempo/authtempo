@@ -16,9 +16,11 @@ import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
 import {
   BodyBusy,
+  BodyTimeout,
   BodyTooLarge,
   bodyBusy,
   bodyReadable,
+  bodyTimeout,
   bodyTooLarge,
   readJsonOf,
 } from "./body.js";
@@ -215,12 +217,14 @@ export function createHandler(
     // A read of the shim past the cap of its route throws core's BodyTooLarge.
     // It answers 413 PAYLOAD_TOO_LARGE at that first read (ruling 46 of the 12j lane).
     // A large read past the budget of the isolate throws BodyBusy: 503 (ruling 51).
+    // A large read past its deadlines throws BodyTimeout: 408 (ruling 59).
     const res = await serve(
       request,
       host ? { waitUntil: (p) => void work.push(p) } : undefined,
     ).catch((e: unknown) => {
       if (e instanceof BodyTooLarge) return bodyTooLarge();
       if (e instanceof BodyBusy) return bodyBusy();
+      if (e instanceof BodyTimeout) return bodyTimeout();
       throw e;
     });
     if (host) {
