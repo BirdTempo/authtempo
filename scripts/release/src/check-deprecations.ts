@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Deprecation, readDeprecations } from "./lib/deprecations.ts";
+import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
@@ -17,9 +18,6 @@ export interface DeprecationsInput {
 }
 
 const COUNT_KEYS = ["items", "live", "due"] as const;
-
-/** The first version that a release carries (spec 33 item 1.2). */
-const FIRST_RELEASE = "0.1.0";
 
 /** The page that lists each entry (spec 33 item 8). Each entry links its own anchor. */
 const DOCS_PAGE = "/docs/reference/deprecations/";
