@@ -1849,3 +1849,61 @@ describe("a large read that cannot start spends no count (ruling 72 Minor 1 of t
     ).toHaveLength(tries);
   });
 });
+
+describe("the stall of a large read of a user (ruling 75 of the 12j lane)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("spends the user's large reads at a 408: the next write answers 429 before any byte, and the next window reads", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Ada's first large read of the hour stalls after 1 MiB.
+    const stalled = gatedBody(REQUEST_BODY_MAX, 1_048_576);
+    const pending = ssoWrite(w, ada.token, "203.0.113.1", stalled.stream);
+    try {
+      await stalled.atGate;
+      await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS);
+      expect(await statusOf(await pending)).toBe("408");
+    } finally {
+      stalled.open();
+    }
+    vi.useRealTimers();
+    // Five of the six reads of the hour are left, and the stall spent them: 429 before any byte.
+    const next = countedForm(1_048_576);
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", next.stream);
+    expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
+    expect(next.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    // The spend refuses no caller, so the one limit.hit is that 429.
+    expect((await events()).filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
+      "sso-large-read:user",
+    ]);
+    // The spend is Ada's own: another account writes at once.
+    expect((await ssoWrite(w, bea.token, "203.0.113.2", "{}")).status).toBe(400);
+    // The window ends an hour after Ada's first count: Ada reads again.
+    w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000 - 1);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+    w.clock.advance(1);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+  });
+
+  it("spends nothing at a write that arrives whole, after pauses or at once: the user keeps its 6 starts", {
+    timeout: 30_000,
+  }, async () => {
+    const { w } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    // One write of 256 KiB that arrives in 8 chunks, 50 ms apart, then five small writes.
+    const answers = [
+      (await ssoWrite(w, ada.token, "203.0.113.1", trickleBody(262_144, 32_768, 50))).status,
+    ];
+    for (let i = 1; i < SSO_LARGE_READ_PER_USER.max; i++)
+      answers.push((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status);
+    expect(answers).toEqual(Array(SSO_LARGE_READ_PER_USER.max).fill(400));
+    // The seventh is past the limit of the hour.
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+  });
+});

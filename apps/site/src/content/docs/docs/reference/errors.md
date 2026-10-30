@@ -520,7 +520,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="body_timeout"><code>body_timeout</code> 408</h3>
 
 - **Meaning:** A body read of a route with a cap above the floor stopped at a deadline. It got no bytes for 10 s, or it ran past the time of its cap at 131072 bytes per second. For a signed-in user, the rate is 262144 bytes per second. That time is at least 10 s. Core freed the bytes of the read, so no handler parsed the body.
-- **Do:** Send the whole body again, with no pause. A link slower than 128 KiB per second, or 256 KiB per second for a signed-in user, can get this code for a large body. A body at the floor never gets it.
+- **Do:** Send the whole body again, with no pause. A link slower than 128 KiB per second, or 256 KiB per second for a signed-in user, can get this code for a large body. An SSO connection write that gets this code spends the rest of the large reads of its user in the window of `sso-large-read:user`. Until that window ends, each SSO connection write of the user answers 429 `rate_limited`. Send it again in the next window, on a faster link. A body at the floor never gets it.
 
 | Routes |
 | --- |

@@ -150,3 +150,21 @@ export async function limit(
   if (!allowed) config.observe.emit({ name: "limit.hit", family });
   return allowed;
 }
+
+/**
+ * Spends the rest of the window of `<family>:<subject>`: it counts until the
+ * limiter refuses, at most `window.max + 1` calls. So each `limit` call of
+ * that key answers false until the window ends. When the window had ended,
+ * the first call opens a new one, and the spend fills it. A spend refuses
+ * no caller, so it emits no `limit.hit`. The stall of a large read of a
+ * user spends its large reads (ruling 75 of the 12j lane).
+ */
+export async function spendLimit(
+  config: ResolvedConfig,
+  family: LimitFamily,
+  subject: string,
+  window: LimitWindow,
+): Promise<void> {
+  for (let i = 0; i <= window.max; i++)
+    if (!(await config.limiter.allow(`${family}:${subject}`, window))) return;
+}

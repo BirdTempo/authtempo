@@ -357,6 +357,21 @@ export function bodyClientOf(request: Request): string {
   return CLIENT_OF.get(request) ?? UNKNOWN_CLIENT;
 }
 
+/** The work of each request at a stall of its large read (`bindBodyStall`). */
+const STALL_OF = new WeakMap<Request, () => Promise<void>>();
+
+/**
+ * Binds `request` to `onStall`, which a read above the floor of the request
+ * runs when it stops at a deadline, before it throws `BodyTimeout` (ruling
+ * 75 of the 12j lane). `managedCall` and `countSsoManageWrite` bind it for
+ * an SSO connection write: it spends the rest of the large reads of the
+ * user in the window of `sso-large-read:user`. A read that arrives whole,
+ * a read past its cap, and a read that cannot start never run it.
+ */
+export function bindBodyStall(request: Request, onStall: () => Promise<void>): void {
+  STALL_OF.set(request, onStall);
+}
+
 /**
  * A request body past the cap of its route, or a body that could not be
  * read. The router answers it 413 `body_too_large` for every route. So a
@@ -455,12 +470,13 @@ export function bodyReadable(request: Request): boolean {
  * at a time: a second throws `BodyBusy` before any byte (ruling 69). It
  * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
  * when it does not end within `largeReadDeadlineMs` of its cap, at the rate
- * of a user for a user (ruling 69). Each end frees its bytes (ruling 59 of
- * the 12j lane). Workers, Node, Bun, and Deno each give
- * `request.body` as a stream. Null when the body was read or locked before,
- * such as by app middleware, and at a chunk that is not bytes: each reader
- * answers it `invalid_body`, not 500 (ruling 46 Low 1, ruling 51 Low 3, and
- * ruling 59 Low 1 of the 12j lane).
+ * of a user for a user (ruling 69). Before that throw it runs the stall
+ * work that `bindBodyStall` bound to the request (ruling 75). Each end
+ * frees its bytes (ruling 59 of the 12j lane). Workers, Node, Bun, and
+ * Deno each give `request.body` as a stream. Null when the body was read
+ * or locked before, such as by app middleware, and at a chunk that is not
+ * bytes: each reader answers it `invalid_body`, not 500 (ruling 46 Low 1,
+ * ruling 51 Low 3, and ruling 59 Low 1 of the 12j lane).
  */
 export async function readBodyBytes(
   request: Request,
@@ -534,7 +550,12 @@ export async function readBodyBytes(
       large ? take : undefined,
     );
     if (busy) throw new BodyBusy();
-    if (timedOut > 0) throw new BodyTimeout(timedOut);
+    if (timedOut > 0) {
+      // Free the bytes first, then spend the reads of a stalled user (ruling 75).
+      release();
+      await STALL_OF.get(request)?.();
+      throw new BodyTimeout(timedOut);
+    }
     // A chunk that is not bytes: a bad body, which no count saw (ruling 59 Low 1).
     if (read === "chunk") return null;
     if (!(read instanceof Uint8Array)) throw new BodyTooLarge(cap);

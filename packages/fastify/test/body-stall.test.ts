@@ -1,6 +1,12 @@
 import type { AddressInfo } from "node:net";
 import net from "node:net";
-import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "@authtempo/core";
+import {
+  createAuth,
+  createMemoryAdapter,
+  createMemoryLimiter,
+  createPbkdf2PasswordHash,
+  type LimiterPort,
+} from "@authtempo/core";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes } from "../src/index.js";
@@ -141,8 +147,8 @@ const USER_DEADLINE_MS = 32_000;
 /** Core's SSO_LARGE_READ_PER_USER.max: the large reads of one user in an hour. */
 const LARGE_READS_PER_HOUR = 6;
 
-/** An app of core with SAML and the password sign-up on, on a real port. */
-async function startApp() {
+/** An app of core with SAML and the password sign-up on, on a real port, with `limiter` when given. */
+async function startApp(limiter?: LimiterPort) {
   const auth = createAuth({
     baseURL: "http://localhost",
     secret: "0123456789abcdef0123456789abcdef",
@@ -152,6 +158,7 @@ async function startApp() {
     organizations: {},
     sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
+    ...(limiter === undefined ? {} : { limiter }),
   });
   const app = Fastify();
   await app.register(authRoutes({ auth }));
@@ -392,6 +399,90 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
       expect(after).toBe('400 {"error":"invalid_body"}');
     } finally {
       held?.socket.destroy();
+      await close();
+    }
+  });
+});
+
+// Ruling 75 of the 12j lane: a large read of a user that stops at a
+// deadline (408) spends the rest of that user's large reads of the window.
+// So a stalled account cannot start its next hold of the user half until
+// the window of sso-large-read:user ends. A write that arrives whole spends
+// nothing. The limiter of these apps runs on a clock that the test moves.
+describe("the stall of a large read of a user through the Fastify binding (ruling 75 of the 12j lane)", () => {
+  /** A memory limiter on the time of the process plus an offset that the test moves. */
+  function movedLimiter() {
+    let offset = 0;
+    const limiter = createMemoryLimiter({ now: () => new Date(Date.now() + offset) });
+    const advance = (ms: number) => {
+      offset += ms;
+    };
+    return { limiter, advance };
+  }
+
+  /** A small SSO connection write of `cookie` from `ip`, as a browser fetch sends it: "<status> <body>". */
+  const smallWrite = async (port: number, cookie: string, ip: string) => {
+    const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+        cookie,
+        "cf-connecting-ip": ip,
+      },
+      body: `{}${" ".repeat(4094)}`,
+    });
+    return `${res.status} ${await res.text()}`;
+  };
+
+  it("refuses the next large read of a user whose read ended by 408, before any byte, and reads it in the next window", {
+    timeout: 60_000,
+  }, async () => {
+    const { limiter, advance } = movedLimiter();
+    const { port, close } = await startApp(limiter);
+    const posts: ReturnType<typeof rawPost>[] = [];
+    try {
+      const cookie = await signedIn(port, "stall@probe.example", "203.0.113.50");
+      // The first large read of the hour sends 64 KiB of 8 MiB and stops: 408 at the idle limit.
+      const stalled = ssoPost(port, cookie, "203.0.113.50", 65_536);
+      posts.push(stalled);
+      await stalled.sent;
+      expect(await answered(stalled, IDLE_MS + 5_000)).toBe(
+        'HTTP/1.1 408 Request Timeout {"error":"body_timeout"}',
+      );
+      console.log(`body-stall: the stalled write of a user answered at ${stalled.at()} ms`);
+      // Five reads of the hour were left, and the stall spent them: the next write sends only
+      // its head, and the answer comes with no byte read.
+      const next = ssoPost(port, cookie, "203.0.113.50", 0);
+      posts.push(next);
+      await next.sent;
+      expect(await answered(next, 5000)).toBe(
+        'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}',
+      );
+      // In the next window of the limiter, the account reads a write again.
+      advance(3600 * 1000);
+      expect(await smallWrite(port, cookie, "203.0.113.50")).toBe('400 {"error":"invalid_body"}');
+    } finally {
+      for (const p of posts) p.socket.destroy();
+      await close();
+    }
+  });
+
+  it("keeps the 6 starts of a user whose small writes arrive whole at once", {
+    timeout: 60_000,
+  }, async () => {
+    const { limiter } = movedLimiter();
+    const { port, close } = await startApp(limiter);
+    try {
+      const cookie = await signedIn(port, "fast@probe.example", "203.0.113.51");
+      const answers: string[] = [];
+      for (let i = 0; i < LARGE_READS_PER_HOUR; i++)
+        answers.push(await smallWrite(port, cookie, "203.0.113.51"));
+      // Each of the 6 writes reads, and the schema refuses it: no write spent another's start.
+      expect(answers).toEqual(Array(LARGE_READS_PER_HOUR).fill('400 {"error":"invalid_body"}'));
+      // The seventh is past the limit of the hour.
+      expect(await smallWrite(port, cookie, "203.0.113.51")).toBe('429 {"error":"rate_limited"}');
+    } finally {
       await close();
     }
   });

@@ -128,7 +128,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `sso-acs:ip:<ip>` | 15 minutes | 60 | SAML form post to the ACS |
 | `sso-domain-verify:org:<organizationId>` | 1 hour | 10 | SSO domain verify, before any resolver |
 | `sso-manage:user:<userId>` | 15 minutes | 30 | Each SSO domain, SSO connection, and SCIM token route, before the manager guard |
-| `sso-large-read:user:<userId>` | 1 hour | 6 | Each SSO connection write, at the start of its body read, after `sso-manage:user`. A write whose read cannot start answers 503 `body_busy` before this count and `sso-manage:user`, and counts on neither. So one account holds the user half of the body budget at most 6 times 32 s in an hour. `SSO_LARGE_READ_PER_USER` |
+| `sso-large-read:user:<userId>` | 1 hour | 6 | Each SSO connection write, at the start of its body read, after `sso-manage:user`. A write whose read cannot start answers 503 `body_busy` before this count and `sso-manage:user`, and counts on neither. So one account holds the user half of the body budget at most 6 times 32 s in an hour. A read that stops at a deadline, 408 `body_timeout`, spends the rest of the window. The account then starts no large read until the window ends. Send the write again in the next window, on a faster link. `SSO_LARGE_READ_PER_USER` |
 | `scim-auth:ip:<ip>` | 15 minutes | 60 | Each failed SCIM token check: a missing, wrong, expired, or revoked token. A valid token never counts here |
 | `scim:token:<tokenId>` | 10 minutes | 1200 | Each call of one SCIM token, after the token check |
 | `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
