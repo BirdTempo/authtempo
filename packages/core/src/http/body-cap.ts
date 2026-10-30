@@ -159,8 +159,36 @@ export function largeReadDeadlineMs(cap: number): number {
   return Math.max(LARGE_READ_DEADLINE_FLOOR_MS, Math.ceil((cap * 1000) / LARGE_READ_MIN_RATE));
 }
 
+/**
+ * The most bytes of the budget that one client holds at once (ruling 59
+ * Major 1 of the 12j lane): a quarter of `LARGE_READ_BUDGET`. A client is
+ * its IP for a read before a session, and its user after one
+ * (`bindBodyClient`). A read past the share of its client answers 503
+ * `body_busy`, as a read past the budget does. So 16 stalled posts of one
+ * client hold at most a quarter, and the other clients keep the rest.
+ *
+ * The derivation, done 2026-10-30. A quarter is 4 MiB: 3 SAML forms of
+ * `SAML_FORM_MAX` (1 081 519 bytes), 16 Apple callbacks, or 4 SCIM
+ * bodies from one IP at once. The largest valid SSO connection write is
+ * 4 705 616 bytes, more than a quarter. So a read whose cap passes the
+ * share may hold its cap instead (`largeShareOf`). A user can then always
+ * send one SSO write of the largest valid body, and holds at most half.
+ */
+export const LARGE_READ_SHARE = 4_194_304;
+
+/** The bytes that one client may hold in a read of `cap`: the share, or the cap when it is more. */
+export function largeShareOf(cap: number): number {
+  return Math.max(LARGE_READ_SHARE, cap);
+}
+
+/** The client of a request that no bind names: one shared client, as the limiter keys no IP. */
+const UNKNOWN_CLIENT = "ip:unknown";
+
 /** The bytes that the reads above the floor hold now, in this isolate. */
 let largeHeld = 0;
+
+/** The bytes that the reads above the floor of each client hold now. An entry goes at 0. */
+const heldBy = new Map<string, number>();
 
 /** The cap of a route: its entry of `BODY_CAPS`, else the floor. */
 export function bodyCapOf(key: RouteKey | undefined): number {
@@ -184,6 +212,26 @@ export function bodyCapOfRequest(request: Request): number {
   return bodyCapOf(ROUTE_OF.get(request));
 }
 
+/** The client of each request, for its share of the budget. */
+const CLIENT_OF = new WeakMap<Request, string>();
+
+/**
+ * Binds `request` to its client for `LARGE_READ_SHARE`: `ip:<key>` by the
+ * router before each handler (the key of `ipKey`), and `user:<id>` after a
+ * session check. A later bind takes the place of an earlier one.
+ */
+export function bindBodyClient(request: Request, client: string): void {
+  CLIENT_OF.set(request, client);
+}
+
+/**
+ * The client of `request` for its share of the budget. A request with no
+ * bind is `ip:unknown`, one shared client, so it fails closed.
+ */
+export function bodyClientOf(request: Request): string {
+  return CLIENT_OF.get(request) ?? UNKNOWN_CLIENT;
+}
+
 /**
  * A request body past the cap of its route, or a body that could not be
  * read. The router answers it 413 `body_too_large` for every route. So a
@@ -201,7 +249,8 @@ export class BodyTooLarge extends Error {
 
 /**
  * A read above the floor while the reads of the isolate hold
- * `LARGE_READ_BUDGET` bytes. The router answers it 503 `body_busy` with
+ * `LARGE_READ_BUDGET` bytes, or while the reads of its client hold its
+ * share (`largeShareOf`). The router answers it 503 `body_busy` with
  * `Retry-After` for every route, and the SCIM routes answer their own 503.
  */
 export class BodyBusy extends Error {
@@ -251,7 +300,8 @@ export function bodyReadable(request: Request): boolean {
  * past the cap stops the read before the first byte. It throws
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against
- * `LARGE_READ_BUDGET` until it ends, and throws `BodyBusy` past it. It
+ * `LARGE_READ_BUDGET` and against the share of `client` until it ends, and
+ * throws `BodyBusy` past either one. It
  * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
  * when it does not end within `largeReadDeadlineMs` of its cap. Each end
  * frees its bytes (ruling 59 of the 12j lane).
@@ -260,7 +310,11 @@ export function bodyReadable(request: Request): boolean {
  * reader answers it `invalid_body`, not 500 (ruling 46 Low 1 and ruling 51
  * Low 3 of the 12j lane).
  */
-export async function readBodyBytes(request: Request, cap: number): Promise<Uint8Array | null> {
+export async function readBodyBytes(
+  request: Request,
+  cap: number,
+  client: string = bodyClientOf(request),
+): Promise<Uint8Array | null> {
   const body = freshBody(request);
   if (body === false) return null;
   const length = request.headers.get("content-length");
@@ -284,17 +338,27 @@ export async function readBodyBytes(request: Request, cap: number): Promise<Uint
     const deadline = largeReadDeadlineMs(cap);
     whole = setTimeout(expire(deadline), deadline);
   }
+  const share = largeShareOf(cap);
+  const release = () => {
+    if (held === 0) return;
+    largeHeld -= held;
+    const left = (heldBy.get(client) ?? 0) - held;
+    if (left > 0) heldBy.set(client, left);
+    else heldBy.delete(client);
+    held = 0;
+  };
   const take = (bytes: number) => {
     clearTimeout(idle);
     idle = setTimeout(expire(LARGE_READ_IDLE_MS), LARGE_READ_IDLE_MS);
-    if (largeHeld + bytes > LARGE_READ_BUDGET) {
+    const mine = heldBy.get(client) ?? 0;
+    if (largeHeld + bytes > LARGE_READ_BUDGET || mine + bytes > share) {
       // Free the bytes of this read at once, so no other read in flight meets a full budget.
-      largeHeld -= held;
-      held = 0;
+      release();
       busy = true;
       return false;
     }
     largeHeld += bytes;
+    heldBy.set(client, mine + bytes);
     held += bytes;
     return true;
   };
@@ -313,21 +377,24 @@ export async function readBodyBytes(request: Request, cap: number): Promise<Uint
     clearTimeout(idle);
     clearTimeout(whole);
     request.signal.removeEventListener("abort", abort);
-    largeHeld -= held;
+    release();
   }
 }
 
 /**
  * The request body as text, at most `cap` bytes (the cap of the request's
- * route by default), by `readBodyBytes`. The decode is that of
+ * route by default), by `readBodyBytes`, for the share of `client` (the
+ * client bound to the request by default). A compat package that reads a
+ * clone names the client of the request it cloned. The decode is that of
  * `request.text()`: UTF-8, with a replacement character for a bad byte and
  * a leading BOM removed. Null when the body was read before.
  */
 export async function readBodyText(
   request: Request,
   cap: number = bodyCapOfRequest(request),
+  client: string = bodyClientOf(request),
 ): Promise<string | null> {
-  const bytes = await readBodyBytes(request, cap);
+  const bytes = await readBodyBytes(request, cap, client);
   return bytes === null ? null : new TextDecoder().decode(bytes);
 }
 

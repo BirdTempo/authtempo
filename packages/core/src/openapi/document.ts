@@ -11,6 +11,7 @@ import {
   LARGE_READ_DEADLINE_FLOOR_MS,
   LARGE_READ_IDLE_MS,
   LARGE_READ_MIN_RATE,
+  LARGE_READ_SHARE,
 } from "../http/body-cap.js";
 import { ROUTE_CONTRACT } from "../http/contract/index.js";
 import { RESET_PAGE_ERRORS } from "../http/contract/password.js";
@@ -81,7 +82,7 @@ const RULES = [
   "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
   '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.',
   `- A request body past the cap of its route answers 413 \`body_too_large\`, and no parse runs. The cap is ${BODY_CAP_FLOOR} bytes, ${capList()}. A JSON body nested deeper than ${BODY_DEPTH_MAX} or with more than ${BODY_ITEMS_MAX} items outside its strings answers 400 \`invalid_body\`, and no parse runs. A form body of more than ${FORM_PAIRS_MAX} pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1 MB.`,
-  `- The body reads of the routes with a cap above ${BODY_CAP_FLOOR} bytes hold at most ${LARGE_READ_BUDGET} bytes at once in one isolate. A read past that answers 503 \`body_busy\` with \`Retry-After: ${BODY_BUSY_RETRY_SECONDS}\`, and no parse runs. The SCIM routes answer their own SCIM 503.`,
+  `- The body reads of the routes with a cap above ${BODY_CAP_FLOOR} bytes hold at most ${LARGE_READ_BUDGET} bytes at once in one isolate. One client holds at most ${LARGE_READ_SHARE} bytes of it, or the cap of its read when that is more. A client is its IP before a session and its user after one. A read past that answers 503 \`body_busy\` with \`Retry-After: ${BODY_BUSY_RETRY_SECONDS}\`, and no parse runs. The SCIM routes answer their own SCIM 503.`,
   `- Such a read that gets no bytes for ${LARGE_READ_IDLE_MS / 1000} s answers 408 \`body_timeout\`. So does a read that runs past the time of its cap at ${LARGE_READ_MIN_RATE} bytes per second, at least ${LARGE_READ_DEADLINE_FLOOR_MS / 1000} s. No parse runs, and the SCIM routes answer it too.`,
   "- An unhandled error answers 500 `internal` and writes one log line.",
   "- An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.",

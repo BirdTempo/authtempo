@@ -4,6 +4,7 @@ import {
   BodyTimeout,
   BodyTooLarge,
   bodyCapOf,
+  bodyClientOf,
   bodyReadable,
   parseBodyJson,
   readBodyText,
@@ -18,11 +19,15 @@ import { apiError } from "../errors.js";
  * every route of such a path takes the floor. Past the cap it throws core's
  * `BodyTooLarge`, and the handler answers 413 `PAYLOAD_TOO_LARGE` there, at
  * the first read. Core's depth and item limits apply before the parse.
+ * The read of the clone counts on the share of the client of `request`
+ * (ruling 59 of the 12j lane): the user after `countSsoManageWrite`.
  * The value, or null for a body that is not JSON.
  */
 export async function readJsonOf(request: Request, key?: RouteKey): Promise<unknown> {
   // A body read or locked before cannot be cloned: it reads as no JSON, as in core (ruling 51 Low 3).
-  const text = bodyReadable(request) ? await readBodyText(request.clone(), bodyCapOf(key)) : null;
+  const text = bodyReadable(request)
+    ? await readBodyText(request.clone(), bodyCapOf(key), bodyClientOf(request))
+    : null;
   const value = parseBodyJson(text);
   return value === undefined ? null : value;
 }

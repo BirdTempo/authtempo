@@ -307,6 +307,7 @@ import {
   usernameAvailable,
 } from "./engine/username.js";
 import { ERRORS } from "./errors.js";
+import { bindBodyClient } from "./http/body-cap.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { ssoManageAllowed } from "./http/routes/sso.js";
@@ -1223,8 +1224,10 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
  * 12j lane). So the read comes after the limit, as in core's own manager
  * routes. Within the limit it marks `request`: the manager route of core
  * that gets it does not count it again. Past the limit it answers false,
- * and the package answers 429 with no read. Throws a TypeError for an Auth
- * that `createAuth` did not make.
+ * and the package answers 429 with no read. Within the limit it binds the
+ * client of `request` to the user, so the read counts on the share of the
+ * user (ruling 59 of the 12j lane). Throws a TypeError for an Auth that
+ * `createAuth` did not make.
  */
 export async function countSsoManageWrite(
   auth: Auth,
@@ -1235,6 +1238,8 @@ export async function countSsoManageWrite(
   if (!config) throw new TypeError("countSsoManageWrite takes an Auth from createAuth");
   if (!(await ssoManageAllowed(config, userId))) return false;
   markSsoManageCounted(request, userId);
+  // The compat package reads the body next: it counts on the share of the user (ruling 59).
+  bindBodyClient(request, `user:${userId}`);
   return true;
 }
 

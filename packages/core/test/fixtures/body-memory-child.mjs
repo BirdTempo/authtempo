@@ -8,9 +8,8 @@
 import v8 from "node:v8";
 
 const dist = new URL("../../dist/", import.meta.url);
-const { bindBodyRoute, bodyCapOf, BODY_DEPTH_MAX, BODY_ITEMS_MAX, FORM_PAIRS_MAX } = await import(
-  new URL("http/body-cap.js", dist).href
-);
+const { bindBodyClient, bindBodyRoute, bodyCapOf, BODY_DEPTH_MAX, BODY_ITEMS_MAX, FORM_PAIRS_MAX } =
+  await import(new URL("http/body-cap.js", dist).href);
 const { holdsBadText } = await import(new URL("http/body-text.js", dist).href);
 const { readJson } = await import(new URL("http/json.js", dist).href);
 const { ROUTE_CONTRACT } = await import(new URL("http/contract/index.js", dist).href);
@@ -29,6 +28,7 @@ if (route === "budget") {
   // `shape` reads of REQUEST_BODY_MAX at once, each streamed in chunks of 64 KiB with a
   // turn of the loop between chunks, as a slow client sends them (ruling 51 Minor 2).
   // With "live" after it, each sample runs a GC first: the live memory, with no garbage.
+  // Each read has its own client, so the budget and not the share of one client stops them (ruling 59).
   const live = process.argv[4] === "live";
   const { REQUEST_BODY_MAX } = await import(new URL("http/body-cap.js", dist).href);
   const SSO = "POST /sso/connections/update";
@@ -59,7 +59,7 @@ if (route === "budget") {
   const sampler = setInterval(sample, 1);
   const started = performance.now();
   const answers = await Promise.all(
-    Array.from({ length: Number(shape) }, async () => {
+    Array.from({ length: Number(shape) }, async (_, i) => {
       const request = new Request("https://auth.test/auth/x", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -67,6 +67,7 @@ if (route === "budget") {
         duplex: "half",
       });
       bindBodyRoute(request, SSO);
+      bindBodyClient(request, `user:${i}`);
       try {
         const result = await readJson(request, ROUTE_CONTRACT[SSO].body.schema);
         sample();

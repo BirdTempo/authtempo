@@ -20,7 +20,9 @@ import {
   LARGE_READ_DEADLINE_FLOOR_MS,
   LARGE_READ_IDLE_MS,
   LARGE_READ_MIN_RATE,
+  LARGE_READ_SHARE,
   largeReadDeadlineMs,
+  largeShareOf,
   REQUEST_BODY_MAX,
   readBodyText,
 } from "../src/http/body-cap.js";
@@ -34,6 +36,9 @@ import { createMemoryAdapter } from "../src/storage/memory.js";
 import { largestBodies } from "./body-limits.js";
 import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
+import { FAST } from "./password-helpers.js";
+import { ssoAuth } from "./sso/helpers.js";
+import { verifiedSession } from "./totp-helpers.js";
 
 /**
  * The request body limits of core (rulings 43 and 46 of the 12j lane). The
@@ -592,13 +597,16 @@ describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 
   /** The count of reads of REQUEST_BODY_MAX that the budget holds at once. */
   const COUNT = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
 
-  /** COUNT reads of REQUEST_BODY_MAX that stop one chunk before their end, and their promises. */
+  /**
+   * COUNT reads of REQUEST_BODY_MAX that stop one chunk before their end, and
+   * their promises. Each read has its own client, so no share stops it (ruling 59).
+   */
   async function holdBudget() {
     const held = Array.from({ length: COUNT }, () =>
       gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 65_536),
     );
-    const reads = held.map((h) =>
-      readBodyText(streamPost("/x", h.stream), REQUEST_BODY_MAX).then(
+    const reads = held.map((h, i) =>
+      readBodyText(streamPost("/x", h.stream), REQUEST_BODY_MAX, `hold:${i}`).then(
         (t) => t?.length,
         (e: unknown) => e,
       ),
@@ -640,7 +648,9 @@ describe("the budget of the large reads of an isolate (ruling 51 Minor 2 of the 
     );
     expect(
       await Promise.all(
-        again.map((g) => readBodyText(streamPost("/x", g.stream), REQUEST_BODY_MAX)),
+        again.map((g, i) =>
+          readBodyText(streamPost("/x", g.stream), REQUEST_BODY_MAX, `again:${i}`),
+        ),
       ),
     ).toHaveLength(COUNT);
   });
@@ -765,7 +775,7 @@ describe("the deadlines of the large reads (ruling 59 Major 1 of the 12j lane)",
     const silent = gatedBody(REQUEST_BODY_MAX, 0);
     try {
       const ends = held.map((h, i) =>
-        watch(readBodyText(streamPost(`/hold/${i}`, h.stream), REQUEST_BODY_MAX)),
+        watch(readBodyText(streamPost("/x", h.stream), REQUEST_BODY_MAX, `hold:${i}`)),
       );
       await Promise.all(held.map((h) => h.atGate));
       await vi.advanceTimersByTimeAsync(0);
@@ -778,10 +788,11 @@ describe("the deadlines of the large reads (ruling 59 Major 1 of the 12j lane)",
       await vi.advanceTimersByTimeAsync(1);
       expect([...ends.map((end) => end()), none()]).toEqual(Array(count + 1).fill("BodyTimeout"));
       // The stalled reads freed their bytes: the budget's count of reads passes again.
-      const again = Array.from({ length: count }, () =>
+      const again = Array.from({ length: count }, (_, i) =>
         readBodyText(
           streamPost("/x", gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX).stream),
           REQUEST_BODY_MAX,
+          `again:${i}`,
         ),
       );
       expect((await Promise.all(again)).map((t) => t?.length)).toEqual(
@@ -851,5 +862,148 @@ describe("the deadlines of the large reads (ruling 59 Major 1 of the 12j lane)",
     expect(res?.headers.get("retry-after")).toBeNull();
     expect(await res?.json()).toEqual({ error: "body_timeout" });
     stalled.open();
+  });
+});
+
+/** A POST to the SAML ACS of any connection id from `ip`, with no sign-in. */
+const acsPost = (ip: string, body: ReadableStream<Uint8Array> | string) =>
+  new Request(`${BASE_URL}/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "cf-connecting-ip": ip },
+    body,
+    duplex: "half",
+  } as RequestInit);
+
+/** An engine with SAML on and no connection: the ACS reads the form of any post. */
+const samlAuth = () =>
+  createAuth({
+    baseURL: BASE_URL,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [],
+    storage: createMemoryAdapter(),
+    mail: { send: async () => {} },
+    organizations: {},
+    sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+  });
+
+describe("the share of one client of the large reads (ruling 59 Major 1 of the 12j lane)", () => {
+  it("derives LARGE_READ_SHARE as a quarter of the budget, and lets a read of a larger cap hold its cap", async () => {
+    expect(LARGE_READ_SHARE).toBe(LARGE_READ_BUDGET / 4);
+    expect(largeShareOf(SAML_FORM_MAX)).toBe(LARGE_READ_SHARE);
+    expect(Math.floor(LARGE_READ_SHARE / SAML_FORM_MAX)).toBe(3);
+    // The largest valid SSO write passes a quarter: one user still sends it whole.
+    const largest = largestBodies()[0]?.bytes ?? 0;
+    expect(largest).toBeGreaterThan(LARGE_READ_SHARE);
+    expect(largeShareOf(REQUEST_BODY_MAX)).toBe(REQUEST_BODY_MAX);
+    expect(
+      await readBodyText(streamPost("/x", spaceStream(largest)), REQUEST_BODY_MAX, "user:ada"),
+    ).toHaveLength(largest);
+  });
+
+  it("holds at most a quarter of the budget for 16 stalled reads of one client, and reads the body of another", {
+    timeout: 30_000,
+  }, async () => {
+    // The probe of the re-review: 16 posts of 1 MiB of one SAML form each, which then stall.
+    const stalls = Array.from({ length: 16 }, () => gatedBody(SAML_FORM_MAX, 1_048_576));
+    const reads: Promise<unknown>[] = [];
+    try {
+      const ends: (() => string)[] = [];
+      for (const g of stalls) {
+        const read = readBodyText(streamPost("/x", g.stream), SAML_FORM_MAX, "ip:203.0.113.7");
+        reads.push(read.catch(() => {}));
+        ends.push(watch(read));
+        // One read at a time: it reaches its stall, or it ends at once.
+        await Promise.race([g.atGate, read.catch(() => {})]);
+        await settle();
+      }
+      const states = ends.map((end) => end());
+      expect(states.filter((x) => x === "open")).toHaveLength(LARGE_READ_SHARE / 1_048_576);
+      expect(states.filter((x) => x === "BodyBusy")).toHaveLength(
+        16 - LARGE_READ_SHARE / 1_048_576,
+      );
+      // Another client reads a whole form, and a read of the largest cap, at once.
+      const form = gatedBody(SAML_FORM_MAX, SAML_FORM_MAX).stream;
+      expect(
+        await readBodyText(streamPost("/x", form), SAML_FORM_MAX, "ip:198.51.100.9"),
+      ).toHaveLength(SAML_FORM_MAX);
+      const large = gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX).stream;
+      expect(
+        await readBodyText(streamPost("/x", large), REQUEST_BODY_MAX, "user:bea"),
+      ).toHaveLength(REQUEST_BODY_MAX);
+    } finally {
+      for (const g of stalls) g.open();
+    }
+    // The reads of the client ended and freed its share: it reads a whole form again.
+    await Promise.all(reads);
+    const again = gatedBody(SAML_FORM_MAX, SAML_FORM_MAX).stream;
+    expect(
+      await readBodyText(streamPost("/x", again), SAML_FORM_MAX, "ip:203.0.113.7"),
+    ).toHaveLength(SAML_FORM_MAX);
+  });
+
+  it("keys a read before a session by its IP: the stalled ACS posts of one IP leave the ACS open to another", {
+    timeout: 30_000,
+  }, async () => {
+    const auth = samlAuth();
+    const stalls = Array.from({ length: 5 }, () => gatedBody(SAML_FORM_MAX, 1_048_576));
+    const answers: (() => string)[] = [];
+    try {
+      for (const g of stalls) {
+        let answer = "open";
+        const res = auth.handle(acsPost("203.0.113.7", g.stream)).then(async (r) => {
+          answer = `${r.status} ${r.status === 503 ? ((await r.json()) as { error: string }).error : ""}`;
+        });
+        answers.push(() => answer);
+        await Promise.race([g.atGate, res]);
+        await settle();
+      }
+      // Four posts of 1 MiB fill the share of the IP; the fifth answers 503 at once.
+      expect(answers.map((a) => a())).toEqual(["open", "open", "open", "open", "503 body_busy"]);
+      const other = await auth.handle(acsPost("198.51.100.9", "SAMLResponse=x&RelayState=y"));
+      expect(other.status).toBe(302);
+    } finally {
+      for (const g of stalls) g.open();
+    }
+  });
+
+  it("keys a read after a session by its user: one user from two IPs holds at most one share", {
+    timeout: 30_000,
+  }, async () => {
+    const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
+    const ada = await verifiedSession(w, "ada@acme.example");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    const write = (token: string, ip: string, body: ReadableStream<Uint8Array> | string) =>
+      w.handle(
+        new Request(`${BASE_URL}/auth/sso/connections/create`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: BASE_URL,
+            cookie: `__Host-tempo_session=${token}`,
+            "cf-connecting-ip": ip,
+          },
+          body,
+          duplex: "half",
+        } as RequestInit),
+      );
+    const first = gatedBody(REQUEST_BODY_MAX, 5 * 1_048_576);
+    const second = gatedBody(REQUEST_BODY_MAX, 4 * 1_048_576);
+    try {
+      const held = write(ada.token, "203.0.113.1", first.stream);
+      await first.atGate;
+      // The same user from another IP: past the share of the user, with half the budget free.
+      const outcome = await Promise.race([
+        write(ada.token, "203.0.113.2", second.stream).then((r) => r.status),
+        second.atGate.then(() => "read past the share of the user"),
+      ]);
+      expect(outcome).toBe(503);
+      // Another user from that IP: the read runs, and the schema refuses the body.
+      expect((await write(bea.token, "203.0.113.2", "{}")).status).toBe(400);
+      first.open();
+      expect((await held).status).toBe(400);
+    } finally {
+      first.open();
+      second.open();
+    }
   });
 });

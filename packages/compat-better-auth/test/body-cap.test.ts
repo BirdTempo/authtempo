@@ -246,7 +246,8 @@ describe("the budget of the large reads through the shim (ruling 51 Minor 2 of t
     const gate = new Promise<void>((resolve) => {
       open = resolve;
     });
-    const held = Array.from({ length: 2 }, () => {
+    // Each held read has its own client, so the budget and not one share stops the write (ruling 59).
+    const held = Array.from({ length: 2 }, (_, i) => {
       let sent = 0;
       const stream = new ReadableStream<Uint8Array>({
         async pull(c) {
@@ -261,7 +262,7 @@ describe("the budget of the large reads through the shim (ruling 51 Minor 2 of t
         body: stream,
         duplex: "half",
       } as RequestInit);
-      return readBodyText(request, SSO_CAP);
+      return readBodyText(request, SSO_CAP, `hold:${i}`);
     });
     await new Promise((resolve) => setTimeout(resolve, 200));
     const res = await auth.handler(
@@ -344,5 +345,65 @@ describe("the deadlines of the large reads through the shim (ruling 59 Major 1 o
     } finally {
       open();
     }
+  });
+});
+
+describe("the share of one client of the large reads through the shim (ruling 59 Major 1 of the 12j lane)", () => {
+  it("counts the shim's read of an SSO write on the share of the user", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const ada = await person("ada@example.com");
+    const bea = await person("bea@example.com");
+    // A read of Ada's that holds 5 MiB of her share and stalls.
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let reached = () => {};
+    const atGate = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (sent >= 5 * 1_048_576) {
+          reached();
+          await gate;
+        }
+        if (sent >= SSO_CAP) return c.close();
+        c.enqueue(new Uint8Array(65_536).fill(0x20));
+        sent += 65_536;
+      },
+    });
+    const held = readBodyText(
+      new Request(`${BASE}/x`, { method: "POST", body: stream, duplex: "half" } as RequestInit),
+      SSO_CAP,
+      `user:${ada.user.id}`,
+    );
+    try {
+      await atGate;
+      const register = (cookie: string) =>
+        auth.handler(
+          new Request(`${BASE}/api/auth/sso/register`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: BASE, cookie },
+            body: countedBody(4 * 1_048_576).stream,
+            duplex: "half",
+          } as RequestInit),
+        );
+      // Ada's register passes her share, with half the budget free: 503 at the shim's read.
+      const mine = await register(ada.cookie);
+      expect(mine.status).toBe(503);
+      expect(await mine.json()).toEqual({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Service unavailable",
+      });
+      // Bea's register reads its body, and the shim refuses its fields.
+      expect((await register(bea.cookie)).status).toBe(400);
+    } finally {
+      open();
+    }
+    expect((await held)?.length).toBe(SSO_CAP);
   });
 });

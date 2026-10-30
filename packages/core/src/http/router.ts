@@ -2,6 +2,7 @@ import { CAPTCHA_HEADER } from "../captcha.js";
 import { atBase, pickBase, type ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
+import { ipKey } from "../limiter/ip-key.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
@@ -10,6 +11,7 @@ import {
   BodyBusy,
   BodyTimeout,
   BodyTooLarge,
+  bindBodyClient,
   bindBodyRoute,
 } from "./body-cap.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
@@ -617,11 +619,14 @@ export function createRouter(
     if (anonymous) return anonymous;
     // A body read of the handler takes the cap of this route (ruling 46 of the 12j lane).
     bindBodyRoute(request, match.route.key);
+    // A large read counts on the share of its client: the IP until a session names the user (ruling 59).
+    const ip = config.clientIp(request);
+    bindBodyClient(request, `ip:${ipKey(ip)}`);
     return match.route.handler({
       request,
       url,
       config: scoped,
-      ip: config.clientIp(request),
+      ip,
       now: config.clock.now(),
       params: match.params,
       waitUntil,

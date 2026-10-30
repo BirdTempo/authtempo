@@ -23,6 +23,8 @@ export {
  * past the cap throws `BodyTooLarge`. A read above the floor past the
  * budget of the large reads of the isolate throws `BodyBusy` (ruling 51).
  * A read above the floor past its deadlines throws `BodyTimeout` (ruling 59).
+ * A package that reads a clone passes `bodyClientOf` of the request it
+ * cloned, so the read counts on the share of that client (ruling 59).
  */
 export {
   BODY_BUSY_RETRY_SECONDS,
@@ -30,6 +32,7 @@ export {
   BodyTimeout,
   BodyTooLarge,
   bodyCapOf,
+  bodyClientOf,
   bodyReadable,
   parseBodyJson,
   readBodyText,

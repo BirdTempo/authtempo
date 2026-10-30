@@ -30,7 +30,7 @@ import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-s
 import { limit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { BodyTooLarge, parseBodyForm, readBodyBytes } from "../body-cap.js";
+import { BodyTooLarge, bindBodyClient, parseBodyForm, readBodyBytes } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
@@ -94,7 +94,8 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * `not_found`. The SSO routes and the SCIM token routes run these steps, so
  * the two cannot drift. A write that a compat package counted before its
  * own read (`countSsoManageWrite`) is not counted again (ruling 51 Minor 1
- * of the 12j lane).
+ * of the 12j lane). After the session, a body read counts on the share of
+ * the user (ruling 59).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -110,6 +111,8 @@ export async function managedCall<T, V>(
   };
   const resolved = await sessionFromRequest(config, ctx.request);
   if (!resolved) return json({ error: "unauthorized" }, 401);
+  // After the session, a large read counts on the share of the user, not of the IP (ruling 59).
+  bindBodyClient(ctx.request, `user:${resolved.user.id}`);
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
   const counted = takeSsoManageCounted(ctx.request, resolved.user.id);
   if (!counted && !(await ssoManageAllowed(config, resolved.user.id)))
