@@ -829,7 +829,15 @@ describe("check-pack", () => {
 
 describe("a local machine path in a tarball (ruling 50 of the plan 12j lane)", () => {
   it("fails a home folder or a drive path, and passes the SCIM routes of core", () => {
-    for (const text of ["/Users/ada/code/app", "see /home/ada/app", "C:\\Users\\ada", "(D:\\work)"])
+    for (const text of [
+      "/Users/ada/code/app",
+      "see /home/ada/app",
+      "C:\\Users\\ada",
+      "(D:\\work)",
+      // The URL form of a source map or a stack text (ruling 61 of plan 12j, A).
+      "file:///Users/ada/app/authtempo/src/index.ts",
+      '"sources":["file:///home/ada/app/src/x.ts"]',
+    ])
       expect(LOCAL_PATH.test(text), text).toBe(true);
     for (const text of [
       '"/scim/v2/Users/:id"',
@@ -841,6 +849,7 @@ describe("a local machine path in a tarball (ruling 50 of the plan 12j lane)", (
       "/path/to/authtempo",
       "/work/authtempo/scripts",
       "[a-zA-Z]:\\/",
+      "file:///work/authtempo/src/x.ts",
     ])
       expect(LOCAL_PATH.test(text), text).toBe(false);
   });

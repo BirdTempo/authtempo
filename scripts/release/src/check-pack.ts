@@ -301,10 +301,12 @@ export function packedTexts(path: string, files: readonly string[]): Map<string,
  * a path names a person and a machine. The SCIM routes of core hold
  * "/scim/v2/Users/:id" and "PATCH /Users/:id", which the form does not match:
  * it needs a path start, a folder name, and a slash. The released tree held
- * no match on 2026-10-30 (1755 packed files with dist).
+ * no match on 2026-10-30 (1755 packed files with dist). A source map or a
+ * stack text names a file as a URL, such as file:///Users/<name>/, which the
+ * path form misses (ruling 61 of plan 12j, A), so the URL form is a third form.
  */
 export const LOCAL_PATH =
-  /(?<![\w/.-])\/(?:Users|home)\/[A-Za-z0-9._-]+\/|(?<!\w)[A-Za-z]:\\{1,2}[A-Za-z0-9._-]/;
+  /(?<![\w/.-])\/(?:Users|home)\/[A-Za-z0-9._-]+\/|file:\/\/\/(?:Users|home)\/[A-Za-z0-9._-]+\/|(?<!\w)[A-Za-z]:\\{1,2}[A-Za-z0-9._-]/;
 
 /** A key that names a registry or a proxy, such as registry, registries, @authtempo:registry, httpsProxy, or https-proxy. */
 const REGISTRY_KEY = /registr|proxy/i;
