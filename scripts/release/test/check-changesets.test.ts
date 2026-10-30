@@ -21,6 +21,7 @@ import {
   readInput,
   statusNotes,
 } from "../src/check-changesets.ts";
+import { breakingByMinor } from "../src/check-pack.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { rewrittenPaths } from "../src/rewrite-unpublished.ts";
@@ -356,6 +357,26 @@ describe("check-changesets", () => {
     ).toBe("check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0");
   });
 
+  // upgrade prints the Breaking: lines of each minor that it crosses, so a
+  // break in a patch reached no app (ruling 67 of plan 12j, Major 3).
+  it("refuses a Breaking: line in a changeset that is not the bump of a break", () => {
+    const x = paths("packages/core/src/x.ts");
+    expect(run(x, ["breaking-minor.md"]).failures).toEqual([]);
+    expect(run(x, ["breaking-patch.md"]).failures).toEqual([
+      '.changeset/breaking-patch.md has a "Breaking:" line and names @authtempo/core as patch; a break is a minor',
+    ]);
+    // From 1.0.0 a break is a major.
+    expect(run(x, ["breaking-minor.md"], 1, files, "1.0.0").failures).toEqual([
+      '.changeset/breaking-minor.md has a "Breaking:" line and names @authtempo/core as minor; a break is a major',
+    ]);
+    expect(run(x, ["breaking-indented.md"]).failures).toEqual([
+      '.changeset/breaking-indented.md has an indented "Breaking:" line; start it at the line start',
+    ]);
+    expect(run(paths("docs/x.md"), ["breaking-empty.md"]).failures).toEqual([
+      '.changeset/breaking-empty.md has a "Breaking:" line and names no package',
+    ]);
+  });
+
   it("refuses a changeset whose body starts with a plan number", () => {
     expect(run(paths("packages/core/src/x.ts"), ["plan-number.md"]).failures).toEqual([
       ".changeset/plan-number.md: the body starts with a plan number; a changelog entry names the change, not the plan",
@@ -424,6 +445,18 @@ describe("check-changesets", () => {
     expect(readInput(repo.root, "main")).toMatchObject({ baseVersion: "0.0.0", version: "0.1.0" });
     // The version branch exempts each file that rewrite-unpublished writes (ruling 50 of plan 12j).
     expect(readInput(repo.root, "main").unpublished).toEqual(rewrittenPaths());
+  });
+
+  it("writes a later Breaking: line that breakingByMinor reads (ruling 67 of plan 12j, Major 3)", () => {
+    repo = fixtureRepo({
+      ".changeset/break.md":
+        '---\n"@fixture/a": minor\n---\n\nRemove foo.\nBreaking: `foo` is gone. Use `bar`.\n',
+    });
+    // The real command of the repository writes the changelog.
+    repo.run(process.execPath, [CHANGESET_BIN, "version"]);
+    const changelog = readFileSync(join(repo.root, "packages/a/CHANGELOG.md"), "utf8");
+    expect(changelog).toContain("\n  Breaking: `foo` is gone. Use `bar`.\n");
+    expect(breakingByMinor(changelog)).toEqual({ "0.1": ["Breaking: `foo` is gone. Use `bar`."] });
   });
 
   it("needs a changeset for a CHANGELOG.md below the package root", () => {

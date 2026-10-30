@@ -562,6 +562,33 @@ describe("check-pack", () => {
     expect(failuresOf({ needs: [...NEEDS, "dist/bin/"] })).toEqual([]);
   });
 
+  it("reads each Breaking: line of a real changeset version output", () => {
+    // The output of `pnpm changeset version` (@changesets/cli 3.0.3, the
+    // default changelog) in a clone of the lane on 2026-10-30, with three
+    // changesets of core: a minor whose first line is "Breaking:", a minor with
+    // two "Breaking:" lines after its first line, and a patch. Changesets
+    // writes each later line of a change with two spaces in front, so the
+    // first form of this function read none of them (ruling 67 of plan 12j, Major 3).
+    const changelog = readFileSync(
+      new URL("./fixtures/changelogs/core-breaking-3.0.3.md", import.meta.url),
+      "utf8",
+    );
+    expect(breakingByMinor(changelog)).toEqual({
+      "0.1": [
+        "Breaking: the `baz` route moves to `/v2/baz`. Call the new path.",
+        "Breaking: `createAuth` refuses the `foo` option. Remove it from the config.",
+        "Breaking: `createAuth` refuses the `bar` option too. Remove it from the config.",
+      ],
+    });
+    // The later lines of "Updated dependencies" have the same indent and are no break.
+    const client = readFileSync(
+      new URL("./fixtures/changelogs/client-updated-3.0.3.md", import.meta.url),
+      "utf8",
+    );
+    expect(client).toContain("\n  - @authtempo/core@0.1.0\n");
+    expect(breakingByMinor(client)).toEqual({});
+  });
+
   it("holds core's breaking and deprecation fields to their sources", () => {
     const breaking = breakingByMinor(readText("core/CHANGELOG.md"));
     expect(breaking).toEqual({

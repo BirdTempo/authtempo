@@ -212,7 +212,11 @@ export function checkPack(input: PackInput): Report {
 /**
  * The "Breaking:" lines of each minor of a Changesets changelog, by "<major>.<minor>".
  * A minor with no such line has no key. Changesets writes each change as
- * "- <text>", or "- <commit>: <text>" when it reads the git history.
+ * "- <text>", or "- <commit>: <text>" when it reads the git history. It
+ * writes each later line of a change with two spaces in front (the default
+ * changelog of @changesets/cli 3.0.3, read in a real `changeset version`
+ * output on 2026-10-30, test/fixtures/changelogs). So a "Breaking:" line
+ * after the first line of a changeset counts too (ruling 67 of plan 12j, Major 3).
  */
 export function breakingByMinor(changelog: string): Record<string, string[]> {
   const out: Record<string, string[]> = {};
@@ -223,7 +227,7 @@ export function breakingByMinor(changelog: string): Record<string, string[]> {
       minor = `${heading[1]}.${heading[2]}`;
       continue;
     }
-    const entry = /^- (?:[0-9a-f]{7,40}: )?(Breaking: .*\S)\s*$/.exec(line);
+    const entry = /^(?:- (?:[0-9a-f]{7,40}: )?| {2})(Breaking: .*\S)\s*$/.exec(line);
     if (minor !== null && entry?.[1] !== undefined) out[minor] = [...(out[minor] ?? []), entry[1]];
   }
   return out;

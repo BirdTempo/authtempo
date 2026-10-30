@@ -156,6 +156,23 @@ export function checkChangesets(input: ChangesetsInput): Report {
           `${file} names ${name} as major; the group is at 0.x, so a break is a minor with a "Breaking:" line until the owner names 1.0.0`,
         );
     }
+    // upgrade prints the Breaking: lines of each minor that it crosses, so a
+    // break in a patch reaches no app (ruling 67 of plan 12j, Major 3). At
+    // 0.x a break is a minor; from 1.0.0 it is a major.
+    const breakBump = input.version.startsWith("0.") ? "minor" : "major";
+    if (/^Breaking: /m.test(parsed.body)) {
+      if (parsed.releases.length === 0)
+        failures.push(`${file} has a "Breaking:" line and names no package`);
+      for (const { name, bump } of parsed.releases)
+        if (bump !== breakBump)
+          failures.push(
+            `${file} has a "Breaking:" line and names ${name} as ${bump}; a break is a ${breakBump}`,
+          );
+    }
+    // Changesets indents each later line of a change by two spaces, so an
+    // indented "Breaking:" line moves deeper and no reader finds it.
+    if (/^[ \t]+Breaking: /m.test(parsed.body))
+      failures.push(`${file} has an indented "Breaking:" line; start it at the line start`);
     // The body becomes the changelog entry, and a reader of the changelog
     // does not know the plan numbers.
     if (/^plan\s+\d/i.test(parsed.body))

@@ -43,7 +43,8 @@ The rules (`check-changesets`, plan 12j Task 4):
 
 The group stays at 0.x until the owner names `1.0.0`. While the group is at 0.x, `check-changesets` fails on a `major`: from 0.x, `changeset version` writes `1.0.0` for a major.
 
-- A break is a `minor` with a line that starts with `Breaking:`.
+- A break is a `minor` with a line that starts with `Breaking:`. The line can be the first line of the body or a later line. Start it at the line start, with no space in front.
+- `check-changesets` fails a `Breaking:` line in a `patch` changeset and in a changeset that names no package. From `1.0.0`, a break is a `major`.
 - A feature is a `minor`.
 - A fix is a `patch`.
 
