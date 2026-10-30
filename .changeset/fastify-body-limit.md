@@ -2,4 +2,4 @@
 "@authtempo/fastify": patch
 ---
 
-The plugin of the routes of core buffers a body of up to 8 MiB, the largest body cap of core, not Fastify's default of 1 MiB. Core answers the cap of each route with `body_too_large` (413), and a longer body gets the same code from the plugin.
+The plugin of the routes of core passes the raw body stream to core, and Fastify buffers none of it. Core reads at most the cap of each route: 64 KiB, 256 KiB for the Apple callback, and 8 MiB for the two SSO connection writes. Past it, core answers `body_too_large` (413) with its own headers. Fastify's `bodyLimit` takes no part.

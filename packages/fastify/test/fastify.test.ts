@@ -1,5 +1,6 @@
 import type { AddressInfo } from "node:net";
 import net from "node:net";
+import { Readable } from "node:stream";
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
 import { bodyCapOf, REQUEST_BODY_MAX } from "@authtempo/core/bindings";
 import Fastify, { type FastifyServerOptions } from "fastify";
@@ -581,16 +582,33 @@ describe("the body cap through the Fastify binding (ruling 46 of the 12j lane)",
     await app.close();
   });
 
-  it("buffers up to REQUEST_BODY_MAX, past the 1 MiB of Fastify, and answers past it in core's shape", async () => {
+  it("passes the raw stream to core, which stops at the cap of the route with its own headers", async () => {
     const { app } = await makeApp();
-    // Past Fastify's default bodyLimit: core reads it and answers its own cap.
+    // Past Fastify's default bodyLimit, and past the largest cap of core: core answers each.
     expect(await send(app, 2 * 1024 * 1024)).toEqual([413, { error: "body_too_large" }, true]);
-    // Past the largest cap of core: Fastify stops the buffer, with core's code.
-    expect(await send(app, REQUEST_BODY_MAX + 1)).toEqual([
-      413,
-      { error: "body_too_large" },
-      false,
-    ]);
+    expect(await send(app, REQUEST_BODY_MAX + 1)).toEqual([413, { error: "body_too_large" }, true]);
+    // A stream of 4 MiB to a route of a 64 KiB cap: Fastify buffers none of it,
+    // and core stops its read near the cap (ruling 51 Low 1 of the 12j lane).
+    let pulled = 0;
+    const chunk = Buffer.alloc(65_536, 0x20);
+    const payload = new Readable({
+      read() {
+        if (pulled >= 4 * 1024 * 1024) return this.push(null);
+        pulled += chunk.length;
+        this.push(chunk);
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/magic-link/request",
+      headers: { "content-type": "application/json", origin: BASE },
+      payload,
+    });
+    expect([res.statusCode, res.json()]).toEqual([413, { error: "body_too_large" }]);
+    // Core's headers: its trace header and its CORS headers for the trusted origin.
+    expect(res.headers["x-authtempo-trace"]).toBeDefined();
+    expect(res.headers["access-control-allow-origin"]).toBe(BASE);
+    expect(pulled).toBeLessThan(CAP * 8);
     await app.close();
   });
 });

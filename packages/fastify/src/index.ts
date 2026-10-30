@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import type { Auth, ResolvedSession } from "@authtempo/core";
 import {
   type BindingWaitUntil,
@@ -5,7 +6,6 @@ import {
   DEFAULT_BASE_PATH,
   type GateAuth,
   handleOptions,
-  REQUEST_BODY_MAX,
   readGate,
 } from "@authtempo/core/bindings";
 import type {
@@ -117,11 +117,24 @@ function routedPath(request: FastifyRequest): { path: string; search: string; fo
   return { path: decodePath(raw), search, forms: [...forms] };
 }
 
-/** The web Request of a Fastify request of `authRoutes`: the full URL, every header, and the raw body. */
+/**
+ * The web Request of a Fastify request of `authRoutes`: the full URL, every
+ * header, and the raw body. The body of `authRoutes` is the raw stream, so
+ * core reads it at the cap of its route with no buffer before it (ruling 51
+ * Low 1 of the 12j lane). A body that a parser of the app buffered is a copy.
+ */
 export function toWebRequest(request: FastifyRequest, baseURL?: string): Request {
   const headers = headersOf(request);
   const method = request.method.toUpperCase();
   const body = request.body;
+  if (method !== "GET" && method !== "HEAD" && body instanceof Readable)
+    return new Request(urlOf(request, baseURL), {
+      method,
+      headers,
+      // node:stream/web's ReadableStream and the global one are one class at run time.
+      body: Readable.toWeb(body) as unknown as ReadableStream<Uint8Array>,
+      duplex: "half",
+    } as RequestInit);
   if (method === "GET" || method === "HEAD" || !(body instanceof Uint8Array))
     return new Request(urlOf(request, baseURL), { method, headers });
   // A copy on its own ArrayBuffer: the body type of fetch takes no shared buffer.
@@ -168,11 +181,11 @@ export interface FastifyRoutesOptions {
 
 /**
  * The routes of core: `await app.register(authRoutes({ auth }))`. In the
- * plugin's own scope no parser of Fastify runs, so core reads the body as it came.
- * The buffer takes up to `REQUEST_BODY_MAX`, the largest cap of core, and
- * core answers the cap of each route (ruling 46 of the 12j lane). Fastify's
- * default `bodyLimit` of 1 MiB would answer an SSO connection write first,
- * in Fastify's own shape.
+ * plugin's own scope no parser of Fastify runs: the one parser passes the
+ * raw stream on, so core reads the body as it came. Core reads at most the
+ * cap of each route and answers 413 `body_too_large` with its own headers
+ * (rulings 46 and 51 of the 12j lane). No buffer of Fastify comes first, so
+ * Fastify's `bodyLimit` takes no part.
  */
 export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
   checkGateOptions({ basePath: options.basePath });
@@ -180,17 +193,8 @@ export function authRoutes(options: FastifyRoutesOptions): FastifyPluginAsync {
   const basePath = options.basePath ?? own ?? DEFAULT_BASE_PATH;
   const plugin: FastifyPluginAsync = async (instance) => {
     instance.removeAllContentTypeParsers();
-    instance.addContentTypeParser(
-      "*",
-      { parseAs: "buffer", bodyLimit: REQUEST_BODY_MAX },
-      (_request, body, done) => done(null, body),
-    );
-    // A body past REQUEST_BODY_MAX is past the cap of every route: core's code, not Fastify's shape.
-    instance.setErrorHandler((error, _request, reply) => {
-      if ((error as { code?: unknown }).code === "FST_ERR_CTP_BODY_TOO_LARGE")
-        return reply.code(413).send({ error: "body_too_large" });
-      throw error;
-    });
+    // A parser with no parseAs gets the raw stream, and Fastify buffers nothing.
+    instance.addContentTypeParser("*", (_request, payload, done) => done(null, payload));
     instance.route({
       // Every method core can get: a method left out would reach the app's other
       // routes under the base path, where the gate reads no session. Fastify adds HEAD to GET.
