@@ -4,21 +4,23 @@ This file tells you how to build and test authtempo, and the rules that each cha
 
 ## Build
 
-You need Node 22 or newer, pnpm 12.8.1, and Docker. The adapter tests need Postgres on port 5439. Start it before the tests.
+You need Node 22.18.0 or newer, pnpm 12.8.1, and Docker. The scripts of the repository are `.ts` files, and Node strips their types from 22.18.0.
 
 ```sh
 pnpm install --frozen-lockfile
-docker compose up -d
 pnpm build
 ```
 
 ## Test with the cache off
 
-Run every test and every type check with the cache off:
+Run every test and every type check with the cache off, through the test servers of your checkout:
 
 ```sh
-pnpm turbo run test typecheck typecheck:configs --force
+node scripts/test-servers.mjs run -- pnpm turbo run test typecheck typecheck:configs --force --continue --log-prefix=task
+node scripts/test-servers.mjs down
 ```
+
+`scripts/test-servers.mjs` starts a set of servers in Docker for your checkout, and gives each test its address. Without it, each test that needs a server stops with "not set". Run `down` at the end, so the set stops. `pnpm release:check` runs the same command.
 
 The summary of Turbo must show `0 cached`. A cache is a tool for speed. It is never evidence that the code works, because a cached task did not run on your change.
 

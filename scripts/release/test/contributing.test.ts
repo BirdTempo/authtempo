@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { NODE_FLOOR } from "../src/lib/release-facts.ts";
+import { EVIDENCE_RUN } from "../src/release-check.ts";
 
 // CONTRIBUTING.md at the repository root (owner decision 5 of 2026-10-14,
 // spec 33 item 14). The test reads the real file and the root package.json.
@@ -10,6 +12,23 @@ const ROOT_PACKAGE = JSON.parse(readFileSync(new URL("package.json", ROOT), "utf
   packageManager: string;
   engines: { node: string };
 };
+const RELEASE_PACKAGE = JSON.parse(
+  readFileSync(new URL("scripts/release/package.json", ROOT), "utf8"),
+) as { engines: { node: string } };
+/**
+ * The task names of turbo.json, which holds comments. A root task "//#<name>"
+ * runs as <name>. A task of one package, "<package>#<name>", defines no task
+ * for the other packages, so it stays out.
+ */
+const TURBO_TASKS = Object.keys(
+  (
+    JSON.parse(readFileSync(new URL("turbo.json", ROOT), "utf8").replace(/^\s*\/\/.*$/gm, "")) as {
+      tasks: Record<string, unknown>;
+    }
+  ).tasks,
+).map((t) => t.replace(/^\/\/#/, ""));
+/** The wrapper of the test servers, which runs the command after "--" (scripts/test-servers.mjs). */
+const SERVERS_RUN = "node scripts/test-servers.mjs run -- ";
 
 /** The text of one `## ` section, without its heading. */
 function section(heading: string): string {
@@ -34,10 +53,13 @@ const PNPM_COMMANDS = new Set(["install"]);
  * a pnpm command of PNPM_COMMANDS, or a `pnpm turbo run` with the cache off.
  */
 function commandFault(line: string, scripts: Record<string, string>): string | null {
+  // The wrapper of the test servers runs the command after "--", which keeps its own rules.
+  if (line.trim().startsWith(SERVERS_RUN))
+    return commandFault(line.trim().slice(SERVERS_RUN.length), scripts);
   const [tool, name] = line.trim().split(/\s+/);
   if (tool !== "pnpm") return null;
   if (name === "turbo")
-    return line.trim().startsWith("pnpm turbo run ") && line.trim().endsWith(" --force")
+    return line.trim().startsWith("pnpm turbo run ") && /\s--force(\s|$)/.test(line)
       ? null
       : `${line.trim()}: a turbo line is pnpm turbo run ... --force`;
   if (name !== undefined && (PNPM_COMMANDS.has(name) || Object.hasOwn(scripts, name))) return null;
@@ -96,9 +118,19 @@ describe("CONTRIBUTING.md", () => {
     expect(
       lines.map((l) => commandFault(l, ROOT_PACKAGE.scripts)).filter((f) => f !== null),
     ).toEqual([]);
-    expect(fenceLines(section("Test with the cache off"))).toContain(
-      "pnpm turbo run test typecheck typecheck:configs --force",
-    );
+    // The command of the evidence run of release-check, through the test
+    // servers: a direct turbo run stops each test that needs a server (ruling
+    // 64 of plan 12j, Minor 1). The docker compose step left with ruling 50.
+    const test = fenceLines(section("Test with the cache off"));
+    expect(test).toEqual([EVIDENCE_RUN.join(" "), "node scripts/test-servers.mjs down"]);
+    expect(fenceLines(TEXT).filter((l) => /\bdocker\b/.test(l))).toEqual([]);
+    // Each task of the turbo line is a task of turbo.json (ruling 26 of plan 12j, L7).
+    const tasks = (test[0] ?? "")
+      .replace(/^.*pnpm turbo run /, "")
+      .split(" ")
+      .filter((w) => !w.startsWith("--"));
+    expect(tasks).toEqual(["test", "typecheck", "typecheck:configs"]);
+    for (const task of tasks) expect(TURBO_TASKS, task).toContain(task);
     // The fault form of each rule, so the test can fail on each.
     expect(commandFault("pnpm turbo run test", ROOT_PACKAGE.scripts)).toBe(
       "pnpm turbo run test: a turbo line is pnpm turbo run ... --force",
@@ -114,6 +146,10 @@ describe("CONTRIBUTING.md", () => {
     const node = ROOT_PACKAGE.engines.node.replace(/^>=/, "");
     expect(section("Build")).toContain(`pnpm ${pnpm}`);
     expect(section("Build")).toContain(`Node ${node} or newer`);
+    // The scripts are .ts files that Node runs by type stripping, so the
+    // floor of the root and of the release package is NODE_FLOOR (ruling 64 of plan 12j, Low 8).
+    expect(ROOT_PACKAGE.engines.node).toBe(`>=${NODE_FLOOR}`);
+    expect(RELEASE_PACKAGE.engines.node).toBe(`>=${NODE_FLOOR}`);
   });
 
   it("states the evidence rule", () => {
