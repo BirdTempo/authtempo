@@ -257,6 +257,19 @@ export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
 export const LARGE_READ_SLOW_MS = 8_000;
 
 /**
+ * The link rate in bytes per second of the derivation of
+ * `LARGE_READ_SLOW_MS`: 1 MiB per second, 8 Mbit/s (ruling 84 Low 2 of the
+ * 12j lane). No read uses it. The limits page states this rate and the time
+ * of the largest valid write at it. The facts test of the site holds both
+ * numbers to this value and to `largestBodies` of test/body-limits.ts.
+ *
+ * The derivation, done 2026-10-31. The largest valid SSO connection write is
+ * 4 705 616 bytes. At this rate it takes 4.5 s, so `LARGE_READ_SLOW_MS`, 8 s,
+ * keeps a margin over it.
+ */
+export const LARGE_READ_SLOW_LINK_RATE = 1_048_576;
+
+/**
  * The time in ms that a whole read above the floor of a cap of `cap` bytes
  * may take at `rate` bytes per second: `LARGE_READ_MIN_RATE` for a read
  * before a session, `LARGE_READ_USER_MIN_RATE` for a read of a user.

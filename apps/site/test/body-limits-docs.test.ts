@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { ipKey } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
+// The derivation of core's body limits: the largest valid body of each route (ruling 84 Low 2).
+import { largestBodies } from "../../../packages/core/test/body-limits.ts";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
@@ -92,6 +94,19 @@ const ssoWriteSeconds = () =>
 
 /** The time in seconds that a large read of a user may take with no spend (ruling 79). */
 const slowSeconds = () => constant("LARGE_READ_SLOW_MS") / 1000;
+
+/** The SSO connection writes: the routes of the largest valid write of the limits page. */
+const SSO_WRITES = ["POST /sso/connections/create", "POST /sso/connections/update"];
+
+/**
+ * The bytes of the largest valid SSO connection write, as core derives them
+ * from the route contract (ruling 84 Low 2). Today it is largestBodies()[0],
+ * which core's derivation test of LARGE_READ_SLOW_MS reads. When no route
+ * of the list is in the contract, the value is -Infinity, and each fact of
+ * it fails.
+ */
+const largestWrite = () =>
+  Math.max(...largestBodies().flatMap((r) => (SSO_WRITES.includes(r.key) ? [r.bytes] : [])));
 
 /** The reads within that time, each with no spend, that fill the window (ruling 79). */
 const slowReads = () => Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / slowSeconds());
@@ -383,6 +398,17 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /takes \d+ reads, \d+ s \/ (\d+) s, from/],
       ["limits", /holds the half for \d+ times (\d+) s and \d+ s/],
     ],
+  ],
+  [
+    // The link rate of the derivation of LARGE_READ_SLOW_MS (ruling 84 Low 2).
+    "the link rate of the time of a slow read",
+    () => constant("LARGE_READ_SLOW_LINK_RATE"),
+    [["limits", /At (\d+) (MiB) per second, the largest valid write takes/]],
+  ],
+  [
+    "the time of the largest valid SSO connection write at that rate, in seconds",
+    () => Math.round((largestWrite() * 10) / constant("LARGE_READ_SLOW_LINK_RATE")) / 10,
+    [["limits", /per second, the largest valid write takes ([\d.]+) s\./]],
   ],
   [
     "the large reads of one user in an hour",
