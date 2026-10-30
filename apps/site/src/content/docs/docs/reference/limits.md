@@ -177,11 +177,11 @@ These counts live in their rows, so they hold under every limiter.
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
 | Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try. A lost try tries again while another call spent, 20 tries at most, then `conflict` |
-| The `metadata` of one API token | 4096 bytes as JSON | `invalid_body` |
+| The `metadata` of one API token | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |
 | Pending invitations of one organization | `organizations.limits.pendingInvitationsPerOrganization` | `invitation_limit` |
-| The `metadata` of one organization | 4096 bytes as JSON | `invalid_body` |
+| The `metadata` of one organization | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Teams of one organization | `organizations.limits.teamsPerOrganization` | `team_limit` |
 | Members of one team | `organizations.limits.membersPerTeam`. A team member add and an accept count | `team_member_limit` |
 | Stored roles of one organization | `organizations.dynamicRoles.maxPerOrganization`, 50 by default | `role_limit` |

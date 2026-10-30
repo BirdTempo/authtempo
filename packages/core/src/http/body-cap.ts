@@ -52,7 +52,12 @@ export const REQUEST_BODY_MAX = 8_388_608;
  * schema is 4 (`POST /oauth/register`: the body, `jwks`, `keys`, one key).
  * The margin is 12 for the nodes that no schema bounds: a passkey response
  * holds the extension outputs of the client (`prf.results.first` nests 3
- * more levels), and a JWK may hold an array. The test holds both numbers.
+ * more levels), a JWK may hold an array, and the `metadata` of an
+ * organization or of an API token is a record of any values. That record
+ * is at depth 2 of its body, so its values nest at most 14 levels: a deeper
+ * value answers `invalid_body` (ruling 51 Low 5 of the 12j lane). No
+ * release exists, so no stored row holds a deeper value. The test holds
+ * each number.
  */
 export const BODY_DEPTH_MAX = 16;
 

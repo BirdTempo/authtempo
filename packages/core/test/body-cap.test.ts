@@ -143,6 +143,15 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     );
   });
 
+  it("leaves 14 levels to the values of a metadata record at depth 2 of its body", () => {
+    // `{"metadata":{"k":` is depth 2; each `[` of the value is one more level.
+    const metadata = (levels: number) =>
+      `{"metadata":{"k":${"[".repeat(levels)}${"]".repeat(levels)}}}`;
+    expect(BODY_DEPTH_MAX - 2).toBe(14);
+    expect(jsonShapeFits(metadata(14))).toBe(true);
+    expect(jsonShapeFits(metadata(15))).toBe(false);
+  });
+
   it("derives BODY_DEPTH_MAX as the deepest schema plus a margin of 12", () => {
     const rows = largestBodies();
     const deepest = Math.max(...rows.map((r) => r.depth));
