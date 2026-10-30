@@ -115,7 +115,7 @@ describe("rewrite-unpublished on the tree", () => {
       }),
     ).toEqual([]);
 
-    // check-unpublished at 0.1.0: no page holds the mark, and each listed page holds REGISTRY_INSTALL.
+    // check-unpublished at 0.1.0: no page holds a note form, and each listed page holds REGISTRY_INSTALL.
     const pages = treePages().map((p) => ({
       path: p.path,
       source: rewritten(`${DOCS_DIR}${p.path}`) ?? "",
@@ -125,7 +125,6 @@ describe("rewrite-unpublished on the tree", () => {
         version: "0.1.0",
         pages,
         listed: UNPUBLISHED_PAGES,
-        mark: UNPUBLISHED_MARK,
         install: REGISTRY_INSTALL,
       }).failures,
     ).toEqual([]);

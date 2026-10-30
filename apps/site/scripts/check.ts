@@ -27,7 +27,6 @@ import {
   PRE_RELEASE_SENTENCES,
   REGISTRY_INSTALL,
   RESOURCES_EMPTY,
-  UNPUBLISHED_MARK,
   UNPUBLISHED_PAGES,
 } from "../src/data/unpublished.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
@@ -525,7 +524,6 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         version: releaseFacts().version,
         pages: docsPages(),
         listed: UNPUBLISHED_PAGES,
-        mark: UNPUBLISHED_MARK,
         install: REGISTRY_INSTALL,
       }),
   },

@@ -2,12 +2,12 @@
  * The note of the pages while no release exists (plan 12j Task 13, spec 33
  * item 11). The note stays page text, because a .md page cannot render a
  * component (plan 12j deviation 6). check-unpublished holds each page of
- * UNPUBLISHED_PAGES to the mark while core is at 0.0.0, and fails on any docs
- * page that holds the mark above 0.0.0. At the first release, the script
- * scripts/release/src/rewrite-unpublished.ts replaces each note line of
- * PAGE_NOTES and each text of PRE_RELEASE_SENTENCES with its published text
- * (ruling 50 of plan 12j). So this file is the one list of the pre-release
- * texts of the site, and the release package reads it.
+ * UNPUBLISHED_PAGES to a note form while core is at 0.0.0, and fails on any
+ * docs page that holds a note form above 0.0.0. At the first release, the
+ * script scripts/release/src/rewrite-unpublished.ts replaces each note line
+ * of PAGE_NOTES and each text of PRE_RELEASE_SENTENCES with its published
+ * text (ruling 50 of plan 12j). So this file is the one list of the
+ * pre-release texts of the site, and the release package reads it.
  */
 
 /**
@@ -19,7 +19,7 @@
  * form, with each run of white space read as one space. So "Not on a
  * registry yet" counts too, also across a line break. check-pack, the source
  * test of the packed files, the README test, and rewrite-unpublished read
- * this list.
+ * this list. check-unpublished reads it too (ruling 58 of plan 12j, item 3).
  */
 export const UNPUBLISHED_FORMS = [
   "not on a registry yet",
@@ -47,7 +47,7 @@ export const VERSION_SLOT = "<version>";
 /**
  * Each docs page that holds the note, by its path under src/content/docs/.
  * The list was read from the tree with `git grep -l` on 2026-10-30 (ruling 7
- * of plan 12j). check-unpublished fails on a page with the mark that this
+ * of plan 12j). check-unpublished fails on a page with a note form that this
  * list lacks, so a new page with the note joins the list.
  */
 export const UNPUBLISHED_PAGES: readonly string[] = [

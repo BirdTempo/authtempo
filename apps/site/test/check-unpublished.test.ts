@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { checkUnpublished, type UnpublishedInput } from "../scripts/check-unpublished.ts";
 import { docsPages, readRepoFile } from "../scripts/lib/load.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
-import { REGISTRY_INSTALL, UNPUBLISHED_MARK, UNPUBLISHED_PAGES } from "../src/data/unpublished.ts";
+import {
+  REGISTRY_INSTALL,
+  UNPUBLISHED_FORMS,
+  UNPUBLISHED_MARK,
+  UNPUBLISHED_PAGES,
+} from "../src/data/unpublished.ts";
 
 const NOTE = `The packages are ${UNPUBLISHED_MARK}. Run the command from the repo.`;
 const page = (path: string, text: string) => ({ path, source: `---\ntitle: x\n---\n\n${text}\n` });
@@ -12,7 +17,6 @@ const BASE: UnpublishedInput = {
   version: "0.0.0",
   pages: [page("docs/a.md", NOTE), page("docs/b.mdx", NOTE), page("docs/c.md", "Other text.")],
   listed: ["docs/a.md", "docs/b.mdx"],
-  mark: UNPUBLISHED_MARK,
   install: REGISTRY_INSTALL,
 };
 
@@ -29,7 +33,7 @@ describe("check-unpublished", () => {
   it("fails a listed page with no mark at 0.0.0", () => {
     const pages = [page("docs/a.md", "No note."), ...BASE.pages.slice(1)];
     expect(failures({ ...BASE, pages })).toEqual([
-      `docs/a.md: core is at 0.0.0, and the page lacks the note "${UNPUBLISHED_MARK}"`,
+      "docs/a.md: core is at 0.0.0, and the page holds no form of UNPUBLISHED_FORMS",
     ]);
   });
 
@@ -64,6 +68,36 @@ describe("check-unpublished", () => {
     ];
     expect(failures({ ...BASE, version: "0.1.0", pages })).toEqual([
       `docs/b.mdx: core is at 0.1.0, and the page still holds "${UNPUBLISHED_MARK}"`,
+    ]);
+  });
+
+  // Ruling 58 of plan 12j, item 3: the one list of check-pack and rewrite-unpublished.
+  it("reads each form of UNPUBLISHED_FORMS, not only the first, one probe per form", () => {
+    expect(UNPUBLISHED_FORMS.length).toBeGreaterThan(1);
+    for (const form of UNPUBLISHED_FORMS) {
+      const text = `Text. ${form.charAt(0).toUpperCase()}${form.slice(1).replace(" ", "\n")}, so read on.`;
+      // A listed page with only this form holds the note at 0.0.0.
+      const pages = [page("docs/a.md", text), ...BASE.pages.slice(1)];
+      expect(failures({ ...BASE, pages }), form).toEqual([]);
+      // A page that the list lacks fails at 0.0.0.
+      expect(failures({ ...BASE, pages: [...BASE.pages, page("docs/d.md", text)] }), form).toEqual([
+        `docs/d.md: holds the note "${form}", and UNPUBLISHED_PAGES lacks it`,
+      ]);
+      // A page that still holds it fails above 0.0.0.
+      const after = [
+        page("docs/a.md", REGISTRY_INSTALL),
+        page("docs/b.mdx", `${REGISTRY_INSTALL} ${text}`),
+      ];
+      expect(failures({ ...BASE, version: "0.1.0", pages: after }), form).toEqual([
+        `docs/b.mdx: core is at 0.1.0, and the page still holds "${form}"`,
+      ]);
+    }
+  });
+
+  it("names each form that a page holds", () => {
+    const both = `${NOTE} Until the packages are on a registry, wait.`;
+    expect(failures({ ...BASE, pages: [...BASE.pages, page("docs/d.md", both)] })).toEqual([
+      `docs/d.md: holds the note "${UNPUBLISHED_MARK}", "until the packages are on a registry", and UNPUBLISHED_PAGES lacks it`,
     ]);
   });
 
