@@ -65,12 +65,37 @@ const reader = (tree: Record<string, string>) => (file: string) => tree[file] ??
 /** The old cookie name in the source of core: the constant and its alias in credentials.ts. */
 const OLD_NAME = /\b(LEGACY_SESSION_COOKIE|LEGACY_COOKIE_NAME)\b/g;
 
+/** A line that holds only the old name and a comma. */
+const LIST_ELEMENT = /^\s*(LEGACY_SESSION_COOKIE|LEGACY_COOKIE_NAME),\s*$/;
+
+/**
+ * The innermost bracket that is open at the end of `code`, or null. The scan
+ * does not skip strings, so a bracket in a string can give a false answer.
+ * The only use is the list rule of oldCookieReads, and there a false answer
+ * keeps a line as a read.
+ */
+function openBracket(code: string): string | null {
+  const open: string[] = [];
+  for (const ch of code) {
+    if (ch === "(" || ch === "[" || ch === "{") open.push(ch);
+    else if (ch === ")" || ch === "]" || ch === "}") open.pop();
+  }
+  return open.at(-1) ?? null;
+}
+
 /**
  * The reads of the old cookie tempo_session in one source file of core. A
  * read needs the old name. So a read is a readCookie call with a legacy
  * name, a quoted "tempo_session", or a use of OLD_NAME as a value. The
  * comments, the import and export lists, the declaration of a constant, and
  * a comparison with `===` or `!==` are not reads.
+ *
+ * An element of an array literal over lines is not a read either (ruling
+ * 41). The taken set of lastMethod in config.ts names the old name, so no
+ * other cookie takes it. The set reserves the name and never reads the
+ * cookie, and it stays after 0.2.0. So a line that holds only the name and
+ * a comma, in an open `[`, is skipped. In an open `(`, the same line is an
+ * argument of a call over lines, and it stays a read.
  */
 function oldCookieReads(source: string): string[] {
   const code = source
@@ -78,7 +103,9 @@ function oldCookieReads(source: string): string[] {
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
     .replace(/^\s*(import|export)\s+(type\s+)?\{[^}]*\}\s*from\s*"[^"]*";/gm, "")
     .replace(/^export const (LEGACY_SESSION_COOKIE|LEGACY_COOKIE_NAME) = [^;]*;/gm, "");
-  return code.split("\n").filter((line) => {
+  const lines = code.split("\n");
+  return lines.filter((line, i) => {
+    if (LIST_ELEMENT.test(line) && openBracket(lines.slice(0, i).join("\n")) === "[") return false;
     if (/readCookie\([^)]*legacy/i.test(line) || /["'`]tempo_session["'`]/.test(line)) return true;
     return [...line.matchAll(OLD_NAME)].some((m) => {
       const before = line.slice(0, m.index);
@@ -446,6 +473,42 @@ describe("check-deprecations", () => {
     } finally {
       rmSync(copy, { recursive: true, force: true });
     }
+  });
+
+  describe("the reads of the old cookie (ruling 41)", () => {
+    it("skips an element of an array literal over lines", () => {
+      const source = [
+        "const taken = new Set([",
+        "  sessionCookie,",
+        "  LEGACY_SESSION_COOKIE,",
+        "  bindingCookieName(sessionCookie),",
+        "]);",
+      ].join("\n");
+      expect(oldCookieReads(source)).toEqual([]);
+    });
+
+    it("keeps an argument of a call as a read", () => {
+      const source = [
+        "const value = readCookie(request, LEGACY_SESSION_COOKIE);",
+        "const other = cookieOf(request.headers, LEGACY_SESSION_COOKIE);",
+      ].join("\n");
+      expect(oldCookieReads(source)).toEqual(source.split("\n"));
+    });
+
+    it("keeps an argument of a call over lines as a read", () => {
+      const source = ["const value = cookieOf(", "  request,", "  LEGACY_SESSION_COOKIE,", ");"];
+      expect(oldCookieReads(source.join("\n"))).toEqual(["  LEGACY_SESSION_COOKIE,"]);
+    });
+
+    it("keeps a lookup as a read", () => {
+      const source = "const value = cookies[LEGACY_SESSION_COOKIE];";
+      expect(oldCookieReads(source)).toEqual([source]);
+    });
+
+    it("keeps an assignment as a read", () => {
+      const source = ["let name = DEFAULT_SESSION_COOKIE;", "name = LEGACY_COOKIE_NAME;"];
+      expect(oldCookieReads(source.join("\n"))).toEqual(["name = LEGACY_COOKIE_NAME;"]);
+    });
   });
 
   it("names each handoff re-export of an index.ts marker in the what text", () => {
