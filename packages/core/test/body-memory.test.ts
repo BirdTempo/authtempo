@@ -10,8 +10,9 @@ import type { RouteKey } from "../src/http/route-list.js";
  * the shape scan, the parse, the text walk, and zod. A fatal out-of-memory
  * stops a child with no answer, so each child must answer. The SAML ACS
  * form at `SAML_FORM_MAX` and the SCIM body at `SCIM_BODY_MAX` join it with
- * their own worst shapes (ruling 51). Each child records the peak of its
- * heap and of its array buffers.
+ * their own worst shapes (ruling 51), the SCIM body also at its scan limits
+ * (ruling 56). Each child records the peak of its heap and of its array
+ * buffers.
  *
  * The child imports the build of core, so the first test fails when a
  * source file is newer than its build. A turbo run of `test` builds first.
@@ -69,9 +70,18 @@ const FORM_SHAPES = [
   "form-value",
   "form-at-limit",
 ];
-/** A SCIM write: its body at `SCIM_BODY_MAX`, through readScimBody, which has no shape scan. */
+/** A SCIM write: its body at `SCIM_BODY_MAX`, through readScimBody and its shape scan. */
 const SCIM = "POST /scim/v2/Users";
-const SCIM_SHAPES = ["nesting", "zeros", "empties", "objects", "string", "keys"];
+/** The SCIM shapes past the depth or the item limit: each answers 400 before the parse. */
+const SCIM_PAST = ["nesting", "zeros", "empties", "objects", "keys"];
+const SCIM_SHAPES = [
+  ...SCIM_PAST,
+  "string",
+  "zeros-at-limit",
+  "objects-at-limit",
+  "nesting-at-limit",
+  "keys-at-limit",
+];
 
 /** The line of a child that runs reads of `REQUEST_BODY_MAX` at once. */
 interface BudgetLine {
@@ -194,6 +204,9 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
       expect([l.shape, l.answer]).toEqual([l.shape, "302 sso_failed"]);
       expect(l.ms).toBeLessThan(1000);
     }
+    // SCIM refuses each shape past its limits, and reads one string and each shape at them.
+    for (const l of lines.filter((l) => l.route === SCIM))
+      expect([l.shape, l.answer]).toEqual([l.shape, SCIM_PAST.includes(l.shape) ? "400" : "ok"]);
   });
 
   it("walks a parsed array of 4 million zeros for bad text in a heap of 128 MB", {

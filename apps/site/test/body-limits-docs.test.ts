@@ -4,15 +4,17 @@ import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, and 56 of the 12j
 // lane). The errors page, the limits page, the Express and Fastify pages, the
-// core README, and the Express README state the caps and the scan limits by
-// hand. This test reads each constant from the source of core and each
-// number from the pages, in the form of sso-scim-limits.test.ts. A new
-// derivation that changes a constant fails here until each line says the new
-// value. A cap number in one of the files that no fact holds fails too, so no
-// line drifts unseen.
+// SCIM guide, the core README, and the Express README state the caps and the
+// scan limits by hand. This test reads each constant from the source of core
+// and each number from the pages, in the form of sso-scim-limits.test.ts. A
+// new derivation that changes a constant fails here until each line says the
+// new value. A cap number in one of the files that no fact holds fails too,
+// so no line drifts unseen.
 
 const BODY_CAP = `${REPO}packages/core/src/http/body-cap.ts`;
 const source = readFileSync(BODY_CAP, "utf8");
+/** The SCIM routes of core: the SCIM item limit of the shape scan (ruling 56). */
+const scimSource = readFileSync(`${REPO}packages/core/src/http/routes/scim.ts`, "utf8");
 
 /** The text of a file with each run of white space as one space: a README line wraps. */
 function textOf(file: string): string {
@@ -24,6 +26,7 @@ const FILES = {
   limits: `${DOCS}docs/reference/limits.md`,
   express: `${DOCS}docs/reference/express.md`,
   fastify: `${DOCS}docs/reference/fastify.md`,
+  scim: `${DOCS}docs/guides/scim.mdx`,
   readme: `${REPO}packages/core/README.md`,
   expressReadme: `${REPO}packages/express/README.md`,
 } as const;
@@ -37,10 +40,10 @@ function numberOf(text: string): number {
     .reduce((a, b) => a * b, 1);
 }
 
-/** The value of `export const NAME = <number>;` in body-cap.ts. */
-function constant(name: string): number {
-  const m = new RegExp(`export const ${name} = ([0-9_ *]+);`).exec(source);
-  if (!m) throw new Error(`no constant ${name} in body-cap.ts`);
+/** The value of `export const NAME = <number>;` in body-cap.ts, or in `text`. */
+function constant(name: string, text: string = source): number {
+  const m = new RegExp(`export const ${name} = ([0-9_ *]+);`).exec(text);
+  if (!m) throw new Error(`no constant ${name} in the source`);
   return numberOf(m[1] ?? "");
 }
 
@@ -116,6 +119,10 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Nesting of one JSON request body \| (\d+) levels/],
       ["readme", /A JSON body nested deeper than (\d+) or/],
+      // The SCIM body takes the same depth limit (ruling 56).
+      ["limits", /\| Nesting and items of one SCIM request body \| (\d+) levels/],
+      ["scim", /A body nested deeper than (\d+) levels/],
+      ["readme", /A SCIM body nested deeper than (\d+) or/],
     ],
   ],
   [
@@ -132,6 +139,18 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Items of one JSON request body \| (\d+) of/],
       ["readme", /or with more than (\d+) items answers `invalid_body`/],
+    ],
+  ],
+  [
+    "the item limit of a SCIM body",
+    () => constant("SCIM_ITEMS_MAX", scimSource),
+    [
+      [
+        "limits",
+        /\| Nesting and items of one SCIM request body \| \d+ levels of `\[` and `\{`, and (\d+) items/,
+      ],
+      ["scim", /or with more than (\d+) items of/],
+      ["readme", /or with more than (\d+) items answers 400 `invalidSyntax`/],
     ],
   ],
   [

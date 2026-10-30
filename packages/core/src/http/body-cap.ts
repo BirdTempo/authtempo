@@ -247,13 +247,18 @@ export async function readBodyText(
 }
 
 /**
- * True when the JSON text nests `[` and `{` at most `BODY_DEPTH_MAX` deep
- * and has at most `BODY_ITEMS_MAX` items outside its strings. One pass over
- * the text, before `JSON.parse`, so a body that would take more memory than
- * its bytes never becomes values. The scan does not check the grammar:
- * `JSON.parse` does that next.
+ * True when the JSON text nests `[` and `{` at most `depthMax` deep and has
+ * at most `itemsMax` items outside its strings: by default the limits of a
+ * route body. The SCIM body passes its own item limit (`SCIM_ITEMS_MAX`,
+ * ruling 56 of the 12j lane). One pass over the text, before `JSON.parse`,
+ * so a body that would take more memory than its bytes never becomes
+ * values. The scan does not check the grammar: `JSON.parse` does that next.
  */
-export function jsonShapeFits(text: string): boolean {
+export function jsonShapeFits(
+  text: string,
+  depthMax: number = BODY_DEPTH_MAX,
+  itemsMax: number = BODY_ITEMS_MAX,
+): boolean {
   let depth = 0;
   let items = 0;
   let inString = false;
@@ -267,9 +272,9 @@ export function jsonShapeFits(text: string): boolean {
     else if (c === 0x5b || c === 0x7b) {
       depth++;
       items++;
-      if (depth > BODY_DEPTH_MAX || items > BODY_ITEMS_MAX) return false;
+      if (depth > depthMax || items > itemsMax) return false;
     } else if (c === 0x5d || c === 0x7d) depth--;
-    else if (c === 0x2c && ++items > BODY_ITEMS_MAX) return false;
+    else if (c === 0x2c && ++items > itemsMax) return false;
   }
   return true;
 }

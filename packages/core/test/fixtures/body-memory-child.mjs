@@ -15,7 +15,9 @@ const { holdsBadText } = await import(new URL("http/body-text.js", dist).href);
 const { readJson } = await import(new URL("http/json.js", dist).href);
 const { ROUTE_CONTRACT } = await import(new URL("http/contract/index.js", dist).href);
 const { SAML_FORM_MAX } = await import(new URL("engine/sso/saml-sp.js", dist).href);
-const { readScimBody, SCIM_BODY_MAX } = await import(new URL("http/routes/scim.js", dist).href);
+const { readScimBody, SCIM_BODY_MAX, SCIM_ITEMS_MAX } = await import(
+  new URL("http/routes/scim.js", dist).href
+);
 const core = await import(new URL("index.js", dist).href);
 
 const ACS = "POST /sso/:connectionId/acs";
@@ -166,7 +168,7 @@ const FORM_SHAPES = {
   },
 };
 
-// The SCIM body at SCIM_BODY_MAX (ruling 51): its own reader has no shape scan.
+// The SCIM body at SCIM_BODY_MAX (rulings 51 and 56): the shape scan with SCIM_ITEMS_MAX.
 const SCIM_SHAPES = {
   nesting: () => `${"[".repeat(cap / 2)}${"]".repeat(cap / 2)}`,
   zeros: () => fill("[", "0,", "0]"),
@@ -174,6 +176,22 @@ const SCIM_SHAPES = {
   objects: () => fill("[", "{},", "{}]"),
   string: JSON_SHAPES.string,
   keys: JSON_SHAPES.keys,
+  // SCIM_ITEMS_MAX zeros: a bracket and a comma before each zero but the first.
+  "zeros-at-limit": () => pad(`[${"0,".repeat(SCIM_ITEMS_MAX - 1)}0]`),
+  // Empty objects, two items each, to SCIM_ITEMS_MAX with the bracket.
+  "objects-at-limit": () => pad(`[${"{},".repeat(SCIM_ITEMS_MAX / 2 - 1)}{}]`),
+  // Chains at the depth limit, BODY_DEPTH_MAX items each with the bracket or a comma.
+  "nesting-at-limit": () => {
+    const n = Math.floor(SCIM_ITEMS_MAX / BODY_DEPTH_MAX);
+    return pad(`[${Array.from({ length: n }, () => chain(BODY_DEPTH_MAX + 1)).join(",")}]`);
+  },
+  // SCIM_ITEMS_MAX keys, each long, to the cap.
+  "keys-at-limit": () => {
+    const n = SCIM_ITEMS_MAX;
+    const width = Math.floor((cap - 2) / n) - 5;
+    const keys = Array.from({ length: n }, (_, i) => `"${i.toString(36).padStart(width, "k")}":0`);
+    return pad(`{${keys.join(",")}}`);
+  },
 };
 
 const SHAPES = route === ACS ? FORM_SHAPES : route === SCIM ? SCIM_SHAPES : JSON_SHAPES;

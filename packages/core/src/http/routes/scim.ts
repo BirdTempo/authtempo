@@ -33,7 +33,14 @@ import {
 } from "../../engine/scim/users.js";
 import { withSecrets } from "../../observe/observer.js";
 import type { ScimScope } from "../../schema.js";
-import { BODY_BUSY_RETRY_SECONDS, BodyBusy, BodyTooLarge, readBodyBytes } from "../body-cap.js";
+import {
+  BODY_BUSY_RETRY_SECONDS,
+  BODY_DEPTH_MAX,
+  BodyBusy,
+  BodyTooLarge,
+  jsonShapeFits,
+  readBodyBytes,
+} from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
 import { json } from "../json.js";
@@ -47,6 +54,28 @@ export { NS_SCIM_ERROR, SCIM_MEDIA, scimError, scimJson };
 /** The largest SCIM request body: 1 MB. */
 export const SCIM_BODY_MAX = 1_048_576;
 
+/**
+ * The most items of a SCIM body: each `[`, `{`, and `,` outside a string,
+ * as for a route body (ruling 56 of the 12j lane). The scan runs before the
+ * parse. Measured 2026-10-30 (Node 26, a heap of 128 MB, body-memory.test.ts):
+ * before the scan, 1 MB of nesting kept 54 MB of heap, and 1 MB of `{}`
+ * items 56 MB. With it, each shape past the limits peaks at 26 MB, and the
+ * worst shape at them, 65536 keys, at 35 MB.
+ *
+ * The derivation, done 2026-10-30. The largest valid body by the bounds of
+ * the engine is a Group PATCH of `PATCH_OPS_MAX` operations that name
+ * `PATCH_MEMBERS_MAX` members, each with the four sub-attributes of RFC 7643
+ * section 4.2: 5403 items. The PUT of such a Group holds 5013. A User keeps
+ * at most `SCIM_DATA_MAX` bytes of attributes. At that bound, a body of
+ * `emails` items `{"type":""}` holds 2732. The limit of a route body, 4096,
+ * would refuse the PATCH and the PUT. The next power of two is 8192. The
+ * limit is 8 times that, as for a route body, for the attributes that core
+ * ignores. The depth limit is `BODY_DEPTH_MAX`: the deepest valid body is a
+ * PATCH value of `PATCH_VALUE_DEPTH_MAX` levels under 3 levels of the
+ * message. scim/limits.test.ts holds each number.
+ */
+export const SCIM_ITEMS_MAX = 65_536;
+
 /** The media types that a SCIM body may carry; a parameter such as `charset` may follow. */
 const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]);
 
@@ -57,7 +86,9 @@ const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]
  * else 413. A body that is not UTF-8 answers 400 `invalidSyntax`, as does
  * JSON that does not parse or a body read before. So 413 means a long body
  * only. The read holds its bytes against the budget of the large reads, and
- * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane).
+ * past it answers 503 with `Retry-After` (ruling 51 of the 12j lane). A body
+ * nested deeper than `BODY_DEPTH_MAX` or with more than `SCIM_ITEMS_MAX`
+ * items answers 400 `invalidSyntax` before the parse (ruling 56).
  */
 export async function readScimBody(
   request: Request,
@@ -97,6 +128,16 @@ export async function readScimBody(
   } catch {
     return { ok: false, response: scimError(400, "the body is not UTF-8", "invalidSyntax") };
   }
+  // The shape scan of a route body, with the item limit of SCIM, before the parse.
+  if (!jsonShapeFits(text, BODY_DEPTH_MAX, SCIM_ITEMS_MAX))
+    return {
+      ok: false,
+      response: scimError(
+        400,
+        `the body nests deeper than ${BODY_DEPTH_MAX} or holds more than ${SCIM_ITEMS_MAX} items`,
+        "invalidSyntax",
+      ),
+    };
   let value: unknown;
   try {
     value = JSON.parse(text);

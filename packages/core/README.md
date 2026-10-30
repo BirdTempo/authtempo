@@ -1752,7 +1752,9 @@ writes each value under version 1.
   no parse runs. A JSON body nested deeper than 16 or with more than 4096
   items answers `invalid_body` before the parse. A form body of more than
   128 pairs gets the refusal of a bad form before the parse, the SAML ACS
-  form too. SCIM keeps its own 1 MB cap.
+  form too. SCIM keeps its own 1 MB cap. A SCIM body nested deeper than
+  16 or with more than 65536 items answers 400 `invalidSyntax` before the
+  parse.
 - The body reads of the routes with a cap above 64 KiB hold at most
   16 MiB at once in one isolate (`LARGE_READ_BUDGET`). A read past it
   answers 503 `body_busy` with `Retry-After: 1`, and SCIM its own 503.
