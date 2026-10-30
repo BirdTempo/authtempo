@@ -61,6 +61,15 @@ describe("the raw body reads of core (ruling 46 of the 12j lane)", () => {
       "request.body",
       "{ body } = request",
       "maybe.text",
+      // Ruling 51 Low 2: an element access with a literal name, an intersection,
+      // an access that is not a call, a nested pattern, an assignment pattern,
+      // and a parameter pattern.
+      "request.json",
+      "tagged.text",
+      "request.arrayBuffer",
+      "{ body } of Request",
+      "{ body } = request",
+      "{ body } of Request",
     ]);
   });
 });

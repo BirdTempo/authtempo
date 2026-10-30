@@ -16,3 +16,20 @@ export async function rawReads(request: Request, maybe: Request | null, res: Res
   await res.clone().text();
   return body;
 }
+
+// The forms of ruling 51 Low 2, which the scan of ruling 46 missed.
+export async function moreReads(request: Request, tagged: Request & { tag?: 1 }) {
+  // biome-ignore lint/complexity/useLiteralKeys: the scan must find an element access with a literal name.
+  await request["json"]();
+  await tagged.text();
+  const bound = request.arrayBuffer.bind(request);
+  const ctx = { request };
+  const {
+    request: { body: nested },
+  } = ctx;
+  let assigned: unknown = null;
+  ({ body: assigned } = request);
+  return [bound, nested, assigned];
+}
+
+export const fromParameter = ({ body }: Request) => body;
