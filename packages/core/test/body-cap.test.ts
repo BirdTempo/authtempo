@@ -124,6 +124,90 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * Each node of a route body that no schema bounds, with the check that bounds
+ * it (ruling 68 Low 1 of the 12j lane). The walk of body-limits.ts counts such
+ * a node at its least size, so the largest valid body of its route is a lower
+ * bound. A new open node fails the derivation test until it names its bound
+ * here. The cap of the route and the shape scan bound every node; an entry
+ * that names only them has no engine rule.
+ */
+const OPEN_NODES: Readonly<Record<string, string>> = {
+  "POST /sso/connections/create.scimRoles{}": "SCIM_ROLES_MAX entries (engine/sso/connections.ts)",
+  "POST /sso/connections/update.scimRoles{}": "SCIM_ROLES_MAX entries (engine/sso/connections.ts)",
+  "POST /reauth.passkey.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /reauth.passkey.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/register/verify.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/register/verify.response.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/register/verify.name": "PASSKEY_NAME_MAX, 64 units (engine/passkeys.ts)",
+  "POST /passkey/authenticate/verify.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/authenticate/verify.response.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/sign-up/verify.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/sign-up/verify.response.response.*":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /second-factor/passkey/enable.response: unknown":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /totp/verify.passkey: unknown":
+    "the WebAuthn seam checks the fields that it reads; the cap of the route and the shape scan bound the rest",
+  "POST /passkey/authenticate/options.extensions.prf.first":
+    "the pattern of 43 base64url units of the PRF salt (contract/passkeys.ts)",
+  "POST /passkey/authenticate/options.extensions.prf.second":
+    "the pattern of 43 base64url units of the PRF salt (contract/passkeys.ts)",
+  "POST /passkey/sign-up/options.name": "SIGN_UP_NAME_MAX, 80 units (engine/passkeys.ts)",
+  "POST /passkeys/rename.name": "PASSKEY_NAME_MAX, 64 units (engine/passkeys.ts)",
+  "POST /tokens.permissions{}":
+    "statementFault (access.ts): each resource and action is a known name, at most 64 actions of 64 units",
+  "POST /tokens/update.permissions{}":
+    "statementFault (access.ts): each resource and action is a known name, at most 64 actions of 64 units",
+  "POST /organizations/tokens.permissions{}":
+    "statementFault (access.ts): each resource and action is a known name, at most 64 actions of 64 units",
+  "POST /organizations/tokens/update.permissions{}":
+    "statementFault (access.ts): each resource and action is a known name, at most 64 actions of 64 units",
+  "POST /organizations/roles/create.permissions{}":
+    "the refine of 64 resources (contract/roles.ts), then statementFault",
+  "POST /organizations/roles/update.permissions{}":
+    "the refine of 64 resources (contract/roles.ts), then statementFault",
+  "POST /organizations/has-permission.permissions{}":
+    "the refine of 64 resources (contract/organizations.ts)",
+  "POST /tokens.metadata{}": "validMetadata, 4096 bytes as JSON (engine/tokens.ts)",
+  "POST /organizations/tokens.metadata{}": "validMetadata, 4096 bytes as JSON (engine/tokens.ts)",
+  "POST /organizations/create.metadata{}":
+    "the refine of METADATA_MAX_BYTES, 4096 bytes as JSON (contract/organizations.ts)",
+  "POST /organizations/update.metadata{}":
+    "the refine of METADATA_MAX_BYTES, 4096 bytes as JSON (contract/organizations.ts)",
+  "POST /tokens/update.expiresAt":
+    "the cap of the route and the shape scan only: no engine rule bounds it; the ISO format takes any count of fraction digits",
+  "POST /organizations/tokens/update.expiresAt":
+    "the cap of the route and the shape scan only: no engine rule bounds it; the ISO format takes any count of fraction digits",
+  "POST /oauth/register.redirect_uris[]":
+    "redirectList: REDIRECT_MAX URIs of URI_MAX units (engine/oauth-clients.ts)",
+  "POST /oauth/register.grant_types[]":
+    "stringList: at most the served grants, each once (engine/oauth-clients.ts)",
+  "POST /oauth/register.response_types[]":
+    "subsetOf: each value is code; the cap of the route and the shape scan only: no engine rule bounds it for the count",
+  "POST /oauth/register.jwks.keys[]{}":
+    "clientKeySet: CLIENT_KEYS_MAX keys, each a key of one alg (engine/oauth-clients.ts)",
+  "POST /oauth/register.jwks_uri": "validCimdUrl: URI_MAX units (engine/oauth-clients.ts)",
+  "POST /oauth/register.post_logout_redirect_uris[]":
+    "validRedirectUri: URI_MAX units, 10 URIs by the schema (engine/oauth-clients.ts)",
+  "POST /oauth/register.backchannel_logout_uri":
+    "validLogoutUri: URI_MAX units (engine/oauth-clients.ts)",
+  "POST /oauth/register.id_token_signed_response_alg":
+    "equal to the alg of jwtMint (engine/oauth-clients.ts)",
+  "POST /operator/impersonate.reason": "operatorReason: REASON_MAX, 500 units (engine/operator)",
+  "POST /operator/impersonate/stop.reason":
+    "the cap of the route and the shape scan only: no engine rule bounds it; the audit row keeps the text",
+  "POST /operator/secrets/rewrap.after":
+    "the cap of the route and the shape scan only: no engine rule bounds it; CURSOR (engine/secrets.ts) checks the kind only",
+};
+
 describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
   it("derives the cap of each route as the next power of two above its largest valid body, at least 64 KiB", () => {
     const rows = largestBodies();
@@ -161,6 +245,15 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
         [8_388_608, 2],
       ]),
     );
+  });
+
+  it("holds every open node of every route to the check that bounds it (ruling 68 Low 1)", () => {
+    const rows = largestBodies();
+    const open = [...new Set(rows.flatMap((r) => r.open))].sort();
+    console.log(
+      `body-cap: open nodes=${open.length} of ${rows.filter((r) => r.open.length > 0).length} routes`,
+    );
+    expect(open).toEqual(Object.keys(OPEN_NODES).sort());
   });
 
   it("leaves 14 levels to the values of a metadata record at depth 2 of its body", () => {
