@@ -237,6 +237,26 @@ export const LARGE_READ_USER_MIN_RATE = 262_144;
 export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
 
 /**
+ * The longest time in ms that a large read of a signed-in user may take
+ * with no spend (ruling 79 of the 12j lane). A read that takes longer runs
+ * the work that `bindSlowRead` bound to its request. It runs it at each
+ * end: whole, 408 `body_timeout`, a closed socket, or past its cap. At an
+ * SSO connection write, that work spends the rest of the user's window of
+ * `sso-large-read:user` (`spendLargeReads` in routes/sso.ts). Before this
+ * rule only a 408 spent. A client that sent its last bytes just before the
+ * deadline, or closed its socket, held the user half for 32 s for free.
+ *
+ * The derivation, done 2026-10-31. The largest valid SSO connection write,
+ * 4 705 616 bytes, takes 4.5 s at 1 MiB per second (8 Mbit/s). A time of
+ * 8 s keeps a margin over it. It is less than `LARGE_READ_IDLE_MS` and
+ * `LARGE_READ_DEADLINE_FLOOR_MS`, so each 408 of a large read takes longer.
+ * A read that spends nothing holds the user half for at most 8 s. An admin
+ * on a slower link still gets a write that takes longer. Only the next
+ * large write of the account waits for the next window.
+ */
+export const LARGE_READ_SLOW_MS = 8_000;
+
+/**
  * The time in ms that a whole read above the floor of a cap of `cap` bytes
  * may take at `rate` bytes per second: `LARGE_READ_MIN_RATE` for a read
  * before a session, `LARGE_READ_USER_MIN_RATE` for a read of a user.
@@ -357,19 +377,20 @@ export function bodyClientOf(request: Request): string {
   return CLIENT_OF.get(request) ?? UNKNOWN_CLIENT;
 }
 
-/** The work of each request at a stall of its large read (`bindBodyStall`). */
-const STALL_OF = new WeakMap<Request, () => Promise<void>>();
+/** The work of each request at the end of a slow large read (`bindSlowRead`). */
+const SLOW_OF = new WeakMap<Request, () => Promise<void>>();
 
 /**
- * Binds `request` to `onStall`, which a read above the floor of the request
- * runs when it stops at a deadline, before it throws `BodyTimeout` (ruling
- * 75 of the 12j lane). `managedCall` and `countSsoManageWrite` bind it for
- * an SSO connection write: it spends the rest of the large reads of the
- * user in the window of `sso-large-read:user`. A read that arrives whole,
- * a read past its cap, and a read that cannot start never run it.
+ * Binds `request` to `onSlow` (rulings 75 and 79 of the 12j lane). A large
+ * read of a user of the request runs it at its end when the read took more
+ * than `LARGE_READ_SLOW_MS`. It runs at each end: whole, 408, a closed
+ * socket, or past its cap. `managedCall` and `countSsoManageWrite` bind it
+ * for an SSO connection write. There it spends the rest of the user's large
+ * reads in the window of `sso-large-read:user`. A read that ends within
+ * that time, and a read that cannot start, never run it.
  */
-export function bindBodyStall(request: Request, onStall: () => Promise<void>): void {
-  STALL_OF.set(request, onStall);
+export function bindSlowRead(request: Request, onSlow: () => Promise<void>): void {
+  SLOW_OF.set(request, onSlow);
 }
 
 /**
@@ -470,10 +491,13 @@ export function bodyReadable(request: Request): boolean {
  * at a time: a second throws `BodyBusy` before any byte (ruling 69). It
  * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
  * when it does not end within `largeReadDeadlineMs` of its cap, at the rate
- * of a user for a user (ruling 69). Before that throw it runs the stall
- * work that `bindBodyStall` bound to the request (ruling 75). Each end
- * frees its bytes (ruling 59 of the 12j lane). Workers, Node, Bun, and
- * Deno each give `request.body` as a stream. Null when the body was read
+ * of a user for a user (ruling 69). Each end frees its bytes (ruling 59 of
+ * the 12j lane). Then a large read of a user that took more than
+ * `LARGE_READ_SLOW_MS`, or that stopped at a deadline, runs its slow work.
+ * That is the work that `bindSlowRead` bound to the request, and it runs at
+ * any end (rulings 75 and 79). The user runs no other large read until that
+ * work ends. Workers, Node, Bun,
+ * and Deno each give `request.body` as a stream. Null when the body was read
  * or locked before, such as by app middleware, and at a chunk that is not
  * bytes: each reader answers it `invalid_body`, not 500 (ruling 46 Low 1,
  * ruling 51 Low 3, and ruling 59 Low 1 of the 12j lane).
@@ -542,6 +566,8 @@ export async function readBodyBytes(
   };
   const counted = large && user;
   if (counted) readsOf.set(client, (readsOf.get(client) ?? 0) + 1);
+  // Real time, not the injected clock: the time that a read holds its bytes (ruling 79).
+  const started = Date.now();
   try {
     const read = await readCappedOutcome(
       new Response(body, length === null ? {} : { headers: { "content-length": length } }),
@@ -550,12 +576,7 @@ export async function readBodyBytes(
       large ? take : undefined,
     );
     if (busy) throw new BodyBusy();
-    if (timedOut > 0) {
-      // Free the bytes first, then spend the reads of a stalled user (ruling 75).
-      release();
-      await STALL_OF.get(request)?.();
-      throw new BodyTimeout(timedOut);
-    }
+    if (timedOut > 0) throw new BodyTimeout(timedOut);
     // A chunk that is not bytes: a bad body, which no count saw (ruling 59 Low 1).
     if (read === "chunk") return null;
     if (!(read instanceof Uint8Array)) throw new BodyTooLarge(cap);
@@ -565,10 +586,17 @@ export async function readBodyBytes(
     clearTimeout(whole);
     request.signal.removeEventListener("abort", abort);
     release();
-    if (counted) {
-      const left = (readsOf.get(client) ?? 1) - 1;
-      if (left > 0) readsOf.set(client, left);
-      else readsOf.delete(client);
+    try {
+      // A slow read of a user runs its work after it frees its bytes (rulings 75 and 79).
+      // It runs at each end: whole, 408, a closed socket, or past its cap. Its slot holds until then.
+      if (counted && (timedOut > 0 || Date.now() - started > LARGE_READ_SLOW_MS))
+        await SLOW_OF.get(request)?.();
+    } finally {
+      if (counted) {
+        const left = (readsOf.get(client) ?? 1) - 1;
+        if (left > 0) readsOf.set(client, left);
+        else readsOf.delete(client);
+      }
     }
   }
 }

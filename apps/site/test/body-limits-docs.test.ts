@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, 69, 72, and 75 of the 12j lane). The errors page, the limits page, the Express,
+// 68, 69, 72, 75, and 79 of the 12j lane). The errors page, the limits page, the Express,
 // Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
 // README, and the deploy page state the caps and the scan limits by hand.
 // This test reads each constant from the source of core
@@ -355,6 +355,14 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     ],
   ],
   [
+    "the time of a large read of a user with no spend, in seconds",
+    () => constant("LARGE_READ_SLOW_MS") / 1000,
+    [
+      ["limits", /A read that takes more than (\d+) s spends the rest of the window/],
+      ["errors", /So does such a write that reads whole after more than (\d+) s/],
+    ],
+  ],
+  [
     "the large reads of one user in an hour",
     () => limitMax("SSO_LARGE_READ_PER_USER"),
     [
@@ -433,7 +441,7 @@ const PLAN_PAGES = [
 /** The cap numbers that a file may state only where a fact holds them. */
 const CAP_NUMBERS = /\b(65536|262144|8388608|16777216)\b/g;
 
-describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, 72, and 75 of the 12j lane)", () => {
+describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 59, 66, 69, 72, 75, and 79 of the 12j lane)", () => {
   for (const [name, value, lines] of facts)
     it(`states ${name} as the source has it`, () => {
       const want = value();

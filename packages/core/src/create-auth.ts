@@ -311,7 +311,7 @@ import { ERRORS } from "./errors.js";
 import {
   BodyBusy,
   bindBodyClient,
-  bindBodyStall,
+  bindSlowRead,
   bodyCapOf,
   largeReadCanStart,
 } from "./http/body-cap.js";
@@ -1239,9 +1239,9 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
  * either limit it answers false. Before the counts, it
  * throws `BodyBusy` when the large read of the user cannot start, so a
  * retry after `Retry-After` spends no count (ruling 72 Minor 1). A read of
- * the package that stops at a deadline spends the rest of the user's large
- * reads of the window (ruling 75). Throws a TypeError for an Auth that
- * `createAuth` did not make.
+ * the package that takes more than 8 s spends the rest of the user's large
+ * reads (rulings 75 and 79).
+ * Throws a TypeError for an Auth that `createAuth` did not make.
  */
 export async function countSsoManageWrite(
   auth: Auth,
@@ -1263,8 +1263,8 @@ export async function countSsoManageWrite(
   if (!allowed) return false;
   // The compat package reads the body next: it counts on the share of the user (ruling 59).
   bindBodyClient(request, `user:${userId}`);
-  // A read of the package that stops at a deadline spends the rest of the user's large reads (ruling 75).
-  bindBodyStall(request, () => spendLargeReads(config, userId));
+  // A read of the package that takes more than 8 s spends the rest of the user's large reads (ruling 79).
+  bindSlowRead(request, () => spendLargeReads(config, userId));
   return true;
 }
 

@@ -404,37 +404,38 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
   });
 });
 
-// Ruling 75 of the 12j lane: a large read of a user that stops at a
-// deadline (408) spends the rest of that user's large reads of the window.
-// So a stalled account cannot start its next hold of the user half until
-// the window of sso-large-read:user ends. A write that arrives whole spends
-// nothing. The limiter of these apps runs on a clock that the test moves.
-describe("the stall of a large read of a user through the Fastify binding (ruling 75 of the 12j lane)", () => {
-  /** A memory limiter on the time of the process plus an offset that the test moves. */
-  function movedLimiter() {
-    let offset = 0;
-    const limiter = createMemoryLimiter({ now: () => new Date(Date.now() + offset) });
-    const advance = (ms: number) => {
-      offset += ms;
-    };
-    return { limiter, advance };
-  }
-
-  /** A small SSO connection write of `cookie` from `ip`, as a browser fetch sends it: "<status> <body>". */
-  const smallWrite = async (port: number, cookie: string, ip: string) => {
-    const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        origin: "http://localhost",
-        cookie,
-        "cf-connecting-ip": ip,
-      },
-      body: `{}${" ".repeat(4094)}`,
-    });
-    return `${res.status} ${await res.text()}`;
+/** A memory limiter on the time of the process plus an offset that the test moves. */
+function movedLimiter() {
+  let offset = 0;
+  const limiter = createMemoryLimiter({ now: () => new Date(Date.now() + offset) });
+  const advance = (ms: number) => {
+    offset += ms;
   };
+  return { limiter, advance };
+}
 
+/** A small SSO connection write of `cookie` from `ip`, as a browser fetch sends it: "<status> <body>". */
+const smallWrite = async (port: number, cookie: string, ip: string) => {
+  const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost",
+      cookie,
+      "cf-connecting-ip": ip,
+    },
+    body: `{}${" ".repeat(4094)}`,
+  });
+  return `${res.status} ${await res.text()}`;
+};
+
+// Ruling 75 of the 12j lane: a 408 of a user's large read spends the rest
+// of the user's large reads of the window.
+// So a stalled account cannot start its next hold of the user half until
+// the window of sso-large-read:user ends. A write that ends within 8 s
+// spends nothing (ruling 79). The limiter of these apps runs on a clock
+// that the test moves.
+describe("the stall of a large read of a user through the Fastify binding (ruling 75 of the 12j lane)", () => {
   it("refuses the next large read of a user whose read ended by 408, before any byte, and reads it in the next window", {
     timeout: 60_000,
   }, async () => {
@@ -483,6 +484,144 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
       // The seventh is past the limit of the hour.
       expect(await smallWrite(port, cookie, "203.0.113.51")).toBe('429 {"error":"rate_limited"}');
     } finally {
+      await close();
+    }
+  });
+});
+
+// Ruling 79 of the 12j lane, with core's LARGE_READ_SLOW_MS of 8 s. A large
+// read of a user that takes more than 8 s spends the rest of that user's
+// large reads of the window. It spends at each end: whole, 408, or a closed
+// socket. Before it, a careful client that sent its last bytes just before
+// 32 s, or closed its socket, held the user half and spent nothing. A
+// write that ends within 8 s spends nothing.
+describe("a slow large read of a user through the Fastify binding (ruling 79 of the 12j lane)", () => {
+  /** Core's LARGE_READ_SLOW_MS: a large read of a user that takes longer spends. */
+  const SLOW_MS = 8_000;
+  /** The bytes of each paused write. */
+  const BYTES = 1_048_576;
+  const HEAD_429 = 'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}';
+  const HEAD_503 = 'HTTP/1.1 503 Service Unavailable {"error":"body_busy"}';
+
+  /**
+   * A raw SSO connection write of `BYTES` spaces: 960 KiB at once, 32 KiB
+   * at `endMs / 2`, and the last 32 KiB at `endMs`. With `close`, the socket
+   * closes at `endMs` in place of the last bytes. Each gap is under the idle
+   * limit, so no 408 comes.
+   */
+  async function pausedPost(
+    port: number,
+    cookie: string,
+    ip: string,
+    endMs: number,
+    close: boolean,
+  ) {
+    const p = rawPost(port, SSO_WRITE, {
+      headers: { cookie, origin: "http://localhost", "cf-connecting-ip": ip },
+      type: "application/json",
+      declared: BYTES,
+      send: BYTES - 65_536,
+    });
+    await p.sent;
+    await sleep(endMs / 2);
+    p.socket.write(Buffer.alloc(32_768, 0x20));
+    await sleep(endMs / 2);
+    if (close) p.socket.destroy();
+    else p.socket.write(Buffer.alloc(32_768, 0x20));
+    return p;
+  }
+
+  /** An SSO connection write of `cookie` that sends only its head: the first line and JSON of its answer. */
+  async function headOnly(port: number, cookie: string, ip: string) {
+    const p = ssoPost(port, cookie, ip, 0);
+    try {
+      await p.sent;
+      return await answered(p, 5000);
+    } finally {
+      p.socket.destroy();
+    }
+  }
+
+  it("spends the rest of the window at a write that reads whole after 9 s: the next write answers 429 before any byte, and the next window reads", {
+    timeout: 60_000,
+  }, async () => {
+    const { limiter, advance } = movedLimiter();
+    const { port, close } = await startApp(limiter);
+    let slow: ReturnType<typeof rawPost> | undefined;
+    try {
+      const cookie = await signedIn(port, "slow@probe.example", "203.0.113.52");
+      slow = await pausedPost(port, cookie, "203.0.113.52", 9_000, false);
+      // The read ends whole, with no 408: the schema refuses the body.
+      expect(await answered(slow, 5_000)).toBe('HTTP/1.1 400 Bad Request {"error":"invalid_body"}');
+      console.log(`body-stall: the slow whole write of a user answered at ${slow.at()} ms`);
+      expect(slow.at()).toBeGreaterThanOrEqual(9_000);
+      // The read took more than 8 s and spent the five reads that were left. The next write
+      // sends only its head, and the answer comes with no byte read.
+      expect(await headOnly(port, cookie, "203.0.113.52")).toBe(HEAD_429);
+      // In the next window of the limiter, the account reads a write again.
+      advance(3600 * 1000);
+      expect(await smallWrite(port, cookie, "203.0.113.52")).toBe('400 {"error":"invalid_body"}');
+    } finally {
+      slow?.socket.destroy();
+      await close();
+    }
+  });
+
+  it("spends nothing at a write that reads whole after 2 s: the account keeps its other 5 starts", {
+    timeout: 60_000,
+  }, async () => {
+    const { limiter } = movedLimiter();
+    const { port, close } = await startApp(limiter);
+    let quick: ReturnType<typeof rawPost> | undefined;
+    try {
+      const cookie = await signedIn(port, "quick@probe.example", "203.0.113.53");
+      quick = await pausedPost(port, cookie, "203.0.113.53", 2_000, false);
+      expect(await answered(quick, 5_000)).toBe(
+        'HTTP/1.1 400 Bad Request {"error":"invalid_body"}',
+      );
+      console.log(`body-stall: the quick whole write of a user answered at ${quick.at()} ms`);
+      expect(quick.at()).toBeGreaterThanOrEqual(2_000);
+      expect(quick.at()).toBeLessThan(SLOW_MS);
+      // The other 5 starts of the hour read, and the seventh write is past the limit.
+      const answers: string[] = [];
+      for (let i = 1; i < LARGE_READS_PER_HOUR; i++)
+        answers.push(await smallWrite(port, cookie, "203.0.113.53"));
+      expect(answers).toEqual(Array(LARGE_READS_PER_HOUR - 1).fill('400 {"error":"invalid_body"}'));
+      expect(await smallWrite(port, cookie, "203.0.113.53")).toBe('429 {"error":"rate_limited"}');
+    } finally {
+      quick?.socket.destroy();
+      await close();
+    }
+  });
+
+  it("spends the rest of the window at a write whose socket closes at 9 s, with no 408", {
+    timeout: 60_000,
+  }, async () => {
+    const { limiter, advance } = movedLimiter();
+    const { port, close } = await startApp(limiter);
+    let closed: ReturnType<typeof rawPost> | undefined;
+    try {
+      const cookie = await signedIn(port, "gone@probe.example", "203.0.113.54");
+      closed = await pausedPost(port, cookie, "203.0.113.54", 9_000, true);
+      const closedAt = performance.now();
+      // Until the server sees the close, the account runs its one large read, and a write gets
+      // 503 before any count. The idle limit would end that read at 14.5 s, 10 s after its last
+      // bytes. The tries stop long before that time, so only the close can end the read.
+      let line = await headOnly(port, cookie, "203.0.113.54");
+      for (let i = 0; i < 20 && line === HEAD_503; i++) {
+        await sleep(100);
+        line = await headOnly(port, cookie, "203.0.113.54");
+      }
+      console.log(
+        `body-stall: the write after a closed slow write answered ${Math.round(performance.now() - closedAt)} ms after the close`,
+      );
+      expect(performance.now() - closedAt).toBeLessThan(4_000);
+      expect(line).toBe(HEAD_429);
+      // In the next window of the limiter, the account reads a write again.
+      advance(3600 * 1000);
+      expect(await smallWrite(port, cookie, "203.0.113.54")).toBe('400 {"error":"invalid_body"}');
+    } finally {
+      closed?.socket.destroy();
       await close();
     }
   });

@@ -35,7 +35,7 @@ import {
   BodyBusy,
   BodyTooLarge,
   bindBodyClient,
-  bindBodyStall,
+  bindSlowRead,
   bodyCapOfRequest,
   largeReadCanStart,
   parseBodyForm,
@@ -85,8 +85,9 @@ export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promis
  * hour, counted at the start of each read, after `sso-manage:user` (ruling
  * 69 of the 12j lane). A read past the limit answers 429 before any byte.
  * A read that cannot start answers 503 before this count, and spends none
- * (ruling 72 Minor 1). A read that stops at a deadline (408) spends the
- * rest of the window (`spendLargeReads`, ruling 75).
+ * (ruling 72 Minor 1). A read that takes more than `LARGE_READ_SLOW_MS`,
+ * 8 s, spends the rest of the window, by any end (`spendLargeReads`,
+ * rulings 75 and 79).
  *
  * The derivation, done 2026-10-30. One read holds the user half of the body
  * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`), and a user runs one
@@ -103,11 +104,12 @@ export function ssoLargeReadAllowed(config: ResolvedConfig, userId: string): Pro
 
 /**
  * Spends the rest of the large reads of the user in the window of
- * `sso-large-read:user`, at a large read of the user that stopped at a
- * deadline, 408 `body_timeout` (ruling 75 of the 12j lane). So the user
- * starts no other large read until that window ends: its next SSO
- * connection write answers 429 before any byte. A write that arrives whole
- * spends nothing, fast or slow.
+ * `sso-large-read:user` (rulings 75 and 79 of the 12j lane). A large read
+ * of the user that took more than `LARGE_READ_SLOW_MS` calls it. It spends
+ * at each end of such a read: whole, 408 `body_timeout`, a closed socket,
+ * or past its cap. So the user starts no other large read until that window
+ * ends: its next SSO connection write answers 429 before any byte. A write
+ * that ends within 8 s spends nothing.
  *
  * Ruling 75 named a mark of its own, `sso-large-read-stalled:user`, checked
  * before the counts. The limiter port has only `allow`, which counts, so a
@@ -154,8 +156,9 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * the read on `sso-large-read:user` before any byte (ruling 69). Before
  * any count, a large read that cannot start (`largeReadCanStart`) answers
  * 503 `body_busy`, so a client that sends again after `Retry-After` spends
- * no count of the hour (ruling 72 Minor 1). A large read that stops at a
- * deadline spends the rest of the user's large reads (ruling 75).
+ * no count of the hour (ruling 72 Minor 1). A large read that takes more
+ * than 8 s spends the rest of the user's large reads, also at a 408
+ * (rulings 75 and 79).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -192,8 +195,8 @@ export async function managedCall<T, V>(
       (shim === null && !(await ssoLargeReadAllowed(config, resolved.user.id)))
     )
       return send(respond(fail("rate_limited")), renewed);
-    // A read that stops at a deadline spends the rest of the user's large reads (ruling 75).
-    bindBodyStall(ctx.request, () => spendLargeReads(config, resolved.user.id));
+    // A read that takes more than 8 s spends the rest of the user's large reads (rulings 75, 79).
+    bindSlowRead(ctx.request, () => spendLargeReads(config, resolved.user.id));
   }
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);

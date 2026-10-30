@@ -156,8 +156,8 @@ export async function limit(
  * limiter refuses, at most `window.max + 1` calls. So each `limit` call of
  * that key answers false until the window ends. When the window had ended,
  * the first call opens a new one, and the spend fills it. A spend refuses
- * no caller, so it emits no `limit.hit`. The stall of a large read of a
- * user spends its large reads (ruling 75 of the 12j lane).
+ * no caller, so it emits no `limit.hit`. A large read of a user that takes
+ * more than 8 s spends its large reads (rulings 75 and 79 of the 12j lane).
  */
 export async function spendLimit(
   config: ResolvedConfig,

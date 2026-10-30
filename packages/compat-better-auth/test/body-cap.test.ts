@@ -586,3 +586,64 @@ describe("the stall of a large read through the shim (ruling 75 of the 12j lane)
       expect((await auth.handler(sizedPost(path, 4096, bea.cookie))).status).not.toBe(429);
   });
 });
+
+describe("a slow large read through the shim (ruling 79 of the 12j lane)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("spends the user's large reads at a shim read that ends whole after 9 s: each SSO write of the user answers 429, and others read", {
+    timeout: 60_000,
+  }, async () => {
+    const { auth, person } = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+    const ada = await person("ada@example.com");
+    const bea = await person("bea@example.com");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // 1 MB of a register body, a pause of 9 s, then the rest: under the idle limit, so no 408.
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let reached = () => {};
+    const atGate = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (sent >= 1_048_576) {
+          reached();
+          await gate;
+        }
+        if (sent >= 2_097_152) return c.close();
+        c.enqueue(new Uint8Array(65_536).fill(0x20));
+        sent += 65_536;
+      },
+    });
+    const pending = auth.handler(
+      new Request(`${BASE}/api/auth/sso/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, cookie: ada.cookie },
+        body: stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    try {
+      await atGate;
+      await vi.advanceTimersByTimeAsync(9_000);
+    } finally {
+      open();
+    }
+    // The shim read the whole body, which is no JSON object.
+    expect((await pending).status).toBe(400);
+    vi.useRealTimers();
+    // The read took more than 8 s: Ada's 5 other reads of the hour are spent, before each read.
+    const after: [string, number][] = [];
+    for (const path of SSO_WRITES)
+      after.push([path, (await auth.handler(sizedPost(path, 4096, ada.cookie))).status]);
+    expect(after).toEqual(SSO_WRITES.map((path) => [path, 429]));
+    // The spend is Ada's own: each write of Bea reads.
+    for (const path of SSO_WRITES)
+      expect((await auth.handler(sizedPost(path, 4096, bea.cookie))).status).not.toBe(429);
+  });
+});
