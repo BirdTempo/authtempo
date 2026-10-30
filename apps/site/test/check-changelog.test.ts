@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type ChangelogInput, checkChangelog } from "../scripts/check-changelog.ts";
 import { SITE } from "../scripts/lib/paths.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
-import { changelogAnchor, readChangelogFiles } from "../src/data/changelogs.ts";
+import { changelogAnchor, changelogMarkdown, readChangelogFiles } from "../src/data/changelogs.ts";
 import { renderMarkdown } from "../src/data/markdown.ts";
 import { CHANGELOG_EMPTY } from "../src/data/unpublished.ts";
 
@@ -85,5 +85,22 @@ describe("the anchor of a version", () => {
       expect(changelogLink(minor)).toBe(
         `https://authtempo.com/docs/changelog/#${changelogAnchor(`${minor}.0`)}`,
       );
+  });
+});
+
+describe("the text of the Releases part", () => {
+  it("is the empty state with no changelog", () => {
+    expect(changelogMarkdown([], () => URL, CHANGELOG_EMPTY)).toBe(CHANGELOG_EMPTY);
+  });
+
+  it("renders core one level lower with its anchor, and links each other package", async () => {
+    const text = changelogMarkdown(readChangelogFiles(FIXTURE), () => URL, CHANGELOG_EMPTY);
+    expect(text).not.toContain("# @authtempo/core");
+    expect(text).toContain("### 0.1.0");
+    expect(text).toContain(
+      `- [\`@authtempo/client\`](${URL}/blob/main/packages/client/CHANGELOG.md)`,
+    );
+    const html = await renderMarkdown(text);
+    expect(checkChangelog({ ...RELEASED, page: `${html}${FEED}` }).failures).toEqual([]);
   });
 });
