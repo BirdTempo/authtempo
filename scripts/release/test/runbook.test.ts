@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { checkResources, DEMO_PATH } from "../../../apps/site/scripts/check-resources.ts";
 import { RESOURCES_EMPTY } from "../../../apps/site/src/data/unpublished.ts";
 import { checkTag } from "../src/check-tag.ts";
+import { COPY_DRY_RUN, shellLine } from "../src/lib/release-copy.ts";
 import {
   CI_FILE,
   ENVIRONMENT,
@@ -432,13 +433,20 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(sh).toContain('cd "$(mktemp -d)"\nnpm init -y\n');
     expect(sh).not.toMatch(/\bmkdir\b/);
     const step = stepOf(TEXT, "At each release", 15);
+    // The dry run of the tarballs reads the bytes that npm receives, at the
+    // version of the tag (ruling 67 of plan 12j, Major 1).
+    const name = /the step `([^`]+)` of the job `check`/.exec(step)?.[1] ?? "";
     expect(step).toContain(
-      `the \`release-dry-run\` line of the job \`check\` of \`${WORKFLOW_FILE}\``,
+      `the \`release-dry-run\` line of the step \`${name}\` of the job \`check\` of \`${WORKFLOW_FILE}\``,
     );
-    // The dry run writes one minor changeset, so at a tag it names the next minor.
-    const [major, minor] = FIRST_RELEASE.split(".");
+    const workflow = readFileSync(new URL(`.github/workflows/${WORKFLOW_FILE}`, ROOT), "utf8");
+    expect(workflow).toContain(
+      `      - name: ${name}\n        run: ${shellLine(COPY_DRY_RUN)} out\n`,
+    );
+    expect(step).toContain(`\`version=${FIRST_RELEASE}\` at \`${TAG_PREFIX}${FIRST_RELEASE}\``);
+    // The dry run of release:check writes one minor changeset, so at a tag it names the next minor.
     expect(step).toContain(
-      `\`version=${major}.${Number(minor) + 1}.0\` at \`${TAG_PREFIX}${FIRST_RELEASE}\``,
+      "Do not copy the `release-dry-run` line of `pnpm release:check` in the same job.",
     );
   });
 

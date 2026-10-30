@@ -61,5 +61,12 @@ export const packCommand = (name: string, out: string): readonly string[] => [
 /** The pack check. The tarball paths follow. */
 export const COPY_CHECK_PACK = ["node", "scripts/release/src/check-pack.ts"] as const;
 
+/**
+ * The dry run of the tarballs that npm receives (ruling 67 of plan 12j,
+ * Major 1): the smoke and both publish dry runs, with no versioning. The
+ * folder of the tarballs follows.
+ */
+export const COPY_DRY_RUN = ["node", "scripts/release/src/dry-run.ts", "--tarballs"] as const;
+
 /** One command as a run line of a workflow. */
 export const shellLine = (command: readonly string[]): string => command.join(" ");

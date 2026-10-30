@@ -12,6 +12,18 @@ const real = (name: string) => readFileSync(`${root}.github/workflows/${name}`, 
 const CI = real("ci.yml");
 const RELEASE = real("release.yml");
 
+/**
+ * The line number of the one line `line` of `text`, so a probe that adds a
+ * line under it names a line number that follows each edit of the file.
+ */
+function lineOf(text: string, line: string): number {
+  const lines = text.split("\n");
+  const at = lines.indexOf(line);
+  if (at === -1 || lines.indexOf(line, at + 1) !== -1)
+    throw new Error(`the text holds the line ${line} not exactly once`);
+  return at + 1;
+}
+
 /** Replaces the one place of `from` in `text`. A change that does not apply throws. */
 function swap(text: string, from: string, to: string): string {
   const at = text.indexOf(from);
@@ -46,7 +58,9 @@ const HISTORY = "\n        with:\n          fetch-depth: 0";
 /** The failure of an upload that is not the tarballs of the release copy. */
 const UPLOAD =
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
-  "release.yml: jobs.check step 14: the upload is not the artifact tarballs of ${{ runner.temp }}/release-copy/out/ with if-no-files-found: error";
+  "release.yml: jobs.check step 15: the upload is not the artifact tarballs of ${{ runner.temp }}/release-copy/out/ with if-no-files-found: error";
+/** The line of a token that a probe adds two lines under the environment of jobs.publish. */
+const ENV_TOKEN_LINE = lineOf(RELEASE, "    environment: release") + 2;
 const PUBLISH_PERMISSIONS = "    permissions:\n      id-token: write\n      contents: read\n";
 
 describe("check-workflows", () => {
@@ -291,7 +305,7 @@ describe("check-workflows", () => {
         ),
       ),
     ).toEqual([
-      "release.yml: line 110: a token or a secret; trusted publishing uses no token",
+      `release.yml: line ${ENV_TOKEN_LINE}: a token or a secret; trusted publishing uses no token`,
       "release.yml: jobs.publish: the key env is not in the rule of the job",
     ]);
   });
@@ -300,7 +314,7 @@ describe("check-workflows", () => {
     const tag =
       '      - name: Check the tag\n        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"\n';
     expect(releaseFailures(swap(RELEASE, tag, ""))).toContain(
-      "release.yml: jobs.check: 13 steps, not the 14 steps of the rule",
+      "release.yml: jobs.check: 14 steps, not the 15 steps of the rule",
     );
     expect(ciFailures(swap(CI, "\n  check:\n", "\n  test:\n"))).toContain(
       "ci.yml: the jobs are not check",
@@ -528,7 +542,7 @@ describe("check-workflows", () => {
           ),
         ),
       [
-        "release.yml: line 110: a token or a secret; trusted publishing uses no token",
+        `release.yml: line ${ENV_TOKEN_LINE}: a token or a secret; trusted publishing uses no token`,
         "release.yml: jobs.publish: the key env is not in the rule of the job",
       ],
     ],
@@ -597,7 +611,7 @@ describe("check-workflows", () => {
           swap(RELEASE, DOWNLOAD, `${DOWNLOAD}          github-token: \${{ github.token }}\n`),
         ),
       [
-        "release.yml: line 131: a token or a secret; trusted publishing uses no token",
+        `release.yml: line ${lineOf(RELEASE, "          path: out") + 1}: a token or a secret; trusted publishing uses no token`,
         "release.yml: jobs.publish step 3: actions/download-artifact has the with key github-token; the rule names no such key",
       ],
     ],

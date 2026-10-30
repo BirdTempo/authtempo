@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -27,6 +28,7 @@ import {
   npmPublishArgs,
   PNPM_PUBLISH_ARGS,
   PNPM_SCOPE_REGISTRY,
+  parseArgs,
   type Run,
   type RunResult,
   readEnv,
@@ -35,7 +37,8 @@ import {
   type ToolPaths,
 } from "../src/dry-run.ts";
 import { VERSION_CONSTANTS } from "../src/lib/pack-rules.ts";
-import { buildCommand } from "../src/lib/release-copy.ts";
+import { buildCommand, COPY_DRY_RUN, shellLine } from "../src/lib/release-copy.ts";
+import { releasedNames } from "../src/lib/released.ts";
 import { reportLines } from "../src/lib/report.ts";
 import {
   listedNoteFailure,
@@ -118,6 +121,8 @@ function kindOf(cmd: string, args: readonly string[], cwd: string): string {
 function fake(
   change: Record<string, (call: Call) => RunResult | undefined> = {},
   lists: UnpublishedLists = { files: [], code: [] },
+  /** The release copy whose config the smoke reads. The default is repo/ beside the smoke app. */
+  smokeRepo?: string,
 ) {
   const calls: Call[] = [];
   const changesets: string[] = [];
@@ -215,7 +220,7 @@ function fake(
       case "smoke apps":
       case "smoke kits": {
         // The real smoke.mjs reads the released list from the config of the copy.
-        const config = join(cwd, "../repo/.changeset/config.json");
+        const config = join(smokeRepo ?? join(cwd, "../repo"), ".changeset/config.json");
         const phase = args[2];
         if (
           args.length !== 3 ||
@@ -456,13 +461,16 @@ describe("dry run", () => {
         }
         return `${c.cmd} ${c.args.join(" ")}`;
       });
-    expect(lines).toEqual(releaseCopyLines());
+    // The job check then runs this dry run itself on its tarballs (ruling 67 of plan 12j, Major 1).
+    const tarballRun = `${shellLine(COPY_DRY_RUN)} out`;
+    expect(lines).toEqual(releaseCopyLines().filter((l) => l !== tarballRun));
     expect(releaseCopyLines()).toEqual([
       "pnpm install --frozen-lockfile --offline",
       "node scripts/release/src/prepare.ts",
       `pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
       'pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"',
       "node scripts/release/src/check-pack.ts out/*.tgz",
+      "node scripts/release/src/dry-run.ts --tarballs out",
     ]);
   });
 
@@ -1300,5 +1308,159 @@ describe("the notes of a source at 0.0.0 in the dry run (rulings 47 and 50 of pl
       `check-pack: ${listedNoteFailure(CLIENT, [UNPUBLISHED_MARK], "0.1.0")}`,
     ]);
     expect(report.notes).toEqual([]);
+  });
+});
+
+/**
+ * The tarballs of a prepared release copy at 0.1.0, as the job check of
+ * release.yml packs them into out/: the version module of the build, then a
+ * real pnpm pack of each released package.
+ */
+function packedCopy(): { repo: string; out: string } {
+  const repo = preparedCopy();
+  for (const p of readWorkspace(repo)) {
+    const constant = VERSION_CONSTANTS[p.name];
+    if (constant === undefined) continue;
+    writeFileSync(
+      join(repo, p.dir, constant.file),
+      `export const ${constant.name} = ${JSON.stringify(p.manifest.version)};\n`,
+    );
+  }
+  const out = join(repo, "out");
+  mkdirSync(out);
+  for (const name of releasedNames(repo))
+    execFileSync(
+      "pnpm",
+      ["--filter", name, "pack", "--ignore-scripts", "--pack-destination", out],
+      { cwd: repo, env: { ...process.env, NO_COLOR: "1" }, stdio: "ignore" },
+    );
+  return { repo, out };
+}
+
+describe("the dry run of a tag and of the tarballs of the job check (ruling 67 of plan 12j, Major 1)", () => {
+  const kinds = (calls: readonly { kind: string }[]) => calls.map((c) => c.kind);
+
+  it("packs the version of HEAD with --at, with no changeset and no rewrite", async () => {
+    // A tag of the merged version branch: the group is at 0.1.0, as the tag says.
+    const { root, tmp } = setup((d) => changesetVersion(d, "Add the first release."));
+    const f = fake();
+    const report = await dryRun({ root, run: f.run, tmp, at: "0.1.0" });
+    expect(failuresOf(report)).toEqual([]);
+    expect(kinds(f.calls)).toEqual([
+      ...READS,
+      "git status",
+      "git archive",
+      "extract",
+      "install",
+      "node prepare.ts",
+      "turbo run build",
+      "pnpm pack",
+      "pnpm pack",
+      "node check-pack.ts",
+      "npm publish",
+      "npm publish",
+      "pnpm publish",
+      "smoke install apps",
+      "smoke apps",
+      "smoke install kits",
+      "smoke kits",
+    ]);
+    expect(f.changesets).toEqual([]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=11 smoke=2 failures=0",
+    );
+  });
+
+  it("fails --at with another version before the install", async () => {
+    const { root, tmp } = setup((d) => changesetVersion(d, "Add the first release."));
+    const f = fake();
+    const report = await dryRun({ root, run: f.run, tmp, at: "0.2.0" });
+    expect(failuresOf(report)).toEqual([
+      "the released packages hold 0.1.0, not 0.2.0, the version of --at",
+    ]);
+    expect(report.exit).toBe(1);
+    expect(kinds(f.calls)).not.toContain("install");
+  });
+
+  it("runs check-pack, both publish dry runs, and the smoke on the tarballs of a folder", async () => {
+    const { repo, out } = packedCopy();
+    const tmp = mkdtempSync(join(tmpdir(), "authtempo-dry-run-test-"));
+    made.push(tmp);
+    const f = fake({}, { files: [], code: [] }, repo);
+    const report = await dryRun({ root: repo, run: f.run, tmp, tarballs: out });
+    expect(failuresOf(report)).toEqual([]);
+    expect(report.exit).toBe(0);
+    // No copy, no versioning, no build, and no pack: the folder holds the bytes that npm receives.
+    expect(kinds(f.calls)).toEqual([
+      ...READS,
+      "node check-pack.ts",
+      "npm publish",
+      "npm publish",
+      "pnpm publish",
+      "smoke install apps",
+      "smoke apps",
+      "smoke install kits",
+      "smoke kits",
+    ]);
+    const files = readdirSync(out).sort();
+    expect(f.calls.find((c) => c.kind === "node check-pack.ts")?.args.slice(1)).toEqual(
+      files.map((t) => join(out, t)),
+    );
+    expect(f.calls.filter((c) => c.kind === "npm publish").map((c) => [c.cwd, c.args[1]])).toEqual(
+      files.map((t) => [out, join(out, t)]),
+    );
+    expect(f.calls.find((c) => c.kind === "pnpm publish")?.cwd).toBe(repo);
+    // Each SHA-256 line is the hash of a file of the folder.
+    const sums = files.map((t) =>
+      createHash("sha256")
+        .update(readFileSync(join(out, t)))
+        .digest("hex"),
+    );
+    expect(
+      report.lines.filter((l) => l.startsWith("@authtempo/")).map((l) => l.split(" ")[1]),
+    ).toEqual(sums);
+    // Each smoke app installs these tarballs.
+    for (const phase of ["apps", "kits"])
+      expect(Object.values(f.smokeManifests[phase]?.dependencies ?? {})).toEqual(
+        files.map((t) => `file:${join(out, t)}`),
+      );
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: PASS packages=2 of 2 version=0.1.0 tarballs=2 files=11 smoke=2 failures=0",
+    );
+  });
+
+  it("fails a folder with no tarball, and a checkout in place of a release copy", async () => {
+    const { repo } = packedCopy();
+    const tmp = mkdtempSync(join(tmpdir(), "authtempo-dry-run-test-"));
+    made.push(tmp);
+    const empty = join(repo, "empty");
+    mkdirSync(empty);
+    const f = fake({}, { files: [], code: [] }, repo);
+    const none = await dryRun({ root: repo, run: f.run, tmp, tarballs: empty });
+    expect(failuresOf(none)).toEqual([`the folder ${empty} holds no .tgz file`]);
+    expect(none.exit).toBe(1);
+    // pnpm publish -r reads the manifests of prepare, so the checkout is refused.
+    const { root } = setup();
+    const g = fake();
+    const refused = await dryRun({ root, run: g.run, tmp, tarballs: join(root, "out") });
+    expect(failuresOf(refused)).toEqual([
+      `--tarballs: prepare runs only in a release copy: ${root} has .git or no .release-copy file`,
+    ]);
+    expect(kinds(g.calls)).toEqual(READS);
+  });
+
+  it("reads --keep, --at, and --tarballs, and refuses another argument", () => {
+    expect(parseArgs([])).toEqual({ keep: false });
+    expect(parseArgs(["--keep", "--at", "0.1.0"])).toEqual({ keep: true, at: "0.1.0" });
+    expect(parseArgs(["--tarballs", "out"])).toEqual({ keep: false, tarballs: "out" });
+    expect(parseArgs(["--at", "v0.1.0"])).toBe("--at v0.1.0 is not <major>.<minor>.<patch>");
+    expect(parseArgs(["--at"])).toBe("--at needs a value");
+    expect(parseArgs(["--tarballs", "--keep"])).toBe("--tarballs needs a value");
+    expect(parseArgs(["--at", "0.1.0", "--tarballs", "out"])).toBe(
+      "give --at or --tarballs, not both",
+    );
+    expect(parseArgs(["--base", "main"])).toBe(
+      "unknown argument --base; give --keep, --at <version>, or --tarballs <folder>",
+    );
   });
 });

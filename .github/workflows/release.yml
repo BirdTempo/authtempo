@@ -86,6 +86,13 @@ jobs:
       # tarball with a stray file or a missing entry publishes.
       - run: node scripts/release/src/check-pack.ts out/*.tgz
         working-directory: ${{ runner.temp }}/release-copy
+      # The smoke, npm publish --dry-run, and pnpm publish -r --dry-run on the
+      # tarballs that npm receives, with no versioning. The dry run of
+      # release:check packs a copy at the next minor. Without this step, no
+      # smoke and no publish dry run reads these bytes.
+      - name: Dry run the tarballs
+        run: node scripts/release/src/dry-run.ts --tarballs out
+        working-directory: ${{ runner.temp }}/release-copy
       # The SHA-256 list. The job publish compares each tarball with it, so a
       # tarball that changes between the two jobs never publishes.
       - name: Write the SHA-256 list

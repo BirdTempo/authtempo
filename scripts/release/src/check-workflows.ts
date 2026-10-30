@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   COPY_BUILD,
   COPY_CHECK_PACK,
+  COPY_DRY_RUN,
   COPY_INSTALL,
   COPY_PREPARE,
   packCommand,
@@ -285,6 +286,8 @@ const JOBS: Record<string, Record<string, Job>> = {
           copy: true,
         },
         { run: `${shellLine(COPY_CHECK_PACK)} out/*.tgz`, copy: true },
+        // The smoke and both publish dry runs read these tarballs (ruling 67 of plan 12j, Major 1).
+        { name: "Dry run the tarballs", run: `${shellLine(COPY_DRY_RUN)} out`, copy: true },
         {
           name: "Write the SHA-256 list",
           run: "cd out && sha256sum -- *.tgz > SHA256SUMS",

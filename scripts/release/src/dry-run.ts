@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -26,6 +27,7 @@ import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
 import { UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
+import { refusal } from "./prepare.ts";
 
 export interface RunResult {
   status: number;
@@ -131,6 +133,47 @@ export interface DryRunOptions {
   log?: (line: string) => void;
   /** The env that childEnv reads. The default is process.env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * The version of a tag, such as 0.1.0 (ruling 67 of plan 12j, Major 1).
+   * The copy packs HEAD at its own version: no changeset, no changeset
+   * version, and no rewrite. The run fails when the group version differs.
+   * Without it, the dry run at a tag packs the next minor.
+   */
+  at?: string;
+  /**
+   * A folder of tarballs that the job check of release.yml packed (ruling 67
+   * of plan 12j, Major 1). The run makes no copy, versions nothing, and packs
+   * nothing. It runs check-pack, both publish dry runs, and the smoke on
+   * these tarballs, in the release copy at `root`.
+   */
+  tarballs?: string;
+}
+
+/** The form of a version of --at. */
+const VERSION_FORM = /^\d+\.\d+\.\d+$/;
+
+/** The options of the command line, or the reason that it is wrong. */
+export function parseArgs(
+  argv: readonly string[],
+): { keep: boolean; at?: string; tarballs?: string } | string {
+  const out: { keep: boolean; at?: string; tarballs?: string } = { keep: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--keep") out.keep = true;
+    else if (a === "--at" || a === "--tarballs") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("--")) return `${a} needs a value`;
+      if (a === "--at") {
+        if (!VERSION_FORM.test(value)) return `--at ${value} is not <major>.<minor>.<patch>`;
+        out.at = value;
+      } else out.tarballs = value;
+      i++;
+    } else return `unknown argument ${a}; give --keep, --at <version>, or --tarballs <folder>`;
+  }
+  // The tarballs of a folder already hold their version, so --at has nothing to set there.
+  if (out.at !== undefined && out.tarballs !== undefined)
+    return "give --at or --tarballs, not both";
+  return out;
 }
 
 export interface DryRunReport extends Report {
@@ -381,6 +424,17 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       return done(1);
     }
     env = childEnv(parent, files, read.paths);
+    if (options.tarballs !== undefined) {
+      // pnpm publish -r reads the manifests that prepare wrote, so the
+      // folder of the tarballs is a release copy, never the checkout.
+      const refused = refusal(options.root);
+      if (refused !== null) {
+        failures.push(`--tarballs: ${refused}`);
+        return done(1);
+      }
+      dir = temp;
+      return done(tarballSteps(temp, options.tarballs));
+    }
     // git archive HEAD holds no change of the working tree, so a dirty checkout
     // would pack another tree than the one that the person sees.
     log("dry-run: git status --porcelain");
@@ -404,6 +458,42 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
   } finally {
     // A run that stopped before the copy keeps no folder, also with --keep.
     if (options.keep !== true || dir === null) rmSync(temp, { recursive: true, force: true });
+  }
+
+  /**
+   * The steps of --tarballs: each .tgz file of `folder` and the release copy
+   * at the root, then the checks of checkSteps. A smoke app for each phase
+   * goes in smoke-<phase>/ of the temp folder.
+   */
+  function tarballSteps(temp: string, folder: string): 0 | 1 {
+    const repo = options.root;
+    const out = resolve(repo, folder);
+    const names = releasedNames(repo).sort();
+    counts.released = names.length;
+    if (names.length === 0) {
+      failures.push("read 0 packages");
+      return 1;
+    }
+    if (!existsSync(out)) {
+      failures.push(`the folder ${out} does not exist`);
+      return 1;
+    }
+    // check-pack fails a tarball of another name, a second tarball of a name, and a missing name.
+    const tarballs: { name: string; path: string }[] = [];
+    for (const file of readdirSync(out)
+      .filter((f) => f.endsWith(".tgz"))
+      .sort()) {
+      const path = join(out, file);
+      try {
+        tarballs.push({ name: readTarball(path).manifest.name, path });
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    counts.tarballs = tarballs.length;
+    if (tarballs.length === 0) failures.push(`the folder ${out} holds no .tgz file`);
+    if (failures.length > 0) return 1;
+    return checkSteps(temp, repo, out, tarballs);
   }
 
   /**
@@ -455,16 +545,25 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       ),
     ];
     const source = sources.length === 1 ? sources[0] : undefined;
+    // At a tag, the copy packs the version of HEAD itself (ruling 67 of plan 12j, Major 1).
+    if (options.at !== undefined && source !== options.at) {
+      failures.push(
+        `the released packages hold ${sources.join(", ")}, not ${options.at}, the version of --at`,
+      );
+      return 1;
+    }
 
     // The commands of src/lib/release-copy.ts, which the job check of release.yml also runs.
     const copyStep = (label: string, command: readonly string[]) =>
       step(label, command[0] ?? "", command.slice(1), repo);
     if (!copyStep("pnpm install", COPY_INSTALL)) return 1;
-    writeFileSync(
-      join(repo, ".changeset/dry-run.md"),
-      `---\n${names.map((n) => `"${n}": minor`).join("\n")}\n---\n\n${CHANGESET_BODY}\n`,
-    );
-    if (!step("changeset version", "pnpm", ["changeset", "version"], repo)) return 1;
+    if (options.at === undefined) {
+      writeFileSync(
+        join(repo, ".changeset/dry-run.md"),
+        `---\n${names.map((n) => `"${n}": minor`).join("\n")}\n---\n\n${CHANGESET_BODY}\n`,
+      );
+      if (!step("changeset version", "pnpm", ["changeset", "version"], repo)) return 1;
+    }
     const versions = [
       ...new Set(
         readWorkspace(repo)
@@ -481,7 +580,8 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     version = versions[0] ?? null;
     // A source at 0.0.0 holds the notes, and the version branch of the first
     // release rewrites them. A source above 0.0.0 holds none, so no rewrite runs.
-    if (source === UNPUBLISHED_VERSION) {
+    // A tag at 0.0.0 has no version branch, so --at runs no rewrite, and check-pack fails it.
+    if (source === UNPUBLISHED_VERSION && options.at === undefined) {
       const rewrite = copyStep("rewrite-unpublished", COPY_REWRITE);
       if (rewrite === null) return 1;
       const summary = reportOf(rewrite.stdout)?.summary;
@@ -505,6 +605,20 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     }
     counts.tarballs = tarballs.length;
     if (failures.length > 0) return 1;
+    return checkSteps(temp, repo, out, tarballs);
+  }
+
+  /**
+   * check-pack, npm publish --dry-run of each tarball, pnpm publish -r
+   * --dry-run in the copy at `repo`, and the smoke of each phase. Both modes
+   * end here, so the tarballs of --tarballs get each check of a copy.
+   */
+  function checkSteps(
+    temp: string,
+    repo: string,
+    out: string,
+    tarballs: { name: string; path: string }[],
+  ): 0 | 1 {
     const tag = new Map<string, string>();
     for (const t of tarballs) {
       const read = readTarball(t.path);
@@ -518,6 +632,11 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       tag.set(t.name, `${read.manifest.name}@${read.manifest.version}`);
     }
     if (failures.length > 0) return 1;
+    // A copy has its version from changeset version. The tarballs of --tarballs have their own.
+    if (version === null) {
+      const held = [...new Set([...tag.values()].map((id) => id.slice(id.lastIndexOf("@") + 1)))];
+      if (held.length === 1) version = held[0] ?? null;
+    }
 
     const bad = new Set<string>();
     const settle = () => {
@@ -636,8 +755,23 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
 
 if (import.meta.main) {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
-  const keep = process.argv.includes("--keep");
-  const report = await dryRun({ root, keep, log: (line) => console.error(line) });
+  const args = parseArgs(process.argv.slice(2));
+  if (typeof args === "string") {
+    console.log(
+      "release-dry-run: FAIL packages=0 of 0 version=none tarballs=0 files=0 smoke=0 failures=1",
+    );
+    console.log(`  ${args}`);
+    process.exit(2);
+  }
+  // The folder of --tarballs is relative to the working folder, such as the release copy of the job check.
+  const { keep, at, tarballs } = args;
+  const report = await dryRun({
+    root,
+    keep,
+    ...(at === undefined ? {} : { at }),
+    ...(tarballs === undefined ? {} : { tarballs: resolve(tarballs) }),
+    log: (line) => console.error(line),
+  });
   for (const line of report.lines) console.log(line);
   console.log(dryRunLine(report));
   for (const failure of report.failures) console.log(`  ${failure}`);
