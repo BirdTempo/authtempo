@@ -248,7 +248,8 @@ export function largeReadDeadlineMs(cap: number, rate: number = LARGE_READ_MIN_R
  * `body_busy`, as a read past its half does. So 16 stalled posts of one IP
  * hold at most half of the anonymous half, and the other IPs keep the rest.
  * A user has no such share: it may hold the cap of its read in its half.
- * A request with no client IP has none either (ruling 66 Minor 1).
+ * A request with no client IP, `ip:unknown`, takes this share as one IP
+ * does (ruling 69 of the 12j lane).
  *
  * The derivation, done 2026-10-30. 4 MiB is 3 SAML forms of
  * `SAML_FORM_MAX` (1 081 519 bytes), 16 Apple callbacks, or 4 SCIM bodies
@@ -258,11 +259,10 @@ export const LARGE_READ_SHARE = 4_194_304;
 
 /**
  * The bytes that `client` may hold in a read of `cap`: the cap for a user,
- * `LARGE_READ_SHARE` for an IP, and the whole anonymous half for a request
- * with no client IP, which so has no share of its own.
+ * and `LARGE_READ_SHARE` for every other client, an IP or the one client
+ * with no IP (ruling 69 of the 12j lane).
  */
 export function largeShareOf(client: string, cap: number): number {
-  if (client === UNKNOWN_CLIENT) return LARGE_READ_ANON_BUDGET;
   return isUserClient(client) ? cap : LARGE_READ_SHARE;
 }
 
@@ -273,11 +273,12 @@ export function ipBodyClient(ip: string | null): string {
 
 /**
  * The client of a request with no client IP, or with no bind: `ip:unknown`,
- * as the limiter keys it. It takes no share of its own, and its reads count
- * in the anonymous half only (ruling 66 Minor 1 of the 12j lane). On a host
- * with no `clientIp`, every request without the header is this one client.
- * With a share, 4 stalled posts of one such caller left no room to every
- * other caller with no header (Minor 1 of rr-12j-bodycap4).
+ * as the limiter keys it. It takes the share of one IP, and its reads count
+ * in the anonymous half (ruling 69 of the 12j lane). On a host with no
+ * `clientIp`, every request without the header is this one client of 4 MiB.
+ * So one caller with no header holds at most that share, and the clients
+ * with an IP key keep the rest of the half. Ruling 66 gave it no share, and
+ * one such caller then filled the anonymous half alone.
  */
 const UNKNOWN_CLIENT = ipBodyClient(null);
 

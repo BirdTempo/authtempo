@@ -341,3 +341,58 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
     }
   });
 });
+
+/** An ACS post of 8 KB with `cf-connecting-ip: ip`, or with no such header: "302", or "<status> <body>". */
+async function acsFrom(port: number, ip: string | null): Promise<string> {
+  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+  if (ip !== null) headers["cf-connecting-ip"] = ip;
+  const res = await fetch(`http://127.0.0.1:${port}${ACS}`, {
+    method: "POST",
+    redirect: "manual",
+    headers,
+    body: `SAMLResponse=${"QUFB".repeat(2000)}&RelayState=x`,
+  });
+  return res.status === 302 ? "302" : `${res.status} ${await res.text()}`;
+}
+
+/** A raw ACS post of `DECLARED` bytes that sends `SENT` and stalls, with `headers`. */
+const stalledAcs = (port: number, headers: Record<string, string>) =>
+  rawPost(port, ACS, {
+    headers,
+    type: "application/x-www-form-urlencoded",
+    declared: DECLARED,
+    send: SENT,
+  });
+
+/** Core's LARGE_READ_SHARE in posts of `SENT` bytes: the posts that one client key holds. */
+const SHARE_POSTS = 4;
+
+describe("the client with no IP through the Fastify binding (ruling 69 of the 12j lane)", () => {
+  it("holds 8 stalled posts with no IP header to the share of one IP, and leaves the ACS open to an IP key", {
+    timeout: 60_000,
+  }, async () => {
+    const { port, close } = await startApp();
+    const posts: ReturnType<typeof rawPost>[] = [];
+    try {
+      for (let i = 0; i < 2 * SHARE_POSTS; i++) {
+        const p = stalledAcs(port, {});
+        posts.push(p);
+        await p.sent;
+      }
+      await sleep(1500);
+      const during = posts.map((p) => p.answer());
+      console.log(`body-stall: 8 stalled posts with no IP header ${JSON.stringify(during)}`);
+      // Under ruling 66 the client with no IP had no share: all 8 held, and the half was full.
+      expect(during.filter((a) => a === null)).toHaveLength(SHARE_POSTS);
+      expect(during.filter((a) => a !== null)).toEqual(
+        Array(SHARE_POSTS).fill('HTTP/1.1 503 Service Unavailable {"error":"body_busy"}'),
+      );
+      // A client with an IP key reads its form at once; a caller with no header has no room.
+      expect(await acsFrom(port, "198.51.100.9")).toBe("302");
+      expect(await acsFrom(port, null)).toBe('503 {"error":"body_busy"}');
+    } finally {
+      for (const p of posts) p.socket.destroy();
+      await close();
+    }
+  });
+});

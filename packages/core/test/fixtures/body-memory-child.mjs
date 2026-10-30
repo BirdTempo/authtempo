@@ -25,23 +25,26 @@ const SCIM = "POST /scim/v2/Users";
 const [route, shape] = process.argv.slice(2);
 
 if (route === "budget") {
-  // `shape` reads of REQUEST_BODY_MAX at once, each streamed in chunks of 64 KiB with a
-  // turn of the loop between chunks, as a slow client sends them (ruling 51 Minor 2).
-  // With "live" after it, each sample runs a GC first: the live memory, with no garbage.
-  // Each even read is a user of its own, in the user half. Each odd read has no client, as on a
-  // host with no client IP: it counts in the anonymous half (ruling 66 of the 12j lane).
+  // `shape` reads at once, each streamed in chunks of 64 KiB with a turn of the loop between
+  // chunks, as a slow client sends them (ruling 51 Minor 2). With "live" after it, each
+  // sample runs a GC first: the live memory, with no garbage. Each even read is a user of its
+  // own, of REQUEST_BODY_MAX, in the user half. Each odd read is an IP of its own, of
+  // LARGE_READ_SHARE, in the anonymous half (rulings 66 and 69 of the 12j lane). Each answer
+  // names the half of its read: "user invalid_body" or "ip BodyBusy".
   const live = process.argv[4] === "live";
-  const { REQUEST_BODY_MAX } = await import(new URL("http/body-cap.js", dist).href);
+  const { LARGE_READ_SHARE, REQUEST_BODY_MAX } = await import(
+    new URL("http/body-cap.js", dist).href
+  );
   const SSO = "POST /sso/connections/update";
-  const stream = () => {
+  const stream = (size) => {
     let sent = 0;
     return new ReadableStream({
       async pull(c) {
         await new Promise((resolve) => setImmediate(resolve));
-        if (sent >= REQUEST_BODY_MAX) return c.close();
-        const chunk = new Uint8Array(Math.min(65_536, REQUEST_BODY_MAX - sent)).fill(0x61);
+        if (sent >= size) return c.close();
+        const chunk = new Uint8Array(Math.min(65_536, size - sent)).fill(0x61);
         if (sent === 0) chunk.set(new TextEncoder().encode('{"idpMetadata":"'));
-        if (sent + chunk.length === REQUEST_BODY_MAX) chunk.set([0x22, 0x7d], chunk.length - 2);
+        if (sent + chunk.length === size) chunk.set([0x22, 0x7d], chunk.length - 2);
         sent += chunk.length;
         c.enqueue(chunk);
       },
@@ -61,20 +64,22 @@ if (route === "budget") {
   const started = performance.now();
   const answers = await Promise.all(
     Array.from({ length: Number(shape) }, async (_, i) => {
+      const user = i % 2 === 0;
       const request = new Request("https://auth.test/auth/x", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: stream(),
+        body: stream(user ? REQUEST_BODY_MAX : LARGE_READ_SHARE),
         duplex: "half",
       });
       bindBodyRoute(request, SSO);
-      if (i % 2 === 0) bindBodyClient(request, `user:${i}`);
+      bindBodyClient(request, user ? `user:${i}` : `ip:198.51.100.${i}`);
+      const half = user ? "user" : "ip";
       try {
         const result = await readJson(request, ROUTE_CONTRACT[SSO].body.schema);
         sample();
-        return result.ok ? "ok" : result.code;
+        return `${half} ${result.ok ? "ok" : result.code}`;
       } catch (e) {
-        return e instanceof Error ? e.name : String(e);
+        return `${half} ${e instanceof Error ? e.name : String(e)}`;
       }
     }),
   );

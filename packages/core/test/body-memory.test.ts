@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { bodyCapOf, LARGE_READ_BUDGET, REQUEST_BODY_MAX } from "../src/http/body-cap.js";
+import {
+  bodyCapOf,
+  LARGE_READ_ANON_BUDGET,
+  LARGE_READ_BUDGET,
+  LARGE_READ_SHARE,
+} from "../src/http/body-cap.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteKey } from "../src/http/route-list.js";
 
@@ -233,7 +238,9 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
   it("runs the budget's large reads at once and one more, and a burst, under 128 MB", {
     timeout: 60_000,
   }, async () => {
-    const count = LARGE_READ_BUDGET / REQUEST_BODY_MAX;
+    // The budget's reads: one user read of the cap, and the shares of 2 IPs (ruling 69).
+    const ips = LARGE_READ_ANON_BUDGET / LARGE_READ_SHARE;
+    const count = 1 + ips;
     const { execFile } = await node();
     const budget = (args: string[]) =>
       new Promise<BudgetLine>((resolve, reject) =>
@@ -261,14 +268,17 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
       lines
         .map(
           (l) =>
-            `body-memory: budget=${LARGE_READ_BUDGET} reads=${l.reads} live=${l.live} busy=${l.answers.filter((a) => a === "BodyBusy").length} ms=${l.ms} baseMB=${l.baseHeapMB + l.baseArrayBuffersMB} peakHeapMB=${l.peakHeapMB} peakArrayBuffersMB=${l.peakArrayBuffersMB} peakHeapPlusArrayBuffersMB=${l.peakHeapPlusArrayBuffersMB}`,
+            `body-memory: budget=${LARGE_READ_BUDGET} reads=${l.reads} live=${l.live} busy=${l.answers.filter((a) => a.endsWith(" BodyBusy")).length} ms=${l.ms} baseMB=${l.baseHeapMB + l.baseArrayBuffersMB} peakHeapMB=${l.peakHeapMB} peakArrayBuffersMB=${l.peakArrayBuffersMB} peakHeapPlusArrayBuffersMB=${l.peakHeapPlusArrayBuffersMB}`,
         )
         .join("\n"),
     );
     for (const l of lines) {
-      // Each half answers one read; each other read answers BodyBusy at once (ruling 66).
-      // A read with no client has no share of its own, so one of them fills the anonymous half.
-      expect(l.answers.filter((a) => a !== "BodyBusy")).toEqual(Array(count).fill("invalid_body"));
+      // The user half answers one read of the cap, and the anonymous half the shares of 2 IPs.
+      // Each other read answers BodyBusy at once (rulings 66 and 69).
+      expect(l.answers.filter((a) => !a.endsWith(" BodyBusy"))).toEqual([
+        ...Array(ips).fill("ip invalid_body"),
+        "user invalid_body",
+      ]);
       // Heap and array buffers together, garbage included, stay within the isolate.
       expect(l.peakHeapPlusArrayBuffersMB).toBeLessThan(HEAP_MB);
       // The live growth over the base, with no garbage, stays within half of it.

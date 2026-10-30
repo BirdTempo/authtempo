@@ -1162,46 +1162,49 @@ const acsPostNoIp = (body: ReadableStream<Uint8Array> | string) =>
     duplex: "half",
   } as RequestInit);
 
-describe("a read with no client IP (ruling 66 Minor 1 of the 12j lane)", () => {
-  it("keys a request with no client IP as ip:unknown, with no share of its own", () => {
+describe("a read with no client IP (rulings 66 Minor 1 and 69 of the 12j lane)", () => {
+  it("keys a request with no client IP as ip:unknown, with the share of one IP", () => {
     expect([ipBodyClient(null), ipBodyClient("")]).toEqual(["ip:unknown", "ip:unknown"]);
     expect(ipBodyClient("2001:db8:1:2:3:4:5:6")).toBe("ip:2001:db8:1:2::/64");
     expect(bodyClientOf(new Request(`${BASE_URL}/x`))).toBe("ip:unknown");
-    // Only the anonymous half bounds it.
-    expect(largeShareOf("ip:unknown", SAML_FORM_MAX)).toBe(LARGE_READ_ANON_BUDGET);
+    // Ruling 69: the share of one IP, not the whole anonymous half.
+    expect(largeShareOf("ip:unknown", SAML_FORM_MAX)).toBe(LARGE_READ_SHARE);
+    expect(largeShareOf("ip:unknown", REQUEST_BODY_MAX)).toBe(LARGE_READ_SHARE);
   });
 
-  it("leaves the ACS open to callers with no IP after 4 stalled posts of one of them, and holds them to the anonymous half", {
+  it("holds 8 stalled posts with no IP to the share of one IP, and leaves the ACS open to an IP key", {
     timeout: 30_000,
   }, async () => {
     const auth = samlAuth();
     const share = LARGE_READ_SHARE / 1_048_576;
-    const stalls = Array.from({ length: LARGE_READ_ANON_BUDGET / 1_048_576 }, () =>
-      gatedBody(SAML_FORM_MAX, 1_048_576),
-    );
+    const stalls = Array.from({ length: 2 * share }, () => gatedBody(SAML_FORM_MAX, 1_048_576));
     const ends: Promise<unknown>[] = [];
     const answers: (() => string)[] = [];
-    const stall = async (g: ReturnType<typeof gatedBody>) => {
-      let answer = "open";
-      const res = auth.handle(acsPostNoIp(g.stream)).then(async (r) => {
-        answer = await statusOf(r);
-      });
-      ends.push(res);
-      answers.push(() => answer);
-      await Promise.race([g.atGate, res]);
-      await settle();
-    };
     try {
-      // Before the fix, 4 stalled posts of 1 MiB held the share of every caller with no IP.
-      for (const g of stalls.slice(0, share)) await stall(g);
-      const other = await auth.handle(acsPostNoIp(gatedBody(SAML_FORM_MAX, SAML_FORM_MAX).stream));
+      for (const g of stalls) {
+        let answer = "open";
+        const res = auth.handle(acsPostNoIp(g.stream)).then(async (r) => {
+          answer = await statusOf(r);
+        });
+        ends.push(res);
+        answers.push(() => answer);
+        await Promise.race([g.atGate, res]);
+        await settle();
+      }
+      // Before the fix, all 8 held and filled the anonymous half: every client got 503.
+      expect(answers.map((a) => a())).toEqual([
+        ...Array(share).fill("open"),
+        ...Array(share).fill("503 body_busy"),
+      ]);
+      // A client with an IP key reads a whole form: the SAML check refuses it.
+      const other = await auth.handle(
+        acsPost("198.51.100.9", gatedBody(SAML_FORM_MAX, SAML_FORM_MAX).stream),
+      );
       expect([
         other.status,
         new URL(other.headers.get("location") ?? "x:").searchParams.get("auth_error"),
       ]).toEqual([302, "sso_failed"]);
-      // The anonymous half still bounds them: when it is full, a post with no IP answers 503.
-      for (const g of stalls.slice(share)) await stall(g);
-      expect(answers.map((a) => a())).toEqual(Array(stalls.length).fill("open"));
+      // Every caller with no IP is the one client whose share is full.
       expect(await statusOf(await auth.handle(acsPostNoIp("SAMLResponse=x")))).toBe(
         "503 body_busy",
       );

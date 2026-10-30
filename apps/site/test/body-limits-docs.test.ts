@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // The request body limits of core (rulings 43, 46, 51, 56, 59, 66, and 69 of
-// the 12j lane). The errors page, the limits page, the Express and Fastify pages, the
-// SCIM guide, the core README, and the Express README state the caps and the
-// scan limits by hand. This test reads each constant from the source of core
+// the 12j lane). The errors page, the limits page, the Express and Fastify
+// pages, the SCIM guide, the core README, the Express README, and the deploy
+// page state the caps and the scan limits by hand. This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
 // new derivation that changes a constant fails here until each line says the
 // new value. A cap number in one of the files that no fact holds fails too,
@@ -30,6 +30,7 @@ const FILES = {
   fastify: `${DOCS}docs/reference/fastify.md`,
   scim: `${DOCS}docs/guides/scim.mdx`,
   readme: `${REPO}packages/core/README.md`,
+  deploy: `${DOCS}docs/operations/deploy.md`,
   expressReadme: `${REPO}packages/express/README.md`,
 } as const;
 type FileKey = keyof typeof FILES;
@@ -296,6 +297,10 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /Or the reads of one client hold its share: (\d+) bytes for an IP/],
       ["limits", /hold at once \| (\d+), a quarter of the budget/],
       ["limits", /the shares of \d+ IPs of (\d+) (MiB) each/],
+      // The one client with no IP takes the share of one IP (ruling 69).
+      ["limits", /one client, `unknown`, with the share of one IP, (\d+) (MiB)/],
+      ["deploy", /In the body budget, it is one client of (\d+) (MiB)/],
+      ["deploy", /one client of (\d+) (MiB) in the budget of the large body reads/],
       ["readme", /One client holds at most (\d+) (MiB) of it/],
     ],
   ],
