@@ -4,4 +4,4 @@
 "@authtempo/compat-better-auth": minor
 ---
 
-Add the error code `body_too_large` (413). Core reads at most the cap of each route of a request body (64 KiB, 256 KiB for the Apple callback, and 8 MiB for the two SSO connection writes) and refuses a longer body before any parse. A JSON body nested deeper than 16 or with more than 4096 items answers `invalid_body` before the parse.
+Add the error code `body_too_large` (413). Core reads at most the cap of each route of a request body (64 KiB, 256 KiB for the Apple callback, and 8 MiB for the two SSO connection writes) and refuses a longer body before any parse. A JSON body nested deeper than 16 or with more than 4096 items answers `invalid_body` before the parse. The compatibility package reads each request body with core's capped reader, at the cap of the core route of the path, and answers `PAYLOAD_TOO_LARGE` (413) at its first read.

@@ -12,3 +12,15 @@ export {
   verifyDomainByRecord,
   withDomainRecord,
 } from "./create-auth.js";
+/**
+ * The capped body read of core (ruling 46 of the 12j lane). A compat
+ * package reads each request body with it, at the cap of the core route
+ * that the body goes to, so no read of the package is unbounded. A read
+ * past the cap throws `BodyTooLarge`.
+ */
+export {
+  BodyTooLarge,
+  bodyCapOf,
+  parseBodyJson,
+  readBodyText,
+} from "./http/body-cap.js";

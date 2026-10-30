@@ -1,8 +1,10 @@
 import type { Auth, SsoConnectionSummary, SsoDomainSummary } from "@authtempo/core";
 import { scimRequestAs, verifyDomainByRecord } from "@authtempo/core/compat";
+import type { RouteKey } from "@authtempo/core/routes";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { BETTER_AUTH_CODES, messageOf } from "../errors.js";
 import { equalHex, toHex } from "../hash.js";
+import { readJsonOf } from "./body.js";
 import type { Mapped } from "./map-options.js";
 import { PROVIDER_ID_RE, verificationIdentifier } from "./map-options.js";
 
@@ -694,12 +696,12 @@ async function managedProvider(
   return { connection, domain: mine[0] ?? null, domains: mine };
 }
 
-/** A JSON body of an object, or null. */
-async function jsonBody(request: Request): Promise<Json | null> {
-  const body = await request
-    .clone()
-    .json()
-    .catch(() => null);
+/**
+ * A JSON body of an object, or null. `key` is the core route that the body
+ * goes to: its cap bounds the read. With no key, core's floor bounds it.
+ */
+async function jsonBody(request: Request, key?: RouteKey): Promise<Json | null> {
+  const body = await readJsonOf(request, key);
   return isObject(body) ? body : null;
 }
 
@@ -734,7 +736,7 @@ async function register(
 ): Promise<Response> {
   if (!(await auth.session(request)))
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
-  const body = await jsonBody(request);
+  const body = await jsonBody(request, "POST /sso/connections/create");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   const sso = mapped.sso;
   if (!sso) return calls.fail(NOT_FOUND);
@@ -816,9 +818,21 @@ async function listProviders(
   return calls.answer({ providers });
 }
 
-/** `POST /sso/update-provider`: core's update of the connection, and a new domain when it changes. */
-async function updateProvider(mapped: Mapped, request: Request, calls: Calls): Promise<Response> {
-  const body = await jsonBody(request);
+/**
+ * `POST /sso/update-provider`: core's update of the connection, and a new
+ * domain when it changes. The session check comes before the read of the
+ * body, as at the register: the read takes the large cap of the connection
+ * writes (ruling 46 of the 12j lane).
+ */
+async function updateProvider(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+  calls: Calls,
+): Promise<Response> {
+  if (!(await auth.session(request)))
+    return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  const body = await jsonBody(request, "POST /sso/connections/update");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   for (const [key, v] of Object.entries(body))
     if (
@@ -1105,17 +1119,22 @@ export async function ssoAcsRoute(
  * each Better Auth path of acme answers 404. A create or an update refuses a
  * new label of the providerId form, and an update refuses any new label on a
  * row that holds one. A body that is not a JSON object is refused too, so
- * no form of body passes unread. Null for every other request.
+ * no form of body passes unread. Null for every other request. A request
+ * with no session is null too: core answers it 401 before it reads the body,
+ * so no one reads a body of the large cap of these writes without a session
+ * (ruling 46 of the 12j lane).
  */
 async function coreLabelRefusal(
+  auth: Auth,
   mapped: Mapped,
   request: Request,
   path: string,
 ): Promise<Response | null> {
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
+  if (!(await auth.session(request))) return null;
   const refuse = (message: string) =>
     Response.json({ error: "invalid_body", message }, { status: 400 });
-  const body = await jsonBody(request);
+  const body = await jsonBody(request, `POST ${path}`);
   if (!body) return refuse("expected a JSON object");
   if (body.label === undefined) return null;
   const why =
@@ -1146,7 +1165,7 @@ export async function ssoRoute(
   const get = request.method === "GET";
   const post = request.method === "POST";
   if (post) {
-    const refusal = await coreLabelRefusal(mapped, request, path);
+    const refusal = await coreLabelRefusal(auth, mapped, request, path);
     if (refusal) return refusal;
   }
   if (post && path === "/sso/register") return register(auth, mapped, request, calls);
@@ -1161,7 +1180,7 @@ export async function ssoRoute(
       ? found
       : calls.answer(providerOf(mapped, found.connection, found.domain));
   }
-  if (post && path === "/sso/update-provider") return updateProvider(mapped, request, calls);
+  if (post && path === "/sso/update-provider") return updateProvider(auth, mapped, request, calls);
   if (post && path === "/sso/delete-provider") return deleteProvider(mapped, request, calls);
   if (post && path === "/sso/request-domain-verification")
     return requestVerification(mapped, request, calls);

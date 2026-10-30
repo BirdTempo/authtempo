@@ -6,6 +6,7 @@ import {
   type HandleOptions,
   onWorkers,
 } from "@authtempo/core";
+import type { RouteKey } from "@authtempo/core/routes";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
 import { isPlaceholder, placeholderRuleOf } from "../storage/placeholder.js";
@@ -13,6 +14,7 @@ import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
+import { BodyTooLarge, bodyTooLarge, readJsonOf } from "./body.js";
 import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
@@ -44,14 +46,18 @@ export async function withPolicyCode(
   mapped: Mapped,
 ): Promise<Response> {
   if (!copy || res.status !== 400) return res;
-  const field = PASSWORD_FIELD[new URL(copy.url).pathname.slice(mapped.basePath.length)];
+  const path = new URL(copy.url).pathname.slice(mapped.basePath.length);
+  const field = PASSWORD_FIELD[path];
   if (!field) return res;
   const body = (await res
     .clone()
     .json()
     .catch(() => null)) as { error?: unknown } | null;
   if (body?.error !== "password_policy") return res;
-  const sent = (await copy.json().catch(() => null)) as Record<string, unknown> | null;
+  const sent = (await readJsonOf(copy, `POST ${path}` as RouteKey)) as Record<
+    string,
+    unknown
+  > | null;
   const password = typeof sent?.[field] === "string" ? (sent[field] as string) : "";
   const headers = new Headers(res.headers);
   headers.delete("content-length");
@@ -198,7 +204,15 @@ export function createHandler(
   return async (request, options) => {
     const host = options?.waitUntil;
     const work: Promise<unknown>[] = [];
-    const res = await serve(request, host ? { waitUntil: (p) => void work.push(p) } : undefined);
+    // A read of the shim past the cap of its route throws core's BodyTooLarge.
+    // It answers 413 PAYLOAD_TOO_LARGE at that first read (ruling 46 of the 12j lane).
+    const res = await serve(
+      request,
+      host ? { waitUntil: (p) => void work.push(p) } : undefined,
+    ).catch((e: unknown) => {
+      if (e instanceof BodyTooLarge) return bodyTooLarge();
+      throw e;
+    });
     if (host) {
       // The flush has started when a throwing waitUntil returns: the answer stays,
       // and the events reach the sink while the isolate lives.
@@ -230,10 +244,7 @@ async function placeholderChange(
   request: Request,
   betterAuthShape: boolean,
 ): Promise<Response | null> {
-  const body: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
+  const body = await readJsonOf(request, "POST /user/change-email");
   const email = (body as { newEmail?: unknown } | null)?.newEmail;
   if (typeof email !== "string") return null;
   const s = await auth.session(request, { refresh: false });

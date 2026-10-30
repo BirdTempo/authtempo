@@ -257,7 +257,7 @@ describe("createAuthClient", () => {
       basePath: "/api/auth",
       fetchOptions: { customFetchImpl: s.fetchImpl },
     });
-    // More than the 8 MiB of core's REQUEST_BODY_MAX.
+    // More than the cap of the route (64 KiB) and than core's largest cap (8 MiB).
     const long = await c.sendVerificationEmail({ email: `${"x".repeat(9_000_000)}@example.com` });
     expect(long).toEqual({
       data: null,
