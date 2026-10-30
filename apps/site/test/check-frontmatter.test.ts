@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkFrontmatter, pageUrl } from "../scripts/check-frontmatter.ts";
+import { docsPages, readRepoFile } from "../scripts/lib/load.ts";
+import { PAGE_NOTES, UNPUBLISHED_PAGES, VERSION_SLOT } from "../src/data/unpublished.ts";
 
 const repo: Record<string, string> = {
   "docs/spec.md": "## 8. Flows\n\n### 8.2 Magic link\n",
@@ -134,5 +136,30 @@ describe("checkFrontmatter", () => {
       "read 0 sources",
       "read 0 prerequisites",
     ]);
+  });
+});
+
+// Ruling 65 of plan 12j, M1: the rewrite of the first release wrote a "Before
+// you start" item with no link on three pages, so check-frontmatter failed on
+// the version branch. Each page of UNPUBLISHED_PAGES with its published lines
+// must pass, and no published line may rest on the exempt list.
+describe("the pages of the first release", () => {
+  it("pass with each published line of PAGE_NOTES, and no published line is exempt", () => {
+    const published = (source: string) =>
+      source
+        .split("\n")
+        .map(
+          (l) =>
+            PAGE_NOTES.find((n) => n.note === l)?.published.replaceAll(VERSION_SLOT, "0.1.0") ?? l,
+        )
+        .join("\n");
+    const pages = docsPages()
+      .filter((p) => UNPUBLISHED_PAGES.includes(p.path))
+      .map((p) => ({ ...p, source: published(p.source) }));
+    expect(pages).toHaveLength(UNPUBLISHED_PAGES.length);
+    const r = checkFrontmatter(pages, readRepoFile);
+    expect(r.failures).toEqual([]);
+    const lines = PAGE_NOTES.map((n) => n.published.replace(/^- /, ""));
+    expect((r.exempt ?? []).filter((e) => lines.some((l) => e.endsWith(`: ${l}`)))).toEqual([]);
   });
 });

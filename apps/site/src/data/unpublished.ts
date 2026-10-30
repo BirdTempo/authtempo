@@ -131,13 +131,17 @@ export const PAGE_NOTES: readonly PageNote[] = [
     note: `${RUN_NOTE} Else the shell answers "command not found" at step 1.`,
     published: REGISTRY_INSTALL,
   },
+  // A "Before you start" item needs a link, and check-frontmatter refuses a
+  // link to the page itself (ruling 65 of plan 12j, M1). So the item of the
+  // start pages links the CLI reference, and the item of the CLI reference
+  // links the start page.
   {
     note: "- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.",
-    published: `- ${REGISTRY_INSTALL}`,
+    published: `- ${REGISTRY_INSTALL} [The CLI reference](/docs/reference/cli/) lists each command.`,
   },
   {
     note: "- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.",
-    published: `- ${REGISTRY_INSTALL}`,
+    published: `- ${REGISTRY_INSTALL} [Choose your stack](/docs/start/) tells how to start an app.`,
   },
   {
     note: "- Until the packages are on a registry, a new app installs only inside the pnpm workspace of the repo.",
