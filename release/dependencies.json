@@ -366,7 +366,7 @@
     "kind": "dev",
     "versions": ["1.4.3"],
     "users": ["@authtempo/adapter-sqlite", "authtempo-example-node"],
-    "reason": "The Node example typechecks its Bun entry with it.",
+    "reason": "The Node example typechecks its Bun entry with it. The SQLite adapter typechecks its Bun driver (src/bun.ts) and its Bun driver tests with it.",
     "read": "2026-10-20"
   },
   {
@@ -514,7 +514,7 @@
     "kind": "dev",
     "versions": ["1.4.3"],
     "users": ["@authtempo/adapter-sqlite", "authtempo-example-elysia", "authtempo-example-node"],
-    "reason": "The Node and Elysia examples run their Bun tests with it.",
+    "reason": "The Node and Elysia examples run their Bun tests with it. The SQLite adapter runs its Bun driver tests with it (vitest.bun.config.ts).",
     "read": "2026-10-20"
   },
   {

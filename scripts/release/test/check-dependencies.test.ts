@@ -61,10 +61,23 @@ const FIXTURE_RELEASED = [
 
 describe("check-dependencies", () => {
   it("passes when each direct dependency has one row", () => {
-    const r = checkDependencies(real());
+    const input = real();
+    const r = checkDependencies(input);
     expect(r.failures).toEqual([]);
+    // The skipped count depends on the machine: pnpm installs the platform
+    // package of this os and cpu only. So it is the platform rows minus the
+    // rows whose package this machine holds (ruling 40 of plan 12j, L2). On
+    // darwin arm64, linux x64, and win32 x64 it is 8 of 9.
+    const platform = input.rows.filter((row) => row.kind === "platform");
+    const installed = platform.filter(
+      (row) =>
+        storeLicense(repoRoot)(String(row.name), String((row.versions as unknown[])[0] ?? "")) !==
+        undefined,
+    );
+    const skipped = platform.length - installed.length;
+    expect(platform.length).toBe(9);
     expect(summaryLine(r)).toBe(
-      "check-dependencies: PASS rows=113 runtime=37 peer=17 dev=50 platform=9 packages=53 closure=65 skipped=8 exempt=1 builds=5 failures=0",
+      `check-dependencies: PASS rows=113 runtime=37 peer=17 dev=50 platform=9 packages=53 closure=65 skipped=${skipped} exempt=1 builds=5 failures=0`,
     );
   });
 
