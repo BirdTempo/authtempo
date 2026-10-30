@@ -266,6 +266,18 @@ export function packedTexts(path: string, files: readonly string[]): Map<string,
   }
 }
 
+/**
+ * A path of a local machine in a packed text (ruling 50 of plan 12j): a home
+ * folder of macOS or Linux at the start of a path, such as /Users/<name>/, or
+ * a drive path of Windows, such as C:\. A tarball ships to every app, and such
+ * a path names a person and a machine. The SCIM routes of core hold
+ * "/scim/v2/Users/:id" and "PATCH /Users/:id", which the form does not match:
+ * it needs a path start, a folder name, and a slash. The released tree held
+ * no match on 2026-10-30 (1755 packed files with dist).
+ */
+export const LOCAL_PATH =
+  /(?<![\w/.-])\/(?:Users|home)\/[A-Za-z0-9._-]+\/|(?<!\w)[A-Za-z]:\\{1,2}[A-Za-z0-9._-]/;
+
 /** A key that names a registry or a proxy, such as registry, registries, @authtempo:registry, httpsProxy, or https-proxy. */
 const REGISTRY_KEY = /registr|proxy/i;
 
@@ -403,6 +415,11 @@ export function checkTarballs(
     for (const [f, text] of packedTexts(path, t.files)) {
       const forms = noteForms(text);
       if (forms.length > 0) marked.set(`${dir}/${f}`, forms);
+      const local = LOCAL_PATH.exec(text);
+      if (local !== null)
+        failures.push(
+          `${name}@${t.manifest.version}: ${f} holds the local machine path ${local[0]}`,
+        );
     }
   }
   const code = new Set(lists.code.map((c) => c.path));

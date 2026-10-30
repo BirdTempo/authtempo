@@ -21,6 +21,7 @@ import {
   checkPack,
   checkTarballs,
   entry,
+  LOCAL_PATH,
   type PackInput,
   readTarball,
 } from "../src/check-pack.ts";
@@ -745,6 +746,43 @@ describe("check-pack", () => {
       ]);
     } finally {
       rmSync(out, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a local machine path in a tarball (ruling 50 of the plan 12j lane)", () => {
+  it("fails a home folder or a drive path, and passes the SCIM routes of core", () => {
+    for (const text of ["/Users/ada/code/app", "see /home/ada/app", "C:\\Users\\ada", "(D:\\work)"])
+      expect(LOCAL_PATH.test(text), text).toBe(true);
+    for (const text of [
+      '"/scim/v2/Users/:id"',
+      "`PATCH /Users/:id`",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the text of a template in core's dist.
+      "${base}/Users/${value}",
+      "/scim/v2/Users/.search",
+      "/scim/v2/Users/ada/groups",
+      "/path/to/authtempo",
+      "/work/authtempo/scripts",
+      "[a-zA-Z]:\\/",
+    ])
+      expect(LOCAL_PATH.test(text), text).toBe(false);
+  });
+
+  it("fails a packed file that holds a local machine path", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const tree = copyRoot((dir) =>
+      appendFileSync(
+        join(dir, "packages/fixture/README.md"),
+        "\nBuilt in /Users/ada/code/authtempo. Route: `GET /scim/v2/Users/:id`.\n",
+      ),
+    );
+    try {
+      const path = pack(join(tree, "packages/fixture"), out);
+      expect(checkFixture(tree, [path]).failures).toEqual([
+        "@authtempo/fixture@0.1.0: README.md holds the local machine path /Users/ada/",
+      ]);
+    } finally {
+      for (const dir of [out, tree]) rmSync(dir, { recursive: true, force: true });
     }
   });
 });

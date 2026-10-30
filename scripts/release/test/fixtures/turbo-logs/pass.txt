@@ -50,7 +50,7 @@ authtempo-release:test: cache bypass, force executing dff7958cc3c5e001
 authtempo-release:test: $ vitest run
 authtempo-release:typecheck: $ tsc -p tsconfig.json
 authtempo-release:test: 
-authtempo-release:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/scripts/release[39m
+authtempo-release:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/scripts/release[39m
 authtempo-release:test: 
 @authtempo/breach-check:test: cache bypass, force executing 2c5147150d4030d4
 @authtempo/breach-check:test: $ vitest run && node ../../examples/worker/proof/bundle-no-node.mjs proof && tsc -p tsconfig.json && node proof/pack-files.mjs
@@ -64,7 +64,7 @@ authtempo-release:test:  [32m✓[39m test/check-support.test.ts [2m([22m[2m
 authtempo-release:test:  [32m✓[39m test/contributing.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 4[2mms[22m[39m
 authtempo-release:test:  [32m✓[39m test/workspace.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
 @authtempo/breach-check:test: 
-@authtempo/breach-check:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/breach-check[39m
+@authtempo/breach-check:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/breach-check[39m
 @authtempo/breach-check:test: 
 authtempo-release:test:  [32m✓[39m test/prepare.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 227[2mms[22m[39m
 //:typecheck:configs: typecheck:configs checked 57 vitest config files (minimum 57).
@@ -138,7 +138,7 @@ authtempo-release:test:      [33m[2m✓[22m[39m reads a pnpm pack tarball an
 @authtempo/import:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
 @authtempo/demo:build: check-assets: PASS files=32 imports=44
 @authtempo/adapter-sqlite:test: 
-@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
 @authtempo/adapter-sqlite:test: 
 authtempo-release:test:  [32m✓[39m test/git.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1979[2mms[22m[39m
 authtempo-release:test:    [32m✓[39m git [2m(5)[22m
@@ -197,7 +197,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/site:build: 11:21:54 [types] Generated 637ms
 @authtempo/site:build: 11:21:54 [build] output: "static"
 @authtempo/site:build: 11:21:54 [build] mode: "static"
-@authtempo/site:build: 11:21:54 [build] directory: ~/code/tempo-auth-lane-12j-t14/apps/site/dist/
+@authtempo/site:build: 11:21:54 [build] directory: /work/authtempo/apps/site/dist/
 @authtempo/site:build: 11:21:54 [build] Collecting build info...
 @authtempo/site:build: 11:21:54 [build] ✓ Completed in 745ms.
 @authtempo/site:build: 11:21:55 [build] Building static entrypoints...
@@ -459,7 +459,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/adapter-sqlite:test: conformance: storage conformance: node:sqlite tests=100 passed=100
 @authtempo/site:build: build-agent: PASS pages=174 sections=1623 twins=174
 @authtempo/adapter-sqlite:test: 
-@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
 @authtempo/adapter-sqlite:test: 
 @authtempo/site:build: write-headers: PASS pages=181 hashes=10
 @authtempo/site:build: build-feed: PASS entries=0 changelogs=0
@@ -469,7 +469,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/mcp:test: cache bypass, force executing fb270e3667278dbe
 @authtempo/mcp:test: $ vitest run && vitest run -c vitest.pool.config.ts && node scripts/dry-run.mjs
 @authtempo/mcp:test: 
-@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/mcp[39m
+@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/mcp[39m
 @authtempo/mcp:test: 
 @authtempo/mcp:test:  [32m✓[39m test/sdk-seam.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
 @authtempo/mcp:test:  [32m✓[39m test/remote-limiter.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 40[2mms[22m[39m
@@ -503,7 +503,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/mcp:test:  [32m✓[39m test/resources.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 70[2mms[22m[39m
 @authtempo/mcp:test:  [32m✓[39m test/docs-tools.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 285[2mms[22m[39m
 @authtempo/adapter-sqlite:test: 
-@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
 @authtempo/adapter-sqlite:test: 
 @authtempo/mcp:test:  [32m✓[39m test/skills.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 44[2mms[22m[39m
 @authtempo/mcp:test:  [32m✓[39m test/prompts.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 67[2mms[22m[39m
@@ -581,7 +581,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/mcp:test: [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
 @authtempo/mcp:test: 
 @authtempo/mcp:test: 
-@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/packages/mcp[39m
+@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/mcp[39m
 @authtempo/mcp:test: 
 @authtempo/mcp:test:  [32m✓[39m test/pool/remote.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 231[2mms[22m[39m
 @authtempo/mcp:test: 
@@ -611,7 +611,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/site:test: 11:22:13 [types] Generated 551ms
 @authtempo/site:test: 11:22:13 [build] output: "static"
 @authtempo/site:test: 11:22:13 [build] mode: "static"
-@authtempo/site:test: 11:22:13 [build] directory: ~/code/tempo-auth-lane-12j-t14/apps/site/dist/
+@authtempo/site:test: 11:22:13 [build] directory: /work/authtempo/apps/site/dist/
 @authtempo/site:test: 11:22:13 [build] Collecting build info...
 @authtempo/site:test: 11:22:13 [build] ✓ Completed in 644ms.
 @authtempo/site:test: 11:22:13 [build] Building static entrypoints...
@@ -945,7 +945,7 @@ authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
 @authtempo/site:test:   exempt check-resources: no release exists, so the page lists no package, example, or demo
 @authtempo/site:test: site checks: 83 of 83 passed
 @authtempo/site:test: 
-@authtempo/site:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m~/code/tempo-auth-lane-12j-t14/apps/site[39m
+@authtempo/site:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/apps/site[39m
 @authtempo/site:test: 
 @authtempo/site:test:  [32m✓[39m test/check-csp.test.ts [2m([22m[2m31 tests[22m[2m)[22m[32m 5[2mms[22m[39m
 @authtempo/site:test:  [32m✓[39m test/check-migrate.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 6[2mms[22m[39m

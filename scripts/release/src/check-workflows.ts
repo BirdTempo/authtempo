@@ -245,7 +245,6 @@ const JOBS: Record<string, Record<string, Job>> = {
         checkout(true),
         PNPM,
         NODE,
-        { run: "docker compose up -d --wait" },
         { run: "pnpm install --frozen-lockfile" },
         { run: "pnpm release:check --no-osv --no-dry-run --base origin/main" },
       ],
@@ -259,7 +258,6 @@ const JOBS: Record<string, Record<string, Job>> = {
         PNPM,
         NODE,
         { name: "Check the tag", run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
-        { run: "docker compose up -d --wait" },
         { run: "pnpm install --frozen-lockfile" },
         // A tag checkout has no local main (ruling 16 of plan 12j).
         { run: "pnpm release:check --base origin/main" },
@@ -367,6 +365,14 @@ const PUBLISH_JOB = "publish";
 const PIN = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{40})$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
 const PUBLISH_COMMAND = /\b(?:npm|pnpm|yarn|changeset)\s+publish\b/;
+
+/**
+ * A run line that starts containers. release-check starts the test servers
+ * of the checkout through scripts/test-servers.mjs, so a docker step starts
+ * a set that no test reads: a step that silently does nothing (ruling 50 of
+ * plan 12j).
+ */
+const DOCKER_COMMAND = /\bdocker\b/;
 const TOKEN = /\bsecrets\b|\bgithub\.token\b|\bGITHUB_TOKEN\b|NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/;
 
 /** -1, 0, or 1 for two versions of the form x.y.z. */
@@ -477,6 +483,10 @@ function checkJob(
         fail(`${where}: an expression in a run line; pass the value through env`);
       if (PUBLISH_COMMAND.test(run))
         fail(`${where}: a publish command outside node scripts/release/src/publish.ts`);
+      if (DOCKER_COMMAND.test(run))
+        fail(
+          `${where}: a docker command; release-check starts the test servers through scripts/test-servers.mjs`,
+        );
       for (const message of pathFailures(run, tree)) fail(`${where}: ${message}`);
     }
   });

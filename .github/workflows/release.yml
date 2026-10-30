@@ -45,14 +45,14 @@ jobs:
       # The tag name comes through the environment, never as an expression.
       - name: Check the tag
         run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"
-      # Postgres on port 5439. Without it, the adapter tests fail.
-      - run: docker compose up -d --wait
       # The lockfile as written. Without --frozen-lockfile, a new resolution
       # installs and no check sees it.
       - run: pnpm install --frozen-lockfile
       # Every release check with OSV and the dry run. A tag checkout has no
       # local main, so the base is origin/main. Without it, a tarball ships
-      # with no evidence.
+      # with no evidence. release-check starts the test servers of the
+      # checkout through scripts/test-servers.mjs, so no step starts docker
+      # compose (ruling 50 of plan 12j).
       - run: pnpm release:check --base origin/main
       # The release copy of the tagged commit. prepare refuses a folder with
       # no .release-copy file, so the checkout stays as it is.

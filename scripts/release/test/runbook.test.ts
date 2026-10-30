@@ -230,7 +230,7 @@ describe("docs/release/RUNBOOK.md", () => {
   });
 
   it("states a consequence beside each once-only step", () => {
-    expect(steps(section(TEXT, "Once, before the first release"))).toHaveLength(8);
+    expect(steps(section(TEXT, "Once, before the first release"))).toHaveLength(9);
     expect(consequenceFaults(TEXT)).toEqual([]);
     const without = TEXT.replace(
       "required reviewer. Add a deployment rule that allows the tags `v*` only. Without it,",
@@ -269,12 +269,9 @@ describe("docs/release/RUNBOOK.md", () => {
     ]);
   });
 
-  it("starts the servers and runs the check as the job check of release.yml does", () => {
-    const commands = [
-      "docker compose up -d --wait",
-      "pnpm install --frozen-lockfile",
-      "pnpm release:check",
-    ];
+  it("runs the check as the job check of release.yml does, and starts no docker set", () => {
+    // release-check starts the test servers through scripts/test-servers.mjs (ruling 50 of plan 12j).
+    const commands = ["pnpm install --frozen-lockfile", "pnpm release:check"];
     const step = stepOf(TEXT, "At each release", 1);
     const workflow = readFileSync(new URL(`.github/workflows/${WORKFLOW_FILE}`, ROOT), "utf8");
     const runs = [...workflow.matchAll(/^\s+- run: (.+)$/gm)].map((m) => m[1] ?? "");
@@ -286,6 +283,27 @@ describe("docs/release/RUNBOOK.md", () => {
       expect(order.every((i) => i >= 0)).toBe(true);
       expect([...order].sort((a, b) => a - b)).toEqual(order);
     }
+    expect(step).toContain("`scripts/test-servers.mjs`");
+    expect(step).not.toContain("docker compose");
+    expect(runs.filter((r) => r.includes("docker"))).toEqual([]);
+  });
+
+  it("names the up lines of the test servers to read in the first job log on GitHub", () => {
+    const step = stepOf(TEXT, "Once, before the first release", 9);
+    // The container name of a set: the project of the slot and the service (scripts/test-servers.mjs).
+    expect(step).toContain("`Container authtempo-s<slot>-<service>-1 Healthy`");
+    const ports = readFileSync(new URL("scripts/test-ports.mjs", ROOT), "utf8");
+    const services = [...ports.matchAll(/^\s+name: "([\w-]+)",$/gm)].map((m) => m[1] ?? "");
+    expect(services).toHaveLength(6);
+    for (const name of services) expect(step, name).toContain(`\`${name}\``);
+    expect(step).toContain("a line starts with `test-servers:`");
+  });
+
+  it("says that the records hold local paths and a user name, before the repository goes public", () => {
+    const step = stepOf(TEXT, "Once, before the first release", 2);
+    expect(step).toContain("local machine paths with a user name");
+    expect(step).toContain("Decide whether they may be public before the change.");
+    expect(step.indexOf("Decide whether")).toBeLessThan(step.indexOf("Then make the repository"));
   });
 
   it("adds the support row at each new minor, as check-support needs (ruling 52)", () => {
