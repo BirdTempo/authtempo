@@ -18,14 +18,17 @@ const text = readFileSync(`${REPO}turbo.json`, "utf8").replace(/^\s*\/\/.*$/gm, 
 const tasks = (JSON.parse(text) as { tasks: Record<string, Task> }).tasks;
 const inputs = tasks["@authtempo/site#build"]?.inputs ?? [];
 
-/** The three root files that src/data/repo.ts reads. */
-const ROOT_FILES = ["package.json", "SECURITY.md", "LICENSE"];
+/**
+ * The root files that src/data/repo.ts reads. The changelog page links each
+ * package changelog through release/repository.json (plan 12j Task 13).
+ */
+const ROOT_FILES = ["package.json", "SECURITY.md", "LICENSE", "release/repository.json"];
 
 /** The repo paths that the inputs name after $TURBO_ROOT$/. */
 const rootPatterns = inputs
   .filter((i) => i.startsWith("$TURBO_ROOT$/"))
   .map((i) => i.slice("$TURBO_ROOT$/".length));
-/** The same, the three root files apart. */
+/** The same, the root files apart. */
 const examplePatterns = rootPatterns.filter((p) => !ROOT_FILES.includes(p));
 
 /** True when a repo path matches an input glob: `*` is one path segment part, `**` any depth. */
@@ -74,12 +77,13 @@ describe("the inputs of the site build in turbo.json (plan 11b Task 5, rulings 2
   // The root pages read the root package.json, SECURITY.md, and LICENSE
   // (src/data/repo.ts). Turbo hashes the files of the package only, so
   // without these inputs a cache hit serves a stale license or empty state.
-  it("hashes the files of the package and the three root files that the pages read", () => {
-    expect(inputs.slice(0, 4)).toEqual([
+  it("hashes the files of the package and the root files that the pages read", () => {
+    expect(inputs.slice(0, 5)).toEqual([
       "$TURBO_DEFAULT$",
       "$TURBO_ROOT$/package.json",
       "$TURBO_ROOT$/SECURITY.md",
       "$TURBO_ROOT$/LICENSE",
+      "$TURBO_ROOT$/release/repository.json",
     ]);
   });
 
@@ -105,7 +109,7 @@ describe("the inputs of the site build in turbo.json (plan 11b Task 5, rulings 2
   // build-feed.ts reads the changelogs and the package names outside apps/site.
   // Without these inputs, a cache hit serves a feed older than its changelog.
   it("hashes each file that build-feed.ts reads, on the fixture tree and on this tree", () => {
-    expect(inputs.slice(4, 6)).toEqual([
+    expect(inputs.slice(5, 7)).toEqual([
       "$TURBO_ROOT$/packages/*/CHANGELOG.md",
       "$TURBO_ROOT$/packages/*/package.json",
     ]);

@@ -1,5 +1,8 @@
 import { dirname, posix } from "node:path";
 import type { AgentIndex, AgentPage, AgentSection } from "@authtempo/mcp/index-format";
+import { changelogMarkdown, readChangelogFiles } from "../../src/data/changelogs.ts";
+import { REPO_ROOT, repositoryUrl } from "../../src/data/repo.ts";
+import { CHANGELOG_EMPTY } from "../../src/data/unpublished.ts";
 import { pageUrl } from "../check-frontmatter.ts";
 import type { ExportEntry } from "./entries.ts";
 import { type Page, parseFrontmatter } from "./markdown.ts";
@@ -26,6 +29,11 @@ const CODE_TAG = /^<Code\s([^>]*?)\s*\/>\s*$/;
  */
 const KNOWN_TAGS = new Set(["code", "abbr"]);
 const RAW_H3 = /^<h3 id="([^"]+)">(.*)<\/h3>\s*$/;
+/**
+ * The changelog component of plan 12j Task 13. It stands alone on its line,
+ * and the agent markdown holds the text that it renders.
+ */
+const CHANGELOG_TAG = /^<ChangelogList\s*\/>\s*$/;
 
 function decode(s: string): string {
   return s
@@ -116,6 +124,10 @@ export function agentMarkdown(page: Page, readFile: ReadFile): string {
     }
     if (line.includes("<Code"))
       throw new Error(`${where}: a <Code> tag must stand alone on one line, at the start`);
+    if (CHANGELOG_TAG.test(line)) {
+      out.push(changelogMarkdown(readChangelogFiles(REPO_ROOT), repositoryUrl, CHANGELOG_EMPTY));
+      continue;
+    }
     const h3 = RAW_H3.exec(line);
     if (h3) {
       out.push(`### ${textOf(h3[2] ?? "")} {#${h3[1]}}`);

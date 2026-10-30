@@ -42,3 +42,4 @@ Do not open a public issue for a fault. Do not include a real user's data in the
 
 - [Versioning policy](/docs/versioning/)
 - [Threat model](/docs/concepts/threat-model/)
+- [Resources](/docs/resources/)

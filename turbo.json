@@ -32,6 +32,7 @@
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/SECURITY.md",
         "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/release/repository.json",
         "$TURBO_ROOT$/packages/*/CHANGELOG.md",
         "$TURBO_ROOT$/packages/*/package.json",
         "$TURBO_ROOT$/examples/elysia/src/app.ts",
