@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STACK_INFO, STACKS, type Stack, type StackInfo } from "./stacks.js";
+import { CLI_VERSION } from "./version.js";
 
 /**
  * The init templates (spec 19, the one-source rule). Each stack is an
@@ -47,17 +48,21 @@ export function exampleFiles(dir: string): string[] {
 }
 
 /**
- * True while the CLI is unpublished: its own package.json is private or at
- * version 0.0.0. The note below then goes into the next steps and the
- * scaffold README; it removes itself at publication.
+ * True for the version of a package that no release published: 0.0.0. Each
+ * package holds it until the first `changeset version`, which writes 0.1.0
+ * or higher.
  */
-export const UNPUBLISHED: boolean = (() => {
-  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
-    private?: boolean;
-    version: string;
-  };
-  return pkg.private === true || pkg.version === "0.0.0";
-})();
+export function isUnpublished(version: string): boolean {
+  return version === "0.0.0";
+}
+
+/**
+ * True while the CLI is unpublished. The note below then goes into the next
+ * steps and the scaffold README; it removes itself at publication. The
+ * release copy has no private key and main keeps private: true, so private
+ * says nothing about publication (plan 12j).
+ */
+export const UNPUBLISHED: boolean = isUnpublished(CLI_VERSION);
 /**
  * The scaffold does not depend on @authtempo/cli, so `authtempo` in the next
  * steps is on no path until publication. The note gives the documented run
@@ -82,20 +87,30 @@ interface PackageJson {
 }
 
 /**
- * The declared rewrites (plan 11c, deviation 5). A scaffold lives outside
- * the repo, so its name is my-app. Each workspace:* is the CLI's version,
- * because the packages release together. Each tsconfig extends the
- * scaffold's own copy of the base config. The test script of a D1 stack
- * drops the repo's bundle proof. The Bun stack starts with bun. A rewrite that finds an unexpected
- * text throws, so a change of an example fails the build, not the scaffold.
+ * The six declared rewrites (plan 11c, deviation 5; plan 12j). A scaffold
+ * lives outside the repo, so its name is my-app. Each workspace:* is the
+ * CLI's version, because the packages release together. A published
+ * scaffold takes the CLI at that version as a dev dependency, so each step
+ * runs with pnpm exec. Each tsconfig extends the scaffold's own copy of the
+ * base config. The test script of a D1 stack drops the repo's bundle proof.
+ * The Bun stack starts with bun. A rewrite that finds an unexpected text
+ * throws, so a change of an example fails the build, not the scaffold.
  */
-export function rewrite(stack: Stack, path: string, text: string, version: string): string {
+export function rewrite(
+  stack: Stack,
+  path: string,
+  text: string,
+  version: string,
+  published: boolean,
+): string {
   if (path === "package.json") {
     const pkg = JSON.parse(text) as PackageJson;
     pkg.name = "my-app";
     for (const deps of [pkg.dependencies, pkg.devDependencies])
       if (deps)
         for (const [k, v] of Object.entries(deps)) if (v === "workspace:*") deps[k] = version;
+    if (published)
+      pkg.devDependencies = sortKeys({ ...pkg.devDependencies, "@authtempo/cli": version });
     if (D1_STACKS.has(stack)) {
       if (pkg.scripts?.test !== D1_TEST)
         throw new Error(
@@ -118,10 +133,28 @@ export function rewrite(stack: Stack, path: string, text: string, version: strin
   return text;
 }
 
+/** The keys of a dependency list in the order of pnpm. */
+function sortKeys(deps: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(deps).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/**
+ * The steps after `cd`: the install and the steps of the stack. A published
+ * scaffold has the CLI as a dev dependency, so each authtempo step runs with
+ * pnpm exec. An unpublished one keeps the bare form, and UNPUBLISHED_NOTE
+ * gives the run form of a clone.
+ */
+export function nextSteps(stack: Stack, published: boolean): string[] {
+  const steps = STACK_INFO[stack].next.map((s) =>
+    published && s.startsWith("authtempo ") ? `pnpm exec ${s}` : s,
+  );
+  return ["pnpm install", ...steps];
+}
+
 /** The three files that each stack adds: the README, the ignore list, and the list of the secrets with no value. */
-export function extraFiles(stack: Stack): TemplateFile[] {
+export function extraFiles(stack: Stack, published: boolean): TemplateFile[] {
   const info = STACK_INFO[stack];
-  const steps = ["pnpm install", ...info.next];
+  const steps = nextSteps(stack, published);
   const readme = [
     "# my-app",
     "",
@@ -131,7 +164,7 @@ export function extraFiles(stack: Stack): TemplateFile[] {
     "",
     ...steps.map((s, i) => `${i + 1}. Run \`${s}\`.`),
     "",
-    ...(UNPUBLISHED ? [UNPUBLISHED_NOTE, ""] : []),
+    ...(published ? [] : [UNPUBLISHED_NOTE, ""]),
     `\`${info.secrets}\` lists each secret with no value. Do not commit a copy with values: \`.gitignore\` lists it.`,
     "",
     "## Links",
@@ -191,16 +224,21 @@ export function readTemplates(read: (path: string) => string): Record<Stack, Tem
 const byPath = (a: TemplateFile, b: TemplateFile) =>
   a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 
-/** The files of one stack: the example's files with the rewrites, the base config, and the extra files. */
+/**
+ * The files of one stack: the example's files with the rewrites, the base
+ * config, and the extra files. The version alone decides the branch, as for
+ * UNPUBLISHED.
+ */
 export function renderStack(stack: Stack, repo: string, version: string): TemplateFile[] {
+  const published = !isUnpublished(version);
   const dir = join(repo, "examples", STACK_INFO[stack].example);
   const files = exampleFiles(dir).map((path) => ({
     path,
-    text: rewrite(stack, path, readFileSync(join(dir, path), "utf8"), version),
+    text: rewrite(stack, path, readFileSync(join(dir, path), "utf8"), version, published),
   }));
   const added = [
     { path: "tsconfig.base.json", text: readFileSync(join(repo, "tsconfig.base.json"), "utf8") },
-    ...extraFiles(stack),
+    ...extraFiles(stack, published),
   ];
   for (const a of added)
     if (files.some((f) => f.path === a.path))

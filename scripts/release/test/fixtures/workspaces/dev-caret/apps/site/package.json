@@ -1,0 +1,9 @@
+{
+  "name": "@authtempo/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@authtempo/cli": "workspace:^"
+  }
+}

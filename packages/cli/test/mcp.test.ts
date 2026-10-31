@@ -21,7 +21,7 @@ import { type EditorId, mcpEntry, renderEntry } from "../src/editors.js";
 import { MCP_JSON_KEYS } from "../src/json.js";
 import { main } from "../src/main.js";
 import { UNPUBLISHED } from "../src/templates.js";
-import { assertFreshBuild, linesOf, PKG, REPO, runBin } from "./support/bin.js";
+import { assertFreshBuild, cliAt, linesOf, PKG, REPO, runBin } from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
 
 const FIXTURES = join(PKG, "test/fixtures/mcp");
@@ -91,12 +91,16 @@ const read = (dir: string, id: EditorId) => readFileSync(join(dir, FILES[id].fil
 const parsed = (dir: string, id: EditorId) =>
   JSON.parse(read(dir, id)) as Record<string, Record<string, unknown>>;
 
+/**
+ * The start command of the stdio entry at the version of the tree. Before
+ * publication the workspace binary runs (deviation 6); after it, npx runs the
+ * release of the CLI's version.
+ */
+const START = UNPUBLISHED ? ["node", BIN] : ["npx", "-y", `@authtempo/mcp@${VERSION}`];
+
 /** The stdio entry that the plan's table gives, for the binary BIN and the folder `root`. */
 function expected(id: EditorId, root: string, name = "DATABASE_URL"): unknown {
-  // Before publication the workspace binary runs (deviation 6); the package is private now.
-  const [command, ...head] = UNPUBLISHED
-    ? ["node", BIN]
-    : ["npx", "-y", `@authtempo/mcp@${VERSION}`];
+  const [command = "", ...head] = START;
   const args = [...head, "--root", root];
   switch (id) {
     case "claude-code":
@@ -275,7 +279,7 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
     for (const id of JSON_IDS)
       expect(r.stdout, id).toContain(`"authtempo": ${JSON.stringify(expected(id, dir), null, 2)}`);
     expect(r.stdout).toContain(String(expected("codex", dir)));
-    const line = ["node", BIN, "--root", dir].join(" ");
+    const line = [...START, "--root", dir].join(" ");
     expect(linesOf(r.stdout)).toContain(`claude mcp add authtempo -- ${line}`);
     expect(linesOf(r.stdout)).toContain(`codex mcp add authtempo -- ${line}`);
     expect(readdirSync(dir)).toEqual([]);
@@ -344,13 +348,30 @@ describe("authtempo mcp (plan 11e Task 2)", () => {
   it("stops when the server is not built", () => {
     // The default binary is the workspace build of @authtempo/mcp.
     expect(fileURLToPath(MCP_BIN_URL)).toBe(join(REPO, "packages/mcp/dist/bin/authtempo-mcp.js"));
-    const dir = fresh();
-    const r = mcp(dir, ["--cursor"], { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") });
-    expect(r.status).toBe(2);
-    expect(linesOf(r.stderr)).toContain(
-      "stopped: build @authtempo/mcp first: pnpm --filter @authtempo/mcp build, then pnpm turbo run index --filter=@authtempo/mcp",
-    );
-    expect(readdirSync(dir)).toEqual([]);
+    // Each state runs on a built copy at its version, so the probe holds at each version of the tree.
+    const unpublished = cliAt("0.0.0");
+    const published = cliAt("0.1.0");
+    try {
+      const dir = fresh();
+      const missing = { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") };
+      const r = runBin(["mcp", "--cursor"], { cwd: dir, env: missing, bin: unpublished.bin });
+      expect(r.status).toBe(2);
+      expect(linesOf(r.stderr)).toContain(
+        "stopped: build @authtempo/mcp first: pnpm --filter @authtempo/mcp build, then pnpm turbo run index --filter=@authtempo/mcp",
+      );
+      expect(readdirSync(dir)).toEqual([]);
+      // After publication, npx fetches the release, so no local binary is needed.
+      const after = runBin(["mcp", "--cursor"], { cwd: dir, env: missing, bin: published.bin });
+      expect(after.status, after.stderr).toBe(0);
+      const entry = parsed(dir, "cursor").mcpServers?.authtempo as Record<string, unknown>;
+      expect(entry).toMatchObject({
+        command: "npx",
+        args: ["-y", "@authtempo/mcp@0.1.0", "--root", dir],
+      });
+    } finally {
+      unpublished.remove();
+      published.remove();
+    }
     // The help names the hook in its Notes block, not as a setting (plan 11e ruling 14).
     const help = runBin(["mcp", "--help"]).stdout;
     expect(help).toContain(

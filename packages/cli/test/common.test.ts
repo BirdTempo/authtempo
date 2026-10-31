@@ -8,7 +8,7 @@ import { COMMON_FLAGS, type HelpText, pageUrl, renderHelp } from "../src/help/ty
 import { VERSION_JSON_KEYS } from "../src/json.js";
 import { COMMANDS, makeMain } from "../src/main.js";
 import { NAME_ONLY_FLAGS, SECRETISH_FLAG } from "../src/secrets.js";
-import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
+import { assertFreshBuild, ESC, linesOf, runBin, VERSION } from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
 
 beforeAll(() => {
@@ -34,6 +34,7 @@ const NAMES = [
   "audit",
   "create-admin",
   "generate",
+  "upgrade",
 ];
 
 /**
@@ -56,11 +57,15 @@ const NEEDS_ARGUMENT = [
   "generate",
 ] as const;
 
-/** The commands that run with no argument (ruling 5): `secret` prints a value, and `info` prints a report. */
-const NO_ARGUMENT = ["secret", "info"] as const;
+/**
+ * The commands that run with no argument (ruling 5): `secret` prints a value,
+ * `info` prints a report, and `upgrade` reads the package.json of the
+ * current folder (plan 12j Task 10).
+ */
+const NO_ARGUMENT = ["secret", "info", "upgrade"] as const;
 
 describe("the common rules (spec 19)", () => {
-  it("has the thirteen commands in the order of the root help", () => {
+  it("has the fourteen commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 
@@ -91,11 +96,11 @@ describe("the common rules (spec 19)", () => {
   it("prints the version of the CLI and the schema version of its core", () => {
     const r = runBin(["--version"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe("authtempo 0.0.0 (schema version 15)\n");
+    expect(r.stdout).toBe(`authtempo ${VERSION} (schema version 15)\n`);
     const j = runBin(["--version", "--json"]);
     const doc = JSON.parse(j.stdout) as Record<string, unknown>;
     expect(Object.keys(doc).sort()).toEqual(Object.keys(VERSION_JSON_KEYS).sort());
-    expect(doc).toEqual({ cli: "0.0.0", schemaVersion: 15 });
+    expect(doc).toEqual({ cli: VERSION, schemaVersion: 15 });
   });
 
   it("prints the short help on stderr and exits 2 with no command", () => {

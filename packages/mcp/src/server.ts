@@ -7,12 +7,15 @@ import type { AgentIndex } from "./index-format.js";
 import { skillPrompts } from "./prompts.js";
 import { docsResources } from "./resources.js";
 import type { ServerSpec, SkillSet, Surface, ToolImpl } from "./spec.js";
+import { MCP_VERSION } from "./version.generated.js";
 
 /**
  * The version of this package. A Worker cannot read package.json, so the
- * value is here; protocol-raw.test.ts holds it to package.json.
+ * build writes the value from package.json into version.generated.ts
+ * (scripts/write-version.mjs, ruling 65 of plan 12j). protocol-raw.test.ts
+ * holds it to package.json on the wire, and check-pack holds it in dist.
  */
-export const MCP_VERSION = "0.0.0";
+export { MCP_VERSION };
 
 /** The newest protocol revision that the SDK serves (2026-07-28, @modelcontextprotocol/server 2.3.1). */
 export const PROTOCOL_REVISION = "2026-07-28";

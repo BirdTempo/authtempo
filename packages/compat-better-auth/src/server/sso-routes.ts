@@ -1,8 +1,15 @@
 import type { Auth, SsoConnectionSummary, SsoDomainSummary } from "@authtempo/core";
-import { scimRequestAs, verifyDomainByRecord } from "@authtempo/core/compat";
+import {
+  countSsoManageWrite,
+  moveSsoManageCount,
+  scimRequestAs,
+  verifyDomainByRecord,
+} from "@authtempo/core/compat";
+import type { RouteKey } from "@authtempo/core/routes";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { BETTER_AUTH_CODES, messageOf } from "../errors.js";
 import { equalHex, toHex } from "../hash.js";
+import { objectOfText, readOwnTextOf } from "./body.js";
 import type { Mapped } from "./map-options.js";
 import { PROVIDER_ID_RE, verificationIdentifier } from "./map-options.js";
 
@@ -603,7 +610,11 @@ class Calls {
   }
 
   async core(to: string, body?: Json): Promise<Response> {
-    return this.keep(await this.auth.handle(this.requestTo(to, body), this.mapped.handleOptions));
+    const request = this.requestTo(to, body);
+    // The first write to core carries the count that the shim made before its
+    // read, so core does not count the write again (ruling 51 Minor 1 of the 12j lane).
+    if (body !== undefined) moveSsoManageCount(this.request, request);
+    return this.keep(await this.auth.handle(request, this.mapped.handleOptions));
   }
 
   keep(res: Response): Response {
@@ -641,6 +652,13 @@ const NOT_FOUND: Refusal = {
   status: 404,
   code: "NOT_FOUND",
   message: "No SSO provider has this providerId",
+};
+
+/** Core's limit of the SSO manager writes of the user, in Better Auth's shape. */
+const TOO_MANY: Refusal = {
+  status: 429,
+  code: BETTER_AUTH_CODES.rate_limited,
+  message: messageOf(BETTER_AUTH_CODES.rate_limited),
 };
 
 /**
@@ -694,12 +712,15 @@ async function managedProvider(
   return { connection, domain: mine[0] ?? null, domains: mine };
 }
 
-/** A JSON body of an object, or null. */
-async function jsonBody(request: Request): Promise<Json | null> {
-  const body = await request
-    .clone()
-    .json()
-    .catch(() => null);
+/**
+ * A JSON body of an object, or null. `key` is the core route that the body
+ * goes to: its cap bounds the read. With no key, core's floor bounds it.
+ * Each Better Auth path of this file sends core new requests of its own, so
+ * the read takes the request itself and holds the body once (ruling 68
+ * Minor 1 of the 12j lane).
+ */
+async function jsonBody(request: Request, key?: RouteKey): Promise<Json | null> {
+  const body = objectOfText(await readOwnTextOf(request, key));
   return isObject(body) ? body : null;
 }
 
@@ -732,9 +753,13 @@ async function register(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  if (!(await auth.session(request)))
+  const session = await auth.session(request);
+  if (!session)
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
-  const body = await jsonBody(request);
+  // Core's limit of the user comes before the read of the large cap, as in
+  // core's manager routes (ruling 51 Minor 1 of the 12j lane).
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  const body = await jsonBody(request, "POST /sso/connections/create");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   const sso = mapped.sso;
   if (!sso) return calls.fail(NOT_FOUND);
@@ -816,9 +841,23 @@ async function listProviders(
   return calls.answer({ providers });
 }
 
-/** `POST /sso/update-provider`: core's update of the connection, and a new domain when it changes. */
-async function updateProvider(mapped: Mapped, request: Request, calls: Calls): Promise<Response> {
-  const body = await jsonBody(request);
+/**
+ * `POST /sso/update-provider`: core's update of the connection, and a new
+ * domain when it changes. The session check and core's limit of the user
+ * come before the read of the body, as at the register: the read takes the
+ * large cap of the connection writes (rulings 46 and 51 of the 12j lane).
+ */
+async function updateProvider(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+  calls: Calls,
+): Promise<Response> {
+  const session = await auth.session(request);
+  if (!session)
+    return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  const body = await jsonBody(request, "POST /sso/connections/update");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   for (const [key, v] of Object.entries(body))
     if (
@@ -1105,29 +1144,53 @@ export async function ssoAcsRoute(
  * each Better Auth path of acme answers 404. A create or an update refuses a
  * new label of the providerId form, and an update refuses any new label on a
  * row that holds one. A body that is not a JSON object is refused too, so
- * no form of body passes unread. Null for every other request.
+ * no form of body passes unread. Null for every other request. A request
+ * with no session is null too: core answers it 401 before it reads the body,
+ * so no one reads a body of the large cap of these writes without a session
+ * (ruling 46 of the 12j lane). Core's limit of the user comes before the
+ * read too, and a write past it is null: core answers it 429 before its own
+ * read. A write within the limit carries the count to core (ruling 51).
+ *
+ * The shim reads the body once, from the request itself (ruling 68 Minor 1
+ * of the 12j lane). A write that passes gives a new request of the same text
+ * with the counts of the user, and core reads that one in place of
+ * `request`. Before this, the shim read a clone and core read the request,
+ * so a large body was held twice.
  */
-async function coreLabelRefusal(
+export async function ssoConnectionWrite(
+  auth: Auth,
   mapped: Mapped,
   request: Request,
-  path: string,
-): Promise<Response | null> {
+): Promise<Response | Request | null> {
+  if (!mapped.sso || request.method !== "POST") return null;
+  const path = new URL(request.url).pathname.slice(mapped.basePath.length);
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
+  const session = await auth.session(request);
+  if (!session) return null;
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return null;
   const refuse = (message: string) =>
     Response.json({ error: "invalid_body", message }, { status: 400 });
-  const body = await jsonBody(request);
-  if (!body) return refuse("expected a JSON object");
-  if (body.label === undefined) return null;
+  const text = await readOwnTextOf(request, `POST ${path}`);
+  const body = objectOfText(text);
+  if (text === null || !body) return refuse("expected a JSON object");
   const why =
     "a label of the providerId form belongs to /sso/register and /sso/update-provider in a Better Auth app";
   if (typeof body.label === "string" && PROVIDER_ID_RE.test(body.label)) return refuse(why);
-  if (path === "/sso/connections/update" && typeof body.id === "string") {
+  if (
+    path === "/sso/connections/update" &&
+    body.label !== undefined &&
+    typeof body.id === "string"
+  ) {
     const row = await mapped.config.storage.findOne("ssoConnection", [
       { field: "id", op: "eq", value: body.id },
     ]);
     if (row && PROVIDER_ID_RE.test(row.label)) return refuse(why);
   }
-  return null;
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  const forward = new Request(request.url, { method: "POST", headers, body: text });
+  moveSsoManageCount(request, forward);
+  return forward;
 }
 
 /** The shim's answer to a Better Auth SSO path. Null for every other request. */
@@ -1145,10 +1208,6 @@ export async function ssoRoute(
   if (why !== null) return calls.fail(unsupported(path, why));
   const get = request.method === "GET";
   const post = request.method === "POST";
-  if (post) {
-    const refusal = await coreLabelRefusal(mapped, request, path);
-    if (refusal) return refusal;
-  }
   if (post && path === "/sso/register") return register(auth, mapped, request, calls);
   if (get && path === "/sso/providers") return listProviders(auth, mapped, request, calls);
   if (get && path === "/sso/get-provider") {
@@ -1161,7 +1220,7 @@ export async function ssoRoute(
       ? found
       : calls.answer(providerOf(mapped, found.connection, found.domain));
   }
-  if (post && path === "/sso/update-provider") return updateProvider(mapped, request, calls);
+  if (post && path === "/sso/update-provider") return updateProvider(auth, mapped, request, calls);
   if (post && path === "/sso/delete-provider") return deleteProvider(mapped, request, calls);
   if (post && path === "/sso/request-domain-verification")
     return requestVerification(mapped, request, calls);

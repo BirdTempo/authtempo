@@ -506,6 +506,12 @@ describe("betterAuth", () => {
       totp_not_enabled: "TOTP_NOT_ENABLED",
       // Plan 12h: the readiness route. Better Auth 1.7 has no such route, so the name is our own.
       not_ready: "NOT_READY",
+      // 12j ruling 43: better-call's status name, since Better Auth names no code.
+      body_too_large: "PAYLOAD_TOO_LARGE",
+      // 12j ruling 51: better-call's status name, since Better Auth names no code.
+      body_busy: "SERVICE_UNAVAILABLE",
+      // 12j ruling 59: better-call's status name, since Better Auth names no code.
+      body_timeout: "REQUEST_TIMEOUT",
     });
     expect([
       passwordPolicyCode("1234567", 8),

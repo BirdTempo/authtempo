@@ -192,6 +192,18 @@ export const BETTER_AUTH_CODES = {
   // So the name is core's own. At /delete-anonymous-user the shim answers
   // Better Auth's USER_IS_NOT_ANONYMOUS (plan 12i Task 16, ruling 42 L4).
   anonymous_refused: "ANONYMOUS_REFUSED",
+  // 12j ruling 43: core's body cap. Better Auth 1.7.7 names no code for a long
+  // body (its dist, read 2026-10-30). So the name is better-call's status
+  // name (better-call 1.4.0 dist/error.mjs:69).
+  body_too_large: "PAYLOAD_TOO_LARGE",
+  // 12j ruling 51: core's budget of the large reads. Better Auth 1.7.7 names no
+  // code for it. So the name is better-call's status name (better-call 1.4.0
+  // dist/error.mjs:88, read 2026-10-30).
+  body_busy: "SERVICE_UNAVAILABLE",
+  // 12j ruling 59: core's deadlines of a large read. Better Auth 1.7.7 names no
+  // code for it. So the name is better-call's status name (better-call 1.4.0
+  // dist/error.mjs:64, read 2026-10-30).
+  body_timeout: "REQUEST_TIMEOUT",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",
@@ -315,10 +327,16 @@ const STATUS_NAMES: Record<number, string> = {
   403: "FORBIDDEN",
   404: "NOT_FOUND",
   405: "METHOD_NOT_ALLOWED",
+  // better-call 1.4.0 dist/error.mjs:64, for core's 408 body_timeout.
+  408: "REQUEST_TIMEOUT",
   409: "CONFLICT",
+  // better-call 1.4.0 dist/error.mjs:69, for core's 413 body_too_large.
+  413: "PAYLOAD_TOO_LARGE",
   429: "TOO_MANY_REQUESTS",
   500: "INTERNAL_SERVER_ERROR",
   501: "NOT_IMPLEMENTED",
+  // better-call 1.4.0 dist/error.mjs:88, for core's 503 body_busy.
+  503: "SERVICE_UNAVAILABLE",
 };
 
 const STATUS_CODES: Record<string, number> = Object.fromEntries(
@@ -338,10 +356,13 @@ const REASONS: Record<number, string> = {
   403: "Forbidden",
   404: "Not Found",
   405: "Method Not Allowed",
+  408: "Request Timeout",
   409: "Conflict",
+  413: "Payload Too Large",
   429: "Too Many Requests",
   500: "Internal Server Error",
   501: "Not Implemented",
+  503: "Service Unavailable",
 };
 
 /** `INVALID_EMAIL_OR_PASSWORD` to "Invalid email or password". Apps switch on the code, not on this text. */

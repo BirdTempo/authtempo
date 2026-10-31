@@ -9,11 +9,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
 import { REPO_ROOT } from "../src/data/repo.ts";
 import { readChangelogs, readVersions } from "./lib/feed.ts";
-import { guardHint, guardReports } from "./lib/guard.ts";
+import { distMissing, guardHint, guardReports } from "./lib/guard.ts";
 import { distFiles, distPages } from "./lib/load.ts";
 import { DIST } from "./lib/paths.ts";
 import { summaryLine } from "./lib/report.ts";
 
+// The folder first: each read below throws on a missing dist.
+const missing = distMissing(existsSync(DIST));
+if (missing !== null) {
+  console.error(`guard-deploy: FAIL ${missing}`);
+  process.exit(1);
+}
 const read = (file: string) =>
   existsSync(`${DIST}${file}`) ? readFileSync(`${DIST}${file}`, "utf8") : null;
 const headers = read("_headers");

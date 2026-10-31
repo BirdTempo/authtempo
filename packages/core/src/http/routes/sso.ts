@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { isRecordVerify } from "../../compat-seams.js";
+import { isRecordVerify, takeLargeReadCounted, takeSsoManageCounted } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
@@ -27,10 +27,20 @@ import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
-import { limit } from "../../limiter/limit.js";
-import { readCappedBytes } from "../../primitives/read-capped.js";
+import { limit, spendLimit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import {
+  BODY_CAP_FLOOR,
+  BodyBusy,
+  BodyTooLarge,
+  bindBodyClient,
+  bindSlowRead,
+  bodyCapOfRequest,
+  largeReadCanStart,
+  parseBodyForm,
+  readBodyBytes,
+} from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
@@ -65,6 +75,61 @@ import { ssoContinuePage } from "../sso-continue-page.js";
  */
 export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
 
+/** Counts one SSO manager write of the user on its limit. True when the write is within the limit. */
+export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return limit(config, "sso-manage:user", userId, SSO_MANAGE_PER_USER);
+}
+
+/**
+ * The large body reads of one person at the SSO connection writes: 6 per
+ * hour, counted at the start of each read, after `sso-manage:user` (ruling
+ * 69 of the 12j lane). A read past the limit answers 429 before any byte.
+ * A read that cannot start answers 503 before this count, and spends none
+ * (ruling 72 Minor 1). A read that takes more than `LARGE_READ_SLOW_MS`,
+ * 8 s, spends the rest of the window, by any end (`spendLargeReads`,
+ * rulings 75 and 79).
+ *
+ * The derivation, done 2026-10-30. One read holds the user half of the body
+ * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`), and a user runs one
+ * read at a time (`LARGE_READS_PER_USER`). So one account holds that half at
+ * most 6 times 32 s, 192 s, in each hour. A setup of one connection is one
+ * create and a few updates.
+ */
+export const SSO_LARGE_READ_PER_USER = { seconds: 3600, max: 6 };
+
+/** Counts one large body read of the user at an SSO connection write. True when the read is within the limit. */
+export function ssoLargeReadAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return limit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER);
+}
+
+/**
+ * Spends the rest of the large reads of the user in the window of
+ * `sso-large-read:user` (rulings 75 and 79 of the 12j lane). A large read
+ * of the user that took more than `LARGE_READ_SLOW_MS` calls it. It spends
+ * at each end of such a read: whole, 408 `body_timeout`, a closed socket,
+ * or past its cap. So the user starts no other large read until that window
+ * ends: its next SSO connection write answers 429 before any byte. A write
+ * that ends within 8 s spends nothing.
+ *
+ * Ruling 75 named a mark of its own, `sso-large-read-stalled:user`, checked
+ * before the counts. The limiter port has only `allow`, which counts, so a
+ * check of such a mark would set it at each start. The spend keeps the
+ * promise with the count that the start checks already make.
+ *
+ * The residual, derived 2026-10-31 (ruling 79). A read that spends nothing
+ * holds the user half for at most 8 s. If each read of an account ends so,
+ * a hold for the hour takes 450 reads (3600 s / 8 s) from 75 accounts. At
+ * 10 password sign-ups per IP per hour, they come from 8 IPs. The last read
+ * of a window has no start left to spend, so it can run to 32 s. So one
+ * account holds the half for at most 5 times 8 s and 32 s, 72 s, in a
+ * window. The least for the hour is 50 accounts with 300 reads, from 5
+ * IPs. Before the spend of slow reads, 19 accounts did it. The limits page
+ * states this.
+ */
+export function spendLargeReads(config: ResolvedConfig, userId: string): Promise<void> {
+  return spendLimit(config, "sso-large-read:user", userId, SSO_LARGE_READ_PER_USER);
+}
+
 /** The life of the binding cookie: the life of the state row. */
 const BIND_MAX_AGE_SECONDS = 600;
 
@@ -87,7 +152,16 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
  * input. Then the manager guard runs for the organization that
  * `organizationOf` names from the input. An id that names no row answers
  * `not_found`. The SSO routes and the SCIM token routes run these steps, so
- * the two cannot drift.
+ * the two cannot drift. A write that a compat package counted before its
+ * own read (`countSsoManageWrite`) is not counted again (ruling 51 Minor 1
+ * of the 12j lane). After the session, a body read counts on the share of
+ * the user (ruling 59). A route whose cap is above the floor also counts
+ * the read on `sso-large-read:user` before any byte (ruling 69). Before
+ * any count, a large read that cannot start (`largeReadCanStart`) answers
+ * 503 `body_busy`, so a client that sends again after `Retry-After` spends
+ * no count of the hour (ruling 72 Minor 1). A large read that takes more
+ * than 8 s spends the rest of the user's large reads, also at a 408
+ * (rulings 75 and 79).
  */
 export async function managedCall<T, V>(
   config: ResolvedConfig,
@@ -103,9 +177,30 @@ export async function managedCall<T, V>(
   };
   const resolved = await sessionFromRequest(config, ctx.request);
   if (!resolved) return json({ error: "unauthorized" }, 401);
+  // After the session, a large read counts on the share of the user, not of the IP (ruling 59).
+  const client = `user:${resolved.user.id}`;
+  bindBodyClient(ctx.request, client);
+  const cap = bodyCapOfRequest(ctx.request);
+  const large = cap > BODY_CAP_FLOOR;
+  // A large read that cannot start answers 503 before any count, so a retry spends none (ruling 72).
+  if (large && !largeReadCanStart(client, cap, ctx.request.headers.get("content-length")))
+    throw new BodyBusy();
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
-  if (!(await limit(config, "sso-manage:user", resolved.user.id, SSO_MANAGE_PER_USER)))
+  const counted = takeSsoManageCounted(ctx.request, resolved.user.id);
+  if (!counted && !(await ssoManageAllowed(config, resolved.user.id)))
     return send(respond(fail("rate_limited")), renewed);
+  // A large read counts at its start. When the compat package counted it before its own read,
+  // core takes the outcome of that count and counts no more (rulings 69 and 72).
+  if (large) {
+    const shim = takeLargeReadCounted(ctx.request, resolved.user.id);
+    if (
+      shim === "refused" ||
+      (shim === null && !(await ssoLargeReadAllowed(config, resolved.user.id)))
+    )
+      return send(respond(fail("rate_limited")), renewed);
+    // A read that takes more than 8 s spends the rest of the user's large reads (rulings 75, 79).
+    bindSlowRead(ctx.request, () => spendLargeReads(config, resolved.user.id));
+  }
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);
   const organizationId = await organizationOf(read.value);
@@ -125,25 +220,34 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 
 /**
  * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
- * cap, a body that is not UTF-8, a NUL or a lone surrogate, or another
- * media type gives an empty form. `completeSaml` refuses an empty form at the step `form`.
+ * cap, a body read before, a body that is not UTF-8, a form of more than
+ * `FORM_PAIRS_MAX` pairs, a NUL or a lone surrogate, or another media type
+ * gives an empty form. `completeSaml` refuses an empty form at the step
+ * `form`. The read holds its bytes against the budget of the large reads,
+ * and past it the router answers `body_busy` (ruling 51 of the 12j lane).
+ * `completeSaml` calls it only after the ACS limit and the SAML check
+ * (ruling 59).
  */
 async function acsForm(request: Request): Promise<URLSearchParams> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return new URLSearchParams();
-  const length = request.headers.get("content-length");
-  const bytes = await readCappedBytes(
-    new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
-    SAML_FORM_MAX,
-    request.signal,
-  );
-  if (bytes === null) return new URLSearchParams();
-  let form: URLSearchParams;
+  let bytes: Uint8Array | null;
   try {
-    form = new URLSearchParams(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    bytes = await readBodyBytes(request, SAML_FORM_MAX);
+  } catch (e) {
+    if (e instanceof BodyTooLarge) return new URLSearchParams();
+    throw e;
+  }
+  if (bytes === null) return new URLSearchParams();
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return new URLSearchParams();
   }
+  // More than FORM_PAIRS_MAX pairs gives an empty form before the parse (ruling 51 of the 12j lane).
+  const form = parseBodyForm(text);
+  if (form === null) return new URLSearchParams();
   // A NUL or a lone surrogate gives an empty form too (plan 12g, holdsBadText).
   return holdsBadText([...form]) ? new URLSearchParams() : form;
 }
@@ -302,7 +406,8 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const r = await completeSaml(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
-          form: await acsForm(ctx.request),
+          // The read runs after the limit and the SAML check of completeSaml (ruling 59 of the 12j lane).
+          readForm: () => acsForm(ctx.request),
           bindToken: readCookie(ctx.request, bindName),
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),

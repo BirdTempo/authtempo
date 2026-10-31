@@ -62,3 +62,18 @@ export function licenseOf(packageJson: string): string | null {
   const pkg = JSON.parse(packageJson) as { license?: unknown };
   return typeof pkg.license === "string" && pkg.license.trim() !== "" ? pkg.license : null;
 }
+
+/**
+ * The URL of the repository from release/repository.json, the one source of
+ * plan 12j (ruling 34: https://github.com/BirdTempo/authtempo). The changelog
+ * component links each package file through it. It throws when the file or
+ * its url is missing, so a page fails closed and links no other repository.
+ */
+export function repositoryUrl(): string {
+  const text = readRepoText("release/repository.json");
+  if (text === null) throw new Error("repo.ts: release/repository.json is missing");
+  const { url } = JSON.parse(text) as { url?: unknown };
+  if (typeof url !== "string" || !url.startsWith("https://github.com/"))
+    throw new Error("repo.ts: release/repository.json has no https://github.com/ url");
+  return url;
+}

@@ -4,6 +4,7 @@ import { hookRefusal } from "../../src/engine/hooks.js";
 import { createRole, deleteRole } from "../../src/engine/roles.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { acsUrl, SAML_FORM_MAX, SAML_REQUEST_TTL_MS } from "../../src/engine/sso/saml-sp.js";
+import { FORM_PAIRS_MAX } from "../../src/http/body-cap.js";
 import { randomToken } from "../../src/primitives/crypto.js";
 import { XML_LIMITS, type XmlElement } from "../../src/saml/xml.js";
 import { createTestIdp, type TestResponseInput } from "../../src/testing/saml-idp.js";
@@ -57,6 +58,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const ADA = "ada@acme.example";
@@ -443,6 +445,53 @@ describe("the SAML ACS (plan 12d Task 8)", () => {
     const over = await samlStart(w, connectionId);
     expect((await post(over, `${formOf(over.relayState)}&`)).status).toBe(302);
     expect(stepsOf(connectionId)).toEqual(["parse", "form"]);
+  });
+
+  it("refuses a form of more than FORM_PAIRS_MAX pairs before URLSearchParams (ruling 51 of the 12j lane)", async () => {
+    const w = samlWorld();
+    const { connectionId } = await orgWithSaml(w);
+    // URLSearchParams records the pairs of each text that it parses.
+    const pairs: number[] = [];
+    const Real = URLSearchParams;
+    vi.stubGlobal(
+      "URLSearchParams",
+      class extends Real {
+        constructor(init?: ConstructorParameters<typeof Real>[0]) {
+          if (typeof init === "string") pairs.push(init.split("&").length);
+          super(init);
+        }
+      },
+    );
+    const post = (bind: string, body: string) =>
+      w.handle(
+        new Request(`https://api.example.com/auth/sso/${connectionId}/acs`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            origin: IDP_ORIGIN,
+            "sec-fetch-site": "cross-site",
+            cookie: `__Secure-tempo_session_oauth=${bind}`,
+          },
+          body,
+        }),
+      );
+    // The probes of the re-review at the cap: keys with no "=" took 5.2 s on
+    // Node, and empty pairs kept 64 to 80 MB. No sign-in comes before the read.
+    for (const unit of ["a&", "=&"]) {
+      const body = unit.repeat(Math.floor(SAML_FORM_MAX / unit.length));
+      const res = await post("none", body);
+      expect([unit, res.status, lastStep(connectionId)]).toEqual([unit, 302, "form"]);
+    }
+    // A form of FORM_PAIRS_MAX pairs passes the form step and fails at the parse.
+    const formOf = (relayState: string, pairs: number) =>
+      `${new URLSearchParams({ SAMLResponse: "PA==", RelayState: relayState })}${"&x".repeat(pairs - 2)}`;
+    const at = await samlStart(w, connectionId);
+    expect((await post(at.bind, formOf(at.relayState, FORM_PAIRS_MAX))).status).toBe(302);
+    expect(lastStep(connectionId)).toBe("parse");
+    const over = await samlStart(w, connectionId);
+    expect((await post(over.bind, formOf(over.relayState, FORM_PAIRS_MAX + 1))).status).toBe(302);
+    expect(lastStep(connectionId)).toBe("form");
+    expect(pairs.filter((n) => n > FORM_PAIRS_MAX)).toEqual([]);
   });
 
   it("refuses a Content-Length over SAML_FORM_MAX before it reads the body", async () => {

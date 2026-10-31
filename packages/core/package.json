@@ -82,22 +82,38 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "authtempo": {
+    "schemaVersion": 15
+  },
   "scripts": {
-    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "build": "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json",
+    "typecheck": "node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run && vitest run --config vitest.answers.config.ts && vitest run --config vitest.events.config.ts",
     "measure": "vitest run --config vitest.measure.config.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",
     "jose": "6.2.12",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
+  },
+  "peerDependencies": {
+    "vitest": "^5.0.3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "ajv": "8.20.0",
     "typescript": "7.0.2",
+    "typescript-api": "npm:typescript@6.0.3",
     "vitest": "5.0.3",
     "xml-crypto": "6.3.3"
   }

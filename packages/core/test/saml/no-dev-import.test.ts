@@ -47,7 +47,8 @@ describe("the SAML dev dependency stays out of the product", () => {
     expect(found).toEqual([]);
 
     // The Global Constraints: xml-crypto is a dev dependency at its exact version, and only
-    // `dist` ships, so the package never carries it.
+    // `dist` ships, so the package never carries it. The changelog ships too (plan 12j
+    // Task 3), and it holds no code.
     const pkg = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
     ) as {
@@ -55,7 +56,7 @@ describe("the SAML dev dependency stays out of the product", () => {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
     };
-    expect(pkg.files).toEqual(["dist"]);
+    expect(pkg.files).toEqual(["dist", "CHANGELOG.md"]);
     expect(pkg.devDependencies["xml-crypto"]).toBe("6.3.3");
     expect(Object.keys(pkg.dependencies)).not.toContain("xml-crypto");
   });

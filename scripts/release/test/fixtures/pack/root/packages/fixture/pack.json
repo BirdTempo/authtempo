@@ -1,0 +1,34 @@
+{
+  "name": "@authtempo/fixture",
+  "version": "0.1.0",
+  "filename": "authtempo-fixture-0.1.0.tgz",
+  "files": [
+    {
+      "path": "CHANGELOG.md"
+    },
+    {
+      "path": "dist/bin/fixture.js"
+    },
+    {
+      "path": "dist/errors.d.ts"
+    },
+    {
+      "path": "dist/errors.js"
+    },
+    {
+      "path": "dist/index.d.ts"
+    },
+    {
+      "path": "dist/index.js"
+    },
+    {
+      "path": "LICENSE"
+    },
+    {
+      "path": "package.json"
+    },
+    {
+      "path": "README.md"
+    }
+  ]
+}

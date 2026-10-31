@@ -3,31 +3,36 @@
 // package's proof does. pnpm 12.8.1 prints the list with
 // `pnpm pack --dry-run --json` (checked 2026-10-12 for packages/import).
 //
-// The pack holds package.json, README.md, and dist/ only. It must never hold
-// a test, a source file, a scaffold of the tests, or local state: a .env, a
-// .dev.vars, a .wrangler folder, or a node_modules folder.
+// The pack holds package.json, README.md, LICENSE, CHANGELOG.md, and dist/
+// only. It must never hold a test, a source file, or a scaffold of the tests.
+// It must never hold local state: a .env, a .dev.vars, a .wrangler folder, or
+// a node_modules folder.
+//
+// LICENSE ships because an MIT package must carry its notice, and pnpm
+// 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,
+// read 2026-10-20). CHANGELOG.md ships from the first release on (plan 12j).
+//
+// The forbidden names are the one list of plan 12j, which check-pack also
+// reads. Node runs the .ts import by type stripping (Node 22.18 or later).
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  ALWAYS_SHIPPED,
+  CHANGELOG_FILE,
+  forbiddenMatch,
+} from "../../../scripts/release/src/lib/pack-rules.ts";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
+const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 /** The files a pack always holds. */
-const FILES = ["package.json", "README.md"];
+const FILES = [...ALWAYS_SHIPPED, CHANGELOG_FILE];
 /** The folders whose every file ships. */
 const PREFIXES = ["dist/"];
-/** Names that never ship, at the start of a path or after any slash. */
-const FORBIDDEN = [
-  ".env",
-  ".dev.vars",
-  ".wrangler/",
-  "node_modules/",
-  ".scaffold/",
-  "test/",
-  "src/",
-];
 const NEEDED = [
   "package.json",
   "README.md",
+  "LICENSE",
   "dist/index.js",
   "dist/main.js",
   "dist/bin/authtempo.js",
@@ -40,8 +45,7 @@ const NEEDED = [
 
 /** Each path that the exports map of package.json names, with no leading "./". */
 function exportTargets() {
-  const { exports } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  const targets = Object.values(exports).flatMap((entry) =>
+  const targets = Object.values(manifest.exports).flatMap((entry) =>
     typeof entry === "string" ? [entry] : Object.values(entry),
   );
   if (targets.length === 0) throw new Error("pack-files: the exports map names no file");
@@ -62,7 +66,7 @@ if (run.status !== 0) {
   paths = JSON.parse(run.stdout).files.map((f) => f.path);
   for (const need of NEEDED) if (!paths.includes(need)) failures.push(`${need} is not in the pack`);
   for (const p of paths) {
-    const forbidden = FORBIDDEN.find((f) => p.startsWith(f) || p.includes(`/${f}`));
+    const forbidden = forbiddenMatch(p, manifest.files);
     if (forbidden) failures.push(`the pack holds ${p}, which matches ${forbidden}`);
     else if (!FILES.includes(p) && !PREFIXES.some((f) => p.startsWith(f)))
       failures.push(`the pack holds ${p}, outside the allowlist`);

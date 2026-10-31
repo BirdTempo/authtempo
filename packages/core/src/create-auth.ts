@@ -3,7 +3,10 @@ import {
   carryDomainRecord,
   type DomainRecordOf,
   domainRecordFor,
+  markLargeReadCounted,
   markRecordVerify,
+  markSsoManageCounted,
+  moveSsoManageCounted,
   setConfigDomainRecord,
   setScimCaller,
 } from "./compat-seams.js";
@@ -305,8 +308,16 @@ import {
   usernameAvailable,
 } from "./engine/username.js";
 import { ERRORS } from "./errors.js";
+import {
+  BodyBusy,
+  bindBodyClient,
+  bindSlowRead,
+  bodyCapOf,
+  largeReadCanStart,
+} from "./http/body-cap.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
+import { spendLargeReads, ssoLargeReadAllowed, ssoManageAllowed } from "./http/routes/sso.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
@@ -1211,6 +1222,59 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
     throw new TypeError("verifyDomainByRecord takes a POST to <basePath>/sso/domains/verify");
   markRecordVerify(request);
   return auth.handle(request);
+}
+
+/**
+ * Counts one SSO manager write of `userId` on core's limit of the user
+ * (`SSO_MANAGE_PER_USER`), for a compat package that reads the body of a
+ * connection write at its large cap before core (ruling 51 Minor 1 of the
+ * 12j lane). So the read comes after the limit, as in core's own manager
+ * routes. Within the limit it marks `request`: the manager route of core
+ * that gets it does not count it again. Past the limit it answers false,
+ * and the package answers 429 with no read. Within the limit it binds the
+ * client of `request` to the user, so the read counts on the share of the
+ * user (ruling 59 of the 12j lane). It also counts the large read of the
+ * package on `sso-large-read:user`, and marks it with the outcome, so core
+ * counts it once (ruling 69, and ruling 72 Low 2 for the outcome). Past
+ * either limit it answers false. Before the counts, it
+ * throws `BodyBusy` when the large read of the user cannot start, so a
+ * retry after `Retry-After` spends no count (ruling 72 Minor 1). A read of
+ * the package that takes more than 8 s spends the rest of the user's large
+ * reads (rulings 75 and 79).
+ * Throws a TypeError for an Auth that `createAuth` did not make.
+ */
+export async function countSsoManageWrite(
+  auth: Auth,
+  request: Request,
+  userId: string,
+): Promise<boolean> {
+  const config = configs.get(auth);
+  if (!config) throw new TypeError("countSsoManageWrite takes an Auth from createAuth");
+  // The package reads at the cap of the connection writes. A read that cannot start counts nothing.
+  const cap = bodyCapOf("POST /sso/connections/create");
+  if (!largeReadCanStart(`user:${userId}`, cap, request.headers.get("content-length")))
+    throw new BodyBusy();
+  if (!(await ssoManageAllowed(config, userId))) return false;
+  markSsoManageCounted(request, userId);
+  // The read of the package is a large read of the user: it counts at its start (ruling 69).
+  // Core takes this outcome and counts no more, a refusal too (ruling 72 Low 2).
+  const allowed = await ssoLargeReadAllowed(config, userId);
+  markLargeReadCounted(request, userId, allowed);
+  if (!allowed) return false;
+  // The compat package reads the body next: it counts on the share of the user (ruling 59).
+  bindBodyClient(request, `user:${userId}`);
+  // A read of the package that takes more than 8 s spends the rest of the user's large reads (ruling 79).
+  bindSlowRead(request, () => spendLargeReads(config, userId));
+  return true;
+}
+
+/**
+ * Moves the mark of `countSsoManageWrite` from `from` to `to`, a request
+ * that the compat package builds and sends to core in place of `from`. A
+ * request with no mark moves nothing, so no call adds a mark.
+ */
+export function moveSsoManageCount(from: Request, to: Request): void {
+  moveSsoManageCounted(from, to);
 }
 
 /** A SCIM caller that a compat package checked itself: one credential of one organization. */

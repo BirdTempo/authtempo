@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import manifestText from "../package.json?raw";
 import {
   DEFAULT_RESERVED_SLUGS,
   LEGACY_VERIFY_HASH,
@@ -10,8 +11,8 @@ import {
   validUserName,
 } from "../src/index.js";
 
-it("exports a version", () => {
-  expect(VERSION).toBe("0.0.0");
+it("exports the version of package.json", () => {
+  expect(VERSION).toBe((JSON.parse(manifestText) as { version: string }).version);
 });
 
 it("exports what the importer (plan 9b) consumes", () => {

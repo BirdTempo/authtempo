@@ -6,6 +6,7 @@ sources:
   - packages/fastify/README.md
   - packages/fastify/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 sidebar:
   hidden: true
 ---
@@ -58,6 +59,7 @@ sidebar:
 - Node keeps a detached promise alive, so a plain server needs no `waitUntil`. On a host that stops the function after the answer, pass `waitUntil` in the options of `authRoutes`. The SMS of a phone code and the flush of the events run under it (ruling 29 of plan 12i).
 - The package takes `fastify` 5.12.5 or a later 5 release as a peer dependency.
 - The routes of core read the body as it came. A form post works with no `@fastify/formbody`.
+- The plugin passes the raw body stream to core, and Fastify buffers none of it. Core reads at most the cap of each route and answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large) with its own headers. Fastify's `bodyLimit` takes no part in the routes of core.
 - The field is `request.authSession`, because `@fastify/session` owns `request.session`.
 - The hook reads no session for a route of core. Core reads and renews the session itself.
 - The hook skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.

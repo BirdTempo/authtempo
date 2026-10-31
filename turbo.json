@@ -15,6 +15,20 @@
   ],
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
+    // The build of core and of mcp also writes src/version.generated.ts from
+    // package.json (scripts/write-version.mjs). With only dist/** here, a cache
+    // hit restored dist and left src at the version of another run, so the
+    // version tests failed on src (ruling 70 of plan 12j, Low 1). A package
+    // task replaces the build task whole, so each line names dependsOn again.
+    // apps/site/test/write-version.test.ts holds these lines to the scripts.
+    "@authtempo/core#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "src/version.generated.ts"]
+    },
+    "@authtempo/mcp#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "src/version.generated.ts"]
+    },
     // The site build reads the root package.json, SECURITY.md, and LICENSE
     // (apps/site/src/data/repo.ts). Without these inputs, a cache hit serves a
     // stale license or a stale empty state (ruling 21 of the plan 11b lane).
@@ -32,6 +46,7 @@
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/SECURITY.md",
         "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/release/repository.json",
         "$TURBO_ROOT$/packages/*/CHANGELOG.md",
         "$TURBO_ROOT$/packages/*/package.json",
         "$TURBO_ROOT$/examples/elysia/src/app.ts",
@@ -102,6 +117,46 @@
     // that build deletes it. So each test waits for its own build too.
     // apps/site/test/clean-dist.test.ts holds this line.
     "test": { "dependsOn": ["^build", "build"], "cache": false },
+    // Core's test scans the request body reads of 13 other packages with
+    // scripts/body-reads.mjs (ruling 68 Low 2 of the 12j lane). Their sources,
+    // their tsconfig files, and the scan are inputs, so a cached run sees a
+    // change there (ruling 73). The test task has no cache today: this keeps
+    // its key right if it gets one. It keeps the rule of every test above.
+    // packages/core/test/body-reads.test.ts holds the list to the scan's list.
+    "@authtempo/core#test": {
+      "dependsOn": ["^build", "build"],
+      "cache": false,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/body-reads.mjs",
+        "$TURBO_ROOT$/packages/hono/src/**",
+        "$TURBO_ROOT$/packages/hono/tsconfig.json",
+        "$TURBO_ROOT$/packages/express/src/**",
+        "$TURBO_ROOT$/packages/express/tsconfig.json",
+        "$TURBO_ROOT$/packages/fastify/src/**",
+        "$TURBO_ROOT$/packages/fastify/tsconfig.json",
+        "$TURBO_ROOT$/packages/next/src/**",
+        "$TURBO_ROOT$/packages/next/tsconfig.json",
+        "$TURBO_ROOT$/packages/astro/src/**",
+        "$TURBO_ROOT$/packages/astro/tsconfig.json",
+        "$TURBO_ROOT$/packages/sveltekit/src/**",
+        "$TURBO_ROOT$/packages/sveltekit/tsconfig.json",
+        "$TURBO_ROOT$/packages/react-router/src/**",
+        "$TURBO_ROOT$/packages/react-router/tsconfig.json",
+        "$TURBO_ROOT$/packages/solid/src/**",
+        "$TURBO_ROOT$/packages/solid/tsconfig.json",
+        "$TURBO_ROOT$/packages/tanstack-start/src/**",
+        "$TURBO_ROOT$/packages/tanstack-start/tsconfig.json",
+        "$TURBO_ROOT$/packages/vue/src/**",
+        "$TURBO_ROOT$/packages/vue/tsconfig.json",
+        "$TURBO_ROOT$/packages/verify/src/**",
+        "$TURBO_ROOT$/packages/verify/tsconfig.json",
+        "$TURBO_ROOT$/packages/handoff/src/**",
+        "$TURBO_ROOT$/packages/handoff/tsconfig.json",
+        "$TURBO_ROOT$/packages/mcp/src/**",
+        "$TURBO_ROOT$/packages/mcp/tsconfig.json"
+      ]
+    },
     // A named measure: a test whose time grows with the machine load, out of
     // the default test gate (fix wave of plan 12i, item 3). Only a run by name
     // starts it: pnpm turbo run measure --filter=<package> --force.

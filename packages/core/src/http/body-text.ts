@@ -15,14 +15,33 @@
  * One helper holds the rule, so the readers cannot drift.
  */
 export function holdsBadText(raw: unknown): boolean {
-  const stack: unknown[] = [raw];
+  // The stack holds only arrays and objects. A string is checked where the
+  // walk meets it, and an array is walked by index (ruling 46 of the 12j
+  // lane): Object.entries made a pair for each of 4 million elements, and
+  // a body of 8 MiB then took more than 512 MB.
+  if (typeof raw !== "object" || raw === null) return badText(raw);
+  const stack: object[] = [raw];
   while (stack.length > 0) {
-    const value = stack.pop();
-    if (typeof value === "string") {
-      if (value.includes("\u0000") || /\p{Cs}/u.test(value)) return true;
-    } else if (typeof value === "object" && value !== null) {
-      for (const [key, item] of Object.entries(value)) stack.push(key, item);
+    const value = stack.pop() as object;
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) if (visit(value[i], stack)) return true;
+    } else {
+      for (const key in value) {
+        if (!Object.hasOwn(value, key)) continue;
+        if (badText(key) || visit((value as Record<string, unknown>)[key], stack)) return true;
+      }
     }
   }
   return false;
+}
+
+/** True for a string with a NUL or a lone surrogate. */
+function badText(value: unknown): boolean {
+  return typeof value === "string" && (value.includes("\u0000") || /\p{Cs}/u.test(value));
+}
+
+/** Checks a string at once, and puts an array or an object on the stack. */
+function visit(value: unknown, stack: object[]): boolean {
+  if (typeof value === "object" && value !== null) stack.push(value);
+  return badText(value);
 }

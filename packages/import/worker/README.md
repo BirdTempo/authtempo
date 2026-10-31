@@ -13,16 +13,16 @@ The Worker writes one of two sets of tables, chosen by the `TARGET` var:
 
 - `core` (the default): core's tables, through core's D1 adapter.
 - `compat`: an app's Better Auth 1.7 tables, through
-  `@authtempo/compat-better-auth` (`betterAuthSchemaStorage`), the same
-  mapping that the app's `betterAuth` serves with Better Auth's default table
-  and column names. It serves the default names only. An app with custom
+  `@authtempo/compat-better-auth` (`betterAuthSchemaStorage`). This is the
+  same mapping that the app's `betterAuth` serves with Better Auth's default
+  table and column names. It serves the default names only. An app with custom
   names (for example snake_case columns or plural tables) has no Worker path
   yet; do not run `compat` on it. The ready check reads only the unique
   index on the account table's (issuer, accountId). A custom name of that
   table or of those columns refuses with `schema_mismatch` before any write
   (`test/d1/import-d1-compat-names.test.ts`). Any other custom name passes
-  the check, and the run stops with a D1 error at the first statement on
-  that table: the failing record writes no row, and the records before it
+  the check. The run then stops with a D1 error at the first statement on
+  that table. The failing record writes no row, and the records before it
   stay. The database must hold the compatibility migrations first (step 2).
 
 Any other value stops the Worker at start, and it writes nothing.
@@ -38,7 +38,7 @@ Run every command from `packages/import/worker`.
    `database_id` to the app's database. To import into the real database, add
    `"remote": true` to the binding now, before the dry run. Without it, every
    step below uses the local copy in `.wrangler/state`, and the dry run
-   reports on that copy, not on the real database.
+   reports on that copy. It does not report on the real database.
 2. Make sure the database has core's schema. A database below core's schema
    version refuses every write with `schema_mismatch`.
    - The real database (`"remote": true`): the app's migrations apply core's
@@ -57,15 +57,15 @@ Run every command from `packages/import/worker`.
      ```
 
    - For `TARGET=compat`, apply the compatibility package's migrations in the
-     app's folder, not core's: `migrations/d1/` of
+     app's folder, not core's. Apply `migrations/d1/` of
      `@authtempo/compat-better-auth` for Better Auth 1.7 tables, or
      `migrations/d1-before-1.7/` for older tables (its README). The Worker
      refuses with `schema_mismatch` until they are applied.
 
 3. Write the input as a dry run. Use the same flags as a Postgres run, with
-   `--target d1-bundle --out <file>` in place of `--target postgres`. A pack holds no
-   `input` folder (it can hold the hashes), and the CLI does not make one, so
-   make it first in an installed copy:
+   `--target d1-bundle --out <file>` in place of `--target postgres`. A pack
+   holds no `input` folder, because it can hold the hashes. The CLI does not
+   make one, so make it first in an installed copy:
 
    ```bash
    mkdir -p input
@@ -120,16 +120,17 @@ Run every command from `packages/import/worker`.
 
 The Worker imports `@authtempo/import`, the package's public entry, and the
 D1 adapter, so it builds the same from this repo and from an installed
-package. It runs with Node.js compatibility off: `proof/bundle-no-node.mjs`
-bundles it with both flags, fails on any `node:` module, and fails unless the
-bundle reads the package's `dist`. `proof/pack-files.mjs` checks the file
-list of a pack against the allowlist in `files` (`dist`, this README,
-`wrangler.jsonc`, `src`, `proof`). It fails on any other path, and on any
-path under `.wrangler/` (the local D1 copy and the dev bundle, both with the
-hashes) or `input/`. The package's `test` script runs both. The proofs run
+package. It runs with Node.js compatibility off. `proof/bundle-no-node.mjs`
+bundles it with both flags, and fails on any `node:` module. It also fails
+unless the bundle reads the package's `dist`. `proof/pack-files.mjs` checks
+the file list of a pack against the allowlist in `files` (`dist`, this
+README, `wrangler.jsonc`, `src`). It fails on any other path. It also fails
+on any path under `.wrangler/` or `input/`: the local D1 copy and the dev
+bundle both hold the hashes. The package's `test` script runs both. The proofs run
 in this repo only: `bundle-no-node.mjs` compares `dist` with `src/`, and
-`pack-files.mjs` packs the package folder, and no pack holds `src/`. They
-ship as the record of what was checked.
+`pack-files.mjs` packs the package folder, and no pack holds `src/`. No
+pack holds the proofs either. The git history is the record of what they
+checked.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.

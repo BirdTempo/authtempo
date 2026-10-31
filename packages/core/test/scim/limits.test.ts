@@ -1,18 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LONG_TEST_MS } from "../helpers.js";
-import { scim, type ScimTokenWorld as World, scimTokenWorld as world } from "./helpers.js";
+import { PATCH_MEMBERS_MAX } from "../../src/engine/scim/limits.js";
+import { PATCH_OPS_MAX, PATCH_VALUE_DEPTH_MAX, parsePatch } from "../../src/engine/scim/patch.js";
+import { readUser, SCIM_DATA_MAX } from "../../src/engine/scim/users.js";
+import {
+  BODY_DEPTH_MAX,
+  BODY_ITEMS_MAX,
+  jsonShapeFits,
+  LARGE_READ_ANON_BUDGET,
+  LARGE_READ_IDLE_MS,
+  LARGE_READ_SHARE,
+  REQUEST_BODY_MAX,
+  readBodyText,
+} from "../../src/http/body-cap.js";
+import { SCIM_BODY_MAX, SCIM_ITEMS_MAX } from "../../src/http/routes/scim.js";
+import type { AuthEvent } from "../../src/observe/port.js";
+import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
+import {
+  SCIM_IP,
+  scim,
+  scimAuth,
+  scimToken,
+  type ScimTokenWorld as World,
+  scimTokenWorld as world,
+} from "./helpers.js";
 
 // The limits of the SCIM server (plan 12d Task 12): the per-token limit of
 // Task 9, the body and operation caps of Tasks 9 and 10, and the member cap
-// of Task 11. The measure of a list with no filter (open point 8) is a named
-// measure, out of this gate: test/measure/scim-list.measure.ts. The Postgres
-// half of the measure is adapter-postgres scim-list-measure.test.ts: core
-// tests have no Postgres.
+// of Task 11. The shape scan of the body (ruling 56 of the 12j lane) runs
+// before the parse. The measure of a list with no filter (open point 8) is
+// a named measure, out of this gate: test/measure/scim-list.measure.ts. The
+// Postgres half of the measure is adapter-postgres scim-list-measure.test.ts:
+// core tests have no Postgres.
 
 const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
 const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const ERROR_URN = "urn:ietf:params:scim:api:messages:2.0:Error";
+const ENTRA_GROUP_URN = "http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group";
 
 beforeEach(() => {
   // A refused request and a kept owner row each write one log line.
@@ -22,6 +46,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const patch = (...ops: Record<string, unknown>[]) => ({ schemas: [PATCH_URN], Operations: ops });
@@ -34,6 +59,78 @@ async function status(w: World, method: string, path: string, body?: unknown) {
     body: (text === "" ? null : JSON.parse(text)) as Record<string, unknown>,
   };
 }
+
+/** The items of a JSON text: each `[`, `{`, and `,` outside a string, as the shape scan counts them. */
+function itemsOf(text: string): number {
+  let items = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === "[" || c === "{" || c === ",") items++;
+  }
+  return items;
+}
+
+/** A member in the full form of RFC 7643 section 4.2: `value`, `display`, `$ref`, and `type`. */
+const fullMember = (value: string, i: number) => ({
+  value,
+  display: `m${i}@acme.example`,
+  $ref: `${BASE_URL}/auth/scim/v2/Users/${value}`,
+  type: "User",
+});
+
+/**
+ * A stream of `bytes` spaces that sends `before` bytes in chunks of 64 KiB,
+ * then waits until `open` runs. `atGate` settles when it waits.
+ */
+function stalledBody(bytes: number, before: number) {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let reached = () => {};
+  const atGate = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (sent >= bytes) return c.close();
+      if (sent >= before) {
+        reached();
+        await gate;
+      }
+      const n = Math.min(65_536, (sent < before ? before : bytes) - sent);
+      c.enqueue(new Uint8Array(n).fill(0x20));
+      sent += n;
+    },
+  });
+  return { stream, open, atGate };
+}
+
+/** A SCIM world whose events land in `events()`, with the raw IP (ruling 72 Low 3 of the 12j lane). */
+async function observedWorld() {
+  const batches: AuthEvent[][] = [];
+  const w = await scimAuth({
+    observe: { sink: { write: (b) => void batches.push([...b]) }, include: { ip: "raw" } },
+  });
+  const { token } = await scimToken(w);
+  const events = async () => {
+    await w.config.observe.flush();
+    return batches.flat();
+  };
+  return { w: { ...w, token }, events };
+}
+
+/** The request events of `POST /scim/v2/Users`: the status, the code, and the IP of each. */
+const userWrites = (events: AuthEvent[]) =>
+  events
+    .filter((e) => e.name === "request" && e.route === "POST /scim/v2/Users")
+    .map((e) => ({ status: e.status, code: e.code, ip: e.ip }));
 
 /** A SCIM User through the route: its id. */
 async function user(w: World, local: string): Promise<string> {
@@ -104,12 +201,13 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
         displayName: "Eng",
       });
       const gid = String(group.body.id);
+      // Each member in the full form of RFC 7643: 1000 of them pass the shape scan (ruling 56).
       const add = (values: string[]) =>
         status(
           w,
           "PATCH",
           `/Groups/${gid}`,
-          patch({ op: "add", path: "members", value: values.map((value) => ({ value })) }),
+          patch({ op: "add", path: "members", value: values.map(fullMember) }),
         );
       const past = await add(users);
       expect([past.status, past.body.scimType]).toEqual([400, "invalidValue"]);
@@ -118,4 +216,206 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
     },
     LONG_TEST_MS,
   );
+
+  it("answers 408 in the SCIM error form to a stalled write, and frees its read for the next write", async () => {
+    const w = await world();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = stalledBody(SCIM_BODY_MAX, 65_536);
+    let answered: Response | null = null;
+    void w
+      .handle(
+        new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/scim+json",
+            authorization: `Bearer ${w.token}`,
+            "cf-connecting-ip": SCIM_IP,
+          },
+          body: stalled.stream,
+          duplex: "half",
+        } as RequestInit),
+      )
+      .then((res) => {
+        answered = res;
+      });
+    await stalled.atGate;
+    await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS - 1);
+    expect(answered).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    const res = answered as Response | null;
+    expect(res?.status).toBe(408);
+    expect(res?.headers.get("content-type")).toBe("application/scim+json");
+    expect(res?.headers.get("retry-after")).toBeNull();
+    expect(await res?.json()).toEqual({
+      schemas: [ERROR_URN],
+      status: "408",
+      detail: "the body did not arrive in time",
+    });
+    stalled.open();
+    vi.useRealTimers();
+    // The stalled read freed its bytes: the next write of the same IP reads whole.
+    const next = await status(w, "POST", "/Users", {
+      schemas: [USER_URN],
+      userName: "next@acme.example",
+    });
+    expect(next.status).toBe(201);
+  });
+
+  it("gives the request event of a SCIM 503 the code body_busy (ruling 72 Low 3)", async () => {
+    const { w, events } = await observedWorld();
+    // Other IPs hold the anonymous half, where a SCIM read counts, all but 32 bytes of it.
+    const holds = Array.from({ length: LARGE_READ_ANON_BUDGET / LARGE_READ_SHARE }, (_, i) => {
+      const body = stalledBody(LARGE_READ_SHARE, LARGE_READ_SHARE - 16);
+      const request = new Request(`${BASE_URL}/x`, {
+        method: "POST",
+        body: body.stream,
+        duplex: "half",
+      } as RequestInit);
+      const read = readBodyText(request, REQUEST_BODY_MAX, `ip:198.51.100.${i + 1}`);
+      read.catch(() => {});
+      return { body, read };
+    });
+    try {
+      await Promise.all(holds.map((h) => h.body.atGate));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const res = await scim(w, w.token, "POST", "/Users", {
+        schemas: [USER_URN],
+        userName: "busy@acme.example",
+      });
+      expect([res.status, res.headers.get("retry-after")]).toEqual([503, "1"]);
+      expect(res.headers.get("content-type")).toBe("application/scim+json");
+    } finally {
+      for (const h of holds) h.body.open();
+    }
+    for (const h of holds) expect(await h.read).toHaveLength(LARGE_READ_SHARE);
+    expect(userWrites(await events())).toEqual([{ status: 503, code: "body_busy", ip: SCIM_IP }]);
+  });
+
+  it("gives the request event of a SCIM 413 the code body_too_large (ruling 73)", async () => {
+    const { w, events } = await observedWorld();
+    const res = await scim(w, w.token, "POST", "/Users", `{}${" ".repeat(SCIM_BODY_MAX - 1)}`);
+    expect([res.status, res.headers.get("content-type")]).toEqual([413, "application/scim+json"]);
+    expect(userWrites(await events())).toEqual([
+      { status: 413, code: "body_too_large", ip: SCIM_IP },
+    ]);
+  });
+
+  it("gives the request event of a SCIM 408 the code body_timeout (ruling 73)", async () => {
+    const { w, events } = await observedWorld();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stalled = stalledBody(SCIM_BODY_MAX, 65_536);
+    const answer = w.handle(
+      new Request(`${BASE_URL}/auth/scim/v2/Users`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/scim+json",
+          authorization: `Bearer ${w.token}`,
+          "cf-connecting-ip": SCIM_IP,
+        },
+        body: stalled.stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    await stalled.atGate;
+    await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS);
+    const res = await answer;
+    stalled.open();
+    vi.useRealTimers();
+    expect([res.status, res.headers.get("content-type")]).toEqual([408, "application/scim+json"]);
+    expect(userWrites(await events())).toEqual([
+      { status: 408, code: "body_timeout", ip: SCIM_IP },
+    ]);
+  });
+
+  it("answers 400 invalidSyntax before JSON.parse to a body past the depth or the item limit", async () => {
+    const w = await world();
+    const body = (name: string, x: string) =>
+      `{"schemas":["${USER_URN}"],"userName":"${name}@acme.example","x":${x}}`;
+    // `x` nests depth - 1 levels in the body object, so the body nests `depth` levels.
+    const deep = (name: string, depth: number) =>
+      body(name, `${"[".repeat(depth - 1)}${"]".repeat(depth - 1)}`);
+    // The body object, schemas, its two commas, and `x` are 5 items; each more zero adds one.
+    const wide = (name: string, items: number) => body(name, `[${"0,".repeat(items - 5)}0]`);
+    expect(itemsOf(wide("w", SCIM_ITEMS_MAX))).toBe(SCIM_ITEMS_MAX);
+    expect(jsonShapeFits(deep("d", BODY_DEPTH_MAX), BODY_DEPTH_MAX - 1)).toBe(false);
+    const parse = vi.spyOn(JSON, "parse");
+    // At each limit the body reads, and core ignores the attribute `x`.
+    expect((await status(w, "POST", "/Users", deep("deep", BODY_DEPTH_MAX))).status).toBe(201);
+    expect((await status(w, "POST", "/Users", wide("wide", SCIM_ITEMS_MAX))).status).toBe(201);
+    for (const text of [deep("deeper", BODY_DEPTH_MAX + 1), wide("wider", SCIM_ITEMS_MAX + 1)]) {
+      const res = await scim(w, w.token, "POST", "/Users", text);
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toBe("application/scim+json");
+      expect(await res.json()).toEqual({
+        schemas: [ERROR_URN],
+        status: "400",
+        scimType: "invalidSyntax",
+        detail: `the body nests deeper than ${BODY_DEPTH_MAX} or holds more than ${SCIM_ITEMS_MAX} items`,
+      });
+      expect(parse.mock.calls.filter(([t]) => t === text)).toEqual([]);
+    }
+  });
+
+  it("derives SCIM_ITEMS_MAX as 8 times the next power of two above the most items of a valid body", async () => {
+    // A static import of groups.js first meets an import cycle of the engine; the helpers load it in order.
+    const { readGroup } = await import("../../src/engine/scim/groups.js");
+    // A Group PATCH of PATCH_OPS_MAX operations that name PATCH_MEMBERS_MAX members in the full form.
+    const per = PATCH_MEMBERS_MAX / PATCH_OPS_MAX;
+    const id = (i: number) => `u${String(i).padStart(4, "0")}`;
+    const members = (from: number, n: number) =>
+      Array.from({ length: n }, (_, k) => fullMember(id(from + k), from + k));
+    const most = patch(
+      ...Array.from({ length: PATCH_OPS_MAX }, (_, o) => ({
+        op: "add",
+        path: "members",
+        value: members(o * per, per),
+      })),
+    );
+    expect(parsePatch(most, "Group")).toMatchObject({ ok: true });
+    // The PUT of a Group with the same members, as a directory sends it with id and meta.
+    const put = {
+      schemas: [GROUP_URN, ENTRA_GROUP_URN],
+      id: "g",
+      externalId: "e",
+      displayName: "Eng",
+      members: members(0, PATCH_MEMBERS_MAX),
+      meta: { resourceType: "Group", created: "c", lastModified: "l", location: "u", version: "v" },
+    };
+    expect(readGroup(put)).toMatchObject({ ok: true });
+    // A User at SCIM_DATA_MAX: `emails` items `{"type":""}`, the most that readUser takes.
+    const user = (n: number) => ({
+      schemas: [USER_URN],
+      userName: "u@acme.example",
+      emails: Array.from({ length: n }, () => ({ type: "" })),
+    });
+    let n = 0;
+    while (readUser(user(n + 1)).ok) n++;
+    expect(readUser(user(n + 1))).toMatchObject({
+      ok: false,
+      answer: {
+        status: 400,
+        body: { detail: `the attributes take more than ${SCIM_DATA_MAX} bytes` },
+      },
+    });
+    const items = [most, put, user(n)].map((b) => itemsOf(JSON.stringify(b)));
+    console.log(`scim-body: items PATCH ${items[0]} PUT ${items[1]} User ${items[2]}`);
+    expect(items).toEqual([5403, 5013, 2732]);
+    // The limit of a route body would refuse the PATCH and the PUT.
+    expect(Math.min(items[0] ?? 0, items[1] ?? 0)).toBeGreaterThan(BODY_ITEMS_MAX);
+    expect(SCIM_ITEMS_MAX).toBe(8 * 2 ** Math.ceil(Math.log2(items[0] ?? 0)));
+    expect(jsonShapeFits(JSON.stringify(most), BODY_DEPTH_MAX, SCIM_ITEMS_MAX)).toBe(true);
+    // The deepest valid body: a value of PATCH_VALUE_DEPTH_MAX levels in an operation, 3 levels deep.
+    const value = { members: [{ value: id(0) }] };
+    const deepest = JSON.stringify(patch({ op: "add", value }));
+    expect(parsePatch(JSON.parse(deepest), "Group")).toMatchObject({ ok: true });
+    expect(
+      parsePatch(patch({ op: "add", value: { members: [{ value: [id(0)] }] } }), "Group"),
+    ).toMatchObject({
+      ok: false,
+      scimType: "invalidValue",
+    });
+    expect(jsonShapeFits(deepest, 3 + PATCH_VALUE_DEPTH_MAX)).toBe(true);
+    expect(jsonShapeFits(deepest, 2 + PATCH_VALUE_DEPTH_MAX)).toBe(false);
+    expect(3 + PATCH_VALUE_DEPTH_MAX).toBeLessThanOrEqual(BODY_DEPTH_MAX);
+  });
 });

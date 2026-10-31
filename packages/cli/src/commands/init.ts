@@ -6,7 +6,14 @@ import { Stop, UsageError } from "../errors.js";
 import { INIT_HELP } from "../help/init.js";
 import type { InitJson } from "../json.js";
 import { printJson, sayer } from "../output.js";
-import { readTemplates, STACK_INFO, STACKS, UNPUBLISHED, UNPUBLISHED_NOTE } from "../templates.js";
+import {
+  nextSteps,
+  readTemplates,
+  STACK_INFO,
+  STACKS,
+  UNPUBLISHED,
+  UNPUBLISHED_NOTE,
+} from "../templates.js";
 
 const OPTIONS = { ...COMMON_OPTIONS, stack: { type: "string" } } as const;
 
@@ -58,8 +65,7 @@ export const initCommand: Command = {
     }
     const next = [
       ...(given === "." ? [] : [`cd ${shellPath(given)}`]),
-      "pnpm install",
-      ...STACK_INFO[stack].next,
+      ...nextSteps(stack, !UNPUBLISHED),
     ];
     say("");
     say("Next:");

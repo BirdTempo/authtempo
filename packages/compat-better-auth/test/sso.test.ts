@@ -1,3 +1,4 @@
+import { createMemoryLimiter } from "@authtempo/core";
 import { createTestIdp } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthClient } from "../src/client/create-auth-client.js";
@@ -255,7 +256,10 @@ describe("the sso plugin (plan 12d Task 14)", () => {
   });
 
   it("refuses each provider field with no core feature at the register call", async () => {
-    const app = await owned();
+    // Each register counts on core's limit of the user before its read (ruling 51 Minor 1
+    // of the 12j lane), and this test makes more calls than the 30 of the limit.
+    // body-cap.test.ts tests the limit; here a limiter that allows each call.
+    const app = await owned(undefined, { ...memory(), limiter: { allow: async () => true } });
     const rows: [Record<string, unknown>, string][] = [
       [
         { oidcConfig: { ...OIDC, tokenEndpointAuthentication: "private_key_jwt" } },
@@ -849,13 +853,20 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     expect((await domainsOf(app))[0]?.verified).toBe(false);
   });
   it("refuses each update field and each sign-in key with no core feature", async () => {
-    const app = await owned();
+    // The register and the 6 updates are 7 large reads of the owner, one past core's limit of
+    // an hour (ruling 69 of the 12j lane). So the limiter's clock moves an hour after the register.
+    let later = 0;
+    const app = await owned(undefined, {
+      ...memory(),
+      limiter: createMemoryLimiter({ now: () => new Date(Date.now() + later) }),
+    });
     await app.register({
       providerId: "acme",
       issuer: "https://idp.acme.example",
       domain: "acme.example",
       oidcConfig: OIDC,
     });
+    later = 3_600_000;
     const updates: [Record<string, unknown>, number, string][] = [
       [{ samlConfig: {} }, 501, "samlConfig"],
       [{ oidcConfig: { pkce: false } }, 501, "oidcConfig.pkce"],

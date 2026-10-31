@@ -25,6 +25,7 @@ import {
   SESSIONS_END_ALL_JSON_KEYS,
   SESSIONS_END_JSON_KEYS,
   STOP_JSON,
+  UPGRADE_JSON_KEYS,
   USER_CREATE_JSON_KEYS,
   USER_DELETE_JSON_KEYS,
   USER_JSON_KEYS,
@@ -34,7 +35,15 @@ import {
 } from "../src/json.js";
 import { COMMANDS } from "../src/main.js";
 import { guarded, printJson } from "../src/output.js";
-import { assertFreshBuild, type BinRun, linesOf, PKG, runBin } from "./support/bin.js";
+import {
+  assertFreshBuild,
+  type BinRun,
+  cliAt,
+  linesOf,
+  PKG,
+  runBin,
+  VERSION,
+} from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
 import { freshDatabase } from "./support/pg.js";
 
@@ -340,13 +349,20 @@ describe("mcp --json", () => {
   });
 
   it("prints the stop document on a thrown stop: a server that is not built", () => {
-    const dir = fresh();
-    const r = runBin(["mcp", dir, "--cursor", "--json"], {
-      env: { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") },
-    });
-    const doc = stopDoc(r, MCP_JSON_KEYS, false);
-    expect(doc).toMatchObject({ editor: "", file: null, entry: null });
-    expect(doc.stopped).toContain("build @authtempo/mcp first");
+    // The stop exists only before publication, so the probe runs on a built copy at 0.0.0.
+    const unpublished = cliAt("0.0.0");
+    try {
+      const dir = fresh();
+      const r = runBin(["mcp", dir, "--cursor", "--json"], {
+        env: { AUTHTEMPO_MCP_BIN: join(dir, "missing.js") },
+        bin: unpublished.bin,
+      });
+      const doc = stopDoc(r, MCP_JSON_KEYS, false);
+      expect(doc).toMatchObject({ editor: "", file: null, entry: null });
+      expect(doc.stopped).toContain("build @authtempo/mcp first");
+    } finally {
+      unpublished.remove();
+    }
   });
 });
 
@@ -455,7 +471,7 @@ describe("authtempo info", () => {
 
     const done = doneDoc(runBin(["info", "--json"]), INFO_JSON_KEYS, 0);
     expect(done.unread).toEqual([]);
-    expect(done.cli).toBe("0.0.0");
+    expect(done.cli).toBe(VERSION);
   });
 });
 
@@ -543,6 +559,7 @@ describe("STOP_JSON", () => {
       "audit list": AUDIT_LIST_JSON_KEYS,
       "create-admin": CREATE_ADMIN_JSON_KEYS,
       generate: GENERATE_JSON_KEYS,
+      upgrade: UPGRADE_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
       [
@@ -574,6 +591,7 @@ describe("STOP_JSON", () => {
         "audit list",
         "create-admin",
         "generate",
+        "upgrade",
       ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {

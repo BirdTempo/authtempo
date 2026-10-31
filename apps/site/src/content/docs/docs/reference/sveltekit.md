@@ -7,6 +7,7 @@ sources:
   - packages/sveltekit/src/index.ts
   - packages/sveltekit/src/store.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 sidebar:
   hidden: true
 ---
@@ -72,6 +73,13 @@ sidebar:
 - A path that SvelteKit decodes to a path of core, such as "/%61uth/x", goes to core. It never runs a page.
 - Core matches its routes on the raw path. So core answers such a path as a path that it does not have: 404, or its own answer to an OPTIONS.
 - After the sliding refresh, the page's answer carries the renewed session cookie.
+
+## The body limit of the Node adapter
+
+- `@sveltejs/adapter-node` 6.0.0 limits a request body to `BODY_SIZE_LIMIT`. The default is `512K`, 524288 bytes (read 2026-10-30). The hook still runs: with `@sveltejs/kit` 3.0.1, the body stream fails only when a reader passes the limit.
+- Three bodies of core can pass 512K: an SSO connection write, an ACS form, and a SCIM body of up to 1 MiB.
+- Core reads such a body until its stream fails, and refuses the valid body as a body past its cap. An SSO connection write of 600000 bytes got the [`body_too_large`](/docs/reference/errors/#body_too_large) of core at `512K` (measured 2026-10-31). Then an SSO setup, a SAML sign-in, or a SCIM write fails.
+- Set `BODY_SIZE_LIMIT` to `8M` in the environment of the server. That is 8 MiB, the largest cap of core. Core then reads at most the cap of each route.
 
 ## Cross-site form posts
 

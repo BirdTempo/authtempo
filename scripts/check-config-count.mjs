@@ -37,15 +37,19 @@ import { execFileSync } from "node:child_process";
 // Counted again 2026-10-25: 54. The fix wave of plan 12i adds
 // packages/adapter-d1/vitest.measure.config.ts (55, item 3), then
 // packages/core/vitest.measure.config.ts (56, ruling 48).
+// Plan 12j adds scripts/release/vitest.config.ts (57, Task 2). The pattern below
+// gains "scripts", because the package lives under scripts/release.
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 56;
+const MINIMUM = 57;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",
 });
 const found = listed
   .split("\n")
-  .filter((line) => /\/(packages|examples|apps)\/.+\/vitest[^/]*\.config\.m?ts$/.test(line)).length;
+  .filter((line) =>
+    /\/(packages|examples|apps|scripts)\/.+\/vitest[^/]*\.config\.m?ts$/.test(line),
+  ).length;
 
 if (found < MINIMUM) {
   console.error(

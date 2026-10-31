@@ -1,0 +1,16 @@
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "username" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "displayUsername" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phoneNumber" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phoneNumberVerified" boolean;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "isAnonymous" boolean DEFAULT false;
+UPDATE "user" SET "isAnonymous" = false WHERE "isAnonymous" IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user__username ON "user" ("username");
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user__phone_number ON "user" ("phoneNumber");
+CREATE INDEX IF NOT EXISTS ix_user__is_anonymous__created_at ON "user" ("isAnonymous", "createdAt");
+ALTER TABLE "passkey" ADD COLUMN "taDiscoverable" boolean;
+ALTER TABLE "passkey" ADD COLUMN "taPrf" boolean NOT NULL DEFAULT false;
+ALTER TABLE "passkey" ADD COLUMN "taLargeBlob" boolean NOT NULL DEFAULT false;
+ALTER TABLE ta_oauth_session_client ADD COLUMN issuer text;
+ALTER TABLE ta_oauth_logout ADD COLUMN issuer text;
+UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '12' WHERE key = 'compat_better_auth';

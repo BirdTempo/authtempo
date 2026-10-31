@@ -1,11 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { scimRequestAs, verifyDomainByRecord, withDomainRecord } from "../../src/compat.js";
+import {
+  countSsoManageWrite,
+  moveSsoManageCount,
+  scimRequestAs,
+  verifyDomainByRecord,
+  withDomainRecord,
+} from "../../src/compat.js";
 import { carryDomainRecord, type DomainRecordOf, domainRecordFor } from "../../src/compat-seams.js";
 import { createAuth } from "../../src/create-auth.js";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
 import { createRouter, type Route } from "../../src/http/router.js";
+import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../../src/http/routes/sso.js";
+import { createMemoryLimiter } from "../../src/limiter/memory.js";
+import type { AuthEvent } from "../../src/observe/port.js";
+import { systemClock } from "../../src/primitives/clock.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { BASE_URL, get } from "../helpers.js";
 import { fakeDns, SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
@@ -279,5 +289,110 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
       { ...caller, scopes: ["scim.users.admin"] as never },
     ])
       expect(() => scimRequestAs(plain, scim, bad), JSON.stringify(bad)).toThrow(TypeError);
+    await expect(countSsoManageWrite({ ...plain }, scim, "u")).rejects.toThrow(TypeError);
+  });
+
+  it("counts a manager write that the compat package counted once, for its own user only (ruling 51 Minor 1)", async () => {
+    const sent: string[] = [];
+    const limiter = createMemoryLimiter(systemClock);
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      limiter,
+      mail: { send: async (m) => void sent.push(m.text) },
+      organizations: {},
+      sso: { oidc: true, dns: [fakeDns("a", {})] },
+    });
+    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
+    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "");
+    const session = await auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+    if (!session.ok || !("token" in session.value)) throw new Error("no session");
+    const { token, user } = session.value as { token: string; user: { id: string } };
+    // A manager write with no body to act on: core reads it and answers 400.
+    const writeTo = (path: string) =>
+      new Request(`${BASE_URL}/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: "{}",
+      });
+    const write = () => writeTo("/sso/connections/update");
+    // Domain writes at the floor leave as many manager writes as large reads (ruling 69), so a
+    // second count on either limit fails below.
+    for (let i = 0; i < SSO_MANAGE_PER_USER.max - SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await auth.handle(writeTo("/sso/domains/update"))).status).toBe(400);
+    // Half the limit: a count of the package, then core's route, which counts no more.
+    const half = SSO_LARGE_READ_PER_USER.max / 2;
+    for (let i = 0; i < half; i++) {
+      const r = write();
+      expect(await countSsoManageWrite(auth, r, user.id)).toBe(true);
+      // The last write goes to core on a new request, as the shim's core call does: both marks move.
+      const to = i === half - 1 ? write() : r;
+      if (to !== r) moveSsoManageCount(r, to);
+      expect((await auth.handle(to)).status).toBe(400);
+    }
+    // A mark of another user counts again, and a move of no mark adds none.
+    const other = write();
+    expect(await countSsoManageWrite(auth, other, "someone-else")).toBe(true);
+    const moved = write();
+    moveSsoManageCount(write(), moved);
+    for (const r of [other, moved]) expect((await auth.handle(r)).status).toBe(400);
+    // So far on each limit: 3 writes, 1 count of the other user, and 2 counts of the user.
+    let left = 0;
+    while ((await auth.handle(write())).status === 400) left++;
+    expect(left).toBe(half - 2);
+    expect(await countSsoManageWrite(auth, write(), user.id)).toBe(false);
+    // The package counted each of its large reads (ruling 69): the large-read key of the user is full.
+    expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
+      false,
+    );
+  });
+
+  it("takes a refusal of the package's large-read count, and gives one limit.hit (ruling 72 Low 2)", async () => {
+    const sent: string[] = [];
+    const batches: AuthEvent[][] = [];
+    const limiter = createMemoryLimiter(systemClock);
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      limiter,
+      mail: { send: async (m) => void sent.push(m.text) },
+      organizations: {},
+      sso: { oidc: true, dns: [fakeDns("a", {})] },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
+    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
+    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "");
+    const session = await auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+    if (!session.ok || !("token" in session.value)) throw new Error("no session");
+    const { token, user } = session.value as { token: string; user: { id: string } };
+    const write = () =>
+      new Request(`${BASE_URL}/auth/sso/connections/update`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: "{}",
+      });
+    // The user spent the large reads of this hour.
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
+        true,
+      );
+    // The package counts the write, and the limit of the user refuses it.
+    const r = write();
+    expect(await countSsoManageWrite(auth, r, user.id)).toBe(false);
+    // The shim passes such a write to core: core answers 429 and does not count it again.
+    const res = await auth.handle(r);
+    expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
+    await auth.observe.flush();
+    // One limit.hit: the count of the package. Core did not count the write a second time.
+    expect(
+      batches
+        .flat()
+        .filter((e) => e.name === "limit.hit")
+        .map((e) => e.family),
+    ).toEqual(["sso-large-read:user"]);
   });
 });

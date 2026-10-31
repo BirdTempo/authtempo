@@ -5,12 +5,28 @@ import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
 import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
+import {
+  BODY_BUSY_RETRY_SECONDS,
+  BodyBusy,
+  BodyTimeout,
+  BodyTooLarge,
+  bindBodyClient,
+  bindBodyRoute,
+  ipBodyClient,
+} from "./body-cap.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { anonymousRefusal, impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
-import { HOST_CODE, type RouteKey, type RouterCode } from "./route-list.js";
+import {
+  BODY_CODE,
+  BUSY_CODE,
+  HOST_CODE,
+  type RouteKey,
+  type RouterCode,
+  TIMEOUT_CODE,
+} from "./route-list.js";
 import { withSessionBag } from "./session-answer.js";
 
 export interface RouteContext {
@@ -128,7 +144,9 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
 }
 
 /** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
-function routerError(code: RouterCode | typeof HOST_CODE): Response {
+function routerError(
+  code: RouterCode | typeof HOST_CODE | typeof BODY_CODE | typeof BUSY_CODE | typeof TIMEOUT_CODE,
+): Response {
   return json({ error: code }, ERRORS[code]);
 }
 
@@ -501,7 +519,10 @@ export function createRouter(
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
     // of the bag write, of the cookie move, of the CORS write, or of the
-    // trace header answers `internal` with one log line. The bag write of
+    // trace header answers `internal` with one log line. A `BodyTooLarge` of a
+    // body read answers 413 `body_too_large` (rulings 43 and 46 of the 12j lane),
+    // and a `BodyBusy` 503 `body_busy` with `Retry-After` (ruling 51). A
+    // `BodyTimeout` answers 408 `body_timeout` (ruling 59). The bag write of
     // multi-session (plan 12i Task 11) runs after every handler, so no
     // sign-in route can skip it.
     try {
@@ -516,6 +537,22 @@ export function createRouter(
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
+      // A body past the cap of its route is the client's fault, not an error of core: 413, no log line.
+      if (e instanceof BodyTooLarge) {
+        const res = routerError(BODY_CODE);
+        return withTrace(trusted ? cors(res, origin) : res, traceId);
+      }
+      // The large reads of the isolate hold their budget: a load of the moment, not an error of core.
+      if (e instanceof BodyBusy) {
+        const res = routerError(BUSY_CODE);
+        res.headers.set("retry-after", String(BODY_BUSY_RETRY_SECONDS));
+        return withTrace(trusted ? cors(res, origin) : res, traceId);
+      }
+      // A client that stalled its body past a deadline: its fault, not an error of core.
+      if (e instanceof BodyTimeout) {
+        const res = routerError(TIMEOUT_CODE);
+        return withTrace(trusted ? cors(res, origin) : res, traceId);
+      }
       // The route key, never the raw path: a client chooses the path (ruling 1
       // point 3 of plan 12h). The app sets the error name, so the kind filters it (plan 9c).
       scoped.observe.emit({
@@ -580,11 +617,16 @@ export function createRouter(
     // The anonymous step (plan 12i Task 6): beside the impersonation step, in its form.
     const anonymous = match.route.key && (await anonymousRefusal(scoped, request, match.route.key));
     if (anonymous) return anonymous;
+    // A body read of the handler takes the cap of this route (ruling 46 of the 12j lane).
+    bindBodyRoute(request, match.route.key);
+    // A large read counts on the share of its client: the IP until a session names the user (ruling 59).
+    const ip = config.clientIp(request);
+    bindBodyClient(request, ipBodyClient(ip));
     return match.route.handler({
       request,
       url,
       config: scoped,
-      ip: config.clientIp(request),
+      ip,
       now: config.clock.now(),
       params: match.params,
       waitUntil,

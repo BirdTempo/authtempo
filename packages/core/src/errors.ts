@@ -130,6 +130,15 @@ export const ERRORS = {
   phone_taken: 409,
   // plan 12i Task 6: a route of ANONYMOUS_REFUSED and an anonymous session (spec 32 item 8)
   anonymous_refused: 403,
+  // 12j rulings 43 and 46: a request body past the cap of its route (bodyCapOf). The router
+  // answers it, and no parse runs.
+  body_too_large: 413,
+  // 12j ruling 51 Minor 2: a read above the floor past LARGE_READ_BUDGET of the isolate.
+  // The router answers it with Retry-After, and no parse runs.
+  body_busy: 503,
+  // 12j ruling 59 Major 1: a read above the floor that stalled past LARGE_READ_IDLE_MS
+  // or ran past largeReadDeadlineMs. The router answers it, and no parse runs.
+  body_timeout: 408,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

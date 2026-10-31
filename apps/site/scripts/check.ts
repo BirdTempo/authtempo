@@ -2,7 +2,7 @@
 // `astro build`, so every check that reads dist reads a build that is newer
 // than the change. Each check prints one summary line. The run fails when one
 // check fails, and the last line counts the checks that passed.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
@@ -14,19 +14,33 @@ import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtemp
 import { FIELD_KINDS } from "@authtempo/core/redact";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
+import { readChangelogFiles } from "../src/data/changelogs.ts";
 import { COMPARE_ROWS, HOSTED_MODELS, otherNames } from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
 import { REPO_ROOT } from "../src/data/repo.ts";
+import { SITE } from "../src/data/site.ts";
+import {
+  CHANGELOG_EMPTY,
+  PRE_RELEASE_EXEMPT,
+  PRE_RELEASE_PATTERN,
+  PRE_RELEASE_SENTENCES,
+  REGISTRY_INSTALL,
+  RESOURCES_EMPTY,
+  UNPUBLISHED_PAGES,
+} from "../src/data/unpublished.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
+import { checkChangelog } from "./check-changelog.ts";
 import { checkClaims } from "./check-claims.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkCompare } from "./check-compare.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkContrast } from "./check-contrast.ts";
 import { checkCsp } from "./check-csp.ts";
+import { checkDependenciesPage, type DependencyRow } from "./check-dependencies-page.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
+import { checkDeprecationsPage, type RegisterEntry } from "./check-deprecations-page.ts";
 import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkEvents } from "./check-events.ts";
@@ -56,14 +70,19 @@ import {
   PERFORMANCE_PAGE,
   type PerformanceData,
 } from "./check-performance.ts";
+import { checkPolicyPages, readPolicyPagesInput } from "./check-policy-pages.ts";
+import { checkPreRelease } from "./check-pre-release.ts";
+import { checkResources } from "./check-resources.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
+import { checkSecurityPolicy, readPolicyInput } from "./check-security-policy.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSitePages, MINIMUM_ENTRIES } from "./check-site-pages.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
 import { checkTokens } from "./check-tokens.ts";
+import { checkUnpublished } from "./check-unpublished.ts";
 import { checkWeight } from "./check-weight.ts";
 import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { helpRuns } from "./lib/cli-help.ts";
@@ -121,6 +140,49 @@ function distHeaders(): string | null {
 function distBytes(path: string): number | null {
   const abs = `${DIST}${decodeURIComponent(path).slice(1)}`;
   return existsSync(abs) && statSync(abs).isFile() ? statSync(abs).size : null;
+}
+
+/** A JSON file of the repository, or null when it is missing or not JSON. */
+function repoJson(path: string): unknown {
+  try {
+    const text = readRepoFile(path);
+    return text === null ? null : (JSON.parse(text) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The release facts that the checks of plan 12j Task 13 read: the version of
+ * core (the group version), the released names (fixed[0] of the Changesets
+ * config), the repository url, and each example folder whose package
+ * release/unreleased.json names. A missing file gives an empty value, and
+ * each check then fails on what it lacks.
+ */
+function releaseFacts(): {
+  version: string;
+  released: string[];
+  repoUrl: string;
+  examples: string[];
+} {
+  const core = repoJson("packages/core/package.json") as { version?: string } | null;
+  const config = repoJson(".changeset/config.json") as { fixed?: string[][] } | null;
+  const repo = repoJson("release/repository.json") as { url?: string } | null;
+  const unreleased = Object.keys((repoJson("release/unreleased.json") ?? {}) as object);
+  const examples = existsSync(`${REPO}examples`)
+    ? readdirSync(`${REPO}examples`)
+        .filter((folder) => {
+          const pkg = repoJson(`examples/${folder}/package.json`) as { name?: string } | null;
+          return pkg?.name !== undefined && unreleased.includes(pkg.name);
+        })
+        .sort()
+    : [];
+  return {
+    version: core?.version ?? "",
+    released: config?.fixed?.[0] ?? [],
+    repoUrl: repo?.url ?? "",
+    examples,
+  };
 }
 
 /** The built MCP server. The site's Turbo test builds it first, through the dev dependency. */
@@ -426,6 +488,98 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         dates: RELEASE_DATES,
         start: FEED_START,
       }),
+  },
+  // Plan 12j Task 12: SECURITY.md against release/support.json, release/repository.json,
+  // and owner decision 4. A file that the check could not read is a failure.
+  {
+    name: "check-security-policy",
+    run: () => {
+      const input = readPolicyInput(readRepoFile);
+      const r = checkSecurityPolicy({
+        text: input.text ?? "",
+        rows: input.rows,
+        repository: input.repository,
+        origin: SITE.origin,
+      });
+      r.failures.unshift(...input.failures);
+      return r;
+    },
+  },
+  // Plan 12j Task 13a: each fact of the versioning page and the security
+  // policy page against its source. A file that the check could not read is a failure.
+  {
+    name: "check-policy-pages",
+    run: () => {
+      const read = readPolicyPagesInput(readRepoFile);
+      const r = checkPolicyPages(read.input);
+      r.failures.unshift(...read.failures);
+      return r;
+    },
+  },
+  // Plan 12j Task 13: the notes before the first release, the changelog page,
+  // the deprecation register, the dependency list, and the Resources page.
+  {
+    name: "check-unpublished",
+    run: () =>
+      checkUnpublished({
+        version: releaseFacts().version,
+        pages: docsPages(),
+        listed: UNPUBLISHED_PAGES,
+        install: REGISTRY_INSTALL,
+      }),
+  },
+  // Review M2 and L7 of plan 12j Task 13b: each text that holds only before
+  // the first release, against the version of core, both ways.
+  {
+    name: "check-pre-release",
+    run: () =>
+      checkPreRelease({
+        version: releaseFacts().version,
+        listed: PRE_RELEASE_SENTENCES,
+        read: readRepoFile,
+        pages: docsPages(),
+        pattern: PRE_RELEASE_PATTERN,
+        exempt: PRE_RELEASE_EXEMPT,
+      }),
+  },
+  {
+    name: "check-changelog",
+    run: () =>
+      checkChangelog({
+        changelogs: readChangelogFiles(REPO_ROOT),
+        page: distPageOrEmpty("/docs/changelog/"),
+        repoUrl: releaseFacts().repoUrl,
+        empty: CHANGELOG_EMPTY,
+      }),
+  },
+  {
+    name: "check-deprecations-page",
+    run: () =>
+      checkDeprecationsPage({
+        register: (repoJson("release/deprecations.json") ?? []) as RegisterEntry[],
+        source: readRepoFile("apps/site/src/content/docs/docs/reference/deprecations.md") ?? "",
+        built: distPageOrEmpty("/docs/reference/deprecations/"),
+      }),
+  },
+  {
+    name: "check-dependencies-page",
+    run: () =>
+      checkDependenciesPage({
+        rows: (repoJson("release/dependencies.json") ?? []) as DependencyRow[],
+        released: releaseFacts().released,
+        source: readRepoFile("apps/site/src/content/docs/docs/reference/dependencies.md") ?? "",
+      }),
+  },
+  {
+    name: "check-resources",
+    run: () => {
+      const facts = releaseFacts();
+      return checkResources({
+        ...facts,
+        source: readRepoFile("apps/site/src/content/docs/docs/resources.md") ?? "",
+        empty: RESOURCES_EMPTY,
+      });
+    },
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },

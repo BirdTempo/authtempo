@@ -4,6 +4,7 @@ description: Every rate limit of core with its key, window, and maximum, and the
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - packages/core/src/http/body-cap.ts
   - packages/core/README.md "Limits in version 1"
   - packages/core/README.md "Limits"
   - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
@@ -14,6 +15,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -36,6 +38,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `magic-link:email:<email>` | 15 minutes | 5 | Magic link request |
 | `social-start:ip:<ip>` | 15 minutes | 30 | Social start and link start, for every provider |
 | `social-link:user:<userId>` | 15 minutes | 10 | Link start of a provider, after the start key |
+| `social-callback:ip:<ip>` | 15 minutes | 30 | Callback form post of a provider, such as Apple's, before the read of its form. A post past it reads no byte. `CALLBACK_POST_LIMIT` |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
 | `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify and passkey sign-up verify |
 | `passkey-sign-up:ip:<ip>` | 1 hour | 10 | Passkey sign-up options, after the name rule and the sign-up rule, before the captcha |
@@ -125,6 +128,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `sso-acs:ip:<ip>` | 15 minutes | 60 | SAML form post to the ACS |
 | `sso-domain-verify:org:<organizationId>` | 1 hour | 10 | SSO domain verify, before any resolver |
 | `sso-manage:user:<userId>` | 15 minutes | 30 | Each SSO domain, SSO connection, and SCIM token route, before the manager guard |
+| `sso-large-read:user:<userId>` | 1 hour | 6 | Each SSO connection write, at the start of its body read, after `sso-manage:user`. So one account holds the user half of the body budget at most 6 times 32 s in an hour. A write with a declared length whose read cannot start answers 503 `body_busy` before this count and `sso-manage:user`, and counts on neither. A write with no length counts at its start, and can then get that 503 at its first chunk. A read that takes more than 8 s spends the rest of the window. It spends at each end: whole, a 408, a 413 past its cap, a 503 in the middle of the read, and a closed socket. The spend lands in the window in which the read ends. So a read that ends after its window ended fills the next window. The account then starts no large read until the window ends, up to 1 hour from the end of that read. At 1 MiB per second, the largest valid write takes 4.5 s. After a 408, send the write again in the next window, on a faster link. `SSO_LARGE_READ_PER_USER` |
 | `scim-auth:ip:<ip>` | 15 minutes | 60 | Each failed SCIM token check: a missing, wrong, expired, or revoked token. A valid token never counts here |
 | `scim:token:<tokenId>` | 10 minutes | 1200 | Each call of one SCIM token, after the token check |
 | `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
@@ -135,7 +139,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `id-token-nonce:ip:<ip>` | 15 minutes | 60 | The nonce of the ID-token route, before the nonce write |
 | `id-token:ip:<ip>` | 15 minutes | 30 | The ID-token sign-in, before the nonce spend and the token verify |
 
-For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP stays as given, for example the answer of a custom `clientIp`. Core exports `ipKey`, so an app's own limiter can key the same way.
+For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count. A host that gives one `/64` to many tenants makes them share each count. A request with no client IP keys `unknown`. A value that is not an IP keys `text:` and the value, for example the answer of a custom `clientIp`. So no header text gets the key `unknown` or the key of an address, and each text is a client of its own. Core exports `ipKey`, so an app's own limiter can key the same way.
 
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
@@ -176,11 +180,11 @@ These counts live in their rows, so they hold under every limiter.
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
 | Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try. A lost try tries again while another call spent, 20 tries at most, then `conflict` |
-| The `metadata` of one API token | 4096 bytes as JSON | `invalid_body` |
+| The `metadata` of one API token | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |
 | Pending invitations of one organization | `organizations.limits.pendingInvitationsPerOrganization` | `invitation_limit` |
-| The `metadata` of one organization | 4096 bytes as JSON | `invalid_body` |
+| The `metadata` of one organization | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Teams of one organization | `organizations.limits.teamsPerOrganization` | `team_limit` |
 | Members of one team | `organizations.limits.membersPerTeam`. A team member add and an accept count | `team_member_limit` |
 | Stored roles of one organization | `organizations.dynamicRoles.maxPerOrganization`, 50 by default | `role_limit` |
@@ -193,10 +197,25 @@ These counts live in their rows, so they hold under every limiter.
 | Members of a group that one SCIM request takes away | 1000 | SCIM 400 `invalidValue` |
 | Members whose role one rename or delete of a mapped SCIM group computes | 1000 | SCIM 400 `invalidValue` |
 | Results of one SCIM list page | 100 | The page ends there |
-| One SCIM request body | 1 MB | SCIM 413 |
+| One request body of any other route | 65536 bytes, 262144 for `POST /social/apple/callback`, and 8388608 for the two SSO connection writes, by a stream read that stops at the cap. Each cap is the next power of two above the largest valid body of its route contract | 413 `body_too_large` |
+| Nesting of one JSON request body | 16 levels of `[` and `{` | 400 `invalid_body` |
+| Items of one JSON request body | 4096 of `[`, `{`, and `,` outside its strings | 400 `invalid_body` |
+| Pairs of one form request body | 128, one more than its `&` separators. The OAuth token route has the most fields, 12, and the limit is 8 times the next power of two | 400 `invalid_body`, the `invalid_request` of an OAuth form route, or `sso_failed` at the SAML ACS |
+| One SCIM request body | 1 MiB | SCIM 413 |
+| Nesting and items of one SCIM request body | 16 levels of `[` and `{`, and 65536 items of `[`, `{`, and `,` outside its strings | SCIM 400 `invalidSyntax` |
+| The bytes that the body reads of the routes with a cap above 65536 bytes hold at once in one isolate | 16777216, 2 reads of the largest cap, in two halves that do not lend bytes to each other. A read counts the bytes that it holds | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads above the floor of signed-in users hold at once, in each isolate | 8388608, the user half of the budget. A read counts here after a session check names its user: the SSO connection writes | 503 `body_busy` with `Retry-After: 1` |
+| The bytes that every other body read above the floor holds at once, in each isolate | 8388608, the anonymous half of the budget: the SAML ACS, the Apple callback, and SCIM | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A user runs one large read at a time: a second answers 503 before any byte. A client is its IP before a session and its user after one. A request with no client IP is one client, `unknown`, with the share of one IP | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
+| The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout`, SCIM 408 |
+| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, or at 262144 for a signed-in user, and at least 10 s: 32 s for an SSO connection write, 10 s for the others | 408 `body_timeout`, SCIM 408 |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
 | The metadata XML of a provider | 100 KB | `invalid_body` |
+
+The halves of the body budget leave two limits by design. The anonymous half holds the shares of 2 IPs of 4 MiB each. Such a read ends within 10 s, so 2 IPs must send 8 MiB each 10 s to keep the half full. While it is full, the SAML ACS, the Apple callback, and SCIM answer 503 to every client before a session. An IPv6 client keys by its `/64` prefix, so a `/63` prefix gives 2 keys. On a host with no `clientIp`, the callers with no header are one such key. One account that stalls an SSO connection write of 8 MiB fills the user half for at most 32 s. Then the SSO connection writes of other users answer 503. An account runs one large read at a time, and starts at most 6 in an hour. So one account can delay the SSO connection writes of others by up to 32 s, 6 times per hour. A write with a declared length that gets that 503 before its read starts counts on no limit of its user. So an admin who sends such a write again after `Retry-After` loses no write of the hour. A write with no length counts at its start, and can then get the 503 at its first chunk. A write that takes more than 32 s gets 408 `body_timeout`, so an admin must send it at 256 KiB per second or more. A large read of a user that takes more than 8 s spends the rest of the account's window of `sso-large-read:user`. It spends at each end: whole, a 408, a 413 past its cap, a 503 in the middle of the read, and a closed socket. The spend lands in the window in which the read ends. So a read that ends after its window ended fills the next window. The account then starts no large read until the window ends, up to 1 hour from the end of that read. Before the spend of slow reads, 19 accounts at 6 times 32 s, 3648 s, held the user half for the hour. A careful account ends each read within 8 s and spends nothing. If each of its 6 reads ends so, a hold for the hour takes 450 reads, 3600 s / 8 s, from 75 accounts. At 10 password sign-ups per IP per hour, they come from 8 IPs. Each read sends about 8 MiB, so the hour takes about 3600 MiB of upload. But the last read of a window has no start left to spend, so it can run to 32 s. Then one account holds the half for 5 times 8 s and 32 s, 72 s, in a window. So the least for the hour is 50 accounts with 300 reads, from 5 IPs, with about 2400 MiB of upload.
+
+Off Workers, pass `clientIp`, as [Deploy](/docs/operations/deploy/) says. Without it, every request with no `cf-connecting-ip` header is one client, `unknown`, with the share of one IP, 4 MiB. So one caller with no header can hold that share, and then every caller with no header gets 503. The clients with an IP key keep the rest of the anonymous half. A caller can also set the header to any key, and so pick its own share.
 
 ## The lives
 

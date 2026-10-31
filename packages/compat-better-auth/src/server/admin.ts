@@ -12,6 +12,7 @@ import {
 import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { AdminOptions, AdminSession, AdminUser } from "../types.js";
 import { ADMIN_NOT_SUPPORTED, NO_PASSWORD_SET } from "./admin-lines.js";
+import { readJsonOf, readObjectOf } from "./body.js";
 import type { Mapped } from "./map-options.js";
 import { sessionTokenOf, toSession, toUser } from "./shapes.js";
 
@@ -344,10 +345,7 @@ async function refusalAnswer(mapped: Mapped, request: Request): Promise<AdminAns
     return target.ok ? null : failure(NOT_SUPPORTED, 501, target.why);
   }
   if (path === "/admin/set-role" && request.method === "POST" && mapped.platformRole !== null) {
-    const body: unknown = await request
-      .clone()
-      .json()
-      .catch(() => null);
+    const body = await readJsonOf(request, "POST /operator/users/platform-role");
     const role =
       typeof body === "object" && body !== null ? (body as { role?: unknown }).role : null;
     if (role !== undefined && role !== null && setRoleChange(role, mapped.platformRole) === null)
@@ -358,10 +356,7 @@ async function refusalAnswer(mapped: Mapped, request: Request): Promise<AdminAns
       );
   }
   if (path === "/admin/update-user" && request.method === "POST") {
-    const body: unknown = await request
-      .clone()
-      .json()
-      .catch(() => null);
+    const body = await readJsonOf(request, "POST /operator/users/update");
     const data = dataOf(body);
     if (data !== null) return updateDataRefusal(data);
   }
@@ -539,13 +534,9 @@ function invalid(): AdminAnswer {
   return failure(code, 400, messageOf(code));
 }
 
-/** The JSON object of a POST, or null for no object. */
+/** The JSON object of a POST, or null for no object. Each operator route takes core's floor cap. */
 async function objectOf(request: Request): Promise<Body | null> {
-  const v: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+  return readObjectOf(request);
 }
 
 /** The `userId` of a body: a string of one character or more, else null. */

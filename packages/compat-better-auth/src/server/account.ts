@@ -18,6 +18,7 @@ import {
   sessionIdOf,
   usernameOf,
 } from "./api.js";
+import { readObjectOf } from "./body.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
 import { listedSession, STATE_DATA_REFUSAL, toNext, toPasskey } from "./shapes.js";
@@ -75,13 +76,9 @@ function failure(e: APIError): Response {
   return Response.json(e.body, { status: e.statusCode });
 }
 
-/** The JSON object of a POST, or null for no object. */
+/** The JSON object of a POST, or null for no object. Each path of this file takes core's floor cap. */
 async function bodyOf(request: Request): Promise<Body | null> {
-  const v: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+  return readObjectOf(request);
 }
 
 /** A string field, or undefined. Any other present value answers VALIDATION_ERROR, as Better Auth's schema does. */

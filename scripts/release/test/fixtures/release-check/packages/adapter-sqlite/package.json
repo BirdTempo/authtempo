@@ -1,0 +1,9 @@
+{
+  "name": "@authtempo/adapter-sqlite",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

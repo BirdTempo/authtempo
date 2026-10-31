@@ -1,4 +1,5 @@
 import { type Auth, createAuth, createMemoryAdapter, type MailMessage } from "@authtempo/core";
+import { bodyCapOf } from "@authtempo/core/bindings";
 import {
   type ActionFunctionArgs,
   createStaticHandler,
@@ -476,5 +477,34 @@ describe("the waitUntil of handle (ruling 29 of plan 12i)", () => {
     // React Router 8 gives no platform context: with no option, handle gets none.
     await authRouteModule(s.auth).loader(args as unknown as LoaderFunctionArgs);
     expect(s.got).toEqual(["options", "none"]);
+  });
+});
+
+/** A JSON POST of `bytes` bytes to the magic link request: the address, then spaces. */
+const capBody = (bytes: number) => {
+  const json = JSON.stringify({ email: "ada@example.com" });
+  return json + " ".repeat(bytes - json.length);
+};
+/** The cap of the route of the test below: core's floor. */
+const CAP = bodyCapOf("POST /magic-link/request");
+
+describe("the body cap through the binding (ruling 46 of the 12j lane)", () => {
+  it("answers core's 413 body_too_large one byte past the cap of the route", async () => {
+    const { module, args } = setup();
+    const send = (bytes: number) =>
+      module.action(
+        args(
+          new Request(`${BASE}/auth/magic-link/request`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: BASE },
+            body: capBody(bytes),
+          }),
+        ),
+      );
+    const at = await send(CAP);
+    expect(at.status).toBe(200);
+    const over = await send(CAP + 1);
+    expect(over.status).toBe(413);
+    expect(await over.json()).toEqual({ error: "body_too_large" });
   });
 });

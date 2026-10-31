@@ -1,0 +1,2 @@
+# The fixture is the folder of a released package, so its dist is a source file here.
+!dist

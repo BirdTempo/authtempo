@@ -14,7 +14,7 @@ import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import mysql from "mysql2/promise";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertFreshBuild, runBin } from "./support/bin.js";
+import { assertFreshBuild, runBin, versionSlot } from "./support/bin.js";
 import { freshMysqlDatabase, MYSQL_SERVERS } from "./support/mysql.js";
 import { freshDatabase } from "./support/pg.js";
 
@@ -181,7 +181,9 @@ describe("authtempo generate --format drizzle (plan 12g Task 7)", () => {
       expectTypes(theirs as never);
       expect(theirs).toEqual(mine);
       // The snapshot comes last, so a wrong type fails the read compare first.
-      await expect(text).toMatchFileSnapshot("__snapshots__/generate-drizzle-sqlite.ts.snap");
+      await expect(versionSlot(text)).toMatchFileSnapshot(
+        "__snapshots__/generate-drizzle-sqlite.ts.snap",
+      );
     } finally {
       reader.close();
       db.close();
@@ -202,7 +204,9 @@ describe("authtempo generate --format drizzle (plan 12g Task 7)", () => {
       expectTypes(theirs as never);
       expect(theirs).toEqual(mine);
       // The snapshot comes last, so a wrong type fails the read compare first.
-      await expect(text).toMatchFileSnapshot("__snapshots__/generate-drizzle-postgres.ts.snap");
+      await expect(versionSlot(text)).toMatchFileSnapshot(
+        "__snapshots__/generate-drizzle-postgres.ts.snap",
+      );
     } finally {
       await db.drop();
     }
@@ -227,7 +231,9 @@ describe("authtempo generate --format drizzle (plan 12g Task 7)", () => {
       expectTypes(theirs as never);
       expect(theirs).toEqual(mine);
       // The snapshot comes last, so a wrong type fails the read compare first.
-      await expect(text).toMatchFileSnapshot("__snapshots__/generate-drizzle-mysql.ts.snap");
+      await expect(versionSlot(text)).toMatchFileSnapshot(
+        "__snapshots__/generate-drizzle-mysql.ts.snap",
+      );
     } finally {
       await pool.end();
       await db.drop();

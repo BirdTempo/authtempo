@@ -1,0 +1,9 @@
+{
+  "name": "@authtempo/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "authtempo-example-node": "workspace:*"
+  }
+}

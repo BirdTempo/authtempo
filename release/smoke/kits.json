@@ -1,0 +1,10 @@
+{
+  "@authtempo/client": {
+    "./conformance": "vitest"
+  },
+  "@authtempo/core": {
+    "./conformance": "vitest",
+    "./limiter-conformance": "vitest",
+    "./shape-conformance": "vitest"
+  }
+}

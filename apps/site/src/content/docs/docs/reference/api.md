@@ -21,6 +21,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12k-organizations-tokens-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
@@ -101,7 +102,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `defaultPhoneMessage` | The default SMS text of a phone code: the code, the app name, and the life in minutes. |
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
-| `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
+| `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP, and `text:` and the value for any other text. |
 | `isIpLiteral` | True for a bare IPv4 or IPv6 literal. The notice mail prints an IP only in this form. |
 | `normalizeEmail`, `normalizeSlug` | The address rule and the slug rule of core. |
 | `validOrganizationName`, `validUserName` | The name rules of core. A user name has 1 to 200 code units and no control, format, line separator, paragraph separator, or lone surrogate character. The zero-width non-joiner and joiner pass. |

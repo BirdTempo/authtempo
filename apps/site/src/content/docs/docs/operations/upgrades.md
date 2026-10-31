@@ -3,6 +3,7 @@ title: Upgrades and schema versions
 description: Move an API to a newer authtempo, with the migrations of its schema version applied in the right order.
 type: how-to
 sources:
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 10"
   - packages/core/README.md "Limits in version 1"
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"
@@ -45,6 +46,16 @@ authtempo migrate --target postgres --url-env DATABASE_URL
 7. Deploy the new code.
 8. Run `authtempo check` with the base URL of the API.
 9. Sign in once by each method that the API serves.
+
+## Upgrade with the CLI
+
+`authtempo upgrade` does step 2 for you. It reads the `package.json` of the app and moves each `@authtempo` package to one version. It runs no install.
+
+- When a crossed minor has a "Breaking:" line, the command prints the line and exits 1. It still writes the versions. Read each line and change your code before the install.
+- When the schema version of the target core differs, the next steps name `authtempo migrate`. Run it as in step 3 or step 4, before the deploy.
+- `authtempo upgrade --dry-run` prints the change and writes nothing.
+
+[authtempo upgrade](/docs/reference/cli/upgrade/) lists each flag and each exit code. [Deprecations](/docs/reference/deprecations/) lists each item that a minor removes.
 
 ## How it behaves
 

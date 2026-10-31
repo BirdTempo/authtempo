@@ -1,0 +1,123 @@
+[
+  {
+    "id": "authtempo-import",
+    "what": "The alias binary authtempo-import, with the old flags of the import CLI. Run authtempo import instead.",
+    "since": "0.1.0",
+    "removeIn": "0.2.0",
+    "markers": [
+      { "file": "packages/cli/package.json", "text": "\"authtempo-import\":" },
+      {
+        "file": "packages/cli/src/bin/authtempo-import.ts",
+        "text": "console.error(ALIAS_LINES.renamed);"
+      },
+      {
+        "file": "packages/cli/src/commands/import-alias.ts",
+        "text": "authtempo-import is renamed authtempo import; this alias goes in the next release"
+      },
+      {
+        "file": "packages/cli/src/commands/import-alias.ts",
+        "text": "`authtempo-import`, the old binary, for one release"
+      },
+      { "file": "packages/cli/README.md", "text": "`authtempo-import` stays for one release" },
+      {
+        "file": "packages/import/README.md",
+        "text": "The old binary `authtempo-import` stays for one release"
+      }
+    ],
+    "docs": "/docs/reference/deprecations/#authtempo-import"
+  },
+  {
+    "id": "tempo-session-read",
+    "what": "The read of the old session cookie tempo_session, and its move to __Host-tempo_session.",
+    "since": "0.1.0",
+    "removeIn": "0.2.0",
+    "markers": [
+      { "file": "packages/core/src/http/cookies.ts", "text": "For one release core reads it" },
+      { "file": "packages/core/src/http/router.ts", "text": "async function moveLegacyCookie(" },
+      {
+        "file": "packages/core/src/http/router.ts",
+        "text": "const old = readCookie(request, legacy);"
+      },
+      {
+        "file": "packages/core/src/http/routes/sessions.ts",
+        "text": "const old = legacy === null ? null : readCookie(request, legacy);"
+      },
+      {
+        "file": "packages/core/src/primitives/credentials.ts",
+        "text": "legacyCookieName: name === DEFAULT_COOKIE_NAME ? LEGACY_COOKIE_NAME : null"
+      },
+      {
+        "file": "packages/core/src/primitives/credentials.ts",
+        "text": "config.legacyCookieName ? readCookie(request, config.legacyCookieName)"
+      },
+      {
+        "file": "packages/core/src/primitives/credentials.ts",
+        "text": "Core reads it for one release"
+      },
+      {
+        "file": "packages/core/src/primitives/credentials.ts",
+        "text": "(`legacyCookieName`), for one release."
+      },
+      {
+        "file": "packages/core/src/config.ts",
+        "text": "core also reads the old `tempo_session` for one release"
+      },
+      {
+        "file": "packages/core/src/engine/tokens.ts",
+        "text": "the old `legacyCookieName` for one release"
+      },
+      { "file": "packages/core/README.md", "text": "(`tempo_session`, read for one release)" },
+      {
+        "file": "packages/core/README.md",
+        "text": "For one\n  release core reads the old `tempo_session` and moves it."
+      },
+      {
+        "file": "packages/compat-better-auth/src/server/shapes.ts",
+        "text": "legacyCookieName: LEGACY_SESSION_COOKIE"
+      },
+      {
+        "file": "packages/compat-better-auth/src/server/shapes.ts",
+        "text": "router moves the old `tempo_session` for one release"
+      },
+      {
+        "file": "packages/compat-better-auth/README.md",
+        "text": "For one release the shim also reads `tempo_session`"
+      },
+      {
+        "file": "packages/next/src/index.ts",
+        "text": "(`tempo_session`) counts too, for one release"
+      },
+      { "file": "packages/next/README.md", "text": "before plan 12b, for one release." }
+    ],
+    "docs": "/docs/reference/deprecations/#tempo-session-read"
+  },
+  {
+    "id": "handoff-oauth-reexports",
+    "what": "The re-exports of makePkce, webCrypto, base64Url, parseReturnedUrl, and the types HandoffCrypto and Returned from @authtempo/handoff. Import them from @authtempo/client/oauth.",
+    "since": "0.1.0",
+    "removeIn": "0.2.0",
+    "markers": [
+      {
+        "file": "packages/handoff/src/pkce.ts",
+        "text": "Re-exported for one release, so no import breaks."
+      },
+      {
+        "file": "packages/handoff/src/redirect.ts",
+        "text": "Re-exported for one release, so no import breaks."
+      },
+      {
+        "file": "packages/handoff/src/index.ts",
+        "text": "export { base64Url, type HandoffCrypto, makePkce, webCrypto } from \"./pkce.js\";"
+      },
+      {
+        "file": "packages/handoff/src/index.ts",
+        "text": "export { parseReturnedUrl, type Returned } from \"./redirect.js\";"
+      },
+      {
+        "file": "packages/handoff/README.md",
+        "text": "and the type `HandoffCrypto` for one release."
+      }
+    ],
+    "docs": "/docs/reference/deprecations/#handoff-oauth-reexports"
+  }
+]

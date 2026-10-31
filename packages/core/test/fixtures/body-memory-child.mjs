@@ -1,0 +1,308 @@
+// One body through the full read path of core in a child process with a
+// small heap (rulings 46 and 51 of the 12j lane). body-memory.test.ts starts it as
+//   node --max-old-space-size=128 --expose-gc body-memory-child.mjs <route> <shape>
+// and reads one JSON line. A fatal out-of-memory ends the process with no line.
+// It imports the build: the test checks that dist is newer than src first.
+// The route picks the reader: the SAML ACS posts its form through createAuth,
+// a SCIM route reads with readScimBody, and every other route reads with readJson.
+import v8 from "node:v8";
+
+const dist = new URL("../../dist/", import.meta.url);
+const {
+  bindBodyClient,
+  bindBodyRoute,
+  bodyCapOf,
+  BODY_DEPTH_MAX,
+  BODY_ITEMS_MAX,
+  FORM_PAIRS_MAX,
+  LARGE_READ_SHARE,
+} = await import(new URL("http/body-cap.js", dist).href);
+const { holdsBadText } = await import(new URL("http/body-text.js", dist).href);
+const { readJson } = await import(new URL("http/json.js", dist).href);
+const { ROUTE_CONTRACT } = await import(new URL("http/contract/index.js", dist).href);
+const { SAML_FORM_MAX } = await import(new URL("engine/sso/saml-sp.js", dist).href);
+const { readScimBody, SCIM_BODY_MAX, SCIM_ITEMS_MAX } = await import(
+  new URL("http/routes/scim.js", dist).href
+);
+const core = await import(new URL("index.js", dist).href);
+
+const ACS = "POST /sso/:connectionId/acs";
+const SCIM = "POST /scim/v2/Users";
+
+const [route, shape] = process.argv.slice(2);
+
+if (route === "budget") {
+  // `shape` reads at once, each streamed in chunks of 64 KiB with a turn of the loop between
+  // chunks, as a slow client sends them (ruling 51 Minor 2). With "live" after it, each
+  // sample runs a GC first: the live memory, with no garbage. Each even read is a user of its
+  // own, of REQUEST_BODY_MAX, in the user half. Each odd read is an IP of its own, of
+  // LARGE_READ_SHARE, in the anonymous half (rulings 66 and 69 of the 12j lane). Each answer
+  // names the half of its read: "user invalid_body" or "ip BodyBusy".
+  const live = process.argv[4] === "live";
+  const { LARGE_READ_SHARE, REQUEST_BODY_MAX } = await import(
+    new URL("http/body-cap.js", dist).href
+  );
+  const SSO = "POST /sso/connections/update";
+  const stream = (size) => {
+    let sent = 0;
+    return new ReadableStream({
+      async pull(c) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (sent >= size) return c.close();
+        const chunk = new Uint8Array(Math.min(65_536, size - sent)).fill(0x61);
+        if (sent === 0) chunk.set(new TextEncoder().encode('{"idpMetadata":"'));
+        if (sent + chunk.length === size) chunk.set([0x22, 0x7d], chunk.length - 2);
+        sent += chunk.length;
+        c.enqueue(chunk);
+      },
+    });
+  };
+  globalThis.gc();
+  const base = process.memoryUsage();
+  const peak = { heap: 0, arrayBuffers: 0, sum: 0 };
+  const sample = () => {
+    if (live) globalThis.gc();
+    const m = process.memoryUsage();
+    peak.heap = Math.max(peak.heap, m.heapUsed);
+    peak.arrayBuffers = Math.max(peak.arrayBuffers, m.arrayBuffers);
+    peak.sum = Math.max(peak.sum, m.heapUsed + m.arrayBuffers);
+  };
+  const sampler = setInterval(sample, 1);
+  const started = performance.now();
+  const answers = await Promise.all(
+    Array.from({ length: Number(shape) }, async (_, i) => {
+      const user = i % 2 === 0;
+      const request = new Request("https://auth.test/auth/x", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stream(user ? REQUEST_BODY_MAX : LARGE_READ_SHARE),
+        duplex: "half",
+      });
+      bindBodyRoute(request, SSO);
+      bindBodyClient(request, user ? `user:${i}` : `ip:198.51.100.${i}`);
+      const half = user ? "user" : "ip";
+      try {
+        const result = await readJson(request, ROUTE_CONTRACT[SSO].body.schema);
+        sample();
+        return `${half} ${result.ok ? "ok" : result.code}`;
+      } catch (e) {
+        return `${half} ${e instanceof Error ? e.name : String(e)}`;
+      }
+    }),
+  );
+  clearInterval(sampler);
+  sample();
+  const mb = (x) => Math.round(x / 2 ** 20);
+  console.log(
+    JSON.stringify({
+      route,
+      live,
+      reads: Number(shape),
+      answers: answers.sort(),
+      ms: Math.round(performance.now() - started),
+      baseHeapMB: mb(base.heapUsed),
+      baseArrayBuffersMB: mb(base.arrayBuffers),
+      peakHeapMB: mb(peak.heap),
+      peakArrayBuffersMB: mb(peak.arrayBuffers),
+      peakHeapPlusArrayBuffersMB: mb(peak.sum),
+    }),
+  );
+  process.exit(0);
+}
+const cap = route === ACS ? SAML_FORM_MAX : route === SCIM ? SCIM_BODY_MAX : bodyCapOf(route);
+
+/** `head`, then `unit` as many times as fits, then `tail`: at most `size` bytes of ASCII. */
+function fill(head, unit, tail, size = cap) {
+  const n = Math.max(0, Math.floor((size - head.length - tail.length) / unit.length));
+  return head + unit.repeat(n) + tail;
+}
+
+/** `text` with spaces after it, to exactly `cap` bytes of ASCII. */
+const pad = (text) => text + " ".repeat(cap - text.length);
+
+/**
+ * An object of `n` keys, each of the same width, to exactly `cap` bytes. A key
+ * is its index in base 36, padded with "_", which is no base-36 digit. So no
+ * two keys are equal. A pad of "k" made 1296 of 65536 keys repeat (the Low of
+ * rr-12j-bodycap3b). It throws when two keys are equal.
+ */
+function keysAtLimit(n) {
+  const width = Math.floor((cap - 2) / n) - 5;
+  const keys = Array.from({ length: n }, (_, i) => i.toString(36).padStart(width, "_"));
+  if (new Set(keys).size !== n) throw new Error(`keys-at-limit: ${n} keys are not distinct`);
+  return pad(`{${keys.map((k) => `"${k}":0`).join(",")}}`);
+}
+
+/** A chain of arrays `depth` deep, inside the outer object and array: `[[...]]`. */
+const chain = (depth) => `${"[".repeat(depth - 2)}${"]".repeat(depth - 2)}`;
+
+/** `unit` as many times as fits, then the last key of `a` to exactly `cap` bytes: a form. */
+const formFill = (unit) => fill("", unit, "", cap - 1).padEnd(cap, "a");
+
+const JSON_SHAPES = {
+  // A flat array of zeros to the cap: the walk shape of the review.
+  zeros: () => fill('{"x":[', "0,", "0]}"),
+  // As many zeros as the item limit allows, then spaces to the cap.
+  "zeros-at-limit": () => pad(`{"x":[${"0,".repeat(BODY_ITEMS_MAX - 3)}0]}`),
+  // Chains at the depth limit to the cap: the parse shape of the review.
+  nesting: () => fill('{"x":[', `${chain(BODY_DEPTH_MAX)},`, `${chain(BODY_DEPTH_MAX)}]}`),
+  // As many chains at the depth limit as the item limit allows, then spaces.
+  "nesting-at-limit": () => {
+    const n = Math.floor((BODY_ITEMS_MAX - 2) / (BODY_DEPTH_MAX - 1));
+    return pad(`{"x":[${Array.from({ length: n }, () => chain(BODY_DEPTH_MAX)).join(",")}]}`);
+  },
+  // One string to the cap.
+  string: () => `{"x":"${"a".repeat(cap - 9)}"}`,
+  // Short keys to the cap.
+  keys: () => {
+    const parts = [];
+    let length = 2;
+    for (let i = 0; length + 12 < cap; i++) {
+      const part = `"${i.toString(36)}":0`;
+      parts.push(part);
+      length += part.length + 1;
+    }
+    return `{${parts.join(",")}}`;
+  },
+  // As many distinct keys as the item limit allows, each long, to the cap.
+  "keys-at-limit": () => keysAtLimit(BODY_ITEMS_MAX - 1),
+};
+
+// The ACS form at SAML_FORM_MAX (ruling 51 Major 1): the probes of the re-review.
+const FORM_SHAPES = {
+  // Keys with no "=": Node's URLSearchParams took 5.2 s at the cap.
+  "form-keys": () => formFill("a&"),
+  // Empty pairs: 64 to 80 MB of heap at the cap.
+  "form-empty": () => formFill("=&"),
+  // Escaped keys with no "=".
+  "form-escapes": () => formFill("%41&"),
+  // Short pairs.
+  "form-pairs": () => formFill("a=b&"),
+  // One key of "+": Node's URLSearchParams turns each "+" into a space (ruling 59 Low 2).
+  "form-plus": () => formFill("+"),
+  // One value to the cap, as an IdP posts it.
+  "form-value": () => `SAMLResponse=${"a".repeat(cap - 26)}&RelayState=x`,
+  // FORM_PAIRS_MAX pairs, each long, to the cap.
+  "form-at-limit": () => {
+    const width = Math.floor((cap - (FORM_PAIRS_MAX - 1)) / FORM_PAIRS_MAX);
+    const pairs = Array.from({ length: FORM_PAIRS_MAX }, (_, i) =>
+      `k${i.toString(36).padStart(3, "0")}=`.padEnd(width, "a"),
+    );
+    return pairs.join("&").padEnd(cap, "a");
+  },
+};
+
+// The SCIM body at SCIM_BODY_MAX (rulings 51 and 56): the shape scan with SCIM_ITEMS_MAX.
+const SCIM_SHAPES = {
+  nesting: () => `${"[".repeat(cap / 2)}${"]".repeat(cap / 2)}`,
+  zeros: () => fill("[", "0,", "0]"),
+  empties: () => fill("[", "[],", "[]]"),
+  objects: () => fill("[", "{},", "{}]"),
+  string: JSON_SHAPES.string,
+  keys: JSON_SHAPES.keys,
+  // SCIM_ITEMS_MAX zeros: a bracket and a comma before each zero but the first.
+  "zeros-at-limit": () => pad(`[${"0,".repeat(SCIM_ITEMS_MAX - 1)}0]`),
+  // Empty objects, two items each, to SCIM_ITEMS_MAX with the bracket.
+  "objects-at-limit": () => pad(`[${"{},".repeat(SCIM_ITEMS_MAX / 2 - 1)}{}]`),
+  // Chains at the depth limit, BODY_DEPTH_MAX items each with the bracket or a comma.
+  "nesting-at-limit": () => {
+    const n = Math.floor(SCIM_ITEMS_MAX / BODY_DEPTH_MAX);
+    return pad(`[${Array.from({ length: n }, () => chain(BODY_DEPTH_MAX + 1)).join(",")}]`);
+  },
+  // SCIM_ITEMS_MAX distinct keys, each long, to the cap.
+  "keys-at-limit": () => keysAtLimit(SCIM_ITEMS_MAX),
+};
+
+const SHAPES = route === ACS ? FORM_SHAPES : route === SCIM ? SCIM_SHAPES : JSON_SHAPES;
+const make = SHAPES[shape];
+if (make === undefined || (route !== SCIM && ROUTE_CONTRACT[route]?.body === undefined))
+  throw new Error(`no shape ${shape} or no body of ${route}`);
+const bytes = new TextEncoder().encode(make());
+
+/** The answer of the reader of the route: "ok", the code, or the status. */
+async function answerOf() {
+  if (process.argv[4] === "walk")
+    // The text walk alone on the parsed body, with no scan before it.
+    return holdsBadText(JSON.parse(new TextDecoder().decode(bytes))) ? "bad" : "clean";
+  if (route === ACS) {
+    const auth = core.createAuth({
+      baseURL: "https://auth.test",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: core.createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    });
+    // No sign-in and no connection: past its IP limit and its SAML check, the ACS reads the form.
+    const res = await auth.handle(
+      new Request("https://auth.test/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://idp.example",
+        },
+        body: bytes,
+      }),
+    );
+    return `${res.status} ${new URL(res.headers.get("location") ?? "x:").searchParams.get("auth_error")}`;
+  }
+  const request = new Request("https://auth.test/auth/x", {
+    method: "POST",
+    headers: { "content-type": route === SCIM ? "application/scim+json" : "application/json" },
+    body: bytes,
+  });
+  if (route === SCIM) {
+    const r = await readScimBody(request);
+    return r.ok ? "ok" : String(r.response.status);
+  }
+  bindBodyRoute(request, route);
+  // A read past the share of one IP is the read of a signed-in user: the SSO writes read after
+  // the session (managedCall). With no bind, the client is ip:unknown, whose share of 4 MiB
+  // refused each body at the cap of 8 MiB before the parse (rulings 66 and 69 of the 12j lane).
+  bindBodyClient(request, cap > LARGE_READ_SHARE ? "user:memory" : "ip:memory");
+  try {
+    const result = await readJson(request, ROUTE_CONTRACT[route].body.schema);
+    return result.ok ? "ok" : result.code;
+  } catch (e) {
+    return e instanceof Error ? e.name : String(e);
+  }
+}
+
+globalThis.gc();
+const before = process.memoryUsage().rss;
+// The heap before each collection of the read, and at its end: the peak is the largest.
+const profiler = new v8.GCProfiler();
+profiler.start();
+// The array buffers (the bytes of the body and its chunks) at each turn of the loop and at the end.
+let arrayBuffers = process.memoryUsage().arrayBuffers;
+const sampler = setInterval(() => {
+  arrayBuffers = Math.max(arrayBuffers, process.memoryUsage().arrayBuffers);
+}, 1);
+const started = performance.now();
+const answer = await answerOf();
+const ms = Math.round(performance.now() - started);
+clearInterval(sampler);
+arrayBuffers = Math.max(arrayBuffers, process.memoryUsage().arrayBuffers);
+const stats = profiler.stop().statistics;
+const used = [
+  v8.getHeapStatistics().used_heap_size,
+  ...stats.map((s) => s.beforeGC.heapStatistics.usedHeapSize),
+];
+console.log(
+  JSON.stringify({
+    route,
+    shape,
+    cap,
+    bytes: bytes.length,
+    answer,
+    ms,
+    // The most heap in use during the read, in MB: before each collection and at the end.
+    peakHeapMB: Math.round(Math.max(...used) / 2 ** 20),
+    // The most array buffer memory in the read, in MB, the body itself included.
+    peakArrayBuffersMB: Math.round(arrayBuffers / 2 ** 20),
+    collections: stats.length,
+    // The growth of the resident memory of the process in the read, in MB.
+    readRssMB: Math.max(0, Math.round((process.resourceUsage().maxRSS * 1024 - before) / 2 ** 20)),
+  }),
+);

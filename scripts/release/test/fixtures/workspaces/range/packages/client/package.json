@@ -1,0 +1,9 @@
+{
+  "name": "@authtempo/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@authtempo/core": "^0.1.0"
+  }
+}

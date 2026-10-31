@@ -1745,6 +1745,31 @@ writes each value under version 1.
 
 ## Limits in version 1
 
+- Core reads at most the cap of each route (`bodyCapOf`) of a request
+  body, by a stream read that stops at the cap. The cap is 64 KiB, 256 KiB
+  for the Apple callback, and 8 MiB for the two SSO connection writes
+  (`REQUEST_BODY_MAX`). A longer body answers 413 `body_too_large`, and
+  no parse runs. A JSON body nested deeper than 16 or with more than 4096
+  items answers `invalid_body` before the parse. A form body of more than
+  128 pairs gets the refusal of a bad form before the parse, the SAML ACS
+  form too. SCIM keeps its own 1 MiB cap. A SCIM body nested deeper than
+  16 or with more than 65536 items answers 400 `invalidSyntax` before the
+  parse.
+- The body reads of the routes with a cap above 64 KiB hold at most
+  16 MiB at once in one isolate (`LARGE_READ_BUDGET`). A read past it
+  answers 503 `body_busy` with `Retry-After: 1`, and SCIM its own 503.
+  The budget has two halves of 8 MiB that do not lend bytes to each
+  other: the reads of signed-in users, and every other read. One IP holds
+  at most 4 MiB (`LARGE_READ_SHARE`), and so does the one client with no
+  IP. A user may hold the cap of its read, with one large read at a
+  time. A client is its IP before a session and its user after one.
+- Such a read that gets no bytes for 10 s stops and frees its bytes
+  (`LARGE_READ_IDLE_MS`). So does a read that runs past the time of its
+  cap at 128 KiB per second, at least 10 s (`LARGE_READ_MIN_RATE`). The
+  read of a signed-in user takes 256 KiB per second
+  (`LARGE_READ_USER_MIN_RATE`), so an SSO connection write gets 32 s.
+  Each answers 408 `body_timeout`, and SCIM its own 408. No parse
+  runs.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a

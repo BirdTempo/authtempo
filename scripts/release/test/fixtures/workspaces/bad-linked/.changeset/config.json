@@ -1,0 +1,14 @@
+{
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [["@authtempo/cli", "@authtempo/client", "@authtempo/core"]],
+  "linked": "@authtempo/cli",
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  },
+  "ignore": ["@authtempo/site", "authtempo-example-node"]
+}

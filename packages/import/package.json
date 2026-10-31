@@ -18,8 +18,11 @@
     "worker/README.md",
     "worker/wrangler.jsonc",
     "worker/src",
-    "worker/proof"
+    "CHANGELOG.md"
   ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",

@@ -7,6 +7,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
   - packages/core/README.md "Enterprise SSO and SCIM"
   - packages/client/README.md "Enterprise SSO and SCIM tokens"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -91,7 +92,9 @@ A person can move the account to an address of their own. When no verified domai
 | A path to an attribute that the schema does not know | 400 `invalidPath` |
 | A `schemas` URN that core does not serve, such as a custom extension | 400 `invalidSyntax` |
 | A remove of `userName` or of a group `displayName`, or a replace of it with null | 400 `mutability` |
-| A body over 1 MB | 413 |
+| A body over 1 MiB | 413 |
+| A body that does not arrive within 10 s | 408 |
+| A body nested deeper than 16 levels, or with more than 65536 items of `[`, `{`, and `,` outside its strings | 400 `invalidSyntax` |
 | A request that names more than 1000 members of a group, or takes away more than 1000 | 400 `invalidValue` |
 
 To fix a custom extension URN, remove the custom mapping in the directory, or ask for the extension.

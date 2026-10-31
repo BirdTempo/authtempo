@@ -20,7 +20,7 @@ import { guarded } from "../src/output.js";
 import { adapterD1Dir } from "../src/seams/d1.js";
 import { CORE_MIGRATIONS } from "../src/seams/postgres.js";
 import { SCHEMA_VERSION } from "../src/version.js";
-import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
+import { assertFreshBuild, ESC, linesOf, runBin, VERSION, versionOf } from "./support/bin.js";
 import { d1Project, removeScaffolds } from "./support/d1-project.js";
 import { OPERATOR_SECRET } from "./support/example-worker.js";
 import { fakeIo } from "./support/fake-io.js";
@@ -124,7 +124,7 @@ describe("authtempo info (plan 11c2)", () => {
     expect(io.requests).toHaveLength(0);
     const doc = docOf(io.stdout);
     expect(doc).toEqual({
-      cli: "0.0.0",
+      cli: VERSION,
       schemaVersion: 15,
       runtime: { node: "v26.10.0", platform: "linux", arch: "x64" },
       packageManager: { name: "pnpm", version: "12.8.1", source: "user-agent" },
@@ -143,7 +143,7 @@ describe("authtempo info (plan 11c2)", () => {
     const human = fakeIo({ files: PROJECT, env: { npm_config_user_agent: AGENT } });
     expect(await main(["info"], human)).toBe(0);
     expect(human.stdout).toEqual([
-      "authtempo 0.0.0 (schema version 15)",
+      `authtempo ${VERSION} (schema version 15)`,
       "runtime: node v26.10.0, linux, x64",
       "package manager: pnpm 12.8.1 (from npm_config_user_agent)",
       "packages: @authtempo/adapter-d1 not installed, @authtempo/core 0.0.0",
@@ -318,7 +318,8 @@ describe("authtempo info (plan 11c2)", () => {
         compatVersion: null,
       });
       expect(doc.project).toEqual({ wrangler: true, d1Databases: ["cli-d1"] });
-      expect(doc.packages).toEqual({ "@authtempo/adapter-d1": "0.0.0" });
+      // The project links the adapter of the workspace, so it reports that version.
+      expect(doc.packages).toEqual({ "@authtempo/adapter-d1": versionOf("adapter-d1") });
       expect(doc.adapters).toEqual(["adapter-d1"]);
       expect(doc).toMatchObject({ unread: [], exit: 0, stopped: null });
       expect(linesOf(r.stderr)).toContain("reading the local D1 database");
@@ -335,8 +336,9 @@ describe("authtempo info (plan 11c2)", () => {
     });
     expect(await main(["info", BASE, "--json"], io)).toBe(0);
     const doc = docOf(io.stdout);
+    // The deployment runs the core of the workspace, which answers its own version.
     expect(doc.deployment).toEqual({
-      core: "0.0.0",
+      core: versionOf("core"),
       schemaVersion: 15,
       configKeys: CONFIG_KEYS,
       dropped: 0,
@@ -356,7 +358,7 @@ describe("authtempo info (plan 11c2)", () => {
     });
     expect(await main(["info", BASE], human)).toBe(0);
     const at = human.stdout.indexOf(
-      "deployment: core 0.0.0, schema version 15, 9 config keys, 0 dropped",
+      `deployment: core ${versionOf("core")}, schema version 15, 9 config keys, 0 dropped`,
     );
     expect(at).toBeGreaterThan(0);
     expect(human.stdout.slice(at + 1)).toEqual(CONFIG_KEYS.map((k) => `config key: ${k}`));

@@ -503,6 +503,8 @@ export const ROUTES = Object.freeze([
     feature: "social",
     auth: ["none"],
     codes: [
+      // Ruling 68 Minor 2 of the 12j lane: the limit of its IP, before the read of the form.
+      "rate_limited",
       "invalid_token",
       "token_expired",
       "oauth_denied",
@@ -2973,6 +2975,33 @@ export type RouterCode = (typeof ROUTER_CODES)[number];
  * never answers it, so a 421 on each operation would be untrue there.
  */
 export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
+
+/**
+ * The code that the router answers for a request body past the cap of its
+ * route (`bodyCapOf`, rulings 43 and 46 of the 12j lane). Each route with a body in
+ * its contract can answer it. No entry declares it, and the OpenAPI
+ * document states it in its rules, as it states `HOST_CODE`. The SCIM
+ * routes answer their own SCIM 413.
+ */
+export const BODY_CODE = "body_too_large" as const satisfies ErrorCode;
+
+/**
+ * The code that the router answers, with `Retry-After`, for a read above
+ * the floor past `LARGE_READ_BUDGET` of the isolate (ruling 51 Minor 2 of
+ * the 12j lane). Only the routes of `BODY_CAPS` and the SAML ACS can answer
+ * it. No entry declares it, and the OpenAPI document states it in its
+ * rules, as it states `BODY_CODE`. The SCIM routes answer their own SCIM 503.
+ */
+export const BUSY_CODE = "body_busy" as const satisfies ErrorCode;
+
+/**
+ * The code that the router answers for a read above the floor that got no
+ * chunk for `LARGE_READ_IDLE_MS`, or that ran past `largeReadDeadlineMs`
+ * (ruling 59 Major 1 of the 12j lane). The routes of `BODY_CAPS`, the SAML
+ * ACS, and the SCIM writes can answer it. No entry declares it, and the
+ * OpenAPI document states it in its rules, as it states `BUSY_CODE`.
+ */
+export const TIMEOUT_CODE = "body_timeout" as const satisfies ErrorCode;
 
 /**
  * The codes of the operator routes that only a request with a session gets

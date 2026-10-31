@@ -1,0 +1,164 @@
+# The release of the fixed group (plan 12j, spec 33 item 5). A push of a tag
+# v<version> starts it, and nothing else does. The job check proves the tag
+# and makes the tarballs. The job publish waits for the approval of the owner
+# in the environment release, and publishes the same tarballs by npm trusted
+# publishing. scripts/release/src/check-workflows.ts holds every rule of this
+# file offline, and its test fails when a step, a permission, a pin, or the
+# Node floor changes. The check reads a YAML subset: block mappings, block
+# lists, "|" run blocks, and the flow forms {} and ["..."].
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# No permission at the top. Each job names its own, so only the job publish
+# can mint an OIDC token.
+permissions: {}
+
+jobs:
+  check:
+    # A GitHub-hosted runner with a fixed image. npm trusted publishing
+    # accepts only a cloud-hosted runner.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    # The SHA-256 list of the tarballs, from the step sums. The job publish
+    # reads it here, not from the artifact. Without it, whoever replaces the
+    # artifact replaces the tarballs and their list together.
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      # The tagged commit with the full history. Without fetch-depth 0, the
+      # tag check and release:check find no origin/main and fail. The token
+      # leaves the git config, so no later step can push with it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # pnpm at the packageManager version of the root package.json, the one
+      # source of the version. Without it, no pnpm step runs.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # Node of the tech stack, at or above NODE_FLOOR. Without it, the Node of
+      # the runner image runs. The cache is off: a cache is never evidence.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.10.0"
+          package-manager-cache: false
+      # The tag equals the group version, and the commit is on main or on
+      # release/<major>.<minor>. Without it, any tag on any commit publishes.
+      # The tag name comes through the environment, never as an expression.
+      - name: Check the tag
+        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"
+      # The lockfile as written. Without --frozen-lockfile, a new resolution
+      # installs and no check sees it.
+      - run: pnpm install --frozen-lockfile
+      # Every release check with OSV and the dry run. A tag checkout has no
+      # local main, so the base is origin/main. Without it, a tarball ships
+      # with no evidence. release-check starts the test servers of the
+      # checkout through scripts/test-servers.mjs, so no step starts docker
+      # compose (ruling 50 of plan 12j).
+      - run: pnpm release:check --base origin/main
+      # The release copy of the tagged commit. prepare refuses a folder with
+      # no .release-copy file, so the checkout stays as it is.
+      - name: Make the release copy
+        run: |
+          mkdir "$RUNNER_TEMP/release-copy"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/release-copy"
+          touch "$RUNNER_TEMP/release-copy/.release-copy"
+      # The install of the copy from the store of the first install. Without
+      # --ignore-scripts, each install script of a dependency runs a second
+      # time, and the build needs none of them.
+      - run: pnpm install --frozen-lockfile --offline --ignore-scripts
+        working-directory: ${{ runner.temp }}/release-copy
+      # The release fields from their one source each. Without it, each
+      # tarball is private and has no license, repository, or publishConfig.
+      - name: Prepare the manifests
+        run: node scripts/release/src/prepare.ts
+        working-directory: ${{ runner.temp }}/release-copy
+      # The build of the released packages, with no cache read and no remote
+      # cache. Without it, no dist file exists to pack. The site build fails on
+      # a changelog version with no date, and the site ships in no tarball.
+      - run: pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)
+        working-directory: ${{ runner.temp }}/release-copy
+      # One tarball for each package of the fixed group, the one released list.
+      - name: Pack each released package
+        run: |
+          mkdir out
+          for name in $(jq -r '.fixed[0][]' .changeset/config.json); do
+            pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"
+          done
+        working-directory: ${{ runner.temp }}/release-copy
+      # The tarballs that npm receives, checked file by file. Without it, a
+      # tarball with a stray file or a missing entry publishes. check-pack
+      # reads each tarball once and writes the SHA-256 of those bytes to
+      # SHA256SUMS, so no second read of the files makes the list.
+      - run: node scripts/release/src/check-pack.ts --sums out/SHA256SUMS out/*.tgz
+        working-directory: ${{ runner.temp }}/release-copy
+      # The smoke, npm publish --dry-run, and pnpm publish -r --dry-run on the
+      # tarballs that npm receives, with no versioning. The dry run of
+      # release:check packs a copy at the next minor. Without this step, no
+      # smoke and no publish dry run reads these bytes.
+      - name: Dry run the tarballs
+        run: node scripts/release/src/dry-run.ts --tarballs out
+        working-directory: ${{ runner.temp }}/release-copy
+      # The SHA-256 list as the output sums of this job. The job publish
+      # compares each tarball with it, so a tarball that changes between the
+      # two jobs never publishes, also when the artifact changes as a whole.
+      - name: Export the SHA-256 list
+        id: sums
+        run: |
+          {
+            echo "sums<<SHA256SUMS_END"
+            cat out/SHA256SUMS
+            echo "SHA256SUMS_END"
+          } >> "$GITHUB_OUTPUT"
+        working-directory: ${{ runner.temp }}/release-copy
+      # The tarballs and their list for the job publish. Without it, the job
+      # publish has nothing to publish and fails.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tarballs
+          path: ${{ runner.temp }}/release-copy/out/
+          if-no-files-found: error
+
+  publish:
+    # Only after the job check passes for the same tag.
+    needs: check
+    runs-on: ubuntu-24.04
+    # The owner is the required reviewer of this environment. Without it, the
+    # publish starts with no person who approves it.
+    environment: release
+    # id-token: write mints the OIDC token of npm trusted publishing. No other
+    # job holds it, and no step names a token.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # The publish script only. The job runs no install and no build, so no
+      # dependency code runs beside the token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node with an npm at or above NPM_FLOOR. publish.ts checks the npm
+      # version and stops below the floor.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.10.0"
+          package-manager-cache: false
+      # The tarballs and SHA256SUMS of the job check.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tarballs
+          path: out
+      # Each SHA-256, the npm floor, and the registry, then one npm publish
+      # for each version that the registry lacks.
+      # npm trusted publishing (docs.npmjs.com/trusted-publishers, read
+      # 2026-10-20): a trusted publisher made after 2026-09-03 allows only npm
+      # stage publish by default. The owner must select npm publish under
+      # Allowed actions for each released package. Without it, this step fails.
+      # The SHA-256 list of the job check comes through env, never as an
+      # expression in the run line. Without it, publish.ts publishes nothing.
+      - run: node scripts/release/src/publish.ts out
+        env:
+          RELEASE_SHA256SUMS: ${{ needs.check.outputs.sums }}

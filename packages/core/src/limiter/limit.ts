@@ -12,6 +12,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "magic-link:email",
   "social-start:ip",
   "social-link:user",
+  // Ruling 68 Minor 2 of the 12j lane: a callback form post, counted before its read.
+  "social-callback:ip",
   "passkey-options:ip",
   "passkey-verify:ip",
   "handoff-start:ip",
@@ -99,6 +101,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "oauth-credentials:client",
   // Plan 12d: the SSO manager routes, the domain proof, the sign-in, and the SCIM server.
   "sso-manage:user",
+  // Ruling 69 of the 12j lane: the large body reads of one person at the SSO connection writes.
+  "sso-large-read:user",
   "sso-domain-verify:org",
   "sso-discover:ip",
   "sso-start:ip",
@@ -145,4 +149,22 @@ export async function limit(
   const allowed = await config.limiter.allow(`${family}:${subject}`, window);
   if (!allowed) config.observe.emit({ name: "limit.hit", family });
   return allowed;
+}
+
+/**
+ * Spends the rest of the window of `<family>:<subject>`: it counts until the
+ * limiter refuses, at most `window.max + 1` calls. So each `limit` call of
+ * that key answers false until the window ends. When the window had ended,
+ * the first call opens a new one, and the spend fills it. A spend refuses
+ * no caller, so it emits no `limit.hit`. A large read of a user that takes
+ * more than 8 s spends its large reads (rulings 75 and 79 of the 12j lane).
+ */
+export async function spendLimit(
+  config: ResolvedConfig,
+  family: LimitFamily,
+  subject: string,
+  window: LimitWindow,
+): Promise<void> {
+  for (let i = 0; i <= window.max; i++)
+    if (!(await config.limiter.allow(`${family}:${subject}`, window))) return;
 }

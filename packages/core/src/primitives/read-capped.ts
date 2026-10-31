@@ -20,19 +20,73 @@ export async function readCapped(
 }
 
 /**
- * The body as bytes, or null past `max` bytes, on a read error, or when
- * `signal` aborts. A caller that must tell a long body from a body that is
- * not UTF-8 decodes the bytes itself, as the SCIM body read does.
+ * The body as bytes, or null past `max` bytes, on a read error, when
+ * `signal` aborts, or at a chunk that is not bytes. A caller that must tell
+ * a long body from a body that is not UTF-8 decodes the bytes itself, as
+ * the SCIM body read does.
+ *
+ * The read does not wait for a cancel. A body that is one branch of a tee,
+ * such as a request that an app cloned, settles its cancel only when the
+ * other branch ends too. A wait there never ends (ruling 43 of the 12j lane).
+ *
+ * `take`, when given, gets the bytes of each chunk before the read keeps
+ * it. A false answer stops the read, which then answers null too. The
+ * budget of the large request reads uses it (ruling 51 of the 12j lane).
  */
 export async function readCappedBytes(
   res: Response,
   max: number,
   signal: AbortSignal,
+  take?: (bytes: number) => boolean,
 ): Promise<Uint8Array | null> {
+  const read = await readCappedOutcome(res, max, signal, take);
+  return read instanceof Uint8Array ? read : null;
+}
+
+/**
+ * The `Symbol.toStringTag` getter of the typed arrays. It reads the internal
+ * slot of its value, so it names the kind of a typed array of any realm. A
+ * string, an `ArrayBuffer`, a `DataView`, or an object with its own tag gives
+ * `undefined`.
+ */
+const typedArrayKind = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get;
+
+/**
+ * True for a `Uint8Array` of any realm, such as a chunk that a stream of
+ * another realm makes: the check tests the kind, not the realm (ruling 66
+ * Low 1 of the 12j lane). `instanceof` refused such a chunk.
+ */
+function isBytes(value: unknown): value is Uint8Array {
+  return ArrayBuffer.isView(value) && typedArrayKind?.call(value) === "Uint8Array";
+}
+
+/**
+ * Why a capped read gave no bytes: `cap` past `max` or at a false answer of
+ * `take`, `chunk` at a chunk that is not a `Uint8Array` of any realm, and
+ * `error` at a read error or an abort.
+ */
+export type CappedRefusal = "cap" | "chunk" | "error";
+
+/**
+ * The read of `readCappedBytes`, with the cause of a refusal in place of
+ * null. A chunk that is not a `Uint8Array` cancels the read before any
+ * count: a stream of strings has no `byteLength`, so it passed the cap and
+ * turned the count of the budget into NaN (ruling 59 Low 1 of the 12j
+ * lane). The body read of a request answers it as a bad body.
+ */
+export async function readCappedOutcome(
+  res: Response,
+  max: number,
+  signal: AbortSignal,
+  take?: (bytes: number) => boolean,
+): Promise<Uint8Array | CappedRefusal> {
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > max) {
-    await res.body?.cancel();
-    return null;
+    res.body?.cancel().catch(() => {});
+    return "cap";
   }
   if (!res.body) return new Uint8Array(0);
   const reader = res.body.getReader();
@@ -48,16 +102,20 @@ export async function readCappedBytes(
     for (;;) {
       const { done, value } = await Promise.race([reader.read(), aborted]);
       if (done) break;
+      if (!isBytes(value)) {
+        reader.cancel().catch(() => {});
+        return "chunk";
+      }
       total += value.byteLength;
-      if (total > max) {
-        await reader.cancel();
-        return null;
+      if (total > max || (take !== undefined && !take(value.byteLength))) {
+        reader.cancel().catch(() => {});
+        return "cap";
       }
       chunks.push(value);
     }
   } catch {
-    await reader.cancel().catch(() => {});
-    return null;
+    reader.cancel().catch(() => {});
+    return "error";
   }
   const out = new Uint8Array(total);
   let at = 0;

@@ -44,7 +44,7 @@ const SCOPE_MAX = 1024;
 /** The most values of one key of the MFA list. */
 const MFA_VALUES_MAX = 16;
 /** The most entries of the SCIM role map. */
-const SCIM_ROLES_MAX = 100;
+export const SCIM_ROLES_MAX = 100;
 /** The most role names, apart from the static roles, that one write may name: two reads of `IN_CHUNK`. */
 const ROLE_NAMES_MAX = 100;
 /** The most certificates of a SAML connection: the signing key and the next one during a rollover. */

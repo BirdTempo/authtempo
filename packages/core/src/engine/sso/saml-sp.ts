@@ -221,10 +221,11 @@ async function keysOf(
   return keys;
 }
 
-/** The input of the ACS: the form, the binding cookie, and the request facts. */
+/** The input of the ACS: the read of the form, the binding cookie, and the request facts. */
 export interface SamlComplete {
   connectionId: string;
-  form: URLSearchParams;
+  /** Reads the form of the post. `completeSaml` calls it after the limit and the SAML check. */
+  readForm: () => Promise<URLSearchParams>;
   bindToken: string | null;
   ip: string | null;
   userAgent: string | null;
@@ -233,7 +234,10 @@ export interface SamlComplete {
 
 /**
  * The ACS of a SAML connection (Behaviors 2 to 4). The limit `sso-acs:ip`
- * comes first. The form holds `SAMLResponse` once and `RelayState` once.
+ * comes first, then the check that SAML is on, and only then the read of
+ * the form. So a post past the limit or with SAML off reads no byte and
+ * holds no part of the budget of the large reads (ruling 59 Major 1 of the
+ * 12j lane). The form holds `SAMLResponse` once and `RelayState` once.
  * The `saml-request` row of the `RelayState` hash must name this
  * connection. It must be live and hold the hash of the binding cookie,
  * else `request`. A spent row answers `request_spent`. Then the connection,
@@ -245,18 +249,16 @@ export async function completeSaml(
   outer: ResolvedConfig,
   input: SamlComplete,
 ): Promise<Result<SsoSignedIn | SignInChallenge>> {
+  if (!(await limit(outer, "sso-acs:ip", ipKey(input.ip), ACS_LIMIT))) return fail("rate_limited");
+  const sso = outer.sso;
+  if (!sso?.saml) return fail("sso_not_configured");
+  const form = await input.readForm();
   // The bearer values of the post: each event of the act scrubs them (plan 12d on 12h).
-  const config = withSecrets(outer, [
-    ...input.form.getAll("SAMLResponse"),
-    ...input.form.getAll("RelayState"),
-  ]);
+  const config = withSecrets(outer, [...form.getAll("SAMLResponse"), ...form.getAll("RelayState")]);
   const id = input.connectionId;
   const no = (step: SamlStep) => refused(config, id, step, input.ip);
-  if (!(await limit(config, "sso-acs:ip", ipKey(input.ip), ACS_LIMIT))) return fail("rate_limited");
-  const sso = config.sso;
-  if (!sso?.saml) return fail("sso_not_configured");
-  const responses = input.form.getAll("SAMLResponse");
-  const states = input.form.getAll("RelayState");
+  const responses = form.getAll("SAMLResponse");
+  const states = form.getAll("RelayState");
   const [encoded] = responses;
   const [relayState] = states;
   if (responses.length !== 1 || states.length !== 1 || encoded === undefined) return no("form");

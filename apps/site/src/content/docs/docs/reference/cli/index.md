@@ -9,6 +9,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 10"
   - packages/cli/src/stacks.ts
 sidebar:
   order: 1
@@ -20,7 +21,7 @@ sidebar:
 
 ## Before you start
 
-- Node 22 or newer.
+- Node 22.13 or newer. The `engines` field of `@authtempo/cli` gives this floor.
 - A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.
 
 ## Run it from this repo
@@ -59,6 +60,7 @@ node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 | `authtempo audit list` | Lists the audit rows of the operator acts. | [authtempo audit list](/docs/reference/cli/audit-list/) |
 | `authtempo create-admin` | Makes the first platform operator of a deployment. | [authtempo create-admin](/docs/reference/cli/create-admin/) |
 | `authtempo generate` | Prints the schema of the authtempo tables as SQL, Drizzle, or Prisma. | [authtempo generate](/docs/reference/cli/generate/) |
+| `authtempo upgrade` | Moves every authtempo package of an app to one version, and prints the Breaking lines and the next steps. | [authtempo upgrade](/docs/reference/cli/upgrade/) |
 
 ## The flags
 

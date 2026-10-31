@@ -6,6 +6,7 @@ sources:
   - packages/express/README.md
   - packages/express/src/index.ts
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 sidebar:
   hidden: true
 ---
@@ -20,7 +21,7 @@ sidebar:
 
 ## Steps
 
-1. Mount core: `app.use("/auth", authHandler(auth))`.
+1. Mount core before the body parser of the app: `app.use("/auth", authHandler(auth))`, then `app.use(express.json())`.
 2. Read the session: `app.use(authSession({ auth }))`, then `getSession(res)` in a route.
 3. Protect paths: `authSession({ auth, protect: (p) => p.startsWith("/account"), signInPath: "/sign-in" })`.
 
@@ -56,6 +57,13 @@ sidebar:
 - The package takes `express` 5.2.1 or a later 5 release as a peer dependency.
 - The Express adapter of NestJS 12 pins Express 5.2.1, so the binding runs there too.
 - A body parser such as `express.json()` may run before the routes of core. The binding writes the parsed body again in its content type.
+- Mount the routes of core before the body parser of the app. Core then reads each body itself, at the cap of its route, and answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large) past it. The parser of the app keeps its default limit for the other routes.
+- A parser that must run first answers its own 413 before core past its limit. The default limit of `express.json()` is 100 kB, and an SSO connection write can need more.
+- Make such a parser skip the base path of core, so core reads those bodies at their caps: `app.use((req, res, next) => (req.path.startsWith("/auth/") ? next() : json(req, res, next)))`, with `const json = express.json()`.
+- These are the two setups. Do not give a parser the bodies of core's routes, not even on the two SSO connection paths only.
+- A parser reads a body before core checks the session, and it has no depth or item limit.
+- On 2026-10-30, a parser ran on the two SSO connection paths only, with their cap of 8 MiB as its limit. One body of nested arrays at that limit, with no sign-in, stopped a process with a heap of 256 MB.
+- Never raise the limit of a parser for every route: the same body then stops the process at any route.
 - The middleware reads no session for a route of core. Core reads and renews the session itself.
 - The middleware skips the session read only when the raw path and the matched path are both under the base path. Else it judges the request as a page.
 - After the sliding refresh, the answer carries the renewed session cookie.

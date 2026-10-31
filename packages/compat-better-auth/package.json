@@ -63,8 +63,15 @@
   },
   "files": [
     "dist",
-    "migrations"
+    "migrations",
+    "CHANGELOG.md"
   ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "authtempo": {
+    "betterAuth": ">=1.7.7 <1.8.0"
+  },
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",
@@ -109,6 +116,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "7.0.2",
+    "typescript-api": "npm:typescript@6.0.3",
     "vite": "8.3.3",
     "vitest": "5.0.3",
     "wrangler": "4.148.0"

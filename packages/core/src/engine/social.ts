@@ -77,7 +77,30 @@ import {
 export const OAUTH_STATE_PREFIX = "os_";
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
 const STATE_TTL_MS = 10 * 60_000;
-const START_LIMIT = { seconds: 15 * 60, max: 30 };
+export const START_LIMIT = { seconds: 15 * 60, max: 30 };
+/**
+ * `social-callback:ip`: the callback form posts of one IP, such as Apple's,
+ * per 15 minutes (ruling 68 Minor 2 of the 12j lane). The route counts a post
+ * before it reads the form, so a post past the limit reads no byte and
+ * holds no part of the body budget. Before this limit, 4 IP keys held the
+ * reads of that route for as long as they sent.
+ *
+ * The derivation, done 2026-10-30. Each callback ends one flow that a start
+ * began, and `social-start:ip` allows 30 starts of one IP in 15 minutes. So
+ * 30 posts serve every honest flow of that IP. A stalled post ends within
+ * 10 s (`largeReadDeadlineMs` of the cap of the route). So one IP holds its
+ * share of the budget at most 30 times 10 s in 15 minutes, as the ACS limit
+ * bounds the ACS. The test holds this limit equal to `START_LIMIT`.
+ */
+export const CALLBACK_POST_LIMIT = { seconds: 15 * 60, max: 30 };
+
+/** True when the callback form post of `ip` is within `CALLBACK_POST_LIMIT`. It counts the post. */
+export function socialCallbackPostAllowed(
+  config: ResolvedConfig,
+  ip: string | null,
+): Promise<boolean> {
+  return limit(config, "social-callback:ip", ipKey(ip), CALLBACK_POST_LIMIT);
+}
 // Per 15 minutes, per user, after `social-start:ip` (plan 12a). A settings
 // page links one or two providers; 10 bounds a stolen fresh session.
 export const LINK_PER_USER = { seconds: 900, max: 10 };

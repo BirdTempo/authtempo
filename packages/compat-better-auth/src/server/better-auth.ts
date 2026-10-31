@@ -6,6 +6,7 @@ import {
   type HandleOptions,
   onWorkers,
 } from "@authtempo/core";
+import type { RouteKey } from "@authtempo/core/routes";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
 import { isPlaceholder, placeholderRuleOf } from "../storage/placeholder.js";
@@ -13,6 +14,16 @@ import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
 import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
+import {
+  BodyBusy,
+  BodyTimeout,
+  BodyTooLarge,
+  bodyBusy,
+  bodyReadable,
+  bodyTimeout,
+  bodyTooLarge,
+  readJsonOf,
+} from "./body.js";
 import { checkOptions, pluginOf } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { PLACEHOLDER_ADDRESS_TEXT } from "./hooks.js";
@@ -20,7 +31,7 @@ import { type Mapped, mapOptions, mappedFor } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
 import { signInAdditionsRoute } from "./sign-in-additions.js";
-import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
+import { scimRoute, ssoAcsRoute, ssoConnectionWrite, ssoRoute } from "./sso-routes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
@@ -44,14 +55,18 @@ export async function withPolicyCode(
   mapped: Mapped,
 ): Promise<Response> {
   if (!copy || res.status !== 400) return res;
-  const field = PASSWORD_FIELD[new URL(copy.url).pathname.slice(mapped.basePath.length)];
+  const path = new URL(copy.url).pathname.slice(mapped.basePath.length);
+  const field = PASSWORD_FIELD[path];
   if (!field) return res;
   const body = (await res
     .clone()
     .json()
     .catch(() => null)) as { error?: unknown } | null;
   if (body?.error !== "password_policy") return res;
-  const sent = (await copy.json().catch(() => null)) as Record<string, unknown> | null;
+  const sent = (await readJsonOf(copy, `POST ${path}` as RouteKey)) as Record<
+    string,
+    unknown
+  > | null;
   const password = typeof sent?.[field] === "string" ? (sent[field] as string) : "";
   const headers = new Headers(res.headers);
   headers.delete("content-length");
@@ -153,10 +168,23 @@ export function createHandler(
       const held = await placeholderChange(auth, base, req, true);
       if (held) return held;
     }
+    // Core's SSO connection writes: the label rule of the shim, and one read of the body. A
+    // write that passes goes to core as a new request of the same text (ruling 68 Minor 1).
+    const write = await ssoConnectionWrite(auth, mapped, req);
+    if (write instanceof Response) return write;
+    if (write) req = write;
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
     if (sso) return sso;
-    const copy = req.method === "POST" ? req.clone() : null;
+    // A copy only for a path whose policy code reads it (ruling 68 Minor 1). A clone is a tee:
+    // the branch that no one reads keeps each chunk of the body. A body read or locked before
+    // cannot be cloned: no copy, no policy code (ruling 51 Low 3).
+    const copy =
+      req.method === "POST" &&
+      Object.hasOwn(PASSWORD_FIELD, pathname.slice(mapped.basePath.length)) &&
+      bodyReadable(req)
+        ? req.clone()
+        : null;
     // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
     // serve, then the calls that map onto core's operator routes. Null for every other request.
     const admin = plugins.has("admin")
@@ -198,7 +226,19 @@ export function createHandler(
   return async (request, options) => {
     const host = options?.waitUntil;
     const work: Promise<unknown>[] = [];
-    const res = await serve(request, host ? { waitUntil: (p) => void work.push(p) } : undefined);
+    // A read of the shim past the cap of its route throws core's BodyTooLarge.
+    // It answers 413 PAYLOAD_TOO_LARGE at that first read (ruling 46 of the 12j lane).
+    // A large read past the budget of the isolate throws BodyBusy: 503 (ruling 51).
+    // A large read past its deadlines throws BodyTimeout: 408 (ruling 59).
+    const res = await serve(
+      request,
+      host ? { waitUntil: (p) => void work.push(p) } : undefined,
+    ).catch((e: unknown) => {
+      if (e instanceof BodyTooLarge) return bodyTooLarge();
+      if (e instanceof BodyBusy) return bodyBusy();
+      if (e instanceof BodyTimeout) return bodyTimeout();
+      throw e;
+    });
     if (host) {
       // The flush has started when a throwing waitUntil returns: the answer stays,
       // and the events reach the sink while the isolate lives.
@@ -230,10 +270,7 @@ async function placeholderChange(
   request: Request,
   betterAuthShape: boolean,
 ): Promise<Response | null> {
-  const body: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
+  const body = await readJsonOf(request, "POST /user/change-email");
   const email = (body as { newEmail?: unknown } | null)?.newEmail;
   if (typeof email !== "string") return null;
   const s = await auth.session(request, { refresh: false });

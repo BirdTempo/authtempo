@@ -21,7 +21,6 @@ const VERSION = (JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as 
 const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 let templates: Record<Stack, TemplateFile[]>;
 const PKG_JSON = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
-  private?: boolean;
   version: string;
 };
 
@@ -94,7 +93,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
   it("gives each stack the example's files, the base config, and the three files of the stack", () => {
     for (const stack of STACKS) {
       const example = exampleFiles(join(REPO, "examples", STACK_INFO[stack].example));
-      const extras = extraFiles(stack).map((f) => f.path);
+      const extras = extraFiles(stack, !UNPUBLISHED).map((f) => f.path);
       expect(templates[stack].map((f) => f.path)).toEqual(
         [...example, "tsconfig.base.json", ...extras].sort(),
       );
@@ -108,11 +107,15 @@ describe("the init templates (spec 19, the one-source rule)", () => {
       Object.fromEntries(
         Object.entries(deps).map(([k, v]) => [k, v === "workspace:*" ? VERSION : v]),
       );
+    // A published scaffold also takes the CLI at its version as a dev dependency.
+    const cli = UNPUBLISHED ? {} : { "@authtempo/cli": VERSION };
+    const dev = (deps: Record<string, string> | undefined) =>
+      deps || !UNPUBLISHED ? { devDependencies: { ...pinned(deps), ...cli } } : {};
     for (const stack of STACKS) {
       const dir = join(REPO, "examples", STACK_INFO[stack].example);
       for (const path of exampleFiles(dir)) {
         const original = readFileSync(join(dir, path), "utf8");
-        const out = rewrite(stack, path, original, VERSION);
+        const out = rewrite(stack, path, original, VERSION, !UNPUBLISHED);
         if (path === "package.json") {
           const pkg = JSON.parse(original) as {
             scripts: Record<string, string>;
@@ -123,7 +126,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
             ...pkg,
             name: "my-app",
             ...(pkg.dependencies ? { dependencies: pinned(pkg.dependencies) } : {}),
-            ...(pkg.devDependencies ? { devDependencies: pinned(pkg.devDependencies) } : {}),
+            ...dev(pkg.devDependencies),
             scripts: {
               ...pkg.scripts,
               ...(stack === "workers-d1" || stack === "mcp-server" ? { test: "vitest run" } : {}),
@@ -222,8 +225,10 @@ describe("authtempo init (spec 19)", () => {
     const dir = fresh("init-mcp-server");
     const r = runBin(["init", dir, "--stack", "mcp-server"]);
     expect(r.status, r.stderr).toBe(0);
+    // A published scaffold runs each authtempo step with pnpm exec (spec 33 item 11).
+    const migrate = `${UNPUBLISHED ? "" : "pnpm exec "}authtempo migrate --target d1`;
     expect(r.stdout).toContain(
-      `\nNext:\n  cd ${dir}\n  pnpm install\n  cp .dev.vars.example .dev.vars\n  authtempo migrate --target d1\n  pnpm dev\n`,
+      `\nNext:\n  cd ${dir}\n  pnpm install\n  cp .dev.vars.example .dev.vars\n  ${migrate}\n  pnpm dev\n`,
     );
     expect(linesOf(r.stdout).at(-1)).toBe("Docs: https://authtempo.com/docs/start/mcp-server/");
     for (const path of [
@@ -249,7 +254,7 @@ describe("authtempo init (spec 19)", () => {
   });
 
   it("names the install note only while the CLI is unpublished", () => {
-    expect(UNPUBLISHED).toBe(PKG_JSON.private === true || PKG_JSON.version === "0.0.0");
+    expect(UNPUBLISHED).toBe(PKG_JSON.version === "0.0.0");
   });
 
   it("quotes a folder with a space or a character of the shell in the cd step", () => {

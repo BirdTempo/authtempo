@@ -74,6 +74,7 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
+import { parseBodyForm, parseBodyJson, readBodyText } from "../body-cap.js";
 import { holdsBadText } from "../body-text.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -92,32 +93,44 @@ export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
   return r.ok ? json(r.value, status) : json({ error: r.error }, r.status);
 }
 
-/** A JSON object body, or null. */
+/**
+ * A JSON object body, or null. The read stops at the cap of the route, and
+ * the depth and the item limits apply (rulings 43 and 46 of the 12j lane).
+ */
 async function readObject(request: Request): Promise<Record<string, unknown> | null> {
-  try {
-    const value: unknown = await request.json();
-    if (holdsBadText(value)) return null;
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  const value = parseBodyJson(await readBodyText(request));
+  if (value === undefined || holdsBadText(value)) return null;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-/** A form body whose fields each come once (RFC 6749 section 3.1), or null. */
+/**
+ * A form body whose fields each come once (RFC 6749 section 3.1), or null.
+ * The read stops at the cap of the route. A form of more than
+ * `FORM_PAIRS_MAX` pairs is null before the parse (ruling 51 of the 12j lane).
+ */
 async function formParams(request: Request): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(await request.text());
-  } catch {
-    return null;
-  }
-  for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
+  const params = parseBodyForm(await readBodyText(request));
+  if (params === null || !fieldsOnce(params)) return null;
   if (holdsBadText([...params])) return null;
   return params;
+}
+
+/**
+ * True when each key of `params` comes once. One pass with a set (ruling 51
+ * Minor 4 of the 12j lane): a `getAll` for each key took time of the keys
+ * squared, 714 ms for 64 KiB of distinct keys on Node.
+ */
+function fieldsOnce(params: URLSearchParams): boolean {
+  const seen = new Set<string>();
+  for (const key of params.keys()) {
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
 }
 
 /**
@@ -639,8 +652,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       key: "GET /oauth/end-session",
       async handler(ctx) {
         const params = ctx.url.searchParams;
-        const once = [...new Set(params.keys())].every((k) => params.getAll(k).length === 1);
-        return endSessionAnswer(ctx, once ? params : null);
+        return endSessionAnswer(ctx, fieldsOnce(params) ? params : null);
       },
     },
     {

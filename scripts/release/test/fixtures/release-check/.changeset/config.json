@@ -1,0 +1,5 @@
+{
+  "fixed": [["@authtempo/adapter-sqlite", "@authtempo/breach-check"]],
+  "linked": [],
+  "ignore": ["@authtempo/site", "authtempo-example-node", "authtempo-release"]
+}

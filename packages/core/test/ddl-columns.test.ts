@@ -255,8 +255,11 @@ describe("the column map (plan 12g)", () => {
     // Ruling 38 adds 1: the daily cap of the passkey-first sign-up. Plan 12f2
     // Task 5 adds 1: the per-actor count of the operator delete. Plan 12f2
     // Task 3 adds 1: the per-IP count of the invitation confirm. Plan 12f2
-    // Task 5 adds 1: the per-actor count of the operator create.
-    expect(sites.length).toBe(112);
+    // Task 5 adds 1: the per-actor count of the operator create. Ruling 69 of
+    // the 12j lane adds 1: the large body reads of one person at the SSO writes.
+    // Ruling 68 Minor 2 of the 12j lane adds 1: the callback form posts of an IP.
+    expect(sites.length).toBe(114);
+    expect(sites).toContain('engine/social.ts "social-callback:ip" ipKey(ip)');
     expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
     expect(sites).toContain('http/routes/operator.ts "operator-create:actor" actorSubject(actor)');
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');

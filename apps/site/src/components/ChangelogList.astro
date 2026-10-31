@@ -1,0 +1,15 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// The part "Releases" of the docs changelog page (plan 12j Task 13, spec 33
+// item 3). It reads each packages/*/CHANGELOG.md at build time, by the same
+// function as check-changelog, and renders changelogMarkdown. The agent
+// markdown of the page holds the same text.
+import { changelogMarkdown, readChangelogFiles } from "../data/changelogs.ts";
+import { renderMarkdown } from "../data/markdown.ts";
+import { REPO_ROOT, repositoryUrl } from "../data/repo.ts";
+import { CHANGELOG_EMPTY } from "../data/unpublished.ts";
+
+const text = changelogMarkdown(readChangelogFiles(REPO_ROOT), repositoryUrl, CHANGELOG_EMPTY);
+---
+<Fragment set:html={await renderMarkdown(text)} />

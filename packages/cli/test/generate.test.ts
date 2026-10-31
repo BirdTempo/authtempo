@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SEALED_OR_HASH } from "../src/generate/header.js";
 import { main } from "../src/main.js";
-import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
+import { assertFreshBuild, linesOf, runBin, VERSION } from "./support/bin.js";
 import { fakeIo } from "./support/fake-io.js";
 
 // `authtempo generate` (plan 12g Task 7): the command, its output, and the
@@ -134,7 +134,7 @@ describe("authtempo generate (plan 12g Task 7)", () => {
       expect(await main(["generate", "--format", format, "--dialect", dialect], io)).toBe(0);
       const mark = format === "sql" ? "--" : "//";
       expect(io.stdout[0]).toBe(
-        `${mark} authtempo schema version 15, dialect ${dialect}, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with \`authtempo migrate\`. Write rows through the engine only.`,
+        `${mark} authtempo schema version 15, dialect ${dialect}, authtempo CLI ${VERSION}. authtempo owns these tables. Create and change them with \`authtempo migrate\`. Write rows through the engine only.`,
       );
       expect(io.stdout[1]).toBe(
         `${mark} This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.`,

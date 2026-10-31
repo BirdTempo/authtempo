@@ -5,6 +5,7 @@ type: reference
 sources:
   - packages/core/README.md "Routes under"
   - packages/core/src/http/route-list.ts
+  - packages/core/src/http/body-cap.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md
@@ -14,6 +15,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -30,6 +32,9 @@ sources:
 - With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
 - A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`.
+- A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
+- The body reads of the routes with a cap above 65536 bytes hold at most 16777216 bytes at once in one isolate. The reads of signed-in users hold at most 8388608 bytes of it, and every other read at most 8388608 bytes. One IP holds at most 4194304 bytes, and so does the one client with no IP. A user may hold the cap of its read, with one large read at a time. A client is its IP before a session and its user after one. A read past that answers 503 [`body_busy`](/docs/reference/errors/#body_busy) with `Retry-After: 1`, and no parse runs. The SCIM routes answer their own SCIM 503.
+- Such a read that gets no bytes for 10 s answers 408 [`body_timeout`](/docs/reference/errors/#body_timeout). So does a read that runs past the time of its cap at 131072 bytes per second, at least 10 s. For a signed-in user the rate is 262144 bytes per second. No parse runs. The SCIM routes answer their own SCIM 408.
 - An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
 - An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.
 - Every answer to a trusted origin carries the CORS headers with credentials.
@@ -286,7 +291,7 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Needs | Nothing. The callback reads the binding cookie. The Origin check is skipped |
 | Input | JSON or form `{ code?, state?, error?, user?, id_token? }`. Apple sends a form with `code`, `state`, and `user?` |
 | Answer | The same as the GET callback. A cross-site post carries no trust cookie, so a user with the second factor on goes to the challenge page, which offers the trusted device |
-| Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-social-provider-id-token-nonce"><code>POST /social/:provider/id-token/nonce</code></h3>
 
@@ -1608,7 +1613,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 ## Enterprise SSO
 
-These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. An organization adds an OIDC or a SAML connection to its sign-in provider. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each write writes one audit row.
+These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. An organization adds an OIDC or a SAML connection to its sign-in provider. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each connection write also counts on `sso-large-read:user:<userId>`, 6 per hour, before it reads its body. Each write writes one audit row.
 
 The manager guard runs these steps in order. An impersonation session answers `forbidden_rank`, and the router refuses each write to it with `impersonation_session`. A platform operator who passes the operator user guard manages every organization. The operator user guard needs the platform role, a verified address, a second factor, and a fresh session. An operator who fails it and owns no organization of the call gets `operator_required`. Else the user is an owner of the organization: a member whose role holds a static role of the owner rank, else `forbidden_rank`. The owner needs a second factor (`second_factor_required`) and a fresh session (`session_not_fresh`).
 

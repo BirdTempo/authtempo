@@ -3,30 +3,41 @@
  * the form `<flow>:ip:<value>` calls this function, so the rule has one copy.
  * The session row keeps the raw IP: only the limiter key uses this form.
  *
- * - `null` and `""` give `unknown`: one shared bucket for every caller with no IP.
+ * - `null` gives `unknown`: one shared bucket for every caller with no IP.
+ *   No text gives it (ruling 69 of the 12j lane).
  * - An IPv4 address in dotted form gives that form.
  * - An IPv4-mapped IPv6 address (`::ffff:0:0/96`, RFC 4291 section 2.5.5.2)
  *   gives its dotted IPv4 form, so the two forms of one host share one count.
  * - Any other IPv6 address gives its `/64` prefix, for example
  *   `2001:db8:1:2::/64`. SLAAC (RFC 4862) gives one host on a LAN a whole
  *   `/64`. A key per address lets that host use 2^64 keys.
- * - Any other value stays as it is: a custom `clientIp` can give any string.
+ * - Any other text, `""` too, gives `text:` and the text: a key of its own.
+ *   A custom `clientIp` can give any string, and a header can carry the
+ *   text `unknown` or the form of a `/64` key. Before ruling 69 such a text
+ *   stayed as it was, so the text `unknown` took the key of every caller
+ *   with no IP (ruling 68 Low 4 of the 12j lane).
  *
  * The cost: all users of one `/64` share each per-IP count. A host that gives
  * one `/64` to many tenants makes them share it. The NAT64 prefix
  * `64:ff9b::/96` is not a mapped address, so it keys by its `/64`.
  */
 export function ipKey(ip: string | null): string {
-  if (ip === null || ip === "") return "unknown";
+  if (ip === null) return NO_IP_KEY;
   if (parseIpv4(ip) !== null) return ip;
   const groups = parseIpv6(ip);
-  if (groups === null) return ip;
+  if (groups === null) return `${TEXT_KEY}${ip}`;
   const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0] = groups;
   if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0xffff) {
     return [g >> 8, g & 0xff, h >> 8, h & 0xff].join(".");
   }
   return `${[a, b, c, d].map((x) => x.toString(16)).join(":")}::/64`;
 }
+
+/** The key of every caller with no IP. Each text gives `TEXT_KEY` first, and an address gives digits and hex. */
+const NO_IP_KEY = "unknown";
+
+/** The start of the key of a text that is not an IP: no key of an address or of no IP starts so. */
+const TEXT_KEY = "text:";
 
 const IPV4_PART = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
 const IPV4_LITERAL = new RegExp(`^${IPV4_PART}(\\.${IPV4_PART}){3}$`);

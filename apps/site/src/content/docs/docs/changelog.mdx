@@ -1,0 +1,42 @@
+---
+title: Changelog
+description: The released versions of the authtempo packages, the feed of each release, and the rule that keeps each changelog a record.
+type: reference
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 12
+  - docs/superpowers/plans/README.md
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 13"
+sidebar:
+  order: 91
+---
+
+import ChangelogList from "../../../components/ChangelogList.astro";
+
+**For:** a developer who must know what changed between two versions of authtempo.
+
+**What it does:** this page lists each release of the authtempo packages. Every released package has the same version, so the changelog of `@authtempo/core` lists each release of the group.
+
+## Before you start
+
+- Read [Versioning policy](/docs/versioning/) for what each kind of version means.
+
+## Releases
+
+<ChangelogList />
+
+## The feed
+
+The feed [`/feed.xml`](/feed.xml) has one entry for each release of each package. A feed reader shows each new release.
+
+## The record rule
+
+A changelog is a record. `changeset version` writes each section from the changesets of the release. No later change edits a released section. A fault in an old section gets a correction in the next section. The release check `check-records` fails on an edit of a released section.
+
+Until the first release, the plan index of the repo is the record of each change: `docs/superpowers/plans/README.md`. Each row names a plan, its spec sections, and the commit that merged it.
+
+## Next
+
+- [Versioning policy](/docs/versioning/)
+- [Upgrades and schema versions](/docs/operations/upgrades/)
+- [Resources](/docs/resources/)

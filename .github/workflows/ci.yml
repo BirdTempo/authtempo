@@ -1,0 +1,57 @@
+# The check of each pull request and each push to main (plan 12j, spec 33
+# item 5). scripts/release/src/check-workflows.ts holds every rule of this file
+# offline, and its test fails when a step, a permission, a pin, or the Node
+# floor changes. The check reads a YAML subset: block mappings, block lists,
+# "|" run blocks, and the flow forms {} and ["..."]. Another form fails it.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+# Read only. A write permission lets the code of a pull request change the
+# repository.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # A GitHub-hosted runner with a fixed image. A self-hosted runner keeps
+    # state from one run to the next.
+    runs-on: ubuntu-24.04
+    steps:
+      # The full history. Without it, check-changesets and check-records find
+      # no merge base with main and fail. The token leaves the git config, so
+      # no later step can push with it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # pnpm at the packageManager version of the root package.json, the one
+      # source of the version. Without it, no pnpm step runs.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # Node of the tech stack. Without it, the Node of the runner image runs.
+      # The cache is off: a cache is a speed tool, never an evidence tool.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.10.0"
+          package-manager-cache: false
+      # The lockfile as written. Without --frozen-lockfile, a new resolution
+      # installs and no check sees it.
+      - run: pnpm install --frozen-lockfile
+      # The lint and format rules of Biome, with no error and no warning
+      # (CONTRIBUTING.md). Without it, a pull request that fails pnpm lint
+      # merges, and the format that runbook step 6 asks for has no gate
+      # (ruling 65 of plan 12j).
+      - run: pnpm lint
+      # Every release check with the cache off, against the merge base with
+      # the base branch of the pull request: main, or release/<major>.<minor>
+      # for a patch of an older minor. A push to main has no base branch, so
+      # the base is main. GitHub sets GITHUB_BASE_REF on a pull request only.
+      # Without it, a pull request into a release branch is held to main.
+      # Without this step, this workflow proves nothing. The OSV read and the
+      # dry run run in release.yml at the tag. release-check starts the test
+      # servers of the checkout through scripts/test-servers.mjs, so no step
+      # starts docker compose (ruling 50 of plan 12j).
+      - run: pnpm release:check --no-osv --no-dry-run --base "origin/${GITHUB_BASE_REF:-main}"

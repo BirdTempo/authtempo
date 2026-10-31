@@ -31,6 +31,13 @@ const configRecords = new WeakMap<object, DomainRecordOf>();
 const RECORD = Symbol("authtempo.compat.domainRecord");
 const recordVerifies = new WeakSet<Request>();
 const scimCallers = new WeakMap<Request, ScimCaller>();
+/** The user of an SSO manager write that a compat package counted before its own read. */
+const ssoManageCounted = new WeakMap<Request, string>();
+/**
+ * The user of an SSO connection write whose large read a compat package
+ * counted, and whether the counts allowed it (rulings 69 and 72 Low 2).
+ */
+const largeReadCounted = new WeakMap<Request, { userId: string; allowed: boolean }>();
 
 export function setConfigDomainRecord(input: object, record: DomainRecordOf): void {
   configRecords.set(input, record);
@@ -66,4 +73,65 @@ export function setScimCaller(request: Request, caller: ScimCaller): void {
 /** The caller of a SCIM route that a compat package checked, or null for core's token check. */
 export function scimCallerOf(request: Request): ScimCaller | null {
   return scimCallers.get(request) ?? null;
+}
+
+/**
+ * Marks `request` as one SSO manager write of `userId` that core's limit
+ * counted already (ruling 51 Minor 1 of the 12j lane). Only
+ * `countSsoManageWrite` sets the mark, after the count.
+ */
+export function markSsoManageCounted(request: Request, userId: string): void {
+  ssoManageCounted.set(request, userId);
+}
+
+/**
+ * Marks `request` as one SSO connection write of `userId` whose large body
+ * read core's limits counted already (ruling 69 of the 12j lane), with the
+ * outcome of those counts. Only `countSsoManageWrite` sets the mark, after
+ * the counts. A refused count marks too, so core answers 429 and counts the
+ * read no more (ruling 72 Low 2). A shim that passes a refused write to
+ * core then gives one `limit.hit`, not two. Ruling 75 of the 12j lane
+ * removed the count of the deployment that this mark first served.
+ */
+export function markLargeReadCounted(request: Request, userId: string, allowed: boolean): void {
+  largeReadCounted.set(request, { userId, allowed });
+}
+
+/** Moves the mark of `from` in `marks` to `to`. No mark, no move. */
+function moveMark<V>(marks: WeakMap<Request, V>, from: Request, to: Request): void {
+  const value = marks.get(from);
+  if (value === undefined) return;
+  marks.delete(from);
+  marks.set(to, value);
+}
+
+/** Moves the marks of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
+export function moveSsoManageCounted(from: Request, to: Request): void {
+  moveMark(ssoManageCounted, from, to);
+  moveMark(largeReadCounted, from, to);
+}
+
+/**
+ * True when `request` holds the mark of a write of `userId`. The mark goes
+ * at the read, so it covers one count only.
+ */
+export function takeSsoManageCounted(request: Request, userId: string): boolean {
+  const marked = ssoManageCounted.get(request) === userId;
+  ssoManageCounted.delete(request);
+  return marked;
+}
+
+/**
+ * The outcome of the large-read counts of a compat package for a write of
+ * `userId`: "allowed", "refused", or null when it counted none for that
+ * user. The mark goes at the read.
+ */
+export function takeLargeReadCounted(
+  request: Request,
+  userId: string,
+): "allowed" | "refused" | null {
+  const mark = largeReadCounted.get(request);
+  largeReadCounted.delete(request);
+  if (mark?.userId !== userId) return null;
+  return mark.allowed ? "allowed" : "refused";
 }

@@ -19,22 +19,23 @@
   },
   "files": [
     "dist",
-    "skills"
+    "skills",
+    "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs MCP_VERSION && tsc -p tsconfig.json",
     "index": "node scripts/copy-index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json",
+    "typecheck": "node ../../scripts/write-version.mjs MCP_VERSION && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json",
     "test": "vitest run && vitest run -c vitest.pool.config.ts && node scripts/dry-run.mjs"
   },
   "dependencies": {
     "@authtempo/cli": "workspace:*",
     "@authtempo/core": "workspace:*",
     "@modelcontextprotocol/server": "2.3.1",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",

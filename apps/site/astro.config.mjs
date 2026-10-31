@@ -45,6 +45,8 @@ const sidebar = [
     items: [
       { label: "Versioning policy", slug: "docs/versioning" },
       { label: "Changelog", slug: "docs/changelog" },
+      // Plan 12j Task 13 (owner decision 6 of 2026-10-14): after the changelog.
+      { label: "Resources", slug: "docs/resources" },
     ],
   },
 ];

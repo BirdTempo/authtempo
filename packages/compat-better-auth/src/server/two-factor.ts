@@ -1,6 +1,7 @@
 import type { ClientCode } from "@authtempo/client";
 import { type Auth, TWO_FACTOR_TOKEN_RE } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
+import { readObjectOf } from "./body.js";
 import type { Mapped } from "./map-options.js";
 import { readToken, toUser } from "./shapes.js";
 
@@ -46,12 +47,9 @@ function failure(code: string, status: number, message = messageOf(code), header
   return Response.json({ code, message }, { status, ...(headers ? { headers } : {}) });
 }
 
+/** The JSON object of a POST, or null for no object. Each path of this file takes core's floor cap. */
 async function readBody(request: Request): Promise<Body | null> {
-  const v: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+  return readObjectOf(request);
 }
 
 /** One cookie of the request, never the bearer header. */

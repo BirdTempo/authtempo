@@ -14,6 +14,7 @@ sources:
   - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 7"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 3"
 ---
 
 **For:** a developer who moves an app of Better Auth 1.7 to authtempo and keeps the app's code.
@@ -23,6 +24,12 @@ sources:
 ## Before you start
 
 - The app runs Better Auth 1.7. [From Better Auth](/docs/migrate/better-auth/) tells how to move it.
+
+Supported Better Auth versions: `>=1.7.7 <1.8.0`.
+
+Warning: the rollback system must run Better Auth 1.7.7 or later. The advisory GHSA-965c-763c-88jm affects Better Auth `>=1.4.0-beta.18 <1.7.7`. Those versions accept the state of an OAuth sign-in as a magic link, so an attacker can sign in as another user. The old system stays the rollback target during the move.
+
+The shim was read on the shapes of Better Auth 1.7.2 and on the `@better-auth/api-key` plugin of 1.7.5. The package exports the range as `BETTER_AUTH_RANGE`. A new Better Auth minor gets a compat change in an authtempo minor, never in a patch.
 
 ## The rule
 

@@ -1,0 +1,58 @@
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.8.1
+        version: 12.8.1
+
+packages:
+
+  pnpm@12.8.1:
+    resolution: {integrity: sha512-AAAA}
+    hasBin: true
+
+snapshots:
+
+  pnpm@12.8.1: {}
+
+---
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  packages/core:
+    dependencies:
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
+    optionalDependencies:
+      '@esbuild/aix-ppc64':
+        specifier: 0.28.1
+        version: 0.28.1
+
+packages:
+
+  '@esbuild/aix-ppc64@0.28.1':
+    resolution: {integrity: sha512-BBBB}
+    engines: {node: '>=18'}
+    cpu: [ppc64]
+    os: [aix]
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-CCCC}
+
+snapshots:
+
+  '@esbuild/aix-ppc64@0.28.1':
+    optional: true
+
+  jose@6.2.12: {}

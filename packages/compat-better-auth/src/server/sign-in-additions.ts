@@ -1,6 +1,7 @@
 import type { Auth, UserRow } from "@authtempo/core";
 import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { Session, User } from "../types.js";
+import { readObjectOf } from "./body.js";
 import { translate } from "./email-otp.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
@@ -52,12 +53,9 @@ function failure(code: string, status: number, message = messageOf(code)): Respo
   return Response.json({ code, message }, { status });
 }
 
+/** The JSON object of a POST, or null for no object. Each path of this file takes core's floor cap. */
 async function readBody(request: Request): Promise<Body | null> {
-  const v: unknown = await request
-    .clone()
-    .json()
-    .catch(() => null);
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+  return readObjectOf(request);
 }
 
 /** The keys of `body` outside `allowed`, for a NOT_SUPPORTED answer. */

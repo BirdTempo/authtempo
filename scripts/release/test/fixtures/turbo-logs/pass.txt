@@ -1,0 +1,1188 @@
+ Container authtempo-s2-postgres-1 Running 
+ Container authtempo-s2-mysql97-1 Creating 
+ Container authtempo-s2-libsql-cli-compat-1 Creating 
+ Container authtempo-s2-libsql-cli-1 Creating 
+ Container authtempo-s2-mysql84-1 Creating 
+ Container authtempo-s2-libsql-1 Creating 
+ Container authtempo-s2-libsql-cli-1 Created 
+ Container authtempo-s2-mysql84-1 Created 
+ Container authtempo-s2-libsql-1 Created 
+ Container authtempo-s2-mysql97-1 Created 
+ Container authtempo-s2-libsql-cli-compat-1 Created 
+ Container authtempo-s2-mysql84-1 Starting 
+ Container authtempo-s2-mysql97-1 Starting 
+ Container authtempo-s2-libsql-cli-1 Starting 
+ Container authtempo-s2-libsql-1 Starting 
+ Container authtempo-s2-libsql-cli-compat-1 Starting 
+ Container authtempo-s2-libsql-cli-1 Started 
+ Container authtempo-s2-mysql84-1 Started 
+ Container authtempo-s2-libsql-cli-compat-1 Started 
+ Container authtempo-s2-mysql97-1 Started 
+ Container authtempo-s2-libsql-1 Started 
+ Container authtempo-s2-mysql97-1 Waiting 
+ Container authtempo-s2-postgres-1 Waiting 
+ Container authtempo-s2-libsql-1 Waiting 
+ Container authtempo-s2-libsql-cli-1 Waiting 
+ Container authtempo-s2-libsql-cli-compat-1 Waiting 
+ Container authtempo-s2-mysql84-1 Waiting 
+ Container authtempo-s2-libsql-cli-1 Healthy 
+ Container authtempo-s2-libsql-cli-compat-1 Healthy 
+ Container authtempo-s2-libsql-1 Healthy 
+ Container authtempo-s2-postgres-1 Healthy 
+ Container authtempo-s2-mysql84-1 Healthy 
+ Container authtempo-s2-mysql97-1 Healthy 
+
+   • turbo 2.11.7
+   • Packages in scope: //, @authtempo/adapter-sqlite, @authtempo/breach-check, @authtempo/site, authtempo-example-node, authtempo-release
+   • Running test, typecheck, typecheck:configs in 6 packages
+   • Remote caching disabled, using shared worktree cache
+
+@authtempo/breach-check:build: cache bypass, force executing 661648a170c294d4
+authtempo-release:typecheck: cache bypass, force executing 717c686915a4ddcb
+@authtempo/core:build: cache bypass, force executing cb4e062cad770ebc
+@authtempo/breach-check:typecheck: cache bypass, force executing a8bc0477c45ac14b
+//:typecheck:configs: cache bypass, force executing d030010b980ac87b
+authtempo-release:test: cache bypass, force executing dff7958cc3c5e001
+//:typecheck:configs: $ tsc -p tsconfig.configs.json && node scripts/check-config-count.mjs
+@authtempo/breach-check:typecheck: $ tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json
+@authtempo/breach-check:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/core:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+authtempo-release:test: $ vitest run
+authtempo-release:typecheck: $ tsc -p tsconfig.json
+authtempo-release:test: 
+authtempo-release:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/scripts/release[39m
+authtempo-release:test: 
+@authtempo/breach-check:test: cache bypass, force executing 2c5147150d4030d4
+@authtempo/breach-check:test: $ vitest run && node ../../examples/worker/proof/bundle-no-node.mjs proof && tsc -p tsconfig.json && node proof/pack-files.mjs
+authtempo-release:test:  [32m✓[39m test/package-fields.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/runbook.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/release-copy.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 41[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-workflows.test.ts [2m([22m[2m39 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-packages.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 43[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-osv.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-support.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 121[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/contributing.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/workspace.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/breach-check[39m
+@authtempo/breach-check:test: 
+authtempo-release:test:  [32m✓[39m test/prepare.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 227[2mms[22m[39m
+//:typecheck:configs: typecheck:configs checked 57 vitest config files (minimum 57).
+@authtempo/breach-check:test:  [2m[90m↓[39m[22m test/live.test.ts [2m([22m[2m1 test[22m[2m | [22m[33m1 skipped[39m[2m)[22m
+authtempo-release:test:  [32m✓[39m test/check-records.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 457[2mms[22m[39m
+@authtempo/adapter-postgres:build: cache bypass, force executing a927aaf882bbee88
+@authtempo/client:build: cache bypass, force executing f2c7b934881638bd
+@authtempo/adapter-d1:build: cache bypass, force executing b3b4e3622d9cea9d
+@authtempo/adapter-mysql:build: cache bypass, force executing 1f677c28716a6807
+@authtempo/captcha-turnstile:build: cache bypass, force executing 16e6eb7bdfd2116b
+@authtempo/next:build: cache bypass, force executing 8fabad2a533b8f32
+@authtempo/legacy-hashes:build: cache bypass, force executing ed1f1a4b4644cb17
+@authtempo/observe:build: cache bypass, force executing f7c0411b038af1e9
+@authtempo/adapter-d1:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/client:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/adapter-postgres:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/legacy-hashes:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/observe:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/captcha-turnstile:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/adapter-mysql:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/next:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+authtempo-release:test:  [32m✓[39m test/check-deprecations.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 666[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m check-deprecations [2m(22)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m leaves no read of tempo_session in core after each marker text is removed[33m 566[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-dependencies.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 705[2mms[22m[39m
+@authtempo/adapter-sqlite:build: cache bypass, force executing 07b05e7e3cfbebb5
+@authtempo/adapter-sqlite:build: $ node ../../scripts/clean-dist.mjs && node scripts/copy-migrations.mjs && tsc -p tsconfig.json
+@authtempo/handoff:build: cache bypass, force executing 16ce0bb5d3d4bd0b
+@authtempo/react:build: cache bypass, force executing 1ee9fa98e45833a2
+@authtempo/verify:build: cache bypass, force executing f3c3957e5f233b33
+@authtempo/demo:build: cache bypass, force executing a57512f2cdb772fd
+@authtempo/verify:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/handoff:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/react:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/demo:build: $ node scripts/gen-migrations.mjs && tsc -p tsconfig.facts.json && node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check && node scripts/dry-run.mjs
+@authtempo/breach-check:test:  [32m✓[39m test/breach-check.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 541[2mms[22m[39m
+@authtempo/breach-check:test:    [32m✓[39m createBreachCheck (plan 12b) [2m(8)[22m
+@authtempo/breach-check:test:      [33m[2m✓[22m[39m answers unavailable for a timeout, a network error, a 302, a 500, and a body over the cap[33m 504[2mms[22m[39m
+@authtempo/breach-check:test: 
+@authtempo/breach-check:test: [2m Test Files [22m [1m[32m1 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (2)[39m
+@authtempo/breach-check:test: [2m      Tests [22m [1m[32m8 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (9)[39m
+@authtempo/breach-check:test: [2m   Start at [22m 11:21:49
+@authtempo/breach-check:test: [2m   Duration [22m 723ms[2m (tests 89%, transform 7%, import 3%, worker 1%)[22m
+@authtempo/breach-check:test: 
+@authtempo/demo:build: gen-migrations: PASS files=15
+@authtempo/adapter-sqlite:build: copy-migrations: 15 files
+authtempo-example-node:typecheck: cache bypass, force executing 6e8f3a9b291da120
+authtempo-example-node:test: cache bypass, force executing 6d374750f4e7af53
+authtempo-example-node:typecheck: $ tsc -p tsconfig.json
+authtempo-example-node:test: $ node test/e2e.ts && bun test/e2e.ts
+@authtempo/adapter-sqlite:typecheck: cache bypass, force executing 533890fb6488f6c3
+@authtempo/compat-better-auth:build: cache bypass, force executing dc6691f052857ded
+@authtempo/adapter-sqlite:test: cache bypass, force executing 77d62a84dbcba4e6
+authtempo-release:test:  [32m✓[39m test/publish.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1364[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m publish [2m(20)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m names the public registry at each npm call, over a committed .npmrc[33m 708[2mms[22m[39m
+@authtempo/compat-better-auth:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/adapter-sqlite:typecheck: $ node scripts/copy-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json
+@authtempo/adapter-sqlite:test: $ vitest run && bun --bun vitest run -c vitest.bun.config.ts && vitest run -c vitest.pool.config.ts && node proof/bundle.mjs
+@authtempo/demo:build: copy-assets: PASS files=31
+authtempo-release:test:  [32m✓[39m test/check-tag.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 1388[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m check-tag [2m(10)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m reads the group version and the branches of the checkout[33m 453[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m fails a tag on a commit that release/<minor> does not hold[33m 435[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m prints a FAIL line, not a stack, when git exits with an error[33m 359[2mms[22m[39m
+authtempo-release:test:  [32m✓[39m test/check-pack.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 1408[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m check-pack [2m(27)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m reads a pnpm pack tarball and checks it against the tree[33m 406[2mms[22m[39m
+@authtempo/adapter-sqlite:typecheck: copy-migrations: 15 files
+@authtempo/import:build: cache bypass, force executing 54c010886a3533df
+@authtempo/import:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+@authtempo/demo:build: check-assets: PASS files=32 imports=44
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: 
+authtempo-release:test:  [32m✓[39m test/git.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1979[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m git [2m(5)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m finds the merge base and counts the commits since it[33m 408[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m reads a file at a commit, and null for a file that is not there[33m 482[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m lists a committed, an uncommitted, and an untracked change, and no ignored file[33m 326[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m lists the old path and the new path of a move[33m 432[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m lists the working tree files without a removed file or an ignored file[33m 330[2mms[22m[39m
+@authtempo/cli:build: cache bypass, force executing 5e48e329551d2376
+@authtempo/cli:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/copy-templates.mjs
+authtempo-example-node:test: node-e2e: PASS version=26.10.0 checks=10 failures=0
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/migrations-copy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/breach-check:test: bundle-no-node: PASS, 1 bundle file(s) scanned, the Worker bundles with no_nodejs_compat and imports no node: module
+authtempo-release:test:  [32m✓[39m test/check-changesets.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 2431[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m check-changesets [2m(25)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m passes the release branch that changeset version writes[33m 823[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m reads only the changesets that are new since the merge base[33m 301[2mms[22m[39m
+@authtempo/breach-check:test: pack-files: PASS, 6 packed file(s) checked, each inside the allowlist
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/busy.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 224[2mms[22m[39m
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/sync.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 243[2mms[22m[39m
+@authtempo/cli:build: copy-templates: wrote dist/templates.json (workers-d1 16, workers-postgres 13, node 11, bun 11, mcp-server 15 files)
+@authtempo/mcp:build: cache bypass, force executing 17477aaee0f20ca6
+@authtempo/mcp:build: $ node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json
+authtempo-example-node:test: bun-e2e: PASS version=1.4.3 checks=10 failures=0
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/runner.test.ts[2m > [22m[2msqlite runner on node[2m > [22m[2mapplies every migration once and records it
+@authtempo/adapter-sqlite:test: [22m[39mmigrate-step: node longest=1.7 ms 0011_schema_v11
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/operator-delete-size.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 36[2mms[22m[39m
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/runner.test.ts[2m > [22m[2msqlite runner on better-sqlite3[2m > [22m[2mapplies every migration once and records it
+@authtempo/adapter-sqlite:test: [22m[39mmigrate-step: better-sqlite3 longest=1.6 ms 0011_schema_v11
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/body-text.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/errors.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/runner.test.ts[2m > [22m[2msqlite runner on libsql-file[2m > [22m[2mapplies every migration once and records it
+@authtempo/adapter-sqlite:test: [22m[39mmigrate-step: libsql-file longest=2.8 ms 0013_schema_v13
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/ready.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 110[2mms[22m[39m
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/runner.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 186[2mms[22m[39m
+@authtempo/demo:build: bundle-no-node: PASS, 1 bundle file(s) scanned, the Worker bundles with no_nodejs_compat and imports no node: module
+@authtempo/demo:build: demo-dry-run: PASS bytes=3223738
+@authtempo/site:typecheck: cache bypass, force executing a64a1a694d2cd089
+@authtempo/site:build: cache bypass, force executing a439e837525c3688
+@authtempo/site:typecheck: $ tsc -p tsconfig.json
+@authtempo/site:build: $ ASTRO_TELEMETRY_DISABLED=1 astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && node scripts/build-feed.ts
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/conformance-better-sqlite3.test.ts[2m > [22m[2msqlite driver: better-sqlite3[2m > [22m[2mrecords the SQLite version of the driver
+@authtempo/adapter-sqlite:test: [22m[39msqlite: better-sqlite3 3.53.4
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/conformance-better-sqlite3.test.ts [2m([22m[2m126 tests[22m[2m)[22m[33m 1168[2mms[22m[39m
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/conformance-node.test.ts[2m > [22m[2msqlite driver: node:sqlite[2m > [22m[2mrecords the SQLite version of the driver
+@authtempo/adapter-sqlite:test: [22m[39msqlite: node:sqlite 3.54.0
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/conformance-node.test.ts [2m([22m[2m126 tests[22m[2m)[22m[33m 1385[2mms[22m[39m
+@authtempo/site:build: 11:21:54 [WARN] [content] data store cleared (force)
+@authtempo/site:build: 11:21:54 [content] Syncing content
+@authtempo/site:build: 11:21:54 [content] Synced content
+@authtempo/site:build: 11:21:54 [types] Generated 637ms
+@authtempo/site:build: 11:21:54 [build] output: "static"
+@authtempo/site:build: 11:21:54 [build] mode: "static"
+@authtempo/site:build: 11:21:54 [build] directory: /work/authtempo/apps/site/dist/
+@authtempo/site:build: 11:21:54 [build] Collecting build info...
+@authtempo/site:build: 11:21:54 [build] ✓ Completed in 745ms.
+@authtempo/site:build: 11:21:55 [build] Building static entrypoints...
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/conformance-libsql-file.test.ts[2m > [22m[2msqlite driver: libsql file[2m > [22m[2mrecords the SQLite version of the driver
+@authtempo/adapter-sqlite:test: [22m[39msqlite: libsql file 3.45.1
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/conformance-libsql-file.test.ts [2m([22m[2m126 tests[22m[2m)[22m[33m 3235[2mms[22m[39m
+@authtempo/site:build: 11:21:55 [vite] ✓ built in 814ms
+@authtempo/site:build: 11:21:55 [vite] ✓ built in 27ms
+@authtempo/site:build: 11:21:55 [build] Rearranging server assets...
+@authtempo/site:build: 
+@authtempo/site:build:  generating static routes 
+@authtempo/site:build: 11:21:55 [WARN] [content] The collection "i18n" does not exist or is empty. Please check your content config file for errors.
+@authtempo/site:build: 11:21:55   ├─ /404.html11:21:56 [WARN] [content] Entry docs → 404 was not found.
+@authtempo/site:build:  (+15ms) 
+@authtempo/site:build: 11:21:56   ├─ /compare/index.html (+19ms) 
+@authtempo/site:build: 11:21:56   ├─ /demo/index.html (+22ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/reference/openapi.json (+23ms) 
+@authtempo/site:build: 11:21:56   ├─ /features/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /pricing/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /security/index.html (+11ms) 
+@authtempo/site:build: 11:21:56   ├─ /site.webmanifest (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /index.html (+12ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/index.html (+6ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/changelog/index.html (+5ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/account-without-address/index.html (+3ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/architecture/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/claim-rule/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/credentials/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/evidence/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/fresh-sessions/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/one-connection/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/races/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/seams/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/storage-port/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/concepts/threat-model/index.html (+1ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/faq/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/account-settings/index.html (+186ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/adapter/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/agents/index.html (+2ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/anonymous/index.html (+16ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/api-tokens/index.html (+19ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/base-url-list/index.html (+11ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/breach-check/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/browser-extension/index.html (+26ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/captcha/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/elysia/index.html (+28ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/email-code/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/handoff/index.html (+9ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/hooks/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/jwt/index.html (+10ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/last-method/index.html (+8ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/limiter/index.html (+12ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/magic-link/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/mcp-server/index.html (+36ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/multi-session/index.html (+9ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/mysql/index.html (+3ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/native-apple/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/nestjs/index.html (+29ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/next/index.html (+100ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/oauth-provider/index.html (+27ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/one-tap/index.html (+10ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/operator-tools/index.html (+35ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/organizations/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/other-stacks/index.html (+9ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/pages/index.html (+6ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/passkey-extensions/index.html (+10ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/passkey-sign-up/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/passkeys/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/password/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/phone/index.html (+8ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/preview-deployments/index.html (+6ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/discord/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/facebook/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/gitlab/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/microsoft/index.html (+5ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/slack/index.html (+5ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/tiktok/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/wechat/index.html (+5ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/providers/x/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/react-session/index.html (+26ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/related-origins/index.html (+5ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/roles-and-permissions/index.html (+9ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/scim/index.html (+15ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/second-factor/index.html (+10ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/social/index.html (+8ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/social-providers/index.html (+8ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/social-state-data/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/split-origins/index.html (+7ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/sqlite/index.html (+4ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/sso/index.html (+15ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/sso-entra/index.html (+10ms) 
+@authtempo/site:build: 11:21:56   ├─ /docs/guides/sso-google/index.html (+10ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/sso-okta/index.html (+10ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/sweep/index.html (+6ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/teams/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/third-party-app/index.html (+6ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/username/index.html (+6ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/verify-by-code/index.html (+6ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/guides/verify-caller/index.html (+12ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/auth0/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/authjs/index.html (+10ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/better-auth/index.html (+9ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/clerk/index.html (+7ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/cognito/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/cutover/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/firebase/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/supabase/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/migrate/workos/index.html (+8ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/backups/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/ban-a-user/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/delete-an-account/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/deploy/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/first-operator/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/key-rotation/index.html (+7ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/observability/index.html (+35ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/performance/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/second-factor-recovery/index.html (+7ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/secrets/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/operations/upgrades/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/adapter-mysql/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/adapter-sqlite/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/api/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/astro/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/audit/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/audit-list/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/check/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/create-admin/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/generate/index.html (+3ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/import/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/info/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/init/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/keys/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/mcp/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/migrate/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/secret/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/secret-rewrap/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/secret-status/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/sessions/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/sessions-end/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/sessions-end-all/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/upgrade/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-ban/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-create/index.html (+3ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-delete/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-get/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-list/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-platform-role/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-search/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-second-factor-off/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-unban/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cli/users-update/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/client/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/client-oauth/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/compat-better-auth/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/config/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/cookies/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/dependencies/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/deprecations/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/errors/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/events/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/express/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/fastify/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/glossary/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/handoff/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/hono/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/import-cli/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/limits/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/mcp/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/next/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/openapi/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/react/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/react-router/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/routes/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/runtimes/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/schema/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/security-policy/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/solid/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/sveltekit/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/tanstack-start/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/tokens/index.html (+2ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/verify/index.html (+11ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/verify-mcp/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/vue/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/reference/well-known/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/resources/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/index.html (+1ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/bun/index.html (+4ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/first-sign-in/index.html (+9ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/mcp-server/index.html (+9ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/node/index.html (+24ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/workers-d1/index.html (+10ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/start/workers-hyperdrive/index.html (+19ms) 
+@authtempo/site:build: 11:21:57   ├─ /docs/versioning/index.html (+2ms) 
+@authtempo/site:build: 11:21:57 ✓ Completed in 1.41s.
+@authtempo/site:build: 
+@authtempo/site:build: 11:21:57 [build] ✓ Completed in 2.31s.
+@authtempo/site:build: 11:21:57 [starlight:pagefind] Building search index with Pagefind...
+@authtempo/site:build: 11:21:57 [starlight:pagefind] Found 181 HTML files.
+@authtempo/site:build: 11:21:57 [starlight:pagefind] Finished building search index in 225ms.
+@authtempo/site:build: 11:21:57 [@astrojs/sitemap] `sitemap-index.xml` created at `dist`
+@authtempo/site:build: 11:21:57 [build] 181 page(s) built in 3.36s
+@authtempo/site:build: 11:21:57 [build] Complete!
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/conformance-libsql-http.test.ts[2m > [22m[2msqlite driver: libsql http[2m > [22m[2mrecords the SQLite version of the driver
+@authtempo/adapter-sqlite:test: [22m[39msqlite: libsql http 3.45.1
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/conformance-libsql-http.test.ts [2m([22m[2m126 tests[22m[2m)[22m[33m 5359[2mms[22m[39m
+@authtempo/adapter-sqlite:test:    [32m✓[39m stored form: libsql http [2m(2)[22m
+@authtempo/adapter-sqlite:test:      [33m[2m✓[22m[39m stores the same type and value in each column by create and by createMany, and the undo of many rows restores them (ruling 85 of plan 12d)[33m 739[2mms[22m[39m
+@authtempo/adapter-sqlite:test:      [33m[2m✓[22m[39m stores a lone surrogate as U+FFFD by create and by createMany, and reads it back (ruling 85 of plan 12d)[33m 402[2mms[22m[39m
+@authtempo/adapter-sqlite:test:    [32m✓[39m phone cap: libsql http [2m(3)[22m
+@authtempo/adapter-sqlite:test:      [33m[2m✓[22m[39m the daily cap holds under 40 parallel requests through POST /phone/request[33m 470[2mms[22m[39m
+@authtempo/adapter-sqlite:test:    [32m✓[39m shape conformance: libsql http [2m(3)[22m
+@authtempo/adapter-sqlite:test:      [33m[2m✓[22m[39m builds the database that schemaDdl builds[33m 325[2mms[22m[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+@authtempo/adapter-sqlite:test: [2m      Tests [22m [1m[32m550 passed[39m[22m[90m (550)[39m
+@authtempo/adapter-sqlite:test: [2m   Start at [22m 11:21:50
+@authtempo/adapter-sqlite:test: [2m   Duration [22m 6.89s[2m (tests 48%, transform 31%, import 21%)[22m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [2m  Transform [22m [33mtransforming modules took 7.74s[39m[2m · 31% of tracked time, re-done on every run[22m
+@authtempo/adapter-sqlite:test: [2m            [22m [2mpersist transforms across runs with [22m[33mfsModuleCache: true[39m
+@authtempo/adapter-sqlite:test: [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: conformance: limiter conformance: better-sqlite3 tests=10 passed=10
+@authtempo/adapter-sqlite:test: conformance: limiter conformance: libsql file tests=10 passed=10
+@authtempo/adapter-sqlite:test: conformance: limiter conformance: libsql http tests=10 passed=10
+@authtempo/adapter-sqlite:test: conformance: limiter conformance: node:sqlite tests=10 passed=10
+@authtempo/adapter-sqlite:test: conformance: phone cap: better-sqlite3 tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: phone cap: libsql file tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: phone cap: libsql http tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: phone cap: node:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh reuse race: better-sqlite3 tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh reuse race: libsql file tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh reuse race: libsql http tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh reuse race: node:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh revoke race: better-sqlite3 tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: refresh revoke race: libsql file tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: refresh revoke race: libsql http tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: refresh revoke race: node:sqlite tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: secret rotation: better-sqlite3 tests=1 passed=1
+@authtempo/adapter-sqlite:test: conformance: secret rotation: libsql file tests=1 passed=1
+@authtempo/adapter-sqlite:test: conformance: secret rotation: libsql http tests=1 passed=1
+@authtempo/adapter-sqlite:test: conformance: secret rotation: node:sqlite tests=1 passed=1
+@authtempo/adapter-sqlite:test: conformance: shape conformance: better-sqlite3 tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: shape conformance: libsql file tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: shape conformance: libsql http tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: shape conformance: node:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: sqlite driver: better-sqlite3 tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: sqlite driver: libsql file tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: sqlite driver: libsql http tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: sqlite driver: node:sqlite tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: storage conformance: better-sqlite3 tests=100 passed=100
+@authtempo/adapter-sqlite:test: conformance: storage conformance: libsql file tests=100 passed=100
+@authtempo/adapter-sqlite:test: conformance: storage conformance: libsql http tests=100 passed=100
+@authtempo/adapter-sqlite:test: conformance: storage conformance: node:sqlite tests=100 passed=100
+@authtempo/site:build: build-agent: PASS pages=174 sections=1623 twins=174
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/site:build: write-headers: PASS pages=181 hashes=10
+@authtempo/site:build: build-feed: PASS entries=0 changelogs=0
+@authtempo/mcp:index: cache bypass, force executing 2bf62e454e333baf
+@authtempo/mcp:index: $ node scripts/copy-index.mjs
+@authtempo/mcp:index: copy-index: PASS pages=174 skills=15
+@authtempo/mcp:test: cache bypass, force executing fb270e3667278dbe
+@authtempo/mcp:test: $ vitest run && vitest run -c vitest.pool.config.ts && node scripts/dry-run.mjs
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/mcp[39m
+@authtempo/mcp:test: 
+@authtempo/mcp:test:  [32m✓[39m test/sdk-seam.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/remote-limiter.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/worker-config.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/search.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 284[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/copy-index.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1001[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m copy-index [2m(4)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m copies a fresh index and prints its page count[33m 398[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a skill set that lacks a prompt of the stacks and providers, and writes nothing[33m 389[2mms[22m[39m
+@authtempo/adapter-sqlite:test: [90mstdout[2m | test/bun/conformance-bun.test.ts[2m > [22m[2msqlite driver: bun:sqlite[2m > [22m[2mrecords the SQLite version of the driver
+@authtempo/adapter-sqlite:test: [22m[39msqlite: bun:sqlite 3.54.0
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/bun/conformance-bun.test.ts [2m([22m[2m127 tests[22m[2m)[22m[33m 1176[2mms[22m[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+@authtempo/adapter-sqlite:test: [2m      Tests [22m [1m[32m127 passed[39m[22m[90m (127)[39m
+@authtempo/adapter-sqlite:test: [2m   Start at [22m 11:21:58
+@authtempo/adapter-sqlite:test: [2m   Duration [22m 2.14s[2m (tests 56%, transform 36%, import 8%)[22m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: conformance: limiter conformance: bun:sqlite tests=10 passed=10
+@authtempo/adapter-sqlite:test: conformance: phone cap: bun:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh reuse race: bun:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: refresh revoke race: bun:sqlite tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: secret rotation: bun:sqlite tests=1 passed=1
+@authtempo/adapter-sqlite:test: conformance: shape conformance: bun:sqlite tests=3 passed=3
+@authtempo/adapter-sqlite:test: conformance: sqlite driver: bun:sqlite tests=2 passed=2
+@authtempo/adapter-sqlite:test: conformance: storage conformance: bun:sqlite tests=100 passed=100
+@authtempo/mcp:test:  [32m✓[39m test/remote-address.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/instructions.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/plans.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/resources.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/docs-tools.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 285[2mms[22m[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/adapter-sqlite[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/mcp:test:  [32m✓[39m test/skills.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/prompts.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/root.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/scaffold.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 587[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m scaffold [2m(5)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m writes the node stack into a new folder[33m 555[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/stdout.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 1171[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the stdout of the binary [2m(1)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m writes only JSON-RPC frames on stdout, for each tool and for a line that is not JSON[33m 1131[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/no-network.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 928[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the network of the local server [2m(3)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m makes no network call at the start and for the docs tools[33m 752[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/drift.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 1120[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the tool table on the wire [2m(2)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m answers the keys of the CLI's JSON in a real call of each tool[33m 638[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m serves the same tool table on the wire[33m 432[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/no-secret.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 1819[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the environment of the server [2m(2)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m puts no environment value in a result, a stderr line, or a file[33m 935[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m puts no password with a quote or a backslash in an answer or a stderr line[33m 838[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/protocol-raw.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 3770[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the stdio server on the wire [2m(8)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m pages resources/list on the wire, 100 entries a page, to a last page with no cursor[33m 433[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m gets integrate-binding for each binding of the index, and refuses another[33m 380[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the flags of the binary [2m(6)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a --url-env that is no variable name, and writes no stdout[33m 337[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a flag it does not know[33m 344[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m resolves --root by its links, and logs the target[33m 392[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a --root that does not exist, or that is a file[33m 748[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m exits 2 with the index command when the index is missing[33m 329[2mms[22m[39m
+@authtempo/adapter-sqlite:test:  [32m✓[39m test/pool/libsql-web.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+@authtempo/adapter-sqlite:test: [2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+@authtempo/adapter-sqlite:test: [2m   Start at [22m 11:22:00
+@authtempo/adapter-sqlite:test: [2m   Duration [22m 4.75s[2m (transform 81%, import 19%)[22m
+@authtempo/adapter-sqlite:test: 
+@authtempo/adapter-sqlite:test: [2m  Transform [22m [33mtransforming modules took 2.45s[39m[2m · 81% of tracked time, re-done on every run[22m
+@authtempo/adapter-sqlite:test: [2m            [22m [2mpersist transforms across runs with [22m[33mfsModuleCache: true[39m
+@authtempo/adapter-sqlite:test: [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
+@authtempo/adapter-sqlite:test: 
+@authtempo/mcp:test:  [32m✓[39m test/migrate.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 4971[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m migrate.plan and migrate.run against the database [2m(7)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m plans against the database and gives a handle[33m 680[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m runs a held plan once[33m 570[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a plan whose file changed[33m 566[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a plan whose identities file changed[33m 494[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m plans and runs against the database that the server's --url-env names[33m 607[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m uses up the plan when a file cannot be read at the run[33m 500[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses another input, an expired plan, another database, and confirm false[33m 1011[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m the plan store and the input rules [2m(5)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m scrubs the connection string[33m 338[2mms[22m[39m
+@authtempo/adapter-sqlite:test: bundle-no-node: PASS bytes=1839277
+@authtempo/adapter-sqlite:test: entries-no-driver: PASS entries=5 files=12
+@authtempo/mcp:test:  [32m✓[39m test/check.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 5937[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m check [2m(7)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m returns no text of the checked deployment[33m 341[2mms[22m[39m
+@authtempo/mcp:test:  [32m✓[39m test/schema-migrate.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 6579[2mms[22m[39m
+@authtempo/mcp:test:    [32m✓[39m schema.migrate [2m(8)[22m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m plans and applies the migrations on an empty database[33m 753[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m stops at the gate on a newer database[33m 516[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m refuses a plan when the database changed[33m 830[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m stops at the gate in a run when the database became newer after the plan[33m 513[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m reads the database again after a run that stops[33m 527[2mms[22m[39m
+@authtempo/mcp:test:      [33m[2m✓[22m[39m answers that the state is unknown when the database refuses each link after a stop[33m 3109[2mms[22m[39m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [2m Test Files [22m [1m[32m22 passed[39m[22m[90m (22)[39m
+@authtempo/mcp:test: [2m      Tests [22m [1m[32m145 passed[39m[22m[90m (145)[39m
+@authtempo/mcp:test: [2m   Start at [22m 11:21:58
+@authtempo/mcp:test: [2m   Duration [22m 8.56s[2m (tests 53%, transform 32%, import 14%)[22m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [2m  Transform [22m [33mtransforming modules took 17.33s[39m[2m · 32% of tracked time, re-done on every run[22m
+@authtempo/mcp:test: [2m            [22m [2mpersist transforms across runs with [22m[33mfsModuleCache: true[39m
+@authtempo/mcp:test: [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/packages/mcp[39m
+@authtempo/mcp:test: 
+@authtempo/mcp:test:  [32m✓[39m test/pool/remote.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 231[2mms[22m[39m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+@authtempo/mcp:test: [2m      Tests [22m [1m[32m18 passed[39m[22m[90m (18)[39m
+@authtempo/mcp:test: [2m   Start at [22m 11:22:07
+@authtempo/mcp:test: [2m   Duration [22m 3.16s[2m (transform 74%, import 17%, tests 9%)[22m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: [2m  Transform [22m [33mtransforming modules took 2.01s[39m[2m · 74% of tracked time, re-done on every run[22m
+@authtempo/mcp:test: [2m            [22m [2mpersist transforms across runs with [22m[33mfsModuleCache: true[39m
+@authtempo/mcp:test: [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
+@authtempo/mcp:test: 
+@authtempo/mcp:test: wrangler: Total Upload: 2196.80 KiB / gzip: 377.82 KiB
+@authtempo/mcp:test: wrangler: Your Worker has access to the following bindings:
+@authtempo/mcp:test: wrangler: env.MCP_LIMITER (60 requests/60s)                  Rate Limit
+@authtempo/mcp:test: wrangler: env.ASSETS                                         Assets
+@authtempo/mcp:test: wrangler: env.MCP_HOST ("mcp.authtempo.com")                 Environment Variable
+@authtempo/mcp:test: wrangler: env.MCP_ALLOWED_ORIGINS ("")                       Environment Variable
+@authtempo/mcp:test: wrangler: --dry-run: exiting now.
+@authtempo/mcp:test: bundle-no-node: PASS, 1 bundle file(s) scanned, the Worker bundles with no_nodejs_compat and imports no node: module
+@authtempo/mcp:test: mcp-dry-run: PASS bytes=2249526
+@authtempo/site:test: cache bypass, force executing 0b5d43e2f09be365
+@authtempo/site:test: $ ASTRO_TELEMETRY_DISABLED=1 astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && node scripts/build-feed.ts && { node scripts/check.ts; c=$?; vitest run; v=$?; [ $c -eq 0 ] && [ $v -eq 0 ]; }
+@authtempo/site:test: 11:22:13 [WARN] [content] data store cleared (force)
+@authtempo/site:test: 11:22:13 [content] Syncing content
+@authtempo/site:test: 11:22:13 [content] Synced content
+@authtempo/site:test: 11:22:13 [types] Generated 551ms
+@authtempo/site:test: 11:22:13 [build] output: "static"
+@authtempo/site:test: 11:22:13 [build] mode: "static"
+@authtempo/site:test: 11:22:13 [build] directory: /work/authtempo/apps/site/dist/
+@authtempo/site:test: 11:22:13 [build] Collecting build info...
+@authtempo/site:test: 11:22:13 [build] ✓ Completed in 644ms.
+@authtempo/site:test: 11:22:13 [build] Building static entrypoints...
+@authtempo/site:test: 11:22:14 [vite] ✓ built in 667ms
+@authtempo/site:test: 11:22:14 [vite] ✓ built in 27ms
+@authtempo/site:test: 11:22:14 [build] Rearranging server assets...
+@authtempo/site:test: 
+@authtempo/site:test:  generating static routes 
+@authtempo/site:test: 11:22:14 [WARN] [content] The collection "i18n" does not exist or is empty. Please check your content config file for errors.
+@authtempo/site:test: 11:22:14   ├─ /404.html11:22:14 [WARN] [content] Entry docs → 404 was not found.
+@authtempo/site:test:  (+13ms) 
+@authtempo/site:test: 11:22:14   ├─ /compare/index.html (+12ms) 
+@authtempo/site:test: 11:22:14   ├─ /demo/index.html (+19ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/reference/openapi.json (+86ms) 
+@authtempo/site:test: 11:22:14   ├─ /features/index.html (+3ms) 
+@authtempo/site:test: 11:22:14   ├─ /pricing/index.html (+4ms) 
+@authtempo/site:test: 11:22:14   ├─ /security/index.html (+14ms) 
+@authtempo/site:test: 11:22:14   ├─ /site.webmanifest (+1ms) 
+@authtempo/site:test: 11:22:14   ├─ /index.html (+13ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/index.html (+5ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/changelog/index.html (+4ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/account-without-address/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/architecture/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/claim-rule/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/credentials/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/evidence/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/fresh-sessions/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/one-connection/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/races/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/seams/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/storage-port/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/concepts/threat-model/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/faq/index.html (+2ms) 
+@authtempo/site:test: 11:22:14   ├─ /docs/guides/account-settings/index.html (+189ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/adapter/index.html (+3ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/agents/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/anonymous/index.html (+17ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/api-tokens/index.html (+23ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/base-url-list/index.html (+13ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/breach-check/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/browser-extension/index.html (+32ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/captcha/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/elysia/index.html (+31ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/email-code/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/handoff/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/hooks/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/jwt/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/last-method/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/limiter/index.html (+16ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/magic-link/index.html (+10ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/mcp-server/index.html (+38ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/multi-session/index.html (+10ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/mysql/index.html (+3ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/native-apple/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/nestjs/index.html (+32ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/next/index.html (+102ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/oauth-provider/index.html (+28ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/one-tap/index.html (+10ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/operator-tools/index.html (+36ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/organizations/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/other-stacks/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/pages/index.html (+5ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/passkey-extensions/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/passkey-sign-up/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/passkeys/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/password/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/phone/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/preview-deployments/index.html (+5ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/discord/index.html (+4ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/facebook/index.html (+4ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/gitlab/index.html (+4ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/microsoft/index.html (+4ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/slack/index.html (+5ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/tiktok/index.html (+5ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/wechat/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/providers/x/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/react-session/index.html (+30ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/related-origins/index.html (+5ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/roles-and-permissions/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/scim/index.html (+15ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/second-factor/index.html (+11ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/social/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/social-providers/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/social-state-data/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/split-origins/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sqlite/index.html (+3ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sso/index.html (+15ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sso-entra/index.html (+11ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sso-google/index.html (+12ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sso-okta/index.html (+10ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/sweep/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/teams/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/third-party-app/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/username/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/verify-by-code/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/guides/verify-caller/index.html (+12ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/auth0/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/authjs/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/better-auth/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/clerk/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/cognito/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/cutover/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/firebase/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/supabase/index.html (+8ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/migrate/workos/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/backups/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/ban-a-user/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/delete-an-account/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/deploy/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/first-operator/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/key-rotation/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/observability/index.html (+33ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/performance/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/second-factor-recovery/index.html (+6ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/secrets/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/operations/upgrades/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/adapter-mysql/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/adapter-sqlite/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/api/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/astro/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/audit/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/audit-list/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/check/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/create-admin/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/generate/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/import/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/info/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/init/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/keys/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/mcp/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/migrate/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/secret/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/secret-rewrap/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/secret-status/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/sessions/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/sessions-end/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/sessions-end-all/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/upgrade/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-ban/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-create/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-delete/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-get/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-list/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-platform-role/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-search/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-second-factor-off/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-unban/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cli/users-update/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/client/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/client-oauth/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/compat-better-auth/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/config/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/cookies/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/dependencies/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/deprecations/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/errors/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/events/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/express/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/fastify/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/glossary/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/handoff/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/hono/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/import-cli/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/limits/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/mcp/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/next/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/openapi/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/react/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/react-router/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/routes/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/runtimes/index.html (+2ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/schema/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/security-policy/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/solid/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/sveltekit/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/tanstack-start/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/tokens/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/verify/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/verify-mcp/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/vue/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/reference/well-known/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/resources/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/index.html (+1ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/bun/index.html (+3ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/first-sign-in/index.html (+9ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/mcp-server/index.html (+7ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/node/index.html (+22ms) 
+@authtempo/site:test: 11:22:15   ├─ /docs/start/workers-d1/index.html (+10ms) 
+@authtempo/site:test: 11:22:16   ├─ /docs/start/workers-hyperdrive/index.html (+16ms) 
+@authtempo/site:test: 11:22:16   ├─ /docs/versioning/index.html (+1ms) 
+@authtempo/site:test: 11:22:16 ✓ Completed in 1.43s.
+@authtempo/site:test: 
+@authtempo/site:test: 11:22:16 [build] ✓ Completed in 2.18s.
+@authtempo/site:test: 11:22:16 [starlight:pagefind] Building search index with Pagefind...
+@authtempo/site:test: 11:22:16 [starlight:pagefind] Found 181 HTML files.
+@authtempo/site:test: 11:22:16 [starlight:pagefind] Finished building search index in 212ms.
+@authtempo/site:test: 11:22:16 [@astrojs/sitemap] `sitemap-index.xml` created at `dist`
+@authtempo/site:test: 11:22:16 [build] 181 page(s) built in 3.10s
+@authtempo/site:test: 11:22:16 [build] Complete!
+@authtempo/site:test: build-agent: PASS pages=174 sections=1623 twins=174
+@authtempo/site:test: write-headers: PASS pages=181 hashes=10
+@authtempo/site:test: build-feed: PASS entries=0 changelogs=0
+@authtempo/site:test: check-links: PASS pages=185 links=42953 anchors=9625 external=213 failures=0
+@authtempo/site:test: check-frontmatter: PASS pages=174 sources=839 prerequisites=347 exempt=25 failures=0
+@authtempo/site:test: check-site-pages: PASS pages=6 entries=5 failures=0
+@authtempo/site:test: check-terms: PASS pages=226 units=14026 terms=19 failures=0
+@authtempo/site:test: check-sentences: PASS pages=226 sentences=11920 failures=0
+@authtempo/site:test: check-fences: PASS pages=174 fences=103 includes=191 samples=87 failures=0
+@authtempo/site:test: check-llms: PASS pages=174 links=176 twins=174 failures=0
+@authtempo/site:test: check-agent-index: PASS pages=174 sections=1623 samples=191 twins=174 bodies=174 failures=0
+@authtempo/site:test: check-faq: PASS entries=19 guides=9 failures=0
+@authtempo/site:test: check-errors: PASS codes=113 anchors=113 failures=0
+@authtempo/site:test: check-error-links: PASS links=110 anchors=110 texts=110 failures=0
+@authtempo/site:test: check-routes: PASS routes=209 anchors=209 cells=627 rules=8 failures=0
+@authtempo/site:test: check-openapi: PASS operations=209 routes=209 schemes=11 tags=35 failures=0
+@authtempo/site:test: check-events: PASS events=121 rows=121 lines=86 lists=61 kinds=15 failures=0
+@authtempo/site:test: check-limits: PASS families=102 rows=102 calls=113 compared=99 failures=0
+@authtempo/site:test: check-config: PASS keys=301 rows=301 failures=0
+@authtempo/site:test: check-exports-core: PASS exports=399 found=399 rows=399 failures=0
+@authtempo/site:test: check-exports-core-routes: PASS exports=23 found=23 rows=23 failures=0
+@authtempo/site:test: check-exports-core-credentials: PASS exports=33 found=33 rows=33 failures=0
+@authtempo/site:test: check-exports-core-access: PASS exports=12 found=12 rows=12 failures=0
+@authtempo/site:test: check-exports-core-operator-secret: PASS exports=13 found=13 rows=13 failures=0
+@authtempo/site:test: check-exports-core-secrets: PASS exports=7 found=7 rows=7 failures=0
+@authtempo/site:test: check-exports-core-social-entries: PASS exports=4 found=4 rows=4 failures=0
+@authtempo/site:test: check-exports-core-ddl: PASS exports=8 found=8 rows=8 failures=0
+@authtempo/site:test: check-exports-core-openapi: PASS exports=15 found=15 rows=15 failures=0
+@authtempo/site:test: check-exports-client: PASS exports=82 found=82 rows=82 failures=0
+@authtempo/site:test: check-exports-client-oauth: PASS exports=22 found=22 rows=22 failures=0
+@authtempo/site:test: check-exports-verify: PASS exports=31 found=31 rows=31 failures=0
+@authtempo/site:test: check-exports-verify-mcp: PASS exports=4 found=4 rows=4 failures=0
+@authtempo/site:test: check-exports-react: PASS exports=6 found=6 rows=6 failures=0
+@authtempo/site:test: check-exports-next: PASS exports=6 found=6 rows=6 failures=0
+@authtempo/site:test: check-exports-handoff: PASS exports=19 found=19 rows=19 failures=0
+@authtempo/site:test: check-exports-handoff-expo: PASS exports=8 found=8 rows=8 failures=0
+@authtempo/site:test: check-exports-handoff-electron: PASS exports=13 found=13 rows=13 failures=0
+@authtempo/site:test: check-exports-hono: PASS exports=7 found=7 rows=7 failures=0
+@authtempo/site:test: check-exports-express: PASS exports=8 found=8 rows=8 failures=0
+@authtempo/site:test: check-exports-astro: PASS exports=5 found=5 rows=5 failures=0
+@authtempo/site:test: check-exports-sveltekit: PASS exports=3 found=3 rows=3 failures=0
+@authtempo/site:test: check-exports-react-router: PASS exports=7 found=7 rows=7 failures=0
+@authtempo/site:test: check-exports-vue: PASS exports=6 found=6 rows=6 failures=0
+@authtempo/site:test: check-exports-vue-nuxt: PASS exports=6 found=6 rows=6 failures=0
+@authtempo/site:test: check-exports-solid: PASS exports=6 found=6 rows=6 failures=0
+@authtempo/site:test: check-exports-solid-start: PASS exports=8 found=8 rows=8 failures=0
+@authtempo/site:test: check-exports-sveltekit-store: PASS exports=5 found=5 rows=5 failures=0
+@authtempo/site:test: check-exports-fastify: PASS exports=8 found=8 rows=8 failures=0
+@authtempo/site:test: check-exports-tanstack-start: PASS exports=9 found=9 rows=9 failures=0
+@authtempo/site:test: check-exports-adapter-sqlite: PASS exports=10 found=10 rows=10 failures=0
+@authtempo/site:test: check-exports-adapter-sqlite-node: PASS exports=1 found=1 rows=1 failures=0
+@authtempo/site:test: check-exports-adapter-sqlite-better-sqlite3: PASS exports=1 found=1 rows=1 failures=0
+@authtempo/site:test: check-exports-adapter-sqlite-bun: PASS exports=1 found=1 rows=1 failures=0
+@authtempo/site:test: check-exports-adapter-sqlite-libsql: PASS exports=1 found=1 rows=1 failures=0
+@authtempo/site:test: check-exports-adapter-d1-seam: PASS exports=9 found=9 rows=9 failures=0
+@authtempo/site:test: check-exports-adapter-mysql: PASS exports=13 found=13 rows=13 failures=0
+@authtempo/site:test: check-exports-cli-stacks: PASS exports=4 found=4 rows=4 failures=0
+@authtempo/site:test: check-cli: PASS helps=30 codes=42 anchors=42 flags=284 exits=75 failures=0
+@authtempo/site:test: check-migrate: PASS guides=8 phases=56 providers=7 rows=8 anchors=11 copies=14 failures=0
+@authtempo/site:test: check-mcp: PASS tools=8 inputs=61 prompts=15 templates=1 limits=7 failures=0
+@authtempo/site:test: check-schema: PASS version=15 rows=15 statements=2 compat=12 compatRows=12 guideRows=12 failures=0
+@authtempo/site:test: check-tokens: PASS colors=9 starlight=23 sources=46 exempt=1 failures=0
+@authtempo/site:test: check-contrast: PASS pairs=22 lowest_text=4.61 lowest_non_text=3.59 failures=0
+@authtempo/site:test: check-fonts: PASS fonts=5 licenses=2 faces=5 built=201 failures=0
+@authtempo/site:test: check-motion: PASS pages=181 keyframes=3 animations=3 failures=0
+@authtempo/site:test: check-icons: PASS symbols=19 shapes=39 failures=0
+@authtempo/site:test: check-script: PASS pages=6 scripts=6 lines=29 failures=0
+@authtempo/site:test: check-external: PASS pages=181 styles=8 external_links=30 failures=0
+@authtempo/site:test: check-csp: PASS pages=181 inline_scripts=10 hashes=10 failures=0
+@authtempo/site:test: check-weight: PASS pages=6 largest_bytes=57948 failures=0
+@authtempo/site:test: check-features: PASS features=35 packages=26 exempt=2 failures=0
+@authtempo/site:test: check-claims: PASS pages=5 names=11 failures=0
+@authtempo/site:test: check-facts: PASS rows=74 models=7 oldest_days=16 tracked=3072 failures=0
+@authtempo/site:test: check-compare: PASS rows=74 facts=6 held=6 failures=0
+@authtempo/site:test: check-feed: PASS entries=0 packages=28 failures=0
+@authtempo/site:test: check-security-policy: PASS sections=7 rows=0 channels=2 failures=0
+@authtempo/site:test: check-policy-pages: PASS pages=2 ties=18 states=4 rows=5 links=3 failures=0
+@authtempo/site:test: check-unpublished: PASS pages=174 listed=42 marked=42 failures=0
+@authtempo/site:test: check-changelog: PASS pages=1 changelogs=0 versions=0 links=0 failures=0
+@authtempo/site:test: check-deprecations-page: PASS entries=3 sections=3 anchors=3 failures=0
+@authtempo/site:test: check-dependencies-page: PASS rows=112 listed=28 tableRows=28 failures=0
+@authtempo/site:test: check-resources: PASS pages=1 packages=0 examples=0 demo=0 links=2 failures=0
+@authtempo/site:test: check-size: PASS files=598 largestBytes=4318011 failures=0
+@authtempo/site:test: check-deploy: PASS runs=1 failures=0
+@authtempo/site:test: check-performance: PASS operations=5 samples=1000 failures=0
+@authtempo/site:test: check-observe-timing: PASS signIns=5000 failures=0
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/agents.mdx: Node 22.18 or newer, and pnpm 12.8.1.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/captcha.mdx: A Cloudflare account with a Turnstile widget, for its site key and its secret key.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/elysia.mdx: Bun 1.4 or newer.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/mcp-server.mdx: Node 22.18 or newer for the tools of the project.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/mysql.mdx: Node 22 or newer.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/nestjs.mdx: Node 22.18 or newer.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/next.mdx: Node 22.18 or newer.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/oauth-provider.mdx: Node 22.18 or newer for the tools of the project.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/password.mdx: Workers Paid on Cloudflare. One hash needs more CPU than Workers Free gives one request.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/sqlite.mdx: Node 22.13 or newer, or Bun 1.4.3, the tested version.
+@authtempo/site:test:   exempt check-frontmatter: docs/guides/verify-caller.mdx: Node 22.18 or newer, Bun, or a Cloudflare Worker for the second server.
+@authtempo/site:test:   exempt check-frontmatter: docs/migrate/cognito.mdx: The AWS CLI, with read access to the user pool.
+@authtempo/site:test:   exempt check-frontmatter: docs/migrate/firebase.mdx: The Firebase CLI, signed in to the project.
+@authtempo/site:test:   exempt check-frontmatter: docs/operations/deploy.md: A Cloudflare account, on Workers. With `password`, a Workers Paid plan.
+@authtempo/site:test:   exempt check-frontmatter: docs/reference/cli/index.md: Node 22.13 or newer. The `engines` field of `@authtempo/cli` gives this floor.
+@authtempo/site:test:   exempt check-frontmatter: docs/reference/react-router.md: Node 22.22 or newer. React Router 8.4 needs it (its engines field, read 2026-10-15). The binding adds no floor of its own.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/bun.mdx: Bun 1.4.3. The app pins it as a development tool, so `pnpm install` puts it in `node_modules/.bin`.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/mcp-server.mdx: Node 22.18 or newer, and pnpm 12.8.1.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/mcp-server.mdx: A Cloudflare account, for the deploy and the MCP client at the end.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/node.mdx: Node 22.18 or newer, which runs a `.ts` file with its type stripping. This repo uses Node 26.10.0.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/node.mdx: pnpm 12.8.1 and Docker.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/workers-d1.mdx: Node 22.18 or newer, and pnpm 12.8.1.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/workers-d1.mdx: A Cloudflare account, for the deploy at the end. A magic link runs on Workers Free. A password needs Workers Paid.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/workers-hyperdrive.mdx: Node 22.18 or newer, pnpm 12.8.1, and Docker.
+@authtempo/site:test:   exempt check-frontmatter: docs/start/workers-hyperdrive.mdx: A Cloudflare account, on Workers Paid if you add passwords.
+@authtempo/site:test:   exempt check-site-pages: / (index.html): the home keeps the page of plan 11b1, built from HOME (ruling 5 of the plan 11b lane); homeProsePage() holds its prose
+@authtempo/site:test:   exempt check-llms: https://mcp.authtempo.com/mcp: the remote MCP server is a planned address, not a file of the build
+@authtempo/site:test:   exempt check-events: authtempo: cognito legacy verify failed <reason>: a line of @authtempo/legacy-hashes, outside core
+@authtempo/site:test:   exempt check-events: authtempo compat: <note>: a line of @authtempo/compat-better-auth, which has no observer
+@authtempo/site:test:   exempt check-events: authtempo compat: a credential account row has no password; …: a line of @authtempo/compat-better-auth, which has no observer
+@authtempo/site:test:   exempt check-events: authtempo compat: organizationHooks.<name> returned data that changes <fields>; …: a line of @authtempo/compat-better-auth, which has no observer
+@authtempo/site:test:   exempt check-events: authtempo compat: databaseHooks.session.create.before changed <fields>; …: a line of @authtempo/compat-better-auth, which has no observer
+@authtempo/site:test:   exempt check-limits: token-use:tk: the code builds its window at each call
+@authtempo/site:test:   exempt check-limits: token-use:to: the code builds its window at each call
+@authtempo/site:test:   exempt check-limits: oauth-device-poll:code: the code builds its window at each call
+@authtempo/site:test:   exempt check-migrate: better-auth: the compatibility package: the app keeps its tables (spec 16.2)
+@authtempo/site:test:   exempt check-tokens: --at-shadow-lift is 0 18px 40px rgba(0, 0, 0, 0.14), the one shadow of brand spec 6
+@authtempo/site:test:   exempt check-script: src/scripts/theme-toggle.js sha256-ZS+mzic4RwXCXb8GnmzBDhzIdYtTySnQfoC4CZ7XtxE=: the theme toggle of brand spec 12
+@authtempo/site:test:   exempt check-features: packages/core: every route feature is a row of FEATURES
+@authtempo/site:test:   exempt check-features: packages/sdk-conformance: a test package of the SDKs, not a feature
+@authtempo/site:test:   exempt check-feed: every package is at 0.0.0; no release exists (spec 18 item 13)
+@authtempo/site:test:   exempt check-changelog: no changelog exists, so the page states the empty state and no version
+@authtempo/site:test:   exempt check-resources: no release exists, so the page lists no package, example, or demo
+@authtempo/site:test: site checks: 83 of 83 passed
+@authtempo/site:test: 
+@authtempo/site:test: [1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90m/work/authtempo/apps/site[39m
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m test/check-csp.test.ts [2m([22m[2m31 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-migrate.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-security-policy.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-tokens.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-performance.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-policy-pages.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-feed.test.ts [2m([22m[2m71 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/agent.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/operator-pages.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/sso-scim-limits.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/hook-locks.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 225[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/home-data.test.ts [2m([22m[2m41 tests[22m[2m)[22m[32m 128[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-events.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-fonts.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-limits.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-external.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-config.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-frontmatter.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/test-ports.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 605[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-agent-index.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 51[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-llms.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 86[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/migrate-cutover.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-exports.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-cli.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/turbo-inputs.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/scripts.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-icons.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-routes.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/adapter-pages.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/operator-users.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 79[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/oauth-provider.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/theme-toggle.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-openapi.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/browser-extension.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 149[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/cli-quotes.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-script.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/sso.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 101[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-features.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 76[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/oauth-clients.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-site-pages.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 119[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-facts.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 127[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-terms.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/build-layout.test.ts [2m([22m[2m59 tests[22m[2m)[22m[32m 125[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/scim.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 67[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-motion.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/sidebar-frameworks.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-fences.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-schema.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/guide-error-lists.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/oauth-provider-guide.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-mcp.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1008[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m wireLists [2m(3)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m reads the lists of the built server on both surfaces[33m 809[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/roles-tables.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/second-factor.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 161[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-resources.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/limit-rows.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/assets.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-changelog.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-compare.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/sso-providers.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 76[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/operations/observe.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/verify-caller.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 56[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-error-links.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-unpublished.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/entries.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-deprecations-page.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/reason-rule.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/mysql-node.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 269[2mms[22m[39m
+@authtempo/site:test: [90mstderr[2m | samples/guides/operator-tools.test.ts[2m > [22m[2mthe operator tools[2m > [22m[2mbans a user from the app's admin route, with an audit row and its copy
+@authtempo/site:test: [22m[39mauthtempo: operator read app admin-page searchUsers
+@authtempo/site:test: 
+@authtempo/site:test: [90mstderr[2m | samples/guides/operator-tools.test.ts[2m > [22m[2mthe operator tools[2m > [22m[2mwrites nothing when the app's own staff check refuses
+@authtempo/site:test: [22m[39mauthtempo: operator read app admin-page searchUsers
+@authtempo/site:test: 
+@authtempo/site:test: [90mstderr[2m | samples/guides/operator-tools.test.ts[2m > [22m[2mthe operator tools[2m > [22m[2mgives each named secret the scopes of its job only
+@authtempo/site:test: [22m[39mauthtempo: operator read secret support listUsers
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m samples/guides/operator-tools.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/authjs.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 160[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-claims.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test: [90mstderr[2m | samples/migrate/cognito.test.ts[2m > [22m[2mmove users from Amazon Cognito[2m > [22m[2manswers invalid_credentials when Cognito refuses the password
+@authtempo/site:test: [22m[39mauthtempo: cognito legacy verify failed NotAuthorizedException
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m samples/guides/multi-session.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/example-observability.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/account-settings.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/guard-deploy.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/migrate-better-auth.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-dependencies-page.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/cli-migrate-compat.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-weight.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/storage-operators.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/clean-dist.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 386[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m the package builds [2m(3)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m leaves no stale file in dist after the build of verify[33m 383[2mms[22m[39m
+@authtempo/site:test: (node:60095) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+@authtempo/site:test: (Use `node --trace-warnings ...` to show where the warning was created)
+@authtempo/site:test: (node:60095) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+@authtempo/site:test:  [32m✓[39m samples/guides/passkey-extensions.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-errors.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/root-prose.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-links.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/better-auth.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 226[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-contrast.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/anonymous.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 43[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/api-tokens.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/phone.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/teams.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 45[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/other-stacks.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/core-readme-oauth.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/workos.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/sqlite-node.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 63[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/write-headers.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-faq.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/native-apple.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/supabase.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 434[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m move users from Supabase Auth [2m(3)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m signs an imported user in with the old password and rewrites the hash as PBKDF2[33m 433[2mms[22m[39m
+@authtempo/site:test: [90mstderr[2m | samples/guides/one-tap.test.ts[2m > [22m[2msign in with Google One Tap[2m > [22m[2mrefuses a token with the raw nonce in it
+@authtempo/site:test: [22m[39mauthtempo: social nonce mismatch google
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m samples/guides/one-tap.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/social.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/firebase.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 134[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/roles.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 35[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/handoff.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/operations/key-rotation.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/fresh-calls.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/test-slots.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 3086[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m the slot table of the test servers [2m(15)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m gives two slots to two claims at once from two worktrees[33m 946[2mms[22m[39m
+@authtempo/site:test:      [33m[2m✓[22m[39m takes over the lock of a dead process, and waits on the lock of a live one[33m 327[2mms[22m[39m
+@authtempo/site:test:      [33m[2m✓[22m[39m takes over a dead lock once when two waiters read the same dead pid[33m 1807[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/repo-root.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 839[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m the repository root of src/data/repo.ts (ruling 23 of the plan 11b lane) [2m(5)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m gives the Astro build the root of this checkout through vite.define[33m 462[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/start/first-sign-in.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 35[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/auth0.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 163[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/security-policy.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/password.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 73[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/clerk.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 168[2mms[22m[39m
+@authtempo/site:test: (node:60505) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+@authtempo/site:test: (Use `node --trace-warnings ...` to show where the warning was created)
+@authtempo/site:test: (node:60505) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+@authtempo/site:test:  [32m✓[39m samples/guides/split-origins.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/passkey-sign-up.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/username.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 69[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/third-party-app.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 44[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/hook-vias.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/jwt.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/record-prose.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/operations/second-factor-recovery.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 78[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/email-code.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/organizations.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+@authtempo/site:test: [90mstderr[2m | samples/guides/breach-check.test.ts[2m > [22m[2ma breach check on the password[2m > [22m[2mfails closed: an outage or a page that is not a range refuses the password with 503
+@authtempo/site:test: [22m[39mauthtempo breach-check: the range API answered [33m503[39m
+@authtempo/site:test: 
+@authtempo/site:test: [90mstderr[2m | samples/guides/breach-check.test.ts[2m > [22m[2ma breach check on the password[2m > [22m[2mfails closed: an outage or a page that is not a range refuses the password with 503
+@authtempo/site:test: [22m[39mauthtempo breach-check: the body holds no range line
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m samples/guides/breach-check.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/captcha.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-sentences.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/migrate-runbook-copies.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-size.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/migrate-better-auth-version.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/cli-floor.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test: [90mstdout[2m | samples/guides/sweep.test.ts[2m > [22m[2mdelete expired rows[2m > [22m[2mruns from the scheduled handler
+@authtempo/site:test: [22m[39mauthtempo sweep {"verificationExpired":0,"verificationConsumed":0,"invitations":0,"sessions":0,"pendingSessions":0,"apiTokens":0,"organizationTokens":0,"trustedDevices":0,"jwks":0,"oauthTokens":0,"oauthClients":0,"totpSetups":0,"limits":0,"oauthDevices":0,"oauthSessionLinks":0,"oauthLogouts":0,"oauthClientSecrets":0,"ssoDomains":0,"ssoPendingDomains":0,"scimTokens":0,"organizationRows":0,"anonymousUsers":0}
+@authtempo/site:test: 
+@authtempo/site:test:  [32m✓[39m samples/guides/sweep.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/verify-by-code.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/magic-link.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/last-method.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 53[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/hooks.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 35[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/social-providers.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/sidebar-icons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/preview-deployments.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 30[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/check-deploy.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/social-state-data.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/base-url-list.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/passkeys.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/microsoft.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 20[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/constructs.test.ts [2m([22m[2m88 tests[22m[2m)[22m[32m 286[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/migrate/cognito.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 2076[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m move users from Amazon Cognito [2m(3)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m answers invalid_credentials when Cognito refuses the password[33m 2004[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/related-origins.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/slack.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 18[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/wechat.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 17[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/facebook.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 18[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/discord.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 17[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m test/test-servers.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 4283[2mms[22m[39m
+@authtempo/site:test:    [32m✓[39m the test-servers command [2m(14)[22m
+@authtempo/site:test:      [33m[2m✓[22m[39m prints the six variables of slot 0 in the registered main worktree[33m 493[2mms[22m[39m
+@authtempo/site:test:      [33m[2m✓[22m[39m gives two slots to two clones, from one table for the machine[33m 573[2mms[22m[39m
+@authtempo/site:test:      [33m[2m✓[22m[39m never gives slot 0 to a git-init copy or a linked worktree[33m 771[2mms[22m[39m
+@authtempo/site:test:      [33m[2m✓[22m[39m removes the set of a removed worktree after it frees the lock[33m 555[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/gitlab.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 14[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/x.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 14[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/pages.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 16[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/tiktok.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+@authtempo/site:test:  [32m✓[39m samples/guides/adapter-conformance.test.ts [2m([22m[2m100 tests[22m[2m)[22m[33m 432[2mms[22m[39m
+@authtempo/site:test: 
+@authtempo/site:test: [2m Test Files [22m [1m[32m155 passed[39m[22m[90m (155)[39m
+@authtempo/site:test: [2m      Tests [22m [1m[32m1313 passed[39m[22m[90m (1313)[39m
+@authtempo/site:test: [2m   Start at [22m 11:22:27
+@authtempo/site:test: [2m   Duration [22m 5.22s[2m (import 46%, tests 32%, transform 21%, worker 1%)[22m
+@authtempo/site:test: 
+@authtempo/site:test: [2m    Isolate [22m [33m155 workers spawned[39m[2m · ~131ms startup each (spawn + environment, per file)[22m
+@authtempo/site:test: [2m            [22m [2mat least ~1.06s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+@authtempo/site:test: 
+authtempo-release:test:  [32m✓[39m test/dry-run.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 47685[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m dry run [2m(23)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m runs the steps in order[33m 373[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m installs no kit tool in the apps phase[33m 504[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m stops before the kits phase when the apps phase fails[33m 352[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m fails when the pnpm publish list names a package with no tarball[33m 326[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m counts the packages that pass check-pack[33m 388[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m runs no script at pack or publish[33m 426[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m gives each child the keys of the allowlist only[33m 493[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m reads each tool path from the real tools under a HOME with a UUID in its path[33m 333[2mms[22m[39m
+authtempo-release:test:      [33m[2m✓[22m[39m fails when a publish line names another registry than the dead one[33m 577[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m dry run against a scope registry [2m(1)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m sends no request to the scope registry of the env or of an npmrc[33m 950[2mms[22m[39m
+authtempo-release:test:    [32m✓[39m dry run against a remote cache [2m(1)[22m
+authtempo-release:test:      [33m[2m✓[22m[39m sends no request to the remote cache of a committed turbo.json[33m 39903[2mms[22m[39m
+authtempo-release:test: 
+authtempo-release:test: [2m Test Files [22m [1m[32m19 passed[39m[22m[90m (19)[39m
+authtempo-release:test: [2m      Tests [22m [1m[32m326 passed[39m[22m[90m (326)[39m
+authtempo-release:test: [2m   Start at [22m 11:21:48
+authtempo-release:test: [2m   Duration [22m 48.05s[2m (tests 96%, transform 3%, import 1%)[22m
+authtempo-release:test: 
+
+ Tasks:    33 successful, 33 total
+Cached:    0 cached, 33 total
+  Time:    48.338s 
+

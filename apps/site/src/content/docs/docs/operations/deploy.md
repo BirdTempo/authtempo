@@ -10,6 +10,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 sidebar:
   order: 1
 ---
@@ -32,7 +33,7 @@ sidebar:
 5. Replace the mail port with a call to your mail provider.
 6. Apply every migration before the first request. [Upgrades](/docs/operations/upgrades/) tells how.
 7. Run `auth.api.sweepExpired()` on a schedule, such as once an hour.
-8. Off Workers, pass `clientIp`, and read only the header that your server or proxy sets.
+8. Off Workers, pass `clientIp`, and read only the header that your server or proxy sets. Without it, every request with no client IP is one client for each per-IP limit. In the body budget, it is one client of 4 MiB.
 9. Deploy.
 10. Sign in once by each method that the API serves.
 11. Run `authtempo check` with the base URL of the API. Each check must pass, or skip for a feature that is off.
@@ -80,6 +81,7 @@ Use `GET`: a `HEAD` request to these routes answers 404.
 - The memory limiter counts per isolate. On Workers the real limit is the limit times the isolate count, so it is for tests only.
 - The default `clientIp` reads `cf-connecting-ip`. Only Cloudflare sets it, so off Workers a caller can set it.
 - A request with no client IP counts against one shared IP budget.
+- A host with no `clientIp` makes every caller with no client IP one client of 4 MiB in the budget of the large body reads. On Node or Bun, one caller that stalls large posts can hold that share. Then the SAML ACS, the Apple callback, and SCIM answer 503 to every caller with no client IP. The 503 continues while that caller sends 4 MiB each 10 s. The callers with an IP key still read.
 - Keep the API on its own registrable domain. A sibling subdomain cannot set the `__Host-` session cookie, but it can set the trust cookie for the parent domain.
 
 :::caution
@@ -91,6 +93,7 @@ Warning: a new `secret` that replaces the old value locks every user with the se
 - Every route answers 500 with a storage error: a migration is missing. The adapter throws `schema_mismatch` until the migrations run.
 - [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the app's origin is not in `trustedOrigins`.
 - [`rate_limited`](/docs/reference/errors/#rate_limited) for every caller: the host gives no client IP, so all callers share one budget.
+- [`body_busy`](/docs/reference/errors/#body_busy) at the SAML ACS for every caller with no client IP: the host gives none, so one caller holds their one share.
 - A sign-in request answers 500: the mail port throws.
 - `GET /auth/ready` answers 503 `not_ready` with `schema`: a migration is missing. With `storage`, the store does not answer in 3 seconds, or it throws.
 - `authtempo check` names a code. [authtempo check](/docs/reference/cli/check/) gives the fix of each code.
