@@ -28,12 +28,12 @@ export const TAG_PREFIX = "v";
  * of plan 12j, Major 2). A push to main and a tag of a main commit have a
  * merge base equal to HEAD, so a compare with it reads no change. Then
  * check-records compares with the newest release tag before HEAD, or with
- * this commit while no tag exists. Until the merge of plan 12j it is main
- * 79daeb0b, the base of the 12j lane. The lead sets the 12j merge commit on
- * main here at the merge, so the advisory record of the lane counts too. A
- * test holds it to an ancestor of HEAD.
+ * this commit while no tag exists. It is the merge commit of plan 12j on
+ * main (2026-10-31), so the advisory record of the lane counts too. Before
+ * that merge it was main 79daeb0b, the base of the 12j lane. A test holds
+ * it to an ancestor of HEAD.
  */
-export const RECORDS_BASE = "79daeb0bc8a4176debbd12cd7204090ce695e781";
+export const RECORDS_BASE = "50aed969b4ed335e2907cb38c55ae363d94575aa";
 
 /**
  * The scope of each released name. Read by dry-run and publish. npm and pnpm
