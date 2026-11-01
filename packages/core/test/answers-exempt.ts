@@ -167,6 +167,7 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /sso/domains/update",
   "POST /sso/domains/verify",
   // Plan 12d Task 3: a connection id that names no connection, or an organization that does not exist.
+  // Plan 12l: the update answers not_found before its body read, for the id of its query.
   "GET /sso/connections",
   "POST /sso/connections/create",
   "POST /sso/connections/delete",

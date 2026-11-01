@@ -7,6 +7,7 @@ import {
   withDomainRecord,
 } from "../../src/compat.js";
 import { carryDomainRecord, type DomainRecordOf, domainRecordFor } from "../../src/compat-seams.js";
+import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
@@ -16,8 +17,11 @@ import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../../src/http/rou
 import { createMemoryLimiter } from "../../src/limiter/memory.js";
 import type { AuthEvent } from "../../src/observe/port.js";
 import { systemClock } from "../../src/primitives/clock.js";
+import { base32Decode, totpCode } from "../../src/primitives/totp.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
-import { BASE_URL, get } from "../helpers.js";
+import { BASE_URL, get, tokenFromMail } from "../helpers.js";
+import { FAST } from "../password-helpers.js";
+import { PASSWORD } from "../totp-helpers.js";
 import { fakeDns, SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
 // The seams of the compat entry (plan 12d Task 14, ruling 61 P3 and F4).
@@ -74,6 +78,66 @@ async function recordWorld(marked = true) {
   if (!row) throw new Error("no row");
   const ba = { name: "_ba-acme-sso.acme.example", value: row.challenge };
   return { w, id: added.value.id, own: added.value.record, ba, connectionId: connection.value.id };
+}
+
+/**
+ * A world of `createAuth` with a memory limiter, and a manager of `acme`
+ * with one OIDC connection (plan 12l). The two connection writes run the
+ * guard before their body read, so only a manager reaches their counts of
+ * the large read. The manager is a verified user who created the
+ * organization through the api, then turned on TOTP. The session of the
+ * sign-in before the enable is fresh. Each step is a flow of the product.
+ */
+async function managerWorld(observe?: AuthConfig["observe"]) {
+  const sent: string[] = [];
+  const limiter = createMemoryLimiter(systemClock);
+  const auth = createAuth({
+    baseURL: BASE_URL,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [],
+    storage: createMemoryAdapter(),
+    limiter,
+    mail: { send: async (m) => void sent.push(m.text) },
+    password: { hash: FAST },
+    organizations: {},
+    sso: { oidc: true, dns: [fakeDns("a", {})] },
+    ...(observe ? { observe } : {}),
+  });
+  const { password, totp, sso } = auth.api;
+  if (!password || !totp || !sso) throw new Error("password, totp, and sso must be on");
+  const email = "ada@example.com";
+  const up = await password.signUp({ email, password: PASSWORD, ip: null, userAgent: null });
+  if (!up.ok) throw new Error(up.code);
+  const link = tokenFromMail(sent.at(-1) ?? "");
+  const verified = await password.verifyEmail({ token: link, ip: null, userAgent: null });
+  if (!verified.ok) throw new Error(verified.code);
+  const signedIn = await password.signIn({ email, password: PASSWORD, ip: null, userAgent: null });
+  if (!signedIn.ok || !("token" in signedIn.value)) throw new Error("no session");
+  const token = signedIn.value.token;
+  const session = await auth.api.getSession(token);
+  if (!session) throw new Error("no session");
+  const made = await auth.api.createOrganization({
+    user: session.user,
+    slug: "acme",
+    name: "Acme",
+  });
+  if (!made.ok) throw new Error(made.code);
+  const setup = await totp.setup({ userId: session.user.id, password: PASSWORD });
+  if (!setup.ok) throw new Error(setup.code);
+  const code = await totpCode(base32Decode(setup.value.secret), new Date());
+  const enabled = await totp.enable({ session, code });
+  if (!enabled.ok) throw new Error(enabled.code);
+  const connection = await sso.connections.create({
+    actor: SSO_APP,
+    organizationId: made.value.organization.id,
+    kind: "oidc",
+    label: "acme-sso",
+    issuer: "https://login.idp.example/acme",
+    clientId: "acme",
+    clientSecret: "acme-secret-0123456789",
+  });
+  if (!connection.ok) throw new Error(connection.code);
+  return { auth, limiter, token, user: session.user, connectionId: connection.value.id };
 }
 
 describe("the compat seams of core (plan 12d Task 14)", () => {
@@ -293,35 +357,21 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
   });
 
   it("counts a manager write that the compat package counted once, for its own user only (ruling 51 Minor 1)", async () => {
-    const sent: string[] = [];
-    const limiter = createMemoryLimiter(systemClock);
-    const auth = createAuth({
-      baseURL: BASE_URL,
-      secret: "0123456789abcdef0123456789abcdef",
-      trustedOrigins: [],
-      storage: createMemoryAdapter(),
-      limiter,
-      mail: { send: async (m) => void sent.push(m.text) },
-      organizations: {},
-      sso: { oidc: true, dns: [fakeDns("a", {})] },
-    });
-    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
-    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "");
-    const session = await auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
-    if (!session.ok || !("token" in session.value)) throw new Error("no session");
-    const { token, user } = session.value as { token: string; user: { id: string } };
-    // A manager write with no body to act on: core reads it and answers 400.
-    const writeTo = (path: string) =>
+    const { auth, limiter, token, user, connectionId } = await managerWorld();
+    // A manager write whose body the schema refuses: core reads it and answers 400. The update
+    // names a real connection in its query, so it reaches the read (plan 12l).
+    const writeTo = (path: string, body: string) =>
       new Request(`${BASE_URL}/auth${path}`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: "{}",
+        body,
       });
-    const write = () => writeTo("/sso/connections/update");
+    const write = () =>
+      writeTo(`/sso/connections/update?id=${encodeURIComponent(connectionId)}`, '{"more":1}');
     // Domain writes at the floor leave as many manager writes as large reads (ruling 69), so a
     // second count on either limit fails below.
     for (let i = 0; i < SSO_MANAGE_PER_USER.max - SSO_LARGE_READ_PER_USER.max; i++)
-      expect((await auth.handle(writeTo("/sso/domains/update"))).status).toBe(400);
+      expect((await auth.handle(writeTo("/sso/domains/update", "{}"))).status).toBe(400);
     // Half the limit: a count of the package, then core's route, which counts no more.
     const half = SSO_LARGE_READ_PER_USER.max / 2;
     for (let i = 0; i < half; i++) {
@@ -350,31 +400,20 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
   });
 
   it("takes a refusal of the package's large-read count, and gives one limit.hit (ruling 72 Low 2)", async () => {
-    const sent: string[] = [];
     const batches: AuthEvent[][] = [];
-    const limiter = createMemoryLimiter(systemClock);
-    const auth = createAuth({
-      baseURL: BASE_URL,
-      secret: "0123456789abcdef0123456789abcdef",
-      trustedOrigins: [],
-      storage: createMemoryAdapter(),
-      limiter,
-      mail: { send: async (m) => void sent.push(m.text) },
-      organizations: {},
-      sso: { oidc: true, dns: [fakeDns("a", {})] },
-      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    const { auth, limiter, token, user, connectionId } = await managerWorld({
+      sink: { write: (b) => void batches.push([...b]) },
     });
-    await auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
-    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "");
-    const session = await auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
-    if (!session.ok || !("token" in session.value)) throw new Error("no session");
-    const { token, user } = session.value as { token: string; user: { id: string } };
+    // The update names a real connection of the manager, so it passes the guard (plan 12l).
     const write = () =>
-      new Request(`${BASE_URL}/auth/sso/connections/update`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: "{}",
-      });
+      new Request(
+        `${BASE_URL}/auth/sso/connections/update?id=${encodeURIComponent(connectionId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: '{"more":1}',
+        },
+      );
     // The user spent the large reads of this hour.
     for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
       expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(

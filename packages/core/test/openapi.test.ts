@@ -464,7 +464,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12f2 Task 5 adds 2 answers and 2 bodies of the operator update and delete.
     // Plan 12f2 Task 3 adds the answer, the body, and the query of the invitation confirm.
     // Plan 12f2 Task 5 adds the answer and the body of the operator create.
-    expect([answers, bodies, queries]).toEqual([158, 121, 33]);
+    // Plan 12l adds the two queries of the SSO connection writes.
+    expect([answers, bodies, queries]).toEqual([158, 121, 35]);
   });
 
   it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {

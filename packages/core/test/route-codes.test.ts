@@ -206,16 +206,16 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sso/domains/verify": { id: "$domain" },
   "POST /sso/domains/update": { id: "$domain", includeSubdomains: true },
   "POST /sso/domains/delete": { id: "$domain" },
-  // Plan 12d Task 3: `$connection` names a connection of the world.
+  // Plan 12d Task 3: `$connection` names a connection of the world. Plan 12l moves the
+  // organization of the create and the id of the update into the query (QUERIES).
   "POST /sso/connections/create": {
-    organizationId: "$org",
     kind: "oidc",
     label: "Acme",
     issuer: "https://login.idp.example",
     clientId: "acme",
     clientSecret: "acme-secret",
   },
-  "POST /sso/connections/update": { id: "$connection", label: "Acme" },
+  "POST /sso/connections/update": { label: "Acme" },
   "POST /sso/connections/delete": { id: "$connection" },
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover": { email: "ada@example.com" },
@@ -224,7 +224,10 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /scim/tokens/revoke": { id: "$scimToken" },
 };
 
-/** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
+/**
+ * The query of a GET whose route refuses a request with none, and of a POST
+ * that names its row in its query (plan 12l). A `$` value is a placeholder too.
+ */
 const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /handoff/start": { challenge: BODY43, redirect: "example://auth" },
   "GET /organizations/members": { organizationId: "$org" },
@@ -236,6 +239,8 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/tokens": { organizationId: "$org" },
   "GET /sso/domains": { organizationId: "$org" },
   "GET /sso/connections": { organizationId: "$org" },
+  "POST /sso/connections/create": { organizationId: "$org" },
+  "POST /sso/connections/update": { id: "$connection" },
   "GET /scim/tokens": { organizationId: "$org" },
   "GET /username/available": { username: "ada" },
 };

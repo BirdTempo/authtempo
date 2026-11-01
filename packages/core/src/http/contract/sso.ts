@@ -90,15 +90,17 @@ const connectionFields = {
   attributes: z.strictObject({ email: text, name: text.nullable().optional() }).optional(),
 };
 export const connectionListQuery = z.strictObject({ organizationId: id });
+/** The query of a connection create: the organization of the new row, read before the body (plan 12l). */
+export const connectionCreateQuery = z.strictObject({ organizationId: id });
+/** The query of a connection update: the row, read before the body (plan 12l). */
+export const connectionUpdateQuery = z.strictObject({ id });
 export const connectionCreateBody = z.strictObject({
-  organizationId: id,
   kind: z.enum(["oidc", "saml"]),
   ...connectionFields,
   label: text,
 });
-/** `organizationId` and `kind` may come, so the engine answers that they never change. */
+/** `organizationId` and `kind` may come, so the engine answers that they never change. `id` is in the query. */
 export const connectionUpdateBody = z.strictObject({
-  id,
   organizationId: id.optional(),
   kind: z.enum(["oidc", "saml"]).optional(),
   ...connectionFields,
@@ -195,10 +197,12 @@ export const SSO_CONTRACT = {
     answer: { kind: "json", schema: z.strictObject({ connections: z.array(ConnectionJson) }) },
   },
   "POST /sso/connections/create": {
+    query: { schema: connectionCreateQuery, parsedBy: "zod" },
     body: jsonBody(connectionCreateBody),
     answer: { kind: "json", schema: connectionAnswer },
   },
   "POST /sso/connections/update": {
+    query: { schema: connectionUpdateQuery, parsedBy: "zod" },
     body: jsonBody(connectionUpdateBody),
     answer: { kind: "json", schema: connectionAnswer },
   },
