@@ -7,12 +7,12 @@
  * own read of the body, in core's order. `countSsoManageWrite` counts the
  * manager write on core's limit (ruling 51 Minor 1 of the 12j lane).
  * `checkSsoManager` runs core's manager guard for the organization of the
- * query, and `canManageSomeSso` runs the pre-check of a path whose
- * organization is in the body (plan 12l). `countSsoLargeRead` then counts
- * the large read: plan 12l moved that count out of `countSsoManageWrite`,
- * so an account that manages nothing counts no large read (ruling 69 of
- * the 12j lane). `moveSsoManageCount` moves each mark to the request that
- * core gets. Each route step stays core's.
+ * query (plan 12l). `canManageSomeSso` runs the pre-check of a path whose
+ * organization is in the body. `countSsoLargeRead` then counts the large
+ * read. Plan 12l moved that count out of `countSsoManageWrite`. So an
+ * account that manages nothing counts no large read (ruling 69 of the 12j
+ * lane). `moveSsoManageCount` moves each mark to the request that core
+ * gets. Each route step stays core's.
  */
 export type { DomainRecordOf } from "./compat-seams.js";
 export {
@@ -48,10 +48,10 @@ export {
   readBodyText,
 } from "./http/body-cap.js";
 /**
- * Core's query rule of its two SSO connection writes (fix-wave item 8 of
- * plan 12l). A compat package reads the query of such a write with
- * `readQuery` and the query schema of the route. So it takes exactly the
- * queries that core takes, and the rule has one source.
+ * These exports give core's query rule of its two SSO connection writes
+ * (fix-wave item 8 of plan 12l). A compat package reads the query of such
+ * a write with `readQuery` and the query schema of the route. So it takes
+ * exactly the queries that core takes, and the rule has one source.
  */
 export { connectionCreateQuery, connectionUpdateQuery } from "./http/contract/sso.js";
 export { readQuery } from "./http/routes/sso.js";
