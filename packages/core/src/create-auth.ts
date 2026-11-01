@@ -317,6 +317,8 @@ import {
   bodyCapOf,
   largeReadCanStart,
 } from "./http/body-cap.js";
+import { holdsBadText } from "./http/body-text.js";
+import { id as idSchema } from "./http/contract/organizations.js";
 import { respond } from "./http/json.js";
 import { routeKeyOf } from "./http/route-key.js";
 import { createPostGate, createRouter } from "./http/router.js";
@@ -1305,9 +1307,11 @@ const SSO_GUARDED_WRITES: ReadonlySet<string> = new Set([
  * `organizationId`, for a compat package that reads the body of one of
  * core's two connection writes before core (plan 12l, ruling 4 of its
  * lane). The package reads the organization from the query of the write,
- * so the guard runs before any byte of the body. A pass marks `request`
- * with the user, the organization, and the actor of the guard, and answers
- * null. Core's route then takes the mark and runs the guard no more, so a
+ * so the guard runs before any byte of the body. An id that the query rule
+ * of core refuses (`readQuery`) answers `invalid_body` before any storage
+ * read, as core's route answers it. A pass marks `request` with the user,
+ * the organization, and the actor of the guard, and answers null. Core's
+ * route then takes the mark and runs the guard no more, so a
  * platform operator counts once on `operator:user`. A refusal answers
  * core's JSON answer of the code (`respond`), and the guard emits its
  * event. `moveSsoManageCount` moves the mark to the request that the
@@ -1333,6 +1337,11 @@ export async function checkSsoManager(
     throw new TypeError(
       "checkSsoManager takes a POST to <basePath>/sso/connections/create or /sso/connections/update",
     );
+  // The rule of core's query (`readQuery`): no NUL and no lone surrogate, then the `id` schema
+  // of the contract. The storage port throws at a NUL. So a bad id answers invalid_body before
+  // any storage read, as at core's route (ruling 21 of the 12l lane).
+  if (holdsBadText(organizationId) || !idSchema.safeParse(organizationId).success)
+    return respond(fail("invalid_body"));
   const actor = await requireSsoManager(
     config,
     resolved,

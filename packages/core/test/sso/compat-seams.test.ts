@@ -668,6 +668,33 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     expect(takeSsoManagerChecked(person, w.cy.user.id, w.acme)).toBeNull();
   });
 
+  it("answers invalid_body to an id that core's query rule refuses, before any storage read (checkSsoManager, plan 12l)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
+    const { auth } = w;
+    // Bob owns acme. The seam checks the id that the package gives it.
+    const write = new Request(
+      `${BASE_URL}/auth/sso/connections/create?organizationId=${encodeURIComponent(w.acme)}`,
+      { method: "POST", headers: { authorization: `Bearer ${w.bob.token}` } },
+    );
+    await guardSteps(auth, batches);
+    // A NUL and a lone surrogate, at which the storage port throws. Then an empty id, and an id
+    // longer than the 64 characters of the id schema.
+    for (const bad of ["o\u0000x", "o\ud800x", "", "x".repeat(65)]) {
+      const res = await checkSsoManager(auth, write, w.bob, bad);
+      expect([res?.status, await res?.json()], JSON.stringify(bad)).toEqual([
+        400,
+        { error: "invalid_body" },
+      ]);
+      // The guard did not run, and the request carries no mark.
+      expect(await guardSteps(auth, batches)).toEqual([]);
+      expect(takeSsoManagerChecked(write, w.bob.user.id, bad)).toBeNull();
+    }
+    expect(w.keys).toEqual([]);
+    // The organization of Bob passes.
+    expect(await checkSsoManager(auth, write, w.bob, w.acme)).toBeNull();
+  });
+
   it("refuses a person who manages nothing before any read, with the step of the guard (canManageSomeSso, plan 12l)", async () => {
     const batches: AuthEvent[][] = [];
     const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
