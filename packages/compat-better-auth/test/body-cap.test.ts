@@ -1081,7 +1081,8 @@ describe("the guard before the read through the shim (plan 12l)", () => {
       small.push((await app.auth.handler(sizedPost(update, 4096, ada.cookie))).status);
     expect(small).toEqual(small.map(() => 200));
     // A stalled write of a declared 8 MiB on each core path: the count refuses before the read.
-    for (const path of [ada.paths[2], ada.paths[3]]) {
+    // The core paths are the last two of the four.
+    for (const path of ada.paths.slice(2)) {
       refused.length = 0;
       const body = stalledBody();
       try {
