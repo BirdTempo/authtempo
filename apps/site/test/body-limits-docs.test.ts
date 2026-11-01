@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { ipKey } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 // The derivation of core's body limits: the largest valid body of each route (ruling 84 Low 2).
@@ -44,6 +44,15 @@ const FILES = {
   client: `${DOCS}docs/reference/client.md`,
 } as const;
 type FileKey = keyof typeof FILES;
+
+// The README of the compat package, for its SSO order sentences (rr-final M1
+// and L1 of plan 12l). It is not in FILES: FILES holds each cap number of a
+// file, and this README states a SAML size, 262144, that is no body cap.
+const COMPAT_README = `${REPO}packages/compat-better-auth/README.md`;
+// The changeset of plan 12l. The version branch deletes it, so its fact skips there.
+const WRITE_ORDER_CHANGESET = `${REPO}.changeset/sso-write-order.md`;
+// The SSO guard of core: the bound of the member rows of its pre-check (rr-final L2).
+const GUARD = `${REPO}packages/core/src/engine/sso/guard.ts`;
 
 /** The text of the errors page from the heading of `code` to the next heading. */
 function errorSection(code: string): string {
@@ -755,12 +764,13 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     for (const [file, re] of [
       [
         "routes",
-        /names its organization or its connection in the query, so the manager guard runs before the body read/,
+        // The two writes by name: the delete reads its body first (rr-final M1).
+        /`POST \/sso\/connections\/create` and `POST \/sso\/connections\/update` name their organization or their connection in the query\. So the manager guard runs before their body read\. Each of the two then counts on /,
       ],
       [
         "limits",
         // Each refusal of such an account comes before any byte, not only the 403 (rr-task6 Low 2).
-        /An account that manages no organization starts no large read: each of its SSO connection writes gets a refusal before any byte\. The refusal is the 403 of the manager guard, or an earlier one, such as 401, 503, 429, 400, or 404\./,
+        /An account that manages no organization starts no large read\. `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update` refuse each of its writes before any byte\. The refusal is the 403 of the manager guard, or an earlier one, such as 401, 503, 429, 400, or 404\./,
       ],
       [
         "readme",
@@ -768,6 +778,65 @@ describe("the order of an SSO connection write (plan 12l)", () => {
       ],
     ] as const)
       expect(textOf(FILES[file]), file).toMatch(re);
+  });
+
+  it("names the four writes that check before the read, and the floor reads that come first (rr-final M1)", () => {
+    // The delete and the domain writes name their row in the body, so they run managedCall:
+    // the read, then the guard. They have no cap of their own in BODY_CAPS, so the floor bounds the read.
+    expect(source).not.toMatch(/"POST \/sso\/(connections\/delete|domains\/[a-z]+)":/);
+    const kib = constant("BODY_CAP_FLOOR") / 1024;
+    for (const [file, sentence] of [
+      [
+        FILES.routes,
+        `\`POST /sso/connections/delete\` and the domain writes read their body first, at most ${kib} KiB, and then run the manager guard.`,
+      ],
+      [
+        FILES.limits,
+        `\`POST /sso/connections/delete\` reads its body first, at most ${kib} KiB, and then runs the manager guard. A read at the floor holds no half of the body budget.`,
+      ],
+      [
+        COMPAT_README,
+        "Four SSO connection writes check the caller before they read the body (plan 12l). They are core's `POST /sso/connections/create` and `POST /sso/connections/update`, `/sso/register`, and `/sso/update-provider`.",
+      ],
+      [
+        COMPAT_README,
+        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read their body first, at most ${kib} KiB, and then run the guard.`,
+      ],
+    ] as const)
+      expect(textOf(file), file).toContain(sentence);
+  });
+
+  // The version branch deletes each changeset. There the summary counts a skip (ruling 70 of plan 12j).
+  it.skipIf(!existsSync(WRITE_ORDER_CHANGESET))(
+    "names the two writes and the floor read of the delete in the changeset of plan 12l (rr-final M1)",
+    () => {
+      const kib = constant("BODY_CAP_FLOOR") / 1024;
+      const text = textOf(WRITE_ORDER_CHANGESET);
+      for (const sentence of [
+        "An account that manages no organization reads no large body: each of its writes to these two routes gets a refusal before any byte.",
+        `\`POST /sso/connections/delete\` reads its body first, at most ${kib} KiB, and then runs the manager guard.`,
+      ])
+        expect(text).toContain(sentence);
+    },
+  );
+
+  it("states that the body of /sso/update-provider names a provider, not the organization (rr-final L1)", () => {
+    const text = textOf(COMPAT_README);
+    for (const sentence of [
+      "The body of `/sso/register` names the organization. The body of `/sso/update-provider` names a provider, and the organization comes from the connection of that provider. So the shim cannot know the organization before the read. Before their read, these two paths run a pre-check of the guard",
+      "Core's guard then runs once after the read, for the organization of the body or of the provider.",
+    ])
+      expect(text).toContain(sentence);
+  });
+
+  it("states the member rows of the SSO pre-check as guard.ts bounds them (rr-final L2)", () => {
+    const guard = readFileSync(GUARD, "utf8");
+    // The read of the pre-check takes the constant as its limit, so the page states the bound of the code.
+    expect(guard).toContain("{ limit: SSO_PRECHECK_MEMBER_ROWS }");
+    const rows = constant("SSO_PRECHECK_MEMBER_ROWS", guard);
+    expect(textOf(FILES.limits)).toContain(
+      `Through the compatibility package, \`/sso/register\` and \`/sso/update-provider\` run a pre-check of the manager guard before their read. The pre-check reads at most ${rows} member rows of the caller, the first that the storage gives. A caller who is no platform operator, with no row of the owner rank among them, gets 403 before the read. An owner whose row is past those rows can still write through \`POST /sso/connections/create\` and \`POST /sso/connections/update\`, because their query names the row.`,
+    );
   });
 
   it("states the order in the errors cell and the client paragraph of Task 6 (ruling 25)", () => {

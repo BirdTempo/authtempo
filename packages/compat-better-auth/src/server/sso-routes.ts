@@ -760,13 +760,15 @@ async function addRouted(
 
 /**
  * The steps of a Better Auth SSO write before its read of the large cap
- * (plan 12l). The body names the organization, so core's guard cannot run
- * before the read. First comes core's limit of the user's manager writes
- * (ruling 51 Minor 1 of the 12j lane). Then the pre-check of core's guard
+ * (plan 12l). The body of `/sso/register` names the organization. The body
+ * of `/sso/update-provider` names a provider, and the organization comes
+ * from the connection of that provider. So core's guard cannot run before
+ * the read. First comes core's limit of the user's manager writes (ruling
+ * 51 Minor 1 of the 12j lane). Then the pre-check of core's guard
  * (`canManageSomeSso`) runs, and then the count of the large read. So an
  * account that manages no organization reads no byte. It counts no large
- * read. Core's guard runs once after the read, for the organization of
- * the body. Null when the read may start, else the refusal.
+ * read. Core's guard runs once after the read, for the organization of the
+ * body or of the provider. Null when the read may start, else the refusal.
  */
 async function beforeLargeRead(
   auth: Auth,

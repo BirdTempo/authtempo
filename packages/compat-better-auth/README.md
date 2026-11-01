@@ -1736,12 +1736,15 @@ each connection its own SP entity id, and the provider's answer gives it as
 | `GET /sso/saml2/sp/metadata?providerId=` | `GET /sso/:connectionId/metadata` |
 | `/scim/v2/*` | the same paths |
 
-Each SSO connection write checks the caller before it reads the body (plan
-12l). Each such write of an account that manages no organization gets a
-refusal before any byte. The refusal is the 403 of the guard or its
-pre-check, or an earlier one, such as 401, 503, 429, 400, or 404. Such an
-account counts no large read. The steps of core's two connection writes
-through the shim's handler come in this order:
+Four SSO connection writes check the caller before they read the body (plan
+12l). They are core's `POST /sso/connections/create` and
+`POST /sso/connections/update`, `/sso/register`, and `/sso/update-provider`.
+Each such write of an account that manages no organization gets a refusal
+before any byte. The refusal is the 403 of the guard or its pre-check, or an
+earlier one, such as 401, 503, 429, 400, or 404. Such an account counts no
+large read. `/sso/delete-provider` and core's `POST /sso/connections/delete`
+read their body first, at most 64 KiB, and then run the guard. The steps of
+core's two connection writes through the shim's handler come in this order:
 
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
@@ -1756,14 +1759,17 @@ through the shim's handler come in this order:
 5. Core's limit of the large reads of the user, else 429.
 6. The read of the body and the label rule. Core then runs no guard and no count again.
 
-`/sso/register` and `/sso/update-provider` name the organization in the
-body. So before their read, they run a pre-check of the guard: each step
-that needs no organization. The caller must be a platform operator, or own
-one organization or more. The order: the session, the `body_busy` check,
-the count of the manager write, the pre-check, the count of the large read,
-then the read. A large read that cannot start answers 503
+The body of `/sso/register` names the organization. The body of
+`/sso/update-provider` names a provider, and the organization comes from
+the connection of that provider. So the shim cannot know the organization
+before the read. Before their read, these two paths run a pre-check of the
+guard: each step that needs no organization. The caller must be a platform
+operator, or own one organization or more. The order: the session, the
+`body_busy` check, the count of the manager write, the pre-check, the count
+of the large read, then the read. A large read that cannot start answers 503
 `SERVICE_UNAVAILABLE`, Better Auth's code for core's `body_busy`. Core's
-guard then runs once after the read, for the organization of the body.
+guard then runs once after the read, for the organization of the body or of
+the provider.
 
 Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
 `/sso/saml2/sp/slo/:providerId`, and `POST /sso/saml2/logout/:providerId`.

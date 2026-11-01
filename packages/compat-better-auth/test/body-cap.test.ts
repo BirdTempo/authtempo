@@ -54,7 +54,8 @@ const SSO_WRITES = [
  * The path of the SSO write `write` with the query of core's two routes
  * (plan 12l). The query names the organization of a create, or the
  * connection of an update. Core reads it before the body. The Better Auth
- * paths name the organization in the body, so they take no query.
+ * paths name the organization or a provider in the body, so they take no
+ * query.
  */
 function withQuery(write: string, organizationId: string, connectionId: string): string {
   if (write === "/sso/connections/create")

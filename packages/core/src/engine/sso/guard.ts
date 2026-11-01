@@ -149,11 +149,11 @@ export async function recheckSsoManager(
  * A user can have more member rows, with no row of the owner rank among
  * the first 100 that the storage gives. That user gets `forbidden_rank` at
  * the pre-check, though `requireSsoManager` reads the one row of the
- * organization of the body. The reason: the pre-check runs before any
+ * organization of the write. The reason: the pre-check runs before any
  * byte of a body, so it reads one page of rows, not every row of the user.
  * `organizations.limits.perUser` is off by default, so nothing else bounds
  * the rows of one user. Such a user writes through core's two connection
- * routes, whose query names the organization.
+ * routes, whose query names the organization or the connection.
  */
 export const SSO_PRECHECK_MEMBER_ROWS = 100;
 
@@ -174,12 +174,14 @@ async function ownsSomeOrganization(config: ResolvedConfig, userId: string): Pro
 }
 
 /**
- * The pre-check of `requireSsoManager` for a write that names its
- * organization in its body (plan 12l, ruling 4 of its lane). Such writes
- * are the Better Auth paths of the compat shim. It runs before the body
- * read, so the
- * organization is not known. It runs the steps of the guard that need no
- * organization, in the order of the guard, with its step names and codes:
+ * The pre-check of `requireSsoManager` for a write that names its row in
+ * its body only (plan 12l, ruling 4 of its lane). Such writes are the
+ * Better Auth paths of the compat shim. The body of `/sso/register` names
+ * the organization. The body of `/sso/update-provider` names a provider,
+ * and the organization comes from the connection of that provider. The
+ * pre-check runs before the body read, so it does not know the
+ * organization. It runs the steps of the guard that need no organization,
+ * in the order of the guard, with its step names and codes:
  *
  * 1. An impersonation session answers `forbidden_rank`.
  * 2. In place of the step of the organization: the user is a platform
@@ -192,9 +194,9 @@ async function ownsSomeOrganization(config: ResolvedConfig, userId: string): Pro
  *
  * Each refusal emits one `sso.guard_refused` with the step name. A pass
  * grants nothing: `requireSsoManager` runs after the read, for the
- * organization of the body. So an operator whose session is older than
- * the grant passes here. After the read, the guard refuses that operator
- * unless the user owns the organization of the body.
+ * organization of the body or of the provider. So an operator whose
+ * session is older than the grant passes here. After the read, the guard
+ * refuses that operator unless the user owns that organization.
  */
 export async function requireSsoManagerOfAny(
   config: ResolvedConfig,

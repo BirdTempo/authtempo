@@ -1356,14 +1356,17 @@ export async function checkSsoManager(
 
 /**
  * The pre-check of the SSO manager guard, for a compat package whose write
- * names its organization in the body. It serves the Better Auth paths
- * `/sso/register` and `/sso/update-provider` (plan 12l, ruling 4 of its
- * lane). The package calls it before its read. Null when the session may
- * manage the SSO setup of some organization. Else core's JSON answer of the
- * first refused step, with one `sso.guard_refused` event of that step
- * (`requireSsoManagerOfAny`). It runs no count and no operator guard.
- * Core's guard runs once, after the read, for the organization of the
- * body. Throws a TypeError for an Auth that `createAuth` did not make.
+ * names its row in the body, not in the query. It serves the Better Auth
+ * paths `/sso/register` and `/sso/update-provider` (plan 12l, ruling 4 of
+ * its lane). The body of a register names the organization. The body of an
+ * update names a provider, and the organization comes from the connection
+ * of that provider. The package calls it before its read. Null when the
+ * session may manage the SSO setup of some organization. Else core's JSON
+ * answer of the first refused step, with one `sso.guard_refused` event of
+ * that step (`requireSsoManagerOfAny`). It runs no count and no operator
+ * guard. Core's guard runs once, after the read, for the organization of
+ * the body or of the provider. Throws a TypeError for an Auth that
+ * `createAuth` did not make.
  */
 export async function canManageSomeSso(
   auth: Auth,
