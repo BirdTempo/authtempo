@@ -711,6 +711,50 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     expect(w.keys).toEqual([]);
   });
 
+  it("refuses a member below the owner rank at the pre-check, with the step rank (canManageSomeSso, plan 12l)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
+    const { auth } = w;
+    // Eve is verified, turns on TOTP, and holds the fresh session of her sign-in.
+    await w.verified("eve@example.com");
+    const eve = await w.signIn("eve@example.com");
+    await w.enrol(eve);
+    // Bob, the owner of acme, adds Eve as a plain member through the engine.
+    const added = await auth.api.addMember({
+      user: w.bob.user,
+      organizationId: w.acme,
+      userId: eve.user.id,
+      role: "member",
+    });
+    if (!added.ok) throw new Error(added.code);
+    await guardSteps(auth, batches);
+    /** Bob gives Eve `role` in acme through the engine. */
+    const give = async (role: string) => {
+      const changed = await auth.api.updateMemberRole({
+        user: w.bob.user,
+        organizationId: w.acme,
+        userId: eve.user.id,
+        role,
+      });
+      if (!changed.ok) throw new Error(changed.code);
+    };
+    /** The answer of the pre-check for Eve, and the steps of its events. */
+    const check = async () => {
+      const res = await canManageSomeSso(auth, eve);
+      return [
+        res === null ? null : [res.status, await res.json()],
+        await guardSteps(auth, batches),
+      ];
+    };
+    expect(await check()).toEqual([[403, { error: "forbidden_rank" }], ["rank"]]);
+    // Admin is the highest rank below owner, and it is refused too.
+    await give("admin");
+    expect(await check()).toEqual([[403, { error: "forbidden_rank" }], ["rank"]]);
+    // The owner rank passes. So the rank is the only step that refused Eve.
+    await give("owner");
+    expect(await check()).toEqual([null, []]);
+  });
+
   it("splits the counts: countSsoManageWrite counts the manager write, countSsoLargeRead the large read (plan 12l)", async () => {
     const { auth, keys, token, user, connectionId } = await managerWorld();
     const text = '{"label":"Acme SSO"}';
