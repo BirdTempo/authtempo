@@ -101,6 +101,9 @@ function limitSeconds(name: string): number {
   return numberOf(m[1] ?? "");
 }
 
+/** The seconds of each unit in which the routes page states the window of a limit. */
+const UNIT_SECONDS: Readonly<Record<string, number>> = { minute: 60, hour: 3600 };
+
 /** The password sign-ups of one IP in an hour: `SIGN_UP_PER_IP` of engine/password.ts. */
 function signUpsPerIpHour(): number {
   const text = readFileSync(`${REPO}packages/core/src/engine/password.ts`, "utf8");
@@ -774,6 +777,34 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     );
     expect(textOf(FILES.client)).toMatch(
       /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
+    );
+  });
+
+  it("states the two limits of an SSO manager on the routes page as routes/sso.ts holds them (rr-task6 Low 3)", () => {
+    const text = textOf(FILES.routes);
+    for (const [key, name] of [
+      ["sso-manage:user", "SSO_MANAGE_PER_USER"],
+      ["sso-large-read:user", "SSO_LARGE_READ_PER_USER"],
+    ] as const) {
+      // The page states a limit as `<key>:<userId>`, N per hour, or N per M minutes.
+      const re = new RegExp(`\`${key}:<userId>\`, (\\d+) per (?:(\\d+) )?(minute|hour)s?\\b`, "g");
+      const got = [...text.matchAll(re)].map((m) => ({
+        max: Number(m[1]),
+        seconds: Number(m[2] ?? 1) * (UNIT_SECONDS[m[3] ?? ""] ?? 0),
+      }));
+      expect({ key, stated: got.length > 0 }).toEqual({ key, stated: true });
+      for (const limit of got)
+        expect({ key, ...limit }).toEqual({
+          key,
+          max: limitMax(name),
+          seconds: limitSeconds(name),
+        });
+    }
+  });
+
+  it("states the check after the read on the routes page (rulings 17 and 23)", () => {
+    expect(textOf(FILES.routes)).toMatch(
+      /and reads its body last\. Before the act, it checks again that the caller still owns the organization or holds the platform role, and that the session is live\./,
     );
   });
 
