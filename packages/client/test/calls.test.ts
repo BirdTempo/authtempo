@@ -5,7 +5,12 @@ import { createClient } from "../src/client.js";
 // The text of client.ts, read by Vite (test/raw.d.ts types it). The client has no Node types.
 import clientSource from "../src/client.ts?raw";
 import type { BrowserWebAuthn } from "../src/webauthn.js";
-import { BODY_AS_INPUT, COMPARED, NOT_COMPARED } from "./contract.test-d.js";
+import {
+  BODY_AS_INPUT,
+  COMPARED,
+  NOT_COMPARED,
+  QUERY_AND_BODY_AS_INPUT,
+} from "./contract.test-d.js";
 
 /** The operations that the client looks up in the table, in call order. */
 const looked = vi.hoisted(() => [] as string[]);
@@ -239,8 +244,16 @@ describe("the call table of the client (plan 11d)", () => {
     // A body row is a compared row.
     // Plan 12i Task 2 adds username.set. Task 5 adds phone.verify, phone.add, and phone.verifyAdd.
     // Task 20 adds password.verifyCode. Task 15 adds the multi-session switch and sign-out.
-    expect(BODY_AS_INPUT).toHaveLength(69);
+    // Plan 12l moves the two SSO connection writes to QUERY_AND_BODY_AS_INPUT.
+    expect(BODY_AS_INPUT).toHaveLength(67);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
+    // A row that sends its id in the query is a compared row and no body row (plan 12l).
+    // The two SSO connection writes are these rows.
+    expect(QUERY_AND_BODY_AS_INPUT).toHaveLength(2);
+    for (const op of QUERY_AND_BODY_AS_INPUT) {
+      expect(COMPARED, op).toContain(op);
+      expect(BODY_AS_INPUT, op).not.toContain(op);
+    }
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)
       if ("select" in r) expect(COMPARED, r.operation).toContain(r.operation);
