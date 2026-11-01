@@ -884,7 +884,7 @@ describe("the guard before the read through the shim (plan 12l)", () => {
     const bea = await managerOf(app, "bea@example.com", "bexley");
     // Core's zod counts code points: 64 emoji are 64 code points and 128 UTF-16 units.
     const emoji = (n: number) => encodeURIComponent("\u{1F600}".repeat(n));
-    // The cases of the review of Task 4, with the key of the write and a real value of it.
+    // Each case of the review of Task 4 takes the key of the write and a real value of it.
     const queries = (key: string, real: string): [what: string, query: string][] => [
       ["a repeated key", `?${key}=${real}&${key}=${real}`],
       ["a NUL", `?${key}=o%00x`],
@@ -1094,7 +1094,7 @@ describe("the guard before the read through the shim (plan 12l)", () => {
         ]);
         // No reader asked for the second chunk, and the stream sent one chunk at most.
         expect([path, body.asked(), body.pulled() <= 2 * 65_536]).toEqual([path, false, true]);
-        // One refusal, of the large reads: one limit.hit (ruling 72 Low 2 of the 12j lane).
+        // The write gets one refusal, of the large reads, so one limit.hit (ruling 72 Low 2).
         expect([path, refused]).toEqual([path, [`sso-large-read:user:${ada.user.id}`]]);
       } finally {
         body.open();
