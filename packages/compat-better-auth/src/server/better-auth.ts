@@ -171,8 +171,10 @@ export function createHandler(
     // Core's SSO connection writes: the label rule of the shim, and one read of the body. Core's
     // manager guard runs before that read, for the row that the query names (plan 12l). A write
     // that passes goes to core as a new request of the same text (ruling 68 Minor 1).
+    // The shim answers a refusal of that guard in core's form. The wrapper adds Better Auth's
+    // code of a stale session, as for core's own answers below (review M1 of plan 12l Task 4).
     const write = await ssoConnectionWrite(auth, mapped, req);
-    if (write instanceof Response) return write;
+    if (write instanceof Response) return withFreshCode(write);
     if (write) req = write;
     // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
     const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));

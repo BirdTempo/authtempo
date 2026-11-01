@@ -901,4 +901,44 @@ describe("the guard before the read through the shim (plan 12l)", () => {
       audit.value.rows.filter((r) => r.actorId === op.user.id).map((r) => [r.action, r.actorKind]),
     ).toEqual([["sso_connection_create", "user"]]);
   });
+
+  it("answers a stale session of a manager on core's two writes with Better Auth's code, before any byte (review M1)", {
+    timeout: 60_000,
+  }, async () => {
+    const { database, keys } = recordedMemory();
+    const app = ssoApp(database, [sso({ domainVerification: { enabled: true } })]);
+    // Ann manages acme, and the app made one connection of acme: the update names a real row.
+    const ann = await managerOf(app, "ann@acme.example", "acme");
+    const corePaths = [
+      withQuery("/sso/connections/create", ann.organizationId, ann.connectionId),
+      withQuery("/sso/connections/update", ann.organizationId, ann.connectionId),
+    ];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // Two days is past the fresh window of one day. The session lives seven days.
+      vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      keys.length = 0;
+      for (const path of corePaths) {
+        const body = stalledBody();
+        try {
+          const res = await app.auth.handler(streamPost(path, body.stream, ann.cookie));
+          // The shim's guard refuses in core's form. The handler adds Better Auth's code.
+          expect([path, res.status, await res.json()]).toEqual([
+            path,
+            403,
+            { error: "session_not_fresh", code: "SESSION_NOT_FRESH" },
+          ]);
+          // No reader asked for the second chunk: the refusal came before the read.
+          expect([path, body.asked(), body.pulled() <= 2 * 65_536]).toEqual([path, false, true]);
+        } finally {
+          body.open();
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    // Each write counted once on the manager writes, and none on the large reads.
+    expect(keys.filter((k) => k.startsWith("sso-manage:"))).toHaveLength(corePaths.length);
+    expect(keys.filter((k) => k.startsWith("sso-large-read:"))).toEqual([]);
+  });
 });
