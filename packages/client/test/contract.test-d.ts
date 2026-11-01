@@ -343,8 +343,9 @@ export const noFailingAnswer: [FailingAnswer] extends [never] ? true : FailingAn
 /**
  * The rows whose method sends its input as the body, unchanged, so the input
  * type equals the body type. The other compared rows build their own body:
- * a captcha header, a renamed key, a ceremony's response, no input, or an id
- * that goes in the query (`QUERY_AND_BODY_AS_INPUT`).
+ * a captcha header, a renamed key, a ceremony's response, or no input. A row
+ * of `QUERY_AND_BODY_AS_INPUT` sends its id in the query and the rest of its
+ * input as the body.
  */
 export const BODY_AS_INPUT = [
   "magicLink.verify",
