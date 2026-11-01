@@ -1014,14 +1014,17 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     expect(
       (await app.call("/sso/verify-domain", { providerId: "acme" }, app.owner.cookie)).status,
     ).toBe(204);
-    // Core's own route, outside the shim, takes a dot in a label.
+    // Core's own route, outside the shim, takes a dot in a label. The query names the row (plan 12l).
     const [connection] = await connectionsOf(app);
     const relabel = await app.auth.tempo.handle(
-      new Request(`${BASE}/api/auth/sso/connections/update`, {
-        method: "POST",
-        headers: { origin: BASE, "content-type": "application/json", cookie: app.owner.cookie },
-        body: JSON.stringify({ id: connection?.id, label: "x.sub" }),
-      }),
+      new Request(
+        `${BASE}/api/auth/sso/connections/update?id=${encodeURIComponent(connection?.id ?? "")}`,
+        {
+          method: "POST",
+          headers: { origin: BASE, "content-type": "application/json", cookie: app.owner.cookie },
+          body: JSON.stringify({ label: "x.sub" }),
+        },
+      ),
     );
     expect(relabel.status).toBe(200);
     // Only the zone of sub.acme.example answers: the recheck does not count it.
@@ -1076,11 +1079,18 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     let relabelled = 0;
     between = async () => {
       const r = await app.auth.tempo.handle(
-        new Request(`${BASE}/api/auth/sso/connections/update`, {
-          method: "POST",
-          headers: { origin: BASE, "content-type": "application/json", cookie: app.owner.cookie },
-          body: JSON.stringify({ id: connection?.id, label: "x.sub" }),
-        }),
+        new Request(
+          `${BASE}/api/auth/sso/connections/update?id=${encodeURIComponent(connection?.id ?? "")}`,
+          {
+            method: "POST",
+            headers: {
+              origin: BASE,
+              "content-type": "application/json",
+              cookie: app.owner.cookie,
+            },
+            body: JSON.stringify({ label: "x.sub" }),
+          },
+        ),
       );
       relabelled = r.status;
     };
@@ -1106,11 +1116,12 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     ).toBe(200);
     const mal = await app.manager("mal@evil.example");
     const evil = await app.organizationOf(mal, "evil");
+    // Core's two writes name their row in the query (plan 12l).
+    const createPath = `/sso/connections/create?organizationId=${encodeURIComponent(evil)}`;
     const create = (label: string) =>
       app.call(
-        "/sso/connections/create",
+        createPath,
         {
-          organizationId: evil,
           kind: "oidc",
           label,
           issuer: "https://idp.evil.example",
@@ -1131,14 +1142,14 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     expect(own.status).toBe(200);
     const { connection: evilConnection } = (await own.json()) as { connection: { id: string } };
     const update = (id: string | undefined, label: string, cookie: string) =>
-      app.call("/sso/connections/update", { id, label }, cookie);
+      app.call(`/sso/connections/update?id=${encodeURIComponent(id ?? "")}`, { label }, cookie);
     expect((await update(evilConnection.id, "acme", mal.cookie)).status).toBe(400);
     // The owner's own provider keeps its label too: register and update-provider own it.
     const [acme] = (await connectionsOf(app)).filter((c) => c.label === "acme");
     expect((await update(acme?.id, "Acme Corp", app.owner.cookie)).status).toBe(400);
     // A body that is not a JSON object is refused unread.
     const raw = await app.auth.handler(
-      new Request(`${BASE}/api/auth/sso/connections/create`, {
+      new Request(`${BASE}/api/auth${createPath}`, {
         method: "POST",
         headers: { origin: BASE, "content-type": "application/json", cookie: mal.cookie },
         body: "[1]",

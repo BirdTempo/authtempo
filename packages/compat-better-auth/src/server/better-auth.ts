@@ -168,8 +168,9 @@ export function createHandler(
       const held = await placeholderChange(auth, base, req, true);
       if (held) return held;
     }
-    // Core's SSO connection writes: the label rule of the shim, and one read of the body. A
-    // write that passes goes to core as a new request of the same text (ruling 68 Minor 1).
+    // Core's SSO connection writes: the label rule of the shim, and one read of the body. Core's
+    // manager guard runs before that read, for the row that the query names (plan 12l). A write
+    // that passes goes to core as a new request of the same text (ruling 68 Minor 1).
     const write = await ssoConnectionWrite(auth, mapped, req);
     if (write instanceof Response) return write;
     if (write) req = write;

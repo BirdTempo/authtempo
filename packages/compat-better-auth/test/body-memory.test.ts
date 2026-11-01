@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
  * the 12j lane), with the bound of core's body-memory.test.ts. A child Node
  * process with a heap of 128 MB (the memory of a Workers isolate) sends
  * reads at once to the handler of the shim: 30 SSO connection writes of 8
- * MiB of 30 users, 30 registers of 8 MiB, and 16 SAML forms of 16 IPs.
+ * MiB of 30 managers, 30 registers of 8 MiB, and 16 SAML forms of 16 IPs.
+ * Each SSO write comes from a manager of an organization, since the shim
+ * runs core's manager guard before the read (plan 12l).
  * Before the ruling, the shim cloned every POST and read the clone of an
  * SSO write, then core read the request. A clone is a tee, so a large body
  * was held twice while the budget counted it once.

@@ -1,5 +1,13 @@
-import type { Auth, SsoConnectionSummary, SsoDomainSummary } from "@authtempo/core";
+import type {
+  Auth,
+  ResolvedSession,
+  SsoConnectionSummary,
+  SsoDomainSummary,
+} from "@authtempo/core";
 import {
+  canManageSomeSso,
+  checkSsoManager,
+  countSsoLargeRead,
   countSsoManageWrite,
   moveSsoManageCount,
   scimRequestAs,
@@ -746,6 +754,30 @@ async function addRouted(
   return ((await routed.json()) as { domain: SsoDomainSummary }).domain;
 }
 
+/**
+ * The steps of a Better Auth SSO write before its read of the large cap
+ * (plan 12l). The body names the organization, so core's guard cannot run
+ * before the read. The order: core's limit of the user's manager writes
+ * (ruling 51 Minor 1 of the 12j lane), the pre-check of core's guard
+ * (`canManageSomeSso`), and the count of the large read. So an account
+ * that manages no organization reads no byte and counts no large read.
+ * Core's guard runs once after the read, for the organization of the
+ * body. Null when the read may start, else the refusal.
+ */
+async function beforeLargeRead(
+  auth: Auth,
+  request: Request,
+  calls: Calls,
+  session: ResolvedSession,
+): Promise<Response | null> {
+  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  // Core's refusal in Better Auth's form, with core's status.
+  const refused = await canManageSomeSso(auth, session);
+  if (refused) return calls.refusal(refused);
+  if (!(await countSsoLargeRead(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  return null;
+}
+
 /** `POST /sso/register`: a connection, its domain, and the route of the domain (ruling 61 P4). */
 async function register(
   auth: Auth,
@@ -756,9 +788,8 @@ async function register(
   const session = await auth.session(request);
   if (!session)
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
-  // Core's limit of the user comes before the read of the large cap, as in
-  // core's manager routes (ruling 51 Minor 1 of the 12j lane).
-  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  const refused = await beforeLargeRead(auth, request, calls, session);
+  if (refused) return refused;
   const body = await jsonBody(request, "POST /sso/connections/create");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   const sso = mapped.sso;
@@ -778,14 +809,17 @@ async function register(
       { limit: 2 },
     );
   if ((await byLabel()).length > 0) return calls.fail(taken);
-  const created = await calls.core("/sso/connections/create", {
-    organizationId: read.organizationId,
-    kind: read.kind,
-    label: read.providerId,
-    jit: sso.jit,
-    defaultRole: sso.defaultRole,
-    ...read.fields,
-  });
+  // Core's create names the organization in its query, read before its body (plan 12l).
+  const created = await calls.core(
+    `/sso/connections/create?organizationId=${encodeURIComponent(read.organizationId)}`,
+    {
+      kind: read.kind,
+      label: read.providerId,
+      jit: sso.jit,
+      defaultRole: sso.defaultRole,
+      ...read.fields,
+    },
+  );
   if (!created.ok) return calls.refusal(created);
   const connection = ((await created.json()) as { connection: SsoConnectionSummary }).connection;
   const undo = () => calls.core("/sso/connections/delete", { id: connection.id });
@@ -843,9 +877,10 @@ async function listProviders(
 
 /**
  * `POST /sso/update-provider`: core's update of the connection, and a new
- * domain when it changes. The session check and core's limit of the user
- * come before the read of the body, as at the register: the read takes the
- * large cap of the connection writes (rulings 46 and 51 of the 12j lane).
+ * domain when it changes. The session check, core's limit of the user, the
+ * pre-check of core's guard, and the count of the large read come before
+ * the read of the body, as at the register. The read takes the large cap
+ * of the connection writes (rulings 46 and 51 of the 12j lane, plan 12l).
  */
 async function updateProvider(
   auth: Auth,
@@ -856,7 +891,8 @@ async function updateProvider(
   const session = await auth.session(request);
   if (!session)
     return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
-  if (!(await countSsoManageWrite(auth, request, session.user.id))) return calls.fail(TOO_MANY);
+  const refused = await beforeLargeRead(auth, request, calls, session);
+  if (refused) return refused;
   const body = await jsonBody(request, "POST /sso/connections/update");
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
   for (const [key, v] of Object.entries(body))
@@ -896,7 +932,11 @@ async function updateProvider(
   }
   let current = connection;
   if (Object.keys(fields).length > 0) {
-    const updated = await calls.core("/sso/connections/update", { id: connection.id, ...fields });
+    // Core's update names the connection in its query, read before its body (plan 12l).
+    const updated = await calls.core(
+      `/sso/connections/update?id=${encodeURIComponent(connection.id)}`,
+      fields,
+    );
     if (!updated.ok) return calls.refusal(updated);
     current = ((await updated.json()) as { connection: SsoConnectionSummary }).connection;
   }
@@ -1136,6 +1176,29 @@ export async function ssoAcsRoute(
   );
 }
 
+/** The longest id of core's contract (`id` of core's contract/organizations.ts). */
+const ID_MAX = 64;
+
+/**
+ * The value of `key` in the query of core's connection create or update,
+ * or null (plan 12l). It takes what core's `readQuery` takes with the
+ * query schema of the route: the one key, once, with 1 to 64 characters
+ * and no NUL or lone surrogate. Null for any other query, which core then
+ * refuses with `invalid_body` before any read. The two sets must stay
+ * equal. A query that core takes and this read refused would let core
+ * read a body that the label rule of the shim never saw.
+ */
+function queryValue(url: URL, key: string): string | null {
+  let value: string | null = null;
+  for (const [k, v] of url.searchParams) {
+    if (k !== key || value !== null) return null;
+    value = v;
+  }
+  if (value === null || value.length === 0 || value.length > ID_MAX) return null;
+  // Core's readQuery refuses a NUL or a lone surrogate, which the storage port refuses too.
+  return value.includes("\u0000") || /\p{Cs}/u.test(value) ? null : value;
+}
+
 /**
  * Core's refusal of a call to its own connection create or update through
  * the shim, when the call would touch a providerId (review of plan 12d Task
@@ -1144,18 +1207,31 @@ export async function ssoAcsRoute(
  * each Better Auth path of acme answers 404. A create or an update refuses a
  * new label of the providerId form, and an update refuses any new label on a
  * row that holds one. A body that is not a JSON object is refused too, so
- * no form of body passes unread. Null for every other request. A request
- * with no session is null too: core answers it 401 before it reads the body,
- * so no one reads a body of the large cap of these writes without a session
- * (ruling 46 of the 12j lane). Core's limit of the user comes before the
- * read too, and a write past it is null: core answers it 429 before its own
- * read. A write within the limit carries the count to core (ruling 51).
+ * no form of body passes unread. Null for every other request.
+ *
+ * The steps before the read take core's order (plan 12l), so no one reads
+ * a body of the large cap of these writes unless core's guard passed:
+ *
+ * 1. The session. A request with no session is null: core answers it 401
+ *    before it reads the body (ruling 46 of the 12j lane).
+ * 2. Core's limit of the user's manager writes. A write past it is null:
+ *    core answers it 429 before its own read. A write within the limit
+ *    carries the count to core (ruling 51).
+ * 3. The query: the organization of a create, or the connection of an
+ *    update and then its row. A bad query or no row is null: core answers
+ *    `invalid_body` or `not_found` before any read.
+ * 4. Core's manager guard for the organization (`checkSsoManager`). A
+ *    refusal answers core's JSON answer. A pass marks the request, so core
+ *    runs the guard no more.
+ * 5. The count of the large read. A read past the limit is null: core
+ *    answers it 429 by the mark of the count, before its own read.
+ * 6. The read, the label rule, and the forward.
  *
  * The shim reads the body once, from the request itself (ruling 68 Minor 1
  * of the 12j lane). A write that passes gives a new request of the same text
- * with the counts of the user, and core reads that one in place of
- * `request`. Before this, the shim read a clone and core read the request,
- * so a large body was held twice.
+ * with the counts and the guard mark of the user, and core reads that one
+ * in place of `request`. Before this, the shim read a clone and core read
+ * the request, so a large body was held twice.
  */
 export async function ssoConnectionWrite(
   auth: Auth,
@@ -1163,11 +1239,24 @@ export async function ssoConnectionWrite(
   request: Request,
 ): Promise<Response | Request | null> {
   if (!mapped.sso || request.method !== "POST") return null;
-  const path = new URL(request.url).pathname.slice(mapped.basePath.length);
+  const url = new URL(request.url);
+  const path = url.pathname.slice(mapped.basePath.length);
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
   const session = await auth.session(request);
   if (!session) return null;
   if (!(await countSsoManageWrite(auth, request, session.user.id))) return null;
+  const update = path === "/sso/connections/update";
+  const named = queryValue(url, update ? "id" : "organizationId");
+  if (named === null) return null;
+  const row = update
+    ? await mapped.config.storage.findOne("ssoConnection", [
+        { field: "id", op: "eq", value: named },
+      ])
+    : null;
+  if (update && !row) return null;
+  const refused = await checkSsoManager(auth, request, session, row?.organizationId ?? named);
+  if (refused) return refused;
+  if (!(await countSsoLargeRead(auth, request, session.user.id))) return null;
   const refuse = (message: string) =>
     Response.json({ error: "invalid_body", message }, { status: 400 });
   const text = await readOwnTextOf(request, `POST ${path}`);
@@ -1176,16 +1265,8 @@ export async function ssoConnectionWrite(
   const why =
     "a label of the providerId form belongs to /sso/register and /sso/update-provider in a Better Auth app";
   if (typeof body.label === "string" && PROVIDER_ID_RE.test(body.label)) return refuse(why);
-  if (
-    path === "/sso/connections/update" &&
-    body.label !== undefined &&
-    typeof body.id === "string"
-  ) {
-    const row = await mapped.config.storage.findOne("ssoConnection", [
-      { field: "id", op: "eq", value: body.id },
-    ]);
-    if (row && PROVIDER_ID_RE.test(row.label)) return refuse(why);
-  }
+  // The row of an update comes from the query (plan 12l), read before the body.
+  if (row && body.label !== undefined && PROVIDER_ID_RE.test(row.label)) return refuse(why);
   const headers = new Headers(request.headers);
   headers.delete("content-length");
   const forward = new Request(request.url, { method: "POST", headers, body: text });
