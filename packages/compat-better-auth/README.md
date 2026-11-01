@@ -1737,9 +1737,11 @@ each connection its own SP entity id, and the provider's answer gives it as
 | `/scim/v2/*` | the same paths |
 
 Each SSO connection write checks the caller before it reads the body (plan
-12l). An account that manages no organization gets 403 before any byte. It
-counts no large read. The steps of core's two connection writes through the
-shim's handler come in this order:
+12l). Each such write of an account that manages no organization gets a
+refusal before any byte. The refusal is the 403 of the guard or its
+pre-check, or an earlier one, such as 401, 503, 429, 400, or 404. Such an
+account counts no large read. The steps of core's two connection writes
+through the shim's handler come in this order:
 
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
