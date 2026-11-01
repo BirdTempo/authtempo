@@ -3,13 +3,23 @@
  * only a compat package uses, off the root entry. `withDomainRecord` and
  * `verifyDomainByRecord` let it prove a domain by its own TXT record.
  * `scimRequestAs` lets it run a SCIM route for a credential that it checked.
- * `countSsoManageWrite` and `moveSsoManageCount` let it count an SSO
- * manager write on core's limit before its own read of the body (ruling 51
- * Minor 1 of the 12j lane). Each route step stays core's.
+ * The SSO seams let it run core's steps of a connection write before its
+ * own read of the body, in core's order. `countSsoManageWrite` counts the
+ * manager write on core's limit (ruling 51 Minor 1 of the 12j lane).
+ * `checkSsoManager` runs core's manager guard for the organization of the
+ * query, and `canManageSomeSso` runs the pre-check of a path whose
+ * organization is in the body (plan 12l). `countSsoLargeRead` then counts
+ * the large read: plan 12l moved that count out of `countSsoManageWrite`,
+ * so an account that manages nothing counts no large read (ruling 69 of
+ * the 12j lane). `moveSsoManageCount` moves each mark to the request that
+ * core gets. Each route step stays core's.
  */
 export type { DomainRecordOf } from "./compat-seams.js";
 export {
   type CheckedScimCaller,
+  canManageSomeSso,
+  checkSsoManager,
+  countSsoLargeRead,
   countSsoManageWrite,
   moveSsoManageCount,
   scimRequestAs,

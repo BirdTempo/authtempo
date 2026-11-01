@@ -1,22 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  bodyCapOf,
+  bodyClientOf,
+  canManageSomeSso,
+  checkSsoManager,
+  countSsoLargeRead,
   countSsoManageWrite,
   moveSsoManageCount,
+  readBodyText,
   scimRequestAs,
   verifyDomainByRecord,
   withDomainRecord,
 } from "../../src/compat.js";
-import { carryDomainRecord, type DomainRecordOf, domainRecordFor } from "../../src/compat-seams.js";
+import {
+  carryDomainRecord,
+  type DomainRecordOf,
+  domainRecordFor,
+  takeSsoManagerChecked,
+} from "../../src/compat-seams.js";
 import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
+import type { ResolvedSession } from "../../src/engine/sessions.js";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
+import { ipBodyClient, LARGE_READ_SLOW_MS } from "../../src/http/body-cap.js";
 import { createRouter, type Route } from "../../src/http/router.js";
 import { SSO_LARGE_READ_PER_USER, SSO_MANAGE_PER_USER } from "../../src/http/routes/sso.js";
 import { createMemoryLimiter } from "../../src/limiter/memory.js";
+import type { LimiterPort } from "../../src/limiter/port.js";
 import type { AuthEvent } from "../../src/observe/port.js";
-import { systemClock } from "../../src/primitives/clock.js";
 import { base32Decode, totpCode } from "../../src/primitives/totp.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { BASE_URL, get, tokenFromMail } from "../helpers.js";
@@ -81,55 +94,99 @@ async function recordWorld(marked = true) {
 }
 
 /**
- * A world of `createAuth` with a memory limiter, and a manager of `acme`
- * with one OIDC connection (plan 12l). The two connection writes run the
- * guard before their body read, so only a manager reaches their counts of
- * the large read. The manager is a verified user who created the
- * organization through the api, then turned on TOTP. The session of the
- * sign-in before the enable is fresh. Each step is a flow of the product.
+ * A world of `createAuth` with a memory limiter and a clock of the test
+ * (plan 12l). The limiter records each key that it counts in `keys`, so a
+ * test reads which limits a call counted. The clock starts at the real time
+ * and moves only by `clock.advance`. Each person comes through the flows of
+ * the product: the password sign-up, the link of the verify mail, the
+ * sign-in, `createOrganization`, and the TOTP setup and enable. `extra`
+ * replaces a top key of the config.
  */
-async function managerWorld(observe?: AuthConfig["observe"]) {
+function seamWorld(extra: Partial<AuthConfig> = {}) {
   const sent: string[] = [];
-  const limiter = createMemoryLimiter(systemClock);
+  const keys: string[] = [];
+  let now = Date.now();
+  const clock = {
+    now: () => new Date(now),
+    advance(ms: number) {
+      now += ms;
+    },
+  };
+  const memory = createMemoryLimiter(clock);
+  const limiter: LimiterPort = {
+    scope: "isolate",
+    allow(key, window) {
+      keys.push(key);
+      return memory.allow(key, window);
+    },
+  };
   const auth = createAuth({
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [],
     storage: createMemoryAdapter(),
     limiter,
+    clock,
     mail: { send: async (m) => void sent.push(m.text) },
     password: { hash: FAST },
     organizations: {},
     sso: { oidc: true, dns: [fakeDns("a", {})] },
-    ...(observe ? { observe } : {}),
+    ...extra,
   });
-  const { password, totp, sso } = auth.api;
-  if (!password || !totp || !sso) throw new Error("password, totp, and sso must be on");
-  const email = "ada@example.com";
-  const up = await password.signUp({ email, password: PASSWORD, ip: null, userAgent: null });
-  if (!up.ok) throw new Error(up.code);
-  const link = tokenFromMail(sent.at(-1) ?? "");
-  const verified = await password.verifyEmail({ token: link, ip: null, userAgent: null });
-  if (!verified.ok) throw new Error(verified.code);
-  const signedIn = await password.signIn({ email, password: PASSWORD, ip: null, userAgent: null });
-  if (!signedIn.ok || !("token" in signedIn.value)) throw new Error("no session");
-  const token = signedIn.value.token;
-  const session = await auth.api.getSession(token);
-  if (!session) throw new Error("no session");
-  const made = await auth.api.createOrganization({
-    user: session.user,
-    slug: "acme",
-    name: "Acme",
-  });
-  if (!made.ok) throw new Error(made.code);
-  const setup = await totp.setup({ userId: session.user.id, password: PASSWORD });
-  if (!setup.ok) throw new Error(setup.code);
-  const code = await totpCode(base32Decode(setup.value.secret), new Date());
-  const enabled = await totp.enable({ session, code });
-  if (!enabled.ok) throw new Error(enabled.code);
+  const { password, totp } = auth.api;
+  if (!password || !totp) throw new Error("password and totp must be on");
+  /** A user who signed up with a password and opened the link of the verify mail. */
+  const verified = async (email: string): Promise<void> => {
+    const up = await password.signUp({ email, password: PASSWORD, ip: null, userAgent: null });
+    if (!up.ok) throw new Error(up.code);
+    const token = tokenFromMail(sent.at(-1) ?? "");
+    const proved = await password.verifyEmail({ token, ip: null, userAgent: null });
+    if (!proved.ok) throw new Error(proved.code);
+  };
+  /** The session of a password sign-in now, with its token. The sign-in makes it fresh. */
+  const signIn = async (email: string): Promise<ResolvedSession & { token: string }> => {
+    const r = await password.signIn({ email, password: PASSWORD, ip: null, userAgent: null });
+    if (!r.ok || !("token" in r.value)) throw new Error("no session");
+    const session = await auth.api.getSession(r.value.token);
+    if (!session) throw new Error("no session");
+    return { ...session, token: r.value.token };
+  };
+  /** The id of an organization that the user of `session` creates as its owner. */
+  const organization = async (session: ResolvedSession, slug: string): Promise<string> => {
+    const made = await auth.api.createOrganization({ user: session.user, slug, name: slug });
+    if (!made.ok) throw new Error(made.code);
+    return made.value.organization.id;
+  };
+  /** TOTP on for the user of `session`, through the setup and the enable. */
+  const enrol = async (session: ResolvedSession): Promise<void> => {
+    const setup = await totp.setup({ userId: session.user.id, password: PASSWORD });
+    if (!setup.ok) throw new Error(setup.code);
+    const code = await totpCode(base32Decode(setup.value.secret), clock.now());
+    const enabled = await totp.enable({ session, code });
+    if (!enabled.ok) throw new Error(enabled.code);
+  };
+  return { auth, memory, keys, clock, verified, signIn, organization, enrol };
+}
+
+/**
+ * A world of `seamWorld` and a manager of `acme` with one OIDC connection
+ * (plan 12l). The two connection writes run the guard before their body
+ * read, so only a manager reaches their counts of the large read. The
+ * manager is a verified user who created the organization through the api,
+ * then turned on TOTP. The session of the sign-in before the enable is
+ * fresh. Each step is a flow of the product.
+ */
+async function managerWorld(observe?: AuthConfig["observe"]) {
+  const w = seamWorld(observe ? { observe } : {});
+  const sso = w.auth.api.sso;
+  if (!sso) throw new Error("sso must be on");
+  await w.verified("ada@example.com");
+  const session = await w.signIn("ada@example.com");
+  const organizationId = await w.organization(session, "acme");
+  await w.enrol(session);
   const connection = await sso.connections.create({
     actor: SSO_APP,
-    organizationId: made.value.organization.id,
+    organizationId,
     kind: "oidc",
     label: "acme-sso",
     issuer: "https://login.idp.example/acme",
@@ -137,7 +194,82 @@ async function managerWorld(observe?: AuthConfig["observe"]) {
     clientSecret: "acme-secret-0123456789",
   });
   if (!connection.ok) throw new Error(connection.code);
-  return { auth, limiter, token, user: session.user, connectionId: connection.value.id };
+  return {
+    auth: w.auth,
+    limiter: w.memory,
+    keys: w.keys,
+    token: session.token,
+    user: session.user,
+    connectionId: connection.value.id,
+  };
+}
+
+/**
+ * The platform organization `platform-co` and the platform role `operator`
+ * (plan 12f), with the user tools and impersonation on. The platform role
+ * ranks below owner, so an operator who owns no organization is no owner.
+ */
+const PLATFORM: Partial<AuthConfig> = {
+  organizations: {
+    platformOrganization: "platform-co",
+    platformRole: "operator",
+    ranks: { viewer: 1, member: 2, operator: 2, admin: 3, owner: 4 },
+  },
+  operator: { users: true, impersonation: {} },
+};
+
+/**
+ * A world of `seamWorld` with `PLATFORM` and four people (plan 12l), each
+ * made through the flows of the product:
+ *
+ * - `ada`, a platform operator who owns no organization. The app makes the
+ *   first operator, root@example.com, with `createAdmin`, and so the
+ *   platform organization. A second `createAdmin` gives Ada a member row
+ *   with the platform role alone. Ada signs in after the grant (ruling 50
+ *   of plan 12f) and turns on TOTP.
+ * - `bob`, a manager: the owner of `acme`, with TOTP.
+ * - `dan`, the owner of `dan-co`, with no second factor.
+ * - `cy`, a verified user with no organization.
+ *
+ * Each session is fresh. `keys` is empty at the end.
+ */
+async function platformWorld(observe?: AuthConfig["observe"]) {
+  const w = seamWorld(observe ? { ...PLATFORM, observe } : PLATFORM);
+  const admin = async (email: string) => {
+    const made = await w.auth.api.operator.createAdmin({
+      actor: SSO_APP,
+      email,
+      reason: "the first operators of the test",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+  };
+  await admin("root@example.com");
+  await w.verified("ada@example.com");
+  await admin("ada@example.com");
+  w.clock.advance(1_000);
+  const ada = await w.signIn("ada@example.com");
+  await w.enrol(ada);
+  await w.verified("bob@example.com");
+  const bob = await w.signIn("bob@example.com");
+  const acme = await w.organization(bob, "acme");
+  await w.enrol(bob);
+  await w.verified("dan@example.com");
+  const dan = await w.signIn("dan@example.com");
+  const danCo = await w.organization(dan, "dan-co");
+  await w.verified("cy@example.com");
+  const cy = await w.signIn("cy@example.com");
+  w.keys.length = 0;
+  return { ...w, ada, bob, dan, cy, acme, danCo };
+}
+
+/** The steps of the `sso.guard_refused` events in `batches`, after a flush. It empties `batches`. */
+async function guardSteps(auth: { observe: { flush(): Promise<void> } }, batches: AuthEvent[][]) {
+  await auth.observe.flush();
+  const steps = batches.flat().flatMap((e) => (e.name === "sso.guard_refused" ? [e.step] : []));
+  batches.length = 0;
+  return steps;
 }
 
 describe("the compat seams of core (plan 12d Task 14)", () => {
@@ -354,6 +486,22 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     ])
       expect(() => scimRequestAs(plain, scim, bad), JSON.stringify(bad)).toThrow(TypeError);
     await expect(countSsoManageWrite({ ...plain }, scim, "u")).rejects.toThrow(TypeError);
+    // The seams of plan 12l. Each throws before it reads the session, so none is needed here.
+    const none = null as unknown as ResolvedSession;
+    await expect(countSsoLargeRead({ ...plain }, scim, "u")).rejects.toThrow(TypeError);
+    await expect(canManageSomeSso({ ...plain }, none)).rejects.toThrow(TypeError);
+    const write = (path: string, method = "POST") =>
+      new Request(`${BASE_URL}/auth${path}?organizationId=o`, { method });
+    await expect(
+      checkSsoManager({ ...plain }, write("/sso/connections/create"), none, "o"),
+    ).rejects.toThrow(TypeError);
+    // checkSsoManager takes a POST to one of the two connection writes only.
+    for (const r of [
+      write("/sso/connections/delete"),
+      write("/sso/connections/create", "PUT"),
+      new Request(`${BASE_URL}/other/sso/connections/create`, { method: "POST" }),
+    ])
+      await expect(checkSsoManager(plain, r, none, "o"), r.url).rejects.toThrow(TypeError);
   });
 
   it("counts a manager write that the compat package counted once, for its own user only (ruling 51 Minor 1)", async () => {
@@ -376,7 +524,9 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     const half = SSO_LARGE_READ_PER_USER.max / 2;
     for (let i = 0; i < half; i++) {
       const r = write();
+      // The two counts of the shim before its read (plan 12l splits them).
       expect(await countSsoManageWrite(auth, r, user.id)).toBe(true);
+      expect(await countSsoLargeRead(auth, r, user.id)).toBe(true);
       // The last write goes to core on a new request, as the shim's core call does: both marks move.
       const to = i === half - 1 ? write() : r;
       if (to !== r) moveSsoManageCount(r, to);
@@ -385,6 +535,7 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     // A mark of another user counts again, and a move of no mark adds none.
     const other = write();
     expect(await countSsoManageWrite(auth, other, "someone-else")).toBe(true);
+    expect(await countSsoLargeRead(auth, other, "someone-else")).toBe(true);
     const moved = write();
     moveSsoManageCount(write(), moved);
     for (const r of [other, moved]) expect((await auth.handle(r)).status).toBe(400);
@@ -393,7 +544,8 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     while ((await auth.handle(write())).status === 400) left++;
     expect(left).toBe(half - 2);
     expect(await countSsoManageWrite(auth, write(), user.id)).toBe(false);
-    // The package counted each of its large reads (ruling 69): the large-read key of the user is full.
+    // The package counted each of its large reads with countSsoLargeRead (ruling 69, plan 12l),
+    // and core counted the others once: the large-read key of the user is full.
     expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
       false,
     );
@@ -419,9 +571,10 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
       expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
         true,
       );
-    // The package counts the write, and the limit of the user refuses it.
+    // The package counts the write, then its large read, and the limit of the user refuses the read.
     const r = write();
-    expect(await countSsoManageWrite(auth, r, user.id)).toBe(false);
+    expect(await countSsoManageWrite(auth, r, user.id)).toBe(true);
+    expect(await countSsoLargeRead(auth, r, user.id)).toBe(false);
     // The shim passes such a write to core: core answers 429 and does not count it again.
     const res = await auth.handle(r);
     expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
@@ -433,5 +586,165 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
         .filter((e) => e.name === "limit.hit")
         .map((e) => e.family),
     ).toEqual(["sso-large-read:user"]);
+  });
+
+  it("takes the shim's guard mark once: the guard runs in the seam, and core runs it no more (plan 12l)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
+    const { auth } = w;
+    /** A connection create of `organizationId` with the bearer `token`, as the shim gets it. */
+    const create = (organizationId: string, token: string, label: string) =>
+      new Request(
+        `${BASE_URL}/auth/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            kind: "oidc",
+            label,
+            issuer: "https://login.idp.example/acme",
+            clientId: "acme",
+            clientSecret: "acme-secret-0123456789",
+          }),
+        },
+      );
+    /** The session of `request`, as the shim reads it. */
+    const sessionOf = async (request: Request) => {
+      const resolved = await auth.session(request);
+      if (!resolved) throw new Error("no session");
+      return resolved;
+    };
+    const operatorCounts = () =>
+      w.keys.filter((k) => k === `operator:user:${w.ada.user.id}`).length;
+    await guardSteps(auth, batches);
+
+    // A platform operator: the seam runs the guard and its count on operator:user.
+    const marked = create(w.acme, w.ada.token, "by-ada");
+    expect(await checkSsoManager(auth, marked, await sessionOf(marked), w.acme)).toBeNull();
+    expect(operatorCounts()).toBe(1);
+    // The shim reads the body, then sends core a new request of the same text with the marks.
+    const forward = new Request(marked.url, {
+      method: "POST",
+      headers: marked.headers,
+      body: await marked.text(),
+    });
+    moveSsoManageCount(marked, forward);
+    const made = await auth.handle(forward);
+    expect(made.status).toBe(200);
+    expect(await made.json()).toMatchObject({ connection: { organizationId: w.acme } });
+    // Core took the mark: the guard ran once, so the operator counted once. The mark went at the take.
+    expect(operatorCounts()).toBe(1);
+    expect(takeSsoManagerChecked(forward, w.ada.user.id, w.acme)).toBeNull();
+    // With no mark, core runs the guard, and the operator counts again.
+    expect((await auth.handle(create(w.acme, w.ada.token, "by-ada-again"))).status).toBe(200);
+    expect(operatorCounts()).toBe(2);
+    expect(await guardSteps(auth, batches)).toEqual([]);
+
+    // A mark of another organization is not taken: core runs the guard for the query's organization.
+    const elsewhere = create(w.danCo, w.bob.token, "by-bob");
+    expect(await checkSsoManager(auth, elsewhere, await sessionOf(elsewhere), w.acme)).toBeNull();
+    const refused = await auth.handle(elsewhere);
+    expect([refused.status, await refused.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    expect(await guardSteps(auth, batches)).toEqual(["rank"]);
+    // A mark of another user is not taken either: Bob's mark on a write of Cy.
+    const stranger = create(w.acme, w.cy.token, "by-cy");
+    const bobs = await sessionOf(create(w.acme, w.bob.token, "unsent"));
+    expect(await checkSsoManager(auth, stranger, bobs, w.acme)).toBeNull();
+    const strange = await auth.handle(stranger);
+    expect([strange.status, await strange.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    expect(await guardSteps(auth, batches)).toEqual(["rank"]);
+    // Neither write made a connection of dan-co.
+    const listed = await auth.api.sso?.connections.list({
+      actor: SSO_APP,
+      organizationId: w.danCo,
+    });
+    expect(listed).toEqual({ ok: true, value: [] });
+
+    // A refusal of the seam answers core's JSON with the event of its step, and marks nothing.
+    const person = create(w.acme, w.cy.token, "by-cy-again");
+    const answer = await checkSsoManager(auth, person, await sessionOf(person), w.acme);
+    expect([answer?.status, await answer?.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    expect(await guardSteps(auth, batches)).toEqual(["rank"]);
+    expect(takeSsoManagerChecked(person, w.cy.user.id, w.acme)).toBeNull();
+  });
+
+  it("refuses a person who manages nothing before any read, with the step of the guard (canManageSomeSso, plan 12l)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
+    const { auth } = w;
+    // Ada acts as Bob, a manager, through an impersonation of the product.
+    const started = await auth.api.operator.impersonate({
+      operator: w.ada,
+      userId: w.bob.user.id,
+      reason: "a support call",
+      ip: null,
+      userAgent: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const asBob = await auth.api.getSession(started.value.token);
+    if (!asBob) throw new Error("no session");
+    w.keys.length = 0;
+    await guardSteps(auth, batches);
+    /** The answer of the pre-check for `resolved`, and the steps of its events. */
+    const check = async (resolved: ResolvedSession) => {
+      const res = await canManageSomeSso(auth, resolved);
+      return [
+        res === null ? null : [res.status, await res.json()],
+        await guardSteps(auth, batches),
+      ];
+    };
+    expect(await check(w.cy)).toEqual([[403, { error: "forbidden_rank" }], ["rank"]]);
+    expect(await check(w.dan)).toEqual([
+      [403, { error: "second_factor_required" }],
+      ["second_factor"],
+    ]);
+    expect(await check(w.bob)).toEqual([null, []]);
+    // A platform operator who owns no organization passes, as the guard passes it for each one.
+    expect(await check(w.ada)).toEqual([null, []]);
+    // The impersonation step comes first: Bob's own session passes.
+    expect(asBob.session.actorId).toBe(w.ada.user.id);
+    expect(await check(asBob)).toEqual([[403, { error: "forbidden_rank" }], ["impersonation"]]);
+    // Past the fresh window, a manager meets the last step.
+    w.clock.advance(24 * HOUR_MS + 1);
+    expect(await check(w.bob)).toEqual([[403, { error: "session_not_fresh" }], ["fresh"]]);
+    // The pre-check counted no limit: no key of sso-manage, sso-large-read, or operator:user.
+    expect(w.keys).toEqual([]);
+  });
+
+  it("splits the counts: countSsoManageWrite counts the manager write, countSsoLargeRead the large read (plan 12l)", async () => {
+    const { auth, keys, token, user, connectionId } = await managerWorld();
+    const text = '{"label":"Acme SSO"}';
+    let close = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(text));
+        close = () => c.close();
+      },
+    });
+    const url = `${BASE_URL}/auth/sso/connections/update?id=${encodeURIComponent(connectionId)}`;
+    const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+    const r = new Request(url, { method: "POST", headers, body, duplex: "half" } as RequestInit);
+    keys.length = 0;
+    expect(await countSsoManageWrite(auth, r, user.id)).toBe(true);
+    // The manager write counted. The large read did not, and the request has no client of the user.
+    expect(keys).toEqual([`sso-manage:user:${user.id}`]);
+    expect(bodyClientOf(r)).toBe(ipBodyClient(null));
+    expect(await countSsoLargeRead(auth, r, user.id)).toBe(true);
+    expect(keys).toEqual([`sso-manage:user:${user.id}`, `sso-large-read:user:${user.id}`]);
+    expect(bodyClientOf(r)).toBe(`user:${user.id}`);
+    // The package reads the body for longer than 8 s by the wall clock: the read spends.
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: start });
+    try {
+      const read = readBodyText(r, bodyCapOf("POST /sso/connections/update"));
+      vi.setSystemTime(start + LARGE_READ_SLOW_MS + 1_000);
+      close();
+      expect(await read).toBe(text);
+    } finally {
+      vi.useRealTimers();
+    }
+    // The spend took the rest of the user's large reads: the next count is refused.
+    const next = new Request(url, { method: "POST", headers, body: text });
+    expect(await countSsoLargeRead(auth, next, user.id)).toBe(false);
   });
 });

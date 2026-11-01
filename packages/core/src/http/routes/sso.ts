@@ -1,5 +1,10 @@
 import type { z } from "zod";
-import { isRecordVerify, takeLargeReadCounted, takeSsoManageCounted } from "../../compat-seams.js";
+import {
+  isRecordVerify,
+  takeLargeReadCounted,
+  takeSsoManageCounted,
+  takeSsoManagerChecked,
+} from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
@@ -194,6 +199,10 @@ type GuardAt<Q, T, V> =
  * 4. The `before` form: the query, then the organization of its row, then
  *    the manager guard. A bad query answers `invalid_body` and a query that
  *    names no row `not_found`, each after the count (ruling 6 of plan 12l).
+ *    A compat package that ran the guard for this user and organization
+ *    before its own read (`checkSsoManager`) marked the request with the
+ *    actor of that run. Core takes that actor and runs the guard no more,
+ *    so a platform operator counts once on `operator:user` (plan 12l).
  * 5. A route above the floor counts the read on `sso-large-read:user`
  *    before any byte (ruling 69). A large read that takes more than 8 s
  *    spends the rest of the user's large reads, also at a 408 (rulings 75
@@ -240,8 +249,13 @@ async function managedSteps<Q, T, V>(
     const { before } = at;
     const query = before.query(ctx);
     if (!query.ok) return send(respond(query), renewed);
-    // Task 3 of plan 12l adds takeSsoManagerChecked here.
-    const actor = await guard(await before.organization(query.value));
+    const organizationId = await before.organization(query.value);
+    // The guard mark of a compat package for this user and organization: its actor, once (plan 12l).
+    const checked =
+      organizationId === null
+        ? null
+        : takeSsoManagerChecked(ctx.request, resolved.user.id, organizationId);
+    const actor = checked === null ? await guard(organizationId) : ok(checked);
     if (!actor.ok) return send(respond(actor), renewed);
     act = (value) => before.run(actor.value, value, query.value);
   } else {
