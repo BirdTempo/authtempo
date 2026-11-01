@@ -1744,7 +1744,13 @@ shim's handler come in this order:
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
 3. The query: `organizationId` of a create, or `id` of an update and its connection. A bad query answers `invalid_body` (400), and an unknown connection `not_found` (404).
-4. Core's manager guard, else 403. For a create, the guard checks the organization of the query. For an update, it checks the organization of the connection that the query names.
+4. Core's manager guard. For a create, the guard checks the organization of the query. For an update, it checks the organization of the connection that the query names. The guard gives these answers, in its order:
+   - 403 `forbidden_rank` to an impersonation session.
+   - 403 `operator_required` to a platform operator who fails the operator guard and does not own the organization. Past the operator limit of the user, such an operator gets 429 `rate_limited`.
+   - 403 `forbidden_rank` to a caller who is no platform operator and does not own the organization.
+   - 403 `email_unverified` to an owner whose address is not verified.
+   - 403 `second_factor_required` to an owner with no second factor.
+   - 403 `session_not_fresh` to an owner whose session is not fresh. The handler adds Better Auth's code, `SESSION_NOT_FRESH`.
 5. Core's limit of the large reads of the user, else 429.
 6. The read of the body and the label rule. Core then runs no guard and no count again.
 
