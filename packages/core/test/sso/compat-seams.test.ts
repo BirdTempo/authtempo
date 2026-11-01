@@ -758,35 +758,61 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
   it("splits the counts: countSsoManageWrite counts the manager write, countSsoLargeRead the large read (plan 12l)", async () => {
     const { auth, keys, token, user, connectionId } = await managerWorld();
     const text = '{"label":"Acme SSO"}';
-    let close = () => {};
-    const body = new ReadableStream<Uint8Array>({
-      start(c) {
-        c.enqueue(new TextEncoder().encode(text));
-        close = () => c.close();
-      },
-    });
     const url = `${BASE_URL}/auth/sso/connections/update?id=${encodeURIComponent(connectionId)}`;
     const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
-    const r = new Request(url, { method: "POST", headers, body, duplex: "half" } as RequestInit);
+    /** A write whose body sends `text`, then ends only at `close`. */
+    const held = () => {
+      let close = () => {};
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(text));
+          close = () => c.close();
+        },
+      });
+      const request = new Request(url, {
+        method: "POST",
+        headers,
+        body,
+        duplex: "half",
+      } as RequestInit);
+      return { request, close: () => close() };
+    };
+    /** The package reads `write` as `client` for longer than 8 s by the wall clock. */
+    const slowRead = async (write: ReturnType<typeof held>, client?: string) => {
+      const start = Date.now();
+      vi.useFakeTimers({ toFake: ["Date"], now: start });
+      try {
+        const cap = bodyCapOf("POST /sso/connections/update");
+        const read = readBodyText(write.request, cap, client ?? bodyClientOf(write.request));
+        vi.setSystemTime(start + LARGE_READ_SLOW_MS + 1_000);
+        write.close();
+        expect(await read).toBe(text);
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    // countSsoManageWrite alone counts the manager write. It binds no client and no spend.
+    const alone = held();
     keys.length = 0;
-    expect(await countSsoManageWrite(auth, r, user.id)).toBe(true);
+    expect(await countSsoManageWrite(auth, alone.request, user.id)).toBe(true);
+    expect(keys).toEqual([`sso-manage:user:${user.id}`]);
+    // A request with no bind has the client ip:unknown.
+    expect(bodyClientOf(alone.request)).toBe(ipBodyClient(null));
+    // The read names the user as its client, so a bound spend would run at its end. None ran:
+    // the limiter counted no key of sso-large-read, so the user keeps every large read.
+    await slowRead(alone, `user:${user.id}`);
+    expect(keys).toEqual([`sso-manage:user:${user.id}`]);
+    const r = held();
+    keys.length = 0;
+    expect(await countSsoManageWrite(auth, r.request, user.id)).toBe(true);
     // The manager write counted. The large read did not, and the request has no client of the user.
     expect(keys).toEqual([`sso-manage:user:${user.id}`]);
-    expect(bodyClientOf(r)).toBe(ipBodyClient(null));
-    expect(await countSsoLargeRead(auth, r, user.id)).toBe(true);
+    expect(bodyClientOf(r.request)).toBe(ipBodyClient(null));
+    expect(await countSsoLargeRead(auth, r.request, user.id)).toBe(true);
     expect(keys).toEqual([`sso-manage:user:${user.id}`, `sso-large-read:user:${user.id}`]);
-    expect(bodyClientOf(r)).toBe(`user:${user.id}`);
+    expect(bodyClientOf(r.request)).toBe(`user:${user.id}`);
     // The package reads the body for longer than 8 s by the wall clock: the read spends.
-    const start = Date.now();
-    vi.useFakeTimers({ toFake: ["Date"], now: start });
-    try {
-      const read = readBodyText(r, bodyCapOf("POST /sso/connections/update"));
-      vi.setSystemTime(start + LARGE_READ_SLOW_MS + 1_000);
-      close();
-      expect(await read).toBe(text);
-    } finally {
-      vi.useRealTimers();
-    }
+    await slowRead(r);
     // The spend took the rest of the user's large reads: the next count is refused.
     const next = new Request(url, { method: "POST", headers, body: text });
     expect(await countSsoLargeRead(auth, next, user.id)).toBe(false);
