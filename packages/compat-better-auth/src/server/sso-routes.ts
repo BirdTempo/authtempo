@@ -7,9 +7,12 @@ import type {
 import {
   canManageSomeSso,
   checkSsoManager,
+  connectionCreateQuery,
+  connectionUpdateQuery,
   countSsoLargeRead,
   countSsoManageWrite,
   moveSsoManageCount,
+  readQuery,
   scimRequestAs,
   verifyDomainByRecord,
 } from "@authtempo/core/compat";
@@ -1176,29 +1179,6 @@ export async function ssoAcsRoute(
   );
 }
 
-/** The longest id of core's contract (`id` of core's contract/organizations.ts). */
-const ID_MAX = 64;
-
-/**
- * The value of `key` in the query of core's connection create or update,
- * or null (plan 12l). It takes what core's `readQuery` takes with the
- * query schema of the route. That is the one key, once, with 1 to 64
- * characters. The value holds no NUL and no lone surrogate. Null for any
- * other query, which core then refuses with `invalid_body` before any
- * read. The two sets must stay equal. Else core could take a query that
- * this read refused, and read a body that the label rule never saw.
- */
-function queryValue(url: URL, key: string): string | null {
-  let value: string | null = null;
-  for (const [k, v] of url.searchParams) {
-    if (k !== key || value !== null) return null;
-    value = v;
-  }
-  if (value === null || value.length === 0 || value.length > ID_MAX) return null;
-  // Core's readQuery refuses a NUL or a lone surrogate, which the storage port refuses too.
-  return value.includes("\u0000") || /\p{Cs}/u.test(value) ? null : value;
-}
-
 /**
  * Core's refusal of a call to its own connection create or update through
  * the shim, when the call would touch a providerId (review of plan 12d Task
@@ -1218,8 +1198,10 @@ function queryValue(url: URL, key: string): string | null {
  *    core answers it 429 before its own read. A write within the limit
  *    carries the count to core (ruling 51).
  * 3. The query: the organization of a create, or the connection of an
- *    update and then its row. A bad query or no row is null: core answers
- *    `invalid_body` or `not_found` before any read.
+ *    update and then its row. The shim reads it with core's own reader and
+ *    the query schema of the route (fix-wave item 8 of plan 12l). So it
+ *    takes exactly the queries that core takes. A bad query or no row is
+ *    null: core answers `invalid_body` or `not_found` before any read.
  * 4. Core's manager guard for the organization (`checkSsoManager`). A
  *    refusal answers core's JSON answer. A pass marks the request, so core
  *    runs the guard no more.
@@ -1246,8 +1228,12 @@ export async function ssoConnectionWrite(
   if (!session) return null;
   if (!(await countSsoManageWrite(auth, request, session.user.id))) return null;
   const update = path === "/sso/connections/update";
-  const named = queryValue(url, update ? "id" : "organizationId");
-  if (named === null) return null;
+  // Core's query rule: a query that core refuses is null here too (fix-wave item 8 of plan 12l).
+  const query = update
+    ? readQuery(url, connectionUpdateQuery)
+    : readQuery(url, connectionCreateQuery);
+  if (!query.ok) return null;
+  const named = "id" in query.value ? query.value.id : query.value.organizationId;
   const row = update
     ? await mapped.config.storage.findOne("ssoConnection", [
         { field: "id", op: "eq", value: named },

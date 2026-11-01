@@ -864,6 +864,85 @@ describe("the guard before the read through the shim (plan 12l)", () => {
     expect(keys.filter((k) => k.startsWith("sso-large-read:"))).toEqual([]);
   });
 
+  it("takes exactly the queries that core takes on its two writes, and answers as core before any byte (fix-wave item 8)", {
+    timeout: 60_000,
+  }, async () => {
+    const app = ssoApp(memory(), [admin({}), sso({ domainVerification: { enabled: true } })], {
+      platformOrganization: "platform-co",
+    });
+    // One manager for each write keeps each one under core's 30 manager writes.
+    const ann = await managerOf(app, "ann@acme.example", "acme");
+    const bea = await managerOf(app, "bea@example.com", "bexley");
+    // Core's zod counts code points: 64 emoji are 64 code points and 128 UTF-16 units.
+    const emoji = (n: number) => encodeURIComponent("\u{1F600}".repeat(n));
+    // The cases of the review of Task 4, with the key of the write and a real value of it.
+    const queries = (key: string, real: string): [what: string, query: string][] => [
+      ["a repeated key", `?${key}=${real}&${key}=${real}`],
+      ["a NUL", `?${key}=o%00x`],
+      // The decoder of the URL gives U+FFFD for each byte, so no lone surrogate reaches a value.
+      ["a lone surrogate", `?${key}=%ED%A0%80`],
+      ["a missing key", ""],
+      ["an extra key", `?${key}=${real}&extra=1`],
+      ["64 emoji", `?${key}=${emoji(64)}`],
+      ["65 emoji", `?${key}=${emoji(65)}`],
+    ];
+    const createCases = queries("organizationId", encodeURIComponent(ann.organizationId));
+    const writes = [
+      { path: "/sso/connections/create", cookie: ann.cookie, cases: createCases },
+      {
+        path: "/sso/connections/update",
+        cookie: bea.cookie,
+        cases: queries("id", encodeURIComponent(bea.connectionId)),
+      },
+    ];
+    /** The answer to a stalled write of a declared 8 MiB, and whether a reader asked for more. */
+    const answer = async (
+      send: (r: Request) => Promise<Response>,
+      path: string,
+      cookie: string,
+    ) => {
+      const body = stalledBody();
+      try {
+        const res = await send(streamPost(path, body.stream, cookie));
+        return { status: res.status, body: (await res.json()) as unknown, asked: body.asked() };
+      } finally {
+        body.open();
+      }
+    };
+    const coreTakes: [path: string, what: string, takes: boolean][] = [];
+    for (const { path, cookie, cases } of writes)
+      for (const [what, query] of cases) {
+        const shim = await answer((r) => app.auth.handler(r), `${path}${query}`, cookie);
+        const core = await answer((r) => app.auth.tempo.handle(r), `${path}${query}`, cookie);
+        // The shim answers as core answers the same request, and neither reads a byte first.
+        expect([path, what, shim]).toEqual([path, what, core]);
+        expect([path, what, shim.asked]).toEqual([path, what, false]);
+        // Core refuses a query with 400 invalid_body. Any other answer comes after the query.
+        coreTakes.push([path, what, core.status !== 400]);
+      }
+    const takes = [false, false, true, false, false, true, false];
+    expect(coreTakes).toEqual(
+      writes.flatMap(({ path, cases }) => cases.map(([what], i) => [path, what, takes[i]])),
+    );
+    // A query that core takes reaches the shim's own label rule, after the read. A query that
+    // core refuses does not. A platform operator passes the guard for any organization.
+    const op = await app.operator("op@example.com");
+    const fields = {
+      kind: "oidc",
+      label: "acme-oidc",
+      issuer: "https://idp.acme.example",
+      clientId: "acme-client",
+      clientSecret: "acme-secret-0123456789",
+    };
+    const ruled: [what: string, ruled: boolean][] = [];
+    for (const [what, query] of createCases) {
+      const res = await app.call(`/sso/connections/create${query}`, fields, op.cookie);
+      const body = (await res.json()) as { message?: string };
+      ruled.push([what, res.status === 400 && /providerId form/.test(body.message ?? "")]);
+    }
+    expect(ruled).toEqual(createCases.map(([what], i) => [what, takes[i]]));
+  });
+
   it("runs the operator guard once for a platform operator's write on core's path (review focus 5)", {
     timeout: 60_000,
   }, async () => {

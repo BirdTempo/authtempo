@@ -47,3 +47,11 @@ export {
   parseBodyJson,
   readBodyText,
 } from "./http/body-cap.js";
+/**
+ * Core's query rule of its two SSO connection writes (fix-wave item 8 of
+ * plan 12l). A compat package reads the query of such a write with
+ * `readQuery` and the query schema of the route. So it takes exactly the
+ * queries that core takes, and the rule has one source.
+ */
+export { connectionCreateQuery, connectionUpdateQuery } from "./http/contract/sso.js";
+export { readQuery } from "./http/routes/sso.js";
