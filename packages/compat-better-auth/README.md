@@ -1744,15 +1744,17 @@ shim's handler come in this order:
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
 3. The query: `organizationId` of a create, or `id` of an update and its connection. A bad query answers `invalid_body` (400), and an unknown connection `not_found` (404).
-4. Core's manager guard for the organization of the query, else 403.
+4. Core's manager guard, else 403. For a create, the guard checks the organization of the query. For an update, it checks the organization of the connection that the query names.
 5. Core's limit of the large reads of the user, else 429.
 6. The read of the body and the label rule. Core then runs no guard and no count again.
 
 `/sso/register` and `/sso/update-provider` name the organization in the
 body. So before their read, they run a pre-check of the guard: each step
 that needs no organization. The caller must be a platform operator, or own
-one organization or more. The order: the session, the count of the manager
-write, the pre-check, the count of the large read, then the read. Core's
+one organization or more. The order: the session, the `body_busy` check,
+the count of the manager write, the pre-check, the count of the large read,
+then the read. A large read that cannot start answers 503
+`SERVICE_UNAVAILABLE`, Better Auth's code for core's `body_busy`. Core's
 guard then runs once after the read, for the organization of the body.
 
 Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
