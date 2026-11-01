@@ -3,6 +3,7 @@ import type { ErrorCode } from "../../errors.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow, SSO_AUDIT_ACTIONS, UserRow } from "../../schema.js";
 import { requireFresh } from "../fresh.js";
+import { sessionLive } from "../jwt.js";
 import {
   type AuditActor,
   auditDraft,
@@ -101,22 +102,31 @@ export async function requireSsoManager(
 
 /**
  * Checks the actor of `requireSsoManager` again after a body read, before
- * the act (ruling 17 of plan 12l). A route above the floor runs the guard
- * before its body read, and that read can take up to 32 s. An owner whom
- * another owner removes in that time must not write. So this check reads
- * the right of the actor again:
+ * the act (rulings 17 and 23 of plan 12l). A route above the floor runs the
+ * guard before its body read, and that read can take up to 32 s. An owner
+ * whom another owner removes in that time must not write. An owner whom an
+ * operator bans, or who signs out, must not write either. So this check
+ * reads the session and the right of the actor again, in this order:
  *
- * - An `owner` must still hold a member row of the owner rank in the
- *   organization (`ownsOrganization`, one read).
- * - A `platform` actor must still hold the platform role
- *   (`isPlatformOperator`, the platform organization and one member row).
- * - The `app` acts in process and never through a route, so it holds no
- *   row to lose.
+ * 1. The session of the actor must still be live (`sessionLive`: the
+ *    session row, the ban, the revocation, and the door of an
+ *    impersonation). A dead session answers `unauthorized` with no event,
+ *    as a dead session at the start of a request does (ruling 23).
+ * 2. An `owner` must still hold a member row of the owner rank in the
+ *    organization (`ownsOrganization`, one read).
+ * 3. A `platform` actor must still hold the platform role
+ *    (`isPlatformOperator`, the platform organization and one member row).
+ *
+ * The `app` acts in process and never through a route, so it holds no
+ * session and no row to lose. A revoke of the platform role ends the
+ * sessions of the user, so step 1 answers it. A removal of the platform
+ * member through `removeMember` keeps the sessions, so step 3 answers it.
  *
  * It counts no limit and runs no `requireOperatorUser`, so a platform
  * operator counts once on `operator:user`. A pass emits no event. A
- * refusal answers `forbidden_rank` and emits `sso.guard_refused` with the
- * step `rank`, as the guard does for a caller who owns nothing.
+ * refusal of steps 2 and 3 answers `forbidden_rank`. It emits
+ * `sso.guard_refused` with the step `rank`, as the guard does for a caller
+ * who owns nothing.
  */
 export async function recheckSsoManager(
   config: ResolvedConfig,
@@ -124,6 +134,8 @@ export async function recheckSsoManager(
   organizationId: string,
 ): Promise<Result<true>> {
   if (actor.kind === "app") return ok(true);
+  // A session that ended during the read answers 401, as at the start of a request (ruling 23).
+  if (!(await sessionLive(config, { sid: actor.session.id }))) return fail("unauthorized");
   const holds =
     actor.kind === "owner"
       ? await ownsOrganization(config, actor.user.id, organizationId)

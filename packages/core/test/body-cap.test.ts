@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { banUser } from "../src/engine/operator/ban.js";
 import { createAdmin, revokePlatformRole } from "../src/engine/operator/platform-role.js";
 import { addMember, removeMember } from "../src/engine/organizations.js";
 import { CALLBACK_POST_LIMIT, START_LIMIT } from "../src/engine/social.js";
@@ -2125,10 +2126,42 @@ function gatedCreate() {
   return { stream, open: gated.open, atGate: gated.atGate };
 }
 
-describe("the check of the actor after the read (ruling 17 of plan 12l)", () => {
+describe("the check of the actor after the read (rulings 17 and 23 of plan 12l)", () => {
   /** The steps of the `sso.guard_refused` events. */
   const guardSteps = (events: AuthEvent[]) =>
     events.flatMap((e) => (e.name === "sso.guard_refused" ? [e.step] : []));
+
+  /**
+   * Bea, a manager of acme, and Ada, a platform operator who owns no
+   * organization, each made through the flows of the product. The app
+   * makes root the first operator, and with it the platform organization.
+   * Root signed up first, so root is a verified owner of that organization.
+   * Then the app grants Ada the role. So only the platform path of the guard
+   * passes Ada at acme.
+   */
+  async function operatorWorld() {
+    const { w, events } = observedSso({ sso: { oidc: true }, operator: { users: true } });
+    const bea = await managerSession(w, "bea@acme.example", "acme");
+    const admin = async (email: string) => {
+      const made = await createAdmin(w.config, {
+        actor: SSO_APP,
+        email,
+        reason: "the operators of the test",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      return made.value.userId;
+    };
+    const root = await verifiedSession(w, "root@platform.example");
+    await admin("root@platform.example");
+    await verifiedSession(w, "ada@ops.example");
+    const adaId = await admin("ada@ops.example");
+    // Ada signs in after the grant and turns on TOTP, so the operator guard passes (ruling 50 of plan 12f).
+    w.clock.advance(1_000);
+    const ada = await enrolled(w, "ada@ops.example");
+    return { w, events, bea, root, ada, adaId };
+  }
 
   it("refuses the act of an owner whom another owner removes during the read, and writes no row", {
     timeout: 30_000,
@@ -2165,29 +2198,68 @@ describe("the check of the actor after the read (ruling 17 of plan 12l)", () => 
     expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
   });
 
-  it("refuses the act of a platform operator whose role goes during the read, and writes no row", {
+  it("refuses the act of a platform operator whom root removes from the platform organization during the read, and writes no row", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events, bea, root, ada, adaId } = await operatorWorld();
+    const platform = await w.storage.findOne("organization", [
+      { field: "slug", op: "eq", value: "platform-co" },
+    ]);
+    if (!platform) throw new Error("no platform organization");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.session.token, "203.0.113.1", body.stream, bea.org);
+      await body.atGate;
+      // The removal through the organization engine keeps the sessions of Ada, so the session
+      // check passes and the check of the role answers.
+      const removed = await removeMember(w.config, {
+        user: root.user,
+        organizationId: platform.id,
+        userId: adaId,
+      });
+      expect(removed.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers 401 to an owner whom an operator bans during the read, with no event of the guard, and writes no row (ruling 23)", {
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso({ sso: { oidc: true }, operator: { users: true } });
-    const bea = await managerSession(w, "bea@acme.example", "acme");
-    // The app makes the first operator, and with it the platform organization. Then it grants Ada the role.
-    const admin = async (email: string) => {
-      const made = await createAdmin(w.config, {
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      await body.atGate;
+      // The ban ends the sessions of Ada and keeps her member row, so Ada still owns acme.
+      const banned = await banUser(w.config, {
         actor: SSO_APP,
-        email,
-        reason: "the operators of the test",
+        userId: ada.user.id,
+        reason: "the owner left the company",
         ip: null,
         userAgent: null,
       });
-      if (!made.ok) throw new Error(made.code);
-      return made.value.userId;
-    };
-    await admin("root@platform.example");
-    await verifiedSession(w, "ada@ops.example");
-    const adaId = await admin("ada@ops.example");
-    // Ada signs in after the grant and turns on TOTP, so the operator guard passes (ruling 50 of plan 12f).
-    w.clock.advance(1_000);
-    const ada = await enrolled(w, "ada@ops.example");
+      expect(banned.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([401, { error: "unauthorized" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual([]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers 401 to a platform operator whose role an operator revokes during the read, and writes no row (ruling 23)", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events, bea, ada, adaId } = await operatorWorld();
     const body = gatedCreate();
     try {
       const write = ssoWrite(w, ada.session.token, "203.0.113.1", body.stream, bea.org);
@@ -2202,11 +2274,12 @@ describe("the check of the actor after the read (ruling 17 of plan 12l)", () => 
       expect(revoked.ok).toBe(true);
       body.open();
       const res = await write;
-      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+      // The revoke ends the sessions of Ada, so the session check answers before the check of the role.
+      expect([res.status, await res.json()]).toEqual([401, { error: "unauthorized" }]);
     } finally {
       body.open();
     }
-    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(guardSteps(await events())).toEqual([]);
     expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
   });
 });

@@ -209,8 +209,10 @@ type GuardAt<Q, T, V> =
  *    and 79).
  * 6. The input: the body read and its parse.
  * 7. The `before` form checks its actor again (`recheckSsoManager`). The
- *    read can take up to 32 s, and an owner removed in that time must not
- *    write (ruling 17 of plan 12l). A refusal answers `forbidden_rank`.
+ *    read can take up to 32 s. An owner removed, banned, or signed out in
+ *    that time must not write (rulings 17 and 23 of plan 12l). A dead
+ *    session answers `unauthorized`. A right that went answers
+ *    `forbidden_rank`.
  * 8. The `after` form: the organization of the row that the input names,
  *    else `not_found`, then the manager guard. Its guard runs after the
  *    read, so it needs no second check.
@@ -261,8 +263,8 @@ async function managedSteps<Q, T, V>(
     const actor = checked === null ? await guard(organizationId) : ok(checked);
     if (!actor.ok) return send(respond(actor), renewed);
     act = async (value) => {
-      // The read can take up to 32 s. An owner removed in that time must not write, so the act
-      // reads the right of the actor again (ruling 17 of plan 12l).
+      // The read can take up to 32 s. An owner removed, banned, or signed out in that time must
+      // not write. So the act reads the session and the right of the actor again (rulings 17, 23).
       const still = await recheckSsoManager(config, actor.value, organizationId);
       if (!still.ok) return still;
       return before.run(actor.value, value, query.value);
