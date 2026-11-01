@@ -2211,12 +2211,16 @@ export function createClient(options: ClientOptions): Client {
             undefined,
             { organizationId: input.organizationId },
           ),
+        // Core runs the manager guard before it reads the body. So organizationId
+        // travels in the query, not in the body (plan 12l).
         create: ({ organizationId, ...body }) =>
           part<{ connection: SsoConnectionJSON }, "sso.connections.create">(
             "sso.connections.create",
             body,
             { organizationId },
           ),
+        // Core runs the manager guard before it reads the body. So the id travels
+        // in the query, not in the body (plan 12l).
         update: ({ id, ...body }) =>
           part<{ connection: SsoConnectionJSON }, "sso.connections.update">(
             "sso.connections.update",
