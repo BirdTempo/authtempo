@@ -28,7 +28,7 @@ import {
   updateDomain,
   verifyDomainWith,
 } from "../../engine/sso/domains.js";
-import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
+import { recheckSsoManager, requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
@@ -208,9 +208,13 @@ type GuardAt<Q, T, V> =
  *    spends the rest of the user's large reads, also at a 408 (rulings 75
  *    and 79).
  * 6. The input: the body read and its parse.
- * 7. The `after` form: the organization of the row that the input names,
- *    else `not_found`, then the manager guard.
- * 8. The act and its answer.
+ * 7. The `before` form checks its actor again (`recheckSsoManager`). The
+ *    read can take up to 32 s, and an owner removed in that time must not
+ *    write (ruling 17 of plan 12l). A refusal answers `forbidden_rank`.
+ * 8. The `after` form: the organization of the row that the input names,
+ *    else `not_found`, then the manager guard. Its guard runs after the
+ *    read, so it needs no second check.
+ * 9. The act and its answer.
  */
 async function managedSteps<Q, T, V>(
   config: ResolvedConfig,
@@ -250,14 +254,19 @@ async function managedSteps<Q, T, V>(
     const query = before.query(ctx);
     if (!query.ok) return send(respond(query), renewed);
     const organizationId = await before.organization(query.value);
+    // A query that names no row answers not_found, and takes no guard mark.
+    if (organizationId === null) return send(respond(fail("not_found")), renewed);
     // The guard mark of a compat package for this user and organization: its actor, once (plan 12l).
-    const checked =
-      organizationId === null
-        ? null
-        : takeSsoManagerChecked(ctx.request, resolved.user.id, organizationId);
+    const checked = takeSsoManagerChecked(ctx.request, resolved.user.id, organizationId);
     const actor = checked === null ? await guard(organizationId) : ok(checked);
     if (!actor.ok) return send(respond(actor), renewed);
-    act = (value) => before.run(actor.value, value, query.value);
+    act = async (value) => {
+      // The read can take up to 32 s. An owner removed in that time must not write, so the act
+      // reads the right of the actor again (ruling 17 of plan 12l).
+      const still = await recheckSsoManager(config, actor.value, organizationId);
+      if (!still.ok) return still;
+      return before.run(actor.value, value, query.value);
+    };
   } else {
     const { after } = at;
     act = async (value) => {

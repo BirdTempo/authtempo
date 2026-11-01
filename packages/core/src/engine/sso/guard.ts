@@ -100,6 +100,38 @@ export async function requireSsoManager(
 }
 
 /**
+ * Checks the actor of `requireSsoManager` again after a body read, before
+ * the act (ruling 17 of plan 12l). A route above the floor runs the guard
+ * before its body read, and that read can take up to 32 s. An owner whom
+ * another owner removes in that time must not write. So this check reads
+ * the right of the actor again:
+ *
+ * - An `owner` must still hold a member row of the owner rank in the
+ *   organization (`ownsOrganization`, one read).
+ * - A `platform` actor must still hold the platform role
+ *   (`isPlatformOperator`, the platform organization and one member row).
+ * - The `app` acts in process and never through a route, so it holds no
+ *   row to lose.
+ *
+ * It counts no limit and runs no `requireOperatorUser`, so a platform
+ * operator counts once on `operator:user`. A pass emits no event. A
+ * refusal answers `forbidden_rank` and emits `sso.guard_refused` with the
+ * step `rank`, as the guard does for a caller who owns nothing.
+ */
+export async function recheckSsoManager(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  organizationId: string,
+): Promise<Result<true>> {
+  if (actor.kind === "app") return ok(true);
+  const holds =
+    actor.kind === "owner"
+      ? await ownsOrganization(config, actor.user.id, organizationId)
+      : await isPlatformOperator(config, actor.user.id);
+  return holds ? ok(true) : refused(config, "rank");
+}
+
+/**
  * The most member rows of the user that `requireSsoManagerOfAny` reads
  * (plan 12l). It is a bound of the pre-check, not a rule of the product.
  * A user with more member rows, and with no row of the owner rank among

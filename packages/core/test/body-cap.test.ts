@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { createAdmin, revokePlatformRole } from "../src/engine/operator/platform-role.js";
+import { addMember, removeMember } from "../src/engine/organizations.js";
 import { CALLBACK_POST_LIMIT, START_LIMIT } from "../src/engine/social.js";
 import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
 import { SAML_FORM_MAX } from "../src/engine/sso/saml-sp.js";
@@ -50,9 +53,9 @@ import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
 import { observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
-import { ssoAuth } from "./sso/helpers.js";
+import { SSO_APP, ssoAuth } from "./sso/helpers.js";
 import { type Manager, managerSession } from "./sso/manager-helpers.js";
-import { verifiedSession } from "./totp-helpers.js";
+import { enrolled, verifiedSession } from "./totp-helpers.js";
 
 /**
  * The request body limits of core (rulings 43 and 46 of the 12j lane). The
@@ -1633,13 +1636,17 @@ describe("the kind of a body chunk, not its realm (ruling 66 Low 1 of the 12j la
   });
 });
 
-/** An engine of the SSO writes whose sink keeps each event, with the raw IP, so a test reads the events. */
-function observedSso() {
+/**
+ * An engine of the SSO writes whose sink keeps each event, with the raw IP,
+ * so a test reads the events. `extra` replaces a top key of the config.
+ */
+function observedSso(extra: Partial<AuthConfig> = {}) {
   const batches: AuthEvent[][] = [];
   const w = ssoAuth({
     sso: { saml: true },
     password: { hash: FAST, uniformSignUp: false },
     observe: { sink: { write: (b) => void batches.push([...b]) }, include: { ip: "raw" } },
+    ...extra,
   });
   const events = async () => {
     await w.config.observe.flush();
@@ -2092,5 +2099,114 @@ describe("the guard before the read (plan 12l)", () => {
     for (let i = 1; i < SSO_LARGE_READ_PER_USER.max; i++)
       expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(400);
     expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(429);
+  });
+});
+
+/**
+ * A valid connection create whose read waits at a gate (ruling 17 of plan
+ * 12l): the spaces of `gatedBody`, then the JSON of an OIDC create. JSON
+ * allows white space before a value. `atGate` resolves when the reader has
+ * taken 1 MiB, so the guard passed and the read runs.
+ */
+function gatedCreate() {
+  const gated = gatedBody(1_048_576 + 65_536, 1_048_576);
+  const json = new TextEncoder().encode(
+    JSON.stringify({
+      kind: "oidc",
+      label: "Acme IdP",
+      issuer: "https://login.idp.example/acme",
+      clientId: "acme",
+      clientSecret: "acme-secret-0123456789",
+    }),
+  );
+  const stream = gated.stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({ flush: (c) => c.enqueue(json) }),
+  );
+  return { stream, open: gated.open, atGate: gated.atGate };
+}
+
+describe("the check of the actor after the read (ruling 17 of plan 12l)", () => {
+  /** The steps of the `sso.guard_refused` events. */
+  const guardSteps = (events: AuthEvent[]) =>
+    events.flatMap((e) => (e.name === "sso.guard_refused" ? [e.step] : []));
+
+  it("refuses the act of an owner whom another owner removes during the read, and writes no row", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso({ sso: { oidc: true } });
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    // An organization keeps one owner or more, so Ada makes Bea a second owner first.
+    const bea = await verifiedSession(w, "bea@acme.example");
+    const added = await addMember(w.config, {
+      user: ada.user,
+      organizationId: ada.org,
+      userId: bea.user.id,
+      role: "owner",
+    });
+    expect(added.ok).toBe(true);
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      // The guard passed before the read, and the read waits at the gate.
+      await body.atGate;
+      const removed = await removeMember(w.config, {
+        user: bea.user,
+        organizationId: ada.org,
+        userId: ada.user.id,
+      });
+      expect(removed.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("refuses the act of a platform operator whose role goes during the read, and writes no row", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso({ sso: { oidc: true }, operator: { users: true } });
+    const bea = await managerSession(w, "bea@acme.example", "acme");
+    // The app makes the first operator, and with it the platform organization. Then it grants Ada the role.
+    const admin = async (email: string) => {
+      const made = await createAdmin(w.config, {
+        actor: SSO_APP,
+        email,
+        reason: "the operators of the test",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      return made.value.userId;
+    };
+    await admin("root@platform.example");
+    await verifiedSession(w, "ada@ops.example");
+    const adaId = await admin("ada@ops.example");
+    // Ada signs in after the grant and turns on TOTP, so the operator guard passes (ruling 50 of plan 12f).
+    w.clock.advance(1_000);
+    const ada = await enrolled(w, "ada@ops.example");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.session.token, "203.0.113.1", body.stream, bea.org);
+      await body.atGate;
+      const revoked = await revokePlatformRole(w.config, {
+        actor: SSO_APP,
+        userId: adaId,
+        reason: "the operator left the team",
+        ip: null,
+        userAgent: null,
+      });
+      expect(revoked.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
   });
 });
