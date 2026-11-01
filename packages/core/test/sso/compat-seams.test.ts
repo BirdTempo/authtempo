@@ -668,6 +668,52 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     expect(takeSsoManagerChecked(person, w.cy.user.id, w.acme)).toBeNull();
   });
 
+  it("checks the actor of a shim mark again after the read: an owner whom another owner removes writes no row (plan 12l)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
+    const { auth } = w;
+    // An organization keeps one owner or more, so Bob makes Cy a second owner of acme first.
+    const added = await auth.api.addMember({
+      user: w.bob.user,
+      organizationId: w.acme,
+      userId: w.cy.user.id,
+      role: "owner",
+    });
+    expect(added.ok).toBe(true);
+    // A small valid create of acme by Bob, as the shim gets it.
+    const marked = new Request(
+      `${BASE_URL}/auth/sso/connections/create?organizationId=${encodeURIComponent(w.acme)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${w.bob.token}` },
+        body: JSON.stringify({
+          kind: "oidc",
+          label: "by-bob",
+          issuer: "https://login.idp.example/acme",
+          clientId: "acme",
+          clientSecret: "acme-secret-0123456789",
+        }),
+      },
+    );
+    // The seam runs the guard for Bob and marks the request with the owner actor.
+    expect(await checkSsoManager(auth, marked, w.bob, w.acme)).toBeNull();
+    await guardSteps(auth, batches);
+    // Cy removes Bob after the guard of the seam, as during the read of the shim.
+    const removed = await auth.api.removeMember({
+      user: w.cy.user,
+      organizationId: w.acme,
+      userId: w.bob.user.id,
+    });
+    expect(removed.ok).toBe(true);
+    const res = await auth.handle(marked);
+    expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    // Core took the mark, so it ran no guard. The check after the read refused the actor of the mark.
+    expect(takeSsoManagerChecked(marked, w.bob.user.id, w.acme)).toBeNull();
+    expect(await guardSteps(auth, batches)).toEqual(["rank"]);
+    const listed = await auth.api.sso?.connections.list({ actor: SSO_APP, organizationId: w.acme });
+    expect(listed).toEqual({ ok: true, value: [] });
+  });
+
   it("answers invalid_body to an id that core's query rule refuses, before any storage read (checkSsoManager, plan 12l)", async () => {
     const batches: AuthEvent[][] = [];
     const w = await platformWorld({ sink: { write: (b) => void batches.push([...b]) } });
