@@ -155,9 +155,9 @@ export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
 
 /**
  * The steps of a manager route whose cap is above the floor (plan 12l). The
- * query names the row, so the manager guard runs before the body read, and
- * an account that manages no organization reads no large body and counts no
- * large read. `query` answers `invalid_body` for a bad query, and
+ * query names the row, so the manager guard runs before the body read. An
+ * account that manages no organization then reads no large body and counts
+ * no large read. `query` answers `invalid_body` for a bad query, and
  * `organization` answers null for a query that names no row (`not_found`).
  * `run` takes the parsed query, so the query is parsed once.
  */
@@ -293,13 +293,14 @@ async function managedSteps<Q, T, V>(
 }
 
 /**
- * The steps of one manager route at the floor: the steps of `managedSteps`
- * in their one order, with the organization of the row read from the input
- * after the body read. An id that names no row answers `not_found`. The
- * floor routes of the SSO setup and the SCIM token routes run it.
+ * The steps of one manager route at the floor. They are the steps of
+ * `managedSteps` in their one order. The organization of the row comes from
+ * the input, after the body read. An id that names no row answers
+ * `not_found`. The floor routes of the SSO setup and the SCIM token routes
+ * run it.
  *
  * A route whose cap is above the floor must name its row in its query and
- * run `managedLargeCall`, so the guard runs before its large read (plan
+ * run `managedLargeCall`. Then the guard runs before its large read (plan
  * 12l). This form throws at such a route before any step, so a later large
  * route cannot take it by mistake.
  */
@@ -319,10 +320,10 @@ export async function managedCall<T, V>(
 }
 
 /**
- * The steps of one manager route whose cap is above the floor (plan 12l):
- * the steps of `managedSteps` in their one order, with the row named in the
- * query. So the manager guard runs before the large body read. The two SSO
- * connection writes run it.
+ * The steps of one manager route whose cap is above the floor (plan 12l).
+ * They are the steps of `managedSteps` in their one order, with the row
+ * named in the query. So the manager guard runs before the large body read.
+ * The two SSO connection writes run it.
  */
 export function managedLargeCall<Q, T, V>(
   config: ResolvedConfig,
@@ -378,9 +379,9 @@ async function acsForm(request: Request): Promise<URLSearchParams> {
  * routes of the domain proof and the connections (spec 30 items 2 and 5).
  * Task 8 adds the SAML ACS and the SP metadata of a connection.
  * They exist when `sso` is on. Each manager route at the floor runs
- * `managedCall`: a route with a domain or a connection id reads the
+ * `managedCall`. A route with a domain or a connection id reads the
  * organization of the row after its body read. The two connection writes
- * are above the floor, so they run `managedLargeCall`: their query names
+ * are above the floor, so they run `managedLargeCall`. Their query names
  * the row, and the guard runs before the body read (plan 12l). A manager
  * write takes JSON only, so a browser sends a preflight. The sign-in routes
  * take no session.
