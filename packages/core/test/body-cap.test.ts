@@ -2104,9 +2104,9 @@ describe("the guard before the read (plan 12l)", () => {
 
 /**
  * A valid connection create whose read waits at a gate (ruling 17 of plan
- * 12l): the spaces of `gatedBody`, then the JSON of an OIDC create. JSON
- * allows white space before a value. `atGate` resolves when the reader has
- * taken 1 MiB, so the guard passed and the read runs.
+ * 12l). It sends the spaces of `gatedBody`, then the JSON of an OIDC
+ * create. JSON allows white space before a value. `atGate` resolves when
+ * the reader has taken 1 MiB, so the guard passed and the read runs.
  */
 function gatedCreate() {
   const gated = gatedBody(1_048_576 + 65_536, 1_048_576);
