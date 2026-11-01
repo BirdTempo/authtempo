@@ -2071,7 +2071,8 @@ describe("the guard before the read (plan 12l)", () => {
     expect(starts.filter(([half, own]) => !half || !own)).toEqual([]);
     expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
     expect((await events()).filter((e) => e.name === "limit.hit")).toEqual([]);
-    // No large read was counted: once Ada manages an organization, Ada keeps the 6 starts of the hour.
+    // The 403 counted no large read: once Ada manages an organization, Ada keeps the 6 starts
+    // of the hour.
     const later = await managerSession(w, "ada@acme.example", "ada-co");
     for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
       expect((await ssoWrite(w, later.token, "203.0.113.1", "{}", later.org)).status).toBe(400);

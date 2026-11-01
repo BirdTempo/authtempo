@@ -883,7 +883,8 @@ describe("the client with no IP through the Fastify binding (ruling 69 of the 12
 
 // Plan 12l: the manager guard runs before the read of an SSO connection
 // write. Before it, an account that manages nothing held the user half of
-// the budget with a stalled write of 8 MiB, and got 403 only after its body.
+// the budget with a stalled write of 8 MiB. That account got 403 only after
+// its body.
 describe("the guard before the read through the Fastify binding (plan 12l)", () => {
   it("answers 403 to a write of an account that manages nothing within 5 s, and leaves the user half to a manager", {
     timeout: 60_000,
