@@ -54,6 +54,20 @@ function errorSection(code: string): string {
   return text.slice(start, end < 0 ? undefined : end);
 }
 
+/** The ids of the SSO routes of the routes page whose Errors cell names `code`. */
+function ssoRoutesAnswering(code: string): string[] {
+  return readFileSync(FILES.routes, "utf8")
+    .split('<h3 id="')
+    .slice(1)
+    .flatMap((section) => {
+      const id = section.slice(0, section.indexOf('"'));
+      const errors = /^\| Errors \|(.*)$/m.exec(section)?.[1] ?? "";
+      return /^(get|post)-sso-/.test(id) && errors.includes(`(/docs/reference/errors/#${code})`)
+        ? [id]
+        : [];
+    });
+}
+
 /** The value of a numeric text of the source: digits with `_`, and products such as `2 * 8_388_608`. */
 function numberOf(text: string): number {
   return text
@@ -759,6 +773,22 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     );
     expect(textOf(FILES.client)).toMatch(
       /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
+    );
+  });
+
+  it("lists each SSO route of forbidden_rank in its errors cell, with the order of the two writes (rr-task6 Low 1)", () => {
+    const cell = errorSection("forbidden_rank");
+    // The routes page holds the Errors cell of each route to core (check-routes).
+    const ids = ssoRoutesAnswering("forbidden_rank");
+    expect(ids.length > 0, "the routes page names no SSO route of forbidden_rank").toBe(true);
+    for (const id of ids)
+      expect({ id, linked: cell.includes(`(/docs/reference/routes/#${id})`) }).toEqual({
+        id,
+        linked: true,
+      });
+    // The guard answers it before any byte. The check after the read answers it too (ruling 17).
+    expect(cell).toMatch(
+      /\| [^|]*The two SSO connection writes answer it before any byte of the body\. After the read, they check the caller again\. An owner who lost the owner rank gets it then, and so does a platform operator who lost the platform role\. \|/,
     );
   });
 });
