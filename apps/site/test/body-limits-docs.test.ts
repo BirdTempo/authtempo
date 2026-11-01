@@ -40,8 +40,19 @@ const FILES = {
   // Plan 12l adds the routes page for its order sentence. So each cap that
   // the page states in bytes needs a fact below, as on the other pages.
   routes: `${DOCS}docs/reference/routes.md`,
+  // Plan 12l adds the client page for its paragraph on the two SSO writes (ruling 25).
+  client: `${DOCS}docs/reference/client.md`,
 } as const;
 type FileKey = keyof typeof FILES;
+
+/** The text of the errors page from the heading of `code` to the next heading. */
+function errorSection(code: string): string {
+  const text = textOf(FILES.errors);
+  const start = text.indexOf(`<h3 id="${code}">`);
+  if (start < 0) throw new Error(`no heading of ${code} on the errors page`);
+  const end = text.indexOf("<h3 ", start + 1);
+  return text.slice(start, end < 0 ? undefined : end);
+}
 
 /** The value of a numeric text of the source: digits with `_`, and products such as `2 * 8_388_608`. */
 function numberOf(text: string): number {
@@ -203,7 +214,13 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
   [
     "the update cap, as the create cap",
     () => capOf("POST /sso/connections/update"),
-    [["readme", /and (\d+) (MiB) for the two SSO connection writes/]],
+    [
+      ["readme", /and (\d+) (MiB) for the two SSO connection writes/],
+      [
+        "routes",
+        /and (\d+) bytes for `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update`/,
+      ],
+    ],
   ],
   [
     "the largest cap",
@@ -224,6 +241,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /\| Nesting and items of one SCIM request body \| (\d+) levels/],
       ["scim", /A body nested deeper than (\d+) levels/],
       ["readme", /A SCIM body nested deeper than (\d+) or/],
+      // The routes page states both, in its rules of every route (ruling 25 of plan 12l).
+      ["routes", /A JSON body nested deeper than (\d+) or with more than \d+ items outside/],
+      ["routes", /A SCIM body nested deeper than (\d+) or with more than \d+ items answers/],
     ],
   ],
   [
@@ -240,6 +260,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Items of one JSON request body \| (\d+) of/],
       ["readme", /or with more than (\d+) items answers `invalid_body`/],
+      ["routes", /or with more than (\d+) items outside its strings answers 400/],
     ],
   ],
   [
@@ -251,6 +272,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["scim", /\| A body over (\d+) (MiB) \| 413 \|/],
       ["readme", /SCIM keeps its own (\d+) (MiB) cap/],
       ["sveltekit", /a SCIM body of up to (\d+) (MiB)/],
+      ["routes", /The SCIM routes answer their own SCIM 413 past (\d+) bytes/],
     ],
   ],
   [
@@ -272,6 +294,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Pairs of one form request body \| (\d+), /],
       ["readme", /A form body of more than (\d+) pairs/],
+      ["routes", /A form body of more than (\d+) pairs gets the refusal of a bad form/],
     ],
   ],
   [
@@ -332,6 +355,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /The answer carries `Retry-After: (\d+)`/],
       ["limits", /503 `body_busy` with `Retry-After: (\d+)`/],
       ["readme", /answers 503 `body_busy` with `Retry-After: (\d+)`/],
+      ["routes", /with `Retry-After: (\d+)`, and no parse runs\. The SCIM routes answer/],
     ],
   ],
   [
@@ -341,6 +365,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /It got no bytes for (\d+) s, or it ran past/],
       ["limits", /\| The wait of a body read above the floor for its next bytes \| (\d+) s \|/],
       ["readme", /Such a read that gets no bytes for (\d+) s stops and frees its bytes/],
+      ["routes", /Such a read that gets no bytes for (\d+) s answers 408/],
     ],
   ],
   [
@@ -352,6 +377,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["readme", /cap at (\d+) (KiB) per second/],
       // The link that gets 408 for a large body (ruling 72 Low 1).
       ["errors", /A link slower than (\d+) (KiB) per second/],
+      ["routes", /a read that runs past the time of its cap at (\d+) bytes per second/],
     ],
   ],
   [
@@ -369,6 +395,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // The other large reads each take the least time (ruling 72 Low 1).
       ["limits", /for an SSO connection write, (\d+) s for the others/],
       ["deploy", /while that caller sends \d+ MiB each (\d+) s\. The callers with an IP key/],
+      ["routes", /its cap at \d+ bytes per second, at least (\d+) s\. For a signed-in user/],
     ],
   ],
   [
@@ -530,6 +557,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["deploy", /one client of (\d+) (MiB) in the budget of the large body reads/],
       ["deploy", /while that caller sends (\d+) (MiB) each \d+ s/],
       ["readme", /One IP holds at most (\d+) (MiB)/],
+      ["routes", /One IP holds at most (\d+) bytes, and so does the one client with no IP/],
     ],
   ],
 ];
@@ -722,5 +750,15 @@ describe("the order of an SSO connection write (plan 12l)", () => {
       ],
     ] as const)
       expect(textOf(FILES[file]), file).toMatch(re);
+  });
+
+  it("states the order in the errors cell and the client paragraph of Task 6 (ruling 25)", () => {
+    // The Routes cell of `second_factor_required`: one cell, so no `|` between the routes and it.
+    expect(errorSection("second_factor_required")).toMatch(
+      /\| [^|]*The two connection writes answer it before any byte of the body\. \|/,
+    );
+    expect(textOf(FILES.client)).toMatch(
+      /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
+    );
   });
 });
