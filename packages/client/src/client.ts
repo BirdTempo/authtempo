@@ -2211,15 +2211,17 @@ export function createClient(options: ClientOptions): Client {
             undefined,
             { organizationId: input.organizationId },
           ),
-        create: (input) =>
+        create: ({ organizationId, ...body }) =>
           part<{ connection: SsoConnectionJSON }, "sso.connections.create">(
             "sso.connections.create",
-            input,
+            body,
+            { organizationId },
           ),
-        update: (input) =>
+        update: ({ id, ...body }) =>
           part<{ connection: SsoConnectionJSON }, "sso.connections.update">(
             "sso.connections.update",
-            input,
+            body,
+            { id },
           ),
         delete: (input) => send<{ ok: true }>("sso.connections.delete", input),
       },
