@@ -9,7 +9,7 @@ import type { SsoActor } from "./engine/sso/guard.js";
  * value in place of its own input. Every other step stays core's: the
  * session, the limiter, the scopes, and the audit row. The manager guard
  * stays core's too: `checkSsoManager` runs core's guard before the read of
- * the package, and the mark carries the actor of that run (plan 12l).
+ * the package. The mark carries the actor of that run (plan 12l).
  */
 
 /**
@@ -43,8 +43,8 @@ const ssoManageCounted = new WeakMap<Request, string>();
 const largeReadCounted = new WeakMap<Request, { userId: string; allowed: boolean }>();
 /**
  * The manager guard of an SSO connection write that a compat package ran
- * before its own read (plan 12l): the user, the organization, and the actor
- * that the guard built.
+ * before its own read (plan 12l). The mark holds the user, the
+ * organization, and the actor that the guard built.
  */
 const ssoManagerChecked = new WeakMap<
   Request,
@@ -120,8 +120,9 @@ function moveMark<V>(marks: WeakMap<Request, V>, from: Request, to: Request): vo
 
 /**
  * Marks `request` as one SSO connection write whose manager guard passed
- * for `userId` and `organizationId` before the read of a compat package
- * (plan 12l, ruling 4 of its lane), with the actor that the guard built.
+ * for `userId` and `organizationId` (plan 12l, ruling 4 of its lane). The
+ * guard ran before the read of a compat package. The mark holds the actor
+ * that the guard built.
  * Only `checkSsoManager` sets the mark, after the guard passes.
  */
 export function markSsoManagerChecked(

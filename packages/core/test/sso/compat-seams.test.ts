@@ -98,8 +98,8 @@ async function recordWorld(marked = true) {
  * (plan 12l). The limiter records each key that it counts in `keys`, so a
  * test reads which limits a call counted. The clock starts at the real time
  * and moves only by `clock.advance`. Each person comes through the flows of
- * the product: the password sign-up, the link of the verify mail, the
- * sign-in, `createOrganization`, and the TOTP setup and enable. `extra`
+ * the product. They are the password sign-up, the link of the verify mail,
+ * the sign-in, `createOrganization`, and the TOTP setup and enable. `extra`
  * replaces a top key of the config.
  */
 function seamWorld(extra: Partial<AuthConfig> = {}) {
@@ -544,8 +544,8 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     while ((await auth.handle(write())).status === 400) left++;
     expect(left).toBe(half - 2);
     expect(await countSsoManageWrite(auth, write(), user.id)).toBe(false);
-    // The package counted each of its large reads with countSsoLargeRead (ruling 69, plan 12l),
-    // and core counted the others once: the large-read key of the user is full.
+    // The package counted each of its large reads with countSsoLargeRead (ruling 69, plan 12l).
+    // Core counted the others once, so the large-read key of the user is full.
     expect(await limiter.allow(`sso-large-read:user:${user.id}`, SSO_LARGE_READ_PER_USER)).toBe(
       false,
     );

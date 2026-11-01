@@ -1231,23 +1231,23 @@ export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Resp
 }
 
 /**
- * Counts one SSO manager write of `userId` on core's limit of the user
- * (`SSO_MANAGE_PER_USER`), for a compat package that reads the body of a
- * connection write at its large cap before core (ruling 51 Minor 1 of the
- * 12j lane). So the read comes after the limit, as in core's own manager
- * routes. Within the limit it marks `request`: the manager route of core
- * that gets it does not count it again. Past the limit it answers false,
- * and the package answers 429 with no read. Before the count, it throws
- * `BodyBusy` when the large read of the user cannot start, so a retry
- * after `Retry-After` spends no count (ruling 72 Minor 1).
+ * Counts one SSO manager write of `userId` on core's limit of the user,
+ * `SSO_MANAGE_PER_USER` (ruling 51 Minor 1 of the 12j lane). A compat
+ * package calls it when it reads the body of a connection write at its
+ * large cap before core. So the read comes after the limit, as in core's
+ * own manager routes. Within the limit it marks `request`: the manager
+ * route of core that gets it does not count it again. Past the limit it
+ * answers false, and the package answers 429 with no read. Before the
+ * count, it throws `BodyBusy` when the large read of the user cannot
+ * start. So a retry after `Retry-After` spends no count (ruling 72 Minor 1).
  *
- * It counts the manager write only (plan 12l). Plan 12l moved the count of
- * the large read, the bind of the client to the user, and the bind of the
- * spend of a slow read to `countSsoLargeRead` (rulings 59, 69, 75, and 79
- * of the 12j lane). The package calls that after the manager guard
- * (`checkSsoManager` or `canManageSomeSso`), so an account that manages
- * nothing counts no large read. Throws a TypeError for an Auth that
- * `createAuth` did not make.
+ * It counts the manager write only (plan 12l). Plan 12l moved these steps
+ * to `countSsoLargeRead`: the count of the large read and the bind of the
+ * client to the user. It also moved the bind of the spend of a slow read
+ * there (rulings 59, 69, 75, and 79 of the 12j lane). The package calls
+ * that after the manager guard (`checkSsoManager` or `canManageSomeSso`),
+ * so an account that manages nothing counts no large read. Throws a
+ * TypeError for an Auth that `createAuth` did not make.
  */
 export async function countSsoManageWrite(
   auth: Auth,
@@ -1267,14 +1267,15 @@ export async function countSsoManageWrite(
 
 /**
  * Counts one large body read of `userId` at an SSO connection write on
- * `sso-large-read:user`, for a compat package that reads the body before
- * core (plan 12l; ruling 69 of the 12j lane). It marks `request` with the
- * outcome, so core counts the read once, and a refusal too (ruling 72 Low
- * 2). Past the limit it answers false, and core answers 429 by the mark.
+ * `sso-large-read:user` (plan 12l; ruling 69 of the 12j lane). A compat
+ * package calls it when it reads the body before core. It marks `request`
+ * with the outcome, so core counts the read once, and a refusal too
+ * (ruling 72 Low 2). Past the limit it answers false, and core answers 429
+ * by the mark.
  * Within the limit it binds the client of `request` to the user, so the
  * read counts on the share of the user (ruling 59). It also binds the
- * spend: a read of the package that takes more than 8 s spends the rest of
- * the user's large reads (rulings 75 and 79). The package calls it after
+ * spend (rulings 75 and 79). A read of the package that takes more than
+ * 8 s spends the rest of the user's large reads. The package calls it after
  * `countSsoManageWrite` and after `checkSsoManager` or `canManageSomeSso`,
  * so an account that manages nothing counts no large read. Throws a
  * TypeError for an Auth that `createAuth` did not make.
@@ -1304,9 +1305,9 @@ const SSO_GUARDED_WRITES: ReadonlySet<string> = new Set([
 
 /**
  * Runs core's SSO manager guard (`requireSsoManager`) for `resolved` and
- * `organizationId`, for a compat package that reads the body of one of
- * core's two connection writes before core (plan 12l, ruling 4 of its
- * lane). The package reads the organization from the query of the write,
+ * `organizationId` (plan 12l, ruling 4 of its lane). A compat package calls
+ * it when it reads the body of one of core's two connection writes before
+ * core. The package reads the organization from the query of the write,
  * so the guard runs before any byte of the body. An id that the query rule
  * of core refuses (`readQuery`) answers `invalid_body` before any storage
  * read, as core's route answers it. A pass marks `request` with the user,
@@ -1316,8 +1317,8 @@ const SSO_GUARDED_WRITES: ReadonlySet<string> = new Set([
  * core's JSON answer of the code (`respond`), and the guard emits its
  * event. `moveSsoManageCount` moves the mark to the request that the
  * package sends to core. Throws a TypeError for an Auth that `createAuth`
- * did not make, or for a request that is not a POST to one of the two
- * writes.
+ * did not make. It also throws one for a request that is not a POST to one
+ * of the two writes.
  */
 export async function checkSsoManager(
   auth: Auth,
@@ -1354,12 +1355,12 @@ export async function checkSsoManager(
 }
 
 /**
- * The pre-check of the SSO manager guard for a compat package whose write
- * names its organization in the body (plan 12l, ruling 4 of its lane): the
- * Better Auth paths `/sso/register` and `/sso/update-provider`. The
- * package calls it before its read. Null when the session may manage the
- * SSO setup of some organization. Else core's JSON answer of the first
- * refused step, with one `sso.guard_refused` event of that step
+ * The pre-check of the SSO manager guard, for a compat package whose write
+ * names its organization in the body. It serves the Better Auth paths
+ * `/sso/register` and `/sso/update-provider` (plan 12l, ruling 4 of its
+ * lane). The package calls it before its read. Null when the session may
+ * manage the SSO setup of some organization. Else core's JSON answer of the
+ * first refused step, with one `sso.guard_refused` event of that step
  * (`requireSsoManagerOfAny`). It runs no count and no operator guard.
  * Core's guard runs once, after the read, for the organization of the
  * body. Throws a TypeError for an Auth that `createAuth` did not make.
@@ -1376,9 +1377,9 @@ export async function canManageSomeSso(
 
 /**
  * Moves the marks of `countSsoManageWrite`, `countSsoLargeRead`, and
- * `checkSsoManager` from `from` to `to`, a request that the compat package
- * builds and sends to core in place of `from`. A request with no mark
- * moves nothing, so no call adds a mark.
+ * `checkSsoManager` from `from` to `to`. `to` is a request that the compat
+ * package builds and sends to core in place of `from`. A request with no
+ * mark moves nothing, so no call adds a mark.
  */
 export function moveSsoManageCount(from: Request, to: Request): void {
   moveSsoManageCounted(from, to);

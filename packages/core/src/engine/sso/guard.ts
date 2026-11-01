@@ -146,9 +146,9 @@ export async function recheckSsoManager(
 /**
  * The most member rows of the user that `requireSsoManagerOfAny` reads
  * (plan 12l). It is a bound of the pre-check, not a rule of the product.
- * A user with more member rows, and with no row of the owner rank among
- * the first 100 that the storage gives, gets `forbidden_rank` at the
- * pre-check, though `requireSsoManager` reads the one row of the
+ * A user can have more member rows, with no row of the owner rank among
+ * the first 100 that the storage gives. That user gets `forbidden_rank` at
+ * the pre-check, though `requireSsoManager` reads the one row of the
  * organization of the body. The reason: the pre-check runs before any
  * byte of a body, so it reads one page of rows, not every row of the user.
  * `organizations.limits.perUser` is off by default, so nothing else bounds
@@ -159,8 +159,8 @@ export const SSO_PRECHECK_MEMBER_ROWS = 100;
 
 /**
  * True when the user has a member row of the owner rank in one
- * organization or more: the rule of `ownsOrganization`, over at most
- * `SSO_PRECHECK_MEMBER_ROWS` rows.
+ * organization or more. It applies the rule of `ownsOrganization` to at
+ * most `SSO_PRECHECK_MEMBER_ROWS` rows.
  */
 async function ownsSomeOrganization(config: ResolvedConfig, userId: string): Promise<boolean> {
   const o = config.organizations;
@@ -175,8 +175,9 @@ async function ownsSomeOrganization(config: ResolvedConfig, userId: string): Pro
 
 /**
  * The pre-check of `requireSsoManager` for a write that names its
- * organization in its body (plan 12l, ruling 4 of its lane): the Better
- * Auth paths of the compat shim. It runs before the body read, so the
+ * organization in its body (plan 12l, ruling 4 of its lane). Such writes
+ * are the Better Auth paths of the compat shim. It runs before the body
+ * read, so the
  * organization is not known. It runs the steps of the guard that need no
  * organization, in the order of the guard, with its step names and codes:
  *

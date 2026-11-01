@@ -89,15 +89,15 @@ export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promis
 
 /**
  * The large body reads of one person at the SSO connection writes: 6 per
- * hour, counted at the start of each read, after `sso-manage:user` (ruling
- * 69 of the 12j lane). A read past the limit answers 429 before any byte.
+ * hour (ruling 69 of the 12j lane). Each read counts at its start, after
+ * `sso-manage:user`. A read past the limit answers 429 before any byte.
  * A read that cannot start answers 503 before this count, and spends none
  * (ruling 72 Minor 1). A read that takes more than `LARGE_READ_SLOW_MS`,
  * 8 s, spends the rest of the window, by any end (`spendLargeReads`,
  * rulings 75 and 79).
  *
  * The derivation, done 2026-10-30. One read holds the user half of the body
- * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`), and a user runs one
+ * budget for at most 32 s (`LARGE_READ_USER_MIN_RATE`). A user runs one
  * read at a time (`LARGE_READS_PER_USER`). So one account holds that half at
  * most 6 times 32 s, 192 s, in each hour. A setup of one connection is one
  * create and a few updates.
@@ -199,10 +199,11 @@ type GuardAt<Q, T, V> =
  * 4. The `before` form: the query, then the organization of its row, then
  *    the manager guard. A bad query answers `invalid_body` and a query that
  *    names no row `not_found`, each after the count (ruling 6 of plan 12l).
- *    A compat package that ran the guard for this user and organization
- *    before its own read (`checkSsoManager`) marked the request with the
- *    actor of that run. Core takes that actor and runs the guard no more,
- *    so a platform operator counts once on `operator:user` (plan 12l).
+ *    A compat package can run the guard before its own read
+ *    (`checkSsoManager`). It marks the request with the actor of that run,
+ *    for this user and organization. Core takes that actor and runs the
+ *    guard no more, so a platform operator counts once on `operator:user`
+ *    (plan 12l).
  * 5. A route above the floor counts the read on `sso-large-read:user`
  *    before any byte (ruling 69). A large read that takes more than 8 s
  *    spends the rest of the user's large reads, also at a 408 (rulings 75
@@ -343,11 +344,12 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 
 /**
  * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
- * cap, a body read before, a body that is not UTF-8, a form of more than
- * `FORM_PAIRS_MAX` pairs, a NUL or a lone surrogate, or another media type
- * gives an empty form. `completeSaml` refuses an empty form at the step
- * `form`. The read holds its bytes against the budget of the large reads,
- * and past it the router answers `body_busy` (ruling 51 of the 12j lane).
+ * cap, a body read before, or a body that is not UTF-8 gives an empty form.
+ * A form of more than `FORM_PAIRS_MAX` pairs, a NUL or a lone surrogate, or
+ * another media type gives an empty form too. `completeSaml` refuses an
+ * empty form at the step `form`. The read holds its bytes against the budget
+ * of the large reads, and past it the router answers `body_busy` (ruling 51
+ * of the 12j lane).
  * `completeSaml` calls it only after the ACS limit and the SAML check
  * (ruling 59).
  */
