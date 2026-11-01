@@ -1339,8 +1339,8 @@ export async function checkSsoManager(
       "checkSsoManager takes a POST to <basePath>/sso/connections/create or /sso/connections/update",
     );
   // The rule of core's query (`readQuery`): no NUL and no lone surrogate, then the `id` schema
-  // of the contract. The storage port throws at a NUL. So a bad id answers invalid_body before
-  // any storage read, as at core's route (ruling 21 of the 12l lane).
+  // of the contract. The storage port throws at a NUL or a lone surrogate. So a bad id answers
+  // invalid_body before any storage read, as at core's route (ruling 21 of the 12l lane).
   if (holdsBadText(organizationId) || !idSchema.safeParse(organizationId).success)
     return respond(fail("invalid_body"));
   const actor = await requireSsoManager(

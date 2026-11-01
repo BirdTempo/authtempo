@@ -724,8 +724,8 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
       { method: "POST", headers: { authorization: `Bearer ${w.bob.token}` } },
     );
     await guardSteps(auth, batches);
-    // A NUL and a lone surrogate, at which the storage port throws. Then an empty id, and an id
-    // longer than the 64 characters of the id schema.
+    // The test sends a NUL and a lone surrogate, at which the storage port throws. Then it
+    // sends an empty id, and an id longer than the 64 characters of the id schema.
     for (const bad of ["o\u0000x", "o\ud800x", "", "x".repeat(65)]) {
       const res = await checkSsoManager(auth, write, w.bob, bad);
       expect([res?.status, await res?.json()], JSON.stringify(bad)).toEqual([
