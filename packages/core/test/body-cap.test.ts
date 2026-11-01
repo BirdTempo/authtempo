@@ -1404,11 +1404,15 @@ describe("a header text that is not an IP (ruling 68 Low 4 and ruling 69 of the 
   });
 });
 
-/** A form body of `bytes` bytes in chunks of 64 KiB that counts the bytes a reader pulled. */
-function countedForm(bytes: number) {
+/**
+ * A form body of `bytes` bytes in chunks of 64 KiB that counts the bytes a
+ * reader pulled. `onPull` runs at each pull, before the chunk goes.
+ */
+function countedForm(bytes: number, onPull: () => void = () => {}) {
   let sent = 0;
   const stream = new ReadableStream<Uint8Array>({
     pull(c) {
+      onPull();
       if (sent >= bytes) return c.close();
       const n = Math.min(65_536, bytes - sent);
       c.enqueue(new Uint8Array(n).fill(0x61));
@@ -2051,16 +2055,22 @@ describe("the guard before the read (plan 12l)", () => {
   }, async () => {
     const { w, events } = observedSso();
     const ada = await verifiedSession(w, "ada@acme.example");
-    const body = countedForm(1_048_576);
+    // At each pull of the body: can a fresh user start a write of the cap, and can Ada start a read?
+    const starts: [boolean, boolean][] = [];
+    const body = countedForm(1_048_576, () =>
+      starts.push([
+        largeReadCanStart("user:fresh", REQUEST_BODY_MAX, String(REQUEST_BODY_MAX)),
+        largeReadCanStart(`user:${ada.user.id}`, REQUEST_BODY_MAX, null),
+      ]),
+    );
     const res = await ssoWrite(w, ada.token, "203.0.113.1", body.stream, "o-any");
     expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    // The user half held no byte, and Ada ran no large read, at each pull. A read of the body
+    // before the 403 holds its chunks in the half while it pulls the next one.
+    expect(starts.length).toBeGreaterThan(0);
+    expect(starts.filter(([half, own]) => !half || !own)).toEqual([]);
     expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
     expect((await events()).filter((e) => e.name === "limit.hit")).toEqual([]);
-    // The user half is untouched: a manager's write of the cap starts at once.
-    const bea = await managerSession(w, "bea@acme.example", "acme");
-    expect(
-      largeReadCanStart(`user:${bea.user.id}`, REQUEST_BODY_MAX, String(REQUEST_BODY_MAX)),
-    ).toBe(true);
     // No large read was counted: once Ada manages an organization, Ada keeps the 6 starts of the hour.
     const later = await managerSession(w, "ada@acme.example", "ada-co");
     for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
