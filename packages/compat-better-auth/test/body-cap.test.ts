@@ -51,10 +51,10 @@ const SSO_WRITES = [
 ];
 
 /**
- * The path of the SSO write `write` with the query that core's two routes
- * read before the body (plan 12l): the organization of a create, and the
- * connection of an update. The Better Auth paths name the organization in
- * the body, so they take no query.
+ * The path of the SSO write `write` with the query of core's two routes
+ * (plan 12l). The query names the organization of a create, or the
+ * connection of an update. Core reads it before the body. The Better Auth
+ * paths name the organization in the body, so they take no query.
  */
 function withQuery(write: string, organizationId: string, connectionId: string): string {
   if (write === "/sso/connections/create")
@@ -72,8 +72,8 @@ type SsoApp = ReturnType<typeof ssoApp>;
 
 /**
  * A manager of the organization `slug` through the shim's flows (`manager`
- * and `organizationOf` of sso-helpers.ts), and one OIDC connection of the
- * organization that the app makes in process (plan 12l). The update path
+ * and `organizationOf` of sso-helpers.ts). The app also makes one OIDC
+ * connection of the organization in process (plan 12l). The update path
  * of core names that row in its query. The create of the app counts
  * nothing on the limits of the manager. The label holds a space, so no
  * Better Auth path reads it as a providerId.
@@ -745,7 +745,7 @@ describe("a slow large read through the shim (ruling 79 of the 12j lane)", () =>
 
 /**
  * A JSON POST of `stream` that declares a length of 8 MiB, the cap of the
- * SSO writes, as a client of a large write sends it (plan 12l).
+ * SSO writes (plan 12l). A client of a large write sends it so.
  */
 function streamPost(path: string, stream: ReadableStream<Uint8Array>, cookie: string): Request {
   return new Request(`${BASE}/api/auth${path}`, {

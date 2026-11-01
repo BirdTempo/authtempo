@@ -757,12 +757,12 @@ async function addRouted(
 /**
  * The steps of a Better Auth SSO write before its read of the large cap
  * (plan 12l). The body names the organization, so core's guard cannot run
- * before the read. The order: core's limit of the user's manager writes
- * (ruling 51 Minor 1 of the 12j lane), the pre-check of core's guard
- * (`canManageSomeSso`), and the count of the large read. So an account
- * that manages no organization reads no byte and counts no large read.
- * Core's guard runs once after the read, for the organization of the
- * body. Null when the read may start, else the refusal.
+ * before the read. First comes core's limit of the user's manager writes
+ * (ruling 51 Minor 1 of the 12j lane). Then the pre-check of core's guard
+ * (`canManageSomeSso`) runs, and then the count of the large read. So an
+ * account that manages no organization reads no byte. It counts no large
+ * read. Core's guard runs once after the read, for the organization of
+ * the body. Null when the read may start, else the refusal.
  */
 async function beforeLargeRead(
   auth: Auth,
@@ -877,10 +877,10 @@ async function listProviders(
 
 /**
  * `POST /sso/update-provider`: core's update of the connection, and a new
- * domain when it changes. The session check, core's limit of the user, the
- * pre-check of core's guard, and the count of the large read come before
- * the read of the body, as at the register. The read takes the large cap
- * of the connection writes (rulings 46 and 51 of the 12j lane, plan 12l).
+ * domain when it changes. The session check and `beforeLargeRead` come
+ * before the read of the body, as at the register. The read takes the
+ * large cap of the connection writes (rulings 46 and 51 of the 12j lane,
+ * plan 12l).
  */
 async function updateProvider(
   auth: Auth,
@@ -1182,11 +1182,11 @@ const ID_MAX = 64;
 /**
  * The value of `key` in the query of core's connection create or update,
  * or null (plan 12l). It takes what core's `readQuery` takes with the
- * query schema of the route: the one key, once, with 1 to 64 characters
- * and no NUL or lone surrogate. Null for any other query, which core then
- * refuses with `invalid_body` before any read. The two sets must stay
- * equal. A query that core takes and this read refused would let core
- * read a body that the label rule of the shim never saw.
+ * query schema of the route. That is the one key, once, with 1 to 64
+ * characters. The value holds no NUL and no lone surrogate. Null for any
+ * other query, which core then refuses with `invalid_body` before any
+ * read. The two sets must stay equal. Else core could take a query that
+ * this read refused, and read a body that the label rule never saw.
  */
 function queryValue(url: URL, key: string): string | null {
   let value: string | null = null;
@@ -1209,8 +1209,8 @@ function queryValue(url: URL, key: string): string | null {
  * row that holds one. A body that is not a JSON object is refused too, so
  * no form of body passes unread. Null for every other request.
  *
- * The steps before the read take core's order (plan 12l), so no one reads
- * a body of the large cap of these writes unless core's guard passed:
+ * The steps before the read take core's order (plan 12l). So the shim
+ * reads a body of the large cap of these writes only after core's guard:
  *
  * 1. The session. A request with no session is null: core answers it 401
  *    before it reads the body (ruling 46 of the 12j lane).

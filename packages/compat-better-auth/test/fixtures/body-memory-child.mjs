@@ -11,11 +11,11 @@
 //   "acs": K IPs with no session each post a SAML form of SAML_FORM_MAX to core's ACS.
 // Each body streams in chunks of 64 KiB with a turn of the loop between chunks, as a
 // slow client sends them. With "live", each sample runs a GC first: the live memory.
-// Plan 12l: the shim runs core's manager guard before it reads an SSO write, so each user
+// Plan 12l: the shim runs core's manager guard before it reads an SSO write. So each user
 // of "sso" and "register" is a manager through the shim's paths. It signs up, verifies,
-// signs in, creates its organization on core's POST /organizations/create (the path of
-// `organization.create` of the shim's client), and turns TOTP on through Better Auth's
-// two paths, as `manager` of sso-helpers.ts does.
+// and signs in. It creates its organization on core's POST /organizations/create, the
+// path of `organization.create` of the shim's client. It turns TOTP on through Better
+// Auth's two paths, as `manager` of sso-helpers.ts does.
 import { COOKIE_NAME } from "../../dist/server/shapes.js";
 
 const dist = new URL("../../dist/", import.meta.url);
