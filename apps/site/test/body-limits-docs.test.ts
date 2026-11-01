@@ -802,9 +802,17 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     }
   });
 
-  it("states the check after the read on the routes page (rulings 17 and 23)", () => {
+  it("states the check after the read on the routes page (rulings 17, 23, and 31)", () => {
+    // The session first, then the one right that the guard checked for the actor (ruling 31).
     expect(textOf(FILES.routes)).toMatch(
-      /and reads its body last\. Before the act, it checks again that the caller still owns the organization or holds the platform role, and that the session is live\./,
+      /and reads its body last\. Before the act, it checks again that the session is live, and that the caller still holds the right that the guard checked\. For a caller that the guard accepted as a platform operator, that right is the platform role\. For any other caller, it is the owner rank of the organization\./,
+    );
+  });
+
+  it("states the 401 of the check after the read in the unauthorized cell (rulings 23 and 31)", () => {
+    // The Routes cell of `unauthorized`: one cell, so no `|` between the routes and it.
+    expect(errorSection("unauthorized")).toMatch(
+      /\| [^|]*The SSO connection writes \[`POST \/sso\/connections\/create`\]\(\/docs\/reference\/routes\/#post-sso-connections-create\) and \[`POST \/sso\/connections\/update`\]\(\/docs\/reference\/routes\/#post-sso-connections-update\) also answer it after the body read, when the session ended during the read\. \|/,
     );
   });
 
@@ -819,8 +827,9 @@ describe("the order of an SSO connection write (plan 12l)", () => {
         linked: true,
       });
     // The guard answers it before any byte. The check after the read answers it too (ruling 17).
+    // That check reads the session first, and a revoke of the role ends the sessions (ruling 31).
     expect(cell).toMatch(
-      /\| [^|]*The two SSO connection writes answer it before any byte of the body\. After the read, they check the caller again\. An owner who lost the owner rank gets it then, and so does a platform operator who lost the platform role\. \|/,
+      /\| [^|]*The two SSO connection writes answer it before any byte of the body\. After the read, they check the caller again\. An owner who lost the owner rank gets it then\. A platform operator who lost the platform role usually gets 401 \[`unauthorized`\]\(#unauthorized\), because a revoke of the role ends the operator's sessions\. If a removal of the role keeps the session live, the operator gets 403 `forbidden_rank`\. \|/,
     );
   });
 });
