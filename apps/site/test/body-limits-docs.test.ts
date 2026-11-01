@@ -37,6 +37,9 @@ const FILES = {
   deploy: `${DOCS}docs/operations/deploy.md`,
   expressReadme: `${REPO}packages/express/README.md`,
   sveltekit: `${DOCS}docs/reference/sveltekit.md`,
+  // Plan 12l adds the routes page for its order sentence. So each cap that
+  // the page states in bytes needs a fact below, as on the other pages.
+  routes: `${DOCS}docs/reference/routes.md`,
 } as const;
 type FileKey = keyof typeof FILES;
 
@@ -165,6 +168,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ],
       ["readme", /The cap is (\d+) (KiB), \d+ KiB for the Apple callback/],
       ["readme", /The body reads of the routes with a cap above (\d+) (KiB) hold/],
+      ["routes", /The cap is (\d+) bytes, except \d+ bytes for `POST \/social\/apple\/callback`/],
+      ["routes", /The body reads of the routes with a cap above (\d+) bytes hold at most/],
     ],
   ],
   [
@@ -174,6 +179,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /(\d+) bytes for `POST \/social\/apple\/callback`/],
       ["limits", /bytes, (\d+) for `POST \/social\/apple\/callback`/],
       ["readme", /(\d+) (KiB) for the Apple callback/],
+      ["routes", /except (\d+) bytes for `POST \/social\/apple\/callback`/],
     ],
   ],
   [
@@ -188,6 +194,10 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // The measure of ruling 56: a parser at this cap on the two SSO paths stopped a process.
       ["express", /with their cap of (\d+) (MiB) as its limit/],
       ["expressReadme", /with their cap of (\d+) (MiB) as its limit/],
+      [
+        "routes",
+        /and (\d+) bytes for `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update`/,
+      ],
     ],
   ],
   [
@@ -253,6 +263,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ],
       ["scim", /or with more than (\d+) items of/],
       ["readme", /or with more than (\d+) items answers 400 `invalidSyntax`/],
+      ["routes", /or with more than (\d+) items answers SCIM 400 `invalidSyntax`/],
     ],
   ],
   [
@@ -270,6 +281,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /bytes hold at most (\d+) bytes in this isolate, in two halves/],
       ["limits", /hold at once in one isolate \| (\d+), /],
       ["readme", /hold at most (\d+) (MiB) at once in one isolate/],
+      ["routes", /with a cap above \d+ bytes hold at most (\d+) bytes at once in one isolate/],
     ],
   ],
   [
@@ -280,6 +292,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /of signed-in users hold at once, in each isolate \| (\d+), the user half/],
       ["limits", /stalls an SSO connection write of (\d+) (MiB) fills the user half/],
       ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
+      ["routes", /The reads of signed-in users hold at most (\d+) bytes of it/],
     ],
   ],
   [
@@ -290,6 +303,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /every other body read above the floor holds at once, in each isolate \| (\d+), /],
       ["limits", /so \d+ IPs must send (\d+) (MiB) each/],
       ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
+      ["routes", /and every other read at most (\d+) bytes\./],
     ],
   ],
   [
@@ -366,6 +380,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /or at (\d+) for a signed-in user/],
       ["limits", /an admin must send it at (\d+) (KiB) per second or more/],
       ["readme", /read of a signed-in user takes (\d+) (KiB) per second/],
+      ["routes", /For a signed-in user the rate is (\d+) bytes per second/],
     ],
   ],
   [
@@ -687,5 +702,25 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
                 held.add(m.indices?.[1]?.[0] ?? -1);
       expect({ file, all }).toEqual({ file, all: held.size });
     }
+  });
+});
+
+describe("the order of an SSO connection write (plan 12l)", () => {
+  it("states on each page that the manager guard runs before the body read", () => {
+    for (const [file, re] of [
+      [
+        "routes",
+        /names its organization or its connection in the query, so the manager guard runs before the body read/,
+      ],
+      [
+        "limits",
+        /An account that manages no organization starts no large read: it answers 403 before any byte/,
+      ],
+      [
+        "readme",
+        /name their organization or connection in the query, so the manager guard runs before the body read/,
+      ],
+    ] as const)
+      expect(textOf(FILES[file]), file).toMatch(re);
   });
 });

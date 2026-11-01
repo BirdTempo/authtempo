@@ -13,6 +13,7 @@ sources:
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
   - docs/superpowers/plans/2026-10-14-12j-release-program.md
+  - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
@@ -668,7 +669,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| The SSO manager routes of an owner: [`GET /sso/domains`](/docs/reference/routes/#get-sso-domains), [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add), [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify), [`POST /sso/domains/update`](/docs/reference/routes/#post-sso-domains-update), [`POST /sso/domains/delete`](/docs/reference/routes/#post-sso-domains-delete), [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections), [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update), and [`POST /sso/connections/delete`](/docs/reference/routes/#post-sso-connections-delete). |
+| The SSO manager routes of an owner: [`GET /sso/domains`](/docs/reference/routes/#get-sso-domains), [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add), [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify), [`POST /sso/domains/update`](/docs/reference/routes/#post-sso-domains-update), [`POST /sso/domains/delete`](/docs/reference/routes/#post-sso-domains-delete), [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections), [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update), and [`POST /sso/connections/delete`](/docs/reference/routes/#post-sso-connections-delete). The two connection writes answer it before any byte of the body. |
 
 <h3 id="sso_failed"><code>sso_failed</code> 400</h3>
 
