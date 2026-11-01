@@ -756,7 +756,8 @@ describe("the order of an SSO connection write (plan 12l)", () => {
       ],
       [
         "limits",
-        /An account that manages no organization starts no large read: it answers 403 before any byte/,
+        // Each refusal of such an account comes before any byte, not only the 403 (rr-task6 Low 2).
+        /An account that manages no organization starts no large read: each of its SSO connection writes gets a refusal before any byte\. The refusal is the 403 of the manager guard, or an earlier one, such as 401, 503, 429, 400, or 404\./,
       ],
       [
         "readme",
