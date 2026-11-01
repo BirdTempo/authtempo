@@ -1067,4 +1067,37 @@ describe("the guard before the read through the shim (plan 12l)", () => {
     // No write reached a large-read count.
     expect(keys.filter((k) => k.startsWith("sso-large-read:"))).toEqual([]);
   });
+
+  it("counts the large read before the read on core's two writes: past the limit, 429 before any byte (fix-wave item 15)", {
+    timeout: 60_000,
+  }, async () => {
+    const { database, refused } = recordedMemory();
+    const app = ssoApp(database, [sso({ domainVerification: { enabled: true } })]);
+    const ada = await managerOf(app, "ada@example.com", "acme");
+    // Six small updates spend the six large reads of the hour (ruling 69 of the 12j lane).
+    const update = withQuery("/sso/connections/update", ada.organizationId, ada.connectionId);
+    const small: number[] = [];
+    for (let i = 0; i < SSO_LARGE_READ_MAX; i++)
+      small.push((await app.auth.handler(sizedPost(update, 4096, ada.cookie))).status);
+    expect(small).toEqual(small.map(() => 200));
+    // A stalled write of a declared 8 MiB on each core path: the count refuses before the read.
+    for (const path of [ada.paths[2], ada.paths[3]]) {
+      refused.length = 0;
+      const body = stalledBody();
+      try {
+        const res = await app.auth.handler(streamPost(path, body.stream, ada.cookie));
+        expect([path, res.status, await res.json()]).toEqual([
+          path,
+          429,
+          { error: "rate_limited" },
+        ]);
+        // No reader asked for the second chunk, and the stream sent one chunk at most.
+        expect([path, body.asked(), body.pulled() <= 2 * 65_536]).toEqual([path, false, true]);
+        // One refusal, of the large reads: one limit.hit (ruling 72 Low 2 of the 12j lane).
+        expect([path, refused]).toEqual([path, [`sso-large-read:user:${ada.user.id}`]]);
+      } finally {
+        body.open();
+      }
+    }
+  });
 });
