@@ -1,8 +1,9 @@
-import type {
-  Auth,
-  ResolvedSession,
-  SsoConnectionSummary,
-  SsoDomainSummary,
+import {
+  type Auth,
+  ERRORS,
+  type ResolvedSession,
+  type SsoConnectionSummary,
+  type SsoDomainSummary,
 } from "@authtempo/core";
 import {
   canManageSomeSso,
@@ -1194,9 +1195,10 @@ export async function ssoAcsRoute(
  *
  * 1. The session. A request with no session is null: core answers it 401
  *    before it reads the body (ruling 46 of the 12j lane).
- * 2. Core's limit of the user's manager writes. A write past it is null:
- *    core answers it 429 before its own read. A write within the limit
- *    carries the count to core (ruling 51).
+ * 2. Core's limit of the user's manager writes. A write within the limit
+ *    carries the count to core (ruling 51). A write past it gets core's
+ *    429 from the shim, before any read. Core then never sees it, so the
+ *    write gives one `limit.hit` (fix-wave item 7 of plan 12l).
  * 3. The query: the organization of a create, or the connection of an
  *    update and then its row. The shim reads it with core's own reader and
  *    the query schema of the route (fix-wave item 8 of plan 12l). So it
@@ -1226,7 +1228,9 @@ export async function ssoConnectionWrite(
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
   const session = await auth.session(request);
   if (!session) return null;
-  if (!(await countSsoManageWrite(auth, request, session.user.id))) return null;
+  // A refused count marks nothing. So the shim answers it: a pass to core would count it twice.
+  if (!(await countSsoManageWrite(auth, request, session.user.id)))
+    return Response.json({ error: "rate_limited" }, { status: ERRORS.rate_limited });
   const update = path === "/sso/connections/update";
   // Core's query rule: a query that core refuses is null here too (fix-wave item 8 of plan 12l).
   const query = update

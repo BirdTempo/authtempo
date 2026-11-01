@@ -99,18 +99,27 @@ async function managerOf(app: SsoApp, email: string, slug: string) {
   });
 }
 
-/** A memory database whose limiter records each key that it counts (plan 12l). */
+/**
+ * A memory database whose limiter records each key that it counts (plan
+ * 12l), and each key that it refuses. Core's `limit` is the one caller of
+ * the limiter that emits, and it emits one `limit.hit` for each refusal. So
+ * each refused key of a family is one `limit.hit` of that family. The shim
+ * has no `observe` option, so a test reads the events here.
+ */
 function recordedMemory() {
   const database = memory();
   const keys: string[] = [];
+  const refused: string[] = [];
   const limiter: LimiterPort = {
     scope: "isolate",
-    allow(key, window) {
+    async allow(key, window) {
       keys.push(key);
-      return database.limiter.allow(key, window);
+      const allowed = await database.limiter.allow(key, window);
+      if (!allowed) refused.push(key);
+      return allowed;
     },
   };
-  return { database: { ...database, limiter }, keys };
+  return { database: { ...database, limiter }, keys, refused };
 }
 
 /** An app with every plugin whose path the shim reads first. */
@@ -1018,6 +1027,44 @@ describe("the guard before the read through the shim (plan 12l)", () => {
     }
     // Each write counted once on the manager writes, and none on the large reads.
     expect(keys.filter((k) => k.startsWith("sso-manage:"))).toHaveLength(corePaths.length);
+    expect(keys.filter((k) => k.startsWith("sso-large-read:"))).toEqual([]);
+  });
+
+  it("gives one limit.hit to an SSO write past the manager-write limit, before any byte (fix-wave item 7)", {
+    timeout: 60_000,
+  }, async () => {
+    const { database, keys, refused } = recordedMemory();
+    const app = ssoApp(database, [sso({ domainVerification: { enabled: true } })]);
+    const ada = await managerOf(app, "ada@example.com", "acme");
+    // Domain writes at the floor spend each manager write of the window, and no large read.
+    for (let i = 0; i < SSO_MANAGE_MAX; i++)
+      expect((await app.auth.handler(post("/sso/domains/update", 64, ada.cookie))).status).toBe(
+        400,
+      );
+    keys.length = 0;
+    const answers: [path: string, status: number, body: unknown, hits: string[]][] = [];
+    for (const path of ada.paths) {
+      refused.length = 0;
+      const body = stalledBody();
+      try {
+        const res = await app.auth.handler(streamPost(path, body.stream, ada.cookie));
+        answers.push([path, res.status, await res.json(), [...refused]]);
+        // No reader asked for the second chunk: the refusal came before the read.
+        expect([path, body.asked()]).toEqual([path, false]);
+      } finally {
+        body.open();
+      }
+    }
+    // Each write gets 429 with one refusal of sso-manage:user, so one limit.hit. Core's paths
+    // answer in core's form, and the Better Auth paths in Better Auth's form.
+    const hit = [`sso-manage:user:${ada.user.id}`];
+    expect(answers).toEqual([
+      [ada.paths[0], 429, expect.objectContaining({ code: "TOO_MANY_REQUESTS" }), hit],
+      [ada.paths[1], 429, expect.objectContaining({ code: "TOO_MANY_REQUESTS" }), hit],
+      [ada.paths[2], 429, { error: "rate_limited" }, hit],
+      [ada.paths[3], 429, { error: "rate_limited" }, hit],
+    ]);
+    // No write reached a large-read count.
     expect(keys.filter((k) => k.startsWith("sso-large-read:"))).toEqual([]);
   });
 });
