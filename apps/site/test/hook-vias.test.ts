@@ -76,7 +76,7 @@ const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
 const guideWords = (n: string) =>
   `On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to ${n} of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook.`;
 const compatWords = (n: string) =>
-  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of them with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
+  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
 const compatOwnWords = (n: string) =>
   `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
 

@@ -1,5 +1,6 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import readme from "../../README.md?raw";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { adminApp, adminShim, PASSWORD } from "../admin-helpers.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
@@ -15,6 +16,9 @@ import { execD1 } from "./schema.js";
 
 await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
+
+/** The queries of the ban of a user with 60 sessions in one invocation. The README states it. */
+const BAN_QUERIES = 36;
 
 describe("the admin plugin on D1 (plan 12f Task 13)", () => {
   it("keeps a ban in the compat columns across a restart, and a ban of 60 sessions sends 50 queries or fewer", async () => {
@@ -49,8 +53,10 @@ describe("the admin plugin on D1 (plan 12f Task 13)", () => {
     // impersonation step, and the ban reads the audit for the operator's impersonations.
     // Ruling 60 L2 adds 1: the factor read for the user's twoFactorEnabled.
     // Ruling 78 of plan 12d takes 1: the handler takes the session row of the router.
+    // Decision 15 of plan 12n adds 2: a ban by a user actor reads the platform
+    // role again inside its act (54e2dce2). The run of 2026-11-03 read 36.
     expect(count.queries).toBeLessThanOrEqual(50);
-    expect(count.queries).toBe(34);
+    expect(count.queries).toBe(BAN_QUERIES);
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`)
       .bind(ann.id)
       .first<{ n: number }>();
@@ -82,5 +88,11 @@ describe("the admin plugin on D1 (plan 12f Task 13)", () => {
       status: 403,
       body: { error: "account_banned" },
     });
+  });
+
+  it("states the queries of that ban in the README", () => {
+    expect(readme.replace(/\s+/g, " ")).toContain(
+      `A ban of a user with 60 sessions sends ${BAN_QUERIES} queries in its invocation.`,
+    );
   });
 });
