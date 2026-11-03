@@ -281,6 +281,66 @@ describe("check-changesets", () => {
     expect(check().failures).toEqual(missing);
   });
 
+  describe("the build guard of the scripts/ row fails closed (review of the Task 1 fix of plan 12n, L3)", () => {
+    const script = "packages/core/scripts/gen.mjs";
+    const missing = [`@authtempo/core changes and no changeset names it: ${script}`];
+    const failuresOf = (build: string) =>
+      checkChangesets({
+        changed: paths(script),
+        changesets: [],
+        released,
+        dirs,
+        files,
+        builds: { "@authtempo/core": build },
+        commits: 1,
+        version: "0.0.0",
+      }).failures;
+    // Each test first shows that the plain build of its form keeps the exemption.
+    const plain = "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json";
+
+    it("keeps no exemption for a quoted path to a script of the package", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of ['node "scripts/gen.mjs" && tsc', "node 'scripts/gen.mjs' && tsc"])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for a --config=scripts/ path", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of [
+        "tsup --config=scripts/tsup.config.ts",
+        "tsc --project=scripts/tsconfig.json",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for an indirect run of a package script", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of ["pnpm run gen && tsc", "npm run gen", "pnpm gen", "node --run gen"])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for any other form that the check cannot read", () => {
+      // The real build of core is a plain form, and a package with no build runs no script.
+      expect(
+        failuresOf(
+          "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json",
+        ),
+      ).toEqual([]);
+      expect(failuresOf("")).toEqual([]);
+      for (const build of [
+        "sh -c 'node scripts/gen.mjs' && tsc",
+        "node dist/../scripts/gen.mjs",
+        "node ../core/scripts/gen.mjs",
+        "tsc -p tsconfig.json  && tsc",
+        "tsc -p tsconfig.json; node x.mjs",
+        "node $GEN",
+        "env GEN=1 tsc",
+        "node /repo/packages/core/scripts/gen.mjs",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+  });
+
   it("reads the build script of each package from its manifest (ruling 28 of plan 12n)", () => {
     const manifest = (build: string) =>
       `{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist", "CHANGELOG.md"],\n  "scripts": { "build": "${build}" }\n}\n`;

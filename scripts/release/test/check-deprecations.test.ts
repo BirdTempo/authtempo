@@ -18,6 +18,25 @@ import { summaryLine } from "../src/lib/report.ts";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 
+// The folders of core that the copy of the 0.2.0 walk skips (ruling 32 of plan
+// 12l). Each one is git-ignored and holds no source. A parallel core test run
+// writes and removes the files of .answers and .events: its global setup
+// empties both. Turbo writes the task logs of core in .turbo during the same
+// run. A copy that reads these folders races with those writes. The 12l-int
+// run of 2026-11-01 threw ENOENT on a file of .events that the core run removed.
+const WALK_SKIPS = ["node_modules", "dist", ".answers", ".events", ".turbo"];
+
+/** The filter of the walk's copy of the package folder `root`: false for a path in a skipped folder. */
+const walkKeep = (root: string) => (path: string) =>
+  !relative(root, path)
+    .split(sep)
+    .some((part) => WALK_SKIPS.includes(part));
+
+/** Copies the package folder `from` to `to` as the walk does, with no skipped folder. */
+function walkCopy(from: string, to: string): void {
+  cpSync(from, to, { recursive: true, filter: walkKeep(from) });
+}
+
 /** Three items in the form of release/deprecations.json, with one or two markers each. */
 const ENTRIES: Deprecation[] = [
   {
@@ -447,22 +466,12 @@ describe("check-deprecations", () => {
     const entries = readDeprecations(repo);
     const core = join(repo, "packages/core");
     const copy = mkdtempSync(join(tmpdir(), "authtempo-deprecations-walk-"));
-    // The folders of core that the copy skips (ruling 32 of plan 12l). Each one
-    // is git-ignored and holds no source. A parallel core test run writes and
-    // removes the files of .answers and .events: its global setup empties both.
-    // Turbo writes the task logs of core in .turbo during the same run. A copy
-    // that reads these folders races with those writes. The 12l-int run of
-    // 2026-11-01 threw ENOENT on a file of .events that the core run removed.
-    const skips = ["node_modules", "dist", ".answers", ".events", ".turbo"];
-    const keep = (path: string) =>
-      !relative(core, path)
-        .split(sep)
-        .some((part) => skips.includes(part));
+    const keep = walkKeep(core);
     try {
-      cpSync(core, join(copy, "packages/core"), { recursive: true, filter: keep });
+      walkCopy(core, join(copy, "packages/core"));
       // The copy holds no skipped folder. The records of a core test run stay
       // on disk after it, so the source has them after any run of core's tests.
-      for (const name of skips) {
+      for (const name of WALK_SKIPS) {
         expect(existsSync(join(copy, "packages/core", name)), name).toBe(false);
       }
       // These two checks hold the list on a machine with no records.
@@ -494,6 +503,31 @@ describe("check-deprecations", () => {
       );
     } finally {
       rmSync(copy, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a .turbo folder in the copy of the walk (follow-up 11 of plan 12l)", () => {
+    // A package tree with a source file and a README, and no folder that the walk skips.
+    const tree = mkdtempSync(join(tmpdir(), "authtempo-deprecations-tree-"));
+    const copies = mkdtempSync(join(tmpdir(), "authtempo-deprecations-copies-"));
+    const fileCount = (dir: string) =>
+      readdirSync(dir, { recursive: true, withFileTypes: true }).filter((d) => d.isFile()).length;
+    try {
+      mkdirSync(join(tree, "src"));
+      writeFileSync(join(tree, "src/index.ts"), "export {};\n");
+      writeFileSync(join(tree, "README.md"), "# a\n");
+      walkCopy(tree, join(copies, "before"));
+      const before = fileCount(join(copies, "before"));
+      expect(before).toBe(2);
+      // Turbo writes a task log of the package in .turbo.
+      mkdirSync(join(tree, ".turbo"));
+      writeFileSync(join(tree, ".turbo/turbo-test.log"), "test: ok\n");
+      walkCopy(tree, join(copies, "after"));
+      expect(existsSync(join(copies, "after/.turbo"))).toBe(false);
+      expect(fileCount(join(copies, "after"))).toBe(before);
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+      rmSync(copies, { recursive: true, force: true });
     }
   });
 

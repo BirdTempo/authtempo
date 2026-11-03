@@ -11,7 +11,7 @@ import {
   STEP_TIMEOUT_MS,
   setLimitForTest,
 } from "../src/lib/run-sync.ts";
-import { STALL_MS, withLimit } from "./support/stall.ts";
+import { OUTPUT_STALL_MS, STALL_MS, withLimit } from "./support/stall.ts";
 
 const SRC = new URL("../src/", import.meta.url);
 const source = (file: string) => readFileSync(new URL(file, SRC), "utf8");
@@ -38,13 +38,14 @@ describe("runSync", () => {
       // exec keeps the pid of sh, and sleep keeps the ignored SIGTERM.
       const script = `echo $$ > "$0"; trap '' TERM; exec sleep 30`;
       const start = Date.now();
-      const error = withLimit("step", STALL_MS, () =>
+      // The test reads the pid file, which the shell writes before the kill.
+      const error = withLimit("step", OUTPUT_STALL_MS, () =>
         thrownBy(() => runSync("sh", ["-c", script, pidFile], { limit: "step" })),
       );
       expect(Date.now() - start).toBeLessThan(10_000);
       expect(error).toBeInstanceOf(RunTimeout);
       expect((error as Error).message).toBe(
-        `sh -c ${script} ${pidFile} did not end in ${STALL_MS} ms`,
+        `sh -c ${script} ${pidFile} did not end in ${OUTPUT_STALL_MS} ms`,
       );
       // spawnSync waits for the child after SIGKILL, so its pid names no process.
       const pid = Number(readFileSync(pidFile, "utf8").trim());
@@ -56,7 +57,7 @@ describe("runSync", () => {
   });
 
   it("keeps the output of a call up to the kill (review of Task 1 of plan 12n, M2)", () => {
-    const error = withLimit("step", STALL_MS, () =>
+    const error = withLimit("step", OUTPUT_STALL_MS, () =>
       thrownBy(() =>
         runSync("sh", ["-c", "echo out; echo err >&2; exec sleep 30"], { limit: "step" }),
       ),

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BREAKING, isBreaking, unreadBreaking } from "./check-pack.ts";
 import { parseChangeset } from "./lib/changeset-file.ts";
@@ -57,8 +57,9 @@ export interface ChangesetsInput {
  * The files of a released package that need no changeset, each with its reason
  * (spec 33 item 2). A path is relative to the package folder. A row exempts no
  * file that the `files` field packs, unless the row says `packed: true`. A row
- * with `unbuilt: true` exempts no file of a package whose build runs a file
- * of its own scripts/ folder.
+ * with `unbuilt: true` exempts a file only under a plain build of its package.
+ * `plainBuild` reads that form, which names no file of the package's own
+ * scripts/ folder.
  */
 export const EXEMPT_PATTERNS: readonly {
   pattern: RegExp;
@@ -89,7 +90,8 @@ export const EXEMPT_PATTERNS: readonly {
   // adapter-d1 (ruling 28 of plan 12n). packedBy reads the files field, so a
   // packed script still needs a changeset. A build that runs a script of the
   // package writes dist with it, as the CLI does with copy-templates.mjs. So
-  // the row exempts no file under scripts/ of such a package.
+  // the row exempts no file under scripts/ of such a package. A build that the
+  // check cannot read as a plain form counts as such a build.
   {
     pattern: /^scripts\//,
     reason: "a script that the build does not run is not in the pack",
@@ -97,8 +99,40 @@ export const EXEMPT_PATTERNS: readonly {
   },
 ];
 
-/** A command of a build script that runs a file of the package's own scripts/ folder. */
-const OWN_SCRIPT = /(?:^|[\s&|;(])(?:\.\/)?scripts\//;
+/**
+ * The programs that a plain build may start. node runs the file that it names,
+ * and tsc compiles. A package manager, a shell, or another tool can run a
+ * package script by its name, and the check does not read that script.
+ */
+const PLAIN_PROGRAMS = new Set(["node", "tsc"]);
+
+/** A word of a plain build. A quote, `=`, `$`, or a leading `/` makes no plain word. */
+const PLAIN_WORD = /^[\w@.+-][\w@./+-]*$/;
+
+/**
+ * True when the build of the package in `dir` is a plain form that names no
+ * file of its own scripts/ folder. A plain form is a list of commands joined
+ * by " && ". Each command is words with one space between them, and starts
+ * with node or tsc. node takes no flag, so `node --run <name>` gives no plain
+ * form. The check reads each word as a path from `dir`. Any other form fails
+ * closed: the check counts it as a build that runs a script. A package with
+ * no build runs no script. The rule comes from L3 of the review of the Task 1
+ * fix of plan 12n.
+ */
+function plainBuild(build: string, dir: string): boolean {
+  if (build === "") return true;
+  const own = `${dir}/scripts`;
+  return build.split(" && ").every((command) => {
+    const [program, ...words] = command.split(" ");
+    if (program === undefined || !PLAIN_PROGRAMS.has(program)) return false;
+    if (!words.every((w) => PLAIN_WORD.test(w))) return false;
+    if (program === "node" && words.some((w) => w.startsWith("-"))) return false;
+    return words.every((w) => {
+      const path = posix.join(dir, w);
+      return path !== own && !path.startsWith(`${own}/`);
+    });
+  });
+}
 
 /** A files entry that the check reads: folder names and file names with "/", and no glob. */
 const PLAIN_PATH = /^[\w@-][\w@.-]*(\/[\w@.-]+)*$/;
@@ -319,7 +353,8 @@ export function checkChangesets(input: ChangesetsInput): Report {
     // A file in the tarball changes what an app installs, so it is never exempt.
     const packed = packedBy(inner, files[name]);
     // With no build map, the check does not guess, so each build counts as one that runs a script.
-    const builtWithScript = input.builds === undefined || OWN_SCRIPT.test(input.builds[name] ?? "");
+    const builtWithScript =
+      input.builds === undefined || !plainBuild(input.builds[name] ?? "", dir);
     if (
       EXEMPT_PATTERNS.some(
         (row) =>

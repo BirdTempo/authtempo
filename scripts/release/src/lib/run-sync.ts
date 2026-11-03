@@ -9,29 +9,34 @@ import { type SpawnSyncOptionsWithStringEncoding, spawnSync } from "node:child_p
 
 /**
  * The limit of one git call. Ten git calls of these scripts each took at most
- * 29 ms on this repository, on 2026-11-03 at load 2.6 to 3.7 on 18 cores.
- * Each test of git.test.ts makes several git calls. In the rehearsal logs of
- * 2026-10-31 to 2026-11-03, each such test took at most 662 ms, at load 6.9
- * to 24.1.
+ * 29 ms on this repository on 2026-11-03, on one host with 18 cores. The
+ * 1-minute load was 2.69 at the start and 2.64 at the end (log:
+ * .superpowers/tools/logs/measure-12n-t1-2026-11-03.log). Each test of
+ * git.test.ts makes several git calls. In the six rehearsal logs of 2026-10-31
+ * to 2026-11-03 (.superpowers/tools/logs/rehearse-*.log), each such test took
+ * at most 662 ms. There the 1-minute load was 6.93 to 12.75 at the start of
+ * release-check and 12.92 to 16.83 at its end.
  */
 export const GIT_TIMEOUT_MS = 60_000;
 
 /**
  * The limit of one npm read, such as npm view, and of changeset status. On
- * 2026-11-03, at load 2.6 to 3.7 on 18 cores, npm view on the public registry
- * took at most 1022 ms. npm --version took at most 139 ms, and changeset
- * status took at most 498 ms.
+ * 2026-11-03, on one host with 18 cores, npm view on the public registry took
+ * at most 1022 ms. npm --version took at most 139 ms, and changeset status
+ * took at most 498 ms. The 1-minute load was 2.69 at the start and 2.64 at the
+ * end (log: .superpowers/tools/logs/measure-12n-t1-2026-11-03.log).
  */
 export const REGISTRY_TIMEOUT_MS = 120_000;
 
 /**
  * The limit of one step of the dry run, such as an install, a build, a pack,
- * or a publish dry run. On 2026-11-03, at a 1-minute load of 5.5 to 7.7 on 18
- * cores, the full dry run took 29.5 s. Its slowest step took 8.4 s: node
- * smoke.mjs of the kits phase, up to the end of the run. The build took 5.0 s,
- * and the install took 2.1 s. publish.ts gives each npm publish this limit,
- * the widest one. A real npm publish has no measure yet. The first real
- * publish gives it.
+ * or a publish dry run. On 2026-11-03, on one host with 18 cores, the full dry
+ * run took 29.5 s. The 1-minute load was 5.54 at the start and 7.73 at the end
+ * (log: .superpowers/tools/logs/dry-run-12n-fix1-2026-11-03.log). Its slowest
+ * step took 8.4 s: node smoke.mjs of the kits phase, up to the end of the run.
+ * The build took 5.0 s, and the install took 2.1 s. publish.ts gives each npm
+ * publish this limit, the widest one. A real npm publish has no measure yet.
+ * The first real publish gives it.
  */
 export const STEP_TIMEOUT_MS = 1_200_000;
 

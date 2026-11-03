@@ -22,7 +22,7 @@ import {
   type ViewAnswer,
   viewArgs,
 } from "../src/publish.ts";
-import { STALL_MS, withLimit } from "./support/stall.ts";
+import { NEVER_ENDS, OUTPUT_STALL_MS, STALL_MS, withCommand, withLimit } from "./support/stall.ts";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -104,6 +104,38 @@ function fake(options: {
     calls.filter((c) => c[1] === "publish").map((c) => (c[2] ?? "").split("/").pop());
   return { seams, calls, views, published };
 }
+
+/**
+ * The real seams with a fake npm first on PATH. The seam answers each npm
+ * publish with exit 0 and starts no child process for it. So no test can
+ * publish, also when PATH reaches the real npm.
+ */
+const pathSeams: Seams = {
+  run: (command, args) =>
+    args[0] === "publish" ? { code: 0, stdout: "", stderr: "" } : npmSeams.run(command, args),
+  npmView: (spec, field) => npmSeams.npmView(spec, field),
+};
+/** An npm that answers --version, and each npm view with no output: no such version. */
+const QUICK_NPM = '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 11.19.1; fi\nexit 0\n';
+/** An npm that answers --version, and never ends an npm view. */
+const STALLED_VIEW =
+  '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 11.19.1; exit 0; fi\nexec sleep 30\n';
+
+/** The answer of `fn`, with each write to stdout and stderr dropped: the seams print the output of npm. */
+function quiet<T>(fn: () => T): T {
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    return fn();
+  } finally {
+    stdout.mockRestore();
+    stderr.mockRestore();
+  }
+}
+
+/** The lines of a publish of `out` through the real seams, with `npm` first on PATH. */
+const linesWith = (npm: string, out: string) =>
+  quiet(() => withCommand("npm", npm, () => publishLines(publishOut(out, pathSeams))));
 
 describe("publish", () => {
   it("publishes each tarball that the registry lacks, with latest", () => {
@@ -265,6 +297,30 @@ describe("publish", () => {
     expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
   });
 
+  it("prints a FAIL line, not a stack, when npm --version passes its limit (ruling 41 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    // First an npm that answers at once: the same folder passes.
+    expect(linesWith(QUICK_NPM, out)).toEqual([
+      "publish: PASS published=2 skipped=0 failures=0",
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  published: @authtempo/client@0.1.0 is on the registry",
+    ]);
+    expect(withLimit("step", STALL_MS, () => linesWith(NEVER_ENDS, out))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      `  npm --version did not end in ${STALL_MS} ms`,
+    ]);
+  });
+
+  it("prints a FAIL line, not a stack, when an npm view passes its limit (ruling 41 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    expect(linesWith(QUICK_NPM, out)[0]).toBe("publish: PASS published=2 skipped=0 failures=0");
+    // The first read is the version of the first tarball of the folder.
+    expect(withLimit("registry", STALL_MS, () => linesWith(STALLED_VIEW, out))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      `  npm ${viewArgs("@authtempo/client@0.1.0", "version").join(" ")} did not end in ${STALL_MS} ms`,
+    ]);
+  });
+
   it("names the call and each version after a publish past its limit (review of Task 1 of plan 12n, M2)", () => {
     // core publishes, the client publish never ends, and react gets no call.
     const out = downloaded("0.1.0", true);
@@ -299,7 +355,7 @@ describe("publish", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(capture("stderr"));
     let error: unknown = null;
     try {
-      withLimit("step", STALL_MS, () =>
+      withLimit("step", OUTPUT_STALL_MS, () =>
         npmSeams.run("sh", ["-c", "echo npm notice; echo npm error >&2; exec sleep 30"]),
       );
     } catch (thrown) {

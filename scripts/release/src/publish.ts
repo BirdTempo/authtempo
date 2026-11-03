@@ -239,6 +239,34 @@ function readSums(text: string, failures: string[]): Map<string, string> {
   return sums;
 }
 
+/**
+ * The registry state of each tarball, from at most three npm view reads for
+ * each. They read the version, the latest dist-tag, and for a held version its
+ * dist.integrity. A read past its limit throws its RunTimeout.
+ */
+function registryStates(tarballs: Tarball[], seams: Seams): Record<string, RegistryState> {
+  const registry: Record<string, RegistryState> = {};
+  for (const t of tarballs) {
+    const held = seams.npmView(`${t.name}@${t.version}`, "version");
+    const latest = seams.npmView(t.name, "dist-tags.latest");
+    if ("error" in held) registry[t.name] = { error: held.error };
+    else if ("error" in latest) registry[t.name] = { error: latest.error };
+    else if ("found" in held && held.found === t.version) {
+      // npm view <spec> dist.integrity gives the SHA-512 of the tarball that the registry holds.
+      const integrity = seams.npmView(`${t.name}@${t.version}`, "dist.integrity");
+      registry[t.name] =
+        "error" in integrity
+          ? { error: integrity.error }
+          : {
+              held: true,
+              latest: "found" in latest ? latest.found : null,
+              integrity: "found" in integrity ? integrity.found : null,
+            };
+    } else registry[t.name] = { held: false, latest: "found" in latest ? latest.found : null };
+  }
+  return registry;
+}
+
 export interface Outcome {
   /** Each <name>@<version> that this run published. */
   published: string[];
@@ -255,14 +283,22 @@ export interface Outcome {
  */
 export function publish(dir: string, seams: Seams, listed: string): Outcome {
   const failures: string[] = [];
-  const npm = seams.run("npm", ["--version"]);
-  const npmVersion = npm.code === 0 ? npm.stdout.trim() : `(npm --version exited ${npm.code})`;
   const stop = (failure: string): Outcome => ({
     published: [],
     pending: [],
     skipped: [],
     failures: [failure],
   });
+  let npm: { code: number; stdout: string; stderr: string };
+  try {
+    npm = seams.run("npm", ["--version"]);
+  } catch (error) {
+    // npm --version past its limit gives a FAIL line that names the call, not a
+    // stack (ruling 41 of plan 12n). The check entries do the same.
+    if (!(error instanceof RunTimeout)) throw error;
+    return stop(error.message);
+  }
+  const npmVersion = npm.code === 0 ? npm.stdout.trim() : `(npm --version exited ${npm.code})`;
   if (listed.trim() === "")
     return stop(`${SUMS_ENV} is empty; the job check exports the SHA-256 list as its output sums`);
   if (!existsSync(join(dir, "SHA256SUMS")))
@@ -302,24 +338,14 @@ export function publish(dir: string, seams: Seams, listed: string): Outcome {
     });
   }
   if (failures.length > 0) return { published: [], pending: [], skipped: [], failures };
-  const registry: Record<string, RegistryState> = {};
-  for (const t of tarballs) {
-    const held = seams.npmView(`${t.name}@${t.version}`, "version");
-    const latest = seams.npmView(t.name, "dist-tags.latest");
-    if ("error" in held) registry[t.name] = { error: held.error };
-    else if ("error" in latest) registry[t.name] = { error: latest.error };
-    else if ("found" in held && held.found === t.version) {
-      // npm view <spec> dist.integrity gives the SHA-512 of the tarball that the registry holds.
-      const integrity = seams.npmView(`${t.name}@${t.version}`, "dist.integrity");
-      registry[t.name] =
-        "error" in integrity
-          ? { error: integrity.error }
-          : {
-              held: true,
-              latest: "found" in latest ? latest.found : null,
-              integrity: "found" in integrity ? integrity.found : null,
-            };
-    } else registry[t.name] = { held: false, latest: "found" in latest ? latest.found : null };
+  let registry: Record<string, RegistryState>;
+  try {
+    registry = registryStates(tarballs, seams);
+  } catch (error) {
+    // An npm view past its limit gives such a FAIL line too. publish makes no
+    // plan, so no publish runs.
+    if (!(error instanceof RunTimeout)) throw error;
+    return stop(error.message);
   }
   const plan = publishPlan({ tarballs, sums, registry, npmVersion });
   if (failures.length > 0 || plan.failures.length > 0)
@@ -411,8 +437,10 @@ export function readView(status: number | null, stdout: string, stderr: string):
 
 /**
  * The real seams: npm on the PATH of the publish job. A call past its limit
- * throws an error that names the call. The publish loop prints it as the
- * failure line, and the job fails.
+ * throws a RunTimeout that names the call, and the job fails. npm --version
+ * and each npm view run before the publish loop. publish prints a stalled one
+ * as a FAIL line that names the call, as the check entries do, and no publish
+ * runs. The loop prints a stalled npm publish with each version after it.
  */
 export const npmSeams: Seams = {
   run(command, args) {
