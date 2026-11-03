@@ -1694,7 +1694,7 @@ message names the field and the reason. A field of the wrong form answers
 `VALIDATION_ERROR` (400). The fields map so:
 
 - `providerId` is the connection's label: letters, digits, `_`, and `-`. `_<prefix>-<providerId>` must fit one DNS label of 63 characters.
-- Only the shim writes a label of this form. Through the shim's handler, core's `POST /sso/connections/create` and `POST /sso/connections/update` refuse such a label with `invalid_body` (400). An update also refuses a new label on a connection that holds one. Else a manager of another organization could take a providerId, and its paths would answer 404. Give a connection that core's routes make a label with another character, such as a space.
+- Only the shim writes a label of this form. Through the shim's handler, core's `POST /sso/connections/create` and `POST /sso/connections/update` refuse such a label with `invalid_body` (400). An update also refuses a new label on a connection that holds one. Else a manager of another organization could take a providerId, and its paths would answer 404. The update names its connection in the query (`?id=`), and the shim reads that row before the body. Give a connection that core's routes make a label with another character, such as a space.
 - A call of `auth.tempo.api.sso` does not go through the shim's handler, so nothing refuses its label. Never give `connections.create` or `connections.update` of that api a label of the providerId form. The shim's paths read such a label as a providerId. A second row with the label of a shim provider makes the paths of that provider answer 404.
 - `issuer`, `oidcConfig.clientId`, `clientSecret`, and `scopes` map to the connection's `issuer`, `clientId`, `clientSecret` (sealed with the keyring), and `scope`.
 - `authorizationEndpoint`, `tokenEndpoint`, and `jwksEndpoint` come together, or none of them, and core reads the discovery document.
@@ -1723,10 +1723,10 @@ each connection its own SP entity id, and the provider's answer gives it as
 
 | Better Auth path | Core route |
 | --- | --- |
-| `POST /sso/register` | `POST /sso/connections/create`, then `POST /sso/domains/add` and `POST /sso/domains/update` |
+| `POST /sso/register` | `POST /sso/connections/create?organizationId=`, then `POST /sso/domains/add` and `POST /sso/domains/update` |
 | `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages |
 | `GET /sso/get-provider?providerId=` | `GET /sso/connections` and `GET /sso/domains` |
-| `POST /sso/update-provider` | `POST /sso/connections/update`; a new domain is added and routed, and the old one deleted |
+| `POST /sso/update-provider` | `POST /sso/connections/update?id=`; a new domain is added and routed, and the old one deleted |
 | `POST /sso/delete-provider` | `POST /sso/domains/delete` for each domain of the connection, then `POST /sso/connections/delete` |
 | `POST /sso/request-domain-verification` | `GET /sso/domains`: the token is core's challenge |
 | `POST /sso/verify-domain` | `POST /sso/domains/verify` with Better Auth's record |
@@ -1735,6 +1735,41 @@ each connection its own SP entity id, and the provider's answer gives it as
 | `POST /sso/saml2/sp/acs/:providerId` | `POST /sso/:connectionId/acs` |
 | `GET /sso/saml2/sp/metadata?providerId=` | `GET /sso/:connectionId/metadata` |
 | `/scim/v2/*` | the same paths |
+
+Four SSO connection writes check the caller before they read the body (plan
+12l). They are core's `POST /sso/connections/create` and
+`POST /sso/connections/update`, `/sso/register`, and `/sso/update-provider`.
+Each such write of an account that manages no organization gets a refusal
+before any byte. The refusal is the 403 of the guard or its pre-check, or an
+earlier one, such as 401, 503, 429, 400, or 404. Such an account counts no
+large read. `/sso/delete-provider` and core's `POST /sso/connections/delete`
+read their body first, at most 64 KiB, and then run the guard. The steps of
+core's two connection writes through the shim's handler come in this order:
+
+1. The session, else 401.
+2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
+3. The query: `organizationId` of a create, or `id` of an update and its connection. A bad query answers `invalid_body` (400), and an unknown connection `not_found` (404).
+4. Core's manager guard. For a create, the guard checks the organization of the query. For an update, it checks the organization of the connection that the query names. The guard gives these answers, in its order:
+   - 403 `forbidden_rank` to an impersonation session.
+   - 403 `operator_required` to a platform operator who fails the operator guard and does not own the organization. Past the operator limit of the user, such an operator gets 429 `rate_limited`.
+   - 403 `forbidden_rank` to a caller who is no platform operator and does not own the organization.
+   - 403 `email_unverified` to an owner whose address is not verified.
+   - 403 `second_factor_required` to an owner with no second factor.
+   - 403 `session_not_fresh` to an owner whose session is not fresh. The handler adds Better Auth's code, `SESSION_NOT_FRESH`.
+5. Core's limit of the large reads of the user, else 429.
+6. The read of the body and the label rule. Core then runs no guard and no count again.
+
+The body of `/sso/register` names the organization. The body of
+`/sso/update-provider` names a provider, and the organization comes from
+the connection of that provider. So the shim cannot know the organization
+before the read. Before their read, these two paths run a pre-check of the
+guard: each step that needs no organization. The caller must be a platform
+operator, or own one organization or more. The order: the session, the
+`body_busy` check, the count of the manager write, the pre-check, the count
+of the large read, then the read. A large read that cannot start answers 503
+`SERVICE_UNAVAILABLE`, Better Auth's code for core's `body_busy`. Core's
+guard then runs once after the read, for the organization of the body or of
+the provider.
 
 Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
 `/sso/saml2/sp/slo/:providerId`, and `POST /sso/saml2/logout/:providerId`.

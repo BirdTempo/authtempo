@@ -15,6 +15,7 @@ import {
 } from "../src/engine/password.js";
 import { TWO_FACTOR_TOKEN_RE } from "../src/engine/second-factor.js";
 import { createSession } from "../src/engine/sessions.js";
+import { createConnection } from "../src/engine/sso/connections.js";
 import { USER_INVITE_TOKEN_RE } from "../src/engine/user-invite.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
@@ -24,6 +25,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRouteModules, coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
+import { createTestIdp } from "../src/testing/saml-idp.js";
 import { everyFeature, SOCIAL } from "./every-feature.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { basicHeader, pkce, requestIdOf } from "./oauth-helpers.js";
@@ -330,6 +332,27 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
   );
   await jsonOf(await w.handle(post("/auth/user/delete", {}, cookie)), "the delete request");
   const org = await organizationOf(w, cookie, "setup");
+  // A manager for the two connection writes. They run the guard before the body read (plan 12l),
+  // so a refused body reaches the parse only for a manager. A verified user creates the
+  // organization through the route, then turns on TOTP: the session of the enable is fresh.
+  const boss = await verifiedSession(w.auth, "boss@example.com");
+  const bossOrg = await organizationOf(w, w.cookieOf(boss.token), "boss");
+  const manager = w.cookieOf((await enrolled(w.auth, "boss@example.com")).session.token);
+  // A SAML connection of that organization, which the update names. This world has SAML on, not OIDC.
+  const idp = await createTestIdp({ alg: "ec", entityId: "https://idp.example/metadata" });
+  const connection = await createConnection(
+    w.auth.config,
+    { kind: "app", name: "contract" },
+    {
+      organizationId: bossOrg,
+      kind: "saml",
+      label: "Boss",
+      idpEntityId: idp.entityId,
+      ssoUrl: "https://idp.example/sso",
+      certificates: [idp.certificatePem],
+    },
+  );
+  if (!connection.ok) throw new Error(connection.code);
   const bob = await w.auth.seedUser("bob@example.com");
   const id = "x".repeat(26);
   const rows: BodyRow[] = [
@@ -781,12 +804,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /sso/domains/delete", body: { id }, session: true, refused: INVALID_BODY },
-    // The connection rows of plan 12d Task 3: forbidden_rank for the create, and not_found
-    // for an id that names no connection, past the parse.
+    // The connection rows of plan 12d Task 3. Their query names the row, so the guard runs
+    // before the read (plan 12l), and the manager sends them. The valid create answers
+    // not_found past the parse, since OIDC is off; the valid update changes the connection.
     {
       key: "POST /sso/connections/create",
+      path: `/sso/connections/create?organizationId=${encodeURIComponent(bossOrg)}`,
       body: {
-        organizationId: org,
         kind: "oidc",
         label: "Acme",
         issuer: "https://login.idp.example",
@@ -794,12 +818,15 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
         clientSecret: "acme-secret",
       },
       session: true,
+      headers: manager,
       refused: INVALID_BODY,
     },
     {
       key: "POST /sso/connections/update",
-      body: { id, label: "Acme" },
+      path: `/sso/connections/update?id=${encodeURIComponent(connection.value.id)}`,
+      body: { label: "Acme" },
       session: true,
+      headers: manager,
       refused: INVALID_BODY,
     },
     { key: "POST /sso/connections/delete", body: { id }, session: true, refused: INVALID_BODY },

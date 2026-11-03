@@ -1,4 +1,4 @@
-import type { AnswerOf, BodyOf } from "@authtempo/core/openapi";
+import type { AnswerOf, BodyOf, QueryOf } from "@authtempo/core/openapi";
 import type { RouteKey } from "@authtempo/core/routes";
 import type { CLIENT_CALLS, ClientCall, ClientOperation, Selected } from "../src/calls.js";
 import type { Client } from "../src/client.js";
@@ -10,7 +10,8 @@ import type { ClientResult } from "../src/result.js";
  * `Client` answers each row of `CLIENT_CALLS` but the uncompared ones. Its
  * answer equals the part of the contract's answer that the row's `select`
  * names. For each row of `BODY_AS_INPUT`, the method's input equals the body.
- * `calls.test.ts` holds the three lists to the table.
+ * For each row of `QUERY_AND_BODY_AS_INPUT`, the input equals the query joined
+ * with the body (plan 12l). `calls.test.ts` holds the four lists to the table.
  */
 
 /** True only when A and B are the same type, both ways (plan 11g). */
@@ -73,6 +74,11 @@ type Flat<T> = T extends readonly (infer U)[]
 
 type AnswerEqual<O extends ClientOperation> = Equal<Flat<Value<O>>, Flat<Answer<O>>>;
 type BodyEqual<O extends ClientOperation> = Equal<Flat<Input<Method<O>>>, Flat<BodyOf<KeyOf<O>>>>;
+/** The input of a row that sends its id in the query: the query joined with the body (plan 12l). */
+type QueryAndBodyEqual<O extends ClientOperation> = Equal<
+  Flat<Input<Method<O>>>,
+  Flat<QueryOf<KeyOf<O>> & BodyOf<KeyOf<O>>>
+>;
 
 /**
  * The rows whose method answers the route's answer, or the part that
@@ -337,7 +343,9 @@ export const noFailingAnswer: [FailingAnswer] extends [never] ? true : FailingAn
 /**
  * The rows whose method sends its input as the body, unchanged, so the input
  * type equals the body type. The other compared rows build their own body:
- * a captcha header, a renamed key, a ceremony's response, or no input.
+ * a captcha header, a renamed key, a ceremony's response, or no input. A row
+ * of `QUERY_AND_BODY_AS_INPUT` sends its id in the query and the rest of its
+ * input as the body.
  */
 export const BODY_AS_INPUT = [
   "magicLink.verify",
@@ -404,8 +412,6 @@ export const BODY_AS_INPUT = [
   "sso.domains.verify",
   "sso.domains.update",
   "sso.domains.delete",
-  "sso.connections.create",
-  "sso.connections.update",
   "sso.connections.delete",
   "scim.tokens.create",
   "scim.tokens.revoke",
@@ -478,14 +484,38 @@ export const BODY_ROWS: { readonly [O in BodyAsInput]: BodyEqual<O> } = {
   "sso.domains.verify": true,
   "sso.domains.update": true,
   "sso.domains.delete": true,
-  "sso.connections.create": true,
-  "sso.connections.update": true,
   "sso.connections.delete": true,
   "scim.tokens.create": true,
   "scim.tokens.revoke": true,
 };
 type FailingBody = { [O in BodyAsInput]: BodyEqual<O> extends true ? never : O }[BodyAsInput];
 export const noFailingBody: [FailingBody] extends [never] ? true : FailingBody = true;
+
+/**
+ * The rows whose method sends the id in the query and the other fields in
+ * the body (plan 12l). Core runs the manager guard of these writes before it
+ * reads the body. So the input type equals the query type joined with the
+ * body type.
+ */
+export const QUERY_AND_BODY_AS_INPUT = [
+  "sso.connections.create",
+  "sso.connections.update",
+] as const satisfies readonly Compared[];
+type QueryAndBodyAsInput = (typeof QUERY_AND_BODY_AS_INPUT)[number];
+
+/** One `true` per row: a row whose input differs from the query and the body refuses it on its line. */
+export const QUERY_AND_BODY_ROWS: {
+  readonly [O in QueryAndBodyAsInput]: QueryAndBodyEqual<O>;
+} = {
+  "sso.connections.create": true,
+  "sso.connections.update": true,
+};
+type FailingQueryAndBody = {
+  [O in QueryAndBodyAsInput]: QueryAndBodyEqual<O> extends true ? never : O;
+}[QueryAndBodyAsInput];
+export const noFailingQueryAndBody: [FailingQueryAndBody] extends [never]
+  ? true
+  : FailingQueryAndBody = true;
 
 /** The rows that no method answers as its own value, each with the reason. */
 export const NOT_COMPARED = [

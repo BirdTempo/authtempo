@@ -9,6 +9,7 @@ sources:
   - packages/client/README.md "Account settings"
   - packages/client/src/client.ts
   - packages/client/src/index.ts
+  - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
 ---
 
 **For:** a developer who calls authtempo from a browser app, a native app, a desktop app, or a CLI.
@@ -196,6 +197,8 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 The password, email code, and second factor operations answer `not_found` when the server turns the feature off.
 
 The SSO and SCIM token operations answer `not_found` when the server turns `sso` or `scim` off. A domain, connection, or SCIM token call needs a fresh session of an owner with a second factor on. Wrap each one in `withFresh`. [Enterprise SSO](/docs/guides/sso/) and [SCIM provisioning](/docs/guides/scim/) give the flows.
+
+`sso.connections.create` sends `organizationId` in the query, and `sso.connections.update` sends `id` in the query. The body holds the other fields. Core runs the manager guard before it reads the body.
 
 For passkey autofill, start the autofill when the page loads, before a passkey button can run. A new passkey ceremony ends a waiting one, also a register.
 

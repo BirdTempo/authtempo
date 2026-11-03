@@ -345,6 +345,10 @@ outside the router's segment rule. No answer holds a client secret. The
 directory calls the SCIM routes itself with its token, so the client has
 no SCIM protocol call.
 
+`sso.connections.create` sends `organizationId` in the query, and
+`sso.connections.update` sends `id` in the query. The body holds the
+other fields. Core runs the manager guard before it reads the body.
+
 ## The sign-in additions
 
 These calls serve the sign-in additions of plan 12i. Each answers

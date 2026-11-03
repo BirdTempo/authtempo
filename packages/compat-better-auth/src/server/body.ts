@@ -20,7 +20,7 @@ import { apiError } from "../errors.js";
  * `BodyTooLarge`, and the handler answers 413 `PAYLOAD_TOO_LARGE` there, at
  * the first read. Core's depth and item limits apply before the parse.
  * The read of the clone counts on the share of the client of `request`
- * (ruling 59 of the 12j lane): the user after `countSsoManageWrite`.
+ * (ruling 59 of the 12j lane): the user after `countSsoLargeRead`.
  * The value, or null for a body that is not JSON.
  */
 export async function readJsonOf(request: Request, key?: RouteKey): Promise<unknown> {

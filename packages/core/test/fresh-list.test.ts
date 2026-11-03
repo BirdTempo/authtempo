@@ -158,11 +158,16 @@ async function ownerProbe(): Promise<Map<string, { status: number; error: string
     "/sso/domains/verify": { id: w.domainId },
     "/sso/domains/update": { id: w.domainId },
     "/sso/domains/delete": { id: w.domainId },
-    "/sso/connections/create": { organizationId: w.org, kind: "oidc", label: "Two" },
-    "/sso/connections/update": { id: connection.value.id },
+    "/sso/connections/create": { kind: "oidc", label: "Two" },
+    "/sso/connections/update": {},
     "/sso/connections/delete": { id: connection.value.id },
     "/scim/tokens/create": { organizationId: w.org, name: "next" },
     "/scim/tokens/revoke": { id: token.id },
+  };
+  // The two connection writes name their row in the query (plan 12l).
+  const queries: Readonly<Record<string, string>> = {
+    "/sso/connections/create": `?organizationId=${encodeURIComponent(w.org)}`,
+    "/sso/connections/update": `?id=${encodeURIComponent(connection.value.id)}`,
   };
   const out = new Map<string, { status: number; error: string | undefined }>();
   for (const route of ROUTES.filter(
@@ -178,7 +183,7 @@ async function ownerProbe(): Promise<Map<string, { status: number; error: string
     });
     w.clock.advance(2 * DAY);
     const res = await w.handle(
-      post(`/auth${route.path}`, bodies[route.path] ?? {}, {
+      post(`/auth${route.path}${queries[route.path] ?? ""}`, bodies[route.path] ?? {}, {
         cookie: `__Host-tempo_session=${session}`,
       }),
     );

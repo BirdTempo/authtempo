@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { ipKey } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 // The derivation of core's body limits: the largest valid body of each route (ruling 84 Low 2).
@@ -37,8 +37,45 @@ const FILES = {
   deploy: `${DOCS}docs/operations/deploy.md`,
   expressReadme: `${REPO}packages/express/README.md`,
   sveltekit: `${DOCS}docs/reference/sveltekit.md`,
+  // Plan 12l adds the routes page for its order sentence. So each cap that
+  // the page states in bytes needs a fact below, as on the other pages.
+  routes: `${DOCS}docs/reference/routes.md`,
+  // Plan 12l adds the client page for its paragraph on the two SSO writes (ruling 25).
+  client: `${DOCS}docs/reference/client.md`,
 } as const;
 type FileKey = keyof typeof FILES;
+
+// The README of the compat package, for its SSO order sentences (rr-final M1
+// and L1 of plan 12l). It is not in FILES: FILES holds each cap number of a
+// file, and this README states a SAML size, 262144, that is no body cap.
+const COMPAT_README = `${REPO}packages/compat-better-auth/README.md`;
+// The changeset of plan 12l. The version branch deletes it, so its fact skips there.
+const WRITE_ORDER_CHANGESET = `${REPO}.changeset/sso-write-order.md`;
+// The SSO guard of core: the bound of the member rows of its pre-check (rr-final L2).
+const GUARD = `${REPO}packages/core/src/engine/sso/guard.ts`;
+
+/** The text of the errors page from the heading of `code` to the next heading. */
+function errorSection(code: string): string {
+  const text = textOf(FILES.errors);
+  const start = text.indexOf(`<h3 id="${code}">`);
+  if (start < 0) throw new Error(`no heading of ${code} on the errors page`);
+  const end = text.indexOf("<h3 ", start + 1);
+  return text.slice(start, end < 0 ? undefined : end);
+}
+
+/** The ids of the SSO routes of the routes page whose Errors cell names `code`. */
+function ssoRoutesAnswering(code: string): string[] {
+  return readFileSync(FILES.routes, "utf8")
+    .split('<h3 id="')
+    .slice(1)
+    .flatMap((section) => {
+      const id = section.slice(0, section.indexOf('"'));
+      const errors = /^\| Errors \|(.*)$/m.exec(section)?.[1] ?? "";
+      return /^(get|post)-sso-/.test(id) && errors.includes(`(/docs/reference/errors/#${code})`)
+        ? [id]
+        : [];
+    });
+}
 
 /** The value of a numeric text of the source: digits with `_`, and products such as `2 * 8_388_608`. */
 function numberOf(text: string): number {
@@ -72,6 +109,9 @@ function limitSeconds(name: string): number {
   if (!m) throw new Error(`no limit ${name} in routes/sso.ts`);
   return numberOf(m[1] ?? "");
 }
+
+/** The seconds of each unit in which the routes page states the window of a limit. */
+const UNIT_SECONDS: Readonly<Record<string, number>> = { minute: 60, hour: 3600 };
 
 /** The password sign-ups of one IP in an hour: `SIGN_UP_PER_IP` of engine/password.ts. */
 function signUpsPerIpHour(): number {
@@ -165,6 +205,8 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ],
       ["readme", /The cap is (\d+) (KiB), \d+ KiB for the Apple callback/],
       ["readme", /The body reads of the routes with a cap above (\d+) (KiB) hold/],
+      ["routes", /The cap is (\d+) bytes, except \d+ bytes for `POST \/social\/apple\/callback`/],
+      ["routes", /The body reads of the routes with a cap above (\d+) bytes hold at most/],
     ],
   ],
   [
@@ -174,6 +216,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /(\d+) bytes for `POST \/social\/apple\/callback`/],
       ["limits", /bytes, (\d+) for `POST \/social\/apple\/callback`/],
       ["readme", /(\d+) (KiB) for the Apple callback/],
+      ["routes", /except (\d+) bytes for `POST \/social\/apple\/callback`/],
     ],
   ],
   [
@@ -188,12 +231,22 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // The measure of ruling 56: a parser at this cap on the two SSO paths stopped a process.
       ["express", /with their cap of (\d+) (MiB) as its limit/],
       ["expressReadme", /with their cap of (\d+) (MiB) as its limit/],
+      [
+        "routes",
+        /and (\d+) bytes for `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update`/,
+      ],
     ],
   ],
   [
     "the update cap, as the create cap",
     () => capOf("POST /sso/connections/update"),
-    [["readme", /and (\d+) (MiB) for the two SSO connection writes/]],
+    [
+      ["readme", /and (\d+) (MiB) for the two SSO connection writes/],
+      [
+        "routes",
+        /and (\d+) bytes for `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update`/,
+      ],
+    ],
   ],
   [
     "the largest cap",
@@ -214,6 +267,9 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /\| Nesting and items of one SCIM request body \| (\d+) levels/],
       ["scim", /A body nested deeper than (\d+) levels/],
       ["readme", /A SCIM body nested deeper than (\d+) or/],
+      // The routes page states both, in its rules of every route (ruling 25 of plan 12l).
+      ["routes", /A JSON body nested deeper than (\d+) or with more than \d+ items outside/],
+      ["routes", /A SCIM body nested deeper than (\d+) or with more than \d+ items answers/],
     ],
   ],
   [
@@ -230,6 +286,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Items of one JSON request body \| (\d+) of/],
       ["readme", /or with more than (\d+) items answers `invalid_body`/],
+      ["routes", /or with more than (\d+) items outside its strings answers 400/],
     ],
   ],
   [
@@ -241,6 +298,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["scim", /\| A body over (\d+) (MiB) \| 413 \|/],
       ["readme", /SCIM keeps its own (\d+) (MiB) cap/],
       ["sveltekit", /a SCIM body of up to (\d+) (MiB)/],
+      ["routes", /The SCIM routes answer their own SCIM 413 past (\d+) bytes/],
     ],
   ],
   [
@@ -253,6 +311,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ],
       ["scim", /or with more than (\d+) items of/],
       ["readme", /or with more than (\d+) items answers 400 `invalidSyntax`/],
+      ["routes", /or with more than (\d+) items answers SCIM 400 `invalidSyntax`/],
     ],
   ],
   [
@@ -261,6 +320,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     [
       ["limits", /\| Pairs of one form request body \| (\d+), /],
       ["readme", /A form body of more than (\d+) pairs/],
+      ["routes", /A form body of more than (\d+) pairs gets the refusal of a bad form/],
     ],
   ],
   [
@@ -270,6 +330,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /bytes hold at most (\d+) bytes in this isolate, in two halves/],
       ["limits", /hold at once in one isolate \| (\d+), /],
       ["readme", /hold at most (\d+) (MiB) at once in one isolate/],
+      ["routes", /with a cap above \d+ bytes hold at most (\d+) bytes at once in one isolate/],
     ],
   ],
   [
@@ -280,6 +341,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /of signed-in users hold at once, in each isolate \| (\d+), the user half/],
       ["limits", /stalls an SSO connection write of (\d+) (MiB) fills the user half/],
       ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
+      ["routes", /The reads of signed-in users hold at most (\d+) bytes of it/],
     ],
   ],
   [
@@ -290,6 +352,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /every other body read above the floor holds at once, in each isolate \| (\d+), /],
       ["limits", /so \d+ IPs must send (\d+) (MiB) each/],
       ["readme", /The budget has two halves of (\d+) (MiB) that do not lend/],
+      ["routes", /and every other read at most (\d+) bytes\./],
     ],
   ],
   [
@@ -318,6 +381,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /The answer carries `Retry-After: (\d+)`/],
       ["limits", /503 `body_busy` with `Retry-After: (\d+)`/],
       ["readme", /answers 503 `body_busy` with `Retry-After: (\d+)`/],
+      ["routes", /with `Retry-After: (\d+)`, and no parse runs\. The SCIM routes answer/],
     ],
   ],
   [
@@ -327,6 +391,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["errors", /It got no bytes for (\d+) s, or it ran past/],
       ["limits", /\| The wait of a body read above the floor for its next bytes \| (\d+) s \|/],
       ["readme", /Such a read that gets no bytes for (\d+) s stops and frees its bytes/],
+      ["routes", /Such a read that gets no bytes for (\d+) s answers 408/],
     ],
   ],
   [
@@ -338,6 +403,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["readme", /cap at (\d+) (KiB) per second/],
       // The link that gets 408 for a large body (ruling 72 Low 1).
       ["errors", /A link slower than (\d+) (KiB) per second/],
+      ["routes", /a read that runs past the time of its cap at (\d+) bytes per second/],
     ],
   ],
   [
@@ -355,6 +421,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       // The other large reads each take the least time (ruling 72 Low 1).
       ["limits", /for an SSO connection write, (\d+) s for the others/],
       ["deploy", /while that caller sends \d+ MiB each (\d+) s\. The callers with an IP key/],
+      ["routes", /its cap at \d+ bytes per second, at least (\d+) s\. For a signed-in user/],
     ],
   ],
   [
@@ -366,6 +433,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /or at (\d+) for a signed-in user/],
       ["limits", /an admin must send it at (\d+) (KiB) per second or more/],
       ["readme", /read of a signed-in user takes (\d+) (KiB) per second/],
+      ["routes", /For a signed-in user the rate is (\d+) bytes per second/],
     ],
   ],
   [
@@ -515,6 +583,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["deploy", /one client of (\d+) (MiB) in the budget of the large body reads/],
       ["deploy", /while that caller sends (\d+) (MiB) each \d+ s/],
       ["readme", /One IP holds at most (\d+) (MiB)/],
+      ["routes", /One IP holds at most (\d+) bytes, and so does the one client with no IP/],
     ],
   ],
 ];
@@ -687,5 +756,149 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
                 held.add(m.indices?.[1]?.[0] ?? -1);
       expect({ file, all }).toEqual({ file, all: held.size });
     }
+  });
+});
+
+describe("the order of an SSO connection write (plan 12l)", () => {
+  it("states on each page that the manager guard runs before the body read", () => {
+    for (const [file, re] of [
+      [
+        "routes",
+        // The two writes by name: the delete reads its body first (rr-final M1).
+        /`POST \/sso\/connections\/create` and `POST \/sso\/connections\/update` name their organization or their connection in the query\. So the manager guard runs before their body read\. Each of the two then counts on /,
+      ],
+      [
+        "limits",
+        // Each refusal of such an account comes before any byte, not only the 403 (rr-task6 Low 2).
+        /An account that manages no organization starts no large read\. `POST \/sso\/connections\/create` and `POST \/sso\/connections\/update` refuse each of its writes before any byte\. The refusal is the 403 of the manager guard, or an earlier one, such as 401, 503, 429, 400, or 404\./,
+      ],
+      [
+        "readme",
+        /name their organization or connection in the query, so the manager guard runs before the body read/,
+      ],
+    ] as const)
+      expect(textOf(FILES[file]), file).toMatch(re);
+  });
+
+  it("names the four writes that check before the read, and the floor reads that come first (rr-final M1)", () => {
+    // The delete and the domain writes name their row in the body, so they run managedCall:
+    // the read, then the guard. They have no cap of their own in BODY_CAPS, so the floor bounds the read.
+    expect(source).not.toMatch(/"POST \/sso\/(connections\/delete|domains\/[a-z]+)":/);
+    const kib = constant("BODY_CAP_FLOOR") / 1024;
+    for (const [file, sentence] of [
+      [
+        FILES.routes,
+        `\`POST /sso/connections/delete\` and the domain writes read their body first, at most ${kib} KiB, and then run the manager guard.`,
+      ],
+      [
+        FILES.limits,
+        `\`POST /sso/connections/delete\` reads its body first, at most ${kib} KiB, and then runs the manager guard. A read at the floor holds no half of the body budget.`,
+      ],
+      [
+        COMPAT_README,
+        "Four SSO connection writes check the caller before they read the body (plan 12l). They are core's `POST /sso/connections/create` and `POST /sso/connections/update`, `/sso/register`, and `/sso/update-provider`.",
+      ],
+      [
+        COMPAT_README,
+        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read their body first, at most ${kib} KiB, and then run the guard.`,
+      ],
+    ] as const)
+      expect(textOf(file), file).toContain(sentence);
+  });
+
+  // The version branch deletes each changeset. There the summary counts a skip (ruling 70 of plan 12j).
+  it.skipIf(!existsSync(WRITE_ORDER_CHANGESET))(
+    "names the two writes and the floor read of the delete in the changeset of plan 12l (rr-final M1)",
+    () => {
+      const kib = constant("BODY_CAP_FLOOR") / 1024;
+      const text = textOf(WRITE_ORDER_CHANGESET);
+      for (const sentence of [
+        "An account that manages no organization reads no large body: each of its writes to these two routes gets a refusal before any byte.",
+        `\`POST /sso/connections/delete\` reads its body first, at most ${kib} KiB, and then runs the manager guard.`,
+      ])
+        expect(text).toContain(sentence);
+    },
+  );
+
+  it("states that the body of /sso/update-provider names a provider, not the organization (rr-final L1)", () => {
+    const text = textOf(COMPAT_README);
+    for (const sentence of [
+      "The body of `/sso/register` names the organization. The body of `/sso/update-provider` names a provider, and the organization comes from the connection of that provider. So the shim cannot know the organization before the read. Before their read, these two paths run a pre-check of the guard",
+      "Core's guard then runs once after the read, for the organization of the body or of the provider.",
+    ])
+      expect(text).toContain(sentence);
+  });
+
+  it("states the member rows of the SSO pre-check as guard.ts bounds them (rr-final L2)", () => {
+    const guard = readFileSync(GUARD, "utf8");
+    // The read of the pre-check takes the constant as its limit, so the page states the bound of the code.
+    expect(guard).toContain("{ limit: SSO_PRECHECK_MEMBER_ROWS }");
+    const rows = constant("SSO_PRECHECK_MEMBER_ROWS", guard);
+    expect(textOf(FILES.limits)).toContain(
+      `Through the compatibility package, \`/sso/register\` and \`/sso/update-provider\` run a pre-check of the manager guard before their read. The pre-check reads at most ${rows} member rows of the caller, the first that the storage gives. A caller who is no platform operator, with no row of the owner rank among them, gets 403 before the read. An owner whose row is past those rows can still write through \`POST /sso/connections/create\` and \`POST /sso/connections/update\`, because their query names the row.`,
+    );
+  });
+
+  it("states the order in the errors cell and the client paragraph of Task 6 (ruling 25)", () => {
+    // The Routes cell of `second_factor_required`: one cell, so no `|` between the routes and it.
+    expect(errorSection("second_factor_required")).toMatch(
+      /\| [^|]*The two connection writes answer it before any byte of the body\. \|/,
+    );
+    expect(textOf(FILES.client)).toMatch(
+      /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
+    );
+  });
+
+  it("states the two limits of an SSO manager on the routes page as routes/sso.ts holds them (rr-task6 Low 3)", () => {
+    const text = textOf(FILES.routes);
+    for (const [key, name] of [
+      ["sso-manage:user", "SSO_MANAGE_PER_USER"],
+      ["sso-large-read:user", "SSO_LARGE_READ_PER_USER"],
+    ] as const) {
+      // The page states a limit as `<key>:<userId>`, N per hour, or N per M minutes.
+      const re = new RegExp(`\`${key}:<userId>\`, (\\d+) per (?:(\\d+) )?(minute|hour)s?\\b`, "g");
+      const got = [...text.matchAll(re)].map((m) => ({
+        max: Number(m[1]),
+        seconds: Number(m[2] ?? 1) * (UNIT_SECONDS[m[3] ?? ""] ?? 0),
+      }));
+      expect({ key, stated: got.length > 0 }).toEqual({ key, stated: true });
+      for (const limit of got)
+        expect({ key, ...limit }).toEqual({
+          key,
+          max: limitMax(name),
+          seconds: limitSeconds(name),
+        });
+    }
+  });
+
+  it("states the check after the read on the routes page (rulings 17, 23, and 31)", () => {
+    // The session first, then the one right that the guard checked for the actor (ruling 31).
+    expect(textOf(FILES.routes)).toMatch(
+      /and reads its body last\. Before the act, it checks again that the session is live, and that the caller still holds the right that the guard checked\. For a caller that the guard accepted as a platform operator, that right is the platform role\. For any other caller, it is the owner rank of the organization\./,
+    );
+  });
+
+  it("states the 401 of the check after the read in the unauthorized cell (rulings 23 and 31)", () => {
+    // The Routes cell of `unauthorized`: one cell, so no `|` between the routes and it.
+    expect(errorSection("unauthorized")).toMatch(
+      /\| [^|]*The SSO connection writes \[`POST \/sso\/connections\/create`\]\(\/docs\/reference\/routes\/#post-sso-connections-create\) and \[`POST \/sso\/connections\/update`\]\(\/docs\/reference\/routes\/#post-sso-connections-update\) also answer it after the body read, when the session ended during the read\. \|/,
+    );
+  });
+
+  it("lists each SSO route of forbidden_rank in its errors cell, with the order of the two writes (rr-task6 Low 1)", () => {
+    const cell = errorSection("forbidden_rank");
+    // The routes page holds the Errors cell of each route to core (check-routes).
+    const ids = ssoRoutesAnswering("forbidden_rank");
+    expect(ids.length > 0, "the routes page names no SSO route of forbidden_rank").toBe(true);
+    for (const id of ids)
+      expect({ id, linked: cell.includes(`(/docs/reference/routes/#${id})`) }).toEqual({
+        id,
+        linked: true,
+      });
+    // The guard answers it before any byte. The check after the read answers it too (ruling 17).
+    // That check reads the session first, and a revoke of the role ends the sessions (ruling 31).
+    expect(cell).toMatch(
+      /\| [^|]*The two SSO connection writes answer it before any byte of the body\. After the read, they check the caller again\. An owner who lost the owner rank gets it then\. A platform operator who lost the platform role usually gets 401 \[`unauthorized`\]\(#unauthorized\), because a revoke of the role ends the operator's sessions\. If a removal of the role keeps the session live, the operator gets 403 `forbidden_rank`\. \|/,
+    );
   });
 });

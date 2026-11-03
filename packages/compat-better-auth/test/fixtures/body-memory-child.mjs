@@ -4,17 +4,25 @@
 // and reads one JSON line. A fatal out-of-memory ends the process with no line.
 // It imports the build: the test checks that dist is newer than src first.
 // <path> picks the reads, each sent to the handler of the shim (`app.handler`):
-//   "sso": K signed-in users each post core's SSO connection write of 8 MiB.
-//   "register": K signed-in users each post Better Auth's register of 8 MiB.
+//   "sso": K managers each post core's SSO connection write of 8 MiB, with the
+//     organization in the query.
+//   "register": K managers each post Better Auth's register of 8 MiB, with the
+//     organization in the body.
 //   "acs": K IPs with no session each post a SAML form of SAML_FORM_MAX to core's ACS.
 // Each body streams in chunks of 64 KiB with a turn of the loop between chunks, as a
 // slow client sends them. With "live", each sample runs a GC first: the live memory.
+// Plan 12l: the shim runs core's manager guard before it reads an SSO write. So each user
+// of "sso" and "register" is a manager through the shim's paths. It signs up, verifies,
+// and signs in. It creates its organization on core's POST /organizations/create, the
+// path of `organization.create` of the shim's client. It turns TOTP on through Better
+// Auth's two paths, as `manager` of sso-helpers.ts does.
 import { COOKIE_NAME } from "../../dist/server/shapes.js";
 
 const dist = new URL("../../dist/", import.meta.url);
 const compat = await import(new URL("index.js", dist).href);
 const plugins = await import(new URL("plugins.js", dist).href);
 const core = await import("@authtempo/core");
+const { base32Decode, totpCode } = await import("@authtempo/core/testing");
 // The build of core that the shim imports: the caps of its own source files.
 const coreDist = new URL("./", import.meta.resolve("@authtempo/core"));
 const { LARGE_READ_ANON_BUDGET, REQUEST_BODY_MAX } = await import(
@@ -45,7 +53,11 @@ const app = compat.betterAuth({
   },
   emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
   emailVerification: { sendVerificationEmail: async ({ token }) => void links.push(token) },
-  plugins: [plugins.organization({ sendInvitationEmail: async () => {} }), compat.sso({})],
+  plugins: [
+    plugins.organization({ sendInvitationEmail: async () => {} }),
+    plugins.twoFactor({ accountLockout: { enabled: false } }),
+    compat.sso({}),
+  ],
 });
 
 /** A JSON post of the shim from `ip`, with the session cookie `cookie`. */
@@ -63,20 +75,32 @@ const call = (route, body, cookie, ip) =>
     }),
   );
 
-/** The session cookie of a new verified user of each SSO read. */
+/** The session cookie and the organization of a new manager of each SSO read. */
 const cookies = [];
+const organizations = [];
+const password = "correct horse battery";
 if (path !== "acs")
   for (let i = 0; i < K; i++) {
     const email = `u${i}@example.com`;
     const ip = `10.0.${i >> 8}.${i & 255}`;
-    await call("/password/sign-up", { email, password: "correct horse battery" }, "", ip);
+    await call("/password/sign-up", { email, password }, "", ip);
     await call("/password/verify", { token: links.at(-1) }, "", ip);
-    const r = await call("/password/sign-in", { email, password: "correct horse battery" }, "", ip);
+    const r = await call("/password/sign-in", { email, password }, "", ip);
     const c = (r.headers.getSetCookie().find((s) => s.startsWith(`${COOKIE_NAME}=`)) ?? "").split(
       ";",
     )[0];
     if (!c) throw new Error(`no session cookie for ${email}: ${r.status}`);
+    const made = await call("/organizations/create", { slug: `u${i}-org`, name: `u${i}` }, c, ip);
+    if (made.status !== 200) throw new Error(`no organization for ${email}: ${made.status}`);
+    const { organization } = await made.json();
+    const enable = await call("/two-factor/enable", { password }, c, ip);
+    const { totpURI } = await enable.json();
+    const secret = base32Decode(new URL(totpURI).searchParams.get("secret") ?? "");
+    const code = await totpCode(secret, new Date());
+    const confirm = await call("/two-factor/verify-totp", { code }, c, ip);
+    if (confirm.status !== 200) throw new Error(`no TOTP for ${email}: ${confirm.status}`);
     cookies.push(c);
+    organizations.push(organization.id);
   }
 
 /** A body of `size` bytes: `head`, then "a" to the end, then `tail`. */
@@ -109,11 +133,20 @@ function requestOf(i) {
       body: stream(SAML_FORM_MAX, "SAMLResponse=", ""),
       duplex: "half",
     });
-  const route = path === "sso" ? "/sso/connections/create" : "/sso/register";
+  // Core's create names the organization in its query, the register in its body (plan 12l).
+  const organizationId = organizations[i];
+  const route =
+    path === "sso"
+      ? `/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`
+      : "/sso/register";
+  const head =
+    path === "sso"
+      ? '{"idpMetadata":"'
+      : `{"organizationId":${JSON.stringify(organizationId)},"idpMetadata":"`;
   return new Request(`${BASE}/api/auth${route}`, {
     method: "POST",
     headers: { origin: BASE, "content-type": "application/json", cookie: cookies[i] },
-    body: stream(REQUEST_BODY_MAX, '{"idpMetadata":"', '"}'),
+    body: stream(REQUEST_BODY_MAX, head, '"}'),
     duplex: "half",
   });
 }

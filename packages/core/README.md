@@ -1770,6 +1770,9 @@ writes each value under version 1.
   (`LARGE_READ_USER_MIN_RATE`), so an SSO connection write gets 32 s.
   Each answers 408 `body_timeout`, and SCIM its own 408. No parse
   runs.
+- The two SSO connection writes name their organization or connection in
+  the query, so the manager guard runs before the body read. An account
+  that manages no organization reads no large body.
 - A uniform sign-up of a new address writes rows, and one of a known
   address does not. The time of the answer can differ by that work.
 - The PBKDF2 cost stays at 100000 iterations until a measurement on a

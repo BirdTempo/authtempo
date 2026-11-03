@@ -1,5 +1,6 @@
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { checkDeprecations, entry, sourceFiles } from "../src/check-deprecations.ts";
@@ -440,12 +441,29 @@ describe("check-deprecations", () => {
   it("leaves no read of tempo_session in core after each marker text is removed", () => {
     // The 0.2.0 walk in a copy: remove each marker text of core from its file.
     const entries = readDeprecations(repo);
+    const core = join(repo, "packages/core");
     const copy = mkdtempSync(join(tmpdir(), "authtempo-deprecations-walk-"));
+    // The folders of core that the copy skips (ruling 32 of plan 12l). Each one
+    // is git-ignored and holds no source. A parallel core test run writes and
+    // removes the files of .answers and .events: its global setup empties both.
+    // Turbo writes the task logs of core in .turbo during the same run. A copy
+    // that reads these folders races with those writes. The 12l-int run of
+    // 2026-11-01 threw ENOENT on a file of .events that the core run removed.
+    const skips = ["node_modules", "dist", ".answers", ".events", ".turbo"];
+    const keep = (path: string) =>
+      !relative(core, path)
+        .split(sep)
+        .some((part) => skips.includes(part));
     try {
-      cpSync(join(repo, "packages/core"), join(copy, "packages/core"), {
-        recursive: true,
-        filter: (path) => !path.includes("node_modules") && !path.includes("/dist"),
-      });
+      cpSync(core, join(copy, "packages/core"), { recursive: true, filter: keep });
+      // The copy holds no skipped folder. The records of a core test run stay
+      // on disk after it, so the source has them after any run of core's tests.
+      for (const name of skips) {
+        expect(existsSync(join(copy, "packages/core", name)), name).toBe(false);
+      }
+      // These two checks hold the list on a machine with no records.
+      expect(keep(join(core, ".events/credentials-1-1.jsonl"))).toBe(false);
+      expect(keep(join(core, ".answers/1-1.jsonl"))).toBe(false);
       for (const m of entries.flatMap((e) => e.markers)) {
         if (!m.file.startsWith("packages/core/")) continue;
         const path = join(copy, m.file);

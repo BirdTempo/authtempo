@@ -258,7 +258,7 @@ async function answerOf() {
   }
   bindBodyRoute(request, route);
   // A read past the share of one IP is the read of a signed-in user: the SSO writes read after
-  // the session (managedCall). With no bind, the client is ip:unknown, whose share of 4 MiB
+  // the session (managedLargeCall). With no bind, the client is ip:unknown, whose share of 4 MiB
   // refused each body at the cap of 8 MiB before the parse (rulings 66 and 69 of the 12j lane).
   bindBodyClient(request, cap > LARGE_READ_SHARE ? "user:memory" : "ip:memory");
   try {

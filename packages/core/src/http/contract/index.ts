@@ -85,7 +85,10 @@ export type BodyOf<K extends RouteKey> =
     ? z.input<S>
     : never;
 
-/** The query that a GET takes, as a client sends it; `never` for a route with no query. */
+/**
+ * The query of a GET, or of a POST that names its row before its body read
+ * (plan 12l), as a client sends it. It is `never` for a route with no query.
+ */
 export type QueryOf<K extends RouteKey> =
   ContractOf<K> extends {
     readonly query: { readonly schema: infer S extends z.ZodType };

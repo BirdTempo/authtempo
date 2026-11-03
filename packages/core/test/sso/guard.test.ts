@@ -64,15 +64,18 @@ async function send(
   return [res.status, await res.json()];
 }
 
-/** The input of an OIDC connection of `organizationId`. */
-const connection = (organizationId: string) => ({
-  organizationId,
+/** The body of an OIDC connection create. The organization is in the query (plan 12l). */
+const connection = () => ({
   kind: "oidc",
   label: "Acme IdP",
   issuer: "https://login.idp.example/acme",
   clientId: "acme",
   clientSecret: "acme-secret-0123456789",
 });
+
+/** The path of a connection create for `organizationId` (plan 12l). */
+const createPath = (organizationId: string) =>
+  `/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`;
 
 describe("the SSO manager guard (plan 12d Task 3)", () => {
   it("answers one code per failed step of the manager guard", async () => {
@@ -123,7 +126,7 @@ describe("the SSO manager guard (plan 12d Task 3)", () => {
     if (!started.ok) throw new Error(started.code);
     const token = started.value.token;
     // The router refuses each write to an impersonation session.
-    expect(await send(w, "POST", "/sso/connections/create", connection(w.org), token)).toEqual([
+    expect(await send(w, "POST", createPath(w.org), connection(), token)).toEqual([
       403,
       { error: "impersonation_session" },
     ]);
@@ -149,13 +152,7 @@ describe("the SSO manager guard (plan 12d Task 3)", () => {
         { field: "userId", op: "eq", value: w.operator.user.id },
       ]),
     ).toBeNull();
-    const [status, body] = await send(
-      w,
-      "POST",
-      "/sso/connections/create",
-      connection(w.org),
-      w.operator.token,
-    );
+    const [status, body] = await send(w, "POST", createPath(w.org), connection(), w.operator.token);
     expect(status).toBe(200);
     const id = (body as { connection: { id: string } }).connection.id;
     const rows = await w.auth.storage.findMany("operatorAudit", [

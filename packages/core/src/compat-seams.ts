@@ -1,4 +1,5 @@
 import type { ScimCaller } from "./engine/scim/tokens.js";
+import type { SsoActor } from "./engine/sso/guard.js";
 
 /**
  * The seams of a compat package (plan 12d Task 14, ruling 61 P3). Each one
@@ -6,7 +7,9 @@ import type { ScimCaller } from "./engine/scim/tokens.js";
  * copies, or a Request that the compat package built. Only core's own
  * functions of `compat.ts` set a value. A core route or the sweep reads the
  * value in place of its own input. Every other step stays core's: the
- * session, the limiter, the manager guard, the scopes, and the audit row.
+ * session, the limiter, the scopes, and the audit row. The manager guard
+ * stays core's too: `checkSsoManager` runs core's guard before the read of
+ * the package. The mark carries the actor of that run (plan 12l).
  */
 
 /**
@@ -38,6 +41,15 @@ const ssoManageCounted = new WeakMap<Request, string>();
  * counted, and whether the counts allowed it (rulings 69 and 72 Low 2).
  */
 const largeReadCounted = new WeakMap<Request, { userId: string; allowed: boolean }>();
+/**
+ * The manager guard of an SSO connection write that a compat package ran
+ * before its own read (plan 12l). The mark holds the user, the
+ * organization, and the actor that the guard built.
+ */
+const ssoManagerChecked = new WeakMap<
+  Request,
+  { userId: string; organizationId: string; actor: SsoActor }
+>();
 
 export function setConfigDomainRecord(input: object, record: DomainRecordOf): void {
   configRecords.set(input, record);
@@ -87,11 +99,12 @@ export function markSsoManageCounted(request: Request, userId: string): void {
 /**
  * Marks `request` as one SSO connection write of `userId` whose large body
  * read core's limits counted already (ruling 69 of the 12j lane), with the
- * outcome of those counts. Only `countSsoManageWrite` sets the mark, after
- * the counts. A refused count marks too, so core answers 429 and counts the
- * read no more (ruling 72 Low 2). A shim that passes a refused write to
- * core then gives one `limit.hit`, not two. Ruling 75 of the 12j lane
- * removed the count of the deployment that this mark first served.
+ * outcome of those counts. Only `countSsoLargeRead` sets the mark, after
+ * the count: plan 12l moved the count there from `countSsoManageWrite`. A
+ * refused count marks too, so core answers 429 and counts the read no more
+ * (ruling 72 Low 2). A shim that passes a refused write to core then gives
+ * one `limit.hit`, not two. Ruling 75 of the 12j lane removed the count of
+ * the deployment that this mark first served.
  */
 export function markLargeReadCounted(request: Request, userId: string, allowed: boolean): void {
   largeReadCounted.set(request, { userId, allowed });
@@ -105,10 +118,30 @@ function moveMark<V>(marks: WeakMap<Request, V>, from: Request, to: Request): vo
   marks.set(to, value);
 }
 
-/** Moves the marks of `from` to `to`, a request that core gets in place of `from`. No mark, no move. */
+/**
+ * Marks `request` as one SSO connection write whose manager guard passed
+ * for `userId` and `organizationId` (plan 12l, ruling 4 of its lane). The
+ * guard ran before the read of a compat package. The mark holds the actor
+ * that the guard built.
+ * Only `checkSsoManager` sets the mark, after the guard passes.
+ */
+export function markSsoManagerChecked(
+  request: Request,
+  userId: string,
+  organizationId: string,
+  actor: SsoActor,
+): void {
+  ssoManagerChecked.set(request, { userId, organizationId, actor });
+}
+
+/**
+ * Moves the marks of `from` to `to`, a request that core gets in place of
+ * `from`: the counts, and the guard mark of plan 12l. No mark, no move.
+ */
 export function moveSsoManageCounted(from: Request, to: Request): void {
   moveMark(ssoManageCounted, from, to);
   moveMark(largeReadCounted, from, to);
+  moveMark(ssoManagerChecked, from, to);
 }
 
 /**
@@ -134,4 +167,23 @@ export function takeLargeReadCounted(
   largeReadCounted.delete(request);
   if (mark?.userId !== userId) return null;
   return mark.allowed ? "allowed" : "refused";
+}
+
+/**
+ * The actor of the guard mark of `request` when the mark names `userId`
+ * and `organizationId`, else null (plan 12l). Core's two connection writes
+ * take it before their guard. With an actor, the guard does not run again,
+ * and core acts as the actor of the mark. So a platform operator counts
+ * once on `operator:user`. The mark goes at the take, a mark of another
+ * user or organization too, so it covers one write only.
+ */
+export function takeSsoManagerChecked(
+  request: Request,
+  userId: string,
+  organizationId: string,
+): SsoActor | null {
+  const mark = ssoManagerChecked.get(request);
+  ssoManagerChecked.delete(request);
+  if (mark?.userId !== userId || mark.organizationId !== organizationId) return null;
+  return mark.actor;
 }

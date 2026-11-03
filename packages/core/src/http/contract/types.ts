@@ -36,7 +36,11 @@ export type AnswerKind =
  * so the schema of the parse is the schema of the document.
  */
 export interface RouteContract {
-  /** The query parameters of a GET. `hand`: the route reads them by hand, and a test holds them to the schema. */
+  /**
+   * The query parameters of a GET, or of a POST that names its row before
+   * its body read (plan 12l). `hand`: the route reads them by hand, and a
+   * test holds them to the schema.
+   */
   readonly query?: { readonly schema: z.ZodType; readonly parsedBy: "zod" | "hand" };
   /** The body, and the media types that the route reads: readJson is ["json"], readBody is ["json", "form"]. */
   readonly body?: {

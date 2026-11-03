@@ -84,14 +84,21 @@ async function send(
   return [res.status, (await res.json()) as Record<string, unknown>];
 }
 
-const oidcBody = (organizationId: string) => ({
-  organizationId,
+/** The body of an OIDC connection create. The organization is in the query (plan 12l). */
+const oidcBody = () => ({
   kind: "oidc",
   label: "Acme Entra ID",
   issuer: "https://login.idp.example/acme/v2.0",
   clientId: "acme",
   clientSecret: "acme-secret-0123456789",
 });
+
+/** The path of a connection create: the query names the organization of the new row (plan 12l). */
+const createPath = (organizationId: string) =>
+  `/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`;
+
+/** The path of a connection update: the query names the row (plan 12l). */
+const updatePath = (id: string) => `/sso/connections/update?id=${encodeURIComponent(id)}`;
 
 describe("the connection routes (plan 12d Task 3)", () => {
   it("serves the connections of an organization to its owner, with an audit row per write", async () => {
@@ -102,8 +109,8 @@ describe("the connection routes (plan 12d Task 3)", () => {
     const [s1, oidc] = await send(
       w,
       "POST",
-      "/sso/connections/create",
-      { ...oidcBody(w.org), tokenEndpointAuthMethod: "client_secret_basic" },
+      createPath(w.org),
+      { ...oidcBody(), tokenEndpointAuthMethod: "client_secret_basic" },
       w.owner.token,
     );
     expect(s1).toBe(200);
@@ -122,9 +129,8 @@ describe("the connection routes (plan 12d Task 3)", () => {
     const [s2, saml] = await send(
       w,
       "POST",
-      "/sso/connections/create",
+      createPath(w.org),
       {
-        organizationId: w.org,
         kind: "saml",
         label: "Acme Okta",
         idpEntityId: idp.entityId,
@@ -142,15 +148,16 @@ describe("the connection routes (plan 12d Task 3)", () => {
       const [status, body] = await send(
         w,
         "POST",
-        "/sso/connections/update",
-        { id, label: "Renamed", jit: false },
+        updatePath(id),
+        { label: "Renamed", jit: false },
         w.owner.token,
       );
       expect([status, (body.connection as { label: string }).label]).toEqual([200, "Renamed"]);
     }
-    expect(
-      await send(w, "POST", "/sso/connections/update", { id: o.id, kind: "saml" }, w.owner.token),
-    ).toEqual([400, { error: "invalid_body", message: "kind and organizationId do not change" }]);
+    expect(await send(w, "POST", updatePath(o.id), { kind: "saml" }, w.owner.token)).toEqual([
+      400,
+      { error: "invalid_body", message: "kind and organizationId do not change" },
+    ]);
     expect(await send(w, "POST", "/sso/connections/delete", { id: s.id }, w.owner.token)).toEqual([
       200,
       { ok: true },
@@ -170,15 +177,16 @@ describe("the connection routes (plan 12d Task 3)", () => {
   it("answers the refusals of the guard, the input, and the limit", async () => {
     const w = await routeWorld({ factor: false, limits: { connectionsPerOrganization: 1 } });
     const made = await createConnection(w.auth.config, SSO_APP, {
-      ...oidcBody(w.org),
+      ...oidcBody(),
+      organizationId: w.org,
       kind: "oidc",
     });
     if (!made.ok) throw new Error(made.code);
     const id = made.value.id;
     const calls = [
       ["GET", `/sso/connections?organizationId=${w.org}`, null],
-      ["POST", "/sso/connections/create", oidcBody(w.org)],
-      ["POST", "/sso/connections/update", { id, label: "X" }],
+      ["POST", createPath(w.org), oidcBody()],
+      ["POST", updatePath(id), { label: "X" }],
       ["POST", "/sso/connections/delete", { id }],
     ] as const;
     for (const [method, path, body] of calls) {
@@ -193,17 +201,12 @@ describe("the connection routes (plan 12d Task 3)", () => {
       ]);
     }
     // The owner, with the factor and a fresh session, meets the limit of one connection.
+    expect(await send(w, "POST", createPath(w.org), oidcBody(), w.owner.token)).toEqual([
+      409,
+      { error: "connection_limit" },
+    ]);
     expect(
-      await send(w, "POST", "/sso/connections/create", oidcBody(w.org), w.owner.token),
-    ).toEqual([409, { error: "connection_limit" }]);
-    expect(
-      await send(
-        w,
-        "POST",
-        "/sso/connections/create",
-        { ...oidcBody(w.org), label: "" },
-        w.owner.token,
-      ),
+      await send(w, "POST", createPath(w.org), { ...oidcBody(), label: "" }, w.owner.token),
     ).toEqual([
       400,
       {
@@ -216,17 +219,20 @@ describe("the connection routes (plan 12d Task 3)", () => {
       { error: "invalid_body" },
     ]);
     for (const [path, body] of [
-      ["/sso/connections/update", { id, more: 1 }],
-      ["/sso/connections/update", { id, tokenEndpointAuthMethod: "private_key_jwt" }],
+      [updatePath(id), { more: 1 }],
+      [updatePath(id), { tokenEndpointAuthMethod: "private_key_jwt" }],
       ["/sso/connections/delete", { id, more: 1 }],
     ] as const)
       expect(await send(w, "POST", path, body, w.owner.token), path).toEqual([
         400,
         { error: "invalid_body" },
       ]);
-    // An id that names no connection, and an organization that does not exist.
-    for (const path of ["/sso/connections/update", "/sso/connections/delete"])
-      expect(await send(w, "POST", path, { id: "c-none" }, w.owner.token), path).toEqual([
+    // An id that names no connection: in the query of the update, in the body of the delete.
+    for (const [path, body] of [
+      [updatePath("c-none"), {}],
+      ["/sso/connections/delete", { id: "c-none" }],
+    ] as const)
+      expect(await send(w, "POST", path, body, w.owner.token), path).toEqual([
         404,
         { error: "not_found" },
       ]);
@@ -237,9 +243,63 @@ describe("the connection routes (plan 12d Task 3)", () => {
     expect(
       await send(w, "GET", "/sso/connections?organizationId=o-none", null, w.operator.token),
     ).toEqual([404, { error: "not_found" }]);
+    expect(await send(w, "POST", createPath("o-none"), oidcBody(), w.operator.token)).toEqual([
+      404,
+      { error: "not_found" },
+    ]);
+  });
+
+  it("refuses an id in the body of a write, and a write with no query, before the act", async () => {
+    const w = await routeWorld();
+    // The body is strict: the organization comes from the query only.
     expect(
-      await send(w, "POST", "/sso/connections/create", oidcBody("o-none"), w.operator.token),
-    ).toEqual([404, { error: "not_found" }]);
+      await send(
+        w,
+        "POST",
+        createPath(w.org),
+        { ...oidcBody(), organizationId: w.org },
+        w.owner.token,
+      ),
+    ).toEqual([400, { error: "invalid_body" }]);
+    expect(await send(w, "POST", "/sso/connections/create", oidcBody(), w.owner.token)).toEqual([
+      400,
+      { error: "invalid_body" },
+    ]);
+    // A repeated key, as readQuery refuses it for the list.
+    expect(
+      await send(
+        w,
+        "POST",
+        `${createPath(w.org)}&organizationId=${w.org}`,
+        oidcBody(),
+        w.owner.token,
+      ),
+    ).toEqual([400, { error: "invalid_body" }]);
+    expect(await send(w, "POST", "/sso/connections/update", { label: "X" }, w.owner.token)).toEqual(
+      [400, { error: "invalid_body" }],
+    );
+    expect(await w.auth.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers not_found for an update whose query names no connection, and forbidden_rank for a create of another organization", async () => {
+    const w = await routeWorld();
+    expect(await send(w, "POST", updatePath("c-none"), { label: "X" }, w.owner.token)).toEqual([
+      404,
+      { error: "not_found" },
+    ]);
+    expect(await send(w, "POST", createPath("o-none"), oidcBody(), w.owner.token)).toEqual([
+      403,
+      { error: "forbidden_rank" },
+    ]);
+    // Each answer comes before the body read: the query names the row (plan 12l).
+    for (const [path, status] of [
+      [updatePath("c-none"), 404],
+      [createPath("o-none"), 403],
+    ] as const) {
+      const request = rawPost(path, JSON.stringify(oidcBody()), w.owner.token);
+      expect((await w.handle(request)).status, path).toBe(status);
+      expect(request.bodyUsed, path).toBe(false);
+    }
   });
 
   it("answers second_factor_required and session_not_fresh on every manager route", async () => {
@@ -257,7 +317,8 @@ describe("the connection routes (plan 12d Task 3)", () => {
       domain: "beta.example",
     });
     const connection = await createConnection(w.auth.config, SSO_APP, {
-      ...oidcBody(org),
+      ...oidcBody(),
+      organizationId: org,
       kind: "oidc",
     });
     if (!domain.ok || !connection.ok) throw new Error("the setup failed");
@@ -268,8 +329,8 @@ describe("the connection routes (plan 12d Task 3)", () => {
       ["POST", "/sso/domains/update", { id: domain.value.id, includeSubdomains: true }],
       ["POST", "/sso/domains/delete", { id: domain.value.id }],
       ["GET", `/sso/connections?organizationId=${org}`, null],
-      ["POST", "/sso/connections/create", oidcBody(org)],
-      ["POST", "/sso/connections/update", { id: connection.value.id, label: "X" }],
+      ["POST", createPath(org), oidcBody()],
+      ["POST", updatePath(connection.value.id), { label: "X" }],
       ["POST", "/sso/connections/delete", { id: connection.value.id }],
     ] as const;
     // The owner has no second factor yet.
@@ -306,8 +367,8 @@ function rawPost(path: string, text: string, token: string | null): Request {
 describe("the body cap of the connection writes (ruling 46 of the 12j lane)", () => {
   it("reads the body of a connection write only after the session check and the limit of the user", async () => {
     const w = await routeWorld();
-    const text = JSON.stringify({ ...oidcBody(w.org), idpMetadata: "m".repeat(200_000) });
-    for (const path of ["/sso/connections/create", "/sso/connections/update"]) {
+    const text = JSON.stringify({ ...oidcBody(), idpMetadata: "m".repeat(200_000) });
+    for (const path of [createPath(w.org), updatePath("c-none")]) {
       const anonymous = rawPost(path, text, null);
       const res = await w.handle(anonymous);
       expect(res.status).toBe(401);
@@ -319,7 +380,7 @@ describe("the body cap of the connection writes (ruling 46 of the 12j lane)", ()
       const res = await w.handle(rawPost("/sso/domains/update", "{}", w.owner.token));
       expect(res.status).toBe(400);
     }
-    const limited = rawPost("/sso/connections/create", text, w.owner.token);
+    const limited = rawPost(createPath(w.org), text, w.owner.token);
     expect((await w.handle(limited)).status).toBe(429);
     expect(limited.bodyUsed).toBe(false);
   });
@@ -330,20 +391,19 @@ describe("the body cap of the connection writes (ruling 46 of the 12j lane)", ()
     expect(cap).toBe(8_388_608);
     // The largest metadata that the schema allows: past the floor of every other route.
     const text = JSON.stringify({
-      organizationId: w.org,
       kind: "saml",
       label: "Acme Okta",
       idpMetadata: "m".repeat(200_000),
     });
     expect(text.length).toBeGreaterThan(BODY_CAP_FLOOR);
     const [status, body] = await (async () => {
-      const res = await w.handle(rawPost("/sso/connections/create", text, w.owner.token));
+      const res = await w.handle(rawPost(createPath(w.org), text, w.owner.token));
       return [res.status, (await res.json()) as { error: string }] as const;
     })();
     expect(status).toBe(400);
     expect(body.error).toBe("invalid_body");
     const over = await w.handle(
-      rawPost("/sso/connections/create", text + " ".repeat(cap + 1 - text.length), w.owner.token),
+      rawPost(createPath(w.org), text + " ".repeat(cap + 1 - text.length), w.owner.token),
     );
     expect(over.status).toBe(413);
     expect(await over.json()).toEqual({ error: "body_too_large" });

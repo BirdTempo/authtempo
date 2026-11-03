@@ -796,8 +796,8 @@ describe("the SAML ACS (plan 12d Task 8)", () => {
     expect(stepsOf(connectionId)).toEqual(["form"]);
     const create = await w.handle(
       post(
-        "/auth/sso/connections/create",
-        { organizationId, kind: "saml", label: "x" },
+        `/auth/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`,
+        { kind: "saml", label: "x" },
         { origin: IDP_ORIGIN, "sec-fetch-site": "cross-site" },
       ),
     );

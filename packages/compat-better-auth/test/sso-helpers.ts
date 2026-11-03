@@ -46,12 +46,17 @@ export function fakeDns(name: string, answers: Map<string, string[]>) {
 /**
  * A shim app with passwords, organizations, and `extra` plugins. `dns`
  * answers each TXT name; two ports ask the same map, as two resolvers that
- * agree.
+ * agree. `platformOrganization` names the platform organization, for an
+ * app whose `operator` makes a platform operator.
  */
 export function ssoApp(
   database: CompatDatabase,
   extra: BetterAuthPlugin[],
-  options: { ssoDns?: boolean; baseURL?: BetterAuthOptions["baseURL"] } = {},
+  options: {
+    ssoDns?: boolean;
+    baseURL?: BetterAuthOptions["baseURL"];
+    platformOrganization?: string;
+  } = {},
 ) {
   const links: string[] = [];
   const dns = new Map<string, string[]>();
@@ -64,6 +69,9 @@ export function ssoApp(
     authtempo: {
       passwordHash: fast,
       ...(options.ssoDns === false ? {} : { ssoDns: [a.port, b.port] }),
+      ...(options.platformOrganization === undefined
+        ? {}
+        : { platformOrganization: options.platformOrganization }),
     },
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: {
@@ -96,10 +104,13 @@ export function ssoApp(
   const callOn = (host: string, path: string, body: unknown, cookie = "") =>
     send("POST", path, body, cookie, host);
   const read = (path: string, cookie = "") => send("GET", path, undefined, cookie);
-  /** A verified user with a session, through the sign-up, the verify link, and the sign-in. */
-  const person = async (email: string) => {
+  /** A user with a verified address and no session, through the sign-up and the verify link. */
+  const verified = async (email: string) => {
     await call("/password/sign-up", { email, password: PASSWORD });
     await call("/password/verify", { token: links.at(-1) });
+  };
+  /** A session of a verified user through the sign-in. */
+  const signedIn = async (email: string) => {
     const signIn = await call("/password/sign-in", { email, password: PASSWORD });
     const row = await database.storage.findOne("user", [
       { field: "email", op: "eq", value: email },
@@ -107,13 +118,13 @@ export function ssoApp(
     if (!row) throw new Error(`no user ${email}`);
     return { user: row, cookie: cookieOf(signIn) };
   };
-  /**
-   * A person with TOTP on, through Better Auth's two paths: enable with the
-   * password, then verify-totp with the session. Core's SSO manager guard
-   * needs it.
-   */
-  const manager = async (email: string) => {
-    const p = await person(email);
+  /** A verified user with a session, through the sign-up, the verify link, and the sign-in. */
+  const person = async (email: string) => {
+    await verified(email);
+    return signedIn(email);
+  };
+  /** TOTP on for the session `p` of `email`, through Better Auth's two paths. */
+  const withTotp = async (email: string, p: Awaited<ReturnType<typeof person>>) => {
     const enable = await call("/two-factor/enable", { password: PASSWORD }, p.cookie);
     const { totpURI } = (await enable.json()) as { totpURI: string };
     const secret = base32Decode(new URL(totpURI).searchParams.get("secret") ?? "");
@@ -142,6 +153,31 @@ export function ssoApp(
     };
     return Object.assign(p, { signInAgain });
   };
+  /**
+   * A person with TOTP on, through Better Auth's two paths: enable with the
+   * password, then verify-totp with the session. Core's SSO manager guard
+   * needs it.
+   */
+  const manager = async (email: string) => withTotp(email, await person(email));
+  /**
+   * A platform operator through the flows of the product, as `adminApp` of
+   * admin-helpers.ts makes one (plan 12l). The user signs up and verifies
+   * the address. The app grants the platform role in process
+   * (`createAdmin`). The user then signs in after the grant and turns TOTP
+   * on. The app needs `platformOrganization` and the admin plugin.
+   */
+  const operator = async (email: string) => {
+    await verified(email);
+    const made = await auth.tempo.api.operator.createAdmin({
+      actor: { kind: "app", name: "setup" },
+      email,
+      reason: "First operator",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    return withTotp(email, await signedIn(email));
+  };
   /** An organization that `owner` creates through core's api, as a person does on its route. */
   const organizationOf = async (owner: Awaited<ReturnType<typeof person>>, slug: string) => {
     const made = await auth.tempo.api.createOrganization({
@@ -152,5 +188,19 @@ export function ssoApp(
     if (!made.ok) throw new Error(made.code);
     return made.value.organization.id;
   };
-  return { auth, database, call, callOn, read, send, person, manager, organizationOf, dns, a, b };
+  return {
+    auth,
+    database,
+    call,
+    callOn,
+    read,
+    send,
+    person,
+    manager,
+    operator,
+    organizationOf,
+    dns,
+    a,
+    b,
+  };
 }

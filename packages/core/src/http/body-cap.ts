@@ -31,10 +31,13 @@ export const BODY_CAP_FLOOR = 65_536;
 /**
  * The routes whose cap is above `BODY_CAP_FLOOR`, from the derivation of
  * 2026-10-30. `POST /social/apple/callback`: 132 537 bytes. The two SSO
- * connection writes: 4 705 616 bytes (`idpMetadata`, `certificates`, and
- * the `mfa` lists). Every other route has a largest body of at most
- * 55 629 bytes (`POST /reauth`). The SSO writes read the body after the
- * session check and the limit of the user (`managedCall` in routes/sso.ts).
+ * connection writes: 4 705 416 bytes (`idpMetadata`, `certificates`, and
+ * the `mfa` lists). That derivation gave 4 705 616 bytes. On 2026-11-01
+ * plan 12l moved the id of the update into its query, so its largest body
+ * lost 200 bytes. Every other route has a largest body of at most 55 629
+ * bytes (`POST /reauth`). The SSO writes read the body after the session
+ * check, the limit of the user, and the manager guard (`managedLargeCall`
+ * in routes/sso.ts, plan 12l).
  */
 export const BODY_CAPS: Readonly<Partial<Record<RouteKey, number>>> = Object.freeze({
   "POST /social/apple/callback": 262_144,
@@ -67,13 +70,15 @@ export const BODY_DEPTH_MAX = 16;
 
 /**
  * The most items of a JSON body: each `[`, `{`, and `,` outside a string.
- * The largest valid body has 230 items by the schema (the SSO connection
- * update), 329 with `scimRoles` at its engine bound of 100 entries. The
- * next power of two is 512. The limit is 8 times that, for the nodes that
- * no schema bounds: a passkey response, a JWK set, and the keys that an
- * object that is not strict ignores. Each item makes at most one value, so
- * a parsed body holds at most this many values beside its strings, and an
- * 8 MiB body of empty arrays cannot exhaust a 128 MB isolate.
+ * The largest valid body has 229 items by the schema (the SSO connection
+ * update), 328 with `scimRoles` at its engine bound of 100 entries. It had
+ * 230 and 329 until plan 12l moved the id of the update into its query on
+ * 2026-11-01. The next power of two is 512. The limit is 8 times that, for
+ * the nodes that no schema bounds: a passkey response, a JWK set, and the
+ * keys that an object that is not strict ignores. Each item makes at most
+ * one value, so a parsed body holds at most this many values beside its
+ * strings, and an 8 MiB body of empty arrays cannot exhaust a 128 MB
+ * isolate.
  */
 export const BODY_ITEMS_MAX = 4096;
 
@@ -129,8 +134,8 @@ export const LARGE_READ_BUDGET = 2 * 8_388_608;
  * The most bytes that the large reads of signed-in users hold at once in
  * one isolate: half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
  * lane). A read counts here when its client is a user (`user:<id>`), which
- * `managedCall` and `countSsoManageWrite` bind after the session check.
- * Each user may hold up to the cap of its read in this half
+ * `managedLargeCall` and `countSsoLargeRead` bind after the session check
+ * (plan 12l). Each user may hold up to the cap of its read in this half
  * (`largeShareOf`). So the reads of any count of accounts cannot reach the
  * other half: SAML sign-in, the Apple callback, and SCIM writes keep it.
  *
@@ -138,9 +143,9 @@ export const LARGE_READ_BUDGET = 2 * 8_388_608;
  * each held 8 MiB of one SSO write for 64 s, and together they filled the
  * budget (Major 1 of rr-12j-bodycap4). Half of the budget is 8 MiB, the cap
  * of an SSO write. So this half holds one SSO write of the largest valid
- * body (4 705 616 bytes). A second such write at the same time answers 503,
- * and its client sends it again after `Retry-After`. One account that
- * stalls a write holds this half for at most 32 s
+ * body (4 705 416 bytes since plan 12l). A second such write at the same
+ * time answers 503, and its client sends it again after `Retry-After`. One
+ * account that stalls a write holds this half for at most 32 s
  * (`LARGE_READ_USER_MIN_RATE`), with one read at a time
  * (`LARGE_READS_PER_USER`), 6 times in an hour (`SSO_LARGE_READ_PER_USER`
  * in routes/sso.ts, ruling 69 of the 12j lane).
@@ -222,9 +227,9 @@ export const LARGE_READ_MIN_RATE = 131_072;
  * The derivation, done 2026-10-30. At `LARGE_READ_MIN_RATE`, one free
  * account that stalled a write of the cap held the user half for 64 s. At
  * 256 KiB per second (2 Mbit/s), a write of the cap (8 MiB) takes 32 s, and
- * the largest valid write (4 705 616 bytes) takes 18 s. So one stall holds
- * the user half for at most 32 s. An admin whose link is slower than this
- * gets 408 for a large write, and the limits page says so.
+ * the largest valid write (4 705 416 bytes since plan 12l) takes 18 s. So
+ * one stall holds the user half for at most 32 s. An admin whose link is
+ * slower than this gets 408 for a large write, and the limits page says so.
  */
 export const LARGE_READ_USER_MIN_RATE = 262_144;
 
@@ -247,12 +252,13 @@ export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
  * deadline, or closed its socket, held the user half for 32 s for free.
  *
  * The derivation, done 2026-10-31. The largest valid SSO connection write,
- * 4 705 616 bytes, takes 4.5 s at 1 MiB per second (8 Mbit/s). A time of
- * 8 s keeps a margin over it. It is less than `LARGE_READ_IDLE_MS` and
- * `LARGE_READ_DEADLINE_FLOOR_MS`, so each 408 of a large read takes longer.
- * A read that spends nothing holds the user half for at most 8 s. An admin
- * on a slower link still gets a write that takes longer. Only the next
- * large write of the account waits for the next window.
+ * 4 705 416 bytes since plan 12l, takes 4.5 s at 1 MiB per second
+ * (8 Mbit/s). A time of 8 s keeps a margin over it. It is less than
+ * `LARGE_READ_IDLE_MS` and `LARGE_READ_DEADLINE_FLOOR_MS`, so each 408 of
+ * a large read takes longer. A read that spends nothing holds the user half
+ * for at most 8 s. An admin on a slower link still gets a write that takes
+ * longer. Only the next large write of the account waits for the next
+ * window.
  */
 export const LARGE_READ_SLOW_MS = 8_000;
 
@@ -265,8 +271,8 @@ export const LARGE_READ_SLOW_MS = 8_000;
  * test/body-limits.ts.
  *
  * The derivation, done 2026-10-31. The largest valid SSO connection write is
- * 4 705 616 bytes. At this rate it takes 4.5 s, so `LARGE_READ_SLOW_MS`, 8 s,
- * keeps a margin over it.
+ * 4 705 416 bytes since plan 12l. At this rate it takes 4.5 s, so
+ * `LARGE_READ_SLOW_MS`, 8 s, keeps a margin over it.
  */
 export const LARGE_READ_SLOW_LINK_RATE = 1_048_576;
 
@@ -321,7 +327,11 @@ export function ipBodyClient(ip: string | null): string {
  */
 const UNKNOWN_CLIENT = ipBodyClient(null);
 
-/** The start of the client of a signed-in user: `managedCall` and `countSsoManageWrite` bind `user:<id>`. */
+/**
+ * The start of the client of a signed-in user. The manager routes of
+ * routes/sso.ts (`managedCall` and `managedLargeCall`) and
+ * `countSsoLargeRead` bind `user:<id>` (plan 12l).
+ */
 const USER_CLIENT = "user:";
 
 /** True when the reads of `client` count in `LARGE_READ_USER_BUDGET`, else in `LARGE_READ_ANON_BUDGET`. */
@@ -398,10 +408,10 @@ const SLOW_OF = new WeakMap<Request, () => Promise<void>>();
  * Binds `request` to `onSlow` (rulings 75 and 79 of the 12j lane). A large
  * read of a user of the request runs it at its end when the read took more
  * than `LARGE_READ_SLOW_MS`. It runs at each end: whole, 408, a closed
- * socket, or past its cap. `managedCall` and `countSsoManageWrite` bind it
- * for an SSO connection write. There it spends the rest of the user's large
- * reads in the window of `sso-large-read:user`. A read that ends within
- * that time, and a read that cannot start, never run it.
+ * socket, or past its cap. `managedLargeCall` and `countSsoLargeRead` bind
+ * it for an SSO connection write (plan 12l). There it spends the rest of
+ * the user's large reads in the window of `sso-large-read:user`. A read
+ * that ends within that time, and a read that cannot start, never run it.
  */
 export function bindSlowRead(request: Request, onSlow: () => Promise<void>): void {
   SLOW_OF.set(request, onSlow);

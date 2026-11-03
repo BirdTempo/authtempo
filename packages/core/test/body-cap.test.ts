@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { banUser } from "../src/engine/operator/ban.js";
+import { createAdmin, revokePlatformRole } from "../src/engine/operator/platform-role.js";
+import { addMember, removeMember } from "../src/engine/organizations.js";
 import { CALLBACK_POST_LIMIT, START_LIMIT } from "../src/engine/social.js";
 import { SCIM_ROLES_MAX } from "../src/engine/sso/connections.js";
 import { SAML_FORM_MAX } from "../src/engine/sso/saml-sp.js";
@@ -50,8 +54,9 @@ import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
 import { observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
-import { ssoAuth } from "./sso/helpers.js";
-import { verifiedSession } from "./totp-helpers.js";
+import { SSO_APP, ssoAuth } from "./sso/helpers.js";
+import { type Manager, managerSession } from "./sso/manager-helpers.js";
+import { enrolled, verifiedSession } from "./totp-helpers.js";
 
 /**
  * The request body limits of core (rulings 43 and 46 of the 12j lane). The
@@ -231,7 +236,8 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
         )
         .join("\n"),
     );
-    expect(rows[0]).toMatchObject({ key: "POST /sso/connections/update", bytes: 4_705_616 });
+    // Plan 12l moves the id of the update into its query: 200 bytes fewer than 4 705 616.
+    expect(rows[0]).toMatchObject({ key: "POST /sso/connections/update", bytes: 4_705_416 });
     // A route above its cap fails, and so does a cap that is not its derived value.
     expect(table.filter((r) => r.bytes >= r.cap)).toEqual([]);
     expect(table.filter((r) => r.cap !== derivedCap(r.bytes)).map((r) => r.key)).toEqual([]);
@@ -286,7 +292,8 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     console.log(
       `body-cap: most items ${most.key} ${most.items}, ${withRoles} with scimRoles, limit=${BODY_ITEMS_MAX}`,
     );
-    expect(most).toMatchObject({ key: "POST /sso/connections/update", items: 230 });
+    // Plan 12l moves the id of the update into its query: one item fewer than 230.
+    expect(most).toMatchObject({ key: "POST /sso/connections/update", items: 229 });
     expect(most.open).toEqual(["POST /sso/connections/update.scimRoles{}"]);
     expect(BODY_ITEMS_MAX).toBe(8 * 2 ** Math.ceil(Math.log2(withRoles)));
   });
@@ -1098,23 +1105,23 @@ describe("the share of one client of the large reads (ruling 59 Major 1 of the 1
     timeout: 30_000,
   }, async () => {
     const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
-    const write = (token: string, ip: string, body: ReadableStream<Uint8Array> | string) =>
-      ssoWrite(w, token, ip, body);
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
+    const write = (who: Manager, ip: string, body: ReadableStream<Uint8Array> | string) =>
+      ssoWrite(w, who.token, ip, body, who.org);
     const first = gatedBody(REQUEST_BODY_MAX, 5 * 1_048_576);
     const second = gatedBody(REQUEST_BODY_MAX, 4 * 1_048_576);
     try {
-      const held = write(ada.token, "203.0.113.1", first.stream);
+      const held = write(ada, "203.0.113.1", first.stream);
       await first.atGate;
       // The same user from another IP: a second large read of the user, refused before any byte (ruling 69).
       const outcome = await Promise.race([
-        write(ada.token, "203.0.113.2", second.stream).then((r) => r.status),
+        write(ada, "203.0.113.2", second.stream).then((r) => r.status),
         second.atGate.then(() => "read past the share of the user"),
       ]);
       expect(outcome).toBe(503);
       // Another user from that IP: the read runs, and the schema refuses the body.
-      expect((await write(bea.token, "203.0.113.2", "{}")).status).toBe(400);
+      expect((await write(bea, "203.0.113.2", "{}")).status).toBe(400);
       first.open();
       expect((await held).status).toBe(400);
     } finally {
@@ -1124,15 +1131,24 @@ describe("the share of one client of the large reads (ruling 59 Major 1 of the 1
   });
 });
 
-/** An SSO connection write of the session `token` from `ip`, through the router of `w`. */
-const ssoWrite = (
+/** The URL of a connection create: its query names the organization of the new row (plan 12l). */
+const createPath = (organizationId: string) =>
+  `${BASE_URL}/auth/sso/connections/create?organizationId=${encodeURIComponent(organizationId)}`;
+
+/** The URL of a connection update: its query names the row (plan 12l). */
+const updatePath = (id: string) =>
+  `${BASE_URL}/auth/sso/connections/update?id=${encodeURIComponent(id)}`;
+
+/** A JSON POST to `url` with the session `token` from `ip`, through the router of `w`. */
+const sessionPost = (
   w: ReturnType<typeof ssoAuth>,
+  url: string,
   token: string,
   ip: string,
   body: ReadableStream<Uint8Array> | string,
 ) =>
   w.handle(
-    new Request(`${BASE_URL}/auth/sso/connections/create`, {
+    new Request(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -1144,6 +1160,30 @@ const ssoWrite = (
       duplex: "half",
     } as RequestInit),
   );
+
+/**
+ * An SSO connection write of the session `token` from `ip`, through the
+ * router of `w`. `organizationId` is the organization of its query (plan 12l).
+ */
+const ssoWrite = (
+  w: ReturnType<typeof ssoAuth>,
+  token: string,
+  ip: string,
+  body: ReadableStream<Uint8Array> | string,
+  organizationId: string,
+) => sessionPost(w, createPath(organizationId), token, ip, body);
+
+/**
+ * An SSO connection update of the session `token` from `ip`, through the
+ * router of `w`. `id` is the connection of its query (plan 12l).
+ */
+const ssoUpdate = (
+  w: ReturnType<typeof ssoAuth>,
+  token: string,
+  ip: string,
+  body: ReadableStream<Uint8Array> | string,
+  id: string,
+) => sessionPost(w, updatePath(id), token, ip, body);
 
 /** "held" when `read` reaches the gate of its body, else how it ended: "ok", or the name of what it threw. */
 const heldOrEnd = (read: Promise<unknown>, atGate: Promise<void>) =>
@@ -1164,8 +1204,8 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
     timeout: 30_000,
   }, async () => {
     const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
     const first = gatedBody(REQUEST_BODY_MAX, 5 * 1_048_576);
     const second = gatedBody(REQUEST_BODY_MAX, 5 * 1_048_576);
     const anon = ["ip:198.51.100.10", "ip:198.51.100.11"].map((client) => ({
@@ -1173,11 +1213,11 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
       body: gatedBody(LARGE_READ_SHARE, LARGE_READ_SHARE - 65_536),
     }));
     try {
-      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream);
+      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream, ada.org);
       await first.atGate;
       // A second user: the user half holds 8 MiB in all, so its read stops there.
       const late = await Promise.race([
-        ssoWrite(w, bea.token, "203.0.113.2", second.stream).then(statusOf),
+        ssoWrite(w, bea.token, "203.0.113.2", second.stream, bea.org).then(statusOf),
         second.atGate.then(() => "read past the user half"),
       ]);
       expect(late).toBe("503 body_busy");
@@ -1212,7 +1252,7 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
     timeout: 30_000,
   }, async () => {
     const w = ssoAuth({ sso: { saml: true }, password: { hash: FAST, uniformSignUp: false } });
-    const ada = await verifiedSession(w, "ada@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
     // Each of 4 IPs posts its share in stalled ACS forms of 1 MiB.
     const per = LARGE_READ_SHARE / 1_048_576;
     const stalls = ["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"].flatMap((ip) =>
@@ -1243,7 +1283,7 @@ describe("the two halves of the budget (ruling 66 Major 1 of the 12j lane)", () 
       );
       // A signed-in user, from an IP that stalls, writes the largest valid SSO body: it reads whole.
       const largest = largestBodies()[0]?.bytes ?? 0;
-      const write = await ssoWrite(w, ada.token, "203.0.113.1", spaceStream(largest));
+      const write = await ssoWrite(w, ada.token, "203.0.113.1", spaceStream(largest), ada.org);
       expect(write.status).toBe(400);
     } finally {
       for (const s of stalls) s.body.open();
@@ -1364,11 +1404,15 @@ describe("a header text that is not an IP (ruling 68 Low 4 and ruling 69 of the 
   });
 });
 
-/** A form body of `bytes` bytes in chunks of 64 KiB that counts the bytes a reader pulled. */
-function countedForm(bytes: number) {
+/**
+ * A form body of `bytes` bytes in chunks of 64 KiB that counts the bytes a
+ * reader pulled. `onPull` runs at each pull, before the chunk goes.
+ */
+function countedForm(bytes: number, onPull: () => void = () => {}) {
   let sent = 0;
   const stream = new ReadableStream<Uint8Array>({
     pull(c) {
+      onPull();
       if (sent >= bytes) return c.close();
       const n = Math.min(65_536, bytes - sent);
       c.enqueue(new Uint8Array(n).fill(0x61));
@@ -1597,13 +1641,17 @@ describe("the kind of a body chunk, not its realm (ruling 66 Low 1 of the 12j la
   });
 });
 
-/** An engine of the SSO writes whose sink keeps each event, with the raw IP, so a test reads the events. */
-function observedSso() {
+/**
+ * An engine of the SSO writes whose sink keeps each event, with the raw IP,
+ * so a test reads the events. `extra` replaces a top key of the config.
+ */
+function observedSso(extra: Partial<AuthConfig> = {}) {
   const batches: AuthEvent[][] = [];
   const w = ssoAuth({
     sso: { saml: true },
     password: { hash: FAST, uniformSignUp: false },
     observe: { sink: { write: (b) => void batches.push([...b]) }, include: { ip: "raw" } },
+    ...extra,
   });
   const events = async () => {
     await w.config.observe.flush();
@@ -1694,20 +1742,20 @@ describe("the bounds of the large reads of one user (ruling 69 of the 12j lane)"
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
     const first = gatedBody(REQUEST_BODY_MAX, 1_048_576);
     try {
-      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream);
+      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream, ada.org);
       await first.atGate;
       // The same account from another IP: its second write gets no byte read.
       const second = countedForm(1_048_576);
-      expect(await statusOf(await ssoWrite(w, ada.token, "203.0.113.2", second.stream))).toBe(
-        "503 body_busy",
-      );
+      expect(
+        await statusOf(await ssoWrite(w, ada.token, "203.0.113.2", second.stream, ada.org)),
+      ).toBe("503 body_busy");
       expect(second.pulled()).toBeLessThanOrEqual(2 * 65_536);
       // Another account writes at once: the read runs, and the schema refuses the body.
-      expect((await ssoWrite(w, bea.token, "203.0.113.3", "{}")).status).toBe(400);
+      expect((await ssoWrite(w, bea.token, "203.0.113.3", "{}", bea.org)).status).toBe(400);
       first.open();
       expect((await held).status).toBe(400);
     } finally {
@@ -1725,11 +1773,11 @@ describe("the bounds of the large reads of one user (ruling 69 of the 12j lane)"
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const stalled = gatedBody(REQUEST_BODY_MAX, 1_048_576);
     let answered: Response | null = null;
-    void ssoWrite(w, ada.token, "203.0.113.1", stalled.stream).then((res) => {
+    void ssoWrite(w, ada.token, "203.0.113.1", stalled.stream, ada.org).then((res) => {
       answered = res;
     });
     try {
@@ -1751,28 +1799,37 @@ describe("the bounds of the large reads of one user (ruling 69 of the 12j lane)"
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
     for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
-      expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+      expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(400);
     const seventh = countedForm(1_048_576);
-    const res = await ssoWrite(w, ada.token, "203.0.113.1", seventh.stream);
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", seventh.stream, ada.org);
     expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
     expect(seventh.pulled()).toBeLessThanOrEqual(2 * 65_536);
     expect((await events()).filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
       "sso-large-read:user",
     ]);
     // The limit is the user's own: another account writes, and the user writes in the next hour.
-    expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(400);
     w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000);
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(400);
   });
 });
 
-/** An SSO connection write of `token` from `ip` with a body of `bytes` bytes and its content-length. */
-const sizedSsoWrite = (w: ReturnType<typeof ssoAuth>, token: string, ip: string, bytes: number) =>
+/**
+ * An SSO connection write of `token` from `ip` with a body of `bytes` bytes
+ * and its content-length. `organizationId` is the organization of its query (plan 12l).
+ */
+const sizedSsoWrite = (
+  w: ReturnType<typeof ssoAuth>,
+  token: string,
+  ip: string,
+  bytes: number,
+  organizationId: string,
+) =>
   w.handle(
-    new Request(`${BASE_URL}/auth/sso/connections/create`, {
+    new Request(createPath(organizationId), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -1819,19 +1876,27 @@ describe("a large read that cannot start spends no count (ruling 72 Minor 1 of t
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
+    // An account that manages nothing (plan 12l).
+    const cy = await verifiedSession(w, "cy@acme.example");
     // Ada holds the user half less 16 bytes, as the probe of rr-bodycap56 did.
     const first = gatedBody(REQUEST_BODY_MAX, REQUEST_BODY_MAX - 16);
     const tries = SSO_MANAGE_PER_USER.max + 1;
     try {
-      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream);
+      const held = ssoWrite(w, ada.token, "203.0.113.1", first.stream, ada.org);
       await first.atGate;
       await settle();
+      // The busy check comes before the guard: an account that manages nothing gets 503 too (plan 12l).
+      expect(await statusOf(await sizedSsoWrite(w, cy.token, "203.0.113.3", 4096, bea.org))).toBe(
+        "503 body_busy",
+      );
       // Bea sends a write of 4 KiB again and again: more than both limits of a user allow.
       const answers: string[] = [];
       for (let i = 0; i < tries; i++)
-        answers.push(await statusOf(await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)));
+        answers.push(
+          await statusOf(await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096, bea.org)),
+        );
       expect(answers).toEqual(Array(tries).fill("503 body_busy"));
       first.open();
       expect((await held).status).toBe(400);
@@ -1840,8 +1905,8 @@ describe("a large read that cannot start spends no count (ruling 72 Minor 1 of t
     }
     // No refused try counted: Bea still has each large read of the hour, then the limit.
     for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
-      expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)).status).toBe(400);
-    expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096)).status).toBe(429);
+      expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096, bea.org)).status).toBe(400);
+    expect((await sizedSsoWrite(w, bea.token, "203.0.113.2", 4096, bea.org)).status).toBe(429);
     const all = await events();
     expect(all.filter((e) => e.name === "limit.hit").map((e) => e.family)).toEqual([
       "sso-large-read:user",
@@ -1861,12 +1926,12 @@ describe("the stall of a large read of a user (ruling 75 of the 12j lane)", () =
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     // Ada's first large read of the hour stalls after 1 MiB.
     const stalled = gatedBody(REQUEST_BODY_MAX, 1_048_576);
-    const pending = ssoWrite(w, ada.token, "203.0.113.1", stalled.stream);
+    const pending = ssoWrite(w, ada.token, "203.0.113.1", stalled.stream, ada.org);
     try {
       await stalled.atGate;
       await vi.advanceTimersByTimeAsync(LARGE_READ_IDLE_MS);
@@ -1877,7 +1942,7 @@ describe("the stall of a large read of a user (ruling 75 of the 12j lane)", () =
     vi.useRealTimers();
     // Five of the six reads of the hour are left, and the stall spent them: 429 before any byte.
     const next = countedForm(1_048_576);
-    const res = await ssoWrite(w, ada.token, "203.0.113.1", next.stream);
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", next.stream, ada.org);
     expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
     expect(next.pulled()).toBeLessThanOrEqual(2 * 65_536);
     // The spend refuses no caller, so the one limit.hit is that 429.
@@ -1885,28 +1950,29 @@ describe("the stall of a large read of a user (ruling 75 of the 12j lane)", () =
       "sso-large-read:user",
     ]);
     // The spend is Ada's own: another account writes at once.
-    expect((await ssoWrite(w, bea.token, "203.0.113.2", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, bea.token, "203.0.113.2", "{}", bea.org)).status).toBe(400);
     // The window ends an hour after Ada's first count: Ada reads again.
     w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000 - 1);
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(429);
     w.clock.advance(1);
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(400);
   });
 
   it("spends nothing at a write that arrives whole within 8 s, after pauses or at once: the user keeps its 6 starts", {
     timeout: 30_000,
   }, async () => {
     const { w } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
     // One write of 256 KiB that arrives in 8 chunks, 50 ms apart, then five small writes.
     const answers = [
-      (await ssoWrite(w, ada.token, "203.0.113.1", trickleBody(262_144, 32_768, 50))).status,
+      (await ssoWrite(w, ada.token, "203.0.113.1", trickleBody(262_144, 32_768, 50), ada.org))
+        .status,
     ];
     for (let i = 1; i < SSO_LARGE_READ_PER_USER.max; i++)
-      answers.push((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status);
+      answers.push((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status);
     expect(answers).toEqual(Array(SSO_LARGE_READ_PER_USER.max).fill(400));
     // The seventh is past the limit of the hour.
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(429);
   });
 });
 
@@ -1916,10 +1982,10 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
   });
 
   /** A write of Ada of 2 MiB that pauses `pauseMs` after 1 MiB, then ends whole: its status. */
-  async function pausedWrite(w: ReturnType<typeof ssoAuth>, token: string, pauseMs: number) {
+  async function pausedWrite(w: ReturnType<typeof ssoAuth>, who: Manager, pauseMs: number) {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const body = gatedBody(2 * 1_048_576, 1_048_576);
-    const pending = ssoWrite(w, token, "203.0.113.1", body.stream);
+    const pending = ssoWrite(w, who.token, "203.0.113.1", body.stream, who.org);
     try {
       await body.atGate;
       await vi.advanceTimersByTimeAsync(pauseMs);
@@ -1935,7 +2001,8 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
     expect(LARGE_READ_SLOW_MS).toBe(8_000);
     // The largest valid SSO connection write takes 4.5 s at 1 MiB per second: 8 s keeps a margin.
     const largest = largestBodies()[0]?.bytes ?? Number.POSITIVE_INFINITY;
-    expect(largest).toBe(4_705_616);
+    // Plan 12l moves the id of the update into its query: 200 bytes fewer than 4 705 616.
+    expect(largest).toBe(4_705_416);
     expect(Math.ceil((largest * 1000) / LARGE_READ_SLOW_LINK_RATE)).toBe(4_488);
     // Each 408 of a large read takes longer than a slow read, so it spends too.
     expect(LARGE_READ_SLOW_MS).toBeLessThan(LARGE_READ_IDLE_MS);
@@ -1946,13 +2013,13 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
     timeout: 30_000,
   }, async () => {
     const { w, events } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const bea = await verifiedSession(w, "bea@acme.example");
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await managerSession(w, "bea@acme.example", "bexley");
     // The read gets no 408: it pauses 9 s, under the idle limit, and ends whole.
-    expect(await pausedWrite(w, ada.token, 9_000)).toBe("400");
+    expect(await pausedWrite(w, ada, 9_000)).toBe("400");
     // Five of the six reads of the hour were left, and the slow read spent them.
     const next = countedForm(1_048_576);
-    const res = await ssoWrite(w, ada.token, "203.0.113.1", next.stream);
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", next.stream, ada.org);
     expect([res.status, await res.json()]).toEqual([429, { error: "rate_limited" }]);
     expect(next.pulled()).toBeLessThanOrEqual(2 * 65_536);
     // The spend refuses no caller, so the one limit.hit is that 429.
@@ -1960,24 +2027,270 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
       "sso-large-read:user",
     ]);
     // The spend is Ada's own: another account writes at once.
-    expect((await ssoWrite(w, bea.token, "203.0.113.2", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, bea.token, "203.0.113.2", "{}", bea.org)).status).toBe(400);
     // The window ends an hour after Ada's first count: Ada reads again.
     w.clock.advance(SSO_LARGE_READ_PER_USER.seconds * 1000 - 1);
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(429);
     w.clock.advance(1);
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(400);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(400);
   });
 
   it("spends nothing at a write that reads whole after 2 s: the user keeps its 6 starts", {
     timeout: 30_000,
   }, async () => {
     const { w } = observedSso();
-    const ada = await verifiedSession(w, "ada@acme.example");
-    const answers = [await pausedWrite(w, ada.token, 2_000)];
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const answers = [await pausedWrite(w, ada, 2_000)];
     for (let i = 1; i < SSO_LARGE_READ_PER_USER.max; i++)
-      answers.push(`${(await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status}`);
+      answers.push(`${(await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status}`);
     expect(answers).toEqual(Array(SSO_LARGE_READ_PER_USER.max).fill("400"));
     // The seventh is past the limit of the hour.
-    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}")).status).toBe(429);
+    expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(429);
+  });
+});
+
+describe("the guard before the read (plan 12l)", () => {
+  it("answers 403 before any byte to an account that manages nothing, and counts no large read", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const ada = await verifiedSession(w, "ada@acme.example");
+    // At each pull of the body: can a fresh user start a write of the cap, and can Ada start a read?
+    const starts: [boolean, boolean][] = [];
+    const body = countedForm(1_048_576, () =>
+      starts.push([
+        largeReadCanStart("user:fresh", REQUEST_BODY_MAX, String(REQUEST_BODY_MAX)),
+        largeReadCanStart(`user:${ada.user.id}`, REQUEST_BODY_MAX, null),
+      ]),
+    );
+    const res = await ssoWrite(w, ada.token, "203.0.113.1", body.stream, "o-any");
+    expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    // The user half held no byte, and Ada ran no large read, at each pull. A read of the body
+    // before the 403 holds its chunks in the half while it pulls the next one.
+    expect(starts.length).toBeGreaterThan(0);
+    expect(starts.filter(([half, own]) => !half || !own)).toEqual([]);
+    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    expect((await events()).filter((e) => e.name === "limit.hit")).toEqual([]);
+    // The 403 counted no large read: once Ada manages an organization, Ada keeps the 6 starts
+    // of the hour.
+    const later = await managerSession(w, "ada@acme.example", "ada-co");
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await ssoWrite(w, later.token, "203.0.113.1", "{}", later.org)).status).toBe(400);
+    expect((await ssoWrite(w, later.token, "203.0.113.1", "{}", later.org)).status).toBe(429);
+  });
+
+  it("answers 404 before any byte to an update whose query names no connection", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso();
+    const bea = await managerSession(w, "bea@acme.example", "acme");
+    const body = countedForm(1_048_576);
+    const res = await ssoUpdate(w, bea.token, "203.0.113.1", body.stream, "c-none");
+    expect([res.status, await res.json()]).toEqual([404, { error: "not_found" }]);
+    expect(body.pulled()).toBeLessThanOrEqual(2 * 65_536);
+    expect((await events()).filter((e) => e.name === "limit.hit")).toEqual([]);
+    // The large read was not counted: the manager keeps 6 starts.
+    for (let i = 0; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(400);
+    expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(429);
+  });
+
+  it("counts the large read once when the body also carries the organization", {
+    timeout: 30_000,
+  }, async () => {
+    const { w } = observedSso();
+    const bea = await managerSession(w, "bea@acme.example", "acme");
+    const res = await ssoWrite(
+      w,
+      bea.token,
+      "203.0.113.1",
+      JSON.stringify({ organizationId: bea.org }),
+      bea.org,
+    );
+    expect([res.status, await res.json()]).toEqual([400, { error: "invalid_body" }]);
+    for (let i = 1; i < SSO_LARGE_READ_PER_USER.max; i++)
+      expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(400);
+    expect((await ssoWrite(w, bea.token, "203.0.113.1", "{}", bea.org)).status).toBe(429);
+  });
+});
+
+/**
+ * A valid connection create whose read waits at a gate (ruling 17 of plan
+ * 12l). It sends the spaces of `gatedBody`, then the JSON of an OIDC
+ * create. JSON allows white space before a value. `atGate` resolves when
+ * the reader has taken 1 MiB, so the guard passed and the read runs.
+ */
+function gatedCreate() {
+  const gated = gatedBody(1_048_576 + 65_536, 1_048_576);
+  const json = new TextEncoder().encode(
+    JSON.stringify({
+      kind: "oidc",
+      label: "Acme IdP",
+      issuer: "https://login.idp.example/acme",
+      clientId: "acme",
+      clientSecret: "acme-secret-0123456789",
+    }),
+  );
+  const stream = gated.stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({ flush: (c) => c.enqueue(json) }),
+  );
+  return { stream, open: gated.open, atGate: gated.atGate };
+}
+
+describe("the check of the actor after the read (rulings 17 and 23 of plan 12l)", () => {
+  /** The steps of the `sso.guard_refused` events. */
+  const guardSteps = (events: AuthEvent[]) =>
+    events.flatMap((e) => (e.name === "sso.guard_refused" ? [e.step] : []));
+
+  /**
+   * Bea, a manager of acme, and Ada, a platform operator who owns no
+   * organization, each made through the flows of the product. The app
+   * makes root the first operator, and with it the platform organization.
+   * Root signed up first, so root is a verified owner of that organization.
+   * Then the app grants Ada the role. So only the platform path of the guard
+   * passes Ada at acme.
+   */
+  async function operatorWorld() {
+    const { w, events } = observedSso({ sso: { oidc: true }, operator: { users: true } });
+    const bea = await managerSession(w, "bea@acme.example", "acme");
+    const admin = async (email: string) => {
+      const made = await createAdmin(w.config, {
+        actor: SSO_APP,
+        email,
+        reason: "the operators of the test",
+        ip: null,
+        userAgent: null,
+      });
+      if (!made.ok) throw new Error(made.code);
+      return made.value.userId;
+    };
+    const root = await verifiedSession(w, "root@platform.example");
+    await admin("root@platform.example");
+    await verifiedSession(w, "ada@ops.example");
+    const adaId = await admin("ada@ops.example");
+    // Ada signs in after the grant and turns on TOTP, so the operator guard passes (ruling 50 of plan 12f).
+    w.clock.advance(1_000);
+    const ada = await enrolled(w, "ada@ops.example");
+    return { w, events, bea, root, ada, adaId };
+  }
+
+  it("refuses the act of an owner whom another owner removes during the read, and writes no row", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso({ sso: { oidc: true } });
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    // An organization keeps one owner or more, so Ada makes Bea a second owner first.
+    const bea = await verifiedSession(w, "bea@acme.example");
+    const added = await addMember(w.config, {
+      user: ada.user,
+      organizationId: ada.org,
+      userId: bea.user.id,
+      role: "owner",
+    });
+    expect(added.ok).toBe(true);
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      // The guard passed before the read, and the read waits at the gate.
+      await body.atGate;
+      const removed = await removeMember(w.config, {
+        user: bea.user,
+        organizationId: ada.org,
+        userId: ada.user.id,
+      });
+      expect(removed.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("refuses the act of a platform operator whom root removes from the platform organization during the read, and writes no row", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events, bea, root, ada, adaId } = await operatorWorld();
+    const platform = await w.storage.findOne("organization", [
+      { field: "slug", op: "eq", value: "platform-co" },
+    ]);
+    if (!platform) throw new Error("no platform organization");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.session.token, "203.0.113.1", body.stream, bea.org);
+      await body.atGate;
+      // The removal through the organization engine keeps the sessions of Ada, so the session
+      // check passes and the check of the role answers.
+      const removed = await removeMember(w.config, {
+        user: root.user,
+        organizationId: platform.id,
+        userId: adaId,
+      });
+      expect(removed.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual(["rank"]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers 401 to an owner whom an operator bans during the read, with no event of the guard, and writes no row (ruling 23)", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events } = observedSso({ sso: { oidc: true }, operator: { users: true } });
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      await body.atGate;
+      // The ban ends the sessions of Ada and keeps her member row, so Ada still owns acme.
+      const banned = await banUser(w.config, {
+        actor: SSO_APP,
+        userId: ada.user.id,
+        reason: "the owner left the company",
+        ip: null,
+        userAgent: null,
+      });
+      expect(banned.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([401, { error: "unauthorized" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual([]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers 401 to a platform operator whose role an operator revokes during the read, and writes no row (ruling 23)", {
+    timeout: 30_000,
+  }, async () => {
+    const { w, events, bea, ada, adaId } = await operatorWorld();
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.session.token, "203.0.113.1", body.stream, bea.org);
+      await body.atGate;
+      const revoked = await revokePlatformRole(w.config, {
+        actor: SSO_APP,
+        userId: adaId,
+        reason: "the operator left the team",
+        ip: null,
+        userAgent: null,
+      });
+      expect(revoked.ok).toBe(true);
+      body.open();
+      const res = await write;
+      // The revoke ends the sessions of Ada, so the session check answers before the check of the role.
+      expect([res.status, await res.json()]).toEqual([401, { error: "unauthorized" }]);
+    } finally {
+      body.open();
+    }
+    expect(guardSteps(await events())).toEqual([]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
   });
 });

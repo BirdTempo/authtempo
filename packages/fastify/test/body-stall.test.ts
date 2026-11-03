@@ -7,6 +7,7 @@ import {
   createPbkdf2PasswordHash,
   type LimiterPort,
 } from "@authtempo/core";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import { authRoutes } from "../src/index.js";
@@ -138,8 +139,15 @@ describe("a stalled client at the SAML ACS through the Fastify binding (ruling 5
 // for 64 s, and could do so 30 times in 15 minutes. Now a user runs one large
 // read at a time, a read of a user ends at 256 KiB per second (32 s for the
 // cap), and a user starts at most 6 large reads in an hour.
+//
+// Plan 12l runs the manager guard before the read of an SSO connection
+// write. So each writer of these tests is a manager of its own
+// organization (`managerCookie`), and an account that manages nothing gets
+// 403 before any byte.
 
 const SSO_WRITE = "/auth/sso/connections/create";
+/** The path of an SSO connection create: its query names the organization (plan 12l). */
+const ssoWritePath = (org: string) => `${SSO_WRITE}?organizationId=${encodeURIComponent(org)}`;
 /** The cap of an SSO connection write, core's REQUEST_BODY_MAX. */
 const SSO_CAP = 8_388_608;
 /** Core's largeReadDeadlineMs of the cap at LARGE_READ_USER_MIN_RATE (256 KiB per second). */
@@ -149,12 +157,19 @@ const LARGE_READS_PER_HOUR = 6;
 
 /** An app of core with SAML and the password sign-up on, on a real port, with `limiter` when given. */
 async function startApp(limiter?: LimiterPort) {
+  // The manager fixture reads the user row by its address, and the verify link of the mail.
+  const storage = createMemoryAdapter();
+  const mails: { to: string; subject: string; text: string }[] = [];
   const auth = createAuth({
     baseURL: "http://localhost",
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [],
-    storage: createMemoryAdapter(),
-    mail: { send: async () => {} },
+    storage,
+    mail: {
+      send: async (m) => {
+        mails.push({ to: m.to, subject: m.subject, text: m.text });
+      },
+    },
     organizations: {},
     sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
@@ -166,11 +181,30 @@ async function startApp(limiter?: LimiterPort) {
   const port = (app.server.address() as AddressInfo).port;
   return {
     port,
+    auth,
+    storage,
+    mails,
     close: async () => {
       app.server.closeAllConnections();
       await app.close();
     },
   };
+}
+
+/** An app of `startApp`. */
+type App = Awaited<ReturnType<typeof startApp>>;
+
+/** The password of each account of these tests. */
+const PASSWORD = "correct horse battery staple 42";
+
+/** The session cookie of an answer, or null. */
+function sessionCookie(res: Response): string | null {
+  return (
+    res.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0] ?? "")
+      .find((c) => c.includes("tempo_session")) ?? null
+  );
 }
 
 /** A sign-up and a sign-in of `email` from `ip`: the session cookie. No organization, no role. */
@@ -180,19 +214,77 @@ async function signedIn(port: number, email: string, ip: string): Promise<string
     origin: "http://localhost",
     "cf-connecting-ip": ip,
   };
-  const body = JSON.stringify({ email, password: "correct horse battery staple 42" });
+  const body = JSON.stringify({ email, password: PASSWORD });
   await fetch(`http://127.0.0.1:${port}/auth/password/sign-up`, { method: "POST", headers, body });
   const res = await fetch(`http://127.0.0.1:${port}/auth/password/sign-in`, {
     method: "POST",
     headers,
     body,
   });
-  const cookie = res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0] ?? "")
-    .find((c) => c.includes("tempo_session"));
-  if (cookie === undefined) throw new Error(`no session: ${res.status}`);
+  const cookie = sessionCookie(res);
+  if (cookie === null) throw new Error(`no session: ${res.status}`);
   return cookie;
+}
+
+/**
+ * A manager of a new organization from `ip`, through the flows of the
+ * product (plan 12l). The sign-up and the verify link of its mail go over
+ * HTTP. The organization comes from `auth.api.createOrganization`, and its
+ * slug is the local part of `email` with "-org". The TOTP setup and enable
+ * go over HTTP. A new sign-in then passes the second factor with a backup
+ * code, so the session is fresh. The answer is that session cookie and the
+ * id of the organization.
+ */
+async function managerCookie(
+  app: App,
+  email: string,
+  ip: string,
+): Promise<{ cookie: string; org: string }> {
+  const post = async (path: string, body: unknown, cookie?: string) => {
+    const res = await fetch(`http://127.0.0.1:${app.port}/auth${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+        "cf-connecting-ip": ip,
+        ...(cookie === undefined ? {} : { cookie }),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+    return res;
+  };
+  await post("/password/sign-up", { email, password: PASSWORD });
+  // The token of the verify link, read as the core tests read it.
+  const mail = app.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
+  const token = /token=([A-Za-z0-9_%-]+)/.exec(mail?.text ?? "")?.[1];
+  if (token === undefined) throw new Error(`no verify link for ${email}`);
+  await post("/password/verify", { token: decodeURIComponent(token) });
+  const first = sessionCookie(await post("/password/sign-in", { email, password: PASSWORD }));
+  if (first === null) throw new Error(`no session for ${email}`);
+  // A read of the user row by its address: the organization API takes the row.
+  const user = await app.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (user === null) throw new Error(`no user ${email}`);
+  const slug = `${email.split("@")[0] ?? "x"}-org`;
+  const made = await app.auth.api.createOrganization({ user, slug, name: slug });
+  if (!made.ok) throw new Error(made.code);
+  const setup = (await (await post("/totp/setup", { password: PASSWORD }, first)).json()) as {
+    secret: string;
+    backupCodes: string[];
+  };
+  const code = await totpCode(base32Decode(setup.secret), new Date());
+  await post("/totp/enable", { code }, first);
+  // The enable took the code of this step, and a code is good once: the new sign-in takes a backup code.
+  const gated = (await (await post("/password/sign-in", { email, password: PASSWORD })).json()) as {
+    twoFactor?: { challenge: string };
+  };
+  const backupCode = setup.backupCodes[0];
+  if (gated.twoFactor === undefined || backupCode === undefined)
+    throw new Error(`no second factor for ${email}`);
+  const verified = await post("/totp/verify", { challenge: gated.twoFactor.challenge, backupCode });
+  const cookie = sessionCookie(verified);
+  if (cookie === null) throw new Error(`no session after the second factor for ${email}`);
+  return { cookie, org: made.value.organization.id };
 }
 
 /**
@@ -249,9 +341,9 @@ function rawPost(
   return { socket, sent, answer, at: () => st.at };
 }
 
-/** An SSO connection write of the session `cookie` from `ip`, raw. */
-const ssoPost = (port: number, cookie: string, ip: string, send: number) =>
-  rawPost(port, SSO_WRITE, {
+/** An SSO connection write of the session `cookie` from `ip` for the organization `org`, raw. */
+const ssoPost = (port: number, cookie: string, ip: string, send: number, org: string) =>
+  rawPost(port, ssoWritePath(org), {
     headers: { cookie, origin: "http://localhost", "cf-connecting-ip": ip },
     type: "application/json",
     declared: SSO_CAP,
@@ -271,17 +363,18 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
   it("answers 503 body_busy to a second write of an account that holds one, before any byte", {
     timeout: 60_000,
   }, async () => {
-    const { port, close } = await startApp();
+    const app = await startApp();
+    const { port, close } = app;
     const posts: ReturnType<typeof rawPost>[] = [];
     try {
-      const cookie = await signedIn(port, "x@probe.example", "203.0.113.1");
-      const held = ssoPost(port, cookie, "203.0.113.1", 1_048_576);
+      const { cookie, org } = await managerCookie(app, "x@probe.example", "203.0.113.1");
+      const held = ssoPost(port, cookie, "203.0.113.1", 1_048_576, org);
       posts.push(held);
       await held.sent;
       await sleep(500);
       expect(held.answer()).toBeNull();
       // The same account from another IP sends only its head: the answer comes with no byte read.
-      const second = ssoPost(port, cookie, "203.0.113.2", 0);
+      const second = ssoPost(port, cookie, "203.0.113.2", 0, org);
       posts.push(second);
       await second.sent;
       expect(await answered(second, 5000)).toBe(
@@ -297,14 +390,15 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
   it("ends a write of a user that trickles under 256 KiB per second with 408 at 32 s", {
     timeout: 60_000,
   }, async () => {
-    const { port, close } = await startApp();
+    const app = await startApp();
+    const { port, close } = app;
     let post: ReturnType<typeof rawPost> | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
     try {
-      const cookie = await signedIn(port, "y@probe.example", "203.0.113.3");
+      const { cookie, org } = await managerCookie(app, "y@probe.example", "203.0.113.3");
       // 48 KiB each 250 ms: 192 KiB per second. At the rate of a read before a session, 128 KiB
       // per second, the cap had 64 s, and this body ends at 43 s and reads whole.
-      post = ssoPost(port, cookie, "203.0.113.3", 49_152);
+      post = ssoPost(port, cookie, "203.0.113.3", 49_152, org);
       const p = post;
       await p.sent;
       const chunk = Buffer.alloc(49_152, 0x20);
@@ -326,12 +420,13 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
   it("answers the limit to the seventh large read of one user in an hour, before any byte", {
     timeout: 60_000,
   }, async () => {
-    const { port, close } = await startApp();
+    const app = await startApp();
+    const { port, close } = app;
     let seventh: ReturnType<typeof rawPost> | undefined;
     try {
-      const cookie = await signedIn(port, "z@probe.example", "203.0.113.4");
+      const { cookie, org } = await managerCookie(app, "z@probe.example", "203.0.113.4");
       const write = () =>
-        fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+        fetch(`http://127.0.0.1:${port}${ssoWritePath(org)}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -343,7 +438,7 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
         });
       for (let i = 0; i < LARGE_READS_PER_HOUR; i++) expect((await write()).status).toBe(400);
       // The seventh sends only its head: the limit answers with no byte read.
-      seventh = ssoPost(port, cookie, "203.0.113.4", 0);
+      seventh = ssoPost(port, cookie, "203.0.113.4", 0, org);
       await seventh.sent;
       expect(await answered(seventh, 5000)).toBe(
         'HTTP/1.1 429 Too Many Requests {"error":"rate_limited"}',
@@ -359,19 +454,20 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
   it("answers 503 to seven retries of another account while one holds the user half, and no 429", {
     timeout: 60_000,
   }, async () => {
-    const { port, close } = await startApp();
+    const app = await startApp();
+    const { port, close } = app;
     let held: ReturnType<typeof rawPost> | undefined;
     try {
-      const holder = await signedIn(port, "hold@probe.example", "203.0.113.5");
-      const admin = await signedIn(port, "admin@probe.example", "203.0.113.6");
+      const holder = await managerCookie(app, "hold@probe.example", "203.0.113.5");
+      const admin = await managerCookie(app, "admin@probe.example", "203.0.113.6");
       /** A write of 4 KiB by the admin, as a browser fetch sends it: "<status> <body>". */
       const write = async () => {
-        const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+        const res = await fetch(`http://127.0.0.1:${port}${ssoWritePath(admin.org)}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             origin: "http://localhost",
-            cookie: admin,
+            cookie: admin.cookie,
             "cf-connecting-ip": "203.0.113.6",
           },
           body: `{}${" ".repeat(4094)}`,
@@ -379,7 +475,7 @@ describe("a large read that cannot start through the Fastify binding (ruling 72 
         return `${res.status} ${await res.text()}`;
       };
       // The holder sends 8 MiB less 16 bytes of a write and stalls: the user half is full.
-      held = ssoPost(port, holder, "203.0.113.5", SSO_CAP - 16);
+      held = ssoPost(port, holder.cookie, "203.0.113.5", SSO_CAP - 16, holder.org);
       await held.sent;
       await sleep(1000);
       expect(held.answer()).toBeNull();
@@ -414,9 +510,9 @@ function movedLimiter() {
   return { limiter, advance };
 }
 
-/** A small SSO connection write of `cookie` from `ip`, as a browser fetch sends it: "<status> <body>". */
-const smallWrite = async (port: number, cookie: string, ip: string) => {
-  const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+/** A small SSO connection write of `cookie` from `ip` for `org`, as a browser fetch sends it: "<status> <body>". */
+const smallWrite = async (port: number, cookie: string, ip: string, org: string) => {
+  const res = await fetch(`http://127.0.0.1:${port}${ssoWritePath(org)}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -440,12 +536,13 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
     timeout: 60_000,
   }, async () => {
     const { limiter, advance } = movedLimiter();
-    const { port, close } = await startApp(limiter);
+    const app = await startApp(limiter);
+    const { port, close } = app;
     const posts: ReturnType<typeof rawPost>[] = [];
     try {
-      const cookie = await signedIn(port, "stall@probe.example", "203.0.113.50");
+      const { cookie, org } = await managerCookie(app, "stall@probe.example", "203.0.113.50");
       // The first large read of the hour sends 64 KiB of 8 MiB and stops: 408 at the idle limit.
-      const stalled = ssoPost(port, cookie, "203.0.113.50", 65_536);
+      const stalled = ssoPost(port, cookie, "203.0.113.50", 65_536, org);
       posts.push(stalled);
       await stalled.sent;
       expect(await answered(stalled, IDLE_MS + 5_000)).toBe(
@@ -454,7 +551,7 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
       console.log(`body-stall: the stalled write of a user answered at ${stalled.at()} ms`);
       // Five reads of the hour were left, and the stall spent them: the next write sends only
       // its head, and the answer comes with no byte read.
-      const next = ssoPost(port, cookie, "203.0.113.50", 0);
+      const next = ssoPost(port, cookie, "203.0.113.50", 0, org);
       posts.push(next);
       await next.sent;
       expect(await answered(next, 5000)).toBe(
@@ -462,7 +559,9 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
       );
       // In the next window of the limiter, the account reads a write again.
       advance(3600 * 1000);
-      expect(await smallWrite(port, cookie, "203.0.113.50")).toBe('400 {"error":"invalid_body"}');
+      expect(await smallWrite(port, cookie, "203.0.113.50", org)).toBe(
+        '400 {"error":"invalid_body"}',
+      );
     } finally {
       for (const p of posts) p.socket.destroy();
       await close();
@@ -473,16 +572,19 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
     timeout: 60_000,
   }, async () => {
     const { limiter } = movedLimiter();
-    const { port, close } = await startApp(limiter);
+    const app = await startApp(limiter);
+    const { port, close } = app;
     try {
-      const cookie = await signedIn(port, "fast@probe.example", "203.0.113.51");
+      const { cookie, org } = await managerCookie(app, "fast@probe.example", "203.0.113.51");
       const answers: string[] = [];
       for (let i = 0; i < LARGE_READS_PER_HOUR; i++)
-        answers.push(await smallWrite(port, cookie, "203.0.113.51"));
+        answers.push(await smallWrite(port, cookie, "203.0.113.51", org));
       // Each of the 6 writes reads, and the schema refuses it: no write spent another's start.
       expect(answers).toEqual(Array(LARGE_READS_PER_HOUR).fill('400 {"error":"invalid_body"}'));
       // The seventh is past the limit of the hour.
-      expect(await smallWrite(port, cookie, "203.0.113.51")).toBe('429 {"error":"rate_limited"}');
+      expect(await smallWrite(port, cookie, "203.0.113.51", org)).toBe(
+        '429 {"error":"rate_limited"}',
+      );
     } finally {
       await close();
     }
@@ -515,8 +617,9 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
     ip: string,
     endMs: number,
     close: boolean,
+    org: string,
   ) {
-    const p = rawPost(port, SSO_WRITE, {
+    const p = rawPost(port, ssoWritePath(org), {
       headers: { cookie, origin: "http://localhost", "cf-connecting-ip": ip },
       type: "application/json",
       declared: BYTES,
@@ -531,9 +634,9 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
     return p;
   }
 
-  /** An SSO connection write of `cookie` that sends only its head: the first line and JSON of its answer. */
-  async function headOnly(port: number, cookie: string, ip: string) {
-    const p = ssoPost(port, cookie, ip, 0);
+  /** An SSO connection write of `cookie` for `org` that sends only its head: the first line and JSON of its answer. */
+  async function headOnly(port: number, cookie: string, ip: string, org: string) {
+    const p = ssoPost(port, cookie, ip, 0, org);
     try {
       await p.sent;
       return await answered(p, 5000);
@@ -546,21 +649,24 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
     timeout: 60_000,
   }, async () => {
     const { limiter, advance } = movedLimiter();
-    const { port, close } = await startApp(limiter);
+    const app = await startApp(limiter);
+    const { port, close } = app;
     let slow: ReturnType<typeof rawPost> | undefined;
     try {
-      const cookie = await signedIn(port, "slow@probe.example", "203.0.113.52");
-      slow = await pausedPost(port, cookie, "203.0.113.52", 9_000, false);
+      const { cookie, org } = await managerCookie(app, "slow@probe.example", "203.0.113.52");
+      slow = await pausedPost(port, cookie, "203.0.113.52", 9_000, false, org);
       // The read ends whole, with no 408: the schema refuses the body.
       expect(await answered(slow, 5_000)).toBe('HTTP/1.1 400 Bad Request {"error":"invalid_body"}');
       console.log(`body-stall: the slow whole write of a user answered at ${slow.at()} ms`);
       expect(slow.at()).toBeGreaterThanOrEqual(9_000);
       // The read took more than 8 s and spent the five reads that were left. The next write
       // sends only its head, and the answer comes with no byte read.
-      expect(await headOnly(port, cookie, "203.0.113.52")).toBe(HEAD_429);
+      expect(await headOnly(port, cookie, "203.0.113.52", org)).toBe(HEAD_429);
       // In the next window of the limiter, the account reads a write again.
       advance(3600 * 1000);
-      expect(await smallWrite(port, cookie, "203.0.113.52")).toBe('400 {"error":"invalid_body"}');
+      expect(await smallWrite(port, cookie, "203.0.113.52", org)).toBe(
+        '400 {"error":"invalid_body"}',
+      );
     } finally {
       slow?.socket.destroy();
       await close();
@@ -571,11 +677,12 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
     timeout: 60_000,
   }, async () => {
     const { limiter } = movedLimiter();
-    const { port, close } = await startApp(limiter);
+    const app = await startApp(limiter);
+    const { port, close } = app;
     let quick: ReturnType<typeof rawPost> | undefined;
     try {
-      const cookie = await signedIn(port, "quick@probe.example", "203.0.113.53");
-      quick = await pausedPost(port, cookie, "203.0.113.53", 2_000, false);
+      const { cookie, org } = await managerCookie(app, "quick@probe.example", "203.0.113.53");
+      quick = await pausedPost(port, cookie, "203.0.113.53", 2_000, false, org);
       expect(await answered(quick, 5_000)).toBe(
         'HTTP/1.1 400 Bad Request {"error":"invalid_body"}',
       );
@@ -585,9 +692,11 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
       // The other 5 starts of the hour read, and the seventh write is past the limit.
       const answers: string[] = [];
       for (let i = 1; i < LARGE_READS_PER_HOUR; i++)
-        answers.push(await smallWrite(port, cookie, "203.0.113.53"));
+        answers.push(await smallWrite(port, cookie, "203.0.113.53", org));
       expect(answers).toEqual(Array(LARGE_READS_PER_HOUR - 1).fill('400 {"error":"invalid_body"}'));
-      expect(await smallWrite(port, cookie, "203.0.113.53")).toBe('429 {"error":"rate_limited"}');
+      expect(await smallWrite(port, cookie, "203.0.113.53", org)).toBe(
+        '429 {"error":"rate_limited"}',
+      );
     } finally {
       quick?.socket.destroy();
       await close();
@@ -598,19 +707,20 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
     timeout: 60_000,
   }, async () => {
     const { limiter, advance } = movedLimiter();
-    const { port, close } = await startApp(limiter);
+    const app = await startApp(limiter);
+    const { port, close } = app;
     let closed: ReturnType<typeof rawPost> | undefined;
     try {
-      const cookie = await signedIn(port, "gone@probe.example", "203.0.113.54");
-      closed = await pausedPost(port, cookie, "203.0.113.54", 9_000, true);
+      const { cookie, org } = await managerCookie(app, "gone@probe.example", "203.0.113.54");
+      closed = await pausedPost(port, cookie, "203.0.113.54", 9_000, true, org);
       const closedAt = performance.now();
       // Until the server sees the close, the account runs its one large read, and a write gets
       // 503 before any count. The idle limit would end that read at 14.5 s, 10 s after its last
       // bytes. The tries stop long before that time, so only the close can end the read.
-      let line = await headOnly(port, cookie, "203.0.113.54");
+      let line = await headOnly(port, cookie, "203.0.113.54", org);
       for (let i = 0; i < 20 && line === HEAD_503; i++) {
         await sleep(100);
-        line = await headOnly(port, cookie, "203.0.113.54");
+        line = await headOnly(port, cookie, "203.0.113.54", org);
       }
       console.log(
         `body-stall: the write after a closed slow write answered ${Math.round(performance.now() - closedAt)} ms after the close`,
@@ -619,7 +729,9 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
       expect(line).toBe(HEAD_429);
       // In the next window of the limiter, the account reads a write again.
       advance(3600 * 1000);
-      expect(await smallWrite(port, cookie, "203.0.113.54")).toBe('400 {"error":"invalid_body"}');
+      expect(await smallWrite(port, cookie, "203.0.113.54", org)).toBe(
+        '400 {"error":"invalid_body"}',
+      );
     } finally {
       closed?.socket.destroy();
       await close();
@@ -635,16 +747,17 @@ describe("the large reads of one account do not limit another (ruling 75 of the 
   it("reads the SSO write of an eleventh account after ten accounts spend their large reads", {
     timeout: 60_000,
   }, async () => {
-    const { port, close } = await startApp();
+    const app = await startApp();
+    const { port, close } = app;
     try {
-      /** A small SSO connection write of `cookie` from `ip`: "<status> <body>". */
-      const write = async (cookie: string, ip: string) => {
-        const res = await fetch(`http://127.0.0.1:${port}${SSO_WRITE}`, {
+      /** A small SSO connection write of the manager `m` from `ip`: "<status> <body>". */
+      const write = async (m: { cookie: string; org: string }, ip: string) => {
+        const res = await fetch(`http://127.0.0.1:${port}${ssoWritePath(m.org)}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             origin: "http://localhost",
-            cookie,
+            cookie: m.cookie,
             "cf-connecting-ip": ip,
           },
           body: "{}",
@@ -654,16 +767,16 @@ describe("the large reads of one account do not limit another (ruling 75 of the 
       const answers: string[] = [];
       for (let i = 0; i < 10; i++) {
         const ip = `203.0.113.${20 + i}`;
-        const cookie = await signedIn(port, `p${i}@probe.example`, ip);
-        for (let n = 0; n < LARGE_READS_PER_HOUR; n++) answers.push(await write(cookie, ip));
+        const m = await managerCookie(app, `p${i}@probe.example`, ip);
+        for (let n = 0; n < LARGE_READS_PER_HOUR; n++) answers.push(await write(m, ip));
       }
       // Ten accounts start 6 large reads each, 60 in all: each reads, and the schema refuses it.
       expect(answers).toEqual(
         Array(10 * LARGE_READS_PER_HOUR).fill('400 {"error":"invalid_body"}'),
       );
       // The large reads of an eleventh account are its own: its write reads at once.
-      const cookie = await signedIn(port, "late@probe.example", "203.0.113.40");
-      expect(await write(cookie, "203.0.113.40")).toBe('400 {"error":"invalid_body"}');
+      const late = await managerCookie(app, "late@probe.example", "203.0.113.40");
+      expect(await write(late, "203.0.113.40")).toBe('400 {"error":"invalid_body"}');
     } finally {
       await close();
     }
@@ -761,6 +874,40 @@ describe("the client with no IP through the Fastify binding (ruling 69 of the 12
         }
         expect(again, text).toBe("302");
       }
+    } finally {
+      for (const p of posts) p.socket.destroy();
+      await close();
+    }
+  });
+});
+
+// Plan 12l: the manager guard runs before the read of an SSO connection
+// write. Before it, an account that manages nothing held the user half of
+// the budget with a stalled write of 8 MiB. That account got 403 only after
+// its body.
+describe("the guard before the read through the Fastify binding (plan 12l)", () => {
+  it("answers 403 to a write of an account that manages nothing within 5 s, and leaves the user half to a manager", {
+    timeout: 60_000,
+  }, async () => {
+    const app = await startApp();
+    const { port, close } = app;
+    const posts: ReturnType<typeof rawPost>[] = [];
+    try {
+      const plain = await signedIn(port, "plain@probe.example", "203.0.113.60");
+      // No manager's write is held: the busy check passes, and the guard answers with no byte read.
+      const post = ssoPost(port, plain, "203.0.113.60", 65_536, "o-any");
+      posts.push(post);
+      await post.sent;
+      expect(await answered(post, 5000)).toBe('HTTP/1.1 403 Forbidden {"error":"forbidden_rank"}');
+      expect(post.at()).toBeLessThan(5000);
+      // The user half is whole: a manager's write of the cap reads every byte, and the schema refuses it.
+      const owner = await managerCookie(app, "own@probe.example", "203.0.113.61");
+      const full = ssoPost(port, owner.cookie, "203.0.113.61", SSO_CAP, owner.org);
+      posts.push(full);
+      await full.sent;
+      expect(await answered(full, 20_000)).toBe(
+        'HTTP/1.1 400 Bad Request {"error":"invalid_body"}',
+      );
     } finally {
       for (const p of posts) p.socket.destroy();
       await close();
