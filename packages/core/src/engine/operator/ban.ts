@@ -146,8 +146,9 @@ export async function targetOf(
 }
 
 /**
- * The read of the platform role again in the ban's act of a user actor:
- * the platform organization and the member row (decision 15 of plan 12n).
+ * The calls of the second read of the platform role in the ban's act of a
+ * user actor. They are the reads of the platform organization and the
+ * member row (decision 15 of plan 12n).
  */
 const ROLE_CALLS = 2;
 

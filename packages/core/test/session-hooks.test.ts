@@ -827,8 +827,8 @@ describe("session end hooks (plan 9d)", () => {
   );
 
   // The invitation confirm has the counter too, but no real flow reaches it
-  // there: its unique-key retry is on the `email` identity, and only a proof
-  // of the address writes that row. So its retry finds a verified user.
+  // there. Its unique-key retry is on the `email` identity. Only a proof of
+  // the address writes that row, so the retry finds a verified user.
   it.each(["magic link", "social", "reset"] as const)(
     "signs in after a unique-key retry, two session races, and a lost flip (decision 13 of plan 12n, %s)",
     async (proof) => {

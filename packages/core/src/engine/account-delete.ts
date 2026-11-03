@@ -623,12 +623,12 @@ export async function deleteAccountRows(
     early === null
       ? DELETE_KEEP
       : DELETE_KEEP - 1 + Math.max(0, Math.ceil(early.length / IN_CHUNK) - 1);
-  // The least calls after this point, at the worst: the owner lock (a batch
-  // of 2 on D1) and the recount of each organization that the user owns
-  // with another owner, the user delete, the solo organizations, the deletes
-  // of the invitations and the member rows of the user, the least of each
-  // page of sessions, and `keep`. The size check comes before the scimUser
-  // locks, which D1 does not have.
+  // The least calls after this point, at the worst. First the owner lock (a
+  // batch of 2 on D1) and the recount of each organization that the user
+  // owns with another owner. Then the user delete, the solo organizations,
+  // and the deletes of the invitations and the member rows of the user. Last
+  // the least of each page of sessions, and `keep`. The size check comes
+  // before the scimUser locks, which D1 does not have.
   const least =
     3 * owned.length +
     1 +

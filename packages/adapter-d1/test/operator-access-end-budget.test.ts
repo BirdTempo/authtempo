@@ -265,8 +265,8 @@ async function auditOf(userId: string): Promise<string[]> {
 // of the router, so a user actor sends 1 query fewer. Its reserve keeps the call, so the page
 // ends the same sessions.
 // Since decision 15 of plan 12n (run of 2026-11-03), the act of a user actor reads the platform
-// role again after the ban fields, 2 queries. So its act ends 2 sessions fewer, and the sweep
-// ends them.
+// role again after the ban fields. That read costs 2 queries. So its act ends 2 sessions fewer,
+// and the sweep ends them.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
   "user 45": [47, 18, [49]],
@@ -740,10 +740,11 @@ describe("the OAuth families of a ban on D1 (ruling 55 of plan 12d)", () => {
 });
 
 /**
- * The counts of two grants of the platform role to users with no member row,
- * with `membersPerOrganization` at 2, on the binding on 2026-11-03 (decision
- * 15 of plan 12n): the grant that fits and the grant at the limit. Each
- * locks the organization after its user hold and before its count. The lock
+ * The counts of two grants of the platform role on the binding on 2026-11-03
+ * (decision 15 of plan 12n). Each grant goes to a user with no member row,
+ * with `membersPerOrganization` at 2. The first grant fits, and the second
+ * meets the limit. Each locks the organization after its user hold and
+ * before its count. The lock
  * is an update, a batch of 2 queries. The undo of the refused grant restores
  * the row, 1 more query. With no lock, the counts were [13, 11] and [21, 18].
  */

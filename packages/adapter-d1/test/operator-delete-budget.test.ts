@@ -1065,11 +1065,11 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
   /**
    * A user with a scimUser row in each of `count` organizations, through
    * SCIM, and then 60 sessions. One domain moves from organization to
-   * organization: a delete of the domain keeps the scimUser row of its
-   * organization, and the next organization proves the domain again. Each
+   * organization. A delete of the domain keeps the scimUser row of its
+   * organization. The next organization then proves the domain again. Each
    * directory deactivates the user before the move, so no member row stays.
    * With more than 50 member rows, the organization rule of the delete reads
-   * in more than 3 calls, which is not the item of this scene.
+   * in more than 3 calls. That is not the item of this scene.
    */
   async function provisioned(sent: MailMessage[], count: number) {
     const setup = await engine(env.DB, sent, undefined, SCIM);
@@ -1138,10 +1138,11 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
   }
 
   /**
-   * The counts of the delete of a user with scimUser rows in 51
-   * organizations and 60 sessions, on the binding on 2026-11-03 (decision 16
-   * of plan 12n): the act with the route before it, and the sessions that
-   * it ended. The delete of the scimGroupMember rows takes 2 chunks.
+   * The counts of the delete on the binding on 2026-11-03 (decision 16 of
+   * plan 12n). The user has scimUser rows in 51 organizations and 60
+   * sessions. The counts are the act with the route before it, and the
+   * sessions that it ended. The delete of the scimGroupMember rows takes 2
+   * chunks.
    */
   const SCIM_COUNTS = { act: 50, inAct: 15 };
 
