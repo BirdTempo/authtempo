@@ -85,8 +85,10 @@ const WHERE = `SELECT (SELECT count(*) FROM temp.sqlite_master WHERE name = 'fir
 // 0.18.0, read 2026-11-03). So two storage reads at once open a second
 // connection, and the next calls run there. The storage never sets the keys
 // on it, so only the libSQL default keeps the cascade there (ruling 57 of
-// plan 12n). The test pins that default, and no change of the storage can
-// fail it. A client version that opens a connection with the keys off fails it.
+// plan 12n). The test pins that default on a second pooled connection, so no
+// change of the storage's pragma can fail it. A storage that runs its calls
+// one at a time keeps one connection, and then the test fails. A client
+// version that opens a connection with the keys off fails it.
 describe("the foreign keys on a second pooled libSQL connection (ruling 57 of plan 12n)", () => {
   let dir = "";
   afterEach(() => {

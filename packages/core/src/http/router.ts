@@ -460,10 +460,10 @@ export function createRouter(
         ? withTrace(routerError(HOST_CODE), traceId)
         : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
-    // The user of the session row that the request's token names, read in full or by a
-    // peek (rulings 37, 49, and 58 of plan 12n). So a refusal of a router step names the
-    // account of the token, a banned one too. A refusal of the handler's full read sets
-    // no mark: the read answers null for a banned user's row.
+    // The user of the session row that the request's token names (rulings 37, 49, and
+    // 58 of plan 12n). It comes from a full read or a peek of that row. So a refusal of
+    // a router step names the account of the token, a banned one too. A refusal of the
+    // handler's full read sets no mark: the read answers null for a banned user's row.
     const userId = resolvedUserOf(request);
     scoped.observe.emit({
       name: "request",
