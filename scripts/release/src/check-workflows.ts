@@ -480,8 +480,8 @@ function checkJob(
   if (runsOn?.kind !== "scalar") fail(`${at}: runs-on is not one label`);
   else if (!/^ubuntu-\d+\.\d+$/.test(runsOn.value ?? ""))
     fail(`${at}: runs-on ${runsOn.value} is not an ubuntu-<version> runner of GitHub`);
-  // A sync spawn blocks the timer of vitest, so the job limit is the one guard
-  // of a hung step. The default of GitHub is 360 minutes (read 2026-11-03).
+  // The timer of vitest cannot end a sync spawn, so the job limit is the last
+  // guard of a hung step. The default of GitHub is 360 minutes (read 2026-11-03).
   if (!/^[1-9]\d*$/.test(scalarOf(e["timeout-minutes"]) ?? ""))
     fail(`${at}: timeout-minutes is not a whole number of minutes above 0`);
 

@@ -270,7 +270,7 @@ describe("check-workflows", () => {
   });
 
   it("fails a job with no timeout-minutes, or with a value that is not a whole number above 0", () => {
-    // A sync spawn blocks the timer of vitest, so the job limit is the one guard of a hung step.
+    // The timer of vitest cannot end a sync spawn, so the job limit is the last guard of a hung step.
     const NOT_SET = "timeout-minutes is not a whole number of minutes above 0";
     expect(ciFailures(swap(CI, "    timeout-minutes: 40\n", ""))).toEqual([
       `ci.yml: jobs.check: ${NOT_SET}`,

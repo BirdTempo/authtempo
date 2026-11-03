@@ -20,10 +20,10 @@ jobs:
     # A GitHub-hosted runner with a fixed image. A self-hosted runner keeps
     # state from one run to the next.
     runs-on: ubuntu-24.04
-    # A sync spawn blocks the timer of vitest, so only this limit ends a hung
-    # step. Without it, a hung step holds the runner for 360 minutes, the
-    # default (docs.github.com, workflow syntax, read 2026-11-03). On
-    # 2026-11-03, nine full local runs took 3 minutes 10 seconds to 3 minutes
+    # The timer of vitest cannot end a sync spawn, so this limit is the last
+    # guard of a hung step. Without it, a hung step holds the runner for 360
+    # minutes, the default (docs.github.com, workflow syntax, read 2026-11-03).
+    # On 2026-11-03, nine full local runs took 3 minutes 10 seconds to 3 minutes
     # 37 seconds on 18 cores. A GitHub-hosted Linux runner has 4 cores in a
     # public repository and 2 in a private one (read 2026-11-03).
     timeout-minutes: 40
