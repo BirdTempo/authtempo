@@ -331,6 +331,8 @@ export const EVENTS = {
       outcome: enumOf(OUTCOMES),
       code: { kind: "code", optional: true },
       durationMs: { kind: "durationMs" },
+      // The user of the session that the handler resolved, absent when none resolved (plan 12n decision 17).
+      userId: OPTIONAL_ID,
     },
   },
   // A success comes from the commit of the session. A failure comes from the

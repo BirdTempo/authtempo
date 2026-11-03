@@ -849,6 +849,18 @@ export async function peekRequestUser(
   return user;
 }
 
+/**
+ * The user of the last session that `sessionFromRequest` resolved for a
+ * request (plan 12n decision 17). The router reads it into the `request`
+ * event. The map holds no id after the request.
+ */
+const resolvedUsers = new WeakMap<Request, string>();
+
+/** The user id of the session that the handler resolved for `request`, or undefined when none resolved. */
+export function resolvedUserOf(request: Request): string | undefined {
+  return resolvedUsers.get(request);
+}
+
 /** The caller's session from the cookie or the bearer header, or null. */
 export async function sessionFromRequest(
   config: ResolvedConfig,
@@ -861,9 +873,16 @@ export async function sessionFromRequest(
   const peekedUser = peekedUsers.get(request) ?? null;
   peekedRows.delete(request);
   peekedUsers.delete(request);
-  return token
-    ? resolveSession(config, token, readModeOf(config, request, options), peeked, peekedUser)
-    : null;
+  if (!token) return null;
+  const resolved = await resolveSession(
+    config,
+    token,
+    readModeOf(config, request, options),
+    peeked,
+    peekedUser,
+  );
+  if (resolved) resolvedUsers.set(request, resolved.user.id);
+  return resolved;
 }
 
 /**

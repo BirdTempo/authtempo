@@ -1,6 +1,6 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
 import { atBase, pickBase, type ResolvedConfig } from "../config.js";
-import { peekSession, sessionCapMs } from "../engine/sessions.js";
+import { peekSession, resolvedUserOf, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
@@ -457,6 +457,8 @@ export function createRouter(
         ? withTrace(routerError(HOST_CODE), traceId)
         : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
+    // The user of the session that the handler resolved, so an operator ties a refusal to an account (plan 12n).
+    const userId = resolvedUserOf(request);
     scoped.observe.emit({
       name: "request",
       method: request.method,
@@ -464,6 +466,7 @@ export function createRouter(
       outcome,
       ...eventCode(code),
       durationMs: Math.max(0, config.clock.now().getTime() - started),
+      ...(userId === undefined ? {} : { userId }),
     });
     const via = route?.key === undefined ? undefined : SIGN_IN_ROUTES[route.key];
     if (
