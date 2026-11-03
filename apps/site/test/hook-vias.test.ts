@@ -77,8 +77,6 @@ const guideWords = (n: string) =>
   `On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to ${n} of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook.`;
 const compatWords = (n: string) =>
   `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
-const compatOwnWords = (n: string) =>
-  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
 
 describe("the delete residual of the compatibility package", () => {
   it("claims the query limit on the D1 storage only", () => {
@@ -90,7 +88,7 @@ describe("the delete residual of the compatibility package", () => {
   it.each([
     ["the hooks guide", `${DOCS}docs/guides/hooks.mdx`, guideWords],
     ["the core README", `${REPO}packages/core/README.md`, guideWords],
-    ["the compat page", `${DOCS}docs/reference/compat-better-auth.md`, compatOwnWords],
+    ["the compat page", `${DOCS}docs/reference/compat-better-auth.md`, compatWords],
     ["the compat README", `${REPO}packages/compat-better-auth/README.md`, compatWords],
   ])("%s names both cases, with the page size of sessions.ts", (_, path, words) => {
     const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
