@@ -103,19 +103,26 @@ export const FOREIGN_KEYS_OFF =
 /**
  * Turns the foreign keys on, once per storage, on each SQLite driver (rulings
  * 40 and 44 of plan 12n). The cascade of a user delete is a promise of this
- * storage (`cascading`), so no driver default keeps it alone. Bun 1.4.3 opens
- * a bun:sqlite database with the keys off (read 0 on 2026-11-03,
- * darwin-arm64). node:sqlite, better-sqlite3, and libSQL open with the keys
- * on, and an app can turn them off. The pragma is idempotent, so a handle
- * with the keys on gets it too. Then the storage reads the key back and
- * refuses with `config_mismatch` when it reads 0. A probe of 2026-11-03
+ * storage (`cascading`). On a driver with one connection, the pragma keeps
+ * it, so no driver default keeps it alone there. Bun 1.4.3 opens a
+ * bun:sqlite database with the keys off (read 0 on 2026-11-03,
+ * darwin-arm64). On 2026-11-03, on darwin-arm64 with Node 26.10.0,
+ * node:sqlite (SQLite 3.54.0) and better-sqlite3 13.0.3 opened with the keys
+ * on (read 1). An app can turn them off. The pragma is idempotent, so a
+ * handle with the keys on gets it too. Then the storage reads the key back
+ * and refuses with `config_mismatch` when it reads 0. A probe of 2026-11-03
  * read 0 after the pragma inside an open BEGIN on Bun 1.4.3, node:sqlite,
  * and better-sqlite3. Both queries count in `statementsSent` and in
  * `readyStatements`, as the integer check's query does. A failed run is not
- * kept, so the next call runs both queries again. A libSQL file client keeps
- * a pool of connections, and each query reaches the connection that serves
- * it. Each new connection of that pool read 1 with no pragma (2026-11-03,
- * @libsql/client 0.18.0, darwin-arm64).
+ * kept, so the next call runs both queries again.
+ *
+ * A libSQL file client keeps a pool of connections, and each query reaches
+ * the connection that serves it. The storage sets the keys on one connection
+ * only: the connection that serves its pragma. On each other connection, the
+ * default of @libsql/client 0.18.0 keeps the cascade (ruling 57 of plan 12n).
+ * Each new connection read 1 with no pragma (read 2026-11-03, darwin-arm64,
+ * libsql 0.5.29). A test of test/sqlite/foreign-keys.test.ts reaches a second
+ * connection and pins that default.
  */
 function foreignKeysOn(
   driver: SqliteDriver,

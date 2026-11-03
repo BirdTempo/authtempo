@@ -223,9 +223,10 @@ child rows. `bun:sqlite` of Bun 1.4.3 opens with the keys off (read on
 2026-11-03). The storage then reads the key back, and each call answers
 `config_mismatch` while it reads 0. SQLite ignores the pragma inside an open
 transaction, so do not hold a `BEGIN` on the handle at the first call. A
-libSQL file client keeps a pool of connections, and each new one opens with
-the keys on. The storage turns the keys on only for the connection of its
-first call. So do not turn the keys off on that client.
+libSQL file client keeps a pool of connections. The storage turns the keys on
+only for the connection of its first call. On each other connection, the
+default of `@libsql/client` 0.18.0 keeps the keys on and the cascade with
+them (read on 2026-11-03). So do not turn the keys off on that client.
 
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound

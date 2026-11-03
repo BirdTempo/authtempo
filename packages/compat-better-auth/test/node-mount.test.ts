@@ -170,8 +170,11 @@ describe("the shim's Node mount over real sockets (M-1 of the plan 12n review)",
     });
     const registerPulled = pulled.bytes;
     // No declared length: core reads up to its floor and stops at the chunk
-    // that passes it. A clone of the request can pull one chunk more. The
-    // run of 2026-11-03 pulled 131072 bytes in 4 chunks for the 16 MiB.
+    // that passes it. A clone of the request can pull one chunk more. Two
+    // runs of 2026-11-03 on darwin-arm64 with Node 26.10.0 pulled 131072 bytes
+    // in 4 chunks for the 16 MiB. The 1-minute load was 4.62 and 11.22 at
+    // their start. The chunk sizes come from node:http, so the platform and
+    // the Node version can change them.
     const signUp = await post(port, "/api/auth/password/sign-up", {
       send: 16 * MIB,
       chunked: true,

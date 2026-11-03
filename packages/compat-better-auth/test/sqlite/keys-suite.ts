@@ -45,7 +45,7 @@ const session = (id: string, userId: string) => ({
 });
 
 /** The users u1 and u2, each with two sessions, through the storage port. */
-async function twoUsers(s: StorageAdapter): Promise<void> {
+export async function twoUsers(s: StorageAdapter): Promise<void> {
   for (const id of ["u1", "u2"]) {
     await s.create("user", {
       id,
@@ -72,7 +72,7 @@ const keys = async (h: KeysHandle) =>
   Number(await h.driver.db.prepare("PRAGMA foreign_keys").first("foreign_keys"));
 
 /** The count of the session rows of u1 and of u2, read on the handle. */
-const sessionsOf = (h: KeysHandle) =>
+export const sessionsOf = (h: Pick<KeysHandle, "driver">) =>
   Promise.all(
     ["u1", "u2"].map(async (u) =>
       Number(
