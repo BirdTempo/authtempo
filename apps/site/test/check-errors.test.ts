@@ -194,15 +194,102 @@ ${cell('The routes of <a href="#captcha_required"><code dir="auto">captcha_requi
   it("keeps the router-level codes out, and refuses a route that declares one", () => {
     const named = { ...core, body_busy: 503 };
     const busyPage = `${page}\n<h3 id="body_busy"><code>body_busy</code> 503</h3>\n${cell("<code>POST /social/apple/callback</code>.")}`;
-    const r = checkErrors(busyPage, named, oauth, [], routes);
+    // The Apple callback reads above the floor, so the body_busy cell names it (ruling 36 of plan 12n).
+    const apple: RouteCodes = {
+      method: "POST",
+      path: "/social/apple/callback",
+      codes: [],
+      oauthCodes: [],
+    };
+    const r = checkErrors(busyPage, named, oauth, [], [...routes, apple]);
     expect(r.failures).toEqual([]);
     expect(r.exempt?.some((e) => e.startsWith("#body_busy: "))).toBe(true);
-    const declares: RouteCodes[] = [
-      ...routes,
-      { method: "POST", path: "/social/apple/callback", codes: ["body_busy"], oauthCodes: [] },
-    ];
+    const declares: RouteCodes[] = [...routes, { ...apple, codes: ["body_busy"] }];
     expect(checkErrors(busyPage, named, oauth, [], declares).failures).toEqual([
       "POST /social/apple/callback declares the router-level code body_busy; no entry may declare it",
+    ]);
+  });
+
+  // Ruling 36 of plan 12n: a test for each failure line that had none.
+  it('refuses "The routes of" an anchor that names no code', () => {
+    const named = { ...core, captcha_failed: 403 };
+    const crossPage = `${page}
+<h3 id="captcha_failed"><code>captcha_failed</code> 403</h3>
+${cell('The routes of <a href="#captcha_missing"><code dir="auto">captcha_missing</code></a>.')}`;
+    expect(checkErrors(crossPage, named, oauth, [], routes).failures).toEqual([
+      "#captcha_failed: the Routes cell names the routes of #captcha_missing, which is no code",
+    ]);
+  });
+
+  it("refuses a mention whose route declares the code", () => {
+    const named = { ...core, session_not_fresh: 403 };
+    const declares: RouteCodes[] = [
+      ...routes.map((x) =>
+        x.path === "/reauth" ? { ...x, codes: [...x.codes, "session_not_fresh"] } : x,
+      ),
+      { method: "POST", path: "/sessions/revoke", codes: ["session_not_fresh"], oauthCodes: [] },
+    ];
+    const mention = `${link("POST /reauth")} makes the session fresh. ${link("POST /sessions/revoke")} needs one.`;
+    const withMention = `${page}\n<h3 id="session_not_fresh"><code>session_not_fresh</code> 403</h3>\n${cell(mention)}`;
+    expect(checkErrors(withMention, named, oauth, [], declares).failures).toEqual([
+      "#session_not_fresh: MENTIONS names POST /reauth, and the route declares session_not_fresh; remove the entry",
+    ]);
+  });
+
+  it("refuses a Routes cell that links one route twice", () => {
+    const twice = page.replace(
+      list("POST /magic-link/verify"),
+      list("POST /magic-link/verify", "POST /magic-link/verify"),
+    );
+    expect(checkErrors(twice, core, oauth, [], routes).failures).toEqual([
+      "#rate_limited: the Routes cell links POST /magic-link/verify more than once",
+    ]);
+  });
+
+  it("holds the body_busy and body_timeout cells to the routes that read a body above the floor", () => {
+    const named = { ...core, body_busy: 503, body_timeout: 408 };
+    // The three routes of BODY_CAPS in core, then the SAML ACS of LARGE_FORM_READS.
+    const all = [
+      "POST /social/apple/callback",
+      "POST /sso/connections/create",
+      "POST /sso/connections/update",
+      "POST /sso/:connectionId/acs",
+    ];
+    const large: RouteCodes[] = [
+      ...routes,
+      ...all.map((route) => {
+        const [method = "", path = ""] = route.split(" ");
+        return { method, path, codes: [], oauthCodes: [] };
+      }),
+    ];
+    /** A cell in the form of the page: the routes in code spans, then the prose. */
+    const spans = (names: string[]) =>
+      cell(
+        `${names.map((n) => `<code dir="auto">${n}</code>`).join(", ")}. The SCIM routes answer their own SCIM 503.`,
+      );
+    const pageOf = (busy: string[], timeout: string[]) => `${page}
+<h3 id="body_busy"><code>body_busy</code> 503</h3>
+${spans(busy)}
+<h3 id="body_timeout"><code>body_timeout</code> 408</h3>
+${spans(timeout)}`;
+    const held = checkErrors(pageOf(all, all), named, oauth, [], large);
+    expect(held.failures).toEqual([]);
+    for (const id of ["body_busy", "body_timeout"])
+      expect(
+        held.exempt?.some((e) => e.startsWith(`#${id}: `) && e.endsWith("its cell to 4 routes")),
+      ).toBe(true);
+    const lacks = pageOf(
+      all.filter((n) => n !== "POST /sso/connections/update"),
+      all.filter((n) => n !== "POST /sso/:connectionId/acs"),
+    );
+    expect(checkErrors(lacks, named, oauth, [], large).failures).toEqual([
+      "#body_busy: the Routes cell lacks POST /sso/connections/update, which reads a body above the floor",
+      "#body_timeout: the Routes cell lacks POST /sso/:connectionId/acs, which reads a body above the floor",
+    ]);
+    expect(
+      checkErrors(pageOf([...all, "POST /reauth"], all), named, oauth, [], large).failures,
+    ).toEqual([
+      "#body_busy: the Routes cell names POST /reauth, which reads no body above the floor",
     ]);
   });
 });

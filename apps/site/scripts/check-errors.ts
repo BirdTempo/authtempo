@@ -1,4 +1,5 @@
-import { ROUTER_CODES } from "@authtempo/core/routes";
+import { bodyCapOf } from "@authtempo/core/bindings";
+import { ROUTER_CODES, type RouteKey } from "@authtempo/core/routes";
 import { errorAnchor, routeAnchor } from "./lib/anchors.ts";
 import { cellText, h3Headings } from "./lib/html.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
@@ -16,6 +17,7 @@ export interface RouteCodes {
  * reason (decision 4 of plan 12n). Their cells come from the router rules and
  * `BODY_CAPS`, so the Routes rules leave them out. Core exports ROUTER_CODES
  * only. So the four other names are written here, as core names them.
+ * LARGE_READ_CODES holds the cells of two of them.
  */
 export const ROUTER_LEVEL: Readonly<Record<string, string>> = {
   ...Object.fromEntries(
@@ -39,8 +41,8 @@ export const EXEMPT_CELLS: Readonly<Record<string, string>> = {
 
 /**
  * The links of a Routes cell to a route that does not declare the code, by
- * anchor and route, with the reason (decision 4 of plan 12n). Each one is a
- * prose mention, not a route of the code.
+ * anchor and route. Each entry has its reason (decision 4 of plan 12n). Each
+ * one is a prose mention, not a route of the code.
  */
 export const MENTIONS: readonly { anchor: string; route: string; why: string }[] = [
   {
@@ -59,6 +61,32 @@ export const MENTIONS: readonly { anchor: string; route: string; why: string }[]
     why: "the cell names the start of the link flow; its callbacks answer the code",
   },
 ];
+
+/**
+ * The router-level codes whose Routes cell lists each route that reads a body
+ * above the floor. Ruling 36 of plan 12n adds this rule, and it narrows
+ * decision 4. Only those routes answer the two codes. So the cell must name
+ * each one, and no other route. A route in a code span counts as named.
+ */
+export const LARGE_READ_CODES: readonly string[] = ["body_busy", "body_timeout"];
+
+/**
+ * The routes that read a body above the floor with no entry of BODY_CAPS, with
+ * the reason. `bodyCapOf` of core gives each other such route.
+ */
+export const LARGE_FORM_READS: Readonly<Record<string, string>> = {
+  "POST /sso/:connectionId/acs":
+    "acsForm of core reads the SAML form up to SAML_FORM_MAX, above the floor, against the budget of the large reads",
+};
+
+/** Each route that reads a body above the floor, as `<METHOD> <path>`, in the order of ROUTES. */
+export function largeReads(routes: readonly RouteCodes[]): string[] {
+  // bodyCapOf gives the floor to a route with no entry of BODY_CAPS.
+  const floor = bodyCapOf(undefined);
+  return routes
+    .map((x) => `${x.method} ${x.path}`)
+    .filter((key) => key in LARGE_FORM_READS || bodyCapOf(key as RouteKey) > floor);
+}
 
 /** The anchor of a route that a cell or a list names as `<METHOD> <path>`. */
 export function anchorOf(route: string): string {
@@ -110,6 +138,8 @@ function routesCells(html: string): Map<string, string> {
  * `codes` or `oauthCodes` names the code, and no other route. A cell "The
  * routes of" another code holds when the two codes have one route set.
  * ROUTER_LEVEL, EXEMPT_CELLS, and MENTIONS hold the exemptions and the reasons.
+ * A cell links each route once. The cells of LARGE_READ_CODES name each route
+ * of `largeReads`, and no other route (ruling 36 of plan 12n).
  * check-routes holds the other direction: the Errors cell of each route.
  */
 export function checkErrors(
@@ -192,6 +222,7 @@ function routeFailures(
         );
   const cells = routesCells(html);
   const ids = new Set(h3Headings(html).map((h) => h.id));
+  const large = largeReads(routes);
   for (const [id, e] of expected) {
     const cell = cells.get(id);
     if (cell === undefined) {
@@ -202,7 +233,10 @@ function routeFailures(
     r.counts.cells = (r.counts.cells ?? 0) + 1;
     const routerLevel = e.table === "ERRORS" ? ROUTER_LEVEL[e.code] : undefined;
     if (routerLevel !== undefined) {
-      r.exempt?.push(`#${id}: router-level, ${routerLevel}`);
+      const largeCell = LARGE_READ_CODES.includes(e.code);
+      const rule = largeCell ? `; LARGE_READ_CODES holds its cell to ${large.length} routes` : "";
+      r.exempt?.push(`#${id}: router-level, ${routerLevel}${rule}`);
+      if (largeCell) largeReadFailures(r, id, cell, large);
       continue;
     }
     const why = EXEMPT_CELLS[id];
@@ -215,6 +249,10 @@ function routeFailures(
       (m) => m[1] ?? "",
     );
     r.counts.links = (r.counts.links ?? 0) + linked.length;
+    // As check-routes does for an Errors cell, a cell links each route once (ruling 36 of plan 12n).
+    for (const a of new Set(linked))
+      if (linked.indexOf(a) !== linked.lastIndexOf(a))
+        r.failures.push(`#${id}: the Routes cell links ${nameOf(a)} more than once`);
     // "The routes of [`x`](#x)." holds when x has the route set of this code.
     const cross = /^The routes of <a href="#([^"]+)">/.exec(cell.trim())?.[1];
     let held = linked;
@@ -256,4 +294,22 @@ function routeFailures(
         );
     }
   }
+}
+
+/** The rule of LARGE_READ_CODES: the routes in the code spans of the cell are `large`. */
+function largeReadFailures(
+  r: CheckReport,
+  id: string,
+  cell: string,
+  large: readonly string[],
+): void {
+  const named = [...cell.matchAll(/<code[^>]*>([A-Z]+ \/[^<]*)<\/code>/g)].map((m) => m[1] ?? "");
+  for (const route of large)
+    if (!named.includes(route))
+      r.failures.push(`#${id}: the Routes cell lacks ${route}, which reads a body above the floor`);
+  for (const route of new Set(named))
+    if (!large.includes(route))
+      r.failures.push(
+        `#${id}: the Routes cell names ${route}, which reads no body above the floor`,
+      );
 }
