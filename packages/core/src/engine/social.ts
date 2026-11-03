@@ -61,11 +61,10 @@ import { enforcedAnswer } from "./sso/enforce.js";
 import { type OpenedStateData, openStateData, sealStateData } from "./state-data.js";
 import {
   type BeforeResolveWrite,
-  CLAIM_RUNS,
-  ClaimLostError,
   ClaimRacedError,
   claimEmail,
   claimedUser,
+  claimRetry,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
@@ -1219,7 +1218,9 @@ export async function resolveSocialUser<T extends AfterWrite>(
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user. Or a session race undid the claim: the retry claims again.
-      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
+      const next = claimRetry(storage, err, lost++);
+      if (next === "retry") continue;
+      if (next === "conflict") return fail<never>("conflict");
       throw err;
     }
   }

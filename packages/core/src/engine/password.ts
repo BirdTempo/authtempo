@@ -54,10 +54,9 @@ import {
 import { holdUser, userStays } from "./user-hold.js";
 import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
-  CLAIM_RUNS,
-  ClaimLostError,
   claimEmail,
   claimedUser,
+  claimRetry,
   draftUserRow,
   ensureEmailIdentity,
   mayCreateUser,
@@ -1332,8 +1331,12 @@ async function confirmSignUp(
     } catch (err) {
       // Another proof claimed the user first (review M1). The retry finds a
       // verified user: it answers as for a verified user and fires no pair.
-      // Or a session race undid the claim: the retry claims again.
-      if (!(attempt < CLAIM_RUNS && err instanceof ClaimLostError)) throw err;
+      // Or a session race undid the claim: the retry claims again. This
+      // loop has no unique-key retry, so each attempt after the first is a
+      // claim retry.
+      const next = claimRetry(config.storage, err, attempt);
+      if (next === "conflict") verified = fail("conflict");
+      else if (next !== "retry") throw err;
     }
   }
   if (verified.ok) {
@@ -1565,7 +1568,12 @@ export async function runReset(
       // Another proof claimed the user first (review M1). The rollback undid
       // the consume, so the retry spends the link again and finds a verified
       // user. Or a session race undid the claim: the retry claims again.
-      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
+      const next = claimRetry(config.storage, err, lost++);
+      if (next === "retry") continue;
+      if (next === "conflict") {
+        reset = fail("conflict");
+        break;
+      }
       throw err;
     }
   }

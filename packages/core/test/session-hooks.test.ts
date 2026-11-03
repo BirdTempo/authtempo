@@ -920,6 +920,102 @@ describe("session end hooks (plan 9d)", () => {
     },
   );
 
+  // A store with a query limit per invocation (D1) runs each claim once:
+  // one race on D1 already costs 58 queries of 50 (ruling 32 of plan 12n).
+  it.each(["magic link", "verify link", "social", "reset"] as const)(
+    "answers conflict to a session race on a store with a query limit per invocation, and keeps the claimant's rows (ruling 32 of plan 12n, %s)",
+    async (proof) => {
+      const google = googleConfig();
+      const { auth, calls } = recorded({}, google.extra);
+      auth.storage.queryLimitPerInvocation = true;
+      const email = "eve@example.com";
+      const up = await passwordSignUp(auth.config, {
+        email,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!up.ok) throw new Error(up.code);
+      const tokens = [upSession(up.value).token];
+      for (let i = 0; i < 4; i++) {
+        const s = await sessionOnly(
+          passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+        );
+        if (!s.ok) throw new Error(s.code);
+        tokens.push(s.value.token);
+      }
+      const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
+      const rowsOf = async () => ({
+        sessions: (await auth.storage.findMany("session", [...byUser])).map((r) => r.id).sort(),
+        passwords: (await auth.storage.findMany("password", [...byUser])).map((r) => r.id).sort(),
+        identities: (await auth.storage.findMany("identity", [...byUser])).map((r) => r.id).sort(),
+      });
+      const before = await rowsOf();
+      expect(before.sessions).toHaveLength(5);
+      const gone = await auth.storage.findOne("session", [
+        { field: "tokenHash", op: "eq", value: await sha256Hex(tokens[0] ?? "") },
+      ]);
+      // A sign-out of one claimant session between the claim's read and its delete.
+      const outs: string[] = [];
+      let claims = 0;
+      const original = auth.storage.transaction.bind(auth.storage);
+      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+        original((tx) =>
+          fn({
+            ...tx,
+            update: (m, w, d) => {
+              if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true)
+                claims++;
+              return tx.update(m, w, d);
+            },
+            findMany: async (m, w, o) => {
+              const found = await tx.findMany(m, w, o);
+              const next = tokens[0];
+              if (m === "session" && claims > 0 && outs.length === 0 && next !== undefined) {
+                outs.push(await sha256Hex(next));
+                await destroySession(auth.config, next);
+              }
+              return found;
+            },
+          }),
+        );
+      calls.length = 0;
+      const confirm = auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+      const answer =
+        proof === "magic link"
+          ? await magicSignIn(auth, email)
+          : proof === "social"
+            ? await googleSignIn(auth, google.jwtTokens, email)
+            : proof === "reset"
+              ? await reset(auth, email)
+              : await verifyPasswordEmail(auth.config, {
+                  token: tokenFromMail(confirm?.text ?? ""),
+                  ip: null,
+                  userAgent: null,
+                });
+      expect(answer).toEqual({ ok: false, code: "conflict", status: 409 });
+      // One run of the claim, and no retry.
+      expect(claims).toBe(1);
+      expect(outs).toHaveLength(1);
+      // The run undid: the user stays unverified, and each claimant row stays but the signed-out session.
+      const owner = await auth.storage.findOne("user", [
+        { field: "id", op: "eq", value: user?.id },
+      ]);
+      expect(owner?.emailVerified).toBe(false);
+      expect(await rowsOf()).toEqual({
+        ...before,
+        sessions: before.sessions.filter((id) => id !== gone?.id),
+      });
+      // The sign-out fired its hook; the claim fired none.
+      expect(
+        calls
+          .filter(([name]) => name === "afterEnd")
+          .map(([, e]) => (e as { reason: string }).reason),
+      ).toEqual(["sign_out"]);
+    },
+  );
+
   it("fires afterEnd with claim for the claimant's session when the verify link proves the address", async () => {
     const { auth, calls } = recorded();
     const up = await signUp(auth, "ada@example.com");

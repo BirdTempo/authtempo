@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthConfig, ConfigError, type MailMessage } from "../src/config.js";
+import { verifyMagicLink } from "../src/engine/magic-link.js";
 import { appActor, type OperatorActor } from "../src/engine/operator/guards.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
@@ -592,5 +593,51 @@ describe("the claim of the invitation confirm (12f2 follow-up 7, K6)", () => {
       { field: "id", op: "eq", value: done.value.userId },
     ]);
     expect(user?.emailVerified).toBe(true);
+  });
+});
+
+describe("the invitation confirm on a store with a query limit per invocation (ruling 32 of plan 12n)", () => {
+  it("answers conflict when another proof claims the user first, and keeps the invitation for the request again", async () => {
+    const w = await world();
+    const storage = w.config.storage;
+    storage.queryLimitPerInvocation = true;
+    const done = await invited(w);
+    const token = inviteOf(w.mail);
+    // The person also asks for a magic link of the address.
+    expect((await w.handle(post("/auth/magic-link/request", { email: ADA }))).status).toBe(200);
+    const link = linkTo(w.mail, ADA);
+    // Memory runs one transaction at a time. So the magic link runs its
+    // transaction on the store at once, as a commit of another request does.
+    const free: StorageAdapter = { ...storage, transaction: (fn) => fn(free) };
+    const side = { ...w.config, storage: free };
+    let claims = 0;
+    const original = storage.transaction.bind(storage);
+    storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, where, d) => {
+            if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true) {
+              claims++;
+              // The magic link claims the user before the flip of the confirm.
+              const v = await verifyMagicLink(side, { token: link, ip: null, userAgent: null });
+              if (!v.ok) throw new Error(v.code);
+            }
+            return tx.update(m, where, d);
+          },
+        }),
+      );
+    const res = await confirm(w, token);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+    // One run of the claim, and no retry.
+    expect(claims).toBe(1);
+    storage.transaction = original;
+    // The undo kept the invitation unspent, so the request again signs the person in.
+    const [row] = await inviteRows(w);
+    expect(row?.consumedAt).toBeNull();
+    const again = await confirm(w, token);
+    expect(again.status).toBe(200);
+    expect((await resolveSession(w.config, sessionToken(w, again)))?.user.id).toBe(done.userId);
   });
 });
