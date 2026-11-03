@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -15,7 +16,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CheckId, CheckReport } from "../src/checks.js";
 import { main } from "../src/main.js";
 import { SCHEMA_VERSION } from "../src/version.js";
-import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
+import { assertFreshBuild, BIN, linesOf, PKG, runBin } from "./support/bin.js";
 import { BASE, deployment, healthy } from "./support/deployment.js";
 import { fakeIo } from "./support/fake-io.js";
 
@@ -87,6 +88,22 @@ function taTables(path: string): string[] {
   }
 }
 
+/**
+ * Puts the file in WAL mode. This connection is the last one, so it deletes
+ * the -wal and -shm files when it closes.
+ */
+function toWal(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("PRAGMA journal_mode = WAL");
+  } finally {
+    db.close();
+  }
+}
+
+/** The two files that SQLite keeps beside a file in WAL mode. */
+const WAL_SIDES = ["-wal", "-shm"];
+
 describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
   it("migrates a new file and reaches the CLI's version", () => {
     const r = migrateFile(["--json"]);
@@ -129,6 +146,47 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
     expect(statSync(other).mode & 0o777).toBe(0o640);
   });
 
+  it("makes a new file with mode 0600 at the umasks 000, 022, 027, and 077", () => {
+    // The test above takes the umask of vitest. At umask 077, SQLite alone
+    // makes mode 0600, so a shell sets each umask for the child here.
+    for (const mask of ["000", "022", "027", "077"]) {
+      const path = join(dir, `mask-${mask}.db`);
+      const r = spawnSync(
+        "/bin/sh",
+        [
+          "-c",
+          'umask "$1"; shift; exec "$@"',
+          "sh",
+          mask,
+          process.execPath,
+          BIN,
+          "migrate",
+          "--target",
+          "sqlite",
+          "--file",
+          path,
+        ],
+        {
+          cwd: PKG,
+          encoding: "utf8",
+          input: "",
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            TMPDIR: process.env.TMPDIR ?? "/tmp",
+          },
+          timeout: 300_000,
+        },
+      );
+      expect(r.status, `${mask}: ${r.stderr}`).toBe(0);
+      expect(statSync(path).mode & 0o777, mask).toBe(0o600);
+      // SQLite gives the -wal and -shm files the mode of the main file.
+      for (const side of ["-wal", "-shm"])
+        if (existsSync(path + side))
+          expect(statSync(path + side).mode & 0o777, mask + side).toBe(0o600);
+    }
+  });
+
   it("lists the pending files with --dry-run and writes nothing", () => {
     const r = migrateFile(["--dry-run"]);
     expect(r.status, r.stderr).toBe(0);
@@ -150,6 +208,24 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ before: null, pending: CORE, applied: [] });
     expect(readFileSync(file).equals(before)).toBe(true);
+    expect(taTables(file)).toEqual([]);
+  });
+
+  it("keeps the bytes of a file in WAL mode on --dry-run, and leaves its -wal and -shm files", () => {
+    const db = new DatabaseSync(file);
+    db.exec("CREATE TABLE app_note (id INTEGER PRIMARY KEY)");
+    db.close();
+    toWal(file);
+    for (const side of WAL_SIDES) expect(existsSync(file + side), side).toBe(false);
+    const before = readFileSync(file);
+    const r = migrateFile(["--dry-run", "--json"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ before: null, pending: CORE, applied: [] });
+    expect(readFileSync(file).equals(before)).toBe(true);
+    // A read-only connection cannot delete the two files. The CLI deletes
+    // neither, because another connection can hold them (migrate.md).
+    for (const side of WAL_SIDES) expect(existsSync(file + side), side).toBe(true);
+    // taTables opens the file read-write, so it runs after the file checks.
     expect(taTables(file)).toEqual([]);
   });
 
@@ -275,6 +351,19 @@ describe("authtempo check --target sqlite (plan 12g Task 6)", () => {
     });
     expect(report.warnings).toEqual([]);
     expect(io.stderr).toContain(`opening ${file}`);
+  });
+
+  it("check keeps the bytes of a file in WAL mode, and leaves its -wal and -shm files", async () => {
+    expect(migrateFile().status).toBe(0);
+    toWal(file);
+    for (const side of WAL_SIDES) expect(existsSync(file + side), side).toBe(false);
+    const before = readFileSync(file);
+    const io = fakeIo({ fetch: deployment(healthy()) });
+    const code = await main(["check", BASE, "--target", "sqlite", "--file", file], io);
+    expect(code, io.stderr.join("\n")).toBe(0);
+    expect(readFileSync(file).equals(before)).toBe(true);
+    // The read-only connection of check leaves both files too (check.md).
+    for (const side of WAL_SIDES) expect(existsSync(file + side), side).toBe(true);
   });
 
   it("check opens the file read-only and makes no file", async () => {

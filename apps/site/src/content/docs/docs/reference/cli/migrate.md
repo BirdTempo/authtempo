@@ -83,6 +83,7 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 - A URL opens a libSQL server through `@libsql/client`. A host that is not a loopback address needs `https:`, `wss:`, or `libsql:` with TLS. A plain `http:` URL to such a host stops the run with exit 2, before any connection.
 - The command reads the URL with the parser of `@libsql/client`, so it judges the host that the driver connects to. A URL with a backslash, or with a query key more than once, stops the run with exit 2.
 - `--dry-run` on a missing file makes no file. Without `--tables compat`, it lists every migration as pending.
+- On a file in WAL mode, `--dry-run` can leave the `-wal` and `-shm` files of SQLite beside it. The main file does not change. The CLI deletes neither file, because another connection can hold them.
 - A file that is not empty and does not start with the SQLite header stops the run with exit 2, before any write. The command never writes over such a file.
 - `applySqliteMigrations` applies the files, which are the D1 files of `@authtempo/adapter-d1`. Each file and its record in `ta_migrations` run in one write transaction.
 - A driver error prints as `storage: <code> at <file>`, or at the host and the name of the URL. The command never prints the message of the driver, the token, or the query of the URL.
