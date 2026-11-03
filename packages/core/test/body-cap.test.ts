@@ -2035,6 +2035,62 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
     expect((await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org)).status).toBe(400);
   });
 
+  it("frees the bytes of a slow read, then spends, then frees its read slot: a write in the spend answers 503 and counts nothing (ruling 81 of the 12j lane)", {
+    timeout: 30_000,
+  }, async () => {
+    const { w } = observedSso();
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const client = `user:${ada.user.id}`;
+    const spendKey = `sso-large-read:user:${ada.user.id}`;
+    // The limiter of the engine, wrapped. Once armed, each count of Ada's large reads waits at a gate.
+    const limiter = w.config.limiter;
+    const real = limiter.allow.bind(limiter);
+    const keys: string[] = [];
+    let armed = false;
+    let openGate = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    let reached = () => {};
+    const spending = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    vi.spyOn(limiter, "allow").mockImplementation(async (key, window) => {
+      keys.push(key);
+      if (armed && key === spendKey) {
+        reached();
+        await gate;
+      }
+      return real(key, window);
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // A write of 2 MiB that pauses 9 s after 1 MiB, then ends whole: a slow read, as `pausedWrite` sends.
+    const body = gatedBody(2 * 1_048_576, 1_048_576);
+    const first = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+    try {
+      await body.atGate;
+      armed = true;
+      await vi.advanceTimersByTimeAsync(9_000);
+      body.open();
+      // The read freed its bytes and runs the spend, which waits at the gate.
+      await spending;
+      expect(largeReadCanStart(client, REQUEST_BODY_MAX, null)).toBe(false);
+      // The slot holds until the spend ends: a second write answers 503 before any count.
+      const counted = keys.length;
+      const second = await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org);
+      expect(await statusOf(second)).toBe("503 body_busy");
+      expect(keys).toHaveLength(counted);
+    } finally {
+      body.open();
+      openGate();
+    }
+    expect(await statusOf(await first)).toBe("400");
+    vi.useRealTimers();
+    // The spend took the rest of the hour: the next write answers 429.
+    const next = await ssoWrite(w, ada.token, "203.0.113.1", "{}", ada.org);
+    expect([next.status, await next.json()]).toEqual([429, { error: "rate_limited" }]);
+  });
+
   it("spends nothing at a write that reads whole after 2 s: the user keeps its 6 starts", {
     timeout: 30_000,
   }, async () => {
@@ -2265,6 +2321,73 @@ describe("the check of the actor after the read (rulings 17 and 23 of plan 12l)"
     }
     expect(guardSteps(await events())).toEqual([]);
     expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("sends no renewed cookie with the 401 of an owner whom an operator bans during the read (ruling 30 of plan 12l)", {
+    timeout: 30_000,
+  }, async () => {
+    // A sliding refresh at each write: the session read at the start renews the cookie.
+    const { w } = observedSso({
+      sso: { oidc: true },
+      operator: { users: true },
+      session: { slidingRefreshDays: 0 },
+    });
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      await body.atGate;
+      const banned = await banUser(w.config, {
+        actor: SSO_APP,
+        userId: ada.user.id,
+        reason: "the owner left the company",
+        ip: null,
+        userAgent: null,
+      });
+      expect(banned.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([401, { error: "unauthorized" }]);
+      // The ban ended the session, so a renewed cookie would name a dead session.
+      expect(res.headers.getSetCookie()).toEqual([]);
+    } finally {
+      body.open();
+    }
+  });
+
+  it("keeps the renewed cookie on the 403 of an owner whom another owner removes during the read (ruling 30 of plan 12l)", {
+    timeout: 30_000,
+  }, async () => {
+    const { w } = observedSso({ sso: { oidc: true }, session: { slidingRefreshDays: 0 } });
+    const ada = await managerSession(w, "ada@acme.example", "acme");
+    const bea = await verifiedSession(w, "bea@acme.example");
+    const added = await addMember(w.config, {
+      user: ada.user,
+      organizationId: ada.org,
+      userId: bea.user.id,
+      role: "owner",
+    });
+    expect(added.ok).toBe(true);
+    const body = gatedCreate();
+    try {
+      const write = ssoWrite(w, ada.token, "203.0.113.1", body.stream, ada.org);
+      await body.atGate;
+      const removed = await removeMember(w.config, {
+        user: bea.user,
+        organizationId: ada.org,
+        userId: ada.user.id,
+      });
+      expect(removed.ok).toBe(true);
+      body.open();
+      const res = await write;
+      expect([res.status, await res.json()]).toEqual([403, { error: "forbidden_rank" }]);
+      // The session of Ada is live, so the cookie that renews it stays.
+      expect(res.headers.getSetCookie().map((c) => c.split(";")[0])).toEqual([
+        `__Host-tempo_session=${ada.token}`,
+      ]);
+    } finally {
+      body.open();
+    }
   });
 
   it("answers 401 to a platform operator whose role an operator revokes during the read, and writes no row (ruling 23)", {
