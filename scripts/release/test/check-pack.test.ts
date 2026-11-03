@@ -1294,6 +1294,11 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
     const calls = linesFrom(source, /(?<!function )\btar\(/g);
     expect(calls).toHaveLength(3);
     expect(calls.filter((c) => !/^tar\(\[[^\]]*\]\)/.test(c))).toEqual([]);
+    // A default of 0 would drop the limit from every product call with no test red
+    // (R1 of the final re-review).
+    expect(source).toMatch(
+      /export function tar\(args: readonly string\[\], timeoutMs = TAR_TIMEOUT_MS\)/,
+    );
     // Each tar call of readTarball goes through named, so its error starts with the tarball path.
     const reader = source.slice(
       source.indexOf("export function readTarball"),
