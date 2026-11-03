@@ -1241,8 +1241,8 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
     );
     // One child process call in the file, with the limit and no input pipe.
     expect(source.match(/execFileSync\(/g)).toHaveLength(1);
-    // checkPack takes a parameter named input, so the fact reads only an input
-    // property: input:, a shorthand { input }, or , input, (ruling 7 of plan 12m).
+    // checkPack takes a parameter named input. So the fact reads only an input
+    // property (ruling 7 of plan 12m): input:, a shorthand { input }, or , input,.
     const INPUT_PROPERTY = /[{,]\s*input\s*[:,}]/;
     expect(source).not.toMatch(INPUT_PROPERTY);
     for (const form of ["{ input: x }", "{ input }", "{ cwd, input, stdio }"])

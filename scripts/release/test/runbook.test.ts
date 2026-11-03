@@ -353,8 +353,8 @@ describe("docs/release/RUNBOOK.md", () => {
     ]);
   });
 
-  // Follow-up 9 of plan 12j: release-check stops after a failed evidence run,
-  // so at a new minor the owner first meets the test of the real register.
+  // Follow-up 9 of plan 12j: release-check stops after a failed evidence run.
+  // So at a new minor, the owner first meets the test of the real register.
   it("removes the code of each due deprecation at a new minor, before the pull request", () => {
     const step = stepOf(TEXT, "At each release", 5);
     for (const part of [
