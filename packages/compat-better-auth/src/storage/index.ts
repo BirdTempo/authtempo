@@ -91,6 +91,36 @@ function cascading<T extends { userDeleteCascades?: boolean }>(storage: T): T {
   return storage;
 }
 
+/**
+ * Turns the foreign keys on for a bun:sqlite handle, once per storage (plan
+ * 12n). The cascade of a user delete is a promise of this storage
+ * (`cascading`). Bun 1.4.3 opens a bun:sqlite database with the keys off
+ * (`PRAGMA foreign_keys` read 0 on 2026-11-03, darwin-arm64). A bun:sqlite
+ * handle is one connection, so the setting holds for each later statement.
+ * The query counts as the integer check's query does. A failed run is not
+ * kept, so the next call runs it again.
+ */
+function foreignKeysOn(
+  driver: SqliteDriver,
+  sent: { statements: number; ready?: number },
+): () => Promise<void> {
+  if (driver.name !== "bun:sqlite") return async () => {};
+  let on: Promise<void> | null = null;
+  return () => {
+    on ??= (async () => {
+      try {
+        sent.statements++;
+        if (sent.ready !== undefined) sent.ready++;
+        await driver.db.prepare("PRAGMA foreign_keys = ON").run();
+      } catch (e) {
+        on = null;
+        throw e;
+      }
+    })();
+    return on;
+  };
+}
+
 /** Core's storage port, and the owned limiter, over the app's Better Auth tables (spec 16.2). */
 export function betterAuthSchemaStorage(
   options: PostgresSchemaStorageOptions,
@@ -108,11 +138,13 @@ export function betterAuthSchemaStorage(
     // same undo log, the same readiness check. Before the check, the handle
     // must read integers as numbers, as on the core SQLite adapter. The ping
     // runs that check first (ruling 27 of the 12g lane), then the D1 ping
-    // over the seam (ruling 26).
+    // over the seam (ruling 26). On bun:sqlite, the foreign keys go on
+    // before the first call and before the migrations.
     const { driver } = options;
     const variant = options.variant ?? "1.7";
     const st = compatStatements("sqlite", names, rule);
     const sent = { statements: 0, ready: 0 };
+    const keysOn = foreignKeysOn(driver, sent);
     const probe = integerProbe(driver.db, sent);
     const compatReady = d1CompatReady(driver.db, names, sent);
     const compatPing = d1CompatPing(driver.db, names, sent);
@@ -125,6 +157,7 @@ export function betterAuthSchemaStorage(
           statements: st,
           toStorageError: st.toStorageError,
           ready: async () => {
+            await keysOn();
             await probe();
             await compatReady();
           },
@@ -138,7 +171,10 @@ export function betterAuthSchemaStorage(
       ),
       limiter: createD1LimiterOnSeam(driver.db),
       migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),
-      migrate: () => applyBetterAuthCompatSqliteMigrations(driver, names, variant),
+      migrate: async () => {
+        await keysOn();
+        return applyBetterAuthCompatSqliteMigrations(driver, names, variant);
+      },
     };
     registerPlaceholderRule(sqlite, rule);
     registerRawRead(sqlite, async (q) => (await driver.db.prepare(q).all()).results);

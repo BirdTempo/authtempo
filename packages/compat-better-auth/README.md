@@ -217,6 +217,9 @@ On D1, do not delete a user or an organization inside a `transaction` of
 your own while its child rows exist: the foreign keys delete them, and a
 rollback does not bring them back (`@authtempo/adapter-d1` README).
 
+On `bun:sqlite`, which opens with the foreign keys off, the storage turns
+them on, so a user delete deletes the user's child rows.
+
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound
 SELECT, the PRAGMA column names, the rollback of a failed migration file, and
