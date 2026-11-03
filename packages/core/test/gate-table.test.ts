@@ -103,7 +103,10 @@ const GITHUB_OVERRIDE = `${BASE_URL}/auth/oauth/github`;
 const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true });
 const JWK = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
 
-/** The provider answers of every social row. Each profile carries the user's address as verified. */
+/**
+ * The provider answers of every social row. Each profile carries the user's
+ * address as verified.
+ */
 function providerFetch(state: { msNonce: string; now: () => number }) {
   return fakeFetch(async (call: TokenCall) => {
     const at = { access_token: ACCESS, token_type: "Bearer" };
@@ -307,7 +310,10 @@ function viaRecorder() {
   return { hooks, byId };
 }
 
-/** The outcome of a JSON sign-in answer: a challenge with its methods, or a session with its `via`. */
+/**
+ * The outcome of a JSON sign-in answer: a challenge with its methods, or a
+ * session with its `via`.
+ */
 async function outcomeOf(w: Pick<World, "vias">, res: Response): Promise<Outcome> {
   const body = (await res.json()) as {
     twoFactor?: { methods: ChallengeMethod[] };
@@ -1088,7 +1094,7 @@ describe("the gate table (plan 12i Task 15, Review Focus 1)", () => {
         expect(row.limited, row.key).toBe(true);
   });
 
-  it("names each guess route that answers its wrong code in a page, with the test of its limits", () => {
+  it("names each guess route that answers its wrong code in a page, with its limits test", () => {
     // Such a route declares no invalid_code, so the declared codes do not
     // find it (final fix wave item 31). A route here that declares one
     // belongs in GUESSES instead.
@@ -1108,7 +1114,7 @@ describe("the gate table (plan 12i Task 15, Review Focus 1)", () => {
     }
   });
 
-  it("counts a wrong guess at each guess route on the limiter, per IP where no session bounds it", async () => {
+  it("counts a wrong guess at each guess route on the limiter, by IP with no session", async () => {
     // ASVS 6.6.3: each guess costs a count of an owned limit. A route with
     // no session counts per IP, so one client cannot spread its guesses
     // over many addresses. The list comes from the declared codes, and

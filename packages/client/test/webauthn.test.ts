@@ -146,8 +146,12 @@ describe("conversions", () => {
       largeBlob: {},
       credProps: { rk: true },
     });
-    expect(JSON.stringify(split.response)).not.toContain("AQID");
-    expect(JSON.stringify(split.response)).not.toContain("CQk");
+    // The response is the input with the two outputs removed, so no output value stays at any
+    // key. A search for "CQk" in the JSON could match the random id or signature.
+    expect(split.response).toEqual({
+      ...json,
+      clientExtensionResults: { prf: { enabled: true }, largeBlob: {}, credProps: { rk: true } },
+    });
     // The browser's own toJSON writes the same strings; a second value passes too.
     const native = splitExtensionResults({
       ...auth,

@@ -500,9 +500,8 @@ describe("the phone-number plugin", () => {
     expect([reset.status, (await json(reset)).code]).toEqual([501, "NOT_SUPPORTED"]);
   });
 
-  // M2 of final-12i-A, the compat part. The core part is FW1's (415bebc1 on
-  // task/12i-fw1): claimEmail clears the phone. This test fails on this
-  // branch alone and passes once the lead joins FW1's core change.
+  // M2 of final-12i-A, the compat part. The core part is 415bebc1, in main since the
+  // merge 47252713: claimEmail clears the phone.
   it("clears a proved number that Better Auth stored for an unverified user when the owner proves the address", async () => {
     const t = await betterAuthTables();
     // A row as Better Auth 1.7.2 leaves it after /sign-up/email with no proof
