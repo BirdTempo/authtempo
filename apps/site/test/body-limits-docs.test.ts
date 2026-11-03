@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import { largestBodies } from "../../../packages/core/test/body-limits.ts";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, 69, 72, 75, 79, and 84 of the 12j lane). The errors page, the limits page, the Express,
-// Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
-// README, and the deploy page state the caps and the scan limits by hand.
+// This test holds the request body limits of core. They come from rulings
+// 43, 46, 51, 56, 59, 63, 64, 66, 68, 69, 72, 75, 79, and 84 of the 12j lane.
+// The errors page, the limits page, and the Express, Fastify, and SvelteKit
+// pages state the caps and the scan limits by hand. The SCIM guide, the core
+// README, the Express README, and the deploy page state them by hand too.
 // This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
 // new derivation that changes a constant fails here until each line says the
@@ -152,9 +153,10 @@ const largestWrite = () =>
 const slowReads = () => Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / slowSeconds());
 
 /**
- * The seconds that one account holds the user half in a window (ruling 79):
- * each read but the last within the time of no spend, and the last read,
- * with no start left to spend, to the time of an SSO connection write.
+ * The seconds that one account holds the user half in a window (ruling 79).
+ * Each read but the last holds the half for the time of no spend. The last
+ * read has no start left to spend, so it holds the half for the time of an
+ * SSO connection write.
  */
 const holdOfAccount = () =>
   (limitMax("SSO_LARGE_READ_PER_USER") - 1) * slowSeconds() + ssoWriteSeconds();

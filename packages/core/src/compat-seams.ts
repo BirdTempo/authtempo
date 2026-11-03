@@ -100,12 +100,12 @@ export function markSsoManageCounted(request: Request, userId: string): void {
 /**
  * Marks `request` as one SSO connection write of `userId` whose large body
  * read core's limits counted already (ruling 69 of the 12j lane). The mark
- * holds the outcome of those counts. Only `countSsoLargeRead` sets the mark, after
- * the count: plan 12l moved the count there from `countSsoManageWrite`. A
- * refused count marks too, so core answers 429 and counts the read no more
- * (ruling 72 Low 2). A shim that passes a refused write to core then gives
- * one `limit.hit`, not two. Ruling 75 of the 12j lane removed the count of
- * the deployment that this mark first served.
+ * holds the outcome of those counts. Only `countSsoLargeRead` sets the
+ * mark, after the count: plan 12l moved the count there from
+ * `countSsoManageWrite`. A refused count marks too, so core answers 429 and
+ * counts the read no more (ruling 72 Low 2). A shim that passes a refused
+ * write to core then gives one `limit.hit`, not two. Ruling 75 of the 12j
+ * lane removed the count of the deployment that this mark first served.
  */
 export function markLargeReadCounted(request: Request, userId: string, allowed: boolean): void {
   largeReadCounted.set(request, { userId, allowed });

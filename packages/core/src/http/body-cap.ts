@@ -119,10 +119,10 @@ export const FORM_PAIRS_MAX = 128;
  * ended counts too. A budget of 4 reads held the live growth at 36 MB. But
  * its growth with garbage reached 112 to 118 MB over a base of 21 MB, past
  * the 128 MB of an isolate. A budget of 2 reads holds the live growth at
- * 20 MB. It holds the growth with garbage at 97 MB or less for every K up
- * to 60. So the budget is 2 reads
- * of `REQUEST_BODY_MAX`. `body-memory.test.ts` runs the budget's reads at
- * once and one more, and a burst of 30, and measures them.
+ * 20 MB. It holds the growth with garbage at 97 MB or less for every K up to
+ * 60. So the budget is 2 reads of `REQUEST_BODY_MAX`. `body-memory.test.ts`
+ * runs the budget's reads at once and one more, and a burst of 30, and
+ * measures them.
  *
  * The budget is two halves that do not lend bytes to each other (ruling 66
  * Major 1 of the 12j lane). `LARGE_READ_USER_BUDGET` is for the reads of
@@ -441,9 +441,8 @@ export class BodyTooLarge extends Error {
  * the isolate hold that half (`LARGE_READ_USER_BUDGET` or
  * `LARGE_READ_ANON_BUDGET`). The reads of its client hold its share
  * (`largeShareOf`). Its user runs another large read
- * (`LARGE_READS_PER_USER`). The router
- * answers it 503 `body_busy` with `Retry-After` for every route, and the
- * SCIM routes answer their own 503.
+ * (`LARGE_READS_PER_USER`). The router answers it 503 `body_busy` with
+ * `Retry-After` for every route, and the SCIM routes answer their own 503.
  */
 export class BodyBusy extends Error {
   constructor() {
