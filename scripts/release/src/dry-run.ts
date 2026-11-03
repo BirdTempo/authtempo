@@ -23,7 +23,7 @@ import {
 import { SCOPE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
-import { runSync, STEP_TIMEOUT_MS } from "./lib/run-sync.ts";
+import { runSync } from "./lib/run-sync.ts";
 import { UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { refusal } from "./prepare.ts";
@@ -336,7 +336,7 @@ export const spawnRun: Run = (cmd, args, cwd, env) => {
     cwd,
     maxBuffer: 256 * 1024 * 1024,
     env,
-    timeoutMs: STEP_TIMEOUT_MS,
+    limit: "step",
   });
   return {
     status: r.status ?? 1,

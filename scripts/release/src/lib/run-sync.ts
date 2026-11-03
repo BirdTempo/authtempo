@@ -1,8 +1,10 @@
 // The one sync child process call of scripts/release, apart from tar of
 // check-pack.ts. A sync spawn blocks the event loop, so the test timeout of
-// vitest cannot end it. The limit of the spawn is the one guard against a call
-// that never ends (follow-up 1 of plan 12m). This file imports only a Node
-// module, because the publish job runs publish.ts with no install.
+// vitest cannot end it. The limit of the spawn is the first guard against a
+// call that never ends (follow-up 1 of plan 12m). The timeout-minutes of each
+// job in ci.yml and release.yml is the second guard of a hung step. This file
+// imports only a Node module, because the publish job runs publish.ts with no
+// install.
 import { type SpawnSyncOptionsWithStringEncoding, spawnSync } from "node:child_process";
 
 /**
@@ -24,32 +26,73 @@ export const REGISTRY_TIMEOUT_MS = 120_000;
 
 /**
  * The limit of one step of the dry run, such as an install, a build, a pack,
- * or a publish dry run. On 2026-11-03, at load 2.6 to 4.0 on 18 cores, the
- * full dry run took 28.7 s. Its slowest step took 7.7 s: node smoke.mjs of
- * the kits phase. The build took 4.8 s, and the install took 3.1 s. No real
- * npm publish ran before the first release, so publish.ts gives each publish
- * this limit, the widest one.
+ * or a publish dry run. On 2026-11-03, at a 1-minute load of 5.5 to 7.7 on 18
+ * cores, the full dry run took 29.5 s. Its slowest step took 8.4 s: node
+ * smoke.mjs of the kits phase, up to the end of the run. The build took 5.0 s,
+ * and the install took 2.1 s. publish.ts gives each npm publish this limit,
+ * the widest one. A real npm publish has no measure yet. The first real
+ * publish gives it.
  */
 export const STEP_TIMEOUT_MS = 1_200_000;
 
-/** A call that did not end in its limit. Its message names the call and the limit. */
-export class RunTimeout extends Error {}
+/** The kind of a call. Each kind has its own limit. */
+export type LimitKind = "git" | "registry" | "step";
 
-/** The options of spawnSync, with the limit in place of timeout and killSignal. */
+/** The limit of each kind, in ms. runSync reads it at each call. */
+const limits: Record<LimitKind, number> = {
+  git: GIT_TIMEOUT_MS,
+  registry: REGISTRY_TIMEOUT_MS,
+  step: STEP_TIMEOUT_MS,
+};
+
+/** The limit of `kind` that runSync gives a call now, in ms. */
+export const limitOf = (kind: LimitKind): number => limits[kind];
+
+/**
+ * Sets the limit of `kind`, and returns the function that restores it. Only a
+ * test calls it, and run-sync.test.ts holds that no file of src does. A real
+ * limit is one minute or more, so a test of a stall at that limit waits that
+ * long. With this setter, a test reaches each catch of a RunTimeout in a few
+ * hundred ms (review of Task 1 of plan 12n, L1).
+ */
+export function setLimitForTest(kind: LimitKind, ms: number): () => void {
+  const before = limits[kind];
+  limits[kind] = ms;
+  return () => {
+    limits[kind] = before;
+  };
+}
+
+/**
+ * A call that did not end in its limit. Its message names the call and the
+ * limit. stdout and stderr hold the output of the call up to the kill.
+ */
+export class RunTimeout extends Error {
+  readonly stdout: string;
+  readonly stderr: string;
+  constructor(message: string, output: { stdout: string; stderr: string }) {
+    super(message);
+    this.stdout = output.stdout;
+    this.stderr = output.stderr;
+  }
+}
+
+/** The options of spawnSync, with the kind of the call in place of timeout and killSignal. */
 export type RunSyncOptions = Omit<
   SpawnSyncOptionsWithStringEncoding,
   "encoding" | "killSignal" | "timeout"
-> & { timeoutMs: number };
+> & { limit: LimitKind };
 
 /**
  * Runs `cmd` with `args` and answers the result of spawnSync, with the
- * output as text. A call that does not end in `timeoutMs` throws a
- * RunTimeout with the message `<cmd> <args> did not end in <ms> ms`. Each
+ * output as text. A call past the limit of its kind throws a RunTimeout with
+ * the message `<cmd> <args> did not end in <ms> ms`. Each
  * other result goes to the caller, which reads the status, the output, and
  * the error of the spawn.
  */
 export function runSync(cmd: string, args: readonly string[], options: RunSyncOptions) {
-  const { timeoutMs, ...rest } = options;
+  const { limit, ...rest } = options;
+  const timeoutMs = limitOf(limit);
   const r = spawnSync(cmd, args, {
     ...rest,
     encoding: "utf8",
@@ -58,6 +101,9 @@ export function runSync(cmd: string, args: readonly string[], options: RunSyncOp
     timeout: timeoutMs,
   });
   if ((r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT")
-    throw new RunTimeout(`${[cmd, ...args].join(" ")} did not end in ${timeoutMs} ms`);
+    throw new RunTimeout(`${[cmd, ...args].join(" ")} did not end in ${timeoutMs} ms`, {
+      stdout: r.stdout ?? "",
+      stderr: r.stderr ?? "",
+    });
   return r;
 }

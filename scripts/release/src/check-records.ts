@@ -14,6 +14,7 @@ import {
 } from "./lib/git.ts";
 import { RECORDS_BASE, TAG_PREFIX } from "./lib/release-facts.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
+import { RunTimeout } from "./lib/run-sync.ts";
 
 export interface RecordFile {
   path: string;
@@ -262,7 +263,9 @@ export function entry(
   try {
     report = checkRecords(readInput(root, ref, fallback));
   } catch (error) {
-    if (!(error instanceof NoMergeBase)) throw error;
+    // A git call past its limit gives a FAIL line that names the call, not a
+    // stack (review of Task 1 of plan 12n, M1).
+    if (!(error instanceof NoMergeBase || error instanceof RunTimeout)) throw error;
     report = unreadReport(
       "check-records",
       ["files", "changelogs", "migrations", "advisories"],

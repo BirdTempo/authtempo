@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { FIRST_RELEASE, TAG_PREFIX } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
-import { GIT_TIMEOUT_MS, runSync } from "./lib/run-sync.ts";
+import { RunTimeout, runSync } from "./lib/run-sync.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 /**
@@ -48,7 +48,7 @@ function git(root: string, args: string[]): { code: number } {
   const r = runSync("git", args, {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
-    timeoutMs: GIT_TIMEOUT_MS,
+    limit: "git",
   });
   return { code: r.status ?? -1 };
 }
@@ -77,10 +77,22 @@ export function entry(
   tag: string,
   remote = "origin",
 ): { lines: string[]; code: number } {
-  const unread = (reason: string) => {
-    const r = unreadReport("check-tag", ["tags"], reason);
-    return { lines: reportLines(r), code: 1 };
-  };
+  let report: Report;
+  try {
+    report = tagReport(root, tag, remote);
+  } catch (error) {
+    // A git exit other than 0 or 1 gives a FAIL line, not a stack. A call past
+    // its limit gives one too, and its line names the call (review of Task 1
+    // of plan 12n, M1).
+    if (!(error instanceof GitError || error instanceof RunTimeout)) throw error;
+    report = unreadReport("check-tag", ["tags"], error.message);
+  }
+  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+}
+
+/** The report of `tag` on the checkout at `root`. A ref that it cannot read gives an unread report. */
+function tagReport(root: string, tag: string, remote: string): Report {
+  const unread = (reason: string) => unreadReport("check-tag", ["tags"], reason);
   const main = `refs/remotes/${remote}/main`;
   if (!hasRef(root, main))
     return unread(`the checkout has no ${main}; fetch the full history (fetch-depth: 0)`);
@@ -97,17 +109,9 @@ export function entry(
     return unread(`the released packages hold ${versions.length} versions: ${versions.join(", ")}`);
   const minor = new RegExp(`^${TAG_PREFIX}(\\d+\\.\\d+)\\.`).exec(tag)?.[1];
   const branch = `refs/remotes/${remote}/release/${minor}`;
-  let onMain: boolean;
-  let onReleaseBranch: boolean;
-  try {
-    onMain = onRef(root, main);
-    onReleaseBranch = minor !== undefined && hasRef(root, branch) && onRef(root, branch);
-  } catch (error) {
-    if (!(error instanceof GitError)) throw error;
-    return unread(error.message);
-  }
-  const report = checkTag({ tag, groupVersion, onMain, onReleaseBranch });
-  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+  const onMain = onRef(root, main);
+  const onReleaseBranch = minor !== undefined && hasRef(root, branch) && onRef(root, branch);
+  return checkTag({ tag, groupVersion, onMain, onReleaseBranch });
 }
 
 if (import.meta.main) {

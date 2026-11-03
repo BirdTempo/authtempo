@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { GIT_TIMEOUT_MS, RunTimeout, runSync } from "./run-sync.ts";
+import { RunTimeout, runSync } from "./run-sync.ts";
 
 // The error of a failed call holds the stderr of git, so the entry prints only its own lines.
 function git(root: string, args: string[]): string {
@@ -8,7 +8,7 @@ function git(root: string, args: string[]): string {
     cwd: root,
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
-    timeoutMs: GIT_TIMEOUT_MS,
+    limit: "git",
   });
   if (r.error !== undefined) throw r.error;
   if (r.status !== 0)

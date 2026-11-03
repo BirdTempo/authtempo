@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { NPM_FLOOR, PUBLIC_REGISTRY, SCOPE } from "./lib/release-facts.ts";
-import { REGISTRY_TIMEOUT_MS, runSync, STEP_TIMEOUT_MS } from "./lib/run-sync.ts";
+import { RunTimeout, runSync } from "./lib/run-sync.ts";
 
 /** The env key of the SHA-256 list of the job check, which release.yml sets from its job output. */
 export const SUMS_ENV = "RELEASE_SHA256SUMS";
@@ -333,17 +333,35 @@ export function publish(dir: string, seams: Seams, listed: string): Outcome {
   const spec = new Map(tarballs.map((t) => [t.file, `${t.name}@${t.version}`]));
   const published: string[] = [];
   for (const [k, { file, tag }] of plan.publish.entries()) {
-    // No --provenance flag and no token: publishConfig.provenance of the
-    // prepared manifest and the OIDC token of the job give both.
-    const r = seams.run("npm", [
-      "publish",
-      join(dir, file),
-      "--access",
-      "public",
-      "--tag",
-      tag,
-      ...REGISTRY_ARGS,
-    ]);
+    let r: { code: number; stdout: string; stderr: string };
+    try {
+      // No --provenance flag and no token: publishConfig.provenance of the
+      // prepared manifest and the OIDC token of the job give both.
+      r = seams.run("npm", [
+        "publish",
+        join(dir, file),
+        "--access",
+        "public",
+        "--tag",
+        tag,
+        ...REGISTRY_ARGS,
+      ]);
+    } catch (error) {
+      // A publish past its limit gives the lines of a half release, not a
+      // stack (review of Task 1 of plan 12n, M2). npm may hold that version
+      // or not, so the failure line names it, and neither list does.
+      if (!(error instanceof RunTimeout)) throw error;
+      const version = spec.get(file) ?? file;
+      return {
+        published,
+        // Each later version. No later publish runs.
+        pending: plan.publish.slice(k + 1).map((p) => spec.get(p.file) ?? p.file),
+        skipped: plan.skip,
+        failures: [
+          `${error.message}; the registry may hold ${version}, so rerun the workflow on the same tag`,
+        ],
+      };
+    }
     if (r.code !== 0)
       return {
         published,
@@ -393,16 +411,26 @@ export function readView(status: number | null, stdout: string, stderr: string):
 
 /**
  * The real seams: npm on the PATH of the publish job. A call past its limit
- * throws an error that names the call, and the job fails.
+ * throws an error that names the call. The publish loop prints it as the
+ * failure line, and the job fails.
  */
 export const npmSeams: Seams = {
   run(command, args) {
-    // This seam runs npm --version and each npm publish. No real publish ran
-    // before the first release, so each call takes the widest limit.
-    const r = runSync(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeoutMs: STEP_TIMEOUT_MS,
-    });
+    let r: ReturnType<typeof runSync>;
+    try {
+      // This seam runs npm --version and each npm publish. No real publish ran
+      // before the first release, so each call takes the widest limit. A real
+      // publish has no measure yet. The first real publish gives it.
+      r = runSync(command, args, { stdio: ["ignore", "pipe", "pipe"], limit: "step" });
+    } catch (error) {
+      // The output up to the kill shows how far npm got. It goes to the log
+      // before the failure line (review of Task 1 of plan 12n, M2).
+      if (error instanceof RunTimeout) {
+        process.stdout.write(error.stdout);
+        process.stderr.write(error.stderr);
+      }
+      throw error;
+    }
     process.stdout.write(r.stdout ?? "");
     process.stderr.write(r.stderr ?? "");
     return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
@@ -410,7 +438,7 @@ export const npmSeams: Seams = {
   npmView(spec, field) {
     const r = runSync("npm", viewArgs(spec, field), {
       stdio: ["ignore", "pipe", "pipe"],
-      timeoutMs: REGISTRY_TIMEOUT_MS,
+      limit: "registry",
     });
     return readView(r.status, r.stdout ?? "", r.stderr ?? "");
   },

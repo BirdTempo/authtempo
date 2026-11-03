@@ -7,7 +7,7 @@ import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { ROOT_INPUTS, type RootInput, rootInputOf } from "./lib/root-inputs.ts";
-import { REGISTRY_TIMEOUT_MS, runSync } from "./lib/run-sync.ts";
+import { RunTimeout, runSync } from "./lib/run-sync.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { rewrittenPaths } from "./rewrite-unpublished.ts";
 
@@ -408,25 +408,36 @@ export function changesetStatus(root: string, since: string): string[] {
     return [
       `changeset status: skipped, ${CHANGESET_BIN} is absent, and the check installs nothing`,
     ];
-  // changeset status is a Node tool as npm is, so it takes the limit of an npm read.
-  return statusNotes(
-    runSync(bin, ["status", `--since=${since}`], { cwd: root, timeoutMs: REGISTRY_TIMEOUT_MS }),
-  );
+  let run: ReturnType<typeof runSync>;
+  try {
+    // changeset status is a Node tool as npm is, so it takes the limit of an npm read.
+    run = runSync(bin, ["status", `--since=${since}`], { cwd: root, limit: "registry" });
+  } catch (error) {
+    // A note past its limit stays a note, because its result never decides
+    // (review of Task 1 of plan 12n, M1).
+    if (!(error instanceof RunTimeout)) throw error;
+    return [`changeset status: ${error.message}`];
+  }
+  return statusNotes(run);
 }
 
 /** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
 export function entry(root: string, ref: string): { lines: string[]; code: number } {
   let report: Report;
+  let base: string;
   try {
     report = checkChangesets(readInput(root, ref));
+    base = mergeBase(root, ref);
   } catch (error) {
-    if (!(error instanceof NoMergeBase)) throw error;
+    // A git call past its limit gives a FAIL line that names the call, not a
+    // stack (review of Task 1 of plan 12n, M1).
+    if (!(error instanceof NoMergeBase || error instanceof RunTimeout)) throw error;
     // With no merge base, changeset status has no commit to read from either.
     const keys = ["changed", "covered", "exempt", "empty"];
     return { lines: reportLines(unreadReport("check-changesets", keys, error.message)), code: 1 };
   }
   // Changesets runs beside the check as a note. Its exit code never decides.
-  report.notes.push(...changesetStatus(root, mergeBase(root, ref)));
+  report.notes.push(...changesetStatus(root, base));
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 

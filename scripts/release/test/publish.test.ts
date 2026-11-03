@@ -4,11 +4,13 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { releasedNames } from "../src/lib/released.ts";
+import { RunTimeout, runSync } from "../src/lib/run-sync.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import {
   dependencyNames,
+  npmSeams,
   publish,
   publishLines,
   publishPlan,
@@ -20,6 +22,7 @@ import {
   type ViewAnswer,
   viewArgs,
 } from "../src/publish.ts";
+import { STALL_MS, withLimit } from "./support/stall.ts";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -260,6 +263,53 @@ describe("publish", () => {
       "  not published: @authtempo/react@0.1.0 is not on the registry",
     ]);
     expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
+  });
+
+  it("names the call and each version after a publish past its limit (review of Task 1 of plan 12n, M2)", () => {
+    // core publishes, the client publish never ends, and react gets no call.
+    const out = downloaded("0.1.0", true);
+    const f = fake({});
+    const seams: Seams = {
+      ...f.seams,
+      run(command, args) {
+        if (!(args[1] ?? "").endsWith(CLIENT("0.1.0"))) return f.seams.run(command, args);
+        f.calls.push([command, ...args]);
+        // A real call past a short limit throws the RunTimeout of a hung npm publish.
+        runSync("sh", ["-c", "exec sleep 30"], { limit: "step" });
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const outcome = withLimit("step", STALL_MS, () => publishOut(out, seams));
+    expect(publishLines(outcome)).toEqual([
+      "publish: FAIL published=1 skipped=0 failures=1",
+      `  sh -c exec sleep 30 did not end in ${STALL_MS} ms; the registry may hold @authtempo/client@0.1.0, so rerun the workflow on the same tag`,
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  not published: @authtempo/react@0.1.0 is not on the registry",
+    ]);
+    expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
+  });
+
+  it("writes the output of a publish past its limit before the error goes up (review of Task 1 of plan 12n, M2)", () => {
+    const written: string[] = [];
+    const capture = (name: string) => (chunk: string | Uint8Array) => {
+      written.push(`${name} ${String(chunk)}`);
+      return true;
+    };
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(capture("stdout"));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(capture("stderr"));
+    let error: unknown = null;
+    try {
+      withLimit("step", STALL_MS, () =>
+        npmSeams.run("sh", ["-c", "echo npm notice; echo npm error >&2; exec sleep 30"]),
+      );
+    } catch (thrown) {
+      error = thrown;
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+    expect(error).toBeInstanceOf(RunTimeout);
+    expect(written).toEqual(["stdout npm notice\n", "stderr npm error\n"]);
   });
 
   it("publishes with --access public and no --provenance flag", () => {

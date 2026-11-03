@@ -27,6 +27,7 @@ import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { rewrittenPaths } from "../src/rewrite-unpublished.ts";
 import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
+import { NEVER_ENDS, STALL_MS, withLimit, withStalledGit, writeScript } from "./support/stall.ts";
 
 // The changesets CLI of the repository root, the one that writes each release branch.
 const CHANGESET_BIN = fileURLToPath(
@@ -694,6 +695,20 @@ describe("check-changesets", () => {
     }
   });
 
+  it("gives a note, not a failure, for a changeset status past its limit (review of Task 1 of plan 12n, M1)", () => {
+    const bare = mkdtempSync(join(tmpdir(), "authtempo-changeset-status-"));
+    try {
+      mkdirSync(join(bare, "node_modules/.bin"), { recursive: true });
+      const bin = join(bare, "node_modules/.bin/changeset");
+      writeScript(bin, NEVER_ENDS);
+      expect(withLimit("registry", STALL_MS, () => changesetStatus(bare, "f44660d9"))).toEqual([
+        `changeset status: ${bin} status --since=f44660d9 did not end in ${STALL_MS} ms`,
+      ]);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
   it("prints the output of changeset status beside its exit code", () => {
     // The output of changeset status 3.0.3 on the tree of 2026-10-20.
     const notes = statusNotes({
@@ -723,6 +738,22 @@ describe("check-changesets", () => {
       lines: [
         "check-changesets: FAIL changed=0 covered=0 exempt=0 empty=0 failures=1",
         "  no merge base of HEAD and main; fetch the full history (fetch-depth: 0)",
+      ],
+      code: 1,
+    });
+  });
+
+  it("prints a FAIL line, not a stack, when a git call passes its limit (review of Task 1 of plan 12n, M1)", () => {
+    const r = fixtureRepo();
+    repo = r;
+    r.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+    expect(entry(r.root, "main").lines[0]).toBe(
+      "check-changesets: FAIL changed=1 covered=0 exempt=0 empty=0 failures=1",
+    );
+    expect(withStalledGit(() => entry(r.root, "main"))).toEqual({
+      lines: [
+        "check-changesets: FAIL changed=0 covered=0 exempt=0 empty=0 failures=1",
+        `  git merge-base HEAD main did not end in ${STALL_MS} ms`,
       ],
       code: 1,
     });
