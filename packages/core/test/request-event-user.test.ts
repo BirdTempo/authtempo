@@ -14,6 +14,7 @@ import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SOCIAL } from "./every-feature.js";
 import {
   BASE_URL,
+  LONG_TEST_MS,
   makeAuth,
   post,
   recordAddress,
@@ -340,7 +341,12 @@ describe("the user of the request event on every route (ruling 37 of plan 12n)",
     }
   });
 
-  it("names the signed-in caller on each route that takes a session, refusals too, and no user on any other route", async () => {
+  // It walks every route of ROUTES with a fresh session per route. In the
+  // whole-branch review run of 2026-11-03 it took 1237 ms (rr-final L-6 of
+  // plan 12n). The 1-minute load was 1.7 to 13.8 on 18 cores.
+  it("names the signed-in caller on each route that takes a session, refusals too, and no user on any other route", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const w = await walkWorld();
     // A verified user with a fresh session per route. A route that deletes the user leaves the next route a new one.
     let made = 0;

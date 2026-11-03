@@ -318,7 +318,13 @@ export class ClaimLostError extends Error {
  * cap of 50, one race answered 500 and kept writes of the claim. The answer
  * `conflict` comes after the undo of the first run, so no claim write stays.
  * With this rule that race answers in 24 queries (adapter-d1 test
- * anonymous-upgrade-budget.test.ts). The client then sends the request again.
+ * anonymous-upgrade-budget.test.ts). A flow that spent its link, code, or
+ * provider token before the claim needs a new one. The reset and the
+ * invitation confirm keep their link, so the same request works again.
+ *
+ * The unique-key retry of a flow is no claim retry, and it runs on every
+ * store. The same D1 join after one unique-key retry sent 46 queries on
+ * 2026-11-03, inside the cap (the same adapter-d1 test file).
  */
 export function claimRetry(
   storage: StorageAdapter,

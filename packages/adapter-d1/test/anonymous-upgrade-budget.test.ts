@@ -659,6 +659,84 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
     expect(again.queries).toBeLessThanOrEqual(BUDGET);
   });
 
+  // The count of the run of 2026-11-03 (rr-final L-7 of plan 12n): the
+  // worst claim join after one unique-key retry. A sign-up of the address
+  // commits between the first run's read of the user and its user create.
+  // So the create meets the unique key, and the second run claims the user
+  // of the sign-up with 11 claimant sessions.
+  const UNIQUE_PINS = { retry: 46 };
+
+  it("signs in after a unique-key retry on the worst claim join within the D1 Free budget (rr-final L-7 of plan 12n)", async () => {
+    // The sign-up and the sign-ins run on the binding with no count, as requests in other invocations.
+    const other = make({}, false);
+    const email = "bo@example.com";
+    let live = false;
+    let identityReads = 0;
+    let raced = 0;
+    let signedUp = "";
+    const w = make({ multiSession: { max: 10 }, hooks: ALL_HOOKS }, true, async (sql) => {
+      if (!live) return;
+      if (/^SELECT\b[\s\S]*\bFROM\s+"?ta_identity"?\s+WHERE\s+"?provider"?/i.test(sql))
+        identityReads++;
+      else if (
+        identityReads === 1 &&
+        raced === 0 &&
+        /^SELECT\b[\s\S]*\bFROM\s+"?ta_user"?\s+WHERE\s+"?email"?/i.test(sql)
+      ) {
+        raced++;
+        // The claimant signs up and signs in on other devices after the read found no user.
+        await call(other, post("/password/sign-up", { email, password: PASSWORD }));
+        for (let i = 0; i < 10; i++)
+          expect(
+            (await call(other, post("/password/sign-in", { email, password: PASSWORD }))).status,
+          ).toBe(200);
+        const row = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+          .bind(email)
+          .first<{ id: string }>();
+        signedUp = row?.id ?? "";
+      }
+    });
+    const b = await fullBagAnonymous(w, (address) => verifiedUser(w, address));
+    const nonce = (await (await call(w, post("/social/google/id-token/nonce", {}))).json()) as {
+      nonce: string;
+      providerNonce: string;
+    };
+    const iat = Math.floor(Date.now() / 1000);
+    w.claims.current = {
+      iss: "https://accounts.google.com",
+      aud: "gid",
+      sub: "g-bo",
+      email,
+      email_verified: true,
+      nonce: nonce.providerNonce,
+      iat,
+      exp: iat + 3600,
+    };
+    live = true;
+    const done = await measure(
+      w,
+      post("/social/google/id-token", { idToken: "h.e30.s", nonce: nonce.nonce }, b.jar()),
+    );
+    live = false;
+    // Each run reads the identity of the provider. The claim of the second
+    // run reads the email identity too, with the same SQL text.
+    expect({ raced, identityReads }).toEqual({ raced: 1, identityReads: 3 });
+    expect(b.take(done.res).status).toBe(200);
+    const user = await env.DB.prepare("SELECT id, email_verified AS v FROM ta_user WHERE email = ?")
+      .bind(email)
+      .first<{ id: string; v: number }>();
+    // The second run claimed the user of the sign-up: the first run's create wrote no user.
+    expect(user?.id).toBe(signedUp);
+    expect(user?.v).toBe(1);
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM ta_session WHERE user_id = ?")
+      .bind(user?.id ?? "")
+      .first<{ n: number }>();
+    // The claim ended the 11 claimant sessions; the sign-in made one.
+    expect(left?.n).toBe(1);
+    expect(done.queries).toBe(UNIQUE_PINS.retry);
+    expect(done.queries).toBeLessThanOrEqual(BUDGET);
+  });
+
   for (const uniformSignUp of [false, true])
     it(`keeps the sign-up confirm by code with a full bag within the D1 Free budget (uniformSignUp ${uniformSignUp})`, async () => {
       const hash = createPbkdf2PasswordHash({ iterations: 1000 });

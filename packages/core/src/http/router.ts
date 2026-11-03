@@ -245,6 +245,9 @@ async function moveLegacyCookie(
   if (old === null || readCookie(request, config.cookieName) !== null) return res;
   const sets = res.headers.getSetCookie();
   if (!sets.some((c) => c.startsWith(`${config.cookieName}=`))) {
+    // A peek of the row of the old cookie, the request's token here. The move sets no
+    // mark (ruling 49 of plan 12n). So on a route that reads no session, the `request`
+    // event names no user.
     const row = await peekSession(config, old);
     if (row) {
       // The earlier of expiresAt and the cap: a row from before absoluteDays
@@ -457,8 +460,9 @@ export function createRouter(
         ? withTrace(routerError(HOST_CODE), traceId)
         : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
-    // The user of the session that a step of the request resolved, so an operator ties a refusal to an account.
-    // The handler and the two refusal steps of `dispatch` set it (ruling 37 of plan 12n).
+    // The user of the session row that the request's token names, read in full or by a
+    // peek (rulings 37 and 49 of plan 12n). So a refusal names the account of the token,
+    // a banned one too.
     const userId = resolvedUserOf(request);
     scoped.observe.emit({
       name: "request",

@@ -313,7 +313,8 @@ export async function impersonationRefusal(
   // The handler's session read takes this row, so the route reads it once (ruling 78 of plan 12d).
   const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
-  // The refusal names the user of the live row, as the handler's read would (ruling 37 of plan 12n).
+  // The refusal names the user of the token's row (rulings 37 and 49 of plan 12n). The peek
+  // checks the expiry of the row only, not the ban, so a banned user's row is named too.
   markRequestUser(request, row.userId);
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
 }

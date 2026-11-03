@@ -925,8 +925,103 @@ describe("session end hooks (plan 9d)", () => {
     },
   );
 
-  // A store with a query limit per invocation (D1) runs each claim once:
-  // one race on D1 already costs 58 queries of 50 (ruling 32 of plan 12n).
+  // The sign-up confirm has no unique-key retry, so each attempt after the
+  // first is a claim retry (password.ts). Two session races and a lost flip
+  // take all three (rr-final L-1 of plan 12n). A reset by the owner wins the
+  // flip. The undo of that run puts back the user row as it was before the
+  // run. So the last run claims and signs in, as in the cases above.
+  it("signs in after two session races and a lost flip on the verify link (decision 13 of plan 12n)", async () => {
+    const { auth, calls } = recorded();
+    const email = "fay@example.com";
+    // Memory runs one transaction at a time. So each parallel flow runs
+    // its transaction on the store at once, as a commit of another request does.
+    const free: StorageAdapter = { ...auth.storage, transaction: (fn) => fn(free) };
+    const side = { ...auth.config, storage: free };
+    const up = await passwordSignUp(auth.config, {
+      email,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const tokens = [upSession(up.value).token];
+    const s = await sessionOnly(
+      passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+    );
+    if (!s.ok) throw new Error(s.code);
+    tokens.push(s.value.token);
+    const confirm = auth.mail.findLast((x) => x.subject.startsWith("Confirm"));
+    const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+    const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
+    const passwords = (await auth.storage.findMany("password", [...byUser])).map((r) => r.id);
+    expect(passwords).toHaveLength(1);
+    const outs: string[] = [];
+    let stage: "race" | "flip" | "done" = "race";
+    let runs = 0;
+    const original = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) => {
+        runs++;
+        return fn({
+          ...tx,
+          findMany: async (m, w, o) => {
+            const found = await tx.findMany(m, w, o);
+            const next = tokens[outs.length];
+            if (stage === "race" && m === "session" && next !== undefined) {
+              // 1 and 2. A sign-out of a claimant session between the read and the delete of the claim.
+              outs.push(await sha256Hex(next));
+              if (outs.length === 2) stage = "flip";
+              await destroySession(side, next);
+            }
+            return found;
+          },
+          update: async (m, w, d) => {
+            if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
+              stage = "done";
+              // 3. A reset by the owner commits first: the flip of this claim matches no row.
+              const asked = await requestPasswordReset(side, { email, ip: null });
+              if (!asked.ok) throw new Error(asked.code);
+              const r = await resetPassword(side, {
+                token: tokenFromMail(auth.mail.at(-1)?.text ?? ""),
+                password: "another long password",
+                ip: null,
+                userAgent: null,
+              });
+              if (!r.ok) throw new Error(r.code);
+            }
+            return tx.update(m, w, d);
+          },
+        });
+      });
+    calls.length = 0;
+    const v = await verifyPasswordEmail(auth.config, {
+      token: tokenFromMail(confirm?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    expect(v.ok && v.value.signedIn !== null).toBe(true);
+    expect(stage).toBe("done");
+    expect(outs).toHaveLength(2);
+    const owner = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+    expect(owner?.emailVerified).toBe(true);
+    // The claim keeps the row of the password that the link confirms.
+    expect((await auth.storage.findMany("password", [...byUser])).map((r) => r.id)).toEqual(
+      passwords,
+    );
+    // Each signed-out row ends once, with sign_out: the undone runs ended nothing.
+    expect(
+      calls
+        .filter(([name]) => name === "afterEnd")
+        .map(([, e]) => (e as { reason: string }).reason)
+        .filter((r) => r === "sign_out"),
+    ).toHaveLength(2);
+    // Three claim retries, and the run that signs in.
+    expect(runs).toBeGreaterThanOrEqual(CLAIM_RUNS + 1);
+  });
+
+  // A store with a query limit per invocation, such as D1, runs each claim
+  // once (ruling 32 of plan 12n). On D1 the worst claim join sent 58 queries
+  // with one race on 2026-11-03, past the cap of 50 (`claimRetry`).
   it.each(["magic link", "verify link", "social", "reset"] as const)(
     "answers conflict to a session race on a store with a query limit per invocation, and keeps the claimant's rows (ruling 32 of plan 12n, %s)",
     async (proof) => {

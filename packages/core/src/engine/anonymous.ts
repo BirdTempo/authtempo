@@ -466,9 +466,9 @@ export interface AnonymousCaller {
  * The live anonymous session of `request`, or null. It reads with no write
  * (`peekRequestSession`), so it moves no expiry, and the handler's later
  * session read takes the same row. With `anonymous` off it reads nothing: a
- * deployment that turned it off pays no query on each sign-in. A caller
- * that it finds marks the request with the anonymous user (ruling 37 of
- * plan 12n), so the `request` event names that user.
+ * deployment that turned it off pays no query on each sign-in. When it
+ * finds a caller, it marks the request with the anonymous user (ruling 37
+ * of plan 12n). So the `request` event names that user.
  */
 export async function anonymousCaller(
   config: ResolvedConfig,

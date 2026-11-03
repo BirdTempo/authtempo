@@ -1076,9 +1076,11 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * organization. The next organization then proves the domain again. Each
    * directory deactivates the user before the move, so no member row stays.
    * With more than 50 member rows, the organization rule of the delete reads
-   * in more than 3 calls. That is not the item of this scene.
+   * in more than 3 calls. That is not the item of this scene. With `active`,
+   * no directory deactivates the user, so a member row stays in each
+   * organization (ruling 50 of plan 12n).
    */
-  async function provisioned(sent: MailMessage[], count: number) {
+  async function provisioned(sent: MailMessage[], count: number, active = false) {
     const setup = await engine(env.DB, sent, undefined, SCIM);
     const sso = setup.api.sso;
     const scim = setup.api.scim;
@@ -1116,20 +1118,23 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
       );
       if (res.status !== 201) throw new Error(`the SCIM create answered ${res.status}`);
       const id = String(((await res.json()) as { id: unknown }).id);
-      const off = await setup.handle(
-        new Request(`${BASE}/auth/scim/v2/Users/${id}`, {
-          method: "PATCH",
-          headers: {
-            authorization: `Bearer ${token.value.token}`,
-            "content-type": "application/scim+json",
-          },
-          body: JSON.stringify({
-            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            Operations: [{ op: "Replace", path: "active", value: "False" }],
-          }),
-        }),
-      );
-      if (off.status !== 200) throw new Error(`the SCIM deactivate answered ${off.status}`);
+      const off = active
+        ? null
+        : await setup.handle(
+            new Request(`${BASE}/auth/scim/v2/Users/${id}`, {
+              method: "PATCH",
+              headers: {
+                authorization: `Bearer ${token.value.token}`,
+                "content-type": "application/scim+json",
+              },
+              body: JSON.stringify({
+                schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                Operations: [{ op: "Replace", path: "active", value: "False" }],
+              }),
+            }),
+          );
+      if (off !== null && off.status !== 200)
+        throw new Error(`the SCIM deactivate answered ${off.status}`);
       if (!(await sso.domains.delete({ actor: APP, id: domain.value.id })).ok)
         throw new Error("the domain stays");
       current = new Date(current.getTime() + 1);
@@ -1138,7 +1143,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     current = new Date(current.getTime() + 6_000);
     const { userId, tokens } = await signIns(setup, sent, "ada@acme.example", 60);
     expect(await rows("ta_scim_user", `user_id = '${userId}'`)).toBe(count);
-    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(active ? count : 0);
     expect(await rows("ta_session", `user_id = '${userId}'`)).toBe(60);
     endings.length = 0;
     return { setup, userId, tokens };
@@ -1172,6 +1177,38 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     // The doors refuse every left session before the sweep.
     for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
     expect({ act: calls, inAct: endings.length }).toEqual(SCIM_COUNTS);
+  }, 300_000);
+
+  /**
+   * The counts of the delete on the binding on 2026-11-03 (ruling 50 of plan
+   * 12n), the scene of the Task 3a report. The user has scimUser rows and
+   * member rows in 51 organizations, and 60 sessions. The size check counts
+   * the 6 reads that it sends, and the reserve keeps the second scimUser
+   * chunk. With the old count of the size check (1 + 3), the delete made 52
+   * calls. The counts are the act with the route before it, and the sessions
+   * that it ended.
+   */
+  const SCIM_MEMBER_COUNTS = { act: 50, inAct: 6 };
+
+  it("deletes a user with scimUser rows and member rows in 51 organizations in 50 calls (ruling 50 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await provisioned(sent, 51, true);
+    const r = await act(
+      sent,
+      (auth) => auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+      false,
+      SCIM,
+    );
+    expect(r.answer).toMatchObject({ ok: true });
+    expect(r.refused).toBe(0);
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_scim_user", `user_id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    // The doors refuse every left session before the sweep.
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(SCIM_MEMBER_COUNTS);
   }, 300_000);
 
   /**
