@@ -1160,6 +1160,39 @@ function withSlowTar<T>(seconds: number, use: () => T): T {
   }
 }
 
+/**
+ * Runs `use` with a `tar` first on PATH that refuses each call with -xzOf. It
+ * writes "fake tar refused the read" to stderr and exits 1. It runs the real
+ * tar at `real` for each other call, with the same arguments.
+ */
+function withRefusingTar<T>(real: string, use: () => T): T {
+  const bin = mkdtempSync(join(tmpdir(), "authtempo-refusing-tar-"));
+  writeFileSync(
+    join(bin, "tar"),
+    [
+      "#!/bin/sh",
+      'for a in "$@"; do',
+      '  if [ "$a" = "-xzOf" ]; then echo "fake tar refused the read" >&2; exit 1; fi',
+      "done",
+      `exec '${real}' "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const path = process.env.PATH ?? "";
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    return use();
+  } finally {
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+/** The text from each match of `form` in `text` to the end of its line. */
+const linesFrom = (text: string, form: RegExp) =>
+  [...text.matchAll(form)].map((m) => text.slice(m.index, text.indexOf("\n", m.index)));
+
 describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () => {
   it("fails a tar call that does not end in the limit, and names the call", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
@@ -1246,6 +1279,50 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
         return dir;
       });
       expect(existsSync(seen)).toBe(false);
+      expect(tarFolders()).toEqual(before);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it("gives each tar call the default limit, and each read the tarball path", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/check-pack.ts", import.meta.url)),
+      "utf8",
+    );
+    // Each call outside the definition passes the argument list only, so TAR_TIMEOUT_MS holds.
+    const calls = linesFrom(source, /(?<!function )\btar\(/g);
+    expect(calls).toHaveLength(3);
+    expect(calls.filter((c) => !/^tar\(\[[^\]]*\]\)/.test(c))).toEqual([]);
+    // Each tar call of readTarball goes through named, so its error starts with the tarball path.
+    const reader = source.slice(
+      source.indexOf("export function readTarball"),
+      source.indexOf("export function packedTexts"),
+    );
+    expect(linesFrom(reader, /\btar\(/g)).toHaveLength(2);
+    expect(linesFrom(reader, /(?<!named\(\(\) => )\btar\(/g)).toEqual([]);
+  });
+
+  it("puts the tarball path before the reason of a failed -xzOf read", () => {
+    // The real tar, resolved before the PATH change, so the fake does not run itself.
+    const real = execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8" }).trim();
+    expect(real).toMatch(/^\/[^']+$/);
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const path = join(out, "good.tgz");
+      writeTar(path, [manifestEntry("@authtempo/fixture")]);
+      const before = tarFolders();
+      let message = "";
+      withRefusingTar(real, () => {
+        try {
+          readTarball(path);
+        } catch (error) {
+          message = error instanceof Error ? error.message : String(error);
+        }
+      });
+      const head = `${path}: tar -xzOf `;
+      expect(message.slice(0, head.length)).toBe(head);
+      expect(message).toContain("failed: fake tar refused the read");
       expect(tarFolders()).toEqual(before);
     } finally {
       rmSync(out, { recursive: true, force: true });

@@ -285,10 +285,12 @@ export interface Tarball {
 
 /**
  * The limit of one tar call, in milliseconds. The largest tarball of the
- * group lists in under one second on an 18-core host, and in a few seconds
- * at load 50. The test timeout of vitest cannot end a sync spawn, because
- * the spawn blocks the event loop. So this limit is the one guard against
- * a tar that never ends (follow-up 15 of plan 12l).
+ * group lists in under one second on an 18-core host. A whole readTarball
+ * of the core tarball (864 files, four tar calls) took at most 254 ms at
+ * load 43 on 2026-11-03. Ten reads ran alone, ten beside one tar loop, and
+ * ten beside eight tar loops. The test timeout of vitest cannot end a sync
+ * spawn, because the spawn blocks the event loop. So this limit is the one
+ * guard against a tar that never ends (follow-up 15 of plan 12l).
  */
 export const TAR_TIMEOUT_MS = 60_000;
 

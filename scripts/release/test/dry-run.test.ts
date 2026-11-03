@@ -1472,4 +1472,14 @@ describe("the dry run of a tag and of the tarballs of the job check (ruling 67 o
       "unknown argument --base; give --keep, --at <version>, or --tarballs <folder>",
     );
   });
+
+  it("lists the SHA-256 of the bytes that tar read, with no second read of the path", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/dry-run.ts", import.meta.url)),
+      "utf8",
+    );
+    // A second read can give other bytes than the bytes of the manifest and the file list.
+    expect(source).not.toContain('createHash("sha256").update(readFileSync(');
+    expect(source).toContain("read.sha256");
+  });
 });
