@@ -1537,6 +1537,8 @@ export async function runReset(
   // The refresh families that the reset deletes, to end after its commit (ruling 43 of plan 12e).
   const families = familyEnds();
   let reset: Result<ResetResult> | null = null;
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; reset === null; attempt++) {
     try {
       reset = await hookGuard(() =>
@@ -1563,7 +1565,7 @@ export async function runReset(
       // Another proof claimed the user first (review M1). The rollback undid
       // the consume, so the retry spends the link again and finds a verified
       // user. Or a session race undid the claim: the retry claims again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
       throw err;
     }
   }

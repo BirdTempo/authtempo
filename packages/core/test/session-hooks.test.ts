@@ -135,6 +135,48 @@ async function reset(auth: ReturnType<typeof makeAuth>, email = "ada@example.com
   });
 }
 
+/** The config of a Google sign-in through the fake token endpoint: set it at `makeAuth`. */
+function googleConfig(): { jwtTokens: Record<string, FakeIdToken>; extra: Partial<AuthConfig> } {
+  const jwtTokens: Record<string, FakeIdToken> = {};
+  const { fetchFn } = tokenEndpoint("idtok-default");
+  return {
+    jwtTokens,
+    extra: { social: { google: GOOGLE, fetch: fetchFn }, jwt: fakeJwt(jwtTokens) },
+  };
+}
+
+/** A Google sign-in whose ID token proves `email`. */
+async function googleSignIn(
+  auth: ReturnType<typeof makeAuth>,
+  jwtTokens: Record<string, FakeIdToken>,
+  email: string,
+) {
+  const started = await startSocial(auth.config, { provider: "google", next: "/", ip: null });
+  if (!started.ok) throw new Error(started.code);
+  const url = new URL(started.value.location);
+  jwtTokens["idtok-default"] = {
+    audience: GOOGLE.clientId,
+    issuer: "https://accounts.google.com",
+    claims: {
+      sub: "g-1",
+      email,
+      email_verified: true,
+      name: "Ada",
+      picture: "https://p/a.png",
+      nonce: url.searchParams.get("nonce") ?? "",
+    },
+  };
+  return completeSocial(auth.config, {
+    provider: "google",
+    state: url.searchParams.get("state") ?? "",
+    code: "code-1",
+    error: null,
+    bindToken: started.value.bindToken,
+    ip: null,
+    userAgent: null,
+  });
+}
+
 describe("session create hooks (plan 9d)", () => {
   it("fires beforeCreate with the draft and afterCreate with the stored row, once each, on a magic link sign-in", async () => {
     const { auth, calls, names } = recorded();
@@ -702,10 +744,11 @@ describe("session end hooks (plan 9d)", () => {
     expect(armed).toBe(false);
   });
 
-  it.each(["magic link", "verify link"] as const)(
+  it.each(["magic link", "verify link", "social", "reset"] as const)(
     "keeps the owner's claim when a session race undoes each run, and fires afterEnd once for each row (ruling 46 of plan 12i, %s)",
     async (proof) => {
-      const { auth, calls } = recorded();
+      const google = googleConfig();
+      const { auth, calls } = recorded({}, google.extra);
       const email = "cy@example.com";
       const up = await passwordSignUp(auth.config, {
         email,
@@ -753,11 +796,15 @@ describe("session end hooks (plan 9d)", () => {
       const signedIn =
         proof === "magic link"
           ? await magicSignIn(auth, email)
-          : await verifyPasswordEmail(auth.config, {
-              token: tokenFromMail(confirm?.text ?? ""),
-              ip: null,
-              userAgent: null,
-            });
+          : proof === "social"
+            ? await googleSignIn(auth, google.jwtTokens, email)
+            : proof === "reset"
+              ? await reset(auth, email)
+              : await verifyPasswordEmail(auth.config, {
+                  token: tokenFromMail(confirm?.text ?? ""),
+                  ip: null,
+                  userAgent: null,
+                });
       expect(signedIn.ok).toBe(true);
       // Two races undo a run each. The third run deletes each row by its id,
       // so its race ends one row and keeps the claim.
@@ -776,6 +823,100 @@ describe("session end hooks (plan 9d)", () => {
         { field: "id", op: "eq", value: user?.id },
       ]);
       expect(owner?.emailVerified).toBe(true);
+    },
+  );
+
+  // The invitation confirm has the counter too, but no real flow reaches it
+  // there: its unique-key retry is on the `email` identity, and only a proof
+  // of the address writes that row. So its retry finds a verified user.
+  it.each(["magic link", "social", "reset"] as const)(
+    "signs in after a unique-key retry, two session races, and a lost flip (decision 13 of plan 12n, %s)",
+    async (proof) => {
+      const google = googleConfig();
+      const { auth, calls } = recorded({}, google.extra);
+      const email = "dee@example.com";
+      // Memory runs one transaction at a time. So each parallel flow runs
+      // its transaction on the store at once, as a commit of another request does.
+      const free: StorageAdapter = { ...auth.storage, transaction: (fn) => fn(free) };
+      const side = { ...auth.config, storage: free };
+      const tokens: string[] = [];
+      const outs: string[] = [];
+      let stage: "create" | "race" | "flip" | "done" = "create";
+      let runs = 0;
+      const original = auth.storage.transaction.bind(auth.storage);
+      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+        original((tx) => {
+          runs++;
+          return fn({
+            ...tx,
+            create: async (m, d) => {
+              if (stage === "create" && m === "user") {
+                stage = "race";
+                // 1. A sign-up of the address commits first: this create meets its unique key.
+                const up = await passwordSignUp(side, {
+                  email,
+                  password: PASSWORD,
+                  ip: null,
+                  userAgent: null,
+                });
+                if (!up.ok) throw new Error(up.code);
+                tokens.push(upSession(up.value).token);
+                const s = await sessionOnly(
+                  passwordSignIn(side, { email, password: PASSWORD, ip: null, userAgent: null }),
+                );
+                if (!s.ok) throw new Error(s.code);
+                tokens.push(s.value.token);
+              }
+              return tx.create(m, d);
+            },
+            findMany: async (m, w, o) => {
+              const found = await tx.findMany(m, w, o);
+              const next = tokens[outs.length];
+              if (stage === "race" && m === "session" && next !== undefined) {
+                // 2 and 3. A sign-out of a claimant session between the read and the delete of the claim.
+                outs.push(await sha256Hex(next));
+                if (outs.length === 2) stage = "flip";
+                await destroySession(side, next);
+              }
+              return found;
+            },
+            update: async (m, w, d) => {
+              if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
+                stage = "done";
+                // 4. The verify link of the sign-up commits first: the flip of this claim matches no row.
+                const confirm = auth.mail.findLast((x) => x.subject.startsWith("Confirm"));
+                const v = await verifyPasswordEmail(side, {
+                  token: tokenFromMail(confirm?.text ?? ""),
+                  ip: null,
+                  userAgent: null,
+                });
+                if (!v.ok) throw new Error(v.code);
+              }
+              return tx.update(m, w, d);
+            },
+          });
+        });
+      calls.length = 0;
+      const signedIn =
+        proof === "magic link"
+          ? await magicSignIn(auth, email)
+          : proof === "social"
+            ? await googleSignIn(auth, google.jwtTokens, email)
+            : await reset(auth, email);
+      expect(signedIn.ok).toBe(true);
+      expect(stage).toBe("done");
+      expect(outs).toHaveLength(2);
+      const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+      expect(user?.emailVerified).toBe(true);
+      // Each signed-out row ends once, with sign_out: the undone runs ended nothing.
+      expect(
+        calls
+          .filter(([name]) => name === "afterEnd")
+          .map(([, e]) => (e as { reason: string }).reason)
+          .filter((r) => r === "sign_out"),
+      ).toHaveLength(2);
+      // The unique-key retry, three claim retries, and the run that signs in.
+      expect(runs).toBeGreaterThanOrEqual(5);
     },
   );
 

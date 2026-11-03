@@ -137,6 +137,8 @@ export async function confirmUserInvite(
   const verified = verifySteps(config, "invite");
   let answer: Result<UserRow> | null = null;
   let opened: Awaited<ReturnType<typeof steps.write>> | null = null;
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; answer === null; attempt++) {
     try {
       answer = await hookGuard(() =>
@@ -184,7 +186,7 @@ export async function confirmUserInvite(
         continue;
       // Another proof claimed the user first, or a session race undid the
       // claim. The rollback undid the spend, so the retry spends the link again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
       throw err;
     }
   }

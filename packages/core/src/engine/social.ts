@@ -1154,6 +1154,8 @@ export async function resolveSocialUser<T extends AfterWrite>(
   steps?: CreateSteps,
   addressless = false,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await storage.transaction(
@@ -1215,7 +1217,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user. Or a session race undid the claim: the retry claims again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
       throw err;
     }
   }

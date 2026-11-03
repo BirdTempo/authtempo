@@ -276,9 +276,10 @@ export type BeforeResolveWrite = (
 
 /**
  * The runs of one claim that a session race can undo (ruling 46 of plan
- * 12i). A flow retries a `ClaimLostError` while its attempt is below this
- * count. A claim throws on at most `CLAIM_RUNS - 1` races and on one lost
- * flip, so the retries never run out.
+ * 12i). A flow retries a `ClaimLostError` while its count of claim retries
+ * is below this count. A claim throws on at most `CLAIM_RUNS - 1` races and
+ * on one lost flip. A flow counts its claim retries apart from a unique-key
+ * retry, so the retries never run out (decision 13 of plan 12n).
  */
 export const CLAIM_RUNS = 3;
 
@@ -405,6 +406,8 @@ export async function findOrCreateUserByEmail<T>(
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await createOrFindInTransaction(
@@ -432,7 +435,7 @@ export async function findOrCreateUserByEmail<T>(
       }
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user. Or a session race undid the claim: the retry claims again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      if (err instanceof ClaimLostError && lost++ < CLAIM_RUNS) continue;
       throw err;
     }
   }
