@@ -210,6 +210,8 @@ function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array>
   let value: unknown;
   try {
     bytes = fromBase64Url(raw);
+    // A second guard: the bound above holds first. Base64url of at most
+    // ceil(4n / 3) characters decodes to at most n bytes.
     if (bytes.length > rule.maxBytes) return fail("invalid_body");
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
