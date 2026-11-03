@@ -367,8 +367,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
       "POST /social/:provider/id-token",
       "POST /handoff/redeem",
       "POST /magic-link/verify",
-      // Plan 12f2 Task 3: the invitation confirm holds the user row and claims it, as the magic link.
-      "POST /user/invite/confirm",
       "POST /otp/reset",
       "POST /otp/verify",
       "POST /passkey/authenticate/verify",
