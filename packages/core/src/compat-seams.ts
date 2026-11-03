@@ -17,8 +17,8 @@ import type { SsoActor } from "./engine/sso/guard.js";
  * the label of its connection. The challenge is the row's current one. So a
  * row with a new challenge, after a retry or a loss, never proves itself by
  * an old record. Null: the compat package has no record for this row.
- * Core takes a name of one DNS label under the domain only: a deeper name
- * proves nothing, as the owner of a subdomain may hold its zone.
+ * Core takes a name of one DNS label under the domain only. A deeper name
+ * proves nothing, because the owner of a subdomain may hold its zone.
  */
 export type DomainRecordOf = (
   row: { domain: string; challenge: string },
@@ -27,9 +27,9 @@ export type DomainRecordOf = (
 
 const configRecords = new WeakMap<object, DomainRecordOf>();
 /**
- * The key of the record on a resolved config. A property, not a WeakMap
- * entry: plan 12h gives each route a spread copy of the config (the scope
- * of its request), and a spread copy keeps an enumerable symbol property.
+ * The key of the record on a resolved config. It is a property, not a
+ * WeakMap entry. Plan 12h gives each route a spread copy of the config, the
+ * scope of its request. A spread copy keeps an enumerable symbol property.
  */
 const RECORD = Symbol("authtempo.compat.domainRecord");
 const recordVerifies = new WeakSet<Request>();
@@ -38,7 +38,8 @@ const scimCallers = new WeakMap<Request, ScimCaller>();
 const ssoManageCounted = new WeakMap<Request, string>();
 /**
  * The user of an SSO connection write whose large read a compat package
- * counted, and whether the counts allowed it (rulings 69 and 72 Low 2).
+ * counted. The entry also holds whether the counts allowed the read
+ * (rulings 69 and 72 Low 2).
  */
 const largeReadCounted = new WeakMap<Request, { userId: string; allowed: boolean }>();
 /**
@@ -98,8 +99,8 @@ export function markSsoManageCounted(request: Request, userId: string): void {
 
 /**
  * Marks `request` as one SSO connection write of `userId` whose large body
- * read core's limits counted already (ruling 69 of the 12j lane), with the
- * outcome of those counts. Only `countSsoLargeRead` sets the mark, after
+ * read core's limits counted already (ruling 69 of the 12j lane). The mark
+ * holds the outcome of those counts. Only `countSsoLargeRead` sets the mark, after
  * the count: plan 12l moved the count there from `countSsoManageWrite`. A
  * refused count marks too, so core answers 429 and counts the read no more
  * (ruling 72 Low 2). A shim that passes a refused write to core then gives
@@ -156,8 +157,8 @@ export function takeSsoManageCounted(request: Request, userId: string): boolean 
 
 /**
  * The outcome of the large-read counts of a compat package for a write of
- * `userId`: "allowed", "refused", or null when it counted none for that
- * user. The mark goes at the read.
+ * `userId`: "allowed" or "refused". It is null when the package counted
+ * none for that user. The mark goes at the read.
  */
 export function takeLargeReadCounted(
   request: Request,

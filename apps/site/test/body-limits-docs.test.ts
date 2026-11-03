@@ -46,7 +46,7 @@ const FILES = {
 type FileKey = keyof typeof FILES;
 
 // The README of the compat package, for its SSO order sentences (rr-final M1
-// and L1 of plan 12l). It is not in FILES: FILES holds each cap number of a
+// and L1 of plan 12l). It is not in FILES. FILES holds each cap number of a
 // file, and this README states a SAML size, 262144, that is no body cap.
 const COMPAT_README = `${REPO}packages/compat-better-auth/README.md`;
 // The changeset of plan 12l. The version branch deletes it, so its fact skips there.
