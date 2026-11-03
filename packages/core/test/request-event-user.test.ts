@@ -105,7 +105,12 @@ describe("the user of the request event (plan 12n decision 17)", () => {
     );
     const { url } = (await started.json()) as { url: string };
     const state = new URL(url).searchParams.get("state") ?? "";
-    const bind = started.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+    // The binding cookie of the flow: the one cookie of the start that is not the session cookie.
+    const bind =
+      started.headers
+        .getSetCookie()
+        .find((c) => !c.startsWith("__Host-tempo_session="))
+        ?.split(";")[0] ?? "";
     const res = await s.auth.handle(
       new Request(`${BASE_URL}/auth/social/google/callback?code=c&state=${state}`, {
         headers: { cookie: `${ada.cookie}; ${recordCredential(bind)}` },
@@ -284,26 +289,36 @@ async function walkWorld() {
   }
   /** The `userId` of the one request event of the answer `res` to `key`, or null with none. */
   async function userOf(key: string, res: Response): Promise<string | null> {
+    return (await eventOf(key, res)).userId ?? null;
+  }
+  /** The one request event of the answer `res` to `key`. */
+  async function eventOf(key: string, res: Response) {
     await auth.config.observe.flush();
     const events = requestsOf(batches.flat(), res);
     expect(
       events.map((e) => e.route),
       key,
     ).toEqual([key]);
-    return (events[0] as { userId?: string } | undefined)?.userId ?? null;
+    return (events[0] ?? {}) as { status?: number; code?: string; userId?: string };
   }
-  /** The `userId` of the request event of each answer, by route key, or null with none. */
+  /**
+   * The answer of each route, by route key: the status and code of its
+   * request event, and the `userId` of that event, or null with none.
+   */
   async function walk(
     keys: readonly RouteKey[],
     cookieFor: (key: RouteKey) => Promise<string | null>,
-  ): Promise<Record<string, string | null>> {
-    const seen: Record<string, string | null> = {};
+  ): Promise<{ users: Record<string, string | null>; answers: Record<string, string> }> {
+    const users: Record<string, string | null> = {};
+    const answers: Record<string, string> = {};
     for (const key of keys) {
       const token = await cookieFor(key);
       const headers = token === null ? {} : { cookie: `__Host-tempo_session=${token}` };
-      seen[key] = await userOf(key, await handle(await requestOf(key, headers)));
+      const event = await eventOf(key, await handle(await requestOf(key, headers)));
+      users[key] = event.userId ?? null;
+      answers[key] = `${event.status} ${event.code ?? "-"}`;
     }
-    return seen;
+    return { users, answers };
   }
   return { auth, handle, ada, impersonation, stranger, strangerId, walk, userOf, sampleOf };
 }
@@ -330,7 +345,7 @@ describe("the user of the request event on every route (ruling 37 of plan 12n)",
     let made = 0;
     let caller = (await verifiedSession(w.auth, "bo@example.com")).user.id;
     const expected: Record<string, string | null> = {};
-    const seen = await w.walk(KEYS, async (key) => {
+    const { users: seen, answers } = await w.walk(KEYS, async (key) => {
       const live = await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: caller }]);
       if (!live) {
         made++;
@@ -344,31 +359,36 @@ describe("the user of the request event on every route (ruling 37 of plan 12n)",
       });
       return recordCredential(token);
     });
-    // GET /session and POST /session/refresh are in the walk: they resolve the session in their own read (ruling 27 a).
+    // The walk holds GET /session and POST /session/refresh too (ruling 27 a).
     expect(seen).toEqual(expected);
-    expect(Object.values(expected).filter((id) => id !== null).length).toBeGreaterThan(100);
+    const named = KEYS.filter((key) => expected[key] !== null);
+    expect(named.length).toBeGreaterThan(100);
+    // Most of them refuse the empty body or the caller's rank, and each refusal names the caller.
+    expect(named.filter((key) => /^4/.test(answers[key] ?? "")).length).toBeGreaterThan(50);
   });
 
   it("names the impersonated user on each refusal of the impersonation step", async () => {
     const w = await walkWorld();
     const keys = KEYS.filter((key) => IMPERSONATION_REFUSED.has(key));
     expect(keys.length).toBeGreaterThan(0);
-    const seen = await w.walk(keys, async () => w.impersonation);
-    expect(seen).toEqual(Object.fromEntries(keys.map((key) => [key, w.ada.user.id])));
+    const { users, answers } = await w.walk(keys, async () => w.impersonation);
+    expect(answers).toEqual(Object.fromEntries(keys.map((k) => [k, "403 impersonation_session"])));
+    expect(users).toEqual(Object.fromEntries(keys.map((key) => [key, w.ada.user.id])));
   });
 
   it("names the anonymous user on each refusal of the anonymous step", async () => {
     const w = await walkWorld();
     const keys = KEYS.filter((key) => ANONYMOUS_REFUSED.has(key));
     expect(keys.length).toBeGreaterThan(0);
-    const seen = await w.walk(keys, async () => w.stranger);
-    expect(seen).toEqual(Object.fromEntries(keys.map((key) => [key, w.strangerId])));
+    const { users, answers } = await w.walk(keys, async () => w.stranger);
+    expect(answers).toEqual(Object.fromEntries(keys.map((k) => [k, "403 anonymous_refused"])));
+    expect(users).toEqual(Object.fromEntries(keys.map((key) => [key, w.strangerId])));
   });
 
   it("names no user on any route of a request with no session", async () => {
     const w = await walkWorld();
-    const seen = await w.walk(KEYS, async () => null);
-    expect(seen).toEqual(Object.fromEntries(KEYS.map((key) => [key, null])));
+    const { users } = await w.walk(KEYS, async () => null);
+    expect(users).toEqual(Object.fromEntries(KEYS.map((key) => [key, null])));
   });
 
   it("names an anonymous caller of a sign-in, on a success and on a refusal, and no other caller", async () => {
