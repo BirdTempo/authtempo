@@ -835,6 +835,9 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - `/admin/remove-user` deletes the user's solo organizations with the
   account, and refuses the last owner of an organization with other members
   (`SOLE_OWNER`). Better Auth keeps every organization.
+- On the D1 storage, a delete ends one page of the user's sessions with
+  `session.afterEnd`, such as 8 of 60. The cascade of the user row deletes
+  the rest with no hook and no `impersonation_stop` row.
 - `/admin/create-user` takes no password, no role but `user`, no ban key,
   and no added field. Better Auth sets each one. A server call with no
   headers answers 401: Better Auth creates the user there with no session.
@@ -1222,10 +1225,11 @@ Behavior that differs from Better Auth:
 - A proof of the address clears the phone of an unverified user, by the
   claim rule: a number on an unverified row can be a claimant's. Better
   Auth 1.7.2 keeps the number at an email verify. So a moved user who
-  proved a number, but never the address, loses the phone sign-in at
-  their own verify link, magic link, email code, or social sign-in. They
-  add the number again with `/phone-number/send-otp` and
-  `updatePhoneNumber: true`.
+  proved a number, but never the address, loses the phone sign-in at a
+  proof of the address. The proofs are their own verify link, a reset, a
+  magic link, an email code, a social sign-in, and an ID-token sign-in.
+  They add the number again by `/phone-number/send-otp`, then
+  `/phone-number/verify` with `updatePhoneNumber: true`.
 - The last method cookie holds core's values. The client maps them to
   Better Auth's names: `password` is `email`, `social:<id>` is `<id>`,
   `magic_link` is `magic-link`, `email_otp` is `email-otp`, and `phone` is
@@ -1724,7 +1728,7 @@ each connection its own SP entity id, and the provider's answer gives it as
 | Better Auth path | Core route |
 | --- | --- |
 | `POST /sso/register` | `POST /sso/connections/create?organizationId=`, then `POST /sso/domains/add` and `POST /sso/domains/update` |
-| `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages |
+| `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages. The shim reads at most 100 member rows of the caller, the first that the storage gives. It lists the connections of those organizations only. |
 | `GET /sso/get-provider?providerId=` | `GET /sso/connections` and `GET /sso/domains` |
 | `POST /sso/update-provider` | `POST /sso/connections/update?id=`; a new domain is added and routed, and the old one deleted |
 | `POST /sso/delete-provider` | `POST /sso/domains/delete` for each domain of the connection, then `POST /sso/connections/delete` |
@@ -1764,12 +1768,19 @@ The body of `/sso/register` names the organization. The body of
 the connection of that provider. So the shim cannot know the organization
 before the read. Before their read, these two paths run a pre-check of the
 guard: each step that needs no organization. The caller must be a platform
-operator, or own one organization or more. The order: the session, the
+operator, or hold the owner rank in the first 100 member rows that the
+storage gives. An owner whose row is past those rows gets 403 here, and can
+write through core's paths `POST /sso/connections/create` and
+`POST /sso/connections/update`. The order: the session, the
 `body_busy` check, the count of the manager write, the pre-check, the count
 of the large read, then the read. A large read that cannot start answers 503
 `SERVICE_UNAVAILABLE`, Better Auth's code for core's `body_busy`. Core's
 guard then runs once after the read, for the organization of the body or of
 the provider.
+
+A `/sso/register` of a platform operator counts `operator:user` three times,
+one per core write: the create, the domain add, and the domain update. Each
+write runs core's guard. So the 600 calls of an hour give 200 registers.
 
 Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
 `/sso/saml2/sp/slo/:providerId`, and `POST /sso/saml2/logout/:providerId`.

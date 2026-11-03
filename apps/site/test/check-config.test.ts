@@ -5,8 +5,15 @@ import { configKeyPaths } from "../scripts/lib/config-keys.ts";
 const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
+/**
+ * The count of the config keys. The title and the pin of the first test both
+ * read it, so the title cannot drift from the pin (plan 12n). The comments in
+ * that test name the keys of each addend.
+ */
+const KEYS = 255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3 + 3;
+
 describe("checkConfig", () => {
-  it("lists 278 keys, the nested ones by their path", () => {
+  it(`lists ${KEYS} keys, the nested ones by their path`, () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -49,7 +56,7 @@ describe("checkConfig", () => {
     // Plan 12i Task 8 adds passkey.signUp. Ruling 38 adds
     // passkey.signUp.dailyCap and passkey.signUp.isolateLimiter.
     // Plan 12f2 Task 3 adds operator.invite, operator.invite.ttlHours, and totp.gate.invite.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3 + 3);
+    expect(keys.length).toBe(KEYS);
     expect(keys).toContain("operator.invite.ttlHours");
     expect(keys).toContain("totp.gate.invite");
     expect(keys).toContain("social.idToken.requireNonce");
