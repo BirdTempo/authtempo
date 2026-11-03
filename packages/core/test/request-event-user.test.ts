@@ -28,8 +28,9 @@ import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 // session that a step of the request resolved. It names no user when no
 // session resolved. So an operator ties a refusal of a route to an account.
 // Ruling 37 of plan 12n puts one mark, `markRequestUser`, at each step that
-// resolves the request's session: the handler's read, the two refusal steps
-// of the router, the sign-out, the link callback, and an anonymous caller.
+// resolves the request's session. These steps are the handler's read, the
+// two refusal steps of the router, the sign-out, the link callback, and an
+// anonymous caller.
 
 type Observed = ReturnType<typeof observed>;
 
@@ -144,9 +145,9 @@ const HANDOFF = { challenge: "A".repeat(43), redirect: "example://auth" };
  * The world of the walk: every feature on, so each route of `ROUTES` has
  * its handler, and a sink that keeps each event. Each person comes from the
  * flows of the product. Root and Op become operators by `createAdmin` of
- * the app, and Op turns on TOTP and signs in after the grant (ruling 50 of
- * plan 12f). Op starts an impersonation of Ada through the route. A
- * stranger signs in as an anonymous user through the route.
+ * the app. Op turns on TOTP and signs in after the grant (ruling 50 of plan
+ * 12f). Op starts an impersonation of Ada through the route. A stranger
+ * signs in as an anonymous user through the route.
  */
 async function walkWorld() {
   const batches: AuthEvent[][] = [];
@@ -302,8 +303,8 @@ async function walkWorld() {
     return (events[0] ?? {}) as { status?: number; code?: string; userId?: string };
   }
   /**
-   * The answer of each route, by route key: the status and code of its
-   * request event, and the `userId` of that event, or null with none.
+   * The answer of each route, by route key. Each answer holds the status
+   * and the code of its request event, and the `userId` of the event or null.
    */
   async function walk(
     keys: readonly RouteKey[],
