@@ -57,9 +57,10 @@ describe("docs.search", () => {
     expect(top).toContain("/docs/guides/second-factor/");
   });
 
-  // Ruling 24 of plan 12n: the search ranks a section by its prose. The Routes
-  // cell of invalid_credentials links three second-factor routes, and no prose
-  // of the section names a second factor. So that section alone gives no hit.
+  // Ruling 24 of plan 12n: a route link in a table row adds no token to the
+  // score of its section. The Routes cell of invalid_credentials links three
+  // second-factor routes. The title, the heading, and the lines outside the
+  // table do not name a second factor. So that section alone gives no hit.
   it("gives no score to a term that only a Routes cell names", () => {
     const index = siteIndex();
     const terms = index.header.terms;

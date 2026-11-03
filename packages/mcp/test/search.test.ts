@@ -18,6 +18,17 @@ function page(path: string, title: string, sections: Record<string, string>): Pa
   return { path, source };
 }
 
+/** The build options of each fixture index: no include, and the three terms of a second factor. */
+const BUILD = {
+  commit: "fixture",
+  readFile: () => {
+    throw new Error("the fixture has no include");
+  },
+  terms: { "2fa": "second factor", mfa: "second factor", "two-factor": "second factor" },
+  bindings: [],
+  groups: {},
+};
+
 /**
  * The fixture index, built by the site's own builder (the plan's fixture
  * rule). The sidebar order puts beta before alpha, so a tie that follows the
@@ -50,15 +61,7 @@ const fixture = buildAgentIndex(
     "/docs/guides/koala-head/",
     "/docs/guides/koala-title/",
   ],
-  {
-    commit: "fixture",
-    readFile: () => {
-      throw new Error("the fixture has no include");
-    },
-    terms: { "2fa": "second factor", mfa: "second factor", "two-factor": "second factor" },
-    bindings: [],
-    groups: {},
-  },
+  BUILD,
 );
 
 describe("tokenize", () => {
@@ -118,6 +121,31 @@ describe("searchSections", () => {
 
   it("answers no hit for a word that no page holds", () => {
     expect(searchSections(fixture, "nonexistentword", { limit: 5 })).toEqual([]);
+  });
+
+  // Ruling 36 of plan 12n: only a table row loses its route links in the score.
+  it("scores a route link on a prose line, and gives none to a route link in a table row", () => {
+    const link = "[`POST /reauth`](/docs/reference/routes/#post-reauth)";
+    const links = buildAgentIndex(
+      [
+        page("docs/guides/prose-link.md", "Prose page", { Steps: `Call ${link} first.` }),
+        page("docs/guides/table-link.md", "Table page", {
+          Routes: `| Routes |\n| --- |\n| ${link} |`,
+        }),
+      ],
+      ["/docs/guides/prose-link/", "/docs/guides/table-link/"],
+      BUILD,
+    );
+    // The start state: the index text of each section keeps the link, and the link gives the token.
+    const withLink = links.sections.filter((s) => s.text.includes("[`POST /reauth`]("));
+    expect(withLink.map((s) => s.path)).toEqual([
+      "/docs/guides/prose-link/",
+      "/docs/guides/table-link/",
+    ]);
+    for (const s of withLink) expect(tokenize(s.text, BUILD.terms), s.path).toContain("reauth");
+    expect(searchSections(links, "reauth", { limit: 5 }).map((h) => h.path)).toEqual([
+      "/docs/guides/prose-link/",
+    ]);
   });
 });
 
