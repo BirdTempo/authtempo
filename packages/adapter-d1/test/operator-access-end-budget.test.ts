@@ -744,9 +744,9 @@ describe("the OAuth families of a ban on D1 (ruling 55 of plan 12d)", () => {
  * (decision 15 of plan 12n). Each grant goes to a user with no member row,
  * with `membersPerOrganization` at 2. The first grant fits, and the second
  * meets the limit. Each locks the organization after its user hold and
- * before its count. The lock
- * is an update, a batch of 2 queries. The undo of the refused grant restores
- * the row, 1 more query. With no lock, the counts were [13, 11] and [21, 18].
+ * before its count. The lock is an update, a batch of 2 queries. The undo of
+ * the refused grant restores the row, 1 more query. With no lock, the counts
+ * were [13, 11] and [21, 18].
  */
 const LIMITED_GRANT_COUNTS: Record<string, [number, number]> = {
   secret: [15, 14],

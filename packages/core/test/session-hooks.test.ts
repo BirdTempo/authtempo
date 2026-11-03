@@ -826,9 +826,14 @@ describe("session end hooks (plan 9d)", () => {
     },
   );
 
-  // The invitation confirm has the counter too, but no real flow reaches it
-  // there. Its unique-key retry is on the `email` identity. Only a proof of
-  // the address writes that row, so the retry finds a verified user.
+  // The invitation confirm has the counter too, with no case here. Its
+  // unique-key retry is on the `email` identity, and each flow that writes
+  // that row verifies the user in the same transaction. On a store that
+  // isolates a transaction, the retry then finds a verified user. D1 and
+  // the SQLite adapter do not isolate one, so a parallel magic link can
+  // write the row and undo it. Then the retry meets an unverified user and
+  // claims. On D1 a lost claim of that retry answers 409. With no query
+  // limit, the counter holds (adapter-d1 invite-claim-race.test.ts).
   it.each(["magic link", "social", "reset"] as const)(
     "signs in after a unique-key retry, two session races, and a lost flip (decision 13 of plan 12n, %s)",
     async (proof) => {
