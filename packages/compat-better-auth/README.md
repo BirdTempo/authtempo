@@ -248,7 +248,7 @@ Better Auth defaults that core does not keep:
 
 | Better Auth default | authtempo |
 | --- | --- |
-| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. For a header with a list of values, such as `x-forwarded-for`, the shim takes the leftmost value, as Better Auth does. A client can write that value, so list only a header that your proxy sets in full. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. `toNodeHandler` gives core the request body as a stream, so the cap of each route bounds the bytes that the route reads. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. For a header with a list of values, such as `x-forwarded-for`, the shim takes the leftmost value, as Better Auth does. A client can write that value, so list only a header that your proxy sets in full. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `authtempo.appURL` (default the origin of `baseURL`, or of the request's entry of a list) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
@@ -1228,7 +1228,9 @@ Behavior that differs from Better Auth:
   second argument of `toNextJsHandler`. On a serverless Node host, pass
   the host's `waitUntil` to `toNodeHandler` the same way. Without it, the
   send runs detached, and a host that freezes the function after the
-  answer can delay or drop it.
+  answer can delay or drop it. `toNodeHandler` gives core the request body
+  as a stream, so the cap of each route bounds the bytes that the route
+  reads.
 - Core signs in by phone and password only with a number that its code
   proved. A number that Better Auth stored with no proof does not sign in,
   so `requireVerification` other than `true` logs a note.
