@@ -117,7 +117,7 @@ describe("the race of one passkey credential on Postgres (plan 12n decision 18)"
       const winner = answers[0]?.ok ? ada : bob;
       expect(rows[0]?.userId, `delay ${delay}`).toBe(winner.id);
     }
-  }, 120_000);
+  });
 
   it("two passkey sign-ups of one authenticator at once, a delay sweep: one user, and the other answers passkey_failed", async () => {
     const w = world();
@@ -146,5 +146,5 @@ describe("the race of one passkey credential on Postgres (plan 12n decision 18)"
       );
       expect(users.flat(), `delay ${delay}`).toHaveLength(1);
     }
-  }, 120_000);
+  });
 });

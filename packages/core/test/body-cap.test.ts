@@ -2074,6 +2074,8 @@ describe("a slow large read of a user (ruling 79 of the 12j lane)", () => {
       body.open();
       // The read freed its bytes and runs the spend, which waits at the gate.
       await spending;
+      // The user half holds no byte in the spend: another user starts a read of the whole cap.
+      expect(largeReadCanStart("user:bea", REQUEST_BODY_MAX, String(REQUEST_BODY_MAX))).toBe(true);
       expect(largeReadCanStart(client, REQUEST_BODY_MAX, null)).toBe(false);
       // The slot holds until the spend ends: a second write answers 503 before any count.
       const counted = keys.length;
