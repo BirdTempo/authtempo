@@ -95,26 +95,35 @@ describe("the CLI test databases on Postgres", () => {
     const legacy = await freshDatabase({ ...mine, id: LEGACY() });
     const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     let made: Awaited<ReturnType<typeof freshDatabase>> | undefined;
+    let roleMade = false;
     try {
-      await admin.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD 'pw' CREATEDB`);
-      // The user owns the legacy database, so only the age rule keeps it.
-      await admin.unsafe(`ALTER DATABASE ${legacy.name} OWNER TO ${role}`);
-      const u = new URL(ADMIN_URL);
-      u.username = role;
-      u.password = "pw";
-      // The sweep of this call reads no age, and its drop of `old` fails.
-      made = await freshDatabase({ ...mine, url: u.toString() });
-      expect(await names()).toEqual([old.name, legacy.name, made.name].sort());
-      const lines = warn.mock.calls.map((c) => String(c[0]));
-      expect(lines).toHaveLength(2);
-      expect(lines[0]).toMatch(
-        /cannot read the age of 1 legacy databases, so it keeps them: permission denied for function pg_stat_file/,
-      );
-      expect(lines[1]).toMatch(/stopped: the drop failed for .*must be owner of database/);
-      expect(lines.join("\n")).not.toContain("docker compose");
+      try {
+        await admin.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD 'pw' CREATEDB`);
+        roleMade = true;
+        // The user owns the legacy database, so only the age rule keeps it.
+        await admin.unsafe(`ALTER DATABASE ${legacy.name} OWNER TO ${role}`);
+        const u = new URL(ADMIN_URL);
+        u.username = role;
+        u.password = "pw";
+        // The sweep of this call reads no age, and its drop of `old` fails.
+        made = await freshDatabase({ ...mine, url: u.toString() });
+        expect(await names()).toEqual([old.name, legacy.name, made.name].sort());
+        const lines = warn.mock.calls.map((c) => String(c[0]));
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toMatch(
+          /cannot read the age of 1 legacy databases, so it keeps them: permission denied for function pg_stat_file/,
+        );
+        expect(lines[1]).toMatch(/stopped: the drop failed for .*must be owner of database/);
+        expect(lines.join("\n")).not.toContain("docker compose");
+      } finally {
+        await made?.drop();
+        for (const d of [old, legacy]) await d.drop();
+      }
     } finally {
-      await made?.drop();
-      for (const d of [old, legacy]) await d.drop();
+      // A drop above can throw, for example at the lock bound. The role then
+      // still owns a database, and DROP ROLE fails on it. REASSIGN OWNED gives
+      // each such database to the admin user, so the role never stays.
+      if (roleMade) await admin.unsafe(`REASSIGN OWNED BY ${role} TO CURRENT_USER`);
       await admin.unsafe(`DROP ROLE IF EXISTS ${role}`);
       await admin.end({ timeout: 5 });
     }

@@ -24,6 +24,7 @@ import {
   UNPUBLISHED_NOTE,
 } from "../src/templates.js";
 import { assertFreshBuild, PKG, REPO, runBin } from "./support/bin.js";
+import { dropStaleDatabases } from "./support/pg.js";
 
 // Each scaffold of `authtempo init` is compiled and runs its own test in a
 // folder inside the workspace (plan 11c). Its node_modules is a link to the
@@ -268,8 +269,30 @@ const PASSES: Readonly<Record<Stack, readonly string[]>> = {
   "mcp-server": ["Test Files  2 passed (2)", "Tests  49 passed (49)"],
 };
 
-beforeAll(() => {
+/**
+ * The name prefixes of the databases of the Node and Bun scaffolds. Each
+ * name is `ex_<runtime>_` and 32 hex digits (examples/node/test/e2e.ts).
+ * The CLI ships e2e.ts as a template, so the sweep is here, not in e2e.ts.
+ */
+const EXAMPLE_PREFIXES = ["ex_node_", "ex_bun_"];
+
+beforeAll(async () => {
   assertFreshBuild();
+  // A killed e2e never drops its database. The sweep drops each one with no
+  // connection that is older than one hour, so a parallel e2e keeps its own.
+  for (const prefix of EXAMPLE_PREFIXES) {
+    try {
+      const dropped = await dropStaleDatabases({ prefix });
+      const names = dropped.length > 0 ? `: ${dropped.join(", ")}` : "";
+      console.log(
+        `the sweep of the stale ${prefix} test databases dropped ${dropped.length}${names}`,
+      );
+    } catch (e) {
+      console.warn(
+        `the sweep of the stale ${prefix} test databases stopped: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 });
 
 /** The scaffolds that passed: removed after the file. A failed scaffold stays, for diagnosis. */
