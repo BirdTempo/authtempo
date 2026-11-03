@@ -520,6 +520,48 @@ describe("the ban (plan 12f Task 6)", () => {
     ).toEqual([["ban", "support"]]);
   });
 
+  it("refuses a user actor when a grant of the platform role lands after the target check (decision 15 of plan 12n)", async () => {
+    const f = await operatorFixture();
+    const api = operatorApi(f.auth.config);
+    const actor = await requireOperatorUser(f.auth.config, f.operator);
+    if (!actor.ok) throw new Error(actor.code);
+    const other = await enrolled(f.auth, "op2@example.com");
+    // The app grants the role between the target check and the act: the
+    // grant commits first, and then the ban's transaction starts.
+    const storage = f.auth.storage;
+    const original = storage.transaction.bind(storage);
+    let armed = true;
+    storage.transaction = async <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> => {
+      if (armed) {
+        armed = false;
+        const granted = await api.platformRole.grant({
+          actor: APP,
+          userId: other.user.id,
+          reason: "Change of the support team",
+          ip: null,
+          userAgent: null,
+        });
+        if (!granted.ok) throw new Error(granted.code);
+      }
+      return original(fn);
+    };
+    expect(
+      await api.users.ban({
+        actor: actor.value,
+        userId: other.user.id,
+        reason: "Abuse report 7",
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual({ ok: false, code: "operator_required", status: 403 });
+    expect(armed).toBe(false);
+    const row = await storage.findOne("user", [{ field: "id", op: "eq", value: other.user.id }]);
+    expect([row?.bannedAt, row?.banReason, row?.banUntil]).toEqual([null, null, null]);
+    expect((await storage.findMany("operatorAudit", [])).map((r) => r.action)).toEqual([
+      "platform_role_grant",
+    ]);
+  });
+
   it("ends at banUntil", async () => {
     const w = await world();
     const s = await signedIn(w);

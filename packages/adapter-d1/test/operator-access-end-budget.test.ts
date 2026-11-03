@@ -264,11 +264,14 @@ async function auditOf(userId: string): Promise<string[]> {
 // Since ruling 78 of plan 12d (run of 2026-10-24), the session read of the handler takes the row
 // of the router, so a user actor sends 1 query fewer. Its reserve keeps the call, so the page
 // ends the same sessions.
+// Since decision 15 of plan 12n (run of 2026-11-03), the act of a user actor reads the platform
+// role again after the ban fields, 2 queries. So its act ends 2 sessions fewer, and the sweep
+// ends them.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
-  "user 45": [47, 20, [47]],
+  "user 45": [47, 18, [49]],
   "secret 60": [50, 31, [48, 24]],
-  "user 60": [47, 20, [48, 35]],
+  "user 60": [47, 18, [48, 37]],
 };
 // The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
 // rows of the member row it deletes, and so the sweep and a retry end more. The retry of a
@@ -733,5 +736,62 @@ describe("the OAuth families of a ban on D1 (ruling 55 of plan 12d)", () => {
       expect(await familyMarks()).toBe(k);
       expect([r.queries, inAct, marked, sweeps]).toEqual(BAN_FAMILY_COUNTS[k]);
       expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
+});
+
+/**
+ * The counts of two grants of the platform role to users with no member row,
+ * with `membersPerOrganization` at 2, on the binding on 2026-11-03 (decision
+ * 15 of plan 12n): the grant that fits and the grant at the limit. Each
+ * locks the organization after its user hold and before its count. The lock
+ * is an update, a batch of 2 queries. The undo of the refused grant restores
+ * the row, 1 more query. With no lock, the counts were [13, 11] and [21, 18].
+ */
+const LIMITED_GRANT_COUNTS: Record<string, [number, number]> = {
+  secret: [15, 14],
+  user: [23, 21],
+};
+
+describe("the grant of the platform role at the member limit on D1 (decision 15 of plan 12n)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  for (const actor of ["secret", "user"] as const)
+    it(`a ${actor} grants the platform role up to the member limit in 50 queries or fewer`, async () => {
+      const sent: MailMessage[] = [];
+      const { auth: setup } = await engine(env.DB, sent);
+      const token = await platformOperator(setup, sent);
+      const { userId: ada } = await signIns(setup, sent, "ada@example.com", 3);
+      const { userId: bea } = await signIns(setup, sent, "bea@example.com", 3);
+      // Past the slide of 6 hours, inside the 1440 fresh minutes: the worst case of the session read.
+      current = new Date(current.getTime() + 7 * 60 * 60 * 1000);
+      // The platform organization holds the operator, so the limit leaves room for one member.
+      const limited = {
+        organizations: {
+          platformRole: "operator",
+          platformOrganization: "platform-co",
+          ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+          limits: { membersPerOrganization: 2 },
+        },
+      } satisfies Partial<AuthConfig>;
+      const headers = actor === "secret" ? asSecret : asUser(token);
+      const grant = (userId: string) =>
+        invoke(
+          sent,
+          "/operator/users/platform-role",
+          headers,
+          { userId, grant: true, reason: REASON },
+          limited,
+        );
+      const first = await grant(ada);
+      expect(first.status, JSON.stringify(first.body)).toBe(200);
+      const second = await grant(bea);
+      expect([second.status, second.body]).toEqual([409, { error: "member_limit" }]);
+      expect(await auditOf(ada)).toEqual(["platform_role_grant"]);
+      expect(await auditOf(bea)).toEqual([]);
+      expect([first.queries, second.queries]).toEqual(LIMITED_GRANT_COUNTS[actor]);
+      expect(Math.max(first.queries, second.queries)).toBeLessThanOrEqual(50);
     });
 });
