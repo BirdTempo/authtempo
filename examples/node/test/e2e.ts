@@ -46,6 +46,14 @@ async function freePort(): Promise<number> {
 }
 /** The most ports that `listen` tries. */
 const LISTEN_TRIES = 3;
+/** The error of `listen` when each port that it tried was in use. */
+class PortInUse extends Error {
+  port: number;
+  constructor(port: number, tries: number) {
+    super(`the listen failed with EADDRINUSE on ${tries} ports`);
+    this.port = port;
+  }
+}
 /**
  * Serves the handler of `make(base)` on a free port. The probe of freePort
  * closes before the server listens, so another process can take the port.
@@ -62,9 +70,19 @@ async function listen(
       const live = await serve(make(base), { port, hostname: "127.0.0.1", origin: base });
       return { base, server: live, tries };
     } catch (e) {
-      if ((e as { code?: unknown }).code !== "EADDRINUSE" || tries >= LISTEN_TRIES) throw e;
+      if ((e as { code?: unknown }).code !== "EADDRINUSE") throw e;
+      if (tries >= LISTEN_TRIES) throw new PortInUse(port, tries);
     }
   }
+}
+/**
+ * The failure line of an error, with a hint at the server that failed. A port
+ * failure comes before the database exists, so it names the port, not Postgres.
+ */
+function failureLine(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  if (e instanceof PortInUse) return `${message}; another process holds port ${e.port}`;
+  return `${message}; is Postgres up (node scripts/test-servers.mjs up)?`;
 }
 const ADMIN_URL = serverUrl("TEMPO_AUTH_PG_URL");
 const DB = `ex_${runtime}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -102,6 +120,25 @@ try {
     );
   } finally {
     await held.close();
+  }
+  // Three held ports fail each listen, and the failure line names the last port.
+  const three = [await holdPort(), await holdPort(), await holdPort()];
+  try {
+    const ports = three.map((h) => h.port);
+    const line = await listen(
+      () => async () => new Response("ok"),
+      async () => ports.shift() ?? freePort(),
+    ).then(async (served) => {
+      await served.server.close();
+      return `a listen served on try ${served.tries}`;
+    }, failureLine);
+    expectThat(
+      line ===
+        `the listen failed with EADDRINUSE on 3 ports; another process holds port ${three[2]?.port}`,
+      `three held ports gave: ${line}`,
+    );
+  } finally {
+    for (const h of three) await h.close();
   }
 
   await admin.unsafe(`CREATE DATABASE ${DB}`);
@@ -178,16 +215,14 @@ try {
     `/files with a cookie and a refused bearer answered ${withCookie.status} with ${withCookie.headers.get("www-authenticate")}`,
   );
 } catch (e) {
-  failures.push(
-    `${e instanceof Error ? e.message : String(e)}; is Postgres up (node scripts/test-servers.mjs up)?`,
-  );
+  failures.push(failureLine(e));
 } finally {
   await server?.close();
   await sql?.end({ timeout: 5 });
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 11;
+const pass = failures.length === 0 && checks === 12;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );

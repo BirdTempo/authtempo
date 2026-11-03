@@ -96,37 +96,52 @@ describe("the CLI test databases on Postgres", () => {
     const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     let made: Awaited<ReturnType<typeof freshDatabase>> | undefined;
     let roleMade = false;
-    try {
+    // The body and each cleanup step run in their own try, so a throw in one
+    // leaves the next to run. The test then fails on the first error.
+    const errors: unknown[] = [];
+    const step = async (f: () => Promise<unknown>): Promise<void> => {
       try {
-        await admin.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD 'pw' CREATEDB`);
-        roleMade = true;
-        // The user owns the legacy database, so only the age rule keeps it.
-        await admin.unsafe(`ALTER DATABASE ${legacy.name} OWNER TO ${role}`);
-        const u = new URL(ADMIN_URL);
-        u.username = role;
-        u.password = "pw";
-        // The sweep of this call reads no age, and its drop of `old` fails.
-        made = await freshDatabase({ ...mine, url: u.toString() });
-        expect(await names()).toEqual([old.name, legacy.name, made.name].sort());
-        const lines = warn.mock.calls.map((c) => String(c[0]));
-        expect(lines).toHaveLength(2);
-        expect(lines[0]).toMatch(
-          /cannot read the age of 1 legacy databases, so it keeps them: permission denied for function pg_stat_file/,
-        );
-        expect(lines[1]).toMatch(/stopped: the drop failed for .*must be owner of database/);
-        expect(lines.join("\n")).not.toContain("docker compose");
-      } finally {
-        await made?.drop();
-        for (const d of [old, legacy]) await d.drop();
+        await f();
+      } catch (e) {
+        errors.push(e);
       }
-    } finally {
-      // A drop above can throw, for example at the lock bound. The role then
-      // still owns a database, and DROP ROLE fails on it. REASSIGN OWNED gives
-      // each such database to the admin user, so the role never stays.
-      if (roleMade) await admin.unsafe(`REASSIGN OWNED BY ${role} TO CURRENT_USER`);
-      await admin.unsafe(`DROP ROLE IF EXISTS ${role}`);
-      await admin.end({ timeout: 5 });
+    };
+    try {
+      await admin.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD 'pw' CREATEDB`);
+      roleMade = true;
+      // The user owns the legacy database, so only the age rule keeps it.
+      await admin.unsafe(`ALTER DATABASE ${legacy.name} OWNER TO ${role}`);
+      const u = new URL(ADMIN_URL);
+      u.username = role;
+      u.password = "pw";
+      // The sweep of this call reads no age, and its drop of `old` fails.
+      made = await freshDatabase({ ...mine, url: u.toString() });
+      expect(await names()).toEqual([old.name, legacy.name, made.name].sort());
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toMatch(
+        /cannot read the age of 1 legacy databases, so it keeps them: permission denied for function pg_stat_file/,
+      );
+      expect(lines[1]).toMatch(/stopped: the drop failed for .*must be owner of database/);
+      expect(lines.join("\n")).not.toContain("docker compose");
+    } catch (e) {
+      errors.push(e);
     }
+    const m = made;
+    if (m !== undefined) {
+      await step(() => m.drop());
+      // `drop` connects as the role, and so does the afterAll drop. After DROP
+      // ROLE neither can run, and the name matches no id form of the cli_
+      // sweep. So the admin drops the database by name too.
+      await step(() => admin.unsafe(`DROP DATABASE IF EXISTS ${m.name} WITH (FORCE)`));
+    }
+    for (const d of [old, legacy]) await step(() => d.drop());
+    // DROP ROLE fails on a role that still owns a database, so it comes last.
+    // REASSIGN OWNED gives each such database to the admin user.
+    if (roleMade) await step(() => admin.unsafe(`REASSIGN OWNED BY ${role} TO CURRENT_USER`));
+    await step(() => admin.unsafe(`DROP ROLE IF EXISTS ${role}`));
+    await step(() => admin.end({ timeout: 5 }));
+    if (errors.length > 0) throw errors[0];
   });
 
   it("drops each database of the file that no test dropped, past a drop that fails", async () => {
