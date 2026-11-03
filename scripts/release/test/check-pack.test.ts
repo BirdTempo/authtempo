@@ -24,7 +24,12 @@ import {
   entry,
   LOCAL_PATH,
   type PackInput,
+  packedTexts,
   readTarball,
+  TAR_FOLDER_PREFIX,
+  TAR_TIMEOUT_MS,
+  tar,
+  withTarballFile,
 } from "../src/check-pack.ts";
 import { readDeprecations } from "../src/lib/deprecations.ts";
 import { FORBIDDEN_PACK_NAMES, VERSION_CONSTANTS } from "../src/lib/pack-rules.ts";
@@ -1129,6 +1134,98 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
         ),
         c.path,
       ).toBe(true);
+    }
+  });
+});
+
+/** The private folders of the tar reads of this process that remain in the temp folder. */
+const tarFolders = () => readdirSync(tmpdir()).filter((f) => f.startsWith(TAR_FOLDER_PREFIX));
+
+/** Runs `use` with a `tar` first on PATH that sleeps `seconds` and prints nothing. */
+function withSlowTar<T>(seconds: number, use: () => T): T {
+  const bin = mkdtempSync(join(tmpdir(), "authtempo-slow-tar-"));
+  writeFileSync(join(bin, "tar"), `#!/bin/sh\nexec sleep ${seconds}\n`, { mode: 0o755 });
+  const path = process.env.PATH ?? "";
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    return use();
+  } finally {
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () => {
+  it("fails a tar call that does not end in the limit, and names the call", () => {
+    const start = Date.now();
+    withSlowTar(30, () => {
+      expect(() => tar(["-tzf", "none.tgz"], 300)).toThrow(
+        "tar -tzf none.tgz did not end in 300 ms",
+      );
+    });
+    expect(Date.now() - start).toBeLessThan(10_000);
+    expect(TAR_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it("gives tar a file of the bytes, never a pipe and never the path", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/check-pack.ts", import.meta.url)),
+      "utf8",
+    );
+    // One child process call in the file, with the limit and no input pipe.
+    expect(source.match(/execFileSync\(/g)).toHaveLength(1);
+    // checkPack takes a parameter named input, so the fact reads only an input property.
+    expect(source).not.toMatch(/[{,]\s*input:/);
+    expect(source).toMatch(/stdio: \["ignore", "pipe", "inherit"\],\n\s*timeout: timeoutMs,/);
+    // readTarball runs tar on the private file only.
+    const reader = source.slice(
+      source.indexOf("export function readTarball"),
+      source.indexOf("export function packedTexts"),
+    );
+    expect(reader).toMatch(/withTarballFile\(bytes, \(file\)/);
+    expect(reader).not.toMatch(/tar\(\[[^\]]*\bpath\b/);
+    // The folder of a read carries the pid of this process.
+    expect(TAR_FOLDER_PREFIX).toBe(`authtempo-check-pack-tar-${process.pid}-`);
+  });
+
+  it("removes its private folder after a read, a refusal, and a tar failure", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const before = tarFolders();
+      const good = join(out, "good.tgz");
+      writeTar(good, [manifestEntry("@authtempo/fixture")]);
+      expect(readTarball(good).files).toEqual(["package.json"]);
+      expect(packedTexts(readFileSync(good), ["package.json"]).get("package.json")).toContain(
+        "@authtempo/fixture",
+      );
+      const dotdot = join(out, "dotdot.tgz");
+      writeTar(dotdot, [
+        manifestEntry("@authtempo/fixture"),
+        { name: "package/../x.js", body: "x" },
+      ]);
+      expect(() => readTarball(dotdot)).toThrow(`${dotdot}: package/../x.js has a .. part`);
+      // A file that is not a tarball: tar's own failure, not the time limit.
+      const bad = join(out, "bad.tgz");
+      writeFileSync(bad, "not a tarball");
+      let message = "";
+      try {
+        readTarball(bad);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toMatch(/^Command failed: tar -tzf /);
+      expect(message).not.toMatch(/did not end/);
+      // The helper runs use once with the file and its folder, and removes the folder.
+      const seen = withTarballFile(readFileSync(good), (file, dir) => {
+        expect(file).toBe(join(dir, "tarball.tgz"));
+        expect(basename(dir).startsWith(TAR_FOLDER_PREFIX)).toBe(true);
+        expect(tarFolders()).toHaveLength(before.length + 1);
+        return dir;
+      });
+      expect(existsSync(seen)).toBe(false);
+      expect(tarFolders()).toEqual(before);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
     }
   });
 });

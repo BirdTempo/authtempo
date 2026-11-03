@@ -284,64 +284,122 @@ export interface Tarball {
 }
 
 /**
+ * The limit of one tar call, in milliseconds. The largest tarball of the
+ * group lists in under one second on an 18-core host, and in a few seconds
+ * at load 50. The test timeout of vitest cannot end a sync spawn, because
+ * the spawn blocks the event loop. So this limit is the one guard against
+ * a tar that never ends (follow-up 15 of plan 12l).
+ */
+export const TAR_TIMEOUT_MS = 60_000;
+
+/**
+ * The start of the name of the private folder of one tar read. The pid lets
+ * a test count the folders of its own process while other test files read.
+ */
+export const TAR_FOLDER_PREFIX = `authtempo-check-pack-tar-${process.pid}-`;
+
+/**
+ * Runs the system tar with `args` and answers its output. This is the one
+ * child process call of the file. tar reads no pipe: on 2026-11-01 a sync
+ * spawn that fed the bytes of a tarball to bsdtar through its input hung
+ * one full run for 41 hours on macOS, with tar in a read of its input
+ * (follow-up 15 of plan 12l). A call that does not end in `timeoutMs`
+ * throws an error that names the call. So a stall fails the check in
+ * place of a hang of the run. tar's own messages go to the parent's stderr,
+ * as they did before.
+ */
+export function tar(args: readonly string[], timeoutMs = TAR_TIMEOUT_MS): string {
+  try {
+    return execFileSync("tar", args, {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "inherit"],
+      timeout: timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ETIMEDOUT")
+      throw new Error(`tar ${args.join(" ")} did not end in ${timeoutMs} ms`);
+    throw error;
+  }
+}
+
+/**
+ * Runs `use` with the bytes of a tarball in `tarball.tgz` of a new private
+ * folder, and removes the folder after it. The file holds the bytes that
+ * the SHA-256 of the check names, so tar reads the bytes that the check
+ * read and never a second read of the path (ruling 67 of plan 12j, Low 4).
+ */
+export function withTarballFile<T>(bytes: Buffer, use: (file: string, dir: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), TAR_FOLDER_PREFIX));
+  try {
+    const file = join(dir, "tarball.tgz");
+    writeFileSync(file, bytes);
+    return use(file, dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Reads a pnpm or npm tarball through the system tar. It refuses an entry
  * that is not a regular file or a folder, such as a link, and a path with a
  * ".." part. pnpm pack writes neither, so a foreign tarball is the reach.
- * It reads the file once, and tar reads those bytes from its input. So the
- * SHA-256 names the bytes that the check read, not a second read of the
+ * It reads the file once, and tar reads those bytes from a private file. So
+ * the SHA-256 names the bytes that the check read, not a second read of the
  * path (ruling 67 of plan 12j, Low 4).
  */
 export function readTarball(path: string): Tarball {
   const bytes = readFileSync(path);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const tar = (args: string[]) =>
-    execFileSync("tar", args, { input: bytes, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  const lines = (args: string[]) => tar(args).split("\n").slice(0, -1);
-  const names = lines(["-tzf", "-"]);
-  // The first character of each long line is the entry type, in bsdtar and in GNU tar.
-  const types = lines(["-tvzf", "-"]).map((l) => l.charAt(0));
-  if (types.length !== names.length)
-    throw new Error(`${path}: tar lists ${names.length} names and ${types.length} entries`);
-  const files = names
-    .filter((e, i) => {
-      if (e.split("/").includes("..")) throw new Error(`${path}: ${e} has a .. part`);
-      if (types[i] === "d") return false;
-      if (types[i] !== "-") throw new Error(`${path}: ${e} is not a regular file`);
-      return true;
-    })
-    .map((e) => {
-      if (!e.startsWith("package/")) throw new Error(`${path}: ${e} is not under package/`);
-      return e.slice("package/".length);
-    })
-    .sort();
-  const read = (file: string) =>
-    files.includes(file) ? tar(["-xzOf", "-", `package/${file}`]) : null;
-  const manifest = read("package.json");
-  if (manifest === null) throw new Error(`${path}: the tarball has no package.json`);
-  return {
-    files,
-    manifest: JSON.parse(manifest) as Manifest,
-    license: read("LICENSE"),
-    changelog: read(CHANGELOG_FILE),
-    bytes,
-    sha256,
-  };
+  return withTarballFile(bytes, (file) => {
+    const lines = (args: string[]) =>
+      tar([...args, file])
+        .split("\n")
+        .slice(0, -1);
+    const names = lines(["-tzf"]);
+    // The first character of each long line is the entry type, in bsdtar and in GNU tar.
+    const types = lines(["-tvzf"]).map((l) => l.charAt(0));
+    if (types.length !== names.length)
+      throw new Error(`${path}: tar lists ${names.length} names and ${types.length} entries`);
+    const files = names
+      .filter((e, i) => {
+        if (e.split("/").includes("..")) throw new Error(`${path}: ${e} has a .. part`);
+        if (types[i] === "d") return false;
+        if (types[i] !== "-") throw new Error(`${path}: ${e} is not a regular file`);
+        return true;
+      })
+      .map((e) => {
+        if (!e.startsWith("package/")) throw new Error(`${path}: ${e} is not under package/`);
+        return e.slice("package/".length);
+      })
+      .sort();
+    const read = (entry: string) =>
+      files.includes(entry) ? tar(["-xzOf", file, `package/${entry}`]) : null;
+    const manifest = read("package.json");
+    if (manifest === null) throw new Error(`${path}: the tarball has no package.json`);
+    return {
+      files,
+      manifest: JSON.parse(manifest) as Manifest,
+      license: read("LICENSE"),
+      changelog: read(CHANGELOG_FILE),
+      bytes,
+      sha256,
+    };
+  });
 }
 
 /**
  * The text of each file of the bytes of a tarball, from one extraction.
  * readTarball has refused each link and each path with a ".." part, so the
  * files stay in the folder. A binary file reads as text with no harm: the
- * rules look for words.
+ * rules look for words. The extraction lands beside the file, in the
+ * private folder.
  */
 export function packedTexts(bytes: Buffer, files: readonly string[]): Map<string, string> {
-  const dir = mkdtempSync(join(tmpdir(), "authtempo-check-pack-text-"));
-  try {
-    execFileSync("tar", ["-xzf", "-", "-C", dir], { input: bytes });
+  return withTarballFile(bytes, (file, dir) => {
+    tar(["-xzf", file, "-C", dir]);
     return new Map(files.map((f) => [f, readFileSync(join(dir, "package", f), "utf8")]));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 }
 
 /**
