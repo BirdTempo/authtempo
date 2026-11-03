@@ -210,12 +210,11 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | `authClient.admin` calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, `stopImpersonating`, `updateUser`, `removeUser`, and `createUser` send the mapped paths and answer `{ data, error }`. Dates are `Date` values. |
 | `authClient.admin` calls core does not serve | `listUserSessions`, `revokeUserSession`, `setUserPassword`, and `hasPermission` answer `NOT_SUPPORTED` with no request. `checkRolePermission` throws, because core has no permission statements. |
 
-Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. The deviations from Better Auth:
+Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 400 `YOU_CANNOT_BAN_YOURSELF`, as Better Auth does. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. The deviations from Better Auth:
 
 - `/admin/list-users` answers `total` only on a first page that ends the list. An `offset` above 0 is refused, because core pages by a cursor.
 - `/admin/revoke-user-sessions` ends one page per call. While sessions stay, it answers `{ success: false, more: true, ended }`.
 - A `set-role` of `user` on a platform operator answers 403 `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`. That revoke needs an operator secret or the app.
-- A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with 409. Better Auth answers 400.
 - `/admin/revoke-user-sessions`, `/admin/unban-user`, and `/admin/set-role` on the caller's own user answer 409 `FORBIDDEN`. Better Auth has no such check there.
 - An unknown user answers 404 `USER_NOT_FOUND` on every path. Better Auth answers `{ success: true }` on `/admin/revoke-user-sessions`.
 - `/admin/impersonate-user` answers one code, `YOU_CANNOT_IMPERSONATE_ADMINS`, also for an absent user. Better Auth answers `USER_NOT_FOUND` there.

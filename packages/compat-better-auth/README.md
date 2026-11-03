@@ -773,7 +773,7 @@ no operator secret.
 | `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
 | `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
-| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 400 `YOU_CANNOT_REMOVE_YOURSELF` on a remove (Better Auth's status), else 409 `FORBIDDEN`. |
+| `operator_self` | 400 `YOU_CANNOT_BAN_YOURSELF` on a ban and 400 `YOU_CANNOT_REMOVE_YOURSELF` on a remove (Better Auth's status), else 409 `FORBIDDEN`. |
 | `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
 | `delete_too_large` (a remove of a user who alone holds more than 50 organizations, or on D1 a remove that does not fit one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
 | `email_taken` on a create | 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`, Better Auth's code and status. |
@@ -806,8 +806,6 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - A `set-role` of `user` on a platform operator is refused with
   `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`. Better Auth lets an admin
   revoke another admin.
-- A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with status 409.
-  Better Auth answers 400.
 - `/admin/revoke-user-sessions`, `/admin/unban-user`, and `/admin/set-role`
   on the caller's own user answer 409 `FORBIDDEN` (core's `operator_self`).
   Better Auth has no such check on these three paths. Core lets no operator

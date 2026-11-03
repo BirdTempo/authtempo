@@ -498,6 +498,7 @@ function withHeaders(body: unknown, status: number, from: Response): AdminAnswer
  * `operator_required` answers the path's own name, and `not_found`
  * answers `USER_NOT_FOUND`. `operator_self` on a ban answers
  * `YOU_CANNOT_BAN_YOURSELF`, and on a remove `YOU_CANNOT_REMOVE_YOURSELF`.
+ * Each of these two answers Better Auth's status, 400.
  * The shim's actor is always a user, so
  * `operator_self` names the caller's own user. Each other code answers its
  * name in `BETTER_AUTH_CODES`.
@@ -523,9 +524,12 @@ async function refusalOf(path: string, res: Response): Promise<AdminAnswer> {
   // A hook refusal carries the app's own text (plan 9d).
   const message = typeof body?.message === "string" ? body.message : messageOf(code);
   // Better Auth answers a remove of the caller's own user with 400
-  // (routes.mjs removeUser, read 2026-10-25; final-12f2-A I1). Core's
+  // (routes.mjs removeUser, read 2026-10-25; final-12f2-A I1). It answers a
+  // ban of the caller's own user with 400 too (better-auth 1.7.7
+  // dist/plugins/admin/routes.mjs:533, read 2026-11-03; plan 12n). Core's
   // operator_self is 409.
-  return withHeaders({ code, message }, code === REMOVE_YOURSELF ? 400 : res.status, res);
+  const self = code === REMOVE_YOURSELF || code === BAN_YOURSELF;
+  return withHeaders({ code, message }, self ? 400 : res.status, res);
 }
 
 /** A VALIDATION_ERROR of the shim's own, before any core route runs. */
