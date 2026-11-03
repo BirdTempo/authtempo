@@ -15,7 +15,8 @@
 // a class or an interface that extends it, a computed name with a literal
 // in a pattern, an element access by a value of a string literal type, and
 // `Reflect.get` with a literal name. The note of rr-12j-bodycap4 adds an
-// alias of `Reflect.get`, such as `const { get } = Reflect`.
+// alias of `Reflect.get`, such as `const { get } = Reflect`. Follow-up 5 of
+// plan 12j adds `Reflect.get.call` and `Reflect.get.apply`.
 
 import { dirname, relative } from "node:path";
 
@@ -84,6 +85,30 @@ export function rawBodyReads(ts, tsconfig, files) {
         d.name?.text === "get" && d.parent?.parent?.name?.text === "Reflect",
     );
   /**
+   * The receiver and the name of a call of `Reflect.get` or of an alias of it:
+   * `get(request, "body")`, `Reflect.get.call(self, request, "body")`, or
+   * `Reflect.get.apply(self, [request, "body"])`. Null for each other node.
+   * @param {any} node
+   * @returns {any[] | null}
+   */
+  const reflectGetArguments = (node) => {
+    if (!ts.isCallExpression(node)) return null;
+    if (isReflectGet(checker.getTypeAtLocation(node.expression))) return [...node.arguments];
+    const callee = node.expression;
+    if (
+      !ts.isPropertyAccessExpression(callee) ||
+      !isReflectGet(checker.getTypeAtLocation(callee.expression))
+    )
+      return null;
+    // `call` takes the this value first, then the arguments of `get`.
+    if (callee.name.text === "call") return node.arguments.slice(1);
+    // `apply` takes the this value, then the arguments of `get` in one array literal.
+    const list = node.arguments[1];
+    if (callee.name.text === "apply" && list !== undefined && ts.isArrayLiteralExpression(list))
+      return [...list.elements];
+    return null;
+  };
+  /**
    * The member names of a property access, or of an element access by a literal or a literal type.
    * @param {any} node
    * @returns {string[]}
@@ -119,15 +144,16 @@ export function rawBodyReads(ts, tsconfig, files) {
       if (members.length > 0 && isRequest(checker.getTypeAtLocation(node.expression)))
         for (const member of members)
           reads.push(`${where(node)} ${node.expression.getText()}.${member}`);
-      // `Reflect.get(request, "body")`, or a call of an alias of it: `const { get } = Reflect`.
+      // `Reflect.get(request, "body")`, a call of an alias of it (`const { get } = Reflect`),
+      // and `Reflect.get.call` or `Reflect.get.apply`.
+      const reflected = reflectGetArguments(node);
       if (
-        ts.isCallExpression(node) &&
-        isReflectGet(checker.getTypeAtLocation(node.expression)) &&
-        node.arguments.length >= 2 &&
-        isRequest(checker.getTypeAtLocation(node.arguments[0]))
+        reflected !== null &&
+        reflected.length >= 2 &&
+        isRequest(checker.getTypeAtLocation(reflected[0]))
       )
-        for (const member of literalsOf(node.arguments[1]).filter((m) => BODY_MEMBERS.includes(m)))
-          reads.push(`${where(node)} ${node.arguments[0].getText()}.${member}`);
+        for (const member of literalsOf(reflected[1]).filter((m) => BODY_MEMBERS.includes(m)))
+          reads.push(`${where(node)} ${reflected[0].getText()}.${member}`);
       // A pattern of a variable, of a parameter, or inside another pattern:
       // `const { body } = request`, `({ body }: Request) => body`, `const { request: { body } } = ctx`.
       if (ts.isObjectBindingPattern(node)) {

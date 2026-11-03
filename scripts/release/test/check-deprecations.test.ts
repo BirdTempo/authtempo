@@ -387,6 +387,10 @@ describe("check-deprecations", () => {
     }
   });
 
+  // At a new minor, step 5 of "At each release" in docs/release/RUNBOOK.md
+  // removes the code of each due item and changes this test. Until then, this
+  // test fails the evidence run, and release-check stops there (follow-up 9 of
+  // plan 12j). runbook.test.ts holds this title.
   it("reads the real register", () => {
     const entries = readDeprecations(repo);
     expect(entries.map((e) => e.id)).toEqual([

@@ -353,6 +353,28 @@ describe("docs/release/RUNBOOK.md", () => {
     ]);
   });
 
+  // Follow-up 9 of plan 12j: release-check stops after a failed evidence run,
+  // so at a new minor the owner first meets the test of the real register.
+  it("removes the code of each due deprecation at a new minor, before the pull request", () => {
+    const step = stepOf(TEXT, "At each release", 5);
+    for (const part of [
+      "   - At a new minor, also remove the code of each due item of `release/deprecations.json`, with each of its markers.",
+      "Keep its entry in the register",
+      'Then change the test "reads the real register" in `scripts/release/test/check-deprecations.test.ts` to the new state.',
+      "before the pull request of step 7.",
+      "Without it, that test fails the evidence run of `pnpm release:check`, and the check stops there.",
+    ])
+      expect(step, part).toContain(part);
+    // The test that the step names, and the stop that the step states.
+    const test = readFileSync(
+      new URL("scripts/release/test/check-deprecations.test.ts", ROOT),
+      "utf8",
+    );
+    expect(test.split('it("reads the real register", () => {')).toHaveLength(2);
+    const check = readFileSync(new URL("scripts/release/src/release-check.ts", ROOT), "utf8");
+    expect(check).toContain('if (failures.length > 0) return stop("evidence run");');
+  });
+
   // Ruling 65 of plan 12j, C1 b: the version pull request of 0.1.0 failed its
   // own check, and only a run of the suite at the version state shows that.
   it("rehearses the version pull request on main, with the planned values", () => {

@@ -53,3 +53,12 @@ export function aliasedReflect(request: Request, response: Response) {
   const read = Reflect.get;
   return [get(request, "body"), read(request, "text"), get(response, "body")];
 }
+
+// Follow-up 5 of plan 12j: Reflect.get through call and apply, which the scan of the bodycap4 note missed.
+export function reflectCallApply(request: Request, response: Response) {
+  return [
+    Reflect.get.call(undefined, request, "body"),
+    Reflect.get.apply(undefined, [request, "text"]),
+    Reflect.get.call(undefined, response, "body"),
+  ];
+}

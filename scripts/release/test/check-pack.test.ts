@@ -755,7 +755,7 @@ describe("check-pack", () => {
     try {
       const path = join(out, "outside.tgz");
       writeTar(path, [manifestEntry("@authtempo/fixture"), { name: "other/x.js", body: "x" }]);
-      expect(() => readTarball(path)).toThrow(`${path}: other/x.js is not under package/`);
+      expect(messageOf(() => readTarball(path))).toBe(`${path}: other/x.js is not under package/`);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
@@ -774,7 +774,7 @@ describe("check-pack", () => {
         type: "2",
         link: "/etc/passwd",
       });
-      expect(() => readTarball(symlink)).toThrow(
+      expect(messageOf(() => readTarball(symlink))).toBe(
         `${symlink}: package/dist/leak.js is not a regular file`,
       );
       const hardlink = tarball("hardlink.tgz", {
@@ -782,11 +782,11 @@ describe("check-pack", () => {
         type: "1",
         link: "package/package.json",
       });
-      expect(() => readTarball(hardlink)).toThrow(
+      expect(messageOf(() => readTarball(hardlink))).toBe(
         `${hardlink}: package/dist/copy.js is not a regular file`,
       );
       const dotdot = tarball("dotdot.tgz", { name: "package/dist/../../evil.js", body: "x" });
-      expect(() => readTarball(dotdot)).toThrow(
+      expect(messageOf(() => readTarball(dotdot))).toBe(
         `${dotdot}: package/dist/../../evil.js has a .. part`,
       );
       // A folder entry is not a file, and the reader skips it.
@@ -1189,6 +1189,20 @@ function withRefusingTar<T>(real: string, use: () => T): T {
   }
 }
 
+/**
+ * The message of the error that `fn` throws, or "no error" when it returns.
+ * toThrow with a string matches a part of the message, so a doubled path
+ * prefix passes it. toBe on this message does not (ruling 11 of plan 12m).
+ */
+function messageOf(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return "no error";
+}
+
 /** The text from each match of `form` in `text` to the end of its line. */
 const linesFrom = (text: string, form: RegExp) =>
   [...text.matchAll(form)].map((m) => text.slice(m.index, text.indexOf("\n", m.index)));
@@ -1204,7 +1218,7 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
       const start = Date.now();
       // The slow tar ignores SIGTERM, so the two calls end in time only with SIGKILL.
       withSlowTar(30, () => {
-        expect(() => tar(["-tzf", "none.tgz"], 300)).toThrow(
+        expect(messageOf(() => tar(["-tzf", "none.tgz"], 300))).toBe(
           "tar -tzf none.tgz did not end in 300 ms",
         );
         expect(() => withTarballFile(bytes, (file) => tar(["-tzf", file], 300))).toThrow(
@@ -1227,15 +1241,23 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
     );
     // One child process call in the file, with the limit and no input pipe.
     expect(source.match(/execFileSync\(/g)).toHaveLength(1);
-    // checkPack takes a parameter named input, so the fact reads only an input property.
-    expect(source).not.toMatch(/[{,]\s*input:/);
-    expect(source).toMatch(/stdio: \["ignore", "pipe", "pipe"\],\n\s*timeout: timeoutMs,/);
+    // checkPack takes a parameter named input, so the fact reads only an input
+    // property: input:, a shorthand { input }, or , input, (ruling 7 of plan 12m).
+    const INPUT_PROPERTY = /[{,]\s*input\s*[:,}]/;
+    expect(source).not.toMatch(INPUT_PROPERTY);
+    for (const form of ["{ input: x }", "{ input }", "{ cwd, input, stdio }"])
+      expect(form).toMatch(INPUT_PROPERTY);
+    // Each positive fact starts at a line start, so a copy in a comment line,
+    // which starts with // or *, does not meet it.
+    const LIMIT = /^\s*stdio: \["ignore", "pipe", "pipe"\],\n\s*timeout: timeoutMs,/m;
+    expect(source).toMatch(LIMIT);
+    expect('// stdio: ["ignore", "pipe", "pipe"],\n// timeout: timeoutMs,').not.toMatch(LIMIT);
     // readTarball runs tar on the private file only.
     const reader = source.slice(
-      source.indexOf("export function readTarball"),
-      source.indexOf("export function packedTexts"),
+      source.search(/^export function readTarball/m),
+      source.search(/^export function packedTexts/m),
     );
-    expect(reader).toMatch(/withTarballFile\(bytes, \(file\)/);
+    expect(reader).toMatch(/^\s*return withTarballFile\(bytes, \(file\)/m);
     expect(reader).not.toMatch(/tar\(\[[^\]]*\bpath\b/);
     // The folder of a read carries the pid of this process.
     expect(TAR_FOLDER_PREFIX).toBe(`authtempo-check-pack-tar-${process.pid}-`);
@@ -1256,16 +1278,11 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
         manifestEntry("@authtempo/fixture"),
         { name: "package/../x.js", body: "x" },
       ]);
-      expect(() => readTarball(dotdot)).toThrow(`${dotdot}: package/../x.js has a .. part`);
+      expect(messageOf(() => readTarball(dotdot))).toBe(`${dotdot}: package/../x.js has a .. part`);
       // A file that is not a tarball: tar's own failure with its reason, not the time limit.
       const bad = join(out, "bad.tgz");
       writeFileSync(bad, "not a tarball");
-      let message = "";
-      try {
-        readTarball(bad);
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
+      const message = messageOf(() => readTarball(bad));
       // bsdtar and GNU tar give other words for the reason, so the test reads the form only.
       expect(message).toMatch(/tar -tzf \S+ failed: \S/);
       const head = `${bad}: tar -tzf `;
@@ -1296,13 +1313,17 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
     expect(calls.filter((c) => !/^tar\(\[[^\]]*\]\)/.test(c))).toEqual([]);
     // A default of 0 would drop the limit from every product call with no test red
     // (R1 of the final re-review).
-    expect(source).toMatch(
-      /export function tar\(args: readonly string\[\], timeoutMs = TAR_TIMEOUT_MS\)/,
-    );
+    const DEFINITION =
+      /^\s*export function tar\(args: readonly string\[\], timeoutMs = TAR_TIMEOUT_MS\)/m;
+    expect(source).toMatch(DEFINITION);
+    // A copy of the definition in a comment line does not meet the fact.
+    expect(
+      " * export function tar(args: readonly string[], timeoutMs = TAR_TIMEOUT_MS) {",
+    ).not.toMatch(DEFINITION);
     // Each tar call of readTarball goes through named, so its error starts with the tarball path.
     const reader = source.slice(
-      source.indexOf("export function readTarball"),
-      source.indexOf("export function packedTexts"),
+      source.search(/^export function readTarball/m),
+      source.search(/^export function packedTexts/m),
     );
     expect(linesFrom(reader, /\btar\(/g)).toHaveLength(2);
     expect(linesFrom(reader, /(?<!named\(\(\) => )\btar\(/g)).toEqual([]);
@@ -1317,14 +1338,7 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
       const path = join(out, "good.tgz");
       writeTar(path, [manifestEntry("@authtempo/fixture")]);
       const before = tarFolders();
-      let message = "";
-      withRefusingTar(real, () => {
-        try {
-          readTarball(path);
-        } catch (error) {
-          message = error instanceof Error ? error.message : String(error);
-        }
-      });
+      const message = withRefusingTar(real, () => messageOf(() => readTarball(path)));
       const head = `${path}: tar -xzOf `;
       expect(message.slice(0, head.length)).toBe(head);
       expect(message).toContain("failed: fake tar refused the read");
