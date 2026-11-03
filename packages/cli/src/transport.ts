@@ -12,9 +12,15 @@ import { describeUrl } from "./output.js";
 /**
  * True for `localhost`, an IPv4 address in 127.0.0.0/8, and each form of
  * `::1`, such as `0:0:0:0:0:0:0:1`. A URL host `[::1]` keeps its brackets.
+ * An IPv4 octet has no leading zero. `net.isIP` reads `127.0.0.08` as no
+ * address, so the TLS rule applies to such a host.
  */
 export function isLoopbackHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+  // WHATWG URL drops each tab, LF, and CR of its input, so the read below
+  // would take ::<tab>1 as ::1. mysql2 decodes %09 in the host to a tab, and
+  // that host is no address (review of the Task 6 fix of plan 12n, L1).
+  if (/[\t\n\r]/.test(h)) return false;
   if (h === "localhost" || h === "::1") return true;
   if (h.includes(":")) {
     // WHATWG URL writes an IPv6 address in its shortest form, so each form of
@@ -29,6 +35,8 @@ export function isLoopbackHost(host: string): boolean {
   }
   const v4 = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (v4 === null) return false;
+  // The whole-branch review of plan 12n, open point 4: 127.0.0.08 passed with no TLS.
+  if (v4.slice(1).some((n) => n.length > 1 && n.startsWith("0"))) return false;
   return v4.slice(1).every((n) => Number(n) <= 255);
 }
 

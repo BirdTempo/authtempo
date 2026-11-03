@@ -10,6 +10,7 @@ sources:
   - packages/adapter-mysql/README.md "Migrations"
   - packages/adapter-mysql/README.md "Length bounds"
   - packages/core/src/storage/ddl.ts
+  - packages/cli/src/transport.ts
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -46,9 +47,9 @@ The first call of the adapter runs four checks, in this order. A pass is kept. A
 
 ## TLS
 
-The adapter does not check the transport: the app opens the pool. For a host that is not a loopback address, set `ssl: { rejectUnauthorized: true, verifyIdentity: true }`. mysql2 checks the certificate chain with `rejectUnauthorized`, and the host name only with `verifyIdentity`.
+The adapter does not check the transport: the app opens the pool. For a host that is not a loopback address, set `ssl: { rejectUnauthorized: true, verifyIdentity: true }`. mysql2 checks the certificate chain with `rejectUnauthorized`, and the host name only with `verifyIdentity`. For an IP host, mysql2 3.24.5 sends no server name, and it checks the name `localhost` in its place. So for the host of the pool, use the DNS name that the certificate carries.
 
-`authtempo migrate --target mysql` holds the same rule. A URL to such a host needs `?ssl={"rejectUnauthorized":true,"verifyIdentity":true}`, else the command stops with exit 2 before any connection. [authtempo migrate](/docs/reference/cli/migrate/#mysql) gives the rules.
+`authtempo migrate --target mysql` holds the same rule. A URL to such a host needs `?ssl={"rejectUnauthorized":true,"verifyIdentity":true}`, else the command stops with exit 2 before any connection. A URL with an IP host that is not a loopback address stops the command too, also with that `ssl`. [authtempo migrate](/docs/reference/cli/migrate/#mysql) gives the rules.
 
 ## Transactions
 

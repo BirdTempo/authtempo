@@ -214,7 +214,9 @@ describe("the host name check of mysql2 3.24.5 against a real certificate", () =
     const fake = await fakeServer();
     try {
       // An IPv4-mapped address reaches the fake server on 127.0.0.1, and the
-      // transport rule reads it as no loopback address.
+      // transport rule reads it as no loopback address. On Linux,
+      // net.ipv6.bindv6only=1 fails this connect with ENETUNREACH (probe in
+      // node:26.10.0 linux/arm64 containers, 2026-11-03).
       const url = mysqlUrl(
         fake.port,
         { ca: CA, rejectUnauthorized: true, verifyIdentity: true },

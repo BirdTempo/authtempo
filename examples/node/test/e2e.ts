@@ -76,8 +76,9 @@ async function listen(
   }
 }
 /**
- * The failure line of an error, with a hint at the server that failed. A port
- * failure comes before the database exists, so it names the port, not Postgres.
+ * The failure line of an error, with a hint at the server that failed. The
+ * listen of the app server runs after the database exists. A port failure is
+ * no fault of Postgres, so its line names the port, not Postgres.
  */
 function failureLine(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);

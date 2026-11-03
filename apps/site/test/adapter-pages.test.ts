@@ -257,6 +257,21 @@ describe("the facts of the MySQL guide (plan 12g Task 9)", () => {
     expect(row).toContain("The package needs mysql2 3.24.5 or later.");
   });
 
+  it("names the IP host limit of mysql2 for the pool of the app (rr-fix-6 open point 3 of plan 12n)", () => {
+    // mysql2 sends no server name to an IP host, so verifyIdentity checks localhost there.
+    const tls = part(text, "TLS").join("\n");
+    expect(tls).toContain(
+      "For an IP host, mysql2 3.24.5 sends no server name, and it checks the name `localhost` in its place. So for the host of the pool, use the DNS name that the certificate carries.",
+    );
+    expect(tls).toContain(
+      "A URL with an IP host that is not a loopback address stops the command too, also with that `ssl`.",
+    );
+    // The CLI stops an IP host that is not a loopback address, at the mysql2 floor of the adapter.
+    const rule = readFileSync(`${REPO}packages/cli/src/transport.ts`, "utf8");
+    expect(rule).toContain("if (isIP(host) !== 0)");
+    expect(packageJson("adapter-mysql").peerDependencies?.mysql2).toBe("^3.24.5");
+  });
+
   it("names the baseline, the deadlock tries, and the lock wait of the code", () => {
     const migrations = part(text, "Migrations").join("\n");
     expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(
