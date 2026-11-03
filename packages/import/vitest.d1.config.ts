@@ -31,6 +31,10 @@ export default defineConfig(async () => {
         ),
       },
     },
-    test: { include: ["test/d1/**/*.test.ts"] },
+    // The test "logs the verify of a verify bundle" took 0.41 to 4.88 s in the logs of
+    // 2026-10-30 to 2026-11-03. In the 20 evidence runs of that time, at sampled peak load 36
+    // to 56, it passed in up to 2.95 s. It timed out at the default 5 s once, at 5.53 s. That
+    // release rehearsal of 2026-10-31 ran at load 11.8 to 25.6 while other lanes ran tests.
+    test: { include: ["test/d1/**/*.test.ts"], testTimeout: 20_000 },
   };
 });
