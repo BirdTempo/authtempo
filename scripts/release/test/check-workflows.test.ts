@@ -269,6 +269,23 @@ describe("check-workflows", () => {
     ]);
   });
 
+  it("fails a job with no timeout-minutes, or with a value that is not a whole number above 0", () => {
+    // A sync spawn blocks the timer of vitest, so the job limit is the one guard of a hung step.
+    const NOT_SET = "timeout-minutes is not a whole number of minutes above 0";
+    expect(ciFailures(swap(CI, "    timeout-minutes: 40\n", ""))).toEqual([
+      `ci.yml: jobs.check: ${NOT_SET}`,
+    ]);
+    expect(ciFailures(swap(CI, "    timeout-minutes: 40\n", "    timeout-minutes: 0\n"))).toEqual([
+      `ci.yml: jobs.check: ${NOT_SET}`,
+    ]);
+    expect(releaseFailures(swap(RELEASE, "    timeout-minutes: 30\n", ""))).toEqual([
+      `release.yml: jobs.publish: ${NOT_SET}`,
+    ]);
+    expect(
+      releaseFailures(swap(RELEASE, "    timeout-minutes: 40\n", "    timeout-minutes: 1.5\n")),
+    ).toEqual([`release.yml: jobs.check: ${NOT_SET}`]);
+  });
+
   it("fails a publish step that is not node scripts/release/src/publish.ts", () => {
     const step = "      - run: node scripts/release/src/publish.ts out\n";
     expect(releaseFailures(swap(RELEASE, step, "      - run: npm publish out/*.tgz\n"))).toEqual([

@@ -39,6 +39,7 @@ The rules (`check-changesets`, plan 12j Task 4):
 6. An empty changeset (no package lines) needs the body line `No release: <reason>`.
 7. The body is Simplified Technical English. It names the change, not a plan number.
 8. A change to a root input needs a changeset that names each package of its row. A root input is a file outside the package that `prepare` or a build reads. Examples are `tsconfig.base.json`, `LICENSE`, and an example that the CLI renders. `ROOT_INPUTS` in `scripts/release/src/lib/root-inputs.ts` lists them. In `.changeset/config.json` only `fixed` counts, so a new name in `ignore` needs no changeset.
+9. A change of the `typescript` pin in the `devDependencies` of a released package needs a changeset too. tsc of that pin builds `dist`, so a new pin can change the bytes that an app loads. A change of `pnpm-lock.yaml` or `turbo.json` alone needs none: a rule for them asks for a changeset of each released package at each bump of a dev tool.
 
 ## The bump
 

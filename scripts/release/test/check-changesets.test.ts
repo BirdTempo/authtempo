@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
+  COMPILER_PIN,
   changesetStatus,
   checkChangesets,
   entry,
@@ -255,6 +256,33 @@ describe("check-changesets", () => {
     expect(run([manifest("base", "scripts")], []).failures).toEqual([
       "@authtempo/core changes and no changeset names it: packages/core/package.json (scripts)",
     ]);
+  });
+
+  it("needs a changeset for a change of the typescript pin (follow-up 6 of plan 12j)", () => {
+    // tsc of the pin builds dist, so a new pin can change what an app loads.
+    const base = read("manifests/base.json");
+    const pinned = (version: string | null) => {
+      const m = JSON.parse(base) as { devDependencies: Record<string, string> };
+      if (version === null) delete m.devDependencies.typescript;
+      else m.devDependencies.typescript = version;
+      return `${JSON.stringify(m, null, 2)}\n`;
+    };
+    const path = "packages/core/package.json";
+    const bump = { path, base, head: pinned("7.0.3") };
+    expect(run([bump], []).failures).toEqual([
+      `@authtempo/core changes and no changeset names it: ${path} (${COMPILER_PIN})`,
+    ]);
+    expect(summaryLine(run([bump], ["core-patch.md"]))).toBe(
+      "check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0",
+    );
+    expect(run([{ path, base, head: pinned(null) }], []).failures).toEqual([
+      `@authtempo/core changes and no changeset names it: ${path} (${COMPILER_PIN})`,
+    ]);
+    // The same pin in another form of the text is no change.
+    expect(summaryLine(run([{ path, base, head: pinned("7.0.2") }], []))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    expect(COMPILER_PIN).toBe("devDependencies.typescript");
   });
 
   it("needs a changeset for a change of typesVersions (ruling 64 of plan 12j, Minor 3)", () => {

@@ -551,7 +551,7 @@ describe("publish", () => {
     ]);
   });
 
-  it("imports only Node modules and release-facts", () => {
+  it("imports only Node modules, release-facts, and run-sync", () => {
     // The job publish runs no install, so each import must resolve with none.
     const imports = (file: string) =>
       [
@@ -560,13 +560,14 @@ describe("publish", () => {
         ),
       ].map((m) => m[1] ?? m[2]);
     expect(imports("../src/publish.ts")).toEqual([
-      "node:child_process",
       "node:crypto",
       "node:fs",
       "node:path",
       "node:zlib",
       "./lib/release-facts.ts",
+      "./lib/run-sync.ts",
     ]);
     expect(imports("../src/lib/release-facts.ts")).toEqual([]);
+    expect(imports("../src/lib/run-sync.ts")).toEqual(["node:child_process"]);
   });
 });

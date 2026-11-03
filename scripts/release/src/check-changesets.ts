@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +7,7 @@ import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { ROOT_INPUTS, type RootInput, rootInputOf } from "./lib/root-inputs.ts";
+import { REGISTRY_TIMEOUT_MS, runSync } from "./lib/run-sync.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { rewrittenPaths } from "./rewrite-unpublished.ts";
 
@@ -106,13 +106,33 @@ export const RUNTIME_KEYS = [
   "scripts",
 ] as const;
 
+/**
+ * The pin of the compiler in a released manifest. Each released package
+ * builds dist with tsc of its own `typescript` pin, so a new pin can change
+ * the bytes of dist with no change of source. So the pin counts as a runtime
+ * change (follow-up 6 of plan 12j). It is a key of its own, not a part of
+ * RUNTIME_KEYS: a change of each other dev dependency still needs no
+ * changeset. The lockfile and turbo.json stay out of ROOT_INPUTS. A row for
+ * them asks for a changeset of each released package at each bump of a dev
+ * tool.
+ */
+export const COMPILER_PIN = "devDependencies.typescript";
+
+/** The `typescript` pin of the devDependencies of a manifest, or undefined. */
+const compilerPin = (manifest: Record<string, unknown>) =>
+  (manifest.devDependencies as Record<string, unknown> | undefined)?.typescript;
+
 /** The runtime keys whose value differs between two manifest texts. A new or removed manifest changes each key. */
 function runtimeChanges(base: string | null, head: string | null): string[] {
   if (base === null || head === null) return [...RUNTIME_KEYS];
   const a = JSON.parse(base) as Record<string, unknown>;
   const b = JSON.parse(head) as Record<string, unknown>;
   // The key order of `exports` decides which condition matches, so compare the JSON text.
-  return RUNTIME_KEYS.filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+  const keys: string[] = RUNTIME_KEYS.filter(
+    (key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]),
+  );
+  if (compilerPin(a) !== compilerPin(b)) keys.push(COMPILER_PIN);
+  return keys;
 }
 
 /** The keys of `keys` whose value differs between two JSON texts. A new or removed file changes each key. */
@@ -388,8 +408,9 @@ export function changesetStatus(root: string, since: string): string[] {
     return [
       `changeset status: skipped, ${CHANGESET_BIN} is absent, and the check installs nothing`,
     ];
+  // changeset status is a Node tool as npm is, so it takes the limit of an npm read.
   return statusNotes(
-    spawnSync(bin, ["status", `--since=${since}`], { cwd: root, encoding: "utf8" }),
+    runSync(bin, ["status", `--since=${since}`], { cwd: root, timeoutMs: REGISTRY_TIMEOUT_MS }),
   );
 }
 

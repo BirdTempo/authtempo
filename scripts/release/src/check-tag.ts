@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FIRST_RELEASE, TAG_PREFIX } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
+import { GIT_TIMEOUT_MS, runSync } from "./lib/run-sync.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 /**
@@ -43,14 +43,14 @@ export function checkTag(input: {
   return { name: "check-tag", counts: { tags: 1 }, failures, notes: [] };
 }
 
+// A call past its limit throws an error that names the call.
 function git(root: string, args: string[]): { code: number } {
-  try {
-    execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-    return { code: 0 };
-  } catch (error) {
-    const status = (error as { status?: unknown }).status;
-    return { code: typeof status === "number" ? status : -1 };
-  }
+  const r = runSync("git", args, {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeoutMs: GIT_TIMEOUT_MS,
+  });
+  return { code: r.status ?? -1 };
 }
 
 const hasRef = (root: string, ref: string) =>

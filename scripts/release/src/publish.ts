@@ -1,19 +1,20 @@
 // Runs only in the publish job of release.yml. The loop never runs it without
 // the fake seams of its test.
 //
-// The publish job runs no install, so this file imports only Node modules and
-// ./lib/release-facts.ts, which imports nothing. A test holds the import list.
+// The publish job runs no install, so this file imports only Node modules,
+// ./lib/release-facts.ts, which imports nothing, and ./lib/run-sync.ts, which
+// imports only a Node module. A test holds the import list.
 // It checks the npm floor, each SHA-256 against the SHA-256 list of the check
 // job, and the registry. Then it runs one npm publish for each version that
 // the registry lacks, in the order of the dependency graph. The list comes
 // from the job output of the check job through env, and the SHA256SUMS of the
 // artifact must equal it (ruling 67 of plan 12j, Low 4).
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { NPM_FLOOR, PUBLIC_REGISTRY, SCOPE } from "./lib/release-facts.ts";
+import { REGISTRY_TIMEOUT_MS, runSync, STEP_TIMEOUT_MS } from "./lib/run-sync.ts";
 
 /** The env key of the SHA-256 list of the job check, which release.yml sets from its job output. */
 export const SUMS_ENV = "RELEASE_SHA256SUMS";
@@ -390,18 +391,26 @@ export function readView(status: number | null, stdout: string, stderr: string):
   return { error: first ?? `npm view exited ${status}` };
 }
 
-/** The real seams: npm on the PATH of the publish job. */
+/**
+ * The real seams: npm on the PATH of the publish job. A call past its limit
+ * throws an error that names the call, and the job fails.
+ */
 export const npmSeams: Seams = {
   run(command, args) {
-    const r = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    // This seam runs npm --version and each npm publish. No real publish ran
+    // before the first release, so each call takes the widest limit.
+    const r = runSync(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeoutMs: STEP_TIMEOUT_MS,
+    });
     process.stdout.write(r.stdout ?? "");
     process.stderr.write(r.stderr ?? "");
     return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   },
   npmView(spec, field) {
-    const r = spawnSync("npm", viewArgs(spec, field), {
-      encoding: "utf8",
+    const r = runSync("npm", viewArgs(spec, field), {
       stdio: ["ignore", "pipe", "pipe"],
+      timeoutMs: REGISTRY_TIMEOUT_MS,
     });
     return readView(r.status, r.stdout ?? "", r.stderr ?? "");
   },
