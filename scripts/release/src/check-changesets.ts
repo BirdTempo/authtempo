@@ -106,8 +106,13 @@ export const EXEMPT_PATTERNS: readonly {
  */
 const PLAIN_PROGRAMS = new Set(["node", "tsc"]);
 
-/** A word of a plain build. A quote, `=`, `$`, or a leading `/` makes no plain word. */
-const PLAIN_WORD = /^[\w@.+-][\w@./+-]*$/;
+/**
+ * A word of a plain build. A quote, `=`, `$`, a leading `/`, or a leading `@`
+ * makes no plain word. tsc 7.0.2 reads a word `@<file>` as a file of more
+ * arguments (a probe of 2026-11-03), and the check does not read that file.
+ * So that file can name scripts/ (L2 of the review of fix wave A of plan 12n).
+ */
+const PLAIN_WORD = /^[\w.+-][\w@./+-]*$/;
 
 /**
  * True when the build of the package in `dir` is a plain form that names no

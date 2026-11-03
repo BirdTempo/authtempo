@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,6 +74,9 @@ function downloaded(version: string, react = false): string {
 /** publish with the SHA-256 list that the job check exports: the SHA256SUMS of the folder. */
 const publishOut = (out: string, seams: Seams, listed?: string) =>
   publish(out, seams, listed ?? readFileSync(join(out, "SHA256SUMS"), "utf8"));
+
+/** The entry that the publish job runs: node scripts/release/src/publish.ts <folder>. */
+const PUBLISH_ENTRY = fileURLToPath(new URL("../src/publish.ts", import.meta.url));
 
 const CORE = (v: string) => `authtempo-core-${v}.tgz`;
 const CLIENT = (v: string) => `authtempo-client-${v}.tgz`;
@@ -319,6 +322,73 @@ describe("publish", () => {
       "publish: FAIL published=0 skipped=0 failures=1",
       `  npm ${viewArgs("@authtempo/client@0.1.0", "version").join(" ")} did not end in ${STALL_MS} ms`,
     ]);
+  });
+
+  it("lets an error that is not a RunTimeout go up from npm --version and npm view (ruling 56 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    const f = fake({});
+    // First the seams answer: the same folder passes.
+    expect(publishLines(publishOut(out, f.seams))[0]).toBe(
+      "publish: PASS published=2 skipped=0 failures=0",
+    );
+    const broken = new Error("spawnSync npm EACCES");
+    const version: Seams = {
+      ...f.seams,
+      run(command, args) {
+        if (args[0] === "--version") throw broken;
+        return f.seams.run(command, args);
+      },
+    };
+    const view: Seams = {
+      ...f.seams,
+      npmView() {
+        throw broken;
+      },
+    };
+    for (const seams of [version, view]) {
+      let thrown: unknown = null;
+      try {
+        publishOut(out, seams);
+      } catch (error) {
+        thrown = error;
+      }
+      // The same error goes up, so the entry ends with exit 1 and its stack.
+      expect(thrown).toBe(broken);
+    }
+  });
+
+  it("fails the step with exit 1 and the error's own message, with no FAIL line, when an npm view cannot start (ruling 56 of plan 12n)", () => {
+    // The real seams throw a RunTimeout, or an error of spawnSync itself.
+    // spawnSync refuses an argument with a NUL, so a package name with a NUL
+    // gives such an error at the first npm view. An npm that exits 2 gives no
+    // error: the seams read its code (probe of fix wave D, 2026-11-03).
+    const root = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
+    folders.push(root);
+    const out = join(root, "out");
+    mkdirSync(join(root, "package"), { recursive: true });
+    mkdirSync(out);
+    writeFileSync(
+      join(root, "package", "package.json"),
+      JSON.stringify({ name: "@authtempo/core\u0000x", version: "0.1.0" }),
+    );
+    // COPYFILE_DISABLE keeps the macOS tar from adding a ._ file of attributes.
+    execFileSync("tar", ["-czf", join(out, CORE("0.1.0")), "-C", root, "package"], {
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    });
+    const listed = `${createHash("sha256")
+      .update(readFileSync(join(out, CORE("0.1.0"))))
+      .digest("hex")}  ${CORE("0.1.0")}\n`;
+    writeFileSync(join(out, "SHA256SUMS"), listed);
+    const r = withCommand("npm", QUICK_NPM, () =>
+      spawnSync(process.execPath, [PUBLISH_ENTRY, out], {
+        encoding: "utf8",
+        env: { ...process.env, [SUMS_ENV]: listed },
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("must be a string without null bytes");
+    // npm --version printed its version, and publishLines printed nothing.
+    expect(r.stdout).toBe("11.19.1\n");
   });
 
   it("names the call and each version after a publish past its limit (review of Task 1 of plan 12n, M2)", () => {

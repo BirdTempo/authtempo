@@ -319,6 +319,17 @@ describe("check-changesets", () => {
         expect(failuresOf(build), build).toEqual(missing);
     });
 
+    it("keeps no exemption for a word that starts with @, such as a tsc response file (ruling 56 of plan 12n)", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      // tsc reads the file of a word `@<file>` as more arguments, so that file can name scripts/.
+      for (const build of [
+        "tsc @scripts/tsc.rsp",
+        "tsc -p tsconfig.json @scripts/tsc.rsp",
+        "tsc @tsc.rsp",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
     it("keeps no exemption for any other form that the check cannot read", () => {
       // The real build of core is a plain form, and a package with no build runs no script.
       expect(
