@@ -148,7 +148,7 @@ export function foreignKeysSuite(kind: string, d: KeysDriver): void {
 
     it("counts the pragma and its read in statementsSent and readyStatements", async () => {
       const { storage } = storageOf(await migrated());
-      // The pragma and its read (2), the integer check (1), and the compat
+      // The pragma and its read (2), and the integer check (1). The compat
       // check: the two version reads, the index list, and the index read (4).
       expect(await storage.readyStatements?.()).toBe(7);
       expect(storage.statementsSent?.()).toBe(7);

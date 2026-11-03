@@ -857,8 +857,8 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 On D1, an act reads the user row once after core's route, for `{ user }`.
 With `twoFactor()`, it also reads the factor row once.
 A ban of a user with 60 sessions sends 36 queries in its invocation.
-A ban of a user with 501 sessions sends 46: core ends one page of 350
-sessions in the budget, and the sweep ends the other 151.
+A ban of a user with 501 sessions sends 46 queries. Core ends one page of
+350 sessions in the budget, and the sweep ends the other 151.
 An impersonation start sends 33 queries and a stop 19, each with the
 shim's read of the session for `{ session, user }`.
 A remove adds no query to core's delete route: it answers

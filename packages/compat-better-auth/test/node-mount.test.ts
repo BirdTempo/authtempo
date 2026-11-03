@@ -13,9 +13,9 @@ import { BASE, memory, ssoApp } from "./sso-helpers.js";
  * The shim's own Node mount over real sockets (M-1 of the plan 12n review).
  * Before the fix, the mount read every body byte into memory before the
  * shim ran, and a dropped body ended the process. Each server here counts
- * the bytes that the mount pulls from node:http. The form of the measures
- * is that of rr-bodycap56 of plan 12j: the first answer line, its time
- * after the last write of the client, and the bytes pulled.
+ * the bytes that the mount pulls from node:http. The measures take the
+ * form of rr-bodycap56 of plan 12j. They are the first answer line, its
+ * time after the last write of the client, and the bytes pulled.
  */
 
 const KIB = 1024;

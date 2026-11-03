@@ -73,7 +73,7 @@ describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
 
   it("states the queries of that ban and the sessions it ends in the README", () => {
     expect(readme.replace(/\s+/g, " ")).toContain(
-      `A ban of a user with 501 sessions sends ${PAGE.queries}: core ends one page of ${501 - PAGE.left} sessions in the budget, and the sweep ends the other ${PAGE.left}.`,
+      `A ban of a user with 501 sessions sends ${PAGE.queries} queries. Core ends one page of ${501 - PAGE.left} sessions in the budget, and the sweep ends the other ${PAGE.left}.`,
     );
   });
 });
