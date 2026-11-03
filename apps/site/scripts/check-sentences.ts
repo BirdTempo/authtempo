@@ -1,4 +1,5 @@
 import {
+  CODE_SPAN,
   type Page,
   pageBody,
   plainText,
@@ -15,9 +16,11 @@ export const TEXT_MAX = 25;
 /**
  * A cell sentence whose words are all code spans, joined by commas, "and", or
  * "or". It is a list, such as the route links of an errors cell, and not a
- * sentence (decision 5 of plan 12n). plainText gives each code span as CODE.
+ * sentence (decision 5 of plan 12n). plainText gives each code span as
+ * `CODE_SPAN`, CODE in backticks. A bare word CODE is prose, and the rule
+ * does not count it (ruling 30 of plan 12n).
  */
-const CODE_LIST = /^CODE(?:(?:,|,? and|,? or) CODE)*[.;:]?$/;
+const CODE_LIST = new RegExp(`^${CODE_SPAN}(?:(?:,|,? and|,? or) ${CODE_SPAN})*[.;:]?$`);
 
 /**
  * Every sentence of prose. A sentence that cannot meet the limit is exempt by
@@ -44,7 +47,7 @@ export function checkSentences(pages: readonly Page[]): CheckReport {
         if (n <= max) continue;
         if (unit.kind === "cell" && CODE_LIST.test(s)) {
           r.counts.lists = (r.counts.lists ?? 0) + 1;
-          const spans = s.match(/CODE/g)?.length ?? 0;
+          const spans = s.split(CODE_SPAN).length - 1;
           r.exempt?.push(`${p.path}:${unit.line}: a list of ${spans} code spans in a table cell`);
           continue;
         }

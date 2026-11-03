@@ -54,3 +54,42 @@ describe("the sweep bullet of the hooks guide", () => {
     expect([...reasons.matchAll(/`([a-z_]+)`/g)].map((m) => m[1] ?? "").sort()).toEqual(keys);
   });
 });
+
+// The account delete ends the user's own sessions in one page
+// (endOwnSessionsPage of access-end.ts). A page takes at most
+// END_ALL_LIMIT.default rows. account-delete.ts gives the page the budget
+// only on a store that claims the query limit, and the compat storage
+// claims it on D1 only. Each compat storage cascades the user delete after
+// the page. So the four places name both cases (ruling 30 of plan 12n).
+const SESSIONS = readFileSync(`${REPO}packages/core/src/engine/operator/sessions.ts`, "utf8");
+const COMPAT_STORAGE = readFileSync(
+  `${REPO}packages/compat-better-auth/src/storage/index.ts`,
+  "utf8",
+);
+
+/** The text of `path`, with each run of white space as one space. */
+const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
+
+const guideWords = (n: string) =>
+  `On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to ${n} sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook.`;
+const compatWords = (n: string) =>
+  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of them with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
+
+describe("the delete residual of the compatibility package", () => {
+  it("claims the query limit on the D1 storage only", () => {
+    expect(COMPAT_STORAGE.split("queryLimitPerInvocation: true").length - 1).toBe(1);
+    const d1 = /options\.dialect === "d1"\) \{([\s\S]*?)return d1;/.exec(COMPAT_STORAGE)?.[1];
+    expect(d1).toContain("queryLimitPerInvocation: true");
+  });
+
+  it.each([
+    ["the hooks guide", `${DOCS}docs/guides/hooks.mdx`, guideWords],
+    ["the core README", `${REPO}packages/core/README.md`, guideWords],
+    ["the compat page", `${DOCS}docs/reference/compat-better-auth.md`, compatWords],
+    ["the compat README", `${REPO}packages/compat-better-auth/README.md`, compatWords],
+  ])("%s names both cases, with the page size of sessions.ts", (_, path, words) => {
+    const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
+    if (size === undefined) throw new Error("no END_ALL_LIMIT in sessions.ts");
+    expect(flat(path)).toContain(words(size));
+  });
+});

@@ -60,7 +60,26 @@ describe("checkSentences", () => {
   it("refuses a cell sentence of code spans with one prose word", () => {
     const r = checkSentences([table(`${spans(30).join(", ")} answer.`)]);
     expect(r.failures).toEqual([
-      'docs/a.md:6: 31 words in a table cell (at most 25): "CODE, CODE, CODE, CODE, CODE, CODE, CODE, CODE, …"',
+      'docs/a.md:6: 31 words in a table cell (at most 25): "`CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, …"',
+    ]);
+    expect(r.counts.lists).toBe(0);
+  });
+
+  // Ruling 30 of plan 12n, L2: only a table cell exempts a list of code spans.
+  it("refuses a list of 30 code spans in a prose paragraph", () => {
+    const r = checkSentences([page(`${spans(30).join(", ")}.`)]);
+    expect(r.failures).toEqual([
+      'docs/a.md:4: 30 words in a sentence (at most 25): "`CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, `CODE`, …"',
+    ]);
+    expect(r.counts.lists).toBe(0);
+  });
+
+  // Ruling 30 of plan 12n, L3: the list rule counts code spans only, never a bare word.
+  it("refuses a cell of 30 bare words CODE in capitals", () => {
+    const bare = Array.from({ length: 30 }, () => "CODE");
+    const r = checkSentences([table(`${bare.join(", ")}.`)]);
+    expect(r.failures).toEqual([
+      'docs/a.md:6: 30 words in a table cell (at most 25): "CODE, CODE, CODE, CODE, CODE, CODE, CODE, CODE, …"',
     ]);
     expect(r.counts.lists).toBe(0);
   });

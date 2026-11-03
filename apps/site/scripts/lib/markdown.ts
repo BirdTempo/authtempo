@@ -149,12 +149,21 @@ export function proseUnits(
 }
 
 /**
- * The words of a unit as a reader counts them: a code span is one word, a
- * link is its label, and emphasis marks and HTML tags go.
+ * The word that `plainText` writes for each code span: CODE in backticks.
+ * The scan pairs each backtick of the text with the next one, so at most
+ * one backtick of the text stays. A word of prose keeps its form. So no
+ * prose gives this word, and the list rule of check-sentences counts code
+ * spans only (ruling 30 of plan 12n).
+ */
+export const CODE_SPAN = "`CODE`";
+
+/**
+ * The words of a unit as a reader counts them. A code span is one word
+ * (`CODE_SPAN`), and a link is its label. Emphasis marks and HTML tags go.
  */
 export function plainText(text: string): string {
   return text
-    .replace(/`[^`]*`/g, "CODE")
+    .replace(/`[^`]*`/g, CODE_SPAN)
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]+>/g, "")
     .replace(/\*\*|__/g, "")
