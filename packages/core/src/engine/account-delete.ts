@@ -70,9 +70,6 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  */
 const DELETE_CALLS_BEFORE = 6;
 
-/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
-export const ORGANIZATION_RULE_READS = 3;
-
 /**
  * The read of the user's scimUser rows and the delete of their
  * scimGroupMember rows (ruling 25 of plan 12d). A user has one scimUser row
@@ -205,6 +202,40 @@ function readCounted(tx: StorageAdapter): { storage: StorageAdapter; reads(): nu
     },
   });
   return { storage, reads: () => reads };
+}
+
+/**
+ * The size check of a delete before any write (ruling 30 of plan 12d). More
+ * solo organizations than one set-based delete takes answer
+ * `delete_too_large`. The check is also for D1, where the undo of a write
+ * is no lock. One read of the memberships decides: with at most `IN_CHUNK`
+ * of them, no count of solo organizations passes it. Else the organization
+ * rule runs here, and again inside the transaction after the lock of the
+ * user. The self delete and the operator delete share this check.
+ *
+ * It answers the count of the reads that it sent, for the call budget of
+ * the delete (ruling 32 of plan 12n). The rule reads the memberships again.
+ * Then it reads in chunks of `IN_CHUNK` (`findManyIn`): one read per chunk
+ * of organizations, and one per chunk of their members. So 51 to 100
+ * memberships cost 6 reads: 1 here and 5 in the rule. Each 50 more cost 2
+ * more, and no setting bounds the memberships by default. With a fixed
+ * count of 3 for the rule, a D1 delete with 51 memberships made 51 calls
+ * (measured 2026-11-03). This held for the operator delete and for the
+ * worst self delete (operator-delete-budget.test.ts of adapter-d1).
+ */
+export async function deleteSizeCheck(
+  config: ResolvedConfig,
+  userId: string,
+): Promise<Result<number>> {
+  const counted = readCounted(config.storage);
+  const memberships = await counted.storage.findMany("member", [
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  if (memberships.length > IN_CHUNK) {
+    const plan = await organizationsOfDelete(config, counted.storage, userId);
+    if (!plan.ok && plan.code === "delete_too_large") return plan;
+  }
+  return ok(counted.reads());
 }
 
 export interface AccountDelete {
@@ -377,22 +408,11 @@ async function runDelete(
   const ended = endedList(config);
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  // Before any write (ruling 30 of plan 12d), more solo organizations than
-  // one set-based delete takes answer delete_too_large. The check is also
-  // for D1, where the undo of a write is no lock. One read of the
-  // memberships decides:
-  // with at most IN_CHUNK of them, no count of solo organizations passes it.
-  // The rule runs again inside the transaction, after the lock of the user.
-  const memberships = await config.storage.findMany("member", [
-    { field: "userId", op: "eq", value: userId },
-  ]);
-  let checked = 1;
-  if (memberships.length > IN_CHUNK) {
-    const plan = await organizationsOfDelete(config, config.storage, userId);
-    if (!plan.ok && plan.code === "delete_too_large") return plan;
-    checked += ORGANIZATION_RULE_READS;
-  }
-  const before = DELETE_CALLS_BEFORE + checked + ((await config.storage.readyStatements?.()) ?? 1);
+  // Before any write, the size check of the solo organizations, with the count of its reads.
+  const checked = await deleteSizeCheck(config, userId);
+  if (!checked.ok) return checked;
+  const before =
+    DELETE_CALLS_BEFORE + checked.value + ((await config.storage.readyStatements?.()) ?? 1);
   // On a store with a per-invocation query limit (D1), a delete whose least
   // work cannot fit the budget answers delete_too_large before any delete
   // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
@@ -554,9 +574,10 @@ export async function accountDeleted(
  * storage calls for any count, 0 when none goes. The act deletes their
  * organization, connection, domain, SCIM token, and member rows, and one
  * pending row leaves the rest to the sweep (organization-rest.ts). The
- * organization rule reads in 3 calls for any count. At most `IN_CHUNK`
- * solo organizations go in one delete; more answer `delete_too_large`
- * before any write (`runDelete`).
+ * organization rule reads in 3 calls for up to `IN_CHUNK` memberships, and in
+ * 2 more for each further `IN_CHUNK`. At most `IN_CHUNK` solo organizations
+ * go in one delete; more answer `delete_too_large` before any write
+ * (`deleteSizeCheck`).
  *
  * The sessions end in pages inside `budget` (ruling 1 of plan 12f2, item
  * B1): first the user's own sessions, then the impersonation sessions that

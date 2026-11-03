@@ -398,9 +398,9 @@ const LOAD_SOLOS = 1;
  * delete of the load takes for a secret, measured on the binding on
  * 2026-10-25. Each costs 3 calls of the least work: the owner lock, a batch
  * of 2 on D1, and the recount. So the next one passes the budget. Since the
- * move onto main a plain membership costs no call: the organization rule
- * reads in 3 calls for any count (ruling 30 of plan 12d). Until the move
- * each membership cost 2 reads, and 3 fit.
+ * move onto main a plain membership costs no call. The organization rule
+ * reads in 3 calls for up to 50 memberships (ruling 30 of plan 12d). Until
+ * the move each membership cost 2 reads, and 3 fit.
  */
 const EDGE_OWNED = 3;
 
@@ -753,9 +753,15 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
   /**
    * One invocation of a route through `auth.handle`, with the D1 limiter on
    * the counting view: the status, the body, and the whole count, with each
-   * mail and each post.
+   * mail and each post. `extra` goes to the config of the invocation.
    */
-  async function route(sent: MailMessage[], path: string, body: unknown, headers: HeadersInit) {
+  async function route(
+    sent: MailMessage[],
+    path: string,
+    body: unknown,
+    headers: HeadersInit,
+    extra: Partial<AuthConfig> = {},
+  ) {
     return act(
       sent,
       async (auth) => {
@@ -773,6 +779,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
         return { status: res.status, body: (await res.json()) as Record<string, unknown> };
       },
       true,
+      extra,
     );
   }
 
@@ -1165,6 +1172,58 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     // The doors refuse every left session before the sweep.
     for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
     expect({ act: calls, inAct: endings.length }).toEqual(SCIM_COUNTS);
+  }, 300_000);
+
+  /**
+   * The counts of the deletes on the binding on 2026-11-03 (ruling 32 of
+   * plan 12n). The user has 60 sessions, 10 client links, and a plain
+   * membership in 51 organizations of other users. The size check before
+   * the act sends 6 reads: the memberships, and 5 of the organization rule.
+   * The counts are the act with the route before it, and the sessions that
+   * the act ended.
+   */
+  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 5 } };
+
+  it("deletes a user with 51 memberships in 50 calls: the size check counts each read that it sends (ruling 32 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await loaded(sent, 0);
+    await memberships(setup, sent, userId, 51);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(51);
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+    );
+    expect(r.answer).toMatchObject({ ok: true });
+    expect(r.refused).toBe(0);
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    // The doors refuse every left session before the sweep.
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.operator);
+  }, 300_000);
+
+  it("deletes the own account through the route with 51 memberships, a due refresh, and sso.saml on, in 50 calls (ruling 32 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await loaded(sent, 0);
+    await memberships(setup, sent, userId, 51);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(51);
+    // The worst session read before the act: a due refresh that reads the
+    // session-cap row with `sso.saml` on (ruling 44 of plan 12d).
+    const extra: Partial<AuthConfig> = {
+      session: { slidingRefreshDays: 0.05 },
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    };
+    current = new Date(current.getTime() + 80 * 60_000);
+    const r = await route(sent, "/user/delete", {}, cookieOf(tokens.at(-1) ?? ""), extra);
+    expect(r.answer).toMatchObject({ status: 200 });
+    expect([r.refused, r.posts]).toEqual([0, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.self);
   }, 300_000);
 
   for (const solos of [0, 1])

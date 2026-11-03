@@ -2,7 +2,6 @@ import type { ResolvedConfig } from "../../config.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
-import { IN_CHUNK } from "../../storage/batch.js";
 import { meterOf } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import {
@@ -10,11 +9,10 @@ import {
   DELETE_KEEP,
   type DeletedAccount,
   deleteAccountRows,
-  ORGANIZATION_RULE_READS,
+  deleteSizeCheck,
 } from "../account-delete.js";
 import { createSteps } from "../create-steps.js";
 import { runAfter, runBefore, type UserPatch } from "../hooks.js";
-import { organizationsOfDelete } from "../organizations.js";
 import { sendResetLink } from "../password.js";
 import { phoneRefusal } from "../phone.js";
 import { unchanged } from "../profile.js";
@@ -429,24 +427,13 @@ export async function deleteUser(
   if (typeof input.userId !== "string") return fail("invalid_body");
   if (input.actor.kind === "user" && input.actor.user.id === input.userId)
     return fail("operator_self");
-  // Before any write (ruling 30 of plan 12d), more solo organizations than
-  // one set-based delete takes answer delete_too_large, as in the self
-  // delete (`runDelete`). On D1 the undo of a write is no lock. One read of
-  // the memberships decides: with at most IN_CHUNK of them, no count of
-  // solo organizations passes it. The rule runs again in the transaction.
-  const memberships = await config.storage.findMany("member", [
-    { field: "userId", op: "eq", value: input.userId },
-  ]);
-  let checked = 1;
-  if (memberships.length > IN_CHUNK) {
-    const plan = await organizationsOfDelete(config, config.storage, input.userId);
-    if (!plan.ok && plan.code === "delete_too_large") return plan;
-    checked += ORGANIZATION_RULE_READS;
-  }
+  // Before any write, the size check that the self delete runs too, with the count of its reads.
+  const checked = await deleteSizeCheck(config, input.userId);
+  if (!checked.ok) return checked;
   const before =
     OPERATOR_CALLS_BEFORE[input.actor.kind] +
     ACT_LIMIT_CALLS +
-    checked +
+    checked.value +
     ((await config.storage.readyStatements?.()) ?? 1);
   const budget = await workBudget(config.storage, input.actor, before, DELETE_LEAST);
   if (!budget.ok) return budget;
