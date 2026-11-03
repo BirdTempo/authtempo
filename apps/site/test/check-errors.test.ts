@@ -194,7 +194,7 @@ ${cell('The routes of <a href="#captcha_required"><code dir="auto">captcha_requi
   it("keeps the router-level codes out, and refuses a route that declares one", () => {
     const named = { ...core, body_busy: 503 };
     const busyPage = `${page}\n<h3 id="body_busy"><code>body_busy</code> 503</h3>\n${cell("<code>POST /social/apple/callback</code>.")}`;
-    // The Apple callback reads above the floor, so the body_busy cell names it (ruling 36 of plan 12n).
+    // The Apple callback is a route of BODY_CAPS, so the body_busy cell names it (ruling 36 of plan 12n).
     const apple: RouteCodes = {
       method: "POST",
       path: "/social/apple/callback",
@@ -246,7 +246,7 @@ ${cell('The routes of <a href="#captcha_missing"><code dir="auto">captcha_missin
     ]);
   });
 
-  it("holds the body_busy and body_timeout cells to the routes that read a body above the floor", () => {
+  it("holds the body_busy and body_timeout cells to the routes of BODY_CAPS and LARGE_FORM_READS", () => {
     const named = { ...core, body_busy: 503, body_timeout: 408 };
     // The three routes of BODY_CAPS in core, then the SAML ACS of LARGE_FORM_READS.
     const all = [
@@ -283,13 +283,13 @@ ${spans(timeout)}`;
       all.filter((n) => n !== "POST /sso/:connectionId/acs"),
     );
     expect(checkErrors(lacks, named, oauth, [], large).failures).toEqual([
-      "#body_busy: the Routes cell lacks POST /sso/connections/update, which reads a body above the floor",
-      "#body_timeout: the Routes cell lacks POST /sso/:connectionId/acs, which reads a body above the floor",
+      "#body_busy: the Routes cell lacks POST /sso/connections/update, a route of BODY_CAPS or LARGE_FORM_READS",
+      "#body_timeout: the Routes cell lacks POST /sso/:connectionId/acs, a route of BODY_CAPS or LARGE_FORM_READS",
     ]);
     expect(
       checkErrors(pageOf([...all, "POST /reauth"], all), named, oauth, [], large).failures,
     ).toEqual([
-      "#body_busy: the Routes cell names POST /reauth, which reads no body above the floor",
+      "#body_busy: the Routes cell names POST /reauth, which is not a route of BODY_CAPS or LARGE_FORM_READS",
     ]);
   });
 });

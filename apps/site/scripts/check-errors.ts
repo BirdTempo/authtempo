@@ -63,23 +63,26 @@ export const MENTIONS: readonly { anchor: string; route: string; why: string }[]
 ];
 
 /**
- * The router-level codes whose Routes cell lists each route that reads a body
- * above the floor. Ruling 36 of plan 12n adds this rule, and it narrows
- * decision 4. Only those routes answer the two codes. So the cell must name
- * each one, and no other route. A route in a code span counts as named.
+ * The router-level codes whose Routes cell lists the routes of BODY_CAPS and
+ * of LARGE_FORM_READS (rulings 36, 39, and 43 of plan 12n). Ruling 36 adds
+ * this rule, and it narrows decision 4. The router answers the two codes for
+ * those routes only. So the cell must name each one, and no other route. The
+ * six SCIM writes also read above the floor, but they answer their own SCIM
+ * 503 and 408, so no cell names them. A route in a code span counts as named.
  */
 export const LARGE_READ_CODES: readonly string[] = ["body_busy", "body_timeout"];
 
 /**
- * The routes that read a body above the floor with no entry of BODY_CAPS, with
- * the reason. `bodyCapOf` of core gives each other such route.
+ * The routes with no entry of BODY_CAPS whose large read the router answers
+ * with the two codes, with the reason. `bodyCapOf` of core gives the routes
+ * of BODY_CAPS.
  */
 export const LARGE_FORM_READS: Readonly<Record<string, string>> = {
   "POST /sso/:connectionId/acs":
     "acsForm of core reads the SAML form up to SAML_FORM_MAX, above the floor, against the budget of the large reads",
 };
 
-/** Each route that reads a body above the floor, as `<METHOD> <path>`, in the order of ROUTES. */
+/** Each route of BODY_CAPS and of LARGE_FORM_READS, as `<METHOD> <path>`, in the order of ROUTES. */
 export function largeReads(routes: readonly RouteCodes[]): string[] {
   // bodyCapOf gives the floor to a route with no entry of BODY_CAPS.
   const floor = bodyCapOf(undefined);
@@ -306,10 +309,12 @@ function largeReadFailures(
   const named = [...cell.matchAll(/<code[^>]*>([A-Z]+ \/[^<]*)<\/code>/g)].map((m) => m[1] ?? "");
   for (const route of large)
     if (!named.includes(route))
-      r.failures.push(`#${id}: the Routes cell lacks ${route}, which reads a body above the floor`);
+      r.failures.push(
+        `#${id}: the Routes cell lacks ${route}, a route of BODY_CAPS or LARGE_FORM_READS`,
+      );
   for (const route of new Set(named))
     if (!large.includes(route))
       r.failures.push(
-        `#${id}: the Routes cell names ${route}, which reads no body above the floor`,
+        `#${id}: the Routes cell names ${route}, which is not a route of BODY_CAPS or LARGE_FORM_READS`,
       );
 }

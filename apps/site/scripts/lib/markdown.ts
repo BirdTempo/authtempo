@@ -92,12 +92,13 @@ function isTableSeparator(row: string): boolean {
 
 /**
  * The prose of a page body, one unit per paragraph or list item. Markup holds
- * no prose and is skipped: a code fence, a heading, a raw HTML or JSX line, an
- * MDX import or export, and an aside fence (`:::`). A unit runs until a blank
- * line or a markup line. A table row is skipped too, unless `cells` is on.
- * Then each cell of a row is a unit of kind "cell", apart from the header row
- * and the separator row. check-terms reads each whole row itself, the header
- * too, so it leaves `cells` off and reads no cell twice.
+ * no prose, so the scan skips it. Markup is a code fence, a heading, a raw
+ * HTML or JSX line, an MDX import or export, or an aside fence (`:::`). A
+ * unit runs until a blank line or a markup line. A table row is skipped too,
+ * unless `cells` is on. Then each cell of a row is a unit of kind "cell",
+ * apart from the header row and the separator row. check-terms reads each
+ * whole row itself, the header too, so it leaves `cells` off and reads no
+ * cell twice.
  */
 export function proseUnits(
   body: string,

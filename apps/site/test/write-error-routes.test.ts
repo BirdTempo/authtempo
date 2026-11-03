@@ -17,11 +17,13 @@ function rowOf(lines: readonly string[], anchor: string): string {
 
 // The script writes the Routes cell of a code from ROUTES (decision 4 of plan
 // 12n). This test holds its form to the cells of the page (ruling 36 of plan
-// 12n). So each cell that it writes keeps that form.
+// 12n). The four cells take the two paths of the script: a list first, and
+// prose first. `identity_taken` takes the second path (rr-fix-2a L3, ruling
+// 43 of plan 12n). So each cell that it writes keeps the form of the page.
 describe("write-error-routes", () => {
-  it("prints the cell of the page for a list with closing prose, a mention, and an OAuth code", () => {
+  it("prints the cell of the page for a list with closing prose, a mention, a cell that starts with prose, and an OAuth code", () => {
     // In the order of the page, because the script prints in that order.
-    const anchors = ["unauthorized", "session_not_fresh", "oauth-invalid_token"];
+    const anchors = ["unauthorized", "session_not_fresh", "identity_taken", "oauth-invalid_token"];
     const lines = readFileSync(PAGE, "utf8").split("\n");
     const run = spawnSync(process.execPath, [`${SITE}scripts/write-error-routes.ts`, ...anchors], {
       encoding: "utf8",

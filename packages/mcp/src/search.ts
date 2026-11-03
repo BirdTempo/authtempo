@@ -104,10 +104,11 @@ export function tokenize(text: string, terms: Readonly<Record<string, string>>):
 const ROUTE_LINK = /\[`[A-Z]+ \/[^`]*`\]\([^)\s]*\)/g;
 
 /**
- * The body text that the score reads (ruling 24 of plan 12n). In a table
- * row, a route link gives no token, and the other words of the row stay. A
- * Routes cell lists each route that answers a code. So a longer cell must
- * not move its section up. The section text of the index keeps each link,
+ * The body text that the score reads (rulings 24, 29, and 39 of plan 12n).
+ * The cut takes the route links of a table row only, so a route link there
+ * gives no token. The other words of the row stay, the code links too. So a
+ * longer list of route links does not move its section up, and a cell with
+ * more prose still does. The section text of the index keeps each link,
  * because docs.read answers that text.
  */
 function scoredText(text: string): string {
