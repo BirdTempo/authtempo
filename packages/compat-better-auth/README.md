@@ -217,8 +217,15 @@ On D1, do not delete a user or an organization inside a `transaction` of
 your own while its child rows exist: the foreign keys delete them, and a
 rollback does not bring them back (`@authtempo/adapter-d1` README).
 
-On `bun:sqlite`, which opens with the foreign keys off, the storage turns
-them on, so a user delete deletes the user's child rows.
+On SQLite, the storage turns the foreign keys on before its first call and
+before its migrations, on every driver. So a user delete deletes the user's
+child rows. `bun:sqlite` of Bun 1.4.3 opens with the keys off (read on
+2026-11-03). The storage then reads the key back, and each call answers
+`config_mismatch` while it reads 0. SQLite ignores the pragma inside an open
+transaction, so do not hold a `BEGIN` on the handle at the first call. A
+libSQL file client keeps a pool of connections, and each new one opens with
+the keys on. The storage turns the keys on only for the connection of its
+first call. So do not turn the keys off on that client.
 
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound

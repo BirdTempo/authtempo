@@ -8,4 +8,4 @@ Breaking: a ban of the caller's own user answers 400 `YOU_CANNOT_BAN_YOURSELF`, 
 
 These four SSO paths read the session before any byte of the body. A caller with no session token, or a malformed one, gets 401 with no storage read. A well-formed token that names no session costs one session lookup before the 401. A signed-in caller still gets 404 for an unknown provider. Each SSO path of the shim reads the session with no write. So core's own route does the due sliding refresh, and the answer carries the renewed session cookie.
 
-The SQLite storage turns the foreign keys on for a `bun:sqlite` driver, so a user delete deletes the user's child rows, as on D1.
+The SQLite storage turns the foreign keys on for every driver, so a user delete deletes the user's child rows, as on D1. Then it reads the key back. While the key reads 0, each call answers `config_mismatch`: SQLite ignores the pragma inside an open transaction of the app.

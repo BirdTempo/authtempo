@@ -5,6 +5,7 @@ import {
 } from "@authtempo/adapter-d1/seam";
 import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { integerProbe, SQLITE_BOUND_PARAMS, type SqliteDriver } from "@authtempo/adapter-sqlite";
+import { StorageError } from "@authtempo/core";
 import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
@@ -92,26 +93,49 @@ function cascading<T extends { userDeleteCascades?: boolean }>(storage: T): T {
 }
 
 /**
- * Turns the foreign keys on for a bun:sqlite handle, once per storage (plan
- * 12n). The cascade of a user delete is a promise of this storage
- * (`cascading`). Bun 1.4.3 opens a bun:sqlite database with the keys off
- * (`PRAGMA foreign_keys` read 0 on 2026-11-03, darwin-arm64). A bun:sqlite
- * handle is one connection, so the setting holds for each later statement.
- * The query counts as the integer check's query does. A failed run is not
- * kept, so the next call runs it again.
+ * The text of the refusal when `PRAGMA foreign_keys` reads 0 after the
+ * pragma (ruling 44 of plan 12n). SQLite ignores the pragma inside an open
+ * transaction, so an app that holds a BEGIN on the handle gets it.
+ */
+export const FOREIGN_KEYS_OFF =
+  "PRAGMA foreign_keys reads 0 after PRAGMA foreign_keys = ON; SQLite ignores the pragma inside an open transaction, so end the transaction of the handle before the first call";
+
+/**
+ * Turns the foreign keys on, once per storage, on each SQLite driver (rulings
+ * 40 and 44 of plan 12n). The cascade of a user delete is a promise of this
+ * storage (`cascading`), so no driver default keeps it alone. Bun 1.4.3 opens
+ * a bun:sqlite database with the keys off (read 0 on 2026-11-03,
+ * darwin-arm64). node:sqlite, better-sqlite3, and libSQL open with the keys
+ * on, and an app can turn them off. The pragma is idempotent, so a handle
+ * with the keys on gets it too. Then the storage reads the key back and
+ * refuses with `config_mismatch` when it reads 0. A probe of 2026-11-03
+ * read 0 after the pragma inside an open BEGIN on Bun 1.4.3, node:sqlite,
+ * and better-sqlite3. Both queries count in `statementsSent` and in
+ * `readyStatements`, as the integer check's query does. A failed run is not
+ * kept, so the next call runs both queries again. A libSQL file client keeps
+ * a pool of connections, and each query reaches the connection that serves
+ * it. Each new connection of that pool read 1 with no pragma (2026-11-03,
+ * @libsql/client 0.18.0, darwin-arm64).
  */
 function foreignKeysOn(
   driver: SqliteDriver,
   sent: { statements: number; ready?: number },
 ): () => Promise<void> {
-  if (driver.name !== "bun:sqlite") return async () => {};
+  const count = () => {
+    sent.statements++;
+    if (sent.ready !== undefined) sent.ready++;
+  };
   let on: Promise<void> | null = null;
   return () => {
     on ??= (async () => {
       try {
-        sent.statements++;
-        if (sent.ready !== undefined) sent.ready++;
+        count();
         await driver.db.prepare("PRAGMA foreign_keys = ON").run();
+        count();
+        const read = await driver.db.prepare("PRAGMA foreign_keys").first("foreign_keys");
+        // Number(): a handle that reads BigInt gets the integer check's own refusal next.
+        if (Number(read) !== 1)
+          throw new StorageError("config_mismatch", "meta", [FOREIGN_KEYS_OFF]);
       } catch (e) {
         on = null;
         throw e;
@@ -138,7 +162,7 @@ export function betterAuthSchemaStorage(
     // same undo log, the same readiness check. Before the check, the handle
     // must read integers as numbers, as on the core SQLite adapter. The ping
     // runs that check first (ruling 27 of the 12g lane), then the D1 ping
-    // over the seam (ruling 26). On bun:sqlite, the foreign keys go on
+    // over the seam (ruling 26). On every driver, the foreign keys go on
     // before the first call and before the migrations.
     const { driver } = options;
     const variant = options.variant ?? "1.7";
