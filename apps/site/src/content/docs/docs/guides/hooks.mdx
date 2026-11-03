@@ -79,7 +79,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - `identity.beforeUnlink` runs inside the transaction, after core counts the ways in and locks the user row, and before the first delete. It has no `via`.
 - An unlink that `last_credential` refuses runs no hook. `identity.afterUnlink` runs after the commit.
 - The account delete runs `organization.beforeDelete` for each organization that goes, then `user.beforeDelete` with the ids of those organizations. Both run inside the transaction, before the first delete.
-- After the commit of the delete, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` and `user.afterDelete` fire.
+- After the commit of the delete, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` and `user.afterDelete` fire.
 - The rows that the delete removes fire no member or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
@@ -159,7 +159,7 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 | Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
 | Anonymous delete | `user.beforeDelete` | the user's row |
-| Platform role grant | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the target's user row |
+| Platform role grant | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the target's user row; before `organization.beforeAddMember` of a new member row with `membersPerOrganization` set, the organization row too |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 

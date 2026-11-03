@@ -38,7 +38,7 @@ Each event has these fields too:
 
 | Event | Level | Fields | When |
 | --- | --- | --- | --- |
-| `request` | info | `method: method`, `status: status`, `outcome: enum`, `code?: code`, `durationMs: durationMs`, `userId?: id` | Once for each answer of `handle`. The router stamps the route key, or `unmatched`. `userId` is the user of the session that the handler or a refusal step of the router resolved for the request. It is absent when no session resolved. |
+| `request` | info | `method: method`, `status: status`, `outcome: enum`, `code?: code`, `durationMs: durationMs`, `userId?: id` | Once for each answer of `handle`. The router stamps the route key, or `unmatched`. `userId` is the user of the session row that the request's token names, read in full or by a peek. The handler's session read sets it, and so does a refusal step of the router. So a refusal names the account of the token, a banned one too. A request with no session has no `userId`. |
 | `sign_in` | info | `method: enum`, `provider?: name`, `outcome: enum`, `code?: code`, `userId?: id`, `sessionId?: id` | A session opens, a second factor is due, or a route of a sign-in answers a failure code. |
 | `sign_up` | info | `method: enum`, `outcome: enum`, `code?: code`, `userId?: id` | A user row is created, by any way in. |
 | `sign_out` | info | `sessionId?: id`, `outcome: enum`, `code?: code`, `userId?: id` | A sign-out ends its session. With `multiSession`, each bag session that ends with the reason `sign_out` gets one, also at a sign-in of the same user. |

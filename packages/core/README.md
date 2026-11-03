@@ -1251,7 +1251,7 @@ The delete holds the user row by a compare-and-set, the rule of the profile upda
 
 Five more writers hold the user row. They are the organization create, the member add, the accept of an invitation, the password change, and a reset that answers a second-factor challenge. Each also reads the user row after its insert. So a member row or an `email` identity of a deleted user never commits. A writer that loses the race answers 409 `conflict`. An organization that goes loses its invitations first. An accept that comes later finds no invitation. An accept that commits first makes the delete answer `conflict`, and the organization stays.
 
-`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
+`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
 
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
@@ -1381,7 +1381,7 @@ const auth = createAuth({
 | Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
 | Anonymous delete | `user.beforeDelete` | the user's row |
-| Platform role grant | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the target's user row |
+| Platform role grant | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the target's user row; before `organization.beforeAddMember` of a new member row with `membersPerOrganization` set, the organization row too |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 

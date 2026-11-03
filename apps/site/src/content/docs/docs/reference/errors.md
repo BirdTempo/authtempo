@@ -233,6 +233,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="conflict"><code>conflict</code> 409</h3>
 
 - **Meaning:** A write at the same time changed the organization, the member, the stored role, the team, the setup, the account, or the token.
+- **Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When a parallel request ends a claimant session or verifies the user first, the flow answers 409 with no claim write. A flow that spent its link, code, or provider token before the claim needs a new one. The password reset and the invitation confirm keep their link, so the same request can work again.
 - **Do:** Read the row again, and retry.
 
 | Routes |

@@ -235,13 +235,16 @@ describe("the table of locks over a before hook", () => {
         "Member add",
         "addMemberIn organization.beforeAddMember: holdUser, lockOrganization, joinWrite > scimCreateUser > holdUser, joinWrite > writeChange > holdUser, joinWrite > writeChange > lockOrganization",
       ],
+      // The grant locks the organization before its count (decision 15 of plan 12n). The
+      // scan reads no condition: the lock runs only for a new member row with
+      // membersPerOrganization set, so only before beforeAddMember. The two tables say so.
       [
         "Platform role grant",
-        "addRolePart organization.beforeAddMember: grantPlatformRole > holdUser",
+        "addRolePart organization.beforeAddMember: grantPlatformRole > holdUser, grantPlatformRole > lockOrganization",
       ],
       [
         "Platform role grant",
-        "addRolePart organization.beforeUpdateMemberRole: grantPlatformRole > holdUser",
+        "addRolePart organization.beforeUpdateMemberRole: grantPlatformRole > holdUser, grantPlatformRole > lockOrganization",
       ],
       // The team writes of ruling 25 N3 of plan 12d: the user-caller functions call the
       // tx-level forms after their checks, and take no lock before the call.
