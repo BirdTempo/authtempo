@@ -77,6 +77,35 @@ describe("the transport rule (plan 12g Task 6)", () => {
       );
   });
 
+  it("refuses a MySQL host that is an IP address and not a loopback address, even with TLS", () => {
+    // mysql2 3.24.5 checks the name localhost for an IP host, so no host name check holds there.
+    const tls = '{"rejectUnauthorized":true,"verifyIdentity":true}';
+    const ipStop = (where: string) =>
+      `the host of ${where} is an IP address that is not a loopback address; the MySQL driver sends no server name to an IP host and checks the name localhost in its place; use the DNS name that the certificate carries`;
+    const hosts: [host: string, where: string][] = [
+      ["203.0.113.9", "203.0.113.9/db"],
+      ["[2001:db8::7]", "[2001:db8::7]/db"],
+      // An IPv4-mapped address is no form of a loopback address.
+      ["[::ffff:127.0.0.1]", "[::ffff:7f00:1]/db"],
+      // mysql2 decodes the host, so it reads this host as the IP 203.0.113.9.
+      ["203%2E0%2E113%2E9", "203%2E0%2E113%2E9/db"],
+    ];
+    for (const [host, where] of hosts)
+      for (const query of ["", "?ssl=true", `?ssl=${tls}`])
+        expect(
+          stopOf(() => requireMysqlTransport(`mysql://u:p@${host}/db${query}`)),
+          host + query,
+        ).toBe(ipStop(where));
+    // A loopback address needs no TLS. A DNS name passes with TLS and its checks.
+    for (const host of ["127.0.0.1", "[::1]", "[0:0:0:0:0:0:0:1]", "127%2E0%2E0%2E1"])
+      expect(() => requireMysqlTransport(`mysql://u:p@${host}/db`), host).not.toThrow();
+    expect(() => requireMysqlTransport(`mysql://u:p@db.example.com/db?ssl=${tls}`)).not.toThrow();
+    // mysql2 cannot decode this host, so the rule cannot judge it.
+    expect(stopOf(() => requireMysqlTransport(`mysql://u:p@db%ZZ.example/db?ssl=${tls}`))).toBe(
+      "the host of the connection string of mysql has a malformed % escape",
+    );
+  });
+
   it("refuses a MySQL URL with a query key more than once", () => {
     // mysql2 keeps the last ssl, so the second one would turn the checks off.
     const ssl = '{"rejectUnauthorized":true,"verifyIdentity":true}';
@@ -203,8 +232,17 @@ describe("the transport rule (plan 12g Task 6)", () => {
     // An IPv4-mapped address is no form of ::1, so the rule asks for TLS there.
     for (const h of ["[0:0:0:0:0:0:0:2]", "[::ffff:127.0.0.1]", "::ffff:7f00:1", "[fe80::1%25en0]"])
       expect(isLoopbackHost(h), h).toBe(false);
+    // Host text with more after ::1 is no address, and neither is text before it.
+    for (const h of ["::1]#x", "::1]/x", "::1]?x", "[x@[::1]", "x@[::1"])
+      expect(isLoopbackHost(h), h).toBe(false);
     expect(() => libsql("http://[0:0:0:0:0:0:0:1]:8080")).not.toThrow();
     expect(() => libsql("ws://[0::1]:8080")).not.toThrow();
     expect(stopOf(() => libsql("http://[0:0:0:0:0:0:0:2]:8080"))).toContain("TLS");
+    // The libSQL parser decodes the host of these URLs to ::1]#x and ::1]/x.
+    for (const url of ["http://[::1%5D%23x]:8080", "http://[::1%5D%2Fx]:8080"])
+      expect(
+        stopOf(() => libsql(url)),
+        url,
+      ).toContain("TLS");
   });
 });

@@ -97,6 +97,7 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 ## MySQL
 
 - MySQL 8.4 and later. A host that is not a loopback address needs `?ssl={"rejectUnauthorized":true,"verifyIdentity":true}` in the URL. Without it, the run stops with exit 2, before any connection. Without `verifyIdentity`, mysql2 checks the certificate chain but not the host name.
+- A host that is an IP address but not a loopback address stops the run with exit 2, even with that `ssl`. mysql2 sends no server name to an IP host, and it checks the name `localhost` in its place. Use the DNS name that the certificate carries.
 - The URL takes the query keys `ssl` and `connectTimeout` only. Another key, or a key more than once, stops the run with exit 2, before any connection.
 - `applyMysqlMigrations` applies the migrations. Its named lock makes two runs at once safe.
 - The command uses one connection, and ends it before it exits.

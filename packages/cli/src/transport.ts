@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { Stop } from "./errors.js";
 import { describeUrl } from "./output.js";
 
@@ -17,9 +18,11 @@ export function isLoopbackHost(host: string): boolean {
   if (h === "localhost" || h === "::1") return true;
   if (h.includes(":")) {
     // WHATWG URL writes an IPv6 address in its shortest form, so each form of
-    // ::1 reads as [::1]. The libSQL parser keeps the form of the URL.
+    // ::1 reads as [::1]. The libSQL parser keeps the form of the URL. The
+    // whole URL must equal http://[::1]/. Host text such as ::1]#x closes the
+    // bracket early and adds a part after it, so it is no address.
     try {
-      return new URL(`http://[${h}]/`).hostname === "[::1]";
+      return new URL(`http://[${h}]/`).href === "http://[::1]/";
     } catch {
       return false;
     }
@@ -105,12 +108,29 @@ const LIBSQL_TLS = new Set(["https", "wss"]);
 const LIBSQL_SCHEMES = new Set(["http", "ws", ...LIBSQL_TLS]);
 
 /**
+ * The host of a MySQL URL as mysql2 3.24.5 reads it: the WHATWG URL host
+ * with no brackets, then decoded (lib/connection_config.js:334-340, read
+ * 2026-11-03). So the rule judges the host that the driver connects to:
+ * mysql2 reads `203%2E0%2E113%2E9` as the IP address 203.0.113.9.
+ */
+function mysqlHost(u: URL): string {
+  const h = u.hostname.startsWith("[") ? u.hostname.slice(1, -1) : u.hostname;
+  try {
+    return decodeURIComponent(h);
+  } catch {
+    throw new Stop("the host of the connection string of mysql has a malformed % escape");
+  }
+}
+
+/**
  * Stops the run before any connection when a MySQL `url` would send a
  * secret in plain text to a host that is not a loopback address. The URL
  * needs `?ssl=` with a JSON object whose `rejectUnauthorized` and
- * `verifyIdentity` are true. mysql2 reads its URL with WHATWG URL, as this
- * rule does. The message names the host by `describeUrl`, never the user,
- * the password, or the query.
+ * `verifyIdentity` are true. A host that is an IP address and not a
+ * loopback address also stops the run, because mysql2 cannot check its
+ * name. mysql2 reads its URL with WHATWG URL, as this rule does. The
+ * message names the host by `describeUrl`, never the user, the password,
+ * or the query.
  */
 export function requireMysqlTransport(url: string): void {
   let u: URL;
@@ -124,7 +144,20 @@ export function requireMysqlTransport(url: string): void {
   // mysql2 keeps the last of two equal keys, and this rule reads the first.
   if (repeatedKey([...u.searchParams.keys()]) !== null)
     throw new Stop("the connection string of mysql has a query key more than once");
-  if (isLoopbackHost(u.hostname) || mysqlChecksCertificate(u.searchParams.get("ssl"))) return;
+  const host = mysqlHost(u);
+  if (isLoopbackHost(host)) return;
+  // A remote host needs TLS with verifyIdentity, but mysql2 cannot check the
+  // name of an IP host. mysql2 3.24.5 sends no server name when
+  // net.isIP(host) is not 0 (lib/base/connection.js:431-433). Node then
+  // checks the certificate against the name localhost, not the IP (seen
+  // 2026-11-03). So a certificate for localhost passes at any IP, and a
+  // certificate for the IP fails. test/transport-identity.test.ts holds
+  // this fact of mysql2.
+  if (isIP(host) !== 0)
+    throw new Stop(
+      `the host of ${describeUrl(url)} is an IP address that is not a loopback address; the MySQL driver sends no server name to an IP host and checks the name localhost in its place; use the DNS name that the certificate carries`,
+    );
+  if (mysqlChecksCertificate(u.searchParams.get("ssl"))) return;
   throw new Stop(
     `${describeUrl(url)} is not a loopback host, and the URL asks for no TLS with certificate and host name checks; add ?ssl={"rejectUnauthorized":true,"verifyIdentity":true}`,
   );

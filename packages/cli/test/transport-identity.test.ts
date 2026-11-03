@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { createSecureContext, TLSSocket } from "node:tls";
 import mysql from "mysql2/promise";
 import { describe, expect, it } from "vitest";
+import { Stop } from "../src/errors.js";
+import { openMysql } from "../src/seams/mysql.js";
 import { PKG } from "./support/bin.js";
 
 // The host name check of mysql2, which the transport rule of src/transport.ts
@@ -84,6 +86,8 @@ function greeting(): Buffer {
 
 interface FakeServer {
   port: number;
+  /** The TCP connections that the server took. */
+  connections(): number;
   /** The login packets that came over TLS. */
   logins(): number;
   close(): Promise<void>;
@@ -123,6 +127,7 @@ async function fakeServer(): Promise<FakeServer> {
     throw new Error("the fake server has no port");
   return {
     port: address.port,
+    connections: () => sockets.size,
     logins: () => logins,
     close: () =>
       new Promise<void>((done) => {
@@ -135,12 +140,12 @@ async function fakeServer(): Promise<FakeServer> {
 /**
  * The URL form that the CLI gives mysql2 as `uri` (src/seams/mysql.ts), with
  * the CA of the test in the `ssl` JSON. mysql2 reads that JSON as its TLS
- * options. The host is a name, as a remote host is: mysql2 sends a name as
- * the server name, and checks it. For an IP address, mysql2 3.24.5 sends no
- * server name, and Node checks the name localhost (seen 2026-11-03).
+ * options. The default host is a name, as a remote host is: mysql2 sends a
+ * name as the server name, and checks it. For an IP address, mysql2 3.24.5
+ * sends no server name, and Node checks the name localhost (seen 2026-11-03).
  */
-function mysqlUrl(port: number, ssl: Record<string, unknown>): string {
-  return `mysql://u:p@localhost:${port}/app?ssl=${encodeURIComponent(JSON.stringify(ssl))}`;
+function mysqlUrl(port: number, ssl: Record<string, unknown>, host = "localhost"): string {
+  return `mysql://u:p@${host}:${port}/app?ssl=${encodeURIComponent(JSON.stringify(ssl))}`;
 }
 
 /**
@@ -200,6 +205,47 @@ describe("the host name check of mysql2 3.24.5 against a real certificate", () =
         message: expect.stringMatching(/^unable to verify the first certificate(;|$)/),
       });
       expect(fake.logins()).toBe(1);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("checks the name localhost at an IP host, so the CLI refuses that host before any connection", async () => {
+    const fake = await fakeServer();
+    try {
+      // An IPv4-mapped address reaches the fake server on 127.0.0.1, and the
+      // transport rule reads it as no loopback address.
+      const url = mysqlUrl(
+        fake.port,
+        { ca: CA, rejectUnauthorized: true, verifyIdentity: true },
+        "[::ffff:127.0.0.1]",
+      );
+      // mysql2 sends no server name to an IP host, so Node checks the name
+      // localhost, not the IP. When a mysql2 upgrade checks the IP, this
+      // fails: then read the IP rule of src/transport.ts again.
+      expect(await connectError(url)).toEqual({
+        code: "HANDSHAKE_SSL_ERROR",
+        message:
+          "Hostname/IP does not match certificate's altnames: Host: localhost. is not in the cert's altnames: DNS:other.example",
+      });
+      expect(fake.connections()).toBe(1);
+      // The MySQL seam of the CLI runs the rule before mysql2 opens a socket.
+      const refused = await (async () => {
+        const seam = openMysql(url, () => {});
+        try {
+          await seam.ping();
+        } finally {
+          await seam.close();
+        }
+      })().then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(refused).toBeInstanceOf(Stop);
+      expect(refused instanceof Stop ? refused.message : refused).toBe(
+        `the host of [::ffff:7f00:1]:${fake.port}/app is an IP address that is not a loopback address; the MySQL driver sends no server name to an IP host and checks the name localhost in its place; use the DNS name that the certificate carries`,
+      );
+      expect(fake.connections()).toBe(1);
     } finally {
       await fake.close();
     }
