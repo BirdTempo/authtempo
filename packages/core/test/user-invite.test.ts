@@ -569,7 +569,7 @@ describe("the claim of the invitation confirm (12f2 follow-up 7, K6)", () => {
           ...tx,
           findMany: async (m, w, o) => {
             const found = await tx.findMany(m, w, o);
-            if (armed && m === "session" && o?.sort?.field === "id") {
+            if (armed && m === "session" && [o?.sort].flat()[0]?.field === "id") {
               armed = false;
               // A sign-out of the last row between the read of the claim and its second chunk.
               await destroySession(off.config, last.token);
