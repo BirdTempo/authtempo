@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
 // Two sentences of the reference pages state what core does. Each is held to
-// the source that does it (rulings 42 d and 49 a of plan 12n). A change of
-// the code fails here until the page says the new rule.
+// the source that does it (rulings 42 d, 49 a, and 58 a of plan 12n). A
+// change of the code fails here until the page says the new rule.
 
 /** The text of a file with each run of white space as one space: a line wraps. */
 const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
@@ -55,7 +55,7 @@ describe("the conflict entry of the errors page (ruling 42 d of plan 12n)", () =
 });
 
 const EVENT_WORDS =
-  "`userId` is the user of the session row that the request's token names, read in full or by a peek. The handler's session read sets it, and so does a refusal step of the router. So a refusal names the account of the token, a banned one too. A request with no session has no `userId`.";
+  "`userId` is the user of the session row that the request's token names, read in full or by a peek. The handler's session read sets it, and so does a refusal step of the router. So a refusal of a router step names the account of the token, a banned one too. A refusal of the handler's full read sets no `userId`, as for a banned user's row. A request with no session has no `userId`.";
 
 describe("the userId of the request event (ruling 49 a of plan 12n)", () => {
   it("names the user of the token's row, read by a peek that checks no ban", () => {
@@ -72,5 +72,14 @@ describe("the userId of the request event (ruling 49 a of plan 12n)", () => {
       .split("\n")
       .find((l) => l.startsWith("| `request` |"));
     expect(row).toContain(EVENT_WORDS);
+  });
+
+  it("sets no userId for a refusal of the handler's full read (ruling 58 of plan 12n)", () => {
+    // The full read answers null for a banned user's row, and only a resolved session marks the request.
+    const sessions = source("sessions.ts");
+    expect(body(sessions, "resolveSession")).toContain("if (bannedFor(user, session.createdAt)) {");
+    expect(body(sessions, "sessionFromRequest")).toContain(
+      "if (resolved) markRequestUser(request, resolved.user.id);",
+    );
   });
 });
