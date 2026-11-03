@@ -39,9 +39,13 @@ export const serveNode: Serve = (handler, options) => {
         res.writeHead(500).end();
       });
   });
-  return new Promise((resolve) => {
-    server.listen(options.port, options.hostname, () =>
-      resolve({ close: () => new Promise<void>((done) => server.close(() => done())) }),
-    );
+  return new Promise((resolve, reject) => {
+    // A port that another process holds fails the listen with EADDRINUSE.
+    // With no listener, that error event ends the process at once.
+    server.once("error", reject);
+    server.listen(options.port, options.hostname, () => {
+      server.off("error", reject);
+      resolve({ close: () => new Promise<void>((done) => server.close(() => done())) });
+    });
   });
 };
