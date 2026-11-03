@@ -850,13 +850,23 @@ export async function peekRequestUser(
 }
 
 /**
- * The user of the last session that `sessionFromRequest` resolved for a
- * request (plan 12n decision 17). The router reads it into the `request`
- * event. The map holds no id after the request.
+ * The user of the last session that a step of a request resolved from it
+ * (plan 12n decision 17). The router reads it into the `request` event. The
+ * map holds no id after the request.
  */
 const resolvedUsers = new WeakMap<Request, string>();
 
-/** The user id of the session that the handler resolved for `request`, or undefined when none resolved. */
+/**
+ * Marks `request` with the user of a session that a step resolved from it
+ * (ruling 37 of plan 12n). A handler's session read, a refusal step of the
+ * router, the sign-out, the link callback, and an anonymous caller call it.
+ * So the `request` event ties each answer, refusals too, to the account.
+ */
+export function markRequestUser(request: Request, userId: string): void {
+  resolvedUsers.set(request, userId);
+}
+
+/** The user id of the session that a step resolved for `request`, or undefined when none resolved. */
 export function resolvedUserOf(request: Request): string | undefined {
   return resolvedUsers.get(request);
 }
@@ -881,7 +891,7 @@ export async function sessionFromRequest(
     peeked,
     peekedUser,
   );
-  if (resolved) resolvedUsers.set(request, resolved.user.id);
+  if (resolved) markRequestUser(request, resolved.user.id);
   return resolved;
 }
 

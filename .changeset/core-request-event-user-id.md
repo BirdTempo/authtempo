@@ -2,7 +2,7 @@
 "@authtempo/core": minor
 ---
 
-The `request` event has a new optional field `userId`. It is the user of the session that the route resolved for that request. The field is absent when no session resolved. So an operator can tie a refusal of a route, such as a 429 or a 503 of an SSO connection write, to an account.
+The `request` event has a new optional field `userId`. It is the user of the session that the route resolved for that request. The two refusal steps of the router, which run before the route, set it too. The field is absent when no session resolved. So an operator can tie a refusal of a route, such as a 429 or a 503 of an SSO connection write, to an account.
 
 The compat entry `@authtempo/core/compat` exports `ID_TOKEN_PROVIDERS`, the providers of the ID-token route. A compatibility package takes its list from it.
 

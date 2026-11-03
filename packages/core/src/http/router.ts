@@ -457,7 +457,8 @@ export function createRouter(
         ? withTrace(routerError(HOST_CODE), traceId)
         : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
-    // The user of the session that the handler resolved, so an operator ties a refusal to an account (plan 12n).
+    // The user of the session that a step of the request resolved, so an operator ties a refusal to an account.
+    // The handler and the two refusal steps of `dispatch` set it (ruling 37 of plan 12n).
     const userId = resolvedUserOf(request);
     scoped.observe.emit({
       name: "request",

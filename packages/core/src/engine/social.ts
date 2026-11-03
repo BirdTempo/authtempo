@@ -51,6 +51,7 @@ import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js
 import {
   challengeOpened,
   endedList,
+  markRequestUser,
   type ResolvedSession,
   sessionIsLive,
   sessionOpened,
@@ -385,11 +386,14 @@ export interface SocialLinked {
 /**
  * Consumes the state row first, so a replayed callback fails before any
  * network call. Then binds the browser, exchanges the code, verifies the
- * ID token and its nonce, and links or creates the user.
+ * ID token and its nonce, and links or creates the user. The route passes
+ * its `request`: a link marks it with the user of the link's session
+ * (ruling 37 of plan 12n). The app API passes none.
  */
 export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
+  request?: Request,
 ): Promise<
   Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
 > {
@@ -435,6 +439,8 @@ export async function completeSocial(
   const link =
     row.purpose === LINK_STATE ? await linkSession(config, entry, data, input, now) : null;
   if (link && !link.ok) return link;
+  // The request event names the user of the link, refusals after this line too.
+  if (link && request) markRequestUser(request, link.value.userId);
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 

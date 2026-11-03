@@ -20,6 +20,7 @@ import {
   endedList,
   endSessions,
   liveSessionWhere,
+  markRequestUser,
   peekRequestSession,
   peekRequestUser,
   prepareSession,
@@ -465,7 +466,9 @@ export interface AnonymousCaller {
  * The live anonymous session of `request`, or null. It reads with no write
  * (`peekRequestSession`), so it moves no expiry, and the handler's later
  * session read takes the same row. With `anonymous` off it reads nothing: a
- * deployment that turned it off pays no query on each sign-in.
+ * deployment that turned it off pays no query on each sign-in. A caller
+ * that it finds marks the request with the anonymous user (ruling 37 of
+ * plan 12n), so the `request` event names that user.
  */
 export async function anonymousCaller(
   config: ResolvedConfig,
@@ -475,7 +478,9 @@ export async function anonymousCaller(
   const session = await peekRequestSession(config, request);
   if (session === null || session.actorId !== null) return null;
   const user = await peekRequestUser(config, request);
-  return user?.isAnonymous && user.id === session.userId ? { user, session } : null;
+  if (!user?.isAnonymous || user.id !== session.userId) return null;
+  markRequestUser(request, user.id);
+  return { user, session };
 }
 
 /**

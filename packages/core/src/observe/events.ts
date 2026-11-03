@@ -331,7 +331,7 @@ export const EVENTS = {
       outcome: enumOf(OUTCOMES),
       code: { kind: "code", optional: true },
       durationMs: { kind: "durationMs" },
-      // The user of the session that the handler resolved, absent when none resolved (plan 12n decision 17).
+      // The user of the session that a step of the request resolved, absent when none resolved (plan 12n decision 17).
       userId: OPTIONAL_ID,
     },
   },

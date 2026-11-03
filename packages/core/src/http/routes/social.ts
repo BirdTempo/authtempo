@@ -95,20 +95,24 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       if (ctx.request.method === "POST" && !(await socialCallbackPostAllowed(ctx.config, ctx.ip)))
         return failed(ctx, "rate_limited");
       const params = await callbackParams(ctx.request, ctx.url);
-      const r = await completeSocial(ctx.config, {
-        provider: provider.name,
-        ...params,
-        bindToken: readCookie(ctx.request, bindName),
-        ip: ctx.ip,
-        userAgent: ctx.request.headers.get("user-agent"),
-        // A GET callback is a top-level navigation, so a Lax trust cookie
-        // comes with it. Apple's cross-site form post carries none; the
-        // challenge page then offers the trusted device (plan 12c).
-        trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
-        // The cookie only: a provider's redirect carries no bearer header (plan 12a).
-        sessionToken: sessionCookieToken(ctx.config, ctx.request),
-        anonymous: await anonymousCaller(ctx.config, ctx.request),
-      });
+      const r = await completeSocial(
+        ctx.config,
+        {
+          provider: provider.name,
+          ...params,
+          bindToken: readCookie(ctx.request, bindName),
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          // A GET callback is a top-level navigation, so a Lax trust cookie
+          // comes with it. Apple's cross-site form post carries none; the
+          // challenge page then offers the trusted device (plan 12c).
+          trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
+          // The cookie only: a provider's redirect carries no bearer header (plan 12a).
+          sessionToken: sessionCookieToken(ctx.config, ctx.request),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        },
+        ctx.request,
+      );
       if (!r.ok) return failed(ctx, r.code);
       if ("linked" in r.value) {
         // A link (plan 12a): the session does not change, so no session cookie.
