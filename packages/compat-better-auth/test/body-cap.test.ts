@@ -3,6 +3,7 @@ import { BODY_BUSY_RETRY_SECONDS, bodyCapOf, readBodyText } from "@authtempo/cor
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { admin, emailOTP, organization, twoFactor, username } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
+import { COOKIE_NAME } from "../src/server/shapes.js";
 import { sso } from "../src/sso.js";
 import { BASE, fakeDns, memory, SECRET, ssoApp } from "./sso-helpers.js";
 
@@ -329,7 +330,7 @@ const PROVIDER_PATHS = [
 ] as const;
 
 describe("the session before any read on the Better Auth provider paths (plan 12n)", () => {
-  it("answers 401 to an anonymous caller with no byte and no storage read, and 404 to a person for an unknown provider", {
+  it("answers 401 with no byte to a caller with no session, reads the storage only for a well-formed token, and answers 404 to a person for an unknown provider", {
     timeout: 60_000,
   }, async () => {
     const { database, counter } = countedMemory();
@@ -375,18 +376,27 @@ describe("the session before any read on the Better Auth provider paths (plan 12
       };
     };
     const unauthorized = expect.objectContaining({ code: "UNAUTHORIZED" });
+    // The session check answers first, before any byte of the body. No token
+    // and a malformed token cost no storage read. A token of the right form
+    // that names no session costs one read: the session lookup.
+    const callers = [
+      { cookie: undefined, reads: 0 },
+      { cookie: `${COOKIE_NAME}=not-a-session-token`, reads: 0 },
+      { cookie: `${COOKIE_NAME}=ts_${"A".repeat(43)}`, reads: 1 },
+    ];
     for (const path of PROVIDER_PATHS)
-      for (const providerId of ["no-such", "acme-oidc"]) {
-        counter.calls = 0;
-        const anonymous = await send(path, providerId);
-        // The session check answers first: no byte of the body and no storage read.
-        expect([path, providerId, anonymous, counter.calls]).toEqual([
-          path,
-          providerId,
-          { status: 401, body: unauthorized, pulled: 0, used: false },
-          0,
-        ]);
-      }
+      for (const providerId of ["no-such", "acme-oidc"])
+        for (const { cookie, reads } of callers) {
+          counter.calls = 0;
+          const anonymous = await send(path, providerId, cookie);
+          expect([path, providerId, cookie, anonymous, counter.calls]).toEqual([
+            path,
+            providerId,
+            cookie,
+            { status: 401, body: unauthorized, pulled: 0, used: false },
+            reads,
+          ]);
+        }
     // With a session, an unknown provider keeps its 404: no organization exists to guard.
     for (const path of PROVIDER_PATHS) {
       const signedIn = await send(path, "no-such", ada.cookie);

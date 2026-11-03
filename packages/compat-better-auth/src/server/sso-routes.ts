@@ -666,7 +666,11 @@ const NOT_FOUND: Refusal = {
   message: "No SSO provider has this providerId",
 };
 
-/** No session: Better Auth's 401, before any byte of a body and any storage read. */
+/**
+ * No session: Better Auth's 401, before any byte of a body. A request with
+ * no session token, or a malformed one, gets it with no storage read. A
+ * well-formed token that names no session costs one session lookup first.
+ */
 const UNAUTHORIZED: Refusal = {
   status: 401,
   code: "UNAUTHORIZED",

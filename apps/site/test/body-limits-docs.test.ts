@@ -808,7 +808,7 @@ describe("the order of an SSO connection write (plan 12l)", () => {
       ],
       [
         COMPAT_README,
-        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read their body first, at most ${kib} KiB, and then run the guard.`,
+        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read the session first, then their body of at most ${kib} KiB, and then run the guard.`,
       ],
     ] as const)
       expect(textOf(file), file).toContain(sentence);

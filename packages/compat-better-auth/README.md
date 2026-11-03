@@ -1747,8 +1747,9 @@ Each such write of an account that manages no organization gets a refusal
 before any byte. The refusal is the 403 of the guard or its pre-check, or an
 earlier one, such as 401, 503, 429, 400, or 404. Such an account counts no
 large read. `/sso/delete-provider` and core's `POST /sso/connections/delete`
-read their body first, at most 64 KiB, and then run the guard. The steps of
-core's two connection writes through the shim's handler come in this order:
+read the session first, then their body of at most 64 KiB, and then run the
+guard. The steps of core's two connection writes through the shim's handler
+come in this order:
 
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
