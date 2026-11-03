@@ -162,7 +162,7 @@ export interface StorageAdapter {
    * cannot fit 50. This holds for the self delete and the operator delete
    * (rulings 5 and 10 of plan 12f2). The flag also keeps the page of the own
    * sessions of an account delete inside the call budget. With no flag, the
-   * page ends up to 500 sessions in one act.
+   * page ends up to 500 of the user's own sessions in one act.
    * Postgres, MySQL, SQLite, and memory have no such cap and leave it out.
    */
   queryLimitPerInvocation?: boolean;

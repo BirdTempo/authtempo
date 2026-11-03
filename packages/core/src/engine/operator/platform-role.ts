@@ -16,7 +16,7 @@ import {
 } from "../organizations.js";
 import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { sessionsEnded } from "../sessions.js";
-import { dropMemberTeams } from "../teams.js";
+import { dropMemberTeams, lockOrganization } from "../teams.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { createUserIn, normalizeEmail, validUserName } from "../users.js";
 import {
@@ -165,7 +165,9 @@ async function memberChanged(
  * plan 12f2), so its before hook runs after the hold. The hold writes no
  * new value, so a refusal after it changes nothing. `create-admin` runs
  * its before hooks first and then holds the user row. Each caller then
- * calls `writePart`.
+ * calls `writePart`. The grant locks the organization before this count.
+ * `create-admin` takes no such lock: it calls this before its user hold,
+ * and a lock here would come before the user row (user-hold.ts).
  */
 async function addRolePart(
   config: ResolvedConfig,
@@ -319,6 +321,16 @@ export async function grantPlatformRole(
         // account delete too (plan 12a Task 11).
         await holdUser(config.observe, tx, user.id);
         const member = await memberOf(tx, organization.id, user.id);
+        // A new member row counts against `membersPerOrganization`. The lock
+        // of the count comes after the user hold, as in `addMemberIn`. So a
+        // second grant waits here for this commit, and then counts this row
+        // (decision 15 of plan 12n). A gone organization answers not_found.
+        if (
+          !member &&
+          p.value.o.limits.membersPerOrganization !== null &&
+          !(await lockOrganization(tx, organization))
+        )
+          return fail("not_found");
         const change = await addRolePart(
           config,
           tx,

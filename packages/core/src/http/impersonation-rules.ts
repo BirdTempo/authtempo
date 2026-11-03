@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ANONYMOUS_REFUSED } from "../engine/anonymous.js";
-import { peekRequestSession, peekRequestUser } from "../engine/sessions.js";
+import { markRequestUser, peekRequestSession, peekRequestUser } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { json } from "./json.js";
 import type { RouteKey } from "./route-list.js";
@@ -313,6 +313,9 @@ export async function impersonationRefusal(
   // The handler's session read takes this row, so the route reads it once (ruling 78 of plan 12d).
   const row = await peekRequestSession(config, request);
   if (row === null || row.actorId === null) return null;
+  // The refusal names the user of the token's row (rulings 37 and 49 of plan 12n). The peek
+  // checks the expiry of the row only, not the ban, so a banned user's row is named too.
+  markRequestUser(request, row.userId);
   return json({ error: "impersonation_session" }, ERRORS.impersonation_session);
 }
 
@@ -333,5 +336,7 @@ export async function anonymousRefusal(
   if (!ANONYMOUS_REFUSED.has(key)) return null;
   const user = await peekRequestUser(config, request);
   if (user === null || !user.isAnonymous) return null;
+  // The refusal names the anonymous user of the live session (ruling 37 of plan 12n).
+  markRequestUser(request, user.id);
   return json({ error: "anonymous_refused" }, ERRORS.anonymous_refused);
 }

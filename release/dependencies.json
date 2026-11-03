@@ -89,8 +89,8 @@
     "name": "@libsql/client",
     "kind": "dev",
     "versions": ["0.18.0"],
-    "users": ["@authtempo/adapter-sqlite"],
-    "reason": "The SQLite adapter tests its libSQL driver against a local file and a libSQL HTTP server with it.",
+    "users": ["@authtempo/adapter-sqlite", "@authtempo/compat-better-auth"],
+    "reason": "The SQLite adapter tests its libSQL driver against a local file and a libSQL HTTP server with it. The compat package runs its SQLite suite on libSQL files with it.",
     "read": "2026-10-30"
   },
   {
@@ -513,8 +513,13 @@
     "name": "bun",
     "kind": "dev",
     "versions": ["1.4.3"],
-    "users": ["@authtempo/adapter-sqlite", "authtempo-example-elysia", "authtempo-example-node"],
-    "reason": "The Node and Elysia examples run their Bun tests with it. The SQLite adapter runs its Bun driver tests with it (vitest.bun.config.ts).",
+    "users": [
+      "@authtempo/adapter-sqlite",
+      "@authtempo/compat-better-auth",
+      "authtempo-example-elysia",
+      "authtempo-example-node"
+    ],
+    "reason": "The Node and Elysia examples run their Bun tests with it. The SQLite adapter runs its Bun driver tests with it (vitest.bun.config.ts). The compat package runs its SQLite suite on bun:sqlite with it (vitest.bun.config.ts).",
     "read": "2026-10-20"
   },
   {

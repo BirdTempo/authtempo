@@ -54,7 +54,7 @@ On the server of Nuxt:
 | Export | What it does |
 | --- | --- |
 | `authEventHandler` | Answers the handler of `server/routes/auth/[...path].ts`. |
-| `authSessionHandler` | Answers the server middleware that sets `event.context.session`, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
+| `authSessionHandler` | Answers the server middleware that sets `event.context.session`. It sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request, so `nuxt build` reads no secret. |
 | `NuxtRouteOptions` | The options of `authEventHandler`: `waitUntil`, the hook that keeps work alive after the answer. Default: `event.context.waitUntil`, else `event.context.cloudflare.context.waitUntil`. |

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -24,6 +23,7 @@ import {
 import { SCOPE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
+import { runSync } from "./lib/run-sync.ts";
 import { UNPUBLISHED_VERSION } from "./lib/unpublished.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { refusal } from "./prepare.ts";
@@ -327,12 +327,16 @@ export function childEnv(parent: NodeJS.ProcessEnv, files: ChildFiles, paths: To
 /** The registry that an npm or pnpm line names, with no slash at the end. */
 const registryOf = (url: string) => url.replace(/\/+$/, "");
 
+/**
+ * The real seam. A step past STEP_TIMEOUT_MS throws an error that names the
+ * call. dryRun catches it, and the error is the failure of the run.
+ */
 export const spawnRun: Run = (cmd, args, cwd, env) => {
-  const r = spawnSync(cmd, args, {
+  const r = runSync(cmd, args, {
     cwd,
-    encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
     env,
+    limit: "step",
   });
   return {
     status: r.status ?? 1,

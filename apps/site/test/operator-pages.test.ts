@@ -122,21 +122,6 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
 const ROUTER = ROUTER_CODES.filter((c) => c !== "internal");
 
-/**
- * The codes whose Routes table on the errors page lists no operator route:
- * an older drift of the whole operator family (O-12i-15, an owner
- * follow-up of plan 12i). The check of plan 12f2 holds that the family stays
- * out as one, so a later fix must take each route in.
- */
-const OPERATOR_FAMILY_DRIFT: readonly string[] = [
-  "rate_limited",
-  "unauthorized",
-  "invalid_body",
-  "conflict",
-  "hook_refused",
-  "hook_failed",
-];
-
 /** The Routes table of a code on the errors page, from the table head to the next code. */
 function routesCell(code: string): string {
   const page = readFileSync(`${DOCS}docs/reference/errors.md`, "utf8");
@@ -246,14 +231,6 @@ describe("the operator pages", () => {
         if (code === "impersonation_session") {
           // The cell names the operator routes in words.
           expect(cell).toContain("every operator route but the stop");
-          continue;
-        }
-        if (r.path.startsWith("/operator/") && OPERATOR_FAMILY_DRIFT.includes(code)) {
-          // The older drift holds for the whole family: the cell lists no operator route.
-          expect({ code, operator: cell.includes("/routes/#post-operator-") }).toEqual({
-            code,
-            operator: false,
-          });
           continue;
         }
         if (!cell.includes(`](/docs/reference/routes/#${routeAnchor(r.method, r.path)})`))

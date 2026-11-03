@@ -82,7 +82,7 @@ The second factor gate applies to an SSO sign-in, by `totp.gate.sso` (on by defa
 
 ### The enforce flag
 
-With `enforce: true` on a domain, only SSO signs in an address of that domain. Each first factor answers [`sso_required`](/docs/reference/errors/#sso_required), with the start URL in `detail`. That is the password, the magic link, the email code, social, the ID token, the passkey, the phone code, and the sign-up code. The start URL is absolute, on the origin of `baseURL`, as the discovery answers it, so send the browser there as it is. A magic link request, an email code request, a password reset request, and a phone code request give their normal answer and send nothing. `enforce` needs a verified domain routed to an enabled connection.
+With `enforce: true` on a domain, only SSO signs in an address of that domain. Each first factor answers [`sso_required`](/docs/reference/errors/#sso_required), with the start URL in `detail`. That is the password at its sign-up, sign-in, verify link, reset, and change. It is also the magic link, the email code, social, the ID token, the passkey, the phone code, and the sign-up code. The start URL is absolute, on the origin of `baseURL`, as the discovery answers it, so send the browser there as it is. A magic link request, an email code request, a password reset request, and a phone code request give their normal answer and send nothing. `enforce` needs a verified domain routed to an enabled connection.
 
 ### The operator's override
 

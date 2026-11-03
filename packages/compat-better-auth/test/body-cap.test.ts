@@ -3,6 +3,7 @@ import { BODY_BUSY_RETRY_SECONDS, bodyCapOf, readBodyText } from "@authtempo/cor
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { admin, emailOTP, organization, twoFactor, username } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
+import { COOKIE_NAME } from "../src/server/shapes.js";
 import { sso } from "../src/sso.js";
 import { BASE, fakeDns, memory, SECRET, ssoApp } from "./sso-helpers.js";
 
@@ -38,6 +39,31 @@ const FIRST_READS: readonly [path: string, cap: number][] = [
   ["/sso/verify-domain", BODY_CAP_FLOOR],
   ["/sign-in/sso", BODY_CAP_FLOOR],
 ];
+
+/**
+ * The paths of FIRST_READS that read the session before the body (plan
+ * 12n). A request with no session gets 401 there before any byte, so a
+ * test of the read sends the cookie of a person.
+ */
+const SESSION_FIRST = new Set([
+  "/sso/delete-provider",
+  "/sso/request-domain-verification",
+  "/sso/verify-domain",
+]);
+
+/**
+ * The app and the cookie of a request to `path` of FIRST_READS. A path of
+ * SESSION_FIRST gets an SSO app and the session of a person, through the
+ * sign-up, the verify link, and the sign-in. Each other path gets the app
+ * with every plugin and no cookie.
+ */
+async function firstReadOf(
+  path: string,
+): Promise<{ auth: { handler(request: Request): Promise<Response> }; cookie?: string }> {
+  if (!SESSION_FIRST.has(path)) return { auth: app() };
+  const ssoOnly = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+  return { auth: ssoOnly.auth, cookie: (await ssoOnly.person("ada@example.com")).cookie };
+}
 
 /**
  * The paths of the SSO connection writes, whose read takes the large cap.
@@ -123,6 +149,47 @@ function recordedMemory() {
   return { database: { ...database, limiter }, keys, refused };
 }
 
+/**
+ * A memory database that counts each call of its storage (plan 12n). A
+ * test sets `counter.calls` to 0 before the request that it measures.
+ */
+function countedMemory() {
+  const database = memory();
+  const counter = { calls: 0 };
+  const storage = new Proxy(database.storage, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        counter.calls += 1;
+        return value.apply(target, args);
+      };
+    },
+  });
+  return { database: { ...database, storage }, counter };
+}
+
+/**
+ * A body stream of `text` that a reader must ask for (plan 12n). The high
+ * water mark is 0, so the stream fills nothing ahead. `pulled` counts the
+ * bytes that a reader took.
+ */
+function askedBody(text: string) {
+  const bytes = new TextEncoder().encode(text);
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(c) {
+        if (sent > 0) return c.close();
+        sent = bytes.byteLength;
+        c.enqueue(bytes);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, pulled: () => sent };
+}
+
 /** An app with every plugin whose path the shim reads first. */
 function app() {
   return betterAuth({
@@ -166,9 +233,9 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
   it.each(FIRST_READS)(
     "answers 413 PAYLOAD_TOO_LARGE at the first read of %s one byte past its cap",
     async (path, cap) => {
-      const auth = app();
+      const { auth, cookie } = await firstReadOf(path);
       const parse = vi.spyOn(JSON, "parse");
-      const res = await auth.handler(post(path, cap + 1));
+      const res = await auth.handler(post(path, cap + 1, cookie));
       expect(res.status).toBe(413);
       expect(await res.json()).toEqual({ code: "PAYLOAD_TOO_LARGE", message: "Payload too large" });
       expect(parse.mock.calls.filter(([t]) => typeof t === "string" && t.length > cap)).toEqual([]);
@@ -204,9 +271,9 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
   );
 
   it("reads a body that a reader locked before the shim as no JSON, not 500 (ruling 51 Low 3)", async () => {
-    const auth = app();
     for (const [path] of FIRST_READS) {
-      const request = post(path, 100);
+      const { auth, cookie } = await firstReadOf(path);
+      const request = post(path, 100, cookie);
       request.body?.getReader();
       const res = await auth.handler(request);
       expect([path, res.status]).not.toEqual([path, 500]);
@@ -214,10 +281,10 @@ describe("the body reads of the shim (ruling 46 of the 12j lane)", () => {
   });
 
   it("reads a body at the cap of its route and passes it on", async () => {
-    const auth = app();
     // At the floor, the body is read: the answer is not 413, whatever the route answers next.
     for (const [path, cap] of FIRST_READS.filter(([, c]) => c === BODY_CAP_FLOOR)) {
-      const res = await auth.handler(post(path, cap));
+      const { auth, cookie } = await firstReadOf(path);
+      const res = await auth.handler(post(path, cap, cookie));
       expect([path, res.status]).not.toEqual([path, 413]);
     }
   });
@@ -251,6 +318,94 @@ describe("one read of each body through the shim (ruling 68 Minor 1 of the 12j l
       false,
       1,
     ]);
+  });
+});
+
+/** The four Better Auth SSO paths that name a provider (plan 12n). Each reads the session first. */
+const PROVIDER_PATHS = [
+  "/sso/delete-provider",
+  "/sso/request-domain-verification",
+  "/sso/verify-domain",
+  "/sso/get-provider",
+] as const;
+
+describe("the session before any read on the Better Auth provider paths (plan 12n)", () => {
+  it("answers 401 with no byte to a caller with no session, reads the storage only for a well-formed token, and answers 404 to a person for an unknown provider", {
+    timeout: 60_000,
+  }, async () => {
+    const { database, counter } = countedMemory();
+    const app = ssoApp(database, [sso({ domainVerification: { enabled: true } })]);
+    // Ann registers acme-oidc, so one providerId names a real provider.
+    const ann = await app.manager("ann@acme.example");
+    const organizationId = await app.organizationOf(ann, "acme");
+    const reg = await app.call(
+      "/sso/register",
+      {
+        organizationId,
+        providerId: "acme-oidc",
+        issuer: "https://idp.acme.example",
+        domain: "acme.example",
+        oidcConfig: OIDC,
+      },
+      ann.cookie,
+    );
+    expect(reg.status).toBe(200);
+    const ada = await app.person("ada@example.com");
+    /** The request of `path` for `providerId`: a GET with the query, else a POST of an asked body. */
+    const send = async (path: string, providerId: string, cookie?: string) => {
+      const headers: Record<string, string> = { origin: BASE, ...(cookie ? { cookie } : {}) };
+      if (path === "/sso/get-provider") {
+        const res = await app.auth.handler(
+          new Request(`${BASE}/api/auth${path}?providerId=${providerId}`, { headers }),
+        );
+        return { status: res.status, body: (await res.json()) as unknown, pulled: 0, used: false };
+      }
+      const body = askedBody(JSON.stringify({ providerId }));
+      const request = new Request(`${BASE}/api/auth${path}`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: body.stream,
+        duplex: "half",
+      } as RequestInit);
+      const res = await app.auth.handler(request);
+      return {
+        status: res.status,
+        body: (await res.json()) as unknown,
+        pulled: body.pulled(),
+        used: request.bodyUsed,
+      };
+    };
+    const unauthorized = expect.objectContaining({ code: "UNAUTHORIZED" });
+    // The session check answers first, before any byte of the body. No token
+    // and a malformed token cost no storage read. A token of the right form
+    // that names no session costs one read: the session lookup.
+    const callers = [
+      { cookie: undefined, reads: 0 },
+      { cookie: `${COOKIE_NAME}=not-a-session-token`, reads: 0 },
+      { cookie: `${COOKIE_NAME}=ts_${"A".repeat(43)}`, reads: 1 },
+    ];
+    for (const path of PROVIDER_PATHS)
+      for (const providerId of ["no-such", "acme-oidc"])
+        for (const { cookie, reads } of callers) {
+          counter.calls = 0;
+          const anonymous = await send(path, providerId, cookie);
+          expect([path, providerId, cookie, anonymous, counter.calls]).toEqual([
+            path,
+            providerId,
+            cookie,
+            { status: 401, body: unauthorized, pulled: 0, used: false },
+            reads,
+          ]);
+        }
+    // With a session, an unknown provider keeps its 404: no organization exists to guard.
+    for (const path of PROVIDER_PATHS) {
+      const signedIn = await send(path, "no-such", ada.cookie);
+      expect([path, signedIn.status, signedIn.body]).toEqual([
+        path,
+        404,
+        expect.objectContaining({ code: "NOT_FOUND" }),
+      ]);
+    }
   });
 });
 
@@ -989,6 +1144,39 @@ describe("the guard before the read through the shim (plan 12l)", () => {
     expect(
       audit.value.rows.filter((r) => r.actorId === op.user.id).map((r) => [r.action, r.actorKind]),
     ).toEqual([["sso_connection_create", "user"]]);
+  });
+
+  it("counts operator:user three times for a platform operator's register, one per core write, and none for a manager's (plan 12n)", {
+    timeout: 60_000,
+  }, async () => {
+    const { database, keys } = recordedMemory();
+    const app = ssoApp(database, [admin({}), sso({ domainVerification: { enabled: true } })], {
+      platformOrganization: "platform-co",
+    });
+    const ann = await app.manager("ann@acme.example");
+    const organizationId = await app.organizationOf(ann, "acme");
+    const op = await app.operator("op@example.com");
+    const register = (providerId: string, domain: string, cookie: string) =>
+      app.call(
+        "/sso/register",
+        {
+          organizationId,
+          providerId,
+          issuer: "https://idp.acme.example",
+          domain,
+          oidcConfig: OIDC,
+        },
+        cookie,
+      );
+    keys.length = 0;
+    expect((await register("acme-oidc", "acme.example", op.cookie)).status).toBe(200);
+    // The create, the domain add, and the domain update each run core's guard, which counts once.
+    const opKey = `operator:user:${op.user.id}`;
+    expect(keys.filter((k) => k.startsWith("operator:user:"))).toEqual([opKey, opKey, opKey]);
+    // A manager who is no platform operator counts nothing on operator:user.
+    keys.length = 0;
+    expect((await register("acme-two", "acme-two.example", ann.cookie)).status).toBe(200);
+    expect(keys.filter((k) => k.startsWith("operator:user:"))).toEqual([]);
   });
 
   it("answers a stale session of a manager on core's two writes with Better Auth's code, before any byte (review M1)", {

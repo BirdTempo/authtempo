@@ -118,9 +118,13 @@ export async function requireSsoManager(
  *    (`isPlatformOperator`, the platform organization and one member row).
  *
  * The `app` acts in process and never through a route, so it holds no
- * session and no row to lose. A revoke of the platform role ends the
- * sessions of the user, so step 1 answers it. A removal of the platform
- * member through `removeMember` keeps the sessions, so step 3 answers it.
+ * session and no row to lose. A revoke of the platform role ends one page
+ * of the user's sessions, inside the budget of its call
+ * (`OPERATOR_CALL_BUDGET`). Step 1 answers a write on one of them. A
+ * session that the revoke left for the sweep stays live for step 1, because
+ * `revokedFor` reads only the row of a SCIM deactivate. So step 3 answers
+ * it. A removal of the platform member through `removeMember` keeps the
+ * sessions, so step 3 answers it.
  *
  * It counts no limit and runs no `requireOperatorUser`, so a platform
  * operator counts once on `operator:user`. A pass emits no event. A

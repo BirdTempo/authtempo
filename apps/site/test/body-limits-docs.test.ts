@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import { largestBodies } from "../../../packages/core/test/body-limits.ts";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// The request body limits of core (rulings 43, 46, 51, 56, 59, 63, 64, 66,
-// 68, 69, 72, 75, 79, and 84 of the 12j lane). The errors page, the limits page, the Express,
-// Fastify, and SvelteKit pages, the SCIM guide, the core README, the Express
-// README, and the deploy page state the caps and the scan limits by hand.
+// This test holds the request body limits of core. They come from rulings
+// 43, 46, 51, 56, 59, 63, 64, 66, 68, 69, 72, 75, 79, and 84 of the 12j lane.
+// The errors page, the limits page, and the Express, Fastify, and SvelteKit
+// pages state the caps and the scan limits by hand. The SCIM guide, the core
+// README, the Express README, and the deploy page state them by hand too.
 // This test reads each constant from the source of core
 // and each number from the pages, in the form of sso-scim-limits.test.ts. A
 // new derivation that changes a constant fails here until each line says the
@@ -46,7 +47,7 @@ const FILES = {
 type FileKey = keyof typeof FILES;
 
 // The README of the compat package, for its SSO order sentences (rr-final M1
-// and L1 of plan 12l). It is not in FILES: FILES holds each cap number of a
+// and L1 of plan 12l). It is not in FILES. FILES holds each cap number of a
 // file, and this README states a SAML size, 262144, that is no body cap.
 const COMPAT_README = `${REPO}packages/compat-better-auth/README.md`;
 // The changeset of plan 12l. The version branch deletes it, so its fact skips there.
@@ -152,9 +153,10 @@ const largestWrite = () =>
 const slowReads = () => Math.ceil(limitSeconds("SSO_LARGE_READ_PER_USER") / slowSeconds());
 
 /**
- * The seconds that one account holds the user half in a window (ruling 79):
- * each read but the last within the time of no spend, and the last read,
- * with no start left to spend, to the time of an SSO connection write.
+ * The seconds that one account holds the user half in a window (ruling 79).
+ * Each read but the last holds the half for the time of no spend. The last
+ * read has no start left to spend, so it holds the half for the time of an
+ * SSO connection write.
  */
 const holdOfAccount = () =>
   (limitMax("SSO_LARGE_READ_PER_USER") - 1) * slowSeconds() + ssoWriteSeconds();
@@ -411,7 +413,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
     () => constant("LARGE_READ_DEADLINE_FLOOR_MS") / 1000,
     [
       ["errors", /That time is at least (\d+) s\./],
-      ["limits", /for a signed-in user, and at least (\d+) s:/],
+      ["limits", /for a signed-in user, and at least (\d+) s\. That is/],
       // The anonymous reads (ACS, Apple, SCIM) each take the least time (ruling 66).
       ["limits", /Such a read ends within (\d+) s, so/],
       ["limits", /must send \d+ MiB each (\d+) s to keep the half full/],
@@ -444,7 +446,7 @@ const facts: [string, () => number, [FileKey, RegExp][]][] = [
       ["limits", /\d+ accounts at \d+ times (\d+) s, \d+ s, held the user half/],
       ["limits", /has no start left to spend, so it can run to (\d+) s\./],
       ["limits", /for \d+ times \d+ s and (\d+) s, \d+ s, in a window/],
-      ["limits", /at least \d+ s: (\d+) s for an SSO connection write/],
+      ["limits", /at least \d+ s\. That is (\d+) s for an SSO connection write/],
       ["limits", /fills the user half for at most (\d+) s/],
       ["limits", /delay the SSO connection writes of others by up to (\d+) s/],
       ["limits", /A write that takes more than (\d+) s gets 408/],
@@ -628,7 +630,15 @@ const NARROWED: [FileKey, string, number][] = [
   ["errors", "So a read that ends after its window ended fills the next window.", 1],
   [
     "errors",
-    "Until that window ends, up to 1 hour from the end of that read, each SSO connection write of the user answers 429 `rate_limited`.",
+    "Until that window ends, up to 1 hour from the end of that read, both SSO connection writes of the user answer 429 `rate_limited`.",
+    1,
+  ],
+  // In BODY_CAPS, the two SSO connection writes, the create and the update, have a cap above the
+  // floor. `POST /sso/connections/delete` has none. So only the two writes count on
+  // `sso-large-read:user` (12l follow-up (12)).
+  [
+    "limits",
+    "`POST /sso/connections/create` and `POST /sso/connections/update`, at the start of their body read, after `sso-manage:user` and the manager guard.",
     1,
   ],
   [
@@ -800,7 +810,7 @@ describe("the order of an SSO connection write (plan 12l)", () => {
       ],
       [
         COMPAT_README,
-        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read their body first, at most ${kib} KiB, and then run the guard.`,
+        `\`/sso/delete-provider\` and core's \`POST /sso/connections/delete\` read the session first, then their body of at most ${kib} KiB, and then run the guard.`,
       ],
     ] as const)
       expect(textOf(file), file).toContain(sentence);
@@ -844,9 +854,11 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     expect(errorSection("second_factor_required")).toMatch(
       /\| [^|]*The two connection writes answer it before any byte of the body\. \|/,
     );
-    expect(textOf(FILES.client)).toMatch(
-      /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
-    );
+    // The client README holds the same paragraph (12l follow-up 10, plan 12n).
+    for (const file of [FILES.client, `${REPO}packages/client/README.md`])
+      expect(textOf(file), file).toMatch(
+        /`sso\.connections\.create` sends `organizationId` in the query, and `sso\.connections\.update` sends `id` in the query\. The body holds the other fields\. Core runs the manager guard before it reads the body\./,
+      );
   });
 
   it("states the two limits of an SSO manager on the routes page as routes/sso.ts holds them (rr-task6 Low 3)", () => {
@@ -899,6 +911,57 @@ describe("the order of an SSO connection write (plan 12l)", () => {
     // That check reads the session first, and a revoke of the role ends the sessions (ruling 31).
     expect(cell).toMatch(
       /\| [^|]*The two SSO connection writes answer it before any byte of the body\. After the read, they check the caller again\. An owner who lost the owner rank gets it then\. A platform operator who lost the platform role usually gets 401 \[`unauthorized`\]\(#unauthorized\), because a revoke of the role ends the operator's sessions\. If a removal of the role keeps the session live, the operator gets 403 `forbidden_rank`\. \|/,
+    );
+  });
+});
+
+// Plan 12n, follow-ups 1, 4, 10, and 13 of plan 12l. Each sentence on the SSO
+// bounds and counts is held to the constant or to the order of its code.
+describe("the SSO bounds and counts of the docs (plan 12n)", () => {
+  const shim = readFileSync(`${REPO}packages/compat-better-auth/src/server/sso-routes.ts`, "utf8");
+
+  it("states the large read count after sso-manage:user and the manager guard, in the order of routes/sso.ts", () => {
+    const calls = [
+      "await ssoManageAllowed(config",
+      "await guard(organizationId)",
+      "await ssoLargeReadAllowed(config",
+    ].map((call) => ({ call, at: ssoSource.indexOf(call) }));
+    for (const { call, at } of calls)
+      expect(at, `${call} is not in routes/sso.ts`).toBeGreaterThan(-1);
+    expect([...calls].sort((a, b) => a.at - b.at).map((c) => c.call)).toEqual(
+      calls.map((c) => c.call),
+    );
+    expect(textOf(FILES.limits)).toMatch(
+      /\| `sso-large-read:user:<userId>` \| [^|]*\| [^|]*\| [^|]*after `sso-manage:user` and the manager guard\./,
+    );
+  });
+
+  it("states the two bounds of member rows in the compat README, as guard.ts and the shim hold them", () => {
+    const precheck = constant("SSO_PRECHECK_MEMBER_ROWS", readFileSync(GUARD, "utf8"));
+    const max = /^const PROVIDER_ORGANIZATIONS_MAX = (\d+);$/m.exec(shim)?.[1];
+    if (max === undefined) throw new Error("no PROVIDER_ORGANIZATIONS_MAX in sso-routes.ts");
+    // The member read of GET /sso/providers takes the constant as its limit.
+    expect(shim).toContain("{ limit: PROVIDER_ORGANIZATIONS_MAX }");
+    const text = textOf(COMPAT_README);
+    expect(text).toContain(
+      `The caller must be a platform operator, or hold the owner rank in the first ${precheck} member rows that the storage gives. An owner whose row is past those rows gets 403 here, and can write through core's paths \`POST /sso/connections/create\` and \`POST /sso/connections/update\`.`,
+    );
+    expect(text).toContain(
+      `| \`GET /sso/providers\` | \`GET /sso/connections\` and \`GET /sso/domains\` of each organization that the caller manages. The shim reads at most ${max} member rows of the caller, the first that the storage gives. It lists the connections of those organizations only. |`,
+    );
+  });
+
+  it("states the three counts of a register by a platform operator, with the operator limit of guards.ts", () => {
+    const guards = readFileSync(`${REPO}packages/core/src/engine/operator/guards.ts`, "utf8");
+    const max = /export const OPERATOR_PER_USER = \{ seconds: 3600, max: (\d+) \};/.exec(
+      guards,
+    )?.[1];
+    if (max === undefined) throw new Error("no hourly OPERATOR_PER_USER in guards.ts");
+    expect(textOf(COMPAT_README)).toContain(
+      `A \`/sso/register\` of a platform operator counts \`operator:user\` three times, one per core write: the create, the domain add, and the domain update. Each write runs core's guard. So the ${max} calls of an hour give ${Number(max) / 3} registers.`,
+    );
+    expect(textOf(FILES.limits)).toContain(
+      `| \`operator:user:<userId>\` | 1 hour | ${max} | Every call of a platform operator, after the operator user guard passes. A \`/sso/register\` of the compatibility package counts three times, one per core write |`,
     );
   });
 });

@@ -30,7 +30,16 @@ import type { LimiterPort } from "../src/limiter/port.js";
 import { type ModelName, schema } from "../src/schema.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled, tokenFromMail } from "./helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  get,
+  LONG_TEST_MS,
+  makeAuth,
+  post,
+  settled,
+  tokenFromMail,
+} from "./helpers.js";
 import { authorizeGet, oauthHandle, pkce, REDIRECT, registered } from "./oauth-helpers.js";
 import { observed } from "./observe-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
@@ -833,7 +842,13 @@ describe("the anonymous delete (plan 12i Task 6)", () => {
 });
 
 describe("the anonymous sweep (plan 12i Task 6)", () => {
-  it("sweeps anonymous users past ttlDays with no live session, at most 100", async () => {
+  // It makes 102 users. Its lowest time in the logs is 0.32 s. In the 20 evidence runs of
+  // 2026-10-30 to 2026-11-03 it passed in up to 1.11 s, at sampled peak load 36 to 56. It
+  // timed out at the default 5 s once, at 5.04 s, in a core run beside another lane at load
+  // 39.7 (2026-10-31).
+  it("sweeps anonymous users past ttlDays with no live session, at most 100", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const afterDelete = vi.fn();
     const w = world({
       limiter: { allow: async () => true },

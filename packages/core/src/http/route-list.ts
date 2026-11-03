@@ -2988,18 +2988,22 @@ export const BODY_CODE = "body_too_large" as const satisfies ErrorCode;
 /**
  * The code that the router answers, with `Retry-After`, for a read above
  * the floor past `LARGE_READ_BUDGET` of the isolate (ruling 51 Minor 2 of
- * the 12j lane). Only the routes of `BODY_CAPS` and the SAML ACS can answer
- * it. No entry declares it, and the OpenAPI document states it in its
- * rules, as it states `BODY_CODE`. The SCIM routes answer their own SCIM 503.
+ * the 12j lane). The router answers it only for the routes of `BODY_CAPS`
+ * and the SAML ACS. No entry declares it, and the OpenAPI document states
+ * it in its rules, as it states `BODY_CODE`. The six SCIM writes also read
+ * above the floor. They answer their own SCIM 503 and put this code on the
+ * `request` event (`readScimBody`).
  */
 export const BUSY_CODE = "body_busy" as const satisfies ErrorCode;
 
 /**
  * The code that the router answers for a read above the floor that got no
  * chunk for `LARGE_READ_IDLE_MS`, or that ran past `largeReadDeadlineMs`
- * (ruling 59 Major 1 of the 12j lane). The routes of `BODY_CAPS`, the SAML
- * ACS, and the SCIM writes can answer it. No entry declares it, and the
- * OpenAPI document states it in its rules, as it states `BUSY_CODE`.
+ * (ruling 59 Major 1 of the 12j lane). The router answers it only for the
+ * routes of `BODY_CAPS` and the SAML ACS. No entry declares it, and the
+ * OpenAPI document states it in its rules, as it states `BUSY_CODE`. The six
+ * SCIM writes answer their own SCIM 408 and put this code on the `request`
+ * event (`readScimBody`).
  */
 export const TIMEOUT_CODE = "body_timeout" as const satisfies ErrorCode;
 

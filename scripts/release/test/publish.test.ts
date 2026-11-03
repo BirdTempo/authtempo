@@ -1,14 +1,16 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { releasedNames } from "../src/lib/released.ts";
+import { RunTimeout, runSync } from "../src/lib/run-sync.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import {
   dependencyNames,
+  npmSeams,
   publish,
   publishLines,
   publishPlan,
@@ -20,6 +22,7 @@ import {
   type ViewAnswer,
   viewArgs,
 } from "../src/publish.ts";
+import { NEVER_ENDS, OUTPUT_STALL_MS, STALL_MS, withCommand, withLimit } from "./support/stall.ts";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -72,6 +75,9 @@ function downloaded(version: string, react = false): string {
 const publishOut = (out: string, seams: Seams, listed?: string) =>
   publish(out, seams, listed ?? readFileSync(join(out, "SHA256SUMS"), "utf8"));
 
+/** The entry that the publish job runs: node scripts/release/src/publish.ts <folder>. */
+const PUBLISH_ENTRY = fileURLToPath(new URL("../src/publish.ts", import.meta.url));
+
 const CORE = (v: string) => `authtempo-core-${v}.tgz`;
 const CLIENT = (v: string) => `authtempo-client-${v}.tgz`;
 const REACT = (v: string) => `authtempo-react-${v}.tgz`;
@@ -101,6 +107,38 @@ function fake(options: {
     calls.filter((c) => c[1] === "publish").map((c) => (c[2] ?? "").split("/").pop());
   return { seams, calls, views, published };
 }
+
+/**
+ * The real seams with a fake npm first on PATH. The seam answers each npm
+ * publish with exit 0 and starts no child process for it. So no test can
+ * publish, also when PATH reaches the real npm.
+ */
+const pathSeams: Seams = {
+  run: (command, args) =>
+    args[0] === "publish" ? { code: 0, stdout: "", stderr: "" } : npmSeams.run(command, args),
+  npmView: (spec, field) => npmSeams.npmView(spec, field),
+};
+/** An npm that answers --version, and each npm view with no output: no such version. */
+const QUICK_NPM = '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 11.19.1; fi\nexit 0\n';
+/** An npm that answers --version, and never ends an npm view. */
+const STALLED_VIEW =
+  '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 11.19.1; exit 0; fi\nexec sleep 30\n';
+
+/** The answer of `fn`, with each write to stdout and stderr dropped: the seams print the output of npm. */
+function quiet<T>(fn: () => T): T {
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    return fn();
+  } finally {
+    stdout.mockRestore();
+    stderr.mockRestore();
+  }
+}
+
+/** The lines of a publish of `out` through the real seams, with `npm` first on PATH. */
+const linesWith = (npm: string, out: string) =>
+  quiet(() => withCommand("npm", npm, () => publishLines(publishOut(out, pathSeams))));
 
 describe("publish", () => {
   it("publishes each tarball that the registry lacks, with latest", () => {
@@ -260,6 +298,144 @@ describe("publish", () => {
       "  not published: @authtempo/react@0.1.0 is not on the registry",
     ]);
     expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
+  });
+
+  it("prints a FAIL line, not a stack, when npm --version passes its limit (ruling 41 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    // First an npm that answers at once: the same folder passes.
+    expect(linesWith(QUICK_NPM, out)).toEqual([
+      "publish: PASS published=2 skipped=0 failures=0",
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  published: @authtempo/client@0.1.0 is on the registry",
+    ]);
+    expect(withLimit("step", STALL_MS, () => linesWith(NEVER_ENDS, out))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      `  npm --version did not end in ${STALL_MS} ms`,
+    ]);
+  });
+
+  it("prints a FAIL line, not a stack, when an npm view passes its limit (ruling 41 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    expect(linesWith(QUICK_NPM, out)[0]).toBe("publish: PASS published=2 skipped=0 failures=0");
+    // The first read is the version of the first tarball of the folder.
+    expect(withLimit("registry", STALL_MS, () => linesWith(STALLED_VIEW, out))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      `  npm ${viewArgs("@authtempo/client@0.1.0", "version").join(" ")} did not end in ${STALL_MS} ms`,
+    ]);
+  });
+
+  it("lets an error that is not a RunTimeout go up from npm --version and npm view (ruling 56 of plan 12n)", () => {
+    const out = downloaded("0.1.0");
+    const f = fake({});
+    // First the seams answer: the same folder passes.
+    expect(publishLines(publishOut(out, f.seams))[0]).toBe(
+      "publish: PASS published=2 skipped=0 failures=0",
+    );
+    const broken = new Error("spawnSync npm EACCES");
+    const version: Seams = {
+      ...f.seams,
+      run(command, args) {
+        if (args[0] === "--version") throw broken;
+        return f.seams.run(command, args);
+      },
+    };
+    const view: Seams = {
+      ...f.seams,
+      npmView() {
+        throw broken;
+      },
+    };
+    for (const seams of [version, view]) {
+      let thrown: unknown = null;
+      try {
+        publishOut(out, seams);
+      } catch (error) {
+        thrown = error;
+      }
+      // The same error goes up, so the entry ends with exit 1 and its stack.
+      expect(thrown).toBe(broken);
+    }
+  });
+
+  it("fails the step with exit 1 and the error's own message, with no FAIL line, when an npm view cannot start (ruling 56 of plan 12n)", () => {
+    // The real seams throw a RunTimeout, or an error of spawnSync itself.
+    // spawnSync refuses an argument with a NUL, so a package name with a NUL
+    // gives such an error at the first npm view. An npm that exits 2 gives no
+    // error: the seams read its code (probe of fix wave D, 2026-11-03).
+    const root = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
+    folders.push(root);
+    const out = join(root, "out");
+    mkdirSync(join(root, "package"), { recursive: true });
+    mkdirSync(out);
+    writeFileSync(
+      join(root, "package", "package.json"),
+      JSON.stringify({ name: "@authtempo/core\u0000x", version: "0.1.0" }),
+    );
+    // COPYFILE_DISABLE keeps the macOS tar from adding a ._ file of attributes.
+    execFileSync("tar", ["-czf", join(out, CORE("0.1.0")), "-C", root, "package"], {
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    });
+    const listed = `${createHash("sha256")
+      .update(readFileSync(join(out, CORE("0.1.0"))))
+      .digest("hex")}  ${CORE("0.1.0")}\n`;
+    writeFileSync(join(out, "SHA256SUMS"), listed);
+    const r = withCommand("npm", QUICK_NPM, () =>
+      spawnSync(process.execPath, [PUBLISH_ENTRY, out], {
+        encoding: "utf8",
+        env: { ...process.env, [SUMS_ENV]: listed },
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("must be a string without null bytes");
+    // npm --version printed its version, and publishLines printed nothing.
+    expect(r.stdout).toBe("11.19.1\n");
+  });
+
+  it("names the call and each version after a publish past its limit (review of Task 1 of plan 12n, M2)", () => {
+    // core publishes, the client publish never ends, and react gets no call.
+    const out = downloaded("0.1.0", true);
+    const f = fake({});
+    const seams: Seams = {
+      ...f.seams,
+      run(command, args) {
+        if (!(args[1] ?? "").endsWith(CLIENT("0.1.0"))) return f.seams.run(command, args);
+        f.calls.push([command, ...args]);
+        // A real call past a short limit throws the RunTimeout of a hung npm publish.
+        runSync("sh", ["-c", "exec sleep 30"], { limit: "step" });
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const outcome = withLimit("step", STALL_MS, () => publishOut(out, seams));
+    expect(publishLines(outcome)).toEqual([
+      "publish: FAIL published=1 skipped=0 failures=1",
+      `  sh -c exec sleep 30 did not end in ${STALL_MS} ms; the registry may hold @authtempo/client@0.1.0, so rerun the workflow on the same tag`,
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  not published: @authtempo/react@0.1.0 is not on the registry",
+    ]);
+    expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
+  });
+
+  it("writes the output of a publish past its limit before the error goes up (review of Task 1 of plan 12n, M2)", () => {
+    const written: string[] = [];
+    const capture = (name: string) => (chunk: string | Uint8Array) => {
+      written.push(`${name} ${String(chunk)}`);
+      return true;
+    };
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(capture("stdout"));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(capture("stderr"));
+    let error: unknown = null;
+    try {
+      withLimit("step", OUTPUT_STALL_MS, () =>
+        npmSeams.run("sh", ["-c", "echo npm notice; echo npm error >&2; exec sleep 30"]),
+      );
+    } catch (thrown) {
+      error = thrown;
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+    expect(error).toBeInstanceOf(RunTimeout);
+    expect(written).toEqual(["stdout npm notice\n", "stderr npm error\n"]);
   });
 
   it("publishes with --access public and no --provenance flag", () => {
@@ -551,7 +727,7 @@ describe("publish", () => {
     ]);
   });
 
-  it("imports only Node modules and release-facts", () => {
+  it("imports only Node modules, release-facts, and run-sync", () => {
     // The job publish runs no install, so each import must resolve with none.
     const imports = (file: string) =>
       [
@@ -560,13 +736,14 @@ describe("publish", () => {
         ),
       ].map((m) => m[1] ?? m[2]);
     expect(imports("../src/publish.ts")).toEqual([
-      "node:child_process",
       "node:crypto",
       "node:fs",
       "node:path",
       "node:zlib",
       "./lib/release-facts.ts",
+      "./lib/run-sync.ts",
     ]);
     expect(imports("../src/lib/release-facts.ts")).toEqual([]);
+    expect(imports("../src/lib/run-sync.ts")).toEqual(["node:child_process"]);
   });
 });

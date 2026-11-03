@@ -12,13 +12,7 @@ import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
-import {
-  CLAIM_RUNS,
-  ClaimLostError,
-  claimEmail,
-  claimedUser,
-  ensureEmailIdentity,
-} from "./users.js";
+import { claimEmail, claimedUser, claimRetry, ensureEmailIdentity } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -137,6 +131,8 @@ export async function confirmUserInvite(
   const verified = verifySteps(config, "invite");
   let answer: Result<UserRow> | null = null;
   let opened: Awaited<ReturnType<typeof steps.write>> | null = null;
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; answer === null; attempt++) {
     try {
       answer = await hookGuard(() =>
@@ -184,8 +180,10 @@ export async function confirmUserInvite(
         continue;
       // Another proof claimed the user first, or a session race undid the
       // claim. The rollback undid the spend, so the retry spends the link again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
-      throw err;
+      const next = claimRetry(config.storage, err, lost++);
+      if (next === "retry") continue;
+      if (next === "conflict") answer = fail("conflict");
+      else throw err;
     }
   }
   if (!answer.ok) return answer;

@@ -15,10 +15,10 @@ import { authRoutes } from "../src/index.js";
 // The stall probe of the third re-review of the body cap, over real sockets
 // on Node (ruling 59 Major 1 of the 12j lane). Sixteen sockets of one client
 // post 1 MiB of a SAML form each to the ACS of any connection id, with no
-// cookie, and stall. Fastify 5 sets no request timeout, so before ruling 59
+// cookie, and stall. Fastify 5 sets no request timeout. So before ruling 59
 // the stall held the large-read budget of the process: every ACS post
 // answered 503 body_busy while the sockets lived. Now the client holds only
-// its share, the ACS reads the form of another client at once, and each
+// its share, and the ACS reads the form of another client at once. Each
 // stalled read ends at core's idle limit.
 
 const ACS = "/auth/sso/01KDVDQ4K0M3BPSSWQAS1JPT17/acs";
@@ -135,10 +135,10 @@ describe("a stalled client at the SAML ACS through the Fastify binding (ruling 5
 });
 
 // The bounds of ruling 69 of the 12j lane, over real sockets. One free account
-// stalled one SSO connection write of 8 MiB, held the user half of the budget
-// for 64 s, and could do so 30 times in 15 minutes. Now a user runs one large
-// read at a time, a read of a user ends at 256 KiB per second (32 s for the
-// cap), and a user starts at most 6 large reads in an hour.
+// stalled one SSO connection write of 8 MiB and held the user half of the
+// budget for 64 s. It could do so 30 times in 15 minutes. Now a user runs one
+// large read at a time. A read of a user ends at 256 KiB per second (32 s for
+// the cap). A user starts at most 6 large reads in an hour.
 //
 // Plan 12l runs the manager guard before the read of an SSO connection
 // write. So each writer of these tests is a manager of its own
@@ -397,7 +397,7 @@ describe("the large reads of one user through the Fastify binding (ruling 69 of 
     try {
       const { cookie, org } = await managerCookie(app, "y@probe.example", "203.0.113.3");
       // 48 KiB each 250 ms: 192 KiB per second. At the rate of a read before a session, 128 KiB
-      // per second, the cap had 64 s, and this body ends at 43 s and reads whole.
+      // per second, the cap had 64 s. This body ends at 43 s and reads whole.
       post = ssoPost(port, cookie, "203.0.113.3", 49_152, org);
       const p = post;
       await p.sent;
@@ -549,7 +549,7 @@ describe("the stall of a large read of a user through the Fastify binding (rulin
         'HTTP/1.1 408 Request Timeout {"error":"body_timeout"}',
       );
       console.log(`body-stall: the stalled write of a user answered at ${stalled.at()} ms`);
-      // Five reads of the hour were left, and the stall spent them: the next write sends only
+      // Five reads of the hour were left, and the stall spent them. The next write sends only
       // its head, and the answer comes with no byte read.
       const next = ssoPost(port, cookie, "203.0.113.50", 0, org);
       posts.push(next);
@@ -741,7 +741,7 @@ describe("a slow large read of a user through the Fastify binding (ruling 79 of 
 
 // Ruling 75 of the 12j lane withdrew a count of the large reads of the
 // whole deployment (60 per hour). With it, 10 free accounts spent the 60
-// reads with small writes in seconds, and every SSO connection write of the
+// reads with small writes in seconds. Then every SSO connection write of the
 // deployment answered 429 until the window ended.
 describe("the large reads of one account do not limit another (ruling 75 of the 12j lane)", () => {
   it("reads the SSO write of an eleventh account after ten accounts spend their large reads", {

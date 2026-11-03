@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthConfig, ConfigError, type MailMessage } from "../src/config.js";
+import { verifyMagicLink } from "../src/engine/magic-link.js";
 import { appActor, type OperatorActor } from "../src/engine/operator/guards.js";
+import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { passwordSignIn, requestPasswordReset, resetPassword } from "../src/engine/password.js";
-import { resolveSession } from "../src/engine/sessions.js";
+import { destroySession, resolveSession } from "../src/engine/sessions.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
+import { confirmUserInvite } from "../src/engine/user-invite.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import type { UserRow } from "../src/schema.js";
+import type { SessionRow, UserRow } from "../src/schema.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { BASE_URL, get, makeAuth, post, recordCredential, settled } from "./helpers.js";
-import { operatorAuth } from "./operator-helpers.js";
+import { OPERATOR_SECRETS, operatorAuth, operatorFixture } from "./operator-helpers.js";
 import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
 // The invitation link of a created user (plan 12f2 Task 3, spec 26). Every
@@ -504,5 +508,136 @@ describe("the invitation link (plan 12f2 Task 3)", () => {
       world({ totp: { gate: { invite: "yes" as unknown as boolean } } }),
     ).rejects.toThrow(new ConfigError("totp.gate.invite must be true or false"));
     expect((await world()).config.totp?.gate.invite).toBe(true);
+  });
+});
+
+describe("the claim of the invitation confirm (12f2 follow-up 7, K6)", () => {
+  it("fires afterEnd once for each row when a race undoes the claim after its first chunk", async () => {
+    // The impersonation tool was on, and then the app turned it off. So the
+    // impersonation rows of the invited user are plain rows for the claim.
+    // An invited user can hold no other session before the confirm.
+    const operator = async (impersonation: boolean): Promise<Pick<AuthConfig, "operator">> => ({
+      operator: {
+        secrets: [
+          {
+            name: "support",
+            secretHash: await sha256Hex(OPERATOR_SECRETS.support),
+            scopes: ["users", "sessions", "audit"],
+          },
+        ],
+        users: true,
+        ...(impersonation ? { impersonation: {} } : {}),
+      },
+    });
+    const on = await operatorFixture({ config: await operator(true) });
+    const done = await operatorApi(on.auth.config).users.create({
+      actor: appOf("support-desk"),
+      email: ADA,
+      ...REASON,
+    });
+    if (!done.ok) throw new Error(done.code);
+    const token = inviteOf(on.auth.mail);
+    // 51 rows: the claim deletes 50 in its first chunk and the last in the next.
+    const rows: { id: string; token: string }[] = [];
+    for (let i = 0; i < 51; i++) {
+      // The start limit is 20 an hour.
+      if (i > 0 && i % 20 === 0) on.auth.clock.advance(HOUR + 1);
+      const r = await startImpersonation(on.auth.config, {
+        operator: on.operator,
+        userId: done.value.userId,
+        reason: REASON.reason,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      rows.push({ id: r.value.session.id, token: r.value.token });
+    }
+    const last = [...rows].sort((a, b) => (a.id < b.id ? -1 : 1)).at(-1);
+    if (!last) throw new Error("no rows");
+    const ended: { session: SessionRow; reason: string }[] = [];
+    const off = await operatorAuth({
+      ...(await operator(false)),
+      storage: on.auth.config.storage,
+      clock: on.auth.clock,
+      hooks: { session: { afterEnd: (e) => void ended.push(e) } },
+    });
+    const storage = off.config.storage;
+    const original = storage.transaction.bind(storage);
+    let armed = true;
+    storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          findMany: async (m, w, o) => {
+            const found = await tx.findMany(m, w, o);
+            if (armed && m === "session" && [o?.sort].flat()[0]?.field === "id") {
+              armed = false;
+              // A sign-out of the last row between the read of the claim and its second chunk.
+              await destroySession(off.config, last.token);
+            }
+            return found;
+          },
+        }),
+      );
+    const answer = await confirmUserInvite(off.config, {
+      token,
+      ip: "198.51.100.7",
+      userAgent: null,
+    });
+    expect(answer.ok).toBe(true);
+    expect(armed).toBe(false);
+    expect(ended.map((e) => [e.session.id, e.reason]).sort()).toEqual(
+      rows.map((r) => [r.id, r.id === last.id ? "sign_out" : "claim"]).sort(),
+    );
+    const user = await storage.findOne("user", [
+      { field: "id", op: "eq", value: done.value.userId },
+    ]);
+    expect(user?.emailVerified).toBe(true);
+  });
+});
+
+describe("the invitation confirm on a store with a query limit per invocation (ruling 32 of plan 12n)", () => {
+  it("answers conflict when another proof claims the user first, and keeps the invitation for the request again", async () => {
+    const w = await world();
+    const storage = w.config.storage;
+    storage.queryLimitPerInvocation = true;
+    const done = await invited(w);
+    const token = inviteOf(w.mail);
+    // The person also asks for a magic link of the address.
+    expect((await w.handle(post("/auth/magic-link/request", { email: ADA }))).status).toBe(200);
+    const link = linkTo(w.mail, ADA);
+    // Memory runs one transaction at a time. So the magic link runs its
+    // transaction on the store at once, as a commit of another request does.
+    const free: StorageAdapter = { ...storage, transaction: (fn) => fn(free) };
+    const side = { ...w.config, storage: free };
+    let claims = 0;
+    const original = storage.transaction.bind(storage);
+    storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, where, d) => {
+            if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true) {
+              claims++;
+              // The magic link claims the user before the flip of the confirm.
+              const v = await verifyMagicLink(side, { token: link, ip: null, userAgent: null });
+              if (!v.ok) throw new Error(v.code);
+            }
+            return tx.update(m, where, d);
+          },
+        }),
+      );
+    const res = await confirm(w, token);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+    // One run of the claim, and no retry.
+    expect(claims).toBe(1);
+    storage.transaction = original;
+    // The undo kept the invitation unspent, so the request again signs the person in.
+    const [row] = await inviteRows(w);
+    expect(row?.consumedAt).toBeNull();
+    const again = await confirm(w, token);
+    expect(again.status).toBe(200);
+    expect((await resolveSession(w.config, sessionToken(w, again)))?.user.id).toBe(done.userId);
   });
 });

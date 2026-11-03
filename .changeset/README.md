@@ -32,13 +32,14 @@ Add the schema version field to the package manifest.
 The rules (`check-changesets`, plan 12j Task 4):
 
 1. A change to a released package needs a changeset that names the package.
-2. A test, a proof, a typetest, a fixture, and the README need no changeset. The `CHANGELOG.md` at a package root needs none: `changeset version` writes it on the release branch, and `check-records` holds it.
+2. A test, a proof, a typetest, a fixture, and the README need no changeset. The `CHANGELOG.md` at a package root needs none: `changeset version` writes it on the release branch, and `check-records` holds it. A `vitest.config.ts` or a `vitest.<name>.config.ts` at a package root needs none either. A file under `scripts/` needs none when the `files` field does not pack it. That holds only while the `build` script of the package runs no file of `scripts/`. A build that runs one, such as the build of the CLI, writes `dist` with it.
 3. A file that the `files` field of the package packs always needs a changeset, also a proof or a README. A package with no `files` field packs each file. Each `files` entry is a plain path, with no glob and no `./`.
 4. A change to `package.json` needs a changeset only when a runtime key changes. The runtime keys are `dependencies`, `peerDependencies`, `peerDependenciesMeta`, `optionalDependencies`, `exports`, `imports`, `main`, `types`, `typesVersions`, `type`, `bin`, `files`, `engines`, or `scripts`.
 5. A changeset never names an unreleased package.
 6. An empty changeset (no package lines) needs the body line `No release: <reason>`.
 7. The body is Simplified Technical English. It names the change, not a plan number.
 8. A change to a root input needs a changeset that names each package of its row. A root input is a file outside the package that `prepare` or a build reads. Examples are `tsconfig.base.json`, `LICENSE`, and an example that the CLI renders. `ROOT_INPUTS` in `scripts/release/src/lib/root-inputs.ts` lists them. In `.changeset/config.json` only `fixed` counts, so a new name in `ignore` needs no changeset.
+9. A change of the `typescript` pin in the `devDependencies` of a released package needs a changeset too. tsc of that pin builds `dist`, so a new pin can change the bytes that an app loads. A change of `pnpm-lock.yaml` or `turbo.json` alone needs none. A rule for them would ask for a changeset of each released package at each bump of a dev tool.
 
 ## The bump
 

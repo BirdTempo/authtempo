@@ -31,7 +31,7 @@ sidebar:
 | Export | What it does |
 | --- | --- |
 | `authRoutes` | Answers the plugin of the routes of core. In its scope no parser of Fastify runs, so core reads the body as it came. |
-| `authSession` | Answers the onRequest hook that sets `request.authSession`, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
+| `authSession` | Answers the onRequest hook that sets `request.authSession`. It sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the hook set, or `null`. |
 | `toWebRequest` | Answers the web request of a Fastify request of the route plugin. |
 | `sendWebResponse` | Writes a web response to Fastify, with each `Set-Cookie` line. |

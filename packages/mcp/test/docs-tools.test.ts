@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { searchSections, tokenize } from "../src/search.js";
 import { createServer } from "../src/server.js";
 import { REPO } from "./support/bin.js";
 import { connect } from "./support/client.js";
@@ -54,6 +55,34 @@ describe("docs.search", () => {
   it("finds the second factor guide in the top three for '2FA'", async () => {
     const top = (await search("2FA")).slice(0, 3).map((h) => h.path);
     expect(top).toContain("/docs/guides/second-factor/");
+  });
+
+  // Ruling 24 of plan 12n: a route link in a table row adds no token to the
+  // score of its section. The Routes cell of invalid_credentials links three
+  // second-factor routes. The title, the heading, and the lines outside the
+  // table do not name a second factor. So that section alone gives no hit.
+  it("gives no score to a term that only a Routes cell names", () => {
+    const index = siteIndex();
+    const terms = index.header.terms;
+    const section = index.sections.find(
+      (s) => s.path === "/docs/reference/errors/" && s.anchor === "invalid_credentials",
+    );
+    if (!section) throw new Error("the index lacks the invalid_credentials section");
+    const lines = section.text.split("\n");
+    const cells = lines.filter((l) => l.startsWith("|")).join("\n");
+    const prose = [
+      index.pages.find((p) => p.path === section.path)?.title ?? "",
+      section.heading,
+      ...lines.filter((l) => !l.startsWith("|")),
+    ].join("\n");
+    // The start state: the index text keeps the cell, and only the cell names the term.
+    expect(tokenize(cells, terms)).toEqual(expect.arrayContaining(["second", "factor"]));
+    expect(tokenize(prose, terms)).not.toContain("second");
+    expect(tokenize(prose, terms)).not.toContain("factor");
+    const alone = { ...index, sections: [section] };
+    expect(searchSections(alone, "2FA", { limit: 10 })).toEqual([]);
+    // The prose of the section still scores, so the empty answer is no fault of the setup.
+    expect(searchSections(alone, "password", { limit: 10 })).toHaveLength(1);
   });
 
   it("finds the Clerk migration first for 'import from Clerk'", async () => {

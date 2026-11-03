@@ -6,6 +6,7 @@ import { isAncestor } from "../src/lib/git.ts";
 import { RECORDS_BASE } from "../src/lib/release-facts.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
+import { STALL_MS, withStalledGit } from "./support/stall.ts";
 
 const read = (name: string) =>
   readFileSync(new URL(`./fixtures/records/${name}`, import.meta.url), "utf8");
@@ -148,6 +149,24 @@ describe("check-records", () => {
       lines: [
         "check-records: FAIL files=0 changelogs=0 migrations=0 advisories=0 failures=1",
         "  no merge base of HEAD and main; fetch the full history (fetch-depth: 0)",
+      ],
+      code: 1,
+    });
+  });
+
+  it("prints a FAIL line, not a stack, when a git call passes its limit (review of Task 1 of plan 12n, M1)", () => {
+    const r = makeRepo();
+    repo = r;
+    r.write(CHANGELOG, read("changelog/0.1.0.md"));
+    r.commit("first");
+    r.git(["checkout", "--quiet", "-b", "work"]);
+    r.write(CHANGELOG, read("changelog/0.2.0.md"));
+    r.commit("work");
+    expect(entry(r.root, "main").code).toBe(0);
+    expect(withStalledGit(() => entry(r.root, "main"))).toEqual({
+      lines: [
+        "check-records: FAIL files=0 changelogs=0 migrations=0 advisories=0 failures=1",
+        `  git merge-base HEAD main did not end in ${STALL_MS} ms`,
       ],
       code: 1,
     });

@@ -20,9 +20,10 @@ import { ROUNDS } from "./rounds.js";
  * Takes the lock of the user row. The write sets `updatedAt` to the value it
  * read, so it changes nothing, and a parallel compare-and-set still matches.
  * A flow takes it before its other writes, so the lock order is the same for
- * all. One kind of write comes first: the reset and the password change take
- * the pending reset rows of the address. So the account delete removes the
- * proofs after its commit, and no deadlock forms. The password change and
+ * all. Some writes come first. The reset and the password change take the
+ * pending reset rows of the address. The invitation confirm spends its
+ * `user-invite` row of the user id. The account delete removes these proofs
+ * after its commit, so no deadlock forms. The password change and
  * the gated reset take the user row before the password row, as the delete
  * does, so their old order (the password row, then the sessions) forms no
  * cycle with the delete. After `ROUNDS` lost rounds the answer is `conflict`.

@@ -666,6 +666,24 @@ const NOT_FOUND: Refusal = {
   message: "No SSO provider has this providerId",
 };
 
+/**
+ * No session: Better Auth's 401, before any byte of a body. A request with
+ * no session token, or a malformed one, gets it with no storage read. A
+ * well-formed token that names no session costs one session lookup first.
+ */
+const UNAUTHORIZED: Refusal = {
+  status: 401,
+  code: "UNAUTHORIZED",
+  message: messageOf("UNAUTHORIZED"),
+};
+
+/**
+ * The caller's session, read with no write (plan 12n). Core's own route then
+ * does the one due sliding refresh, and `Calls.keep` takes its cookie. A
+ * read with a write here moves the row, and no answer carries the cookie.
+ */
+const sessionOf = (auth: Auth, request: Request) => auth.session(request, { refresh: false });
+
 /** Core's limit of the SSO manager writes of the user, in Better Auth's shape. */
 const TOO_MANY: Refusal = {
   status: 429,
@@ -692,9 +710,10 @@ async function connectionRow(mapped: Mapped, providerId: string) {
 
 /**
  * The connection of `providerId` and the domain routed to it, each read
- * through core's manager routes with the caller's session. Core's session
- * check and manager guard answer first: 401, or 403 for a caller who does
- * not manage the organization.
+ * through core's manager routes with the caller's session. Each caller reads
+ * the session first, so an anonymous caller gets 401 before this read (plan
+ * 12n). Core's session check and manager guard answer first: 401, or 403 for
+ * a caller who does not manage the organization.
  */
 async function managedProvider(
   calls: Calls,
@@ -791,9 +810,8 @@ async function register(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  const session = await auth.session(request);
-  if (!session)
-    return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  const session = await sessionOf(auth, request);
+  if (!session) return calls.fail(UNAUTHORIZED);
   const refused = await beforeLargeRead(auth, request, calls, session);
   if (refused) return refused;
   const body = await jsonBody(request, "POST /sso/connections/create");
@@ -855,9 +873,8 @@ async function listProviders(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  const session = await auth.session(request);
-  if (!session)
-    return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  const session = await sessionOf(auth, request);
+  if (!session) return calls.fail(UNAUTHORIZED);
   const members = await mapped.config.storage.findMany(
     "member",
     [{ field: "userId", op: "eq", value: session.user.id }],
@@ -894,9 +911,8 @@ async function updateProvider(
   request: Request,
   calls: Calls,
 ): Promise<Response> {
-  const session = await auth.session(request);
-  if (!session)
-    return calls.fail({ status: 401, code: "UNAUTHORIZED", message: messageOf("UNAUTHORIZED") });
+  const session = await sessionOf(auth, request);
+  if (!session) return calls.fail(UNAUTHORIZED);
   const refused = await beforeLargeRead(auth, request, calls, session);
   if (refused) return refused;
   const body = await jsonBody(request, "POST /sso/connections/update");
@@ -971,8 +987,17 @@ async function updateProvider(
   return calls.answer(providerOf(mapped, current, routed));
 }
 
-/** `POST /sso/delete-provider`: the domains of the connection, then the connection. */
-async function deleteProvider(mapped: Mapped, request: Request, calls: Calls): Promise<Response> {
+/**
+ * `POST /sso/delete-provider`: the domains of the connection, then the
+ * connection. The session comes first, as at the register (plan 12n).
+ */
+async function deleteProvider(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+  calls: Calls,
+): Promise<Response> {
+  if (!(await sessionOf(auth, request))) return calls.fail(UNAUTHORIZED);
   const body = await jsonBody(request);
   const found = await managedProvider(calls, mapped, body?.providerId);
   if (found instanceof Response) return found;
@@ -999,13 +1024,15 @@ const NO_PENDING: Refusal = {
 /**
  * `POST /sso/request-domain-verification` (ruling 61 P7): core's current
  * challenge as the token, with both records. A pending row past its time
- * is added again, with a new challenge.
+ * is added again, with a new challenge. The session comes first (plan 12n).
  */
 async function requestVerification(
+  auth: Auth,
   mapped: Mapped,
   request: Request,
   calls: Calls,
 ): Promise<Response> {
+  if (!(await sessionOf(auth, request))) return calls.fail(UNAUTHORIZED);
   const body = await jsonBody(request);
   const found = await managedProvider(calls, mapped, body?.providerId);
   if (found instanceof Response) return found;
@@ -1031,13 +1058,17 @@ async function requestVerification(
   return calls.answer(proofOf(mapped, found.connection.label, domain), 201);
 }
 
-/** `POST /sso/verify-domain`: core's verify route, which reads Better Auth's record (ruling 61 F4). */
+/**
+ * `POST /sso/verify-domain`: core's verify route, which reads Better Auth's
+ * record (ruling 61 F4). The session comes first (plan 12n).
+ */
 async function verifyDomain(
   auth: Auth,
   mapped: Mapped,
   request: Request,
   calls: Calls,
 ): Promise<Response> {
+  if (!(await sessionOf(auth, request))) return calls.fail(UNAUTHORIZED);
   const body = await jsonBody(request);
   const found = await managedProvider(calls, mapped, body?.providerId);
   if (found instanceof Response) return found;
@@ -1196,7 +1227,8 @@ export async function ssoAcsRoute(
  * reads a body of the large cap of these writes only after core's guard:
  *
  * 1. The session. A request with no session is null: core answers it 401
- *    before it reads the body (ruling 46 of the 12j lane).
+ *    before it reads the body (ruling 46 of the 12j lane). The shim reads
+ *    it with no write, so core's route does the due refresh (plan 12n).
  * 2. Core's limit of the user's manager writes. A write within the limit
  *    carries the count to core (ruling 51). A write past it gets core's
  *    429 from the shim, before any read. Core then never sees it, so the
@@ -1228,7 +1260,7 @@ export async function ssoConnectionWrite(
   const url = new URL(request.url);
   const path = url.pathname.slice(mapped.basePath.length);
   if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
-  const session = await auth.session(request);
+  const session = await sessionOf(auth, request);
   if (!session) return null;
   // A refused count marks nothing. So the shim answers it: a pass to core would count it twice.
   if (!(await countSsoManageWrite(auth, request, session.user.id)))
@@ -1284,6 +1316,8 @@ export async function ssoRoute(
   if (post && path === "/sso/register") return register(auth, mapped, request, calls);
   if (get && path === "/sso/providers") return listProviders(auth, mapped, request, calls);
   if (get && path === "/sso/get-provider") {
+    // The session comes first, as at the register (plan 12n).
+    if (!(await sessionOf(auth, request))) return calls.fail(UNAUTHORIZED);
     const found = await managedProvider(
       calls,
       mapped,
@@ -1294,9 +1328,9 @@ export async function ssoRoute(
       : calls.answer(providerOf(mapped, found.connection, found.domain));
   }
   if (post && path === "/sso/update-provider") return updateProvider(auth, mapped, request, calls);
-  if (post && path === "/sso/delete-provider") return deleteProvider(mapped, request, calls);
+  if (post && path === "/sso/delete-provider") return deleteProvider(auth, mapped, request, calls);
   if (post && path === "/sso/request-domain-verification")
-    return requestVerification(mapped, request, calls);
+    return requestVerification(auth, mapped, request, calls);
   if (post && path === "/sso/verify-domain") return verifyDomain(auth, mapped, request, calls);
   if (post && path === "/sign-in/sso") return signInSso(mapped, request, calls);
   if (get && path === "/sso/saml2/sp/metadata") {

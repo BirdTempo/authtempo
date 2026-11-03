@@ -265,7 +265,7 @@ const SUMS_ENV = "${{ needs.check.outputs.sums }}";
 const JOBS: Record<string, Record<string, Job>> = {
   [CI_FILE]: {
     check: {
-      keys: ["runs-on", "steps"],
+      keys: ["runs-on", "timeout-minutes", "steps"],
       steps: [
         checkout(true),
         PNPM,
@@ -280,7 +280,7 @@ const JOBS: Record<string, Record<string, Job>> = {
   },
   [WORKFLOW_FILE]: {
     check: {
-      keys: ["runs-on", "permissions", "outputs", "steps"],
+      keys: ["runs-on", "timeout-minutes", "permissions", "outputs", "steps"],
       outputs: { sums: SUMS_OUTPUT },
       steps: [
         checkout(true),
@@ -332,7 +332,7 @@ const JOBS: Record<string, Record<string, Job>> = {
       ],
     },
     publish: {
-      keys: ["needs", "runs-on", "environment", "permissions", "steps"],
+      keys: ["needs", "runs-on", "timeout-minutes", "environment", "permissions", "steps"],
       steps: [
         checkout(false),
         NODE,
@@ -480,6 +480,10 @@ function checkJob(
   if (runsOn?.kind !== "scalar") fail(`${at}: runs-on is not one label`);
   else if (!/^ubuntu-\d+\.\d+$/.test(runsOn.value ?? ""))
     fail(`${at}: runs-on ${runsOn.value} is not an ubuntu-<version> runner of GitHub`);
+  // The timer of vitest cannot end a sync spawn, so the job limit is the last
+  // guard of a hung step. The default of GitHub is 360 minutes (read 2026-11-03).
+  if (!/^[1-9]\d*$/.test(scalarOf(e["timeout-minutes"]) ?? ""))
+    fail(`${at}: timeout-minutes is not a whole number of minutes above 0`);
 
   if (rule.outputs !== undefined && !same(e.outputs, rule.outputs))
     fail(`${at}: the outputs are not ${JSON.stringify(rule.outputs)}`);
@@ -625,9 +629,9 @@ function checkFile(
  * The rules of spec 33 item 5 over the two workflows. Each action is pinned to
  * a commit SHA with its version. The triggers and the permissions are the
  * least, and only the job publish has id-token: write and the environment.
- * Each runner is GitHub-hosted. No run line holds an expression, and no line
- * names a token. Each level holds only the keys of its rule, each step is in
- * its order, and each script file exists.
+ * Each runner is GitHub-hosted, and each job has a time limit. No run line
+ * holds an expression, and no line names a token. Each level holds only the
+ * keys of its rule, each step is in its order, and each script file exists.
  */
 export function checkWorkflows(input: {
   files: { name: string; text: string }[];

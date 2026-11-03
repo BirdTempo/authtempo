@@ -217,6 +217,17 @@ On D1, do not delete a user or an organization inside a `transaction` of
 your own while its child rows exist: the foreign keys delete them, and a
 rollback does not bring them back (`@authtempo/adapter-d1` README).
 
+On SQLite, the storage turns the foreign keys on before its first call and
+before its migrations, on every driver. So a user delete deletes the user's
+child rows. `bun:sqlite` of Bun 1.4.3 opens with the keys off (read on
+2026-11-03). The storage then reads the key back, and each call answers
+`config_mismatch` while it reads 0. SQLite ignores the pragma inside an open
+transaction, so do not hold a `BEGIN` on the handle at the first call. A
+libSQL file client keeps a pool of connections. The storage turns the keys on
+only for the connection of its first call. On each other connection, the
+default of `@libsql/client` 0.18.0 keeps the keys on and the cascade with
+them (read on 2026-11-03). So do not turn the keys off on that client.
+
 These D1 facts come from the local Workers pool only and are not verified on
 a real D1 database: D1 refuses TEMP tables, D1 refuses a long compound
 SELECT, the PRAGMA column names, the rollback of a failed migration file, and
@@ -238,7 +249,7 @@ Better Auth defaults that core does not keep:
 
 | Better Auth default | authtempo |
 | --- | --- |
-| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. For a header with a list of values, such as `x-forwarded-for`, the shim takes the leftmost value, as Better Auth does. A client can write that value, so list only a header that your proxy sets in full. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
+| The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Set `advanced.ipAddress.ipAddressHeaders` off Workers: off Workers any caller sets `cf-connecting-ip`, so every per-IP limit can be rotated. `toNodeHandler` and `toNextJsHandler` throw `BetterAuthCompatError` at creation for an instance with neither a non-empty `ipAddressHeaders` nor `disableIpTracking: true`. `toNodeHandler` gives core the request body as a stream, so the cap of each route bounds the bytes that the route reads. A listed header value that is not an IPv4 or IPv6 literal counts as no client IP. For a header with a list of values, such as `x-forwarded-for`, the shim takes the leftmost value, as Better Auth does. A client can write that value, so list only a header that your proxy sets in full. A request with no client IP (a server call with no headers, or every request under `disableIpTracking: true`, which logs a note) skips the per-IP limit only for password sign-in, the magic link, the reset request, and the verify mail resend, which keep their per-email limits. Every other flow (sign-up, the reset form, invitation accept, the handoff, passkeys, social start) has only a per-IP limit, so it counts all such requests in one shared bucket. |
 | An absolute `callbackURL` or `redirectTo` on any trusted origin | Only the origin of `authtempo.appURL` (default the origin of `baseURL`, or of the request's entry of a list) keeps its path, because core lands every sign-in there. Any other absolute value answers `INVALID_CALLBACK_URL` or `INVALID_REDIRECT_URL`, status 403. |
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
@@ -773,7 +784,7 @@ no operator secret.
 | `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
 | `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
-| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 400 `YOU_CANNOT_REMOVE_YOURSELF` on a remove (Better Auth's status), else 409 `FORBIDDEN`. |
+| `operator_self` | 400 `YOU_CANNOT_BAN_YOURSELF` on a ban and 400 `YOU_CANNOT_REMOVE_YOURSELF` on a remove (Better Auth's status), else 409 `FORBIDDEN`. |
 | `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
 | `delete_too_large` (a remove of a user who alone holds more than 50 organizations, or on D1 a remove that does not fit one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations, or let the user leave the organizations that the user owns with another owner, first. |
 | `email_taken` on a create | 400 `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`, Better Auth's code and status. |
@@ -806,8 +817,6 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - A `set-role` of `user` on a platform operator is refused with
   `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`. Better Auth lets an admin
   revoke another admin.
-- A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with status 409.
-  Better Auth answers 400.
 - `/admin/revoke-user-sessions`, `/admin/unban-user`, and `/admin/set-role`
   on the caller's own user answer 409 `FORBIDDEN` (core's `operator_self`).
   Better Auth has no such check on these three paths. Core lets no operator
@@ -835,6 +844,11 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - `/admin/remove-user` deletes the user's solo organizations with the
   account, and refuses the last owner of an organization with other members
   (`SOLE_OWNER`). Better Auth keeps every organization.
+- On the D1 storage, a delete ends one page of the user's sessions with
+  `session.afterEnd`, such as 8 of 60. On the Postgres and SQLite storages,
+  a delete ends up to 500 of the user's own sessions with
+  `session.afterEnd`. In both cases, the cascade of the user row deletes
+  the rest with no hook and no `impersonation_stop` row.
 - `/admin/create-user` takes no password, no role but `user`, no ban key,
   and no added field. Better Auth sets each one. A server call with no
   headers answers 401: Better Auth creates the user there with no session.
@@ -843,9 +857,9 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
 With `twoFactor()`, it also reads the factor row once.
-A ban of a user with 60 sessions sends 35 queries in its invocation.
-A ban of a user with 501 sessions sends 49: core ends one page of sessions
-in the budget, and the sweep ends the rest.
+A ban of a user with 60 sessions sends 36 queries in its invocation.
+A ban of a user with 501 sessions sends 46 queries. Core ends one page of
+350 sessions in the budget, and the sweep ends the other 151.
 An impersonation start sends 33 queries and a stop 19, each with the
 shim's read of the session for `{ session, user }`.
 A remove adds no query to core's delete route: it answers
@@ -1215,17 +1229,20 @@ Behavior that differs from Better Auth:
   second argument of `toNextJsHandler`. On a serverless Node host, pass
   the host's `waitUntil` to `toNodeHandler` the same way. Without it, the
   send runs detached, and a host that freezes the function after the
-  answer can delay or drop it.
+  answer can delay or drop it. `toNodeHandler` gives core the request body
+  as a stream, so the cap of each route bounds the bytes that the route
+  reads.
 - Core signs in by phone and password only with a number that its code
   proved. A number that Better Auth stored with no proof does not sign in,
   so `requireVerification` other than `true` logs a note.
 - A proof of the address clears the phone of an unverified user, by the
   claim rule: a number on an unverified row can be a claimant's. Better
   Auth 1.7.2 keeps the number at an email verify. So a moved user who
-  proved a number, but never the address, loses the phone sign-in at
-  their own verify link, magic link, email code, or social sign-in. They
-  add the number again with `/phone-number/send-otp` and
-  `updatePhoneNumber: true`.
+  proved a number, but never the address, loses the phone sign-in at a
+  proof of the address. The proofs are their own verify link, a reset, a
+  magic link, an email code, a social sign-in, and an ID-token sign-in.
+  They add the number again by `/phone-number/send-otp`, then
+  `/phone-number/verify` with `updatePhoneNumber: true`.
 - The last method cookie holds core's values. The client maps them to
   Better Auth's names: `password` is `email`, `social:<id>` is `<id>`,
   `magic_link` is `magic-link`, `email_otp` is `email-otp`, and `phone` is
@@ -1724,7 +1741,7 @@ each connection its own SP entity id, and the provider's answer gives it as
 | Better Auth path | Core route |
 | --- | --- |
 | `POST /sso/register` | `POST /sso/connections/create?organizationId=`, then `POST /sso/domains/add` and `POST /sso/domains/update` |
-| `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages |
+| `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages. The shim reads at most 100 member rows of the caller, the first that the storage gives. It lists the connections of those organizations only. |
 | `GET /sso/get-provider?providerId=` | `GET /sso/connections` and `GET /sso/domains` |
 | `POST /sso/update-provider` | `POST /sso/connections/update?id=`; a new domain is added and routed, and the old one deleted |
 | `POST /sso/delete-provider` | `POST /sso/domains/delete` for each domain of the connection, then `POST /sso/connections/delete` |
@@ -1743,8 +1760,9 @@ Each such write of an account that manages no organization gets a refusal
 before any byte. The refusal is the 403 of the guard or its pre-check, or an
 earlier one, such as 401, 503, 429, 400, or 404. Such an account counts no
 large read. `/sso/delete-provider` and core's `POST /sso/connections/delete`
-read their body first, at most 64 KiB, and then run the guard. The steps of
-core's two connection writes through the shim's handler come in this order:
+read the session first, then their body of at most 64 KiB, and then run the
+guard. The steps of core's two connection writes through the shim's handler
+come in this order:
 
 1. The session, else 401.
 2. A large read that cannot start answers 503 at once. Then core's limit of the manager writes of the user, else 429.
@@ -1764,12 +1782,19 @@ The body of `/sso/register` names the organization. The body of
 the connection of that provider. So the shim cannot know the organization
 before the read. Before their read, these two paths run a pre-check of the
 guard: each step that needs no organization. The caller must be a platform
-operator, or own one organization or more. The order: the session, the
+operator, or hold the owner rank in the first 100 member rows that the
+storage gives. An owner whose row is past those rows gets 403 here, and can
+write through core's paths `POST /sso/connections/create` and
+`POST /sso/connections/update`. The order: the session, the
 `body_busy` check, the count of the manager write, the pre-check, the count
 of the large read, then the read. A large read that cannot start answers 503
 `SERVICE_UNAVAILABLE`, Better Auth's code for core's `body_busy`. Core's
 guard then runs once after the read, for the organization of the body or of
 the provider.
+
+A `/sso/register` of a platform operator counts `operator:user` three times,
+one per core write: the create, the domain add, and the domain update. Each
+write runs core's guard. So the 600 calls of an hour give 200 registers.
 
 Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
 `/sso/saml2/sp/slo/:providerId`, and `POST /sso/saml2/logout/:providerId`.

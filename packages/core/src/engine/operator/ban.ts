@@ -145,6 +145,13 @@ export async function targetOf(
   return ok(user);
 }
 
+/**
+ * The calls of the second read of the platform role in the ban's act of a
+ * user actor. They are the reads of the platform organization and the
+ * member row (decision 15 of plan 12n).
+ */
+const ROLE_CALLS = 2;
+
 /** The ban fields that an act writes, from the row that it read. */
 type BanPatch = Pick<UserPatch, "bannedAt" | "banReason" | "banUntil">;
 
@@ -236,11 +243,12 @@ export async function banUser(
   const until = banEnd(input.until, now);
   if (!until.ok) return until;
   const fixed = TARGET_CALLS[input.actor.kind];
+  const role = input.actor.kind === "user" ? ROLE_CALLS : 0;
   const budget = await workBudget(
     config.storage,
     input.actor,
     undefined,
-    fixed + STEP_WORST.hold + ACCESS_END_LEAST,
+    fixed + role + STEP_WORST.hold + ACCESS_END_LEAST,
   );
   if (!budget.ok) return budget;
   const target = await targetOf(config, input);
@@ -273,6 +281,14 @@ export async function banUser(
       if (!written.ok) return written;
       // The read and the update: a batch of 2 on D1.
       meter.step(STEP_WORST.hold);
+      // A user actor reads the platform role again, after the ban fields
+      // hold the user row. A grant holds that row first. So on Postgres and
+      // MySQL, a grant that committed after `targetOf` shows here, and the
+      // answer undoes the act (decision 15 of plan 12n).
+      if (role > 0) {
+        if (await isPlatformOperator(config, input.userId, tx)) return fail("operator_required");
+        meter.step(role);
+      }
       // One read takes the locks of the user's sessions and of the
       // impersonation sessions that the user opened, before any delete
       // (ruling 42 L3). It costs the audit read and the lock read.

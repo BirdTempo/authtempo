@@ -32,6 +32,9 @@ describe("the count of one isolate", () => {
     expect(count.take("192.0.2.1", 0)).toBe(true);
   });
 
+  // It sends more than 600 requests. Its lowest time in the logs is 7.85 s. In the 20 evidence
+  // runs of 2026-10-30 to 2026-11-03 it passed in up to 45.25 s, at sampled peak load 36 to 56.
+  // It timed out at 60 s once, in a release rehearsal of 2026-10-30 (peak load 35).
   it("refuses a request over the limit before its sandbox answers", async () => {
     const jar = await newSandbox();
     // A live sandbox answers /whoami with 401 and no session. The address is only this test's.
@@ -47,6 +50,5 @@ describe("the count of one isolate", () => {
     expect(await over.json()).toEqual({ error: "demo_limit", limit: "requestsPerIpPerMinute" });
     // Another address still reaches the same sandbox.
     expect((await call(jar, "GET", "/whoami")).status).toBe(401);
-    // 601 requests take about 3 s alone, and over 5 s under the load of other lanes.
-  }, 60_000);
+  }, 120_000);
 });

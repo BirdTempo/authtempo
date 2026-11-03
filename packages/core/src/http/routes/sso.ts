@@ -292,7 +292,11 @@ async function managedSteps<Q, T, V>(
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);
   const r = await act(read.value);
-  return send(r.ok ? answer(r.value) : respond(r), renewed);
+  // A 401 of the act names a dead session, so it gets no renewed cookie. A 403 keeps it (ruling 30 of plan 12l).
+  return send(
+    r.ok ? answer(r.value) : respond(r),
+    !r.ok && r.code === "unauthorized" ? null : renewed,
+  );
 }
 
 /**

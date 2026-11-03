@@ -10,7 +10,7 @@ import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, LONG_TEST_MS, makeAuth, post } from "./helpers.js";
 import { authorized, exchange, pkce, REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, sessionOf } from "./operator-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
@@ -578,7 +578,13 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect([counts.calls, counts.sessionRowsRead]).toEqual([22, 501]);
   });
 
-  it("keeps each call of the app at 49 storage calls or fewer, and ends each session once", async () => {
+  // It makes 12 worlds, the largest with 500 sessions. Its lowest time in the logs is 1.23 s,
+  // and its highest pass is 3.82 s (release rehearsal, 2026-10-31). It timed out at the default
+  // 5 s in two core runs beside another lane. It took 5.00 s at load 42.8 (2026-10-30) and
+  // 5.02 s at load 39.7 (2026-10-31).
+  it("keeps each call of the app at 49 storage calls or fewer, and ends each session once", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const cases = [
       { size: 1, linked: 0 },
       { size: 50, linked: 0 },

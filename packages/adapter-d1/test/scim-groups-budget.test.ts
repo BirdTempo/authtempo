@@ -37,6 +37,9 @@ import {
 beforeEach(resetWorld);
 
 describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
+  // It makes 3001 SCIM users first. Its lowest time in the logs is 30.9 s. In the 20 evidence
+  // runs of 2026-10-30 to 2026-11-03 it passed in up to 84.4 s, at sampled peak load 36 to 56.
+  // It timed out at 120 s once, at 122.5 s, in a release rehearsal of 2026-10-30 (peak load 35).
   it("keeps each route at the member cap inside 50 queries", async () => {
     const setup = make(env.DB, false);
     const { token } = await acme(setup);
@@ -107,7 +110,7 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
     // Measured on the binding; see the ledger of plan 12d Task 11.
     expect(counts).toEqual(MEASURED_CAP);
     for (const n of Object.values(counts)) expect(n).toBeLessThanOrEqual(50);
-  }, 120_000);
+  }, 300_000);
 
   it("keeps the rename and the delete of a mapped group at the role cap inside 50 queries", async () => {
     const setup = make(env.DB, false);

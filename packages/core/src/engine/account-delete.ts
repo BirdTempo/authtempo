@@ -70,14 +70,14 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  */
 const DELETE_CALLS_BEFORE = 6;
 
-/** The reads of `organizationsOfDelete` for any count of organizations (ruling 30 of plan 12d). */
-export const ORGANIZATION_RULE_READS = 3;
-
 /**
  * The read of the user's scimUser rows and the delete of their
  * scimGroupMember rows (ruling 25 of plan 12d). A user has one scimUser row
  * per organization, and one delete takes `IN_CHUNK` of them. The reserve
- * holds the read and one delete.
+ * holds the read and one delete. On a store with a per-invocation query
+ * limit, the delete reads the rows before its size check. It then keeps one
+ * call for each chunk past the first, in place of the read (decision 16 of
+ * plan 12n).
  */
 const SCIM_GROUP_CALLS = 2;
 
@@ -202,6 +202,40 @@ function readCounted(tx: StorageAdapter): { storage: StorageAdapter; reads(): nu
     },
   });
   return { storage, reads: () => reads };
+}
+
+/**
+ * The size check of a delete before any write (ruling 30 of plan 12d). More
+ * solo organizations than one set-based delete takes answer
+ * `delete_too_large`. The check is also for D1, where the undo of a write
+ * is no lock. One read of the memberships decides: with at most `IN_CHUNK`
+ * of them, no count of solo organizations passes it. Else the organization
+ * rule runs here, and again inside the transaction after the lock of the
+ * user. The self delete and the operator delete share this check.
+ *
+ * It answers the count of the reads that it sent, for the call budget of
+ * the delete (ruling 32 of plan 12n). The rule reads the memberships again.
+ * Then it reads in chunks of `IN_CHUNK` (`findManyIn`): one read per chunk
+ * of organizations, and one per chunk of their members. So 51 to 100
+ * memberships cost 6 reads: 1 here and 5 in the rule. Each 50 more cost 2
+ * more, and no setting bounds the memberships by default. With a fixed
+ * count of 3 for the rule, a D1 delete with 51 memberships made 51 calls
+ * (measured 2026-11-03). This held for the operator delete and for the
+ * worst self delete (operator-delete-budget.test.ts of adapter-d1).
+ */
+export async function deleteSizeCheck(
+  config: ResolvedConfig,
+  userId: string,
+): Promise<Result<number>> {
+  const counted = readCounted(config.storage);
+  const memberships = await counted.storage.findMany("member", [
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  if (memberships.length > IN_CHUNK) {
+    const plan = await organizationsOfDelete(config, counted.storage, userId);
+    if (!plan.ok && plan.code === "delete_too_large") return plan;
+  }
+  return ok(counted.reads());
 }
 
 export interface AccountDelete {
@@ -374,22 +408,11 @@ async function runDelete(
   const ended = endedList(config);
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  // Before any write (ruling 30 of plan 12d), more solo organizations than
-  // one set-based delete takes answer delete_too_large. The check is also
-  // for D1, where the undo of a write is no lock. One read of the
-  // memberships decides:
-  // with at most IN_CHUNK of them, no count of solo organizations passes it.
-  // The rule runs again inside the transaction, after the lock of the user.
-  const memberships = await config.storage.findMany("member", [
-    { field: "userId", op: "eq", value: userId },
-  ]);
-  let checked = 1;
-  if (memberships.length > IN_CHUNK) {
-    const plan = await organizationsOfDelete(config, config.storage, userId);
-    if (!plan.ok && plan.code === "delete_too_large") return plan;
-    checked += ORGANIZATION_RULE_READS;
-  }
-  const before = DELETE_CALLS_BEFORE + checked + ((await config.storage.readyStatements?.()) ?? 1);
+  // Before any write, the size check of the solo organizations, with the count of its reads.
+  const checked = await deleteSizeCheck(config, userId);
+  if (!checked.ok) return checked;
+  const before =
+    DELETE_CALLS_BEFORE + checked.value + ((await config.storage.readyStatements?.()) ?? 1);
   // On a store with a per-invocation query limit (D1), a delete whose least
   // work cannot fit the budget answers delete_too_large before any delete
   // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
@@ -551,9 +574,10 @@ export async function accountDeleted(
  * storage calls for any count, 0 when none goes. The act deletes their
  * organization, connection, domain, SCIM token, and member rows, and one
  * pending row leaves the rest to the sweep (organization-rest.ts). The
- * organization rule reads in 3 calls for any count. At most `IN_CHUNK`
- * solo organizations go in one delete; more answer `delete_too_large`
- * before any write (`runDelete`).
+ * organization rule reads in 3 calls for up to `IN_CHUNK` memberships, and in
+ * 2 more for each further `IN_CHUNK`. At most `IN_CHUNK` solo organizations
+ * go in one delete; more answer `delete_too_large` before any write
+ * (`deleteSizeCheck`).
  *
  * The sessions end in pages inside `budget` (ruling 1 of plan 12f2, item
  * B1): first the user's own sessions, then the impersonation sessions that
@@ -608,19 +632,31 @@ export async function deleteAccountRows(
   const plan = await organizationsOfDelete(config, counted.storage, user.id, proof.refusePlatform);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
-  // The least calls after this point, at the worst: the owner lock (a batch
-  // of 2 on D1) and the recount of each organization that the user owns
-  // with another owner, the user delete, the solo organizations, the deletes
-  // of the invitations and the member rows of the user, the least of each
-  // page of sessions, and `DELETE_KEEP`. The size check comes before the
-  // scimUser locks, which D1 does not have.
+  // D1 has no lock, so the read of the user's scimUser rows comes before the
+  // size check there, and the delete knows its scimGroupMember chunks. Its
+  // call left the reserve; each chunk past the first joins it. A user with
+  // scimUser rows in 51 organizations makes 2 chunks (decision 16 of plan 12n).
+  const early =
+    config.storage.queryLimitPerInvocation === true
+      ? await counted.storage.findMany("scimUser", [{ field: "userId", op: "eq", value: user.id }])
+      : null;
+  const keep =
+    early === null
+      ? DELETE_KEEP
+      : DELETE_KEEP - 1 + Math.max(0, Math.ceil(early.length / IN_CHUNK) - 1);
+  // The least calls after this point, at the worst. First the owner lock (a
+  // batch of 2 on D1) and the recount of each organization that the user
+  // owns with another owner. Then the user delete, the solo organizations,
+  // and the deletes of the invitations and the member rows of the user. Last
+  // the least of each page of sessions, and `keep`. The size check comes
+  // before the scimUser locks, which D1 does not have.
   const least =
     3 * owned.length +
     1 +
     (going.length > 0 ? SOLO_CALLS : 0) +
     2 +
     SESSIONS_PAGE_LEAST * (hold.targets.length > 0 ? 2 : 1) +
-    DELETE_KEEP;
+    keep;
   if (proof.refuseAfter !== null) {
     // The meter also counts the statements of a parallel invocation on the
     // same adapter, so it alone could refuse a delete that fits. The count
@@ -720,7 +756,7 @@ export async function deleteAccountRows(
       now,
       proof.meter,
       ownBudget,
-      DELETE_KEEP + tail + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
+      keep + tail + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
       "account_deleted",
       proof.stops,
     )
@@ -734,7 +770,7 @@ export async function deleteAccountRows(
       now,
       proof.meter,
       proof.budget,
-      DELETE_KEEP + tail,
+      keep + tail,
       "account_deleted",
       proof.stops,
     )
@@ -747,8 +783,10 @@ export async function deleteAccountRows(
   // after its last attempt. A row that fails waits for its next attempt.
   // A scimGroupMember row names a scimUser row, not the user, so it is no
   // user child model (ruling 25 of plan 12d). One read takes the user's
-  // scimUser ids, and their member rows go before them.
-  const scimUsers = await tx.findMany("scimUser", [{ field: "userId", op: "eq", value: user.id }]);
+  // scimUser ids, and their member rows go before them. On D1 the read came
+  // before the size check; on Postgres and MySQL it comes after the locks.
+  const scimUsers =
+    early ?? (await tx.findMany("scimUser", [{ field: "userId", op: "eq", value: user.id }]));
   for (let i = 0; i < scimUsers.length; i += IN_CHUNK)
     await tx.delete("scimGroupMember", [
       {

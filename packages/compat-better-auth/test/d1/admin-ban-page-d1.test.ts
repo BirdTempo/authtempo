@@ -1,5 +1,6 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import readme from "../../README.md?raw";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import { adminApp, adminShim, PASSWORD } from "../admin-helpers.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
@@ -13,6 +14,9 @@ import { execD1 } from "./schema.js";
 
 await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
+
+/** The ban of 501 sessions in one invocation: its queries and the sessions it leaves. The README states both. */
+const PAGE = { queries: 46, left: 151 } as const;
 
 describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
   it("bans a user with 501 sessions in 50 queries or fewer", { timeout: 300_000 }, async () => {
@@ -54,13 +58,22 @@ describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
     // 47 queries and 101 sessions left (run of 2026-10-22).
     // Ruling 78 of plan 12d: the handler takes the session row of the router, 1 query
     // fewer; the reserve keeps the call, so the page stays (run of 2026-10-24).
+    // Decision 15 of plan 12n: a ban by a user actor reads the platform role
+    // again inside its act, 2 queries (54e2dce2). So the page ends one chunk
+    // of 50 fewer: 46 queries and 151 sessions left (run of 2026-11-03).
     expect(count.queries).toBeLessThanOrEqual(50);
-    expect(count.queries).toBe(46);
+    expect(count.queries).toBe(PAGE.queries);
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`)
       .bind(ann.id)
       .first<{ n: number }>();
     // The sessions past the budget stay for the sweep, and core's ban rule
     // refuses each of them at every door until then.
-    expect(left?.n).toBe(101);
+    expect(left?.n).toBe(PAGE.left);
+  });
+
+  it("states the queries of that ban and the sessions it ends in the README", () => {
+    expect(readme.replace(/\s+/g, " ")).toContain(
+      `A ban of a user with 501 sessions sends ${PAGE.queries} queries. Core ends one page of ${501 - PAGE.left} sessions in the budget, and the sweep ends the other ${PAGE.left}.`,
+    );
   });
 });

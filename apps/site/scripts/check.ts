@@ -253,6 +253,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       ),
   },
   {
+    // The Routes cell of each code holds to ROUTES (12i follow-up (1), plan 12n).
     name: "check-errors",
     run: () =>
       checkErrors(
@@ -260,6 +261,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         ERRORS,
         OAUTH_ERRORS,
         STORAGE_ERROR_CODES,
+        ROUTES,
       ),
   },
   {

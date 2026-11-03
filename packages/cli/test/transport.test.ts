@@ -1,9 +1,11 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
+import { createServer, Socket } from "node:net";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Stop } from "../src/errors.js";
 import { describeUrl } from "../src/output.js";
+import { openMysql } from "../src/seams/mysql.js";
 import { libsqlParser } from "../src/seams/sqlite.js";
 import {
   isLoopbackHost,
@@ -15,7 +17,8 @@ import {
 import { PKG } from "./support/bin.js";
 
 // The transport rule of design section 9 item 4 (plan 12g Task 6): pure
-// tests, with no connection.
+// tests, with no connection. One test counts the sockets of the MySQL seam,
+// and only its control case connects, to a closed port of 127.0.0.1.
 
 /** The message of the Stop that `f` throws. It fails when `f` throws no Stop. */
 function stopOf(f: () => void): string {
@@ -34,6 +37,25 @@ beforeAll(async () => {
   parse = await libsqlParser();
 });
 const libsql = (url: string) => requireLibsqlTransport(url, parse);
+
+/** The Stop of the MySQL rule for a host that is not a loopback address and a URL with no TLS. */
+const noTls = (where: string) =>
+  `${where} is not a loopback host, and the URL asks for no TLS with certificate and host name checks; add ?ssl={"rejectUnauthorized":true,"verifyIdentity":true}`;
+
+/** The error of one ping through the MySQL seam of the CLI, or null when it passes. */
+async function seamError(url: string): Promise<unknown> {
+  try {
+    const seam = openMysql(url, () => {});
+    try {
+      await seam.ping();
+    } finally {
+      await seam.close();
+    }
+    return null;
+  } catch (e) {
+    return e;
+  }
+}
 
 describe("the transport rule (plan 12g Task 6)", () => {
   it("requires TLS for a MySQL host that is not a loopback address", () => {
@@ -75,6 +97,79 @@ describe("the transport rule (plan 12g Task 6)", () => {
       ).toBe(
         'db.example.com/app is not a loopback host, and the URL asks for no TLS with certificate and host name checks; add ?ssl={"rejectUnauthorized":true,"verifyIdentity":true}',
       );
+  });
+
+  it("refuses a MySQL host that is an IP address and not a loopback address, even with TLS", () => {
+    // mysql2 3.24.5 checks the name localhost for an IP host, so no host name check holds there.
+    const tls = '{"rejectUnauthorized":true,"verifyIdentity":true}';
+    const ipStop = (where: string) =>
+      `the host of ${where} is an IP address that is not a loopback address; the MySQL driver sends no server name to an IP host and checks the name localhost in its place; use the DNS name that the certificate carries`;
+    const hosts: [host: string, where: string][] = [
+      ["203.0.113.9", "203.0.113.9/db"],
+      ["[2001:db8::7]", "[2001:db8::7]/db"],
+      // The rule reads an IPv4-mapped address as no loopback address. This one
+      // reaches 127.0.0.1: the identity case of transport-identity.test.ts
+      // connects through it. On Linux, net.ipv6.bindv6only=1 fails that
+      // connect with ENETUNREACH, and disable_ipv6=1 does not (probe in
+      // node:26.10.0 linux/arm64 containers, 2026-11-03).
+      ["[::ffff:127.0.0.1]", "[::ffff:7f00:1]/db"],
+      // mysql2 decodes the host, so it reads this host as the IP 203.0.113.9.
+      ["203%2E0%2E113%2E9", "203%2E0%2E113%2E9/db"],
+    ];
+    for (const [host, where] of hosts)
+      for (const query of ["", "?ssl=true", `?ssl=${tls}`])
+        expect(
+          stopOf(() => requireMysqlTransport(`mysql://u:p@${host}/db${query}`)),
+          host + query,
+        ).toBe(ipStop(where));
+    // A loopback address needs no TLS. A DNS name passes with TLS and its checks.
+    for (const host of ["127.0.0.1", "[::1]", "[0:0:0:0:0:0:0:1]", "127%2E0%2E0%2E1"])
+      expect(() => requireMysqlTransport(`mysql://u:p@${host}/db`), host).not.toThrow();
+    expect(() => requireMysqlTransport(`mysql://u:p@db.example.com/db?ssl=${tls}`)).not.toThrow();
+    // mysql2 cannot decode this host, so the rule cannot judge it.
+    expect(stopOf(() => requireMysqlTransport(`mysql://u:p@db%ZZ.example/db?ssl=${tls}`))).toBe(
+      "the host of the connection string of mysql has a malformed % escape",
+    );
+  });
+
+  it("refuses a MySQL host with a tab, LF, or CR before the loopback read, and opens no socket (review of the Task 6 fix of plan 12n, L1)", async () => {
+    // WHATWG URL drops each of the three, so without the check ::<tab>1 reads as ::1.
+    for (const h of ["::\t1", "::\n1", "::1\r", "[::\t1]", "0:0:0:0:0:0:0:\t1"])
+      expect(isLoopbackHost(h), JSON.stringify(h)).toBe(false);
+    // mysql2 decodes the host %3A%3A%091 to ::<tab>1.
+    const url = "mysql://u:p@%3A%3A%091/db";
+    expect(stopOf(() => requireMysqlTransport(url))).toBe(noTls("%3A%3A%091/db"));
+    const connect = vi.spyOn(Socket.prototype, "connect");
+    try {
+      // The control case: mysql2 connects to a closed port of 127.0.0.1, and the spy counts it.
+      const closed = createServer();
+      await new Promise<void>((done) => closed.listen(0, "127.0.0.1", done));
+      const address = closed.address();
+      await new Promise<void>((done) => closed.close(() => done()));
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      const loopback = await seamError(`mysql://u:p@127.0.0.1:${port}/db`);
+      expect(loopback instanceof Stop ? loopback.message : loopback).toBe(
+        `storage: ECONNREFUSED at 127.0.0.1:${port}/db`,
+      );
+      expect(connect).toHaveBeenCalledTimes(1);
+      // The seam stops the tab host before mysql2 opens a socket.
+      const refused = await seamError(url);
+      expect(refused instanceof Stop ? refused.message : refused).toBe(noTls("%3A%3A%091/db"));
+      expect(connect).toHaveBeenCalledTimes(1);
+    } finally {
+      connect.mockRestore();
+    }
+  });
+
+  it("reads an IPv4 octet with a leading zero as no loopback address (the whole-branch review of plan 12n, open point 4)", () => {
+    // net.isIP gives 0 for each of these, so the rule asks for TLS, as for a name.
+    for (const h of ["127.0.0.08", "127.0.0.010", "127.000.000.001", "127.01.0.1"])
+      expect(isLoopbackHost(h), h).toBe(false);
+    expect(stopOf(() => requireMysqlTransport("mysql://u:p@127.0.0.08/db"))).toBe(
+      noTls("127.0.0.08/db"),
+    );
+    // An octet 0, and an octet that ends in 0, stay in the rule.
+    for (const h of ["127.0.0.0", "127.0.10.100"]) expect(isLoopbackHost(h), h).toBe(true);
   });
 
   it("refuses a MySQL URL with a query key more than once", () => {
@@ -194,5 +289,26 @@ describe("the transport rule (plan 12g Task 6)", () => {
       expect(isLoopbackHost(h), h).toBe(true);
     for (const h of ["127.0.0.256", "128.0.0.1", "10.0.0.1", "db.example.com", "::2", "127.1"])
       expect(isLoopbackHost(h), h).toBe(false);
+  });
+
+  it("reads each long form of ::1 as loopback, and no other IPv6 address", () => {
+    // The libSQL parser keeps the form of the URL, so the rule reads each form.
+    for (const h of ["[0:0:0:0:0:0:0:1]", "0:0:0:0:0:0:0:1", "[0::1]", "0::1", "[0:0::0:1]"])
+      expect(isLoopbackHost(h), h).toBe(true);
+    // An IPv4-mapped address is no form of ::1, so the rule asks for TLS there.
+    for (const h of ["[0:0:0:0:0:0:0:2]", "[::ffff:127.0.0.1]", "::ffff:7f00:1", "[fe80::1%25en0]"])
+      expect(isLoopbackHost(h), h).toBe(false);
+    // Host text with more after ::1 is no address, and neither is text before it.
+    for (const h of ["::1]#x", "::1]/x", "::1]?x", "[x@[::1]", "x@[::1"])
+      expect(isLoopbackHost(h), h).toBe(false);
+    expect(() => libsql("http://[0:0:0:0:0:0:0:1]:8080")).not.toThrow();
+    expect(() => libsql("ws://[0::1]:8080")).not.toThrow();
+    expect(stopOf(() => libsql("http://[0:0:0:0:0:0:0:2]:8080"))).toContain("TLS");
+    // The libSQL parser decodes the host of these URLs to ::1]#x and ::1]/x.
+    for (const url of ["http://[::1%5D%23x]:8080", "http://[::1%5D%2Fx]:8080"])
+      expect(
+        stopOf(() => libsql(url)),
+        url,
+      ).toContain("TLS");
   });
 });

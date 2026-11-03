@@ -66,20 +66,45 @@ export function parseFrontmatter(source: string): Frontmatter | null {
 }
 
 export interface ProseUnit {
-  /** "step" for an item of a numbered list, else "text". */
-  kind: "step" | "text";
+  /** "step" for an item of a numbered list, "cell" for a cell of a table row, else "text". */
+  kind: "step" | "cell" | "text";
   text: string;
   /** The source line where the unit starts. */
   line: number;
 }
 
 /**
- * The prose of a page body, one unit per paragraph or list item. Markup holds
- * no prose and is skipped: a code fence, a table row, a heading, a raw HTML or
- * JSX line, an MDX import or export, and an aside fence (`:::`). A unit runs
- * until a blank line or a markup line.
+ * The cells of a table row, split at each pipe that no backslash escapes. An
+ * escaped pipe in a cell becomes a plain pipe.
  */
-export function proseUnits(body: string, firstLine: number): ProseUnit[] {
+function tableCells(row: string): string[] {
+  const parts = row.trim().split(/(?<!\\)\|/);
+  if (parts[0]?.trim() === "") parts.shift();
+  if (parts.at(-1)?.trim() === "") parts.pop();
+  return parts.map((c) => c.replaceAll("\\|", "|").trim());
+}
+
+/** True for the separator row under a table header, such as `| --- | :---: |`. */
+function isTableSeparator(row: string): boolean {
+  const cells = tableCells(row);
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
+/**
+ * The prose of a page body, one unit per paragraph or list item. Markup holds
+ * no prose, so the scan skips it. Markup is a code fence, a heading, a raw
+ * HTML or JSX line, an MDX import or export, or an aside fence (`:::`). A
+ * unit runs until a blank line or a markup line. A table row is skipped too,
+ * unless `cells` is on. Then each cell of a row is a unit of kind "cell",
+ * apart from the header row and the separator row. check-terms reads each
+ * whole row itself, the header too, so it leaves `cells` off and reads no
+ * cell twice.
+ */
+export function proseUnits(
+  body: string,
+  firstLine: number,
+  options: { cells?: boolean } = {},
+): ProseUnit[] {
   const units: ProseUnit[] = [];
   let fence = false;
   let current: ProseUnit | null = null;
@@ -87,7 +112,8 @@ export function proseUnits(body: string, firstLine: number): ProseUnit[] {
     if (current && current.text.trim() !== "") units.push(current);
     current = null;
   };
-  body.split("\n").forEach((raw, i) => {
+  const lines = body.split("\n");
+  lines.forEach((raw, i) => {
     const line = firstLine + i;
     const t = raw.trim();
     if (/^(```|~~~)/.test(t)) {
@@ -96,7 +122,16 @@ export function proseUnits(body: string, firstLine: number): ProseUnit[] {
       return;
     }
     if (fence) return;
-    if (t === "" || /^(\||#|<|import\s|export\s|:::)/.test(t)) {
+    if (t.startsWith("|")) {
+      flush();
+      const header = isTableSeparator(lines[i + 1] ?? "");
+      if (options.cells === true && !header && !isTableSeparator(t)) {
+        for (const cell of tableCells(t))
+          if (cell !== "") units.push({ kind: "cell", text: cell, line });
+      }
+      return;
+    }
+    if (t === "" || /^(#|<|import\s|export\s|:::)/.test(t)) {
       flush();
       return;
     }
@@ -115,12 +150,21 @@ export function proseUnits(body: string, firstLine: number): ProseUnit[] {
 }
 
 /**
- * The words of a unit as a reader counts them: a code span is one word, a
- * link is its label, and emphasis marks and HTML tags go.
+ * The word that `plainText` writes for each code span: CODE in backticks.
+ * The scan pairs each backtick of the text with the next one, so at most
+ * one backtick of the text stays. A word of prose keeps its form. So no
+ * prose gives this word, and the list rule of check-sentences counts code
+ * spans only (ruling 30 of plan 12n).
+ */
+export const CODE_SPAN = "`CODE`";
+
+/**
+ * The words of a unit as a reader counts them. A code span is one word
+ * (`CODE_SPAN`), and a link is its label. Emphasis marks and HTML tags go.
  */
 export function plainText(text: string): string {
   return text
-    .replace(/`[^`]*`/g, "CODE")
+    .replace(/`[^`]*`/g, CODE_SPAN)
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]+>/g, "")
     .replace(/\*\*|__/g, "")

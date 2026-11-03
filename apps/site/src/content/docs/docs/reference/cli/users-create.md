@@ -35,7 +35,7 @@ authtempo users create https://api.example.com --email ada@example.com --name "A
 | `--phone <E.164>` | The phone number of a new user with no address: a plus sign and 8 to 15 digits. The deployment needs the phone config. |
 | `--name <name>` | The name: 1 to 200 UTF-16 code units with no control or format character. |
 | `--image <url>` | The image: an https URL with a host, of at most 2048 characters, with no space. |
-| `--verified` | Marks the address as verified. Give it only when you checked the address yourself. The deployment then takes the address as proved, and no later proof resets the account: a wrong address gives the account to the owner of that address. |
+| `--verified` | Marks the address as verified. Give it only when you checked the address yourself. The deployment then takes the address as proved, and no later proof resets the account. So a wrong address gives the account to the owner of that address. |
 | `--first-sign-in invite`, `--first-sign-in reset`, `--first-sign-in none` | How the person signs in first. `invite` mails an invitation link and is the default. `reset` mails a reset link. `none` mails nothing. |
 | `--reason <text>` | The audit row holds the reason of the act. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |

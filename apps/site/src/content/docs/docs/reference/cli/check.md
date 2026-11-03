@@ -58,6 +58,8 @@ The command runs nine checks. Each check reports `pass`, `fail` with a code, or 
 
 The first read of the key set on a new database writes its first signing key. That is the first-use rule of core.
 
+With `--file`, the command opens a SQLite file read-only. On a file in WAL mode, it can leave the `-wal` and `-shm` files of SQLite beside it. The main file does not change. The CLI deletes neither file, because another connection can hold them.
+
 ## https
 
 <h3 id="base_not_https"><code>base_not_https</code></h3>

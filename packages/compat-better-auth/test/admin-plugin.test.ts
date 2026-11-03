@@ -505,10 +505,10 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       { action: "platform_role_grant", ...by, reason: "better-auth admin plugin /admin/set-role" },
     ]);
 
-    // The operator's own user: Better Auth's code on a ban, core's FORBIDDEN on
-    // another act. The status stays core's, 409.
+    // The operator's own user: Better Auth's code and status on a ban (plan
+    // 12n), core's FORBIDDEN and 409 on another act.
     expect(await json(await a.call("/admin/ban-user", { userId: a.opId }, a.op))).toEqual({
-      status: 409,
+      status: 400,
       body: { code: "YOU_CANNOT_BAN_YOURSELF", message: "You cannot ban yourself" },
     });
     // The README names these three as deviations (ruling 60 L3).
@@ -1109,7 +1109,7 @@ describe("the admin calls of auth.api (ruling 60 m2)", () => {
       code: "NOT_SUPPORTED",
     });
     expect(await thrown(api.banUser({ body: { userId: a.opId }, headers }))).toEqual({
-      status: 409,
+      status: 400,
       code: "YOU_CANNOT_BAN_YOURSELF",
       message: "You cannot ban yourself",
     });

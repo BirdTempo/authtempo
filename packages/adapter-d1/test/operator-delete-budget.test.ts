@@ -123,6 +123,7 @@ async function engine(
   db: D1Database,
   sent: MailMessage[],
   limiter: AuthConfig["limiter"] = { allow: async () => true },
+  extra: Partial<AuthConfig> = {},
 ) {
   const input: AuthConfig = {
     baseURL: BASE,
@@ -176,6 +177,7 @@ async function engine(
         },
       },
     },
+    ...extra,
   };
   return createAuth(input);
 }
@@ -318,9 +320,14 @@ async function platformOperator(auth: Auth, sent: MailMessage[], email: string) 
  * answer, queries, mails, and posts. With `limited` the D1 limiter runs on
  * the same view, so its statements count.
  */
-async function act<T>(sent: MailMessage[], call: (auth: Auth) => Promise<T>, limited = false) {
+async function act<T>(
+  sent: MailMessage[],
+  call: (auth: Auth) => Promise<T>,
+  limited = false,
+  extra: Partial<AuthConfig> = {},
+) {
   const { db, count } = counting(env.DB, 50);
-  const auth = await engine(db, sent, limited ? createD1Limiter(db, clock) : undefined);
+  const auth = await engine(db, sent, limited ? createD1Limiter(db, clock) : undefined, extra);
   const mails = sent.length;
   const before = posts.length;
   const answer = await call(auth);
@@ -391,9 +398,9 @@ const LOAD_SOLOS = 1;
  * delete of the load takes for a secret, measured on the binding on
  * 2026-10-25. Each costs 3 calls of the least work: the owner lock, a batch
  * of 2 on D1, and the recount. So the next one passes the budget. Since the
- * move onto main a plain membership costs no call: the organization rule
- * reads in 3 calls for any count (ruling 30 of plan 12d). Until the move
- * each membership cost 2 reads, and 3 fit.
+ * move onto main a plain membership costs no call. The organization rule
+ * reads in 3 calls for up to 50 memberships (ruling 30 of plan 12d). Until
+ * the move each membership cost 2 reads, and 3 fit.
  */
 const EDGE_OWNED = 3;
 
@@ -746,9 +753,15 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
   /**
    * One invocation of a route through `auth.handle`, with the D1 limiter on
    * the counting view: the status, the body, and the whole count, with each
-   * mail and each post.
+   * mail and each post. `extra` goes to the config of the invocation.
    */
-  async function route(sent: MailMessage[], path: string, body: unknown, headers: HeadersInit) {
+  async function route(
+    sent: MailMessage[],
+    path: string,
+    body: unknown,
+    headers: HeadersInit,
+    extra: Partial<AuthConfig> = {},
+  ) {
     return act(
       sent,
       async (auth) => {
@@ -766,6 +779,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
         return { status: res.status, body: (await res.json()) as Record<string, unknown> };
       },
       true,
+      extra,
     );
   }
 
@@ -1046,6 +1060,208 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
         inAct: solos === 0 ? 7 : 0,
       });
     }, 300_000);
+
+  /** The DNS answers of the domain proofs, by record name. */
+  const txt: Record<string, string[]> = {};
+  /** SSO domains and SCIM on: a SCIM create needs the address in a verified domain. */
+  const SCIM: Partial<AuthConfig> = {
+    sso: { dns: [{ name: "a", txt: async (name) => txt[name] ?? [] }] },
+    scim: {},
+  };
+
+  /**
+   * A user with a scimUser row in each of `count` organizations, through
+   * SCIM, and then 60 sessions. One domain moves from organization to
+   * organization. A delete of the domain keeps the scimUser row of its
+   * organization. The next organization then proves the domain again. Each
+   * directory deactivates the user before the move, so no member row stays.
+   * With more than 50 member rows, the organization rule of the delete reads
+   * in more than 3 calls. That is not the item of this scene. With `active`,
+   * no directory deactivates the user, so a member row stays in each
+   * organization (ruling 50 of plan 12n).
+   */
+  async function provisioned(sent: MailMessage[], count: number, active = false) {
+    const setup = await engine(env.DB, sent, undefined, SCIM);
+    const sso = setup.api.sso;
+    const scim = setup.api.scim;
+    if (!sso || !scim) throw new Error("no sso or scim api");
+    const owner = await signIns(setup, sent, "owner@example.com", 1);
+    const session = await setup.api.getSession(owner.tokens[0] ?? "");
+    if (!session) throw new Error("no session");
+    for (let i = 0; i < count; i++) {
+      const made = await setup.api.createOrganization({
+        user: session.user,
+        slug: `directory-${i}`,
+        name: `Directory ${i}`,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const organizationId = made.value.organization.id;
+      const domain = await sso.domains.add({ actor: APP, organizationId, domain: "acme.example" });
+      if (!domain.ok || domain.value.record === null) throw new Error("no domain");
+      txt[domain.value.record.name] = [domain.value.record.value];
+      if (!(await sso.domains.verify({ actor: APP, id: domain.value.id })).ok)
+        throw new Error("no proof");
+      const token = await scim.tokens.create({ actor: APP, organizationId, name: "directory" });
+      if (!token.ok) throw new Error(token.code);
+      const res = await setup.handle(
+        new Request(`${BASE}/auth/scim/v2/Users`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token.value.token}`,
+            "content-type": "application/scim+json",
+          },
+          body: JSON.stringify({
+            schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            userName: "ada@acme.example",
+          }),
+        }),
+      );
+      if (res.status !== 201) throw new Error(`the SCIM create answered ${res.status}`);
+      const id = String(((await res.json()) as { id: unknown }).id);
+      const off = active
+        ? null
+        : await setup.handle(
+            new Request(`${BASE}/auth/scim/v2/Users/${id}`, {
+              method: "PATCH",
+              headers: {
+                authorization: `Bearer ${token.value.token}`,
+                "content-type": "application/scim+json",
+              },
+              body: JSON.stringify({
+                schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                Operations: [{ op: "Replace", path: "active", value: "False" }],
+              }),
+            }),
+          );
+      if (off !== null && off.status !== 200)
+        throw new Error(`the SCIM deactivate answered ${off.status}`);
+      if (!(await sso.domains.delete({ actor: APP, id: domain.value.id })).ok)
+        throw new Error("the domain stays");
+      current = new Date(current.getTime() + 1);
+    }
+    // Past the skew bound of the deactivate (ACCESS_END_SKEW_MS of core, 5 s), so the doors keep each new session.
+    current = new Date(current.getTime() + 6_000);
+    const { userId, tokens } = await signIns(setup, sent, "ada@acme.example", 60);
+    expect(await rows("ta_scim_user", `user_id = '${userId}'`)).toBe(count);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(active ? count : 0);
+    expect(await rows("ta_session", `user_id = '${userId}'`)).toBe(60);
+    endings.length = 0;
+    return { setup, userId, tokens };
+  }
+
+  /**
+   * The counts of the delete on the binding on 2026-11-03 (decision 16 of
+   * plan 12n). The user has scimUser rows in 51 organizations and 60
+   * sessions. The counts are the act with the route before it, and the
+   * sessions that it ended. The delete of the scimGroupMember rows takes 2
+   * chunks.
+   */
+  const SCIM_COUNTS = { act: 50, inAct: 15 };
+
+  it("deletes a user with scimUser rows in 51 organizations in 50 calls: the reserve keeps the second chunk (decision 16 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await provisioned(sent, 51);
+    const r = await act(
+      sent,
+      (auth) => auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+      false,
+      SCIM,
+    );
+    expect(r.answer).toMatchObject({ ok: true });
+    expect(r.refused).toBe(0);
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(r.sql.filter((q) => /DELETE FROM "?ta_scim_group_member/i.test(q))).toHaveLength(2);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_scim_user", `user_id = '${userId}'`)).toBe(0);
+    // The doors refuse every left session before the sweep.
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(SCIM_COUNTS);
+  }, 300_000);
+
+  /**
+   * The counts of the delete on the binding on 2026-11-03 (ruling 50 of plan
+   * 12n), the scene of the Task 3a report. The user has scimUser rows and
+   * member rows in 51 organizations, and 60 sessions. The size check counts
+   * the 6 reads that it sends, and the reserve keeps the second scimUser
+   * chunk. With the old count of the size check (1 + 3), the delete made 52
+   * calls. The counts are the act with the route before it, and the sessions
+   * that it ended.
+   */
+  const SCIM_MEMBER_COUNTS = { act: 50, inAct: 6 };
+
+  it("deletes a user with scimUser rows and member rows in 51 organizations in 50 calls (ruling 50 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await provisioned(sent, 51, true);
+    const r = await act(
+      sent,
+      (auth) => auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+      false,
+      SCIM,
+    );
+    expect(r.answer).toMatchObject({ ok: true });
+    expect(r.refused).toBe(0);
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_scim_user", `user_id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    // The doors refuse every left session before the sweep.
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(SCIM_MEMBER_COUNTS);
+  }, 300_000);
+
+  /**
+   * The counts of the deletes on the binding on 2026-11-03 (ruling 32 of
+   * plan 12n). The user has 60 sessions, 10 client links, and a plain
+   * membership in 51 organizations of other users. The size check before
+   * the act sends 6 reads: the memberships, and 5 of the organization rule.
+   * The counts are the act with the route before it, and the sessions that
+   * the act ended.
+   */
+  const MEMBER_COUNTS = { operator: { act: 49, inAct: 7 }, self: { act: 49, inAct: 5 } };
+
+  it("deletes a user with 51 memberships in 50 calls: the size check counts each read that it sends (ruling 32 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await loaded(sent, 0);
+    await memberships(setup, sent, userId, 51);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(51);
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.delete({ actor: ERASURE, userId, ...REASON }),
+    );
+    expect(r.answer).toMatchObject({ ok: true });
+    expect(r.refused).toBe(0);
+    const calls = ROUTE_BEFORE + r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    // The doors refuse every left session before the sweep.
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.operator);
+  }, 300_000);
+
+  it("deletes the own account through the route with 51 memberships, a due refresh, and sso.saml on, in 50 calls (ruling 32 of plan 12n)", async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens } = await loaded(sent, 0);
+    await memberships(setup, sent, userId, 51);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(51);
+    // The worst session read before the act: a due refresh that reads the
+    // session-cap row with `sso.saml` on (ruling 44 of plan 12d).
+    const extra: Partial<AuthConfig> = {
+      session: { slidingRefreshDays: 0.05 },
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    };
+    current = new Date(current.getTime() + 80 * 60_000);
+    const r = await route(sent, "/user/delete", {}, cookieOf(tokens.at(-1) ?? ""), extra);
+    expect(r.answer).toMatchObject({ status: 200 });
+    expect([r.refused, r.posts]).toEqual([0, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(0);
+    for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+    expect({ act: calls, inAct: endings.length }).toEqual(MEMBER_COUNTS.self);
+  }, 300_000);
 
   for (const solos of [0, 1])
     it(`deletes the own account through the route, 60 sessions, 10 client links, and ${solos} solo organizations, in 50 calls; the sweeps end the rest`, async () => {

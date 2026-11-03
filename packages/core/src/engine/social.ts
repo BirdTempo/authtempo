@@ -51,6 +51,7 @@ import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js
 import {
   challengeOpened,
   endedList,
+  markRequestUser,
   type ResolvedSession,
   sessionIsLive,
   sessionOpened,
@@ -60,11 +61,10 @@ import { enforcedAnswer } from "./sso/enforce.js";
 import { type OpenedStateData, openStateData, sealStateData } from "./state-data.js";
 import {
   type BeforeResolveWrite,
-  CLAIM_RUNS,
-  ClaimLostError,
   ClaimRacedError,
   claimEmail,
   claimedUser,
+  claimRetry,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
@@ -209,6 +209,8 @@ function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array>
   let value: unknown;
   try {
     bytes = fromBase64Url(raw);
+    // A second guard: the bound above holds first. Base64url of at most
+    // ceil(4n / 3) characters decodes to at most n bytes.
     if (bytes.length > rule.maxBytes) return fail("invalid_body");
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
@@ -385,11 +387,14 @@ export interface SocialLinked {
 /**
  * Consumes the state row first, so a replayed callback fails before any
  * network call. Then binds the browser, exchanges the code, verifies the
- * ID token and its nonce, and links or creates the user.
+ * ID token and its nonce, and links or creates the user. The route passes
+ * its `request`: a link marks it with the user of the link's session
+ * (ruling 37 of plan 12n). The app API passes none.
  */
 export async function completeSocial(
   config: ResolvedConfig,
   input: SocialComplete,
+  request?: Request,
 ): Promise<
   Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
 > {
@@ -435,6 +440,8 @@ export async function completeSocial(
   const link =
     row.purpose === LINK_STATE ? await linkSession(config, entry, data, input, now) : null;
   if (link && !link.ok) return link;
+  // The request event names the user of the link, refusals after this line too.
+  if (link && request) markRequestUser(request, link.value.userId);
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
@@ -1148,6 +1155,8 @@ export async function resolveSocialUser<T extends AfterWrite>(
   steps?: CreateSteps,
   addressless = false,
 ): Promise<Result<UserRow> | Result<{ user: UserRow; after: T }>> {
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await storage.transaction(
@@ -1209,7 +1218,9 @@ export async function resolveSocialUser<T extends AfterWrite>(
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user. Or a session race undid the claim: the retry claims again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      const next = claimRetry(storage, err, lost++);
+      if (next === "retry") continue;
+      if (next === "conflict") return fail<never>("conflict");
       throw err;
     }
   }

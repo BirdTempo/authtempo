@@ -1,15 +1,21 @@
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { RunTimeout, runSync } from "./run-sync.ts";
 
 // The error of a failed call holds the stderr of git, so the entry prints only its own lines.
 function git(root: string, args: string[]): string {
-  return execFileSync("git", args, {
+  const r = runSync("git", args, {
     cwd: root,
-    encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
+    limit: "git",
   });
+  if (r.error !== undefined) throw r.error;
+  if (r.status !== 0)
+    throw new Error(
+      `git ${args.join(" ")} exited ${r.status ?? "with no code"}: ${r.stderr.trim()}`,
+    );
+  return r.stdout;
 }
 
 /**
@@ -22,7 +28,9 @@ export class NoMergeBase extends Error {}
 export function mergeBase(root: string, ref: string): string {
   try {
     return git(root, ["merge-base", "HEAD", ref]).trim();
-  } catch {
+  } catch (error) {
+    // A call past its limit is not an answer of git, so its own error goes up.
+    if (error instanceof RunTimeout) throw error;
     throw new NoMergeBase(
       `no merge base of HEAD and ${ref}; fetch the full history (fetch-depth: 0)`,
     );
@@ -57,7 +65,8 @@ export function headCommit(root: string): string {
 export function commitOf(root: string, ref: string): string | null {
   try {
     return git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
-  } catch {
+  } catch (error) {
+    if (error instanceof RunTimeout) throw error;
     return null;
   }
 }
@@ -67,7 +76,8 @@ export function isAncestor(root: string, ref: string): boolean {
   try {
     git(root, ["merge-base", "--is-ancestor", ref, "HEAD"]);
     return true;
-  } catch {
+  } catch (error) {
+    if (error instanceof RunTimeout) throw error;
     return false;
   }
 }

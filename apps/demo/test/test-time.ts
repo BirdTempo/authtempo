@@ -7,7 +7,7 @@
  * outbound test passed 5008 ms there (one-minute load 3.5 to 8.1). Measured on
  * 2026-10-20 alone, the four tests of this limit took 0.38 to 1.3 s. While
  * core, compat, and the adapters ran their tests (load 15 to 31), they took
- * up to 2.3 s. Each test grows with the flows, so the limit is 20 s.
+ * up to 2.3 s. Each test grows with the flows, so the limit was 20 s.
  *
  * Review n3 of plan 12e added the two user route tests of limits.test.ts.
  * An unfiltered run took 5009 and 5002 ms (load 3.1 before, 9.1 after). On
@@ -17,5 +17,13 @@
  * An evidence run of plan 12e then timed out a third test at 5005 ms. Each
  * pool test runs a full Worker sandbox, so vitest.config.ts sets this limit
  * for every pool test, and no test waits for its own review.
+ *
+ * On 2026-10-30 the pool timed out at 20 s in two runs. A release rehearsal
+ * ran beside other agents, at a peak load of 35. It timed out the two hooks of
+ * cookies.test.ts and mailbox-only.test.ts, and four tests at 20.01 to 20.19 s.
+ * The evidence run 12j-integ1 held the evidence lock and started at load 5.00.
+ * At a sampled peak load of 55.9, it timed out the same two hooks.
+ * From 2026-10-30 to 2026-11-03 these four tests passed in up to 17.56 s. The
+ * two hook files took up to 18.70 s. So the limit is 60 s (plan 12n).
  */
-export const LONG_TEST_MS = 20_000;
+export const LONG_TEST_MS = 60_000;

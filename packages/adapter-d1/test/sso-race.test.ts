@@ -129,7 +129,11 @@ function world(storage: StorageAdapter, membersPerOrganization?: number) {
     ).token;
     return { organizationId, connection, token };
   }
-  /** One SSO sign-in through the start and the callback: the `auth_error`, or null. */
+  /**
+   * One SSO sign-in through the start and the callback. It answers the
+   * `auth_error` of its redirect, null for a redirect with none, or the
+   * status of another answer.
+   */
   async function ssoSignIn(connection: string, sub: string, email: string) {
     const started = await auth.handle(new Request(`${API}/auth/sso/${connection}/start`));
     const url = new URL(started.headers.get("location") ?? "");
@@ -145,6 +149,8 @@ function world(storage: StorageAdapter, membersPerOrganization?: number) {
         headers: { cookie: bind ?? "" },
       }),
     );
+    // Only a redirect is an answer of the flow. Any other status is a fault.
+    if (res.status !== 302) return `status ${res.status}`;
     return new URL(res.headers.get("location") ?? "", API).searchParams.get("auth_error");
   }
   /** One SCIM request with the bearer `token`: its status and its body. */
@@ -256,8 +262,15 @@ describe("the races of plan 12d on D1 (Task 10)", () => {
       w.ssoSignIn(connection, "a-1", "ada@acme.example"),
       w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null }),
     ]);
-    expect([sso, mailed.ok]).toEqual([null, true]);
-    // One claim: the second proof finds a verified user. The claimant's session is gone.
+    // On D1 a claim runs once (ruling 32 of plan 12n). The proof that loses
+    // the flip answers conflict, and its client sends it again. A proof that
+    // reads the user after the other commits signs in with no claim.
+    const outcomes = [sso ?? "ok", mailed.ok ? "ok" : mailed.code].sort();
+    expect([
+      ["conflict", "ok"],
+      ["ok", "ok"],
+    ]).toContainEqual(outcomes);
+    // One claim. The claimant's session is gone.
     expect(w.verifies() - before).toBe(1);
     expect(await w.auth.api.getSession(up.token)).toBeNull();
     expect(await count("ta_password")).toBe(0);

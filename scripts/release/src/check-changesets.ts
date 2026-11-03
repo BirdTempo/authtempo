@@ -1,6 +1,5 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BREAKING, isBreaking, unreadBreaking } from "./check-pack.ts";
 import { parseChangeset } from "./lib/changeset-file.ts";
@@ -8,6 +7,7 @@ import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { ROOT_INPUTS, type RootInput, rootInputOf } from "./lib/root-inputs.ts";
+import { RunTimeout, runSync } from "./lib/run-sync.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 import { rewrittenPaths } from "./rewrite-unpublished.ts";
 
@@ -36,6 +36,11 @@ export interface ChangesetsInput {
   dirs: Record<string, string>;
   /** The `files` field of each workspace package, by name; undefined when the manifest has none. */
   files: Record<string, readonly string[] | undefined>;
+  /**
+   * The `build` script of each workspace package, by name; undefined when the
+   * manifest has none. With no map, a row with `unbuilt` exempts no file.
+   */
+  builds?: Record<string, string | undefined>;
   /** The count of commits since the merge base. */
   commits: number;
   /** The version of the group in the working tree. */
@@ -51,9 +56,17 @@ export interface ChangesetsInput {
 /**
  * The files of a released package that need no changeset, each with its reason
  * (spec 33 item 2). A path is relative to the package folder. A row exempts no
- * file that the `files` field packs, unless the row says `packed: true`.
+ * file that the `files` field packs, unless the row says `packed: true`. A row
+ * with `unbuilt: true` exempts a file only under a plain build of its package.
+ * `plainBuild` reads that form, which names no file of the package's own
+ * scripts/ folder.
  */
-export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string; packed?: true }[] = [
+export const EXEMPT_PATTERNS: readonly {
+  pattern: RegExp;
+  reason: string;
+  packed?: true;
+  unbuilt?: true;
+}[] = [
   // Each fixture of a released package is under test/, so this row holds it too.
   { pattern: /^test\//, reason: "a test or a fixture is not in the pack" },
   { pattern: /(^|\/)proof\//, reason: "a proof checks the pack and changes no runtime code" },
@@ -67,7 +80,64 @@ export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string; packed
     // Each released package lists CHANGELOG.md in files (spec 33 item 3).
     packed: true,
   },
+  // A vitest config at the package root runs the tests, as a test file does
+  // (ruling 25 of plan 12n).
+  {
+    pattern: /^vitest(\.[\w-]+)?\.config\.ts$/,
+    reason: "a vitest config runs the tests and is not in the pack",
+  },
+  // A script under scripts/ checks the package, such as check-seam-dts.mjs of
+  // adapter-d1 (ruling 28 of plan 12n). packedBy reads the files field, so a
+  // packed script still needs a changeset. A build that runs a script of the
+  // package writes dist with it, as the CLI does with copy-templates.mjs. So
+  // the row exempts no file under scripts/ of such a package. A build that the
+  // check cannot read as a plain form counts as such a build.
+  {
+    pattern: /^scripts\//,
+    reason: "a script that the build does not run is not in the pack",
+    unbuilt: true,
+  },
 ];
+
+/**
+ * The programs that a plain build may start. node runs the file that it names,
+ * and tsc compiles. A package manager, a shell, or another tool can run a
+ * package script by its name, and the check does not read that script.
+ */
+const PLAIN_PROGRAMS = new Set(["node", "tsc"]);
+
+/**
+ * A word of a plain build. A quote, `=`, `$`, a leading `/`, or a leading `@`
+ * makes no plain word. tsc 7.0.2 reads a word `@<file>` as a file of more
+ * arguments (a probe of 2026-11-03), and the check does not read that file.
+ * So that file can name scripts/ (L2 of the review of fix wave A of plan 12n).
+ */
+const PLAIN_WORD = /^[\w.+-][\w@./+-]*$/;
+
+/**
+ * True when the build of the package in `dir` is a plain form that names no
+ * file of its own scripts/ folder. A plain form is a list of commands joined
+ * by " && ". Each command is words with one space between them, and starts
+ * with node or tsc. node takes no flag, so `node --run <name>` gives no plain
+ * form. The check reads each word as a path from `dir`. Any other form fails
+ * closed: the check counts it as a build that runs a script. A package with
+ * no build runs no script. The rule comes from L3 of the review of the Task 1
+ * fix of plan 12n.
+ */
+function plainBuild(build: string, dir: string): boolean {
+  if (build === "") return true;
+  const own = `${dir}/scripts`;
+  return build.split(" && ").every((command) => {
+    const [program, ...words] = command.split(" ");
+    if (program === undefined || !PLAIN_PROGRAMS.has(program)) return false;
+    if (!words.every((w) => PLAIN_WORD.test(w))) return false;
+    if (program === "node" && words.some((w) => w.startsWith("-"))) return false;
+    return words.every((w) => {
+      const path = posix.join(dir, w);
+      return path !== own && !path.startsWith(`${own}/`);
+    });
+  });
+}
 
 /** A files entry that the check reads: folder names and file names with "/", and no glob. */
 const PLAIN_PATH = /^[\w@-][\w@.-]*(\/[\w@.-]+)*$/;
@@ -106,13 +176,33 @@ export const RUNTIME_KEYS = [
   "scripts",
 ] as const;
 
+/**
+ * The pin of the compiler in a released manifest. Each released package
+ * builds dist with tsc of its own `typescript` pin. A new pin can change the
+ * bytes of dist with no change of source. So the pin counts as a runtime
+ * change (follow-up 6 of plan 12j). It is a key of its own, not a part of
+ * RUNTIME_KEYS: a change of each other dev dependency still needs no
+ * changeset. The lockfile and turbo.json stay out of ROOT_INPUTS. A row for
+ * them asks for a changeset of each released package at each bump of a dev
+ * tool.
+ */
+export const COMPILER_PIN = "devDependencies.typescript";
+
+/** The `typescript` pin of the devDependencies of a manifest, or undefined. */
+const compilerPin = (manifest: Record<string, unknown>) =>
+  (manifest.devDependencies as Record<string, unknown> | undefined)?.typescript;
+
 /** The runtime keys whose value differs between two manifest texts. A new or removed manifest changes each key. */
 function runtimeChanges(base: string | null, head: string | null): string[] {
   if (base === null || head === null) return [...RUNTIME_KEYS];
   const a = JSON.parse(base) as Record<string, unknown>;
   const b = JSON.parse(head) as Record<string, unknown>;
   // The key order of `exports` decides which condition matches, so compare the JSON text.
-  return RUNTIME_KEYS.filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+  const keys: string[] = RUNTIME_KEYS.filter(
+    (key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]),
+  );
+  if (compilerPin(a) !== compilerPin(b)) keys.push(COMPILER_PIN);
+  return keys;
 }
 
 /** The keys of `keys` whose value differs between two JSON texts. A new or removed file changes each key. */
@@ -267,7 +357,17 @@ export function checkChangesets(input: ChangesetsInput): Report {
     let label = file.path;
     // A file in the tarball changes what an app installs, so it is never exempt.
     const packed = packedBy(inner, files[name]);
-    if (EXEMPT_PATTERNS.some((row) => row.pattern.test(inner) && (!packed || row.packed))) {
+    // With no build map, the check does not guess, so each build counts as one that runs a script.
+    const builtWithScript =
+      input.builds === undefined || !plainBuild(input.builds[name] ?? "", dir);
+    if (
+      EXEMPT_PATTERNS.some(
+        (row) =>
+          row.pattern.test(inner) &&
+          (!packed || row.packed === true) &&
+          !(row.unbuilt === true && builtWithScript),
+      )
+    ) {
       exempt++;
       continue;
     }
@@ -306,6 +406,12 @@ export function checkChangesets(input: ChangesetsInput): Report {
 }
 
 const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/;
+
+/** The `build` script of a manifest, or undefined. */
+function buildOf(manifest: Record<string, unknown>): string | undefined {
+  const build = (manifest.scripts as Record<string, unknown> | undefined)?.build;
+  return typeof build === "string" ? build : undefined;
+}
 
 /**
  * Reads the input of `checkChangesets` from the checkout at `root`, against the
@@ -347,6 +453,7 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     released,
     dirs: Object.fromEntries(workspace.map((p) => [p.name, p.dir])),
     files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
+    builds: Object.fromEntries(workspace.map((p) => [p.name, buildOf(p.manifest)])),
     commits: commitCount(root, base),
     version,
     baseVersion,
@@ -388,24 +495,36 @@ export function changesetStatus(root: string, since: string): string[] {
     return [
       `changeset status: skipped, ${CHANGESET_BIN} is absent, and the check installs nothing`,
     ];
-  return statusNotes(
-    spawnSync(bin, ["status", `--since=${since}`], { cwd: root, encoding: "utf8" }),
-  );
+  let run: ReturnType<typeof runSync>;
+  try {
+    // changeset status is a Node tool as npm is, so it takes the limit of an npm read.
+    run = runSync(bin, ["status", `--since=${since}`], { cwd: root, limit: "registry" });
+  } catch (error) {
+    // A note past its limit stays a note, because its result never decides
+    // (review of Task 1 of plan 12n, M1).
+    if (!(error instanceof RunTimeout)) throw error;
+    return [`changeset status: ${error.message}`];
+  }
+  return statusNotes(run);
 }
 
 /** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
 export function entry(root: string, ref: string): { lines: string[]; code: number } {
   let report: Report;
+  let base: string;
   try {
     report = checkChangesets(readInput(root, ref));
+    base = mergeBase(root, ref);
   } catch (error) {
-    if (!(error instanceof NoMergeBase)) throw error;
+    // A git call past its limit gives a FAIL line that names the call, not a
+    // stack (review of Task 1 of plan 12n, M1).
+    if (!(error instanceof NoMergeBase || error instanceof RunTimeout)) throw error;
     // With no merge base, changeset status has no commit to read from either.
     const keys = ["changed", "covered", "exempt", "empty"];
     return { lines: reportLines(unreadReport("check-changesets", keys, error.message)), code: 1 };
   }
   // Changesets runs beside the check as a note. Its exit code never decides.
-  report.notes.push(...changesetStatus(root, mergeBase(root, ref)));
+  report.notes.push(...changesetStatus(root, base));
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 

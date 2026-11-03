@@ -1,5 +1,5 @@
 import { createMemoryLimiter } from "@authtempo/core";
-import { createTestIdp } from "@authtempo/core/testing";
+import { base32Decode, createTestIdp, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthClient } from "../src/client/create-auth-client.js";
 import { ssoClient } from "../src/client/plugins.js";
@@ -7,9 +7,10 @@ import { organization } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { compatHooks } from "../src/server/hooks.js";
 import { betterAuthRecord, mapOptions } from "../src/server/map-options.js";
+import { COOKIE_NAME } from "../src/server/shapes.js";
 import { sso } from "../src/sso.js";
 import type { BetterAuthOptions, CompatDatabase, SsoOptions } from "../src/types.js";
-import { BASE, memory, SECRET, ssoApp } from "./sso-helpers.js";
+import { BASE, memory, PASSWORD, SECRET, ssoApp } from "./sso-helpers.js";
 
 // Plan 12d Task 14: @better-auth/sso 1.7.2 on core's SSO. The option names,
 // the paths, and the record of the domain proof were read in the 1.7.2
@@ -1280,4 +1281,160 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     const idp = new URL(start.headers.get("location") ?? "");
     expect(idp.searchParams.get("redirect_uri")).toBe(`${B}/api/auth/sso/${id}/callback`);
   });
+});
+
+const DAY_MS = 86_400_000;
+
+/**
+ * An app whose owner registered `acme-oidc`, with a session that is due for
+ * a sliding refresh and still fresh (plan 12n). Run it with a fake Date.
+ * The owner signs in, turns TOTP on through Better Auth's two paths, and
+ * registers. Half a day later the owner proves the password and a code at
+ * core's `/reauth`. That read is not due, so the proof moves `freshAt` and
+ * keeps `lastSeenAt`. Half a day and a minute after that, Better Auth's
+ * `updateAge` of one day has passed since `lastSeenAt`. The fresh window of
+ * one day has not passed since the proof.
+ */
+async function dueOwner() {
+  const app = ssoApp(memory(), [sso({ domainVerification: { enabled: true } })]);
+  const owner = await app.person("ann@acme.example");
+  // As `manager` of sso-helpers.ts, but the test keeps the secret for the proof.
+  const enable = await app.call("/two-factor/enable", { password: PASSWORD }, owner.cookie);
+  const { totpURI } = (await enable.json()) as { totpURI: string };
+  const secret = base32Decode(new URL(totpURI).searchParams.get("secret") ?? "");
+  const code = () => totpCode(secret, new Date());
+  const confirm = await app.call("/two-factor/verify-totp", { code: await code() }, owner.cookie);
+  expect(confirm.status).toBe(200);
+  const organizationId = await app.organizationOf(owner, "acme");
+  const reg = await app.call(
+    "/sso/register",
+    {
+      organizationId,
+      providerId: "acme-oidc",
+      issuer: "https://idp.acme.example",
+      domain: "acme.example",
+      oidcConfig: OIDC,
+    },
+    owner.cookie,
+  );
+  expect(reg.status).toBe(200);
+  const { redirectURI } = (await reg.json()) as { redirectURI: string };
+  const connectionId = /\/sso\/([^/]+)\/callback$/.exec(redirectURI)?.[1] ?? "";
+  vi.setSystemTime(Date.now() + DAY_MS / 2);
+  const proof = await app.call("/reauth", { password: PASSWORD, code: await code() }, owner.cookie);
+  // Not due yet: the proof slides nothing and sends no cookie.
+  expect([proof.status, proof.headers.getSetCookie()]).toEqual([200, []]);
+  vi.setSystemTime(Date.now() + DAY_MS / 2 + 60_000);
+  return { app, cookie: owner.cookie, organizationId, connectionId };
+}
+
+type DueOwner = Awaited<ReturnType<typeof dueOwner>>;
+
+/**
+ * Each read of the session in the shim's SSO paths, with the status of its
+ * answer (plan 12n). The shim reads with no write. So core's own route does
+ * the one due refresh, and the shim's answer carries core's cookie.
+ */
+const DUE_CASES: [path: string, status: number, send: (o: DueOwner) => Promise<Response>][] = [
+  [
+    "POST /sso/register",
+    200,
+    (o) =>
+      o.app.call(
+        "/sso/register",
+        {
+          organizationId: o.organizationId,
+          providerId: "acme-two",
+          issuer: "https://idp.acme.example",
+          domain: "acme-two.example",
+          oidcConfig: OIDC,
+        },
+        o.cookie,
+      ),
+  ],
+  ["GET /sso/providers", 200, (o) => o.app.read("/sso/providers", o.cookie)],
+  [
+    "POST /sso/update-provider",
+    200,
+    (o) =>
+      o.app.call(
+        "/sso/update-provider",
+        { providerId: "acme-oidc", oidcConfig: { clientId: "acme-client-2" } },
+        o.cookie,
+      ),
+  ],
+  [
+    "POST /sso/connections/create",
+    200,
+    (o) =>
+      o.app.call(
+        `/sso/connections/create?organizationId=${encodeURIComponent(o.organizationId)}`,
+        {
+          kind: "oidc",
+          label: "Acme SSO",
+          issuer: "https://idp.acme.example",
+          clientId: "acme-client",
+          clientSecret: "acme-secret-0123456789",
+        },
+        o.cookie,
+      ),
+  ],
+  [
+    "POST /sso/connections/update",
+    200,
+    (o) =>
+      o.app.call(
+        `/sso/connections/update?id=${encodeURIComponent(o.connectionId)}`,
+        { clientId: "acme-client-3" },
+        o.cookie,
+      ),
+  ],
+  [
+    "GET /sso/get-provider",
+    200,
+    (o) => o.app.read("/sso/get-provider?providerId=acme-oidc", o.cookie),
+  ],
+  [
+    "POST /sso/delete-provider",
+    200,
+    (o) => o.app.call("/sso/delete-provider", { providerId: "acme-oidc" }, o.cookie),
+  ],
+  [
+    "POST /sso/request-domain-verification",
+    201,
+    (o) => o.app.call("/sso/request-domain-verification", { providerId: "acme-oidc" }, o.cookie),
+  ],
+  // No DNS record: Better Auth's 502, after core's reads of the provider.
+  [
+    "POST /sso/verify-domain",
+    502,
+    (o) => o.app.call("/sso/verify-domain", { providerId: "acme-oidc" }, o.cookie),
+  ],
+];
+
+describe("the sliding refresh on the shim's SSO paths (plan 12n)", () => {
+  it.each(DUE_CASES)(
+    "%s with a session due for a refresh answers core's renewed cookie, and the row agrees",
+    async (_path, status, send) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const o = await dueOwner();
+        const res = await send(o);
+        expect(res.status).toBe(status);
+        // One renewed cookie from core's own route: the same token, with the full life of seven days.
+        const renewed = res.headers.getSetCookie().filter((c) => c.startsWith(`${COOKIE_NAME}=`));
+        expect(renewed.map((c) => c.split(";")[0])).toEqual([o.cookie]);
+        expect(renewed[0]).toContain(`Max-Age=${(7 * DAY_MS) / 1000};`);
+        // The row agrees with the cookie: it lives seven days from now.
+        const read = await o.app.auth.tempo.session(
+          new Request(`${BASE}/api/auth/session`, { headers: { cookie: o.cookie } }),
+          { refresh: false },
+        );
+        expect(read?.session.expiresAt.getTime()).toBe(Date.now() + 7 * DAY_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    60_000,
+  );
 });

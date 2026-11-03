@@ -41,6 +41,7 @@ Before you rely on this preset, sign in once with a real account.
 - Each token must name its own tenant: its `iss` must be the issuer of its `tid`. A token of another tenant than the GUID of `tenant` answers `oauth_failed`.
 - `organizations` refuses a personal account, and `consumers` takes only a personal account.
 - The subject is `oid`, the key that Better Auth keeps. Microsoft gives one `oid` to each app of a tenant. A Better Auth `account` row of the provider `microsoft` links with no change.
+- The preset uses the global cloud of Entra ID, `login.microsoftonline.com`. It serves no sovereign cloud, such as the US Government cloud or the China cloud.
 - An address is verified only with `xms_edov: true`. Microsoft says the `email` claim is not sure to be correct and can change.
 - So without `xms_edov`, an Entra ID address links no user that exists. The callback answers `email_taken_unverified` for an address that another user holds. This stops the nOAuth attack.
 - The scope is `openid profile email`.

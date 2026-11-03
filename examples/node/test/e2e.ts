@@ -23,24 +23,68 @@ const serve: Serve =
   runtime === "bun"
     ? (await import("../src/server-bun.ts")).serveBun
     : (await import("../src/server-node.ts")).serveNode;
+/** A socket that holds a free port of 127.0.0.1 from the OS, so a listen on the port fails. */
+async function holdPort(): Promise<{ port: number; close(): Promise<void> }> {
+  const { createServer } = await import("node:net");
+  const held = createServer();
+  await new Promise<void>((done, fail) => {
+    held.once("error", fail);
+    held.listen(0, "127.0.0.1", () => done());
+  });
+  const address = held.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  return { port, close: () => new Promise<void>((done) => held.close(() => done())) };
+}
 /**
  * A free port from the OS. A fixed port met EADDRINUSE when this test and the
  * init scaffold test of the CLI ran at once (lane item P1 of plan 12g).
  */
 async function freePort(): Promise<number> {
-  const { createServer } = await import("node:net");
-  return new Promise((done, fail) => {
-    const probe = createServer();
-    probe.once("error", fail);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => done(port));
-    });
-  });
+  const probe = await holdPort();
+  await probe.close();
+  return probe.port;
 }
-const PORT = await freePort();
-const BASE = `http://127.0.0.1:${PORT}`;
+/** The most ports that `listen` tries. */
+const LISTEN_TRIES = 3;
+/** The error of `listen` when each port that it tried was in use. */
+class PortInUse extends Error {
+  port: number;
+  constructor(port: number, tries: number) {
+    super(`the listen failed with EADDRINUSE on ${tries} ports`);
+    this.port = port;
+  }
+}
+/**
+ * Serves the handler of `make(base)` on a free port. The probe of freePort
+ * closes before the server listens, so another process can take the port.
+ * A listen that fails with EADDRINUSE then tries a new port.
+ */
+async function listen(
+  make: (base: string) => (request: Request) => Promise<Response>,
+  nextPort: () => Promise<number> = freePort,
+): Promise<{ base: string; server: { close(): Promise<void> }; tries: number }> {
+  for (let tries = 1; ; tries++) {
+    const port = await nextPort();
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      const live = await serve(make(base), { port, hostname: "127.0.0.1", origin: base });
+      return { base, server: live, tries };
+    } catch (e) {
+      if ((e as { code?: unknown }).code !== "EADDRINUSE") throw e;
+      if (tries >= LISTEN_TRIES) throw new PortInUse(port, tries);
+    }
+  }
+}
+/**
+ * The failure line of an error, with a hint at the server that failed. The
+ * listen of the app server runs after the database exists. A port failure is
+ * no fault of Postgres, so its line names the port, not Postgres.
+ */
+function failureLine(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  if (e instanceof PortInUse) return `${message}; another process holds port ${e.port}`;
+  return `${message}; is Postgres up (node scripts/test-servers.mjs up)?`;
+}
 const ADMIN_URL = serverUrl("TEMPO_AUTH_PG_URL");
 const DB = `ex_${runtime}_${crypto.randomUUID().replaceAll("-", "")}`;
 const DB_URL = ADMIN_URL.replace(/\/[^/]+$/, `/${DB}`);
@@ -61,21 +105,63 @@ const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
 let sql: ReturnType<typeof postgres> | null = null;
 let server: { close(): Promise<void> } | null = null;
 try {
+  // The retry, before the database exists: a held port fails the first
+  // listen, and the next port serves.
+  const held = await holdPort();
+  try {
+    const ports = [held.port];
+    const probe = await listen(
+      () => async () => new Response("ok"),
+      async () => ports.shift() ?? freePort(),
+    );
+    await probe.server.close();
+    expectThat(
+      probe.tries === 2 && probe.base !== `http://127.0.0.1:${held.port}`,
+      `a listen on a held port took ${probe.tries} tries`,
+    );
+  } finally {
+    await held.close();
+  }
+  // Three held ports fail each listen, and the failure line names the last port.
+  const three = [await holdPort(), await holdPort(), await holdPort()];
+  try {
+    const ports = three.map((h) => h.port);
+    const line = await listen(
+      () => async () => new Response("ok"),
+      async () => ports.shift() ?? freePort(),
+    ).then(async (served) => {
+      await served.server.close();
+      return `a listen served on try ${served.tries}`;
+    }, failureLine);
+    expectThat(
+      line ===
+        `the listen failed with EADDRINUSE on 3 ports; another process holds port ${three[2]?.port}`,
+      `three held ports gave: ${line}`,
+    );
+  } finally {
+    for (const h of three) await h.close();
+  }
+
   await admin.unsafe(`CREATE DATABASE ${DB}`);
-  sql = postgres(DB_URL, { max: 2, onnotice: () => {} });
-  await applyPostgresMigrations(sql);
+  const db = postgres(DB_URL, { max: 2, onnotice: () => {} });
+  sql = db;
+  await applyPostgresMigrations(db);
   const sent: MailMessage[] = [];
-  const app = createApp({
-    baseURL: BASE,
-    secret: "0123456789abcdef0123456789abcdef",
-    sql,
-    mail: {
-      async send(m) {
-        sent.push(m);
-      },
-    },
-  });
-  server = await serve(app.fetch, { port: PORT, hostname: "127.0.0.1", origin: BASE });
+  const live = await listen(
+    (base) =>
+      createApp({
+        baseURL: base,
+        secret: "0123456789abcdef0123456789abcdef",
+        sql: db,
+        mail: {
+          async send(m) {
+            sent.push(m);
+          },
+        },
+      }).fetch,
+  );
+  server = live.server;
+  const BASE = live.base;
 
   const ask = await fetch(`${BASE}/auth/magic-link/request`, json({ email: "ada@example.com" }));
   expectThat(ask.status === 200, `the link request answered ${ask.status}`);
@@ -130,16 +216,14 @@ try {
     `/files with a cookie and a refused bearer answered ${withCookie.status} with ${withCookie.headers.get("www-authenticate")}`,
   );
 } catch (e) {
-  failures.push(
-    `${e instanceof Error ? e.message : String(e)}; is Postgres up (node scripts/test-servers.mjs up)?`,
-  );
+  failures.push(failureLine(e));
 } finally {
   await server?.close();
   await sql?.end({ timeout: 5 });
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`).catch(() => {});
   await admin.end({ timeout: 5 });
 }
-const pass = failures.length === 0 && checks === 10;
+const pass = failures.length === 0 && checks === 12;
 console.log(
   `${runtime}-e2e: ${pass ? "PASS" : "FAIL"} version=${version} checks=${checks} failures=${failures.length}`,
 );

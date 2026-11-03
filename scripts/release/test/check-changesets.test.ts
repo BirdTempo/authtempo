@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
+  COMPILER_PIN,
   changesetStatus,
   checkChangesets,
   entry,
@@ -26,6 +27,7 @@ import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { rewrittenPaths } from "../src/rewrite-unpublished.ts";
 import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
+import { NEVER_ENDS, STALL_MS, withLimit, withStalledGit, writeScript } from "./support/stall.ts";
 
 // The changesets CLI of the repository root, the one that writes each release branch.
 const CHANGESET_BIN = fileURLToPath(
@@ -226,6 +228,151 @@ describe("check-changesets", () => {
     ]);
   });
 
+  it("exempts a vitest config at the package root, and no other path (ruling 25 of plan 12n)", () => {
+    const r = run(
+      paths(
+        "packages/core/vitest.config.ts",
+        "packages/core/vitest.measure.config.ts",
+        "packages/core/src/vitest.config.ts",
+      ),
+      [],
+    );
+    expect(r.failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/src/vitest.config.ts",
+    ]);
+    expect(summaryLine(r)).toBe(
+      "check-changesets: FAIL changed=1 covered=0 exempt=2 empty=0 failures=1",
+    );
+  });
+
+  it("exempts a script that the build does not run and the pack does not hold (ruling 28 of plan 12n)", () => {
+    const script = "packages/core/scripts/check-seam-dts.mjs";
+    const missing = [`@authtempo/core changes and no changeset names it: ${script}`];
+    const check = (builds?: Record<string, string | undefined>, packs = files) =>
+      checkChangesets({
+        changed: paths(script),
+        changesets: [],
+        released,
+        dirs,
+        files: packs,
+        commits: 1,
+        version: "0.0.0",
+        ...(builds === undefined ? {} : { builds }),
+      });
+    // The build of adapter-d1 runs a script of the root only, and a package may have no build.
+    const rootOnly = {
+      "@authtempo/core": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    };
+    expect(summaryLine(check(rootOnly))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    expect(check({}).failures).toEqual([]);
+    // The build of the CLI runs a script of its own package, and that script writes dist.
+    for (const build of [
+      "tsc -p tsconfig.json && node scripts/copy-templates.mjs",
+      "node ./scripts/copy-migrations.mjs",
+    ])
+      expect(check({ "@authtempo/core": build }).failures, build).toEqual(missing);
+    // A files field that packs scripts, a package with no files field, and no build map.
+    expect(check(rootOnly, { ...files, "@authtempo/core": ["dist", "scripts"] }).failures).toEqual(
+      missing,
+    );
+    expect(check(rootOnly, { ...files, "@authtempo/core": undefined }).failures).toEqual(missing);
+    expect(check().failures).toEqual(missing);
+  });
+
+  describe("the build guard of the scripts/ row fails closed (review of the Task 1 fix of plan 12n, L3)", () => {
+    const script = "packages/core/scripts/gen.mjs";
+    const missing = [`@authtempo/core changes and no changeset names it: ${script}`];
+    const failuresOf = (build: string) =>
+      checkChangesets({
+        changed: paths(script),
+        changesets: [],
+        released,
+        dirs,
+        files,
+        builds: { "@authtempo/core": build },
+        commits: 1,
+        version: "0.0.0",
+      }).failures;
+    // Each test first shows that the plain build of its form keeps the exemption.
+    const plain = "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json";
+
+    it("keeps no exemption for a quoted path to a script of the package", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of ['node "scripts/gen.mjs" && tsc', "node 'scripts/gen.mjs' && tsc"])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for a --config=scripts/ path", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of [
+        "tsup --config=scripts/tsup.config.ts",
+        "tsc --project=scripts/tsconfig.json",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for an indirect run of a package script", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      for (const build of ["pnpm run gen && tsc", "npm run gen", "pnpm gen", "node --run gen"])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for a word that starts with @, such as a tsc response file (ruling 56 of plan 12n)", () => {
+      expect(failuresOf(plain)).toEqual([]);
+      // tsc reads the file of a word `@<file>` as more arguments, so that file can name scripts/.
+      for (const build of [
+        "tsc @scripts/tsc.rsp",
+        "tsc -p tsconfig.json @scripts/tsc.rsp",
+        "tsc @tsc.rsp",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+
+    it("keeps no exemption for any other form that the check cannot read", () => {
+      // The real build of core is a plain form, and a package with no build runs no script.
+      expect(
+        failuresOf(
+          "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json",
+        ),
+      ).toEqual([]);
+      expect(failuresOf("")).toEqual([]);
+      for (const build of [
+        "sh -c 'node scripts/gen.mjs' && tsc",
+        "node dist/../scripts/gen.mjs",
+        "node ../core/scripts/gen.mjs",
+        "tsc -p tsconfig.json  && tsc",
+        "tsc -p tsconfig.json; node x.mjs",
+        "node $GEN",
+        "env GEN=1 tsc",
+        "node /repo/packages/core/scripts/gen.mjs",
+      ])
+        expect(failuresOf(build), build).toEqual(missing);
+    });
+  });
+
+  it("reads the build script of each package from its manifest (ruling 28 of plan 12n)", () => {
+    const manifest = (build: string) =>
+      `{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist", "CHANGELOG.md"],\n  "scripts": { "build": "${build}" }\n}\n`;
+    const changedScript = (build: string) => {
+      const r = fixtureRepo({
+        "packages/a/package.json": manifest(build),
+        "packages/a/scripts/check.mjs": "// one\n",
+      });
+      try {
+        r.write("packages/a/scripts/check.mjs", "// two\n");
+        return checkChangesets(readInput(r.root, "main")).failures;
+      } finally {
+        r.remove();
+      }
+    };
+    expect(changedScript("tsc -p tsconfig.json")).toEqual([]);
+    expect(changedScript("tsc -p tsconfig.json && node scripts/check.mjs")).toEqual([
+      "@fixture/a changes and no changeset names it: packages/a/scripts/check.mjs",
+    ]);
+  });
+
   it("fails on a files entry that is not a plain path", () => {
     const r = run(paths("packages/core/test/a.test.ts"), [], 1, {
       ...files,
@@ -255,6 +402,33 @@ describe("check-changesets", () => {
     expect(run([manifest("base", "scripts")], []).failures).toEqual([
       "@authtempo/core changes and no changeset names it: packages/core/package.json (scripts)",
     ]);
+  });
+
+  it("needs a changeset for a change of the typescript pin (follow-up 6 of plan 12j)", () => {
+    // tsc of the pin builds dist, so a new pin can change what an app loads.
+    const base = read("manifests/base.json");
+    const pinned = (version: string | null) => {
+      const m = JSON.parse(base) as { devDependencies: Record<string, string> };
+      if (version === null) delete m.devDependencies.typescript;
+      else m.devDependencies.typescript = version;
+      return `${JSON.stringify(m, null, 2)}\n`;
+    };
+    const path = "packages/core/package.json";
+    const bump = { path, base, head: pinned("7.0.3") };
+    expect(run([bump], []).failures).toEqual([
+      `@authtempo/core changes and no changeset names it: ${path} (${COMPILER_PIN})`,
+    ]);
+    expect(summaryLine(run([bump], ["core-patch.md"]))).toBe(
+      "check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0",
+    );
+    expect(run([{ path, base, head: pinned(null) }], []).failures).toEqual([
+      `@authtempo/core changes and no changeset names it: ${path} (${COMPILER_PIN})`,
+    ]);
+    // The same pin in another form of the text is no change.
+    expect(summaryLine(run([{ path, base, head: pinned("7.0.2") }], []))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    expect(COMPILER_PIN).toBe("devDependencies.typescript");
   });
 
   it("needs a changeset for a change of typesVersions (ruling 64 of plan 12j, Minor 3)", () => {
@@ -666,6 +840,20 @@ describe("check-changesets", () => {
     }
   });
 
+  it("gives a note, not a failure, for a changeset status past its limit (review of Task 1 of plan 12n, M1)", () => {
+    const bare = mkdtempSync(join(tmpdir(), "authtempo-changeset-status-"));
+    try {
+      mkdirSync(join(bare, "node_modules/.bin"), { recursive: true });
+      const bin = join(bare, "node_modules/.bin/changeset");
+      writeScript(bin, NEVER_ENDS);
+      expect(withLimit("registry", STALL_MS, () => changesetStatus(bare, "f44660d9"))).toEqual([
+        `changeset status: ${bin} status --since=f44660d9 did not end in ${STALL_MS} ms`,
+      ]);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
   it("prints the output of changeset status beside its exit code", () => {
     // The output of changeset status 3.0.3 on the tree of 2026-10-20.
     const notes = statusNotes({
@@ -695,6 +883,22 @@ describe("check-changesets", () => {
       lines: [
         "check-changesets: FAIL changed=0 covered=0 exempt=0 empty=0 failures=1",
         "  no merge base of HEAD and main; fetch the full history (fetch-depth: 0)",
+      ],
+      code: 1,
+    });
+  });
+
+  it("prints a FAIL line, not a stack, when a git call passes its limit (review of Task 1 of plan 12n, M1)", () => {
+    const r = fixtureRepo();
+    repo = r;
+    r.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+    expect(entry(r.root, "main").lines[0]).toBe(
+      "check-changesets: FAIL changed=1 covered=0 exempt=0 empty=0 failures=1",
+    );
+    expect(withStalledGit(() => entry(r.root, "main"))).toEqual({
+      lines: [
+        "check-changesets: FAIL changed=0 covered=0 exempt=0 empty=0 failures=1",
+        `  git merge-base HEAD main did not end in ${STALL_MS} ms`,
       ],
       code: 1,
     });

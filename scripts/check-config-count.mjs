@@ -39,8 +39,10 @@ import { execFileSync } from "node:child_process";
 // packages/core/vitest.measure.config.ts (56, ruling 48).
 // Plan 12j adds scripts/release/vitest.config.ts (57, Task 2). The pattern below
 // gains "scripts", because the package lives under scripts/release.
+// Plan 12n adds packages/compat-better-auth/vitest.bun.config.ts (58, Task 4),
+// counted 2026-11-03.
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 57;
+const MINIMUM = 58;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

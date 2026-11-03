@@ -1,6 +1,6 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
 import { atBase, pickBase, type ResolvedConfig } from "../config.js";
-import { peekSession, sessionCapMs } from "../engine/sessions.js";
+import { peekSession, resolvedUserOf, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
 import type { HandleOptions } from "../observe/port.js";
@@ -245,6 +245,9 @@ async function moveLegacyCookie(
   if (old === null || readCookie(request, config.cookieName) !== null) return res;
   const sets = res.headers.getSetCookie();
   if (!sets.some((c) => c.startsWith(`${config.cookieName}=`))) {
+    // A peek of the row of the old cookie, the request's token here. The move sets no
+    // mark (ruling 49 of plan 12n). So on a route that reads no session, the `request`
+    // event names no user.
     const row = await peekSession(config, old);
     if (row) {
       // The earlier of expiresAt and the cap: a row from before absoluteDays
@@ -457,6 +460,11 @@ export function createRouter(
         ? withTrace(routerError(HOST_CODE), traceId)
         : await answer(scoped, request, url, match, traceId, waitUntil);
     const { outcome, code } = outcomeOf(res);
+    // The user of the session row that the request's token names (rulings 37, 49, and
+    // 58 of plan 12n). It comes from a full read or a peek of that row. So a refusal of
+    // a router step names the account of the token, a banned one too. A refusal of the
+    // handler's full read sets no mark: the read answers null for a banned user's row.
+    const userId = resolvedUserOf(request);
     scoped.observe.emit({
       name: "request",
       method: request.method,
@@ -464,6 +472,7 @@ export function createRouter(
       outcome,
       ...eventCode(code),
       durationMs: Math.max(0, config.clock.now().getTime() - started),
+      ...(userId === undefined ? {} : { userId }),
     });
     const via = route?.key === undefined ? undefined : SIGN_IN_ROUTES[route.key];
     if (

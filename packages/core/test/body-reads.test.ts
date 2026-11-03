@@ -124,6 +124,9 @@ describe("the raw body reads of core (ruling 46 of the 12j lane)", () => {
       // The note of rr-12j-bodycap4: an alias of Reflect.get. The read of a Response passes.
       "request.body",
       "request.text",
+      // Follow-up 5 of plan 12j: Reflect.get.call and Reflect.get.apply. The read of a Response passes.
+      "request.body",
+      "request.text",
     ]);
   });
 });

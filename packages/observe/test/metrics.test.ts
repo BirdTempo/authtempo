@@ -9,7 +9,7 @@ import { built } from "./events.js";
  * have no row in `EVENTS` yet, so their fields are the ones of spec 31.
  * Each flow event carries the ids that its row holds, so a metric that
  * copies one shows here. The sign_in row holds the user and session ids
- * since Task 5.
+ * since Task 5. The request row holds the user id since plan 12n.
  */
 const IDS = { userId: "usr_0123456789", sessionId: "ses_0123456789" };
 const SOURCES: Readonly<Record<string, AuthEvent>> = {
@@ -19,6 +19,7 @@ const SOURCES: Readonly<Record<string, AuthEvent>> = {
     status: 200,
     outcome: "ok",
     durationMs: 30,
+    userId: IDS.userId,
   }),
   sign_in: built("sign_in", "info", { method: "password", outcome: "success", ...IDS }),
   "second_factor.challenge": built("second_factor.challenge", "info", {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { checkTag, entry } from "../src/check-tag.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { makeRepo, type Repo } from "./support/git-repo.ts";
+import { STALL_MS, withStalledGit } from "./support/stall.ts";
 
 const tagAt = (tag: string, groupVersion: string, where: "main" | "release" | "neither") =>
   checkTag({ tag, groupVersion, onMain: where === "main", onReleaseBranch: where === "release" });
@@ -152,6 +153,20 @@ describe("check-tag", () => {
       lines: [
         "check-tag: FAIL tags=0 failures=1",
         "  git merge-base --is-ancestor HEAD refs/remotes/origin/main exited 128",
+      ],
+      code: 1,
+    });
+  });
+
+  it("prints a FAIL line, not a stack, when a git call passes its limit (review of Task 1 of plan 12n, M1)", () => {
+    const r = released("0.1.0");
+    repo = r;
+    r.git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    expect(entry(r.root, "v0.1.0").code).toBe(0);
+    expect(withStalledGit(() => entry(r.root, "v0.1.0"))).toEqual({
+      lines: [
+        "check-tag: FAIL tags=0 failures=1",
+        `  git rev-parse --verify --quiet refs/remotes/origin/main^{commit} did not end in ${STALL_MS} ms`,
       ],
       code: 1,
     });

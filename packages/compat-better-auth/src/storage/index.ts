@@ -5,6 +5,7 @@ import {
 } from "@authtempo/adapter-d1/seam";
 import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { integerProbe, SQLITE_BOUND_PARAMS, type SqliteDriver } from "@authtempo/adapter-sqlite";
+import { StorageError } from "@authtempo/core";
 import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
@@ -91,6 +92,66 @@ function cascading<T extends { userDeleteCascades?: boolean }>(storage: T): T {
   return storage;
 }
 
+/**
+ * The text of the refusal when `PRAGMA foreign_keys` reads 0 after the
+ * pragma (ruling 44 of plan 12n). SQLite ignores the pragma inside an open
+ * transaction, so an app that holds a BEGIN on the handle gets it.
+ */
+export const FOREIGN_KEYS_OFF =
+  "PRAGMA foreign_keys reads 0 after PRAGMA foreign_keys = ON; SQLite ignores the pragma inside an open transaction, so end the transaction of the handle before the first call";
+
+/**
+ * Turns the foreign keys on, once per storage, on each SQLite driver (rulings
+ * 40 and 44 of plan 12n). The cascade of a user delete is a promise of this
+ * storage (`cascading`). On a driver with one connection, the pragma keeps
+ * it, so no driver default keeps it alone there. Bun 1.4.3 opens a
+ * bun:sqlite database with the keys off (read 0 on 2026-11-03,
+ * darwin-arm64). On 2026-11-03, on darwin-arm64 with Node 26.10.0,
+ * node:sqlite (SQLite 3.54.0) and better-sqlite3 13.0.3 opened with the keys
+ * on (read 1). An app can turn them off. The pragma is idempotent, so a
+ * handle with the keys on gets it too. Then the storage reads the key back
+ * and refuses with `config_mismatch` when it reads 0. A probe of 2026-11-03
+ * read 0 after the pragma inside an open BEGIN on Bun 1.4.3, node:sqlite,
+ * and better-sqlite3. Both queries count in `statementsSent` and in
+ * `readyStatements`, as the integer check's query does. A failed run is not
+ * kept, so the next call runs both queries again.
+ *
+ * A libSQL file client keeps a pool of connections, and each query reaches
+ * the connection that serves it. The storage sets the keys on one connection
+ * only: the connection that serves its pragma. On each other connection, the
+ * default of @libsql/client 0.18.0 keeps the cascade (ruling 57 of plan 12n).
+ * Each new connection read 1 with no pragma (read 2026-11-03, darwin-arm64,
+ * libsql 0.5.29). A test of test/sqlite/foreign-keys.test.ts reaches a second
+ * connection and pins that default.
+ */
+function foreignKeysOn(
+  driver: SqliteDriver,
+  sent: { statements: number; ready?: number },
+): () => Promise<void> {
+  const count = () => {
+    sent.statements++;
+    if (sent.ready !== undefined) sent.ready++;
+  };
+  let on: Promise<void> | null = null;
+  return () => {
+    on ??= (async () => {
+      try {
+        count();
+        await driver.db.prepare("PRAGMA foreign_keys = ON").run();
+        count();
+        const read = await driver.db.prepare("PRAGMA foreign_keys").first("foreign_keys");
+        // Number(): a handle that reads BigInt gets the integer check's own refusal next.
+        if (Number(read) !== 1)
+          throw new StorageError("config_mismatch", "meta", [FOREIGN_KEYS_OFF]);
+      } catch (e) {
+        on = null;
+        throw e;
+      }
+    })();
+    return on;
+  };
+}
+
 /** Core's storage port, and the owned limiter, over the app's Better Auth tables (spec 16.2). */
 export function betterAuthSchemaStorage(
   options: PostgresSchemaStorageOptions,
@@ -108,11 +169,13 @@ export function betterAuthSchemaStorage(
     // same undo log, the same readiness check. Before the check, the handle
     // must read integers as numbers, as on the core SQLite adapter. The ping
     // runs that check first (ruling 27 of the 12g lane), then the D1 ping
-    // over the seam (ruling 26).
+    // over the seam (ruling 26). On every driver, the foreign keys go on
+    // before the first call and before the migrations.
     const { driver } = options;
     const variant = options.variant ?? "1.7";
     const st = compatStatements("sqlite", names, rule);
     const sent = { statements: 0, ready: 0 };
+    const keysOn = foreignKeysOn(driver, sent);
     const probe = integerProbe(driver.db, sent);
     const compatReady = d1CompatReady(driver.db, names, sent);
     const compatPing = d1CompatPing(driver.db, names, sent);
@@ -125,6 +188,7 @@ export function betterAuthSchemaStorage(
           statements: st,
           toStorageError: st.toStorageError,
           ready: async () => {
+            await keysOn();
             await probe();
             await compatReady();
           },
@@ -138,7 +202,10 @@ export function betterAuthSchemaStorage(
       ),
       limiter: createD1LimiterOnSeam(driver.db),
       migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),
-      migrate: () => applyBetterAuthCompatSqliteMigrations(driver, names, variant),
+      migrate: async () => {
+        await keysOn();
+        return applyBetterAuthCompatSqliteMigrations(driver, names, variant);
+      },
     };
     registerPlaceholderRule(sqlite, rule);
     registerRawRead(sqlite, async (q) => (await driver.db.prepare(q).all()).results);

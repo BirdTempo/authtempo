@@ -15,6 +15,8 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 const OPEN = { allow: async () => true };
 const APP = { kind: "app", name: "support-tool" } as const;
 const PASSWORD = "correct horse battery";
+/** The pause of the grant inside its transaction: long enough for the ban to reach its lock wait. */
+const HOLD_MS = 400;
 
 let db: Awaited<ReturnType<typeof freshDatabase>>;
 beforeEach(async () => {
@@ -24,7 +26,8 @@ afterEach(async () => {
   await db.close();
 });
 
-function world() {
+/** `beforeAddMember` runs as the member hook, inside the grant's transaction after its user hold. */
+function world(beforeAddMember?: () => Promise<void>) {
   const sent: MailMessage[] = [];
   const auth = createAuth({
     baseURL: BASE,
@@ -45,6 +48,7 @@ function world() {
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true },
+    ...(beforeAddMember ? { hooks: { organization: { beforeAddMember } } } : {}),
   });
   const tokenOf = (m: MailMessage | undefined) => {
     const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
@@ -201,4 +205,59 @@ describe("the ban on Postgres (plan 12f Task 6)", () => {
     },
     60_000,
   );
+});
+
+describe("the ban by a user actor beside a grant of the platform role (decision 15 of plan 12n)", () => {
+  it("refuses the ban when the grant commits after its target check, a delay sweep", async () => {
+    let during: (() => Promise<void>) | null = null;
+    const w = world(async () => {
+      await during?.();
+    });
+    const made = await w.auth.api.operator.createAdmin({
+      actor: APP,
+      email: "op@example.com",
+      reason: "First operator",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const op = await w.signIn("op@example.com");
+    const actor = { kind: "user", user: op.user, session: op.session } as const;
+    // The grant holds the target's user row and pauses in its member hook.
+    // The ban starts 0 to 11 ms into the pause. Its target check reads no
+    // role, and its write of the ban fields waits on the user row.
+    for (let round = 0; round < 12; round++) {
+      const target = await w.signIn(`target-${round}@example.com`);
+      let banned: Promise<unknown> | null = null;
+      during = async () => {
+        during = null;
+        banned = (async () => {
+          await new Promise((r) => setTimeout(r, round));
+          return w.auth.api.operator.users.ban({
+            actor,
+            userId: target.user.id,
+            reason: "Race",
+            ip: null,
+            userAgent: null,
+          });
+        })();
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      };
+      const granted = await w.auth.api.operator.platformRole.grant({
+        actor: APP,
+        userId: target.user.id,
+        reason: "Race",
+        ip: null,
+        userAgent: null,
+      });
+      expect(granted.ok).toBe(true);
+      expect(banned).not.toBeNull();
+      // After the grant's commit, the ban reads the role again in its act.
+      expect(await banned).toEqual({ ok: false, code: "operator_required", status: 403 });
+      const rows = await db.sql<{ banned_at: Date | null }[]>`
+        SELECT banned_at FROM ta_user WHERE id = ${target.user.id}`;
+      expect(rows.map((r) => r.banned_at)).toEqual([null]);
+      expect(await w.auth.api.getSession(target.token)).not.toBeNull();
+    }
+  }, 60_000);
 });

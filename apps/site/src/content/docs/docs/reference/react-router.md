@@ -32,7 +32,7 @@ sidebar:
 | Export | What it does |
 | --- | --- |
 | `authRouteModule` | Answers the `loader` and the `action` of the resource route of core. |
-| `authMiddleware` | Answers the middleware that sets the session, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
+| `authMiddleware` | Answers the middleware that sets the session. It sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `sessionContext` | The router context of the session. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |

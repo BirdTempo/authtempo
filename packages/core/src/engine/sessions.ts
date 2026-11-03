@@ -849,6 +849,31 @@ export async function peekRequestUser(
   return user;
 }
 
+/**
+ * The user of the session row that the token of a request names (decision
+ * 17 and ruling 49 of plan 12n). The router reads it into the `request`
+ * event. The map holds no id after the request.
+ */
+const resolvedUsers = new WeakMap<Request, string>();
+
+/**
+ * Marks `request` with the user of the session row that its token names
+ * (rulings 37 and 49 of plan 12n). A step reads the row in full or by a peek.
+ * A handler's session read, the two refusal steps of the router, the
+ * sign-out, and the link callback call it. `anonymousCaller` calls it when it
+ * finds an anonymous caller. A peek checks the expiry of the row only, so a
+ * refusal names the account of the token, a banned one too. The move of an
+ * old cookie peeks its row and sets no mark.
+ */
+export function markRequestUser(request: Request, userId: string): void {
+  resolvedUsers.set(request, userId);
+}
+
+/** The user id that a step marked for `request`, or undefined when no step marked one. */
+export function resolvedUserOf(request: Request): string | undefined {
+  return resolvedUsers.get(request);
+}
+
 /** The caller's session from the cookie or the bearer header, or null. */
 export async function sessionFromRequest(
   config: ResolvedConfig,
@@ -861,9 +886,16 @@ export async function sessionFromRequest(
   const peekedUser = peekedUsers.get(request) ?? null;
   peekedRows.delete(request);
   peekedUsers.delete(request);
-  return token
-    ? resolveSession(config, token, readModeOf(config, request, options), peeked, peekedUser)
-    : null;
+  if (!token) return null;
+  const resolved = await resolveSession(
+    config,
+    token,
+    readModeOf(config, request, options),
+    peeked,
+    peekedUser,
+  );
+  if (resolved) markRequestUser(request, resolved.user.id);
+  return resolved;
 }
 
 /**

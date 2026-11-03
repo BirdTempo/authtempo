@@ -67,23 +67,44 @@ const ALL_HOOKS: AuthConfig["hooks"] = {
   identity: { beforeLink: () => {}, afterLink: () => {} },
 };
 
-/** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
-function counting(db: D1Database) {
+/** The key that gives the SQL text of a statement under a counting view. */
+const SQL = Symbol("sql");
+
+/**
+ * A step that runs after each statement of the view, with its SQL text. It
+ * acts as a parallel request on the binding does between two queries.
+ */
+type Watch = (sql: string) => Promise<void>;
+
+/**
+ * A view of `db` that counts each statement, and each statement of a batch.
+ * Query `BUDGET + 1` throws. `watch` runs after each statement.
+ */
+function counting(db: D1Database, watch?: Watch) {
   const count = { queries: 0 };
   const tick = (n: number) => {
     if (count.queries + n > BUDGET)
       throw new Error("Too many API requests by single worker invocation.");
     count.queries += n;
   };
-  const wrap = (s: D1PreparedStatement): D1PreparedStatement =>
+  const after = async <T>(value: Promise<T>, texts: string[]): Promise<T> => {
+    const done = await value;
+    for (const text of texts) await watch?.(text);
+    return done;
+  };
+  const wrap = (s: D1PreparedStatement, sql: string): D1PreparedStatement =>
     new Proxy(s, {
       get(target, key) {
         if (key === RAW) return target;
-        if (key === "bind") return (...values: unknown[]) => wrap(target.bind(...values));
+        if (key === SQL) return sql;
+        if (key === "bind") return (...values: unknown[]) => wrap(target.bind(...values), sql);
         if (key === "run" || key === "all" || key === "first" || key === "raw")
           return (...args: unknown[]) => {
             tick(1);
-            return (target[key] as (...a: unknown[]) => unknown).apply(target, args);
+            return after(
+              (target[key] as (...a: unknown[]) => Promise<unknown>).apply(target, args),
+              [sql],
+            );
           };
         const value = Reflect.get(target, key);
         return typeof value === "function" ? value.bind(target) : value;
@@ -91,12 +112,17 @@ function counting(db: D1Database) {
     });
   const counted = new Proxy(db, {
     get(target, key) {
-      if (key === "prepare") return (sql: string) => wrap(target.prepare(sql));
+      if (key === "prepare") return (sql: string) => wrap(target.prepare(sql), sql);
       if (key === "batch")
         return (statements: D1PreparedStatement[]) => {
           tick(statements.length);
-          return target.batch(
-            statements.map((s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s),
+          return after(
+            target.batch(
+              statements.map(
+                (s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s,
+              ),
+            ),
+            statements.map((s) => String((s as unknown as Record<symbol, string>)[SQL] ?? "")),
           );
         };
       const value = Reflect.get(target, key);
@@ -106,10 +132,13 @@ function counting(db: D1Database) {
   return { db: counted as D1Database, count };
 }
 
-/** Every pathway on, every upgrade hook set, on a counting view of the binding. */
-function make(extra: Partial<AuthConfig> = {}, counted = true) {
+/**
+ * Every pathway on, every upgrade hook set, on a counting view of the
+ * binding. `watch` runs after each statement of the view.
+ */
+function make(extra: Partial<AuthConfig> = {}, counted = true, watch?: Watch) {
   // A race test runs several requests at once: one invocation each, so it counts nothing.
-  const { db, count } = counted ? counting(env.DB) : { db: env.DB, count: { queries: 0 } };
+  const { db, count } = counted ? counting(env.DB, watch) : { db: env.DB, count: { queries: 0 } };
   const sms = createRecordingSms();
   const mail: { to: string; text: string }[] = [];
   const links: string[] = [];
@@ -513,6 +542,200 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       expect(done.queries).toBe(WORST_JOIN_PINS.idTokenClaim);
       expect(done.queries).toBeLessThanOrEqual(BUDGET);
     });
+
+  // The counts of the run of 2026-11-03 (ruling 32 of plan 12n): the
+  // request of the race, and the request that the client sends again. The
+  // race answers after the undo of its one run. Before the ruling the flow
+  // ran the claim again, and the race reached query 51 (58 with no cap).
+  const RACE_PINS = { race: 24, again: 39 };
+
+  it("answers 409 conflict to a session race on the worst claim join, with no claim write, within the D1 Free budget (ruling 32 of plan 12n)", async () => {
+    // The sign-out runs on the binding with no count, as a request in another invocation.
+    const other = make({}, false);
+    const tokens: string[] = [];
+    let live = false;
+    let flipped = false;
+    let outs = 0;
+    const w = make({ multiSession: { max: 10 }, hooks: ALL_HOOKS }, true, async (sql) => {
+      if (!live || outs > 0) return;
+      // The flip of the claim, not the undo of a flip (its values are CASE forms).
+      if (/^UPDATE\s+"?ta_user"?\s+SET\s+"?email_verified"?\s*=\s*\?/i.test(sql)) flipped = true;
+      else if (
+        flipped &&
+        /^SELECT\b[\s\S]*\bFROM\s+"?ta_session"?\s+WHERE\s+"?user_id"?/i.test(sql)
+      ) {
+        outs++;
+        // A sign-out between the claim's read of the claimant sessions and their delete.
+        await other.auth.api.signOut(tokens[0] ?? "");
+      }
+    });
+    const b = await fullBagAnonymous(w, (email) => verifiedUser(w, email));
+    // The claimant signs up with the address and signs in on other devices.
+    const email = "bo@example.com";
+    await call(w, post("/password/sign-up", { email, password: PASSWORD }));
+    for (let i = 0; i < 10; i++) {
+      const res = await call(w, post("/password/sign-in", { email, password: PASSWORD }));
+      expect(res.status).toBe(200);
+      tokens.push(setToken(res) ?? "");
+    }
+    // The payload segment of the token. The route keeps a key of each used
+    // payload, so the request again needs a new token from the provider.
+    const idToken = async (payload: string) => {
+      const nonce = (await (await call(w, post("/social/google/id-token/nonce", {}))).json()) as {
+        nonce: string;
+        providerNonce: string;
+      };
+      const iat = Math.floor(Date.now() / 1000);
+      w.claims.current = {
+        iss: "https://accounts.google.com",
+        aud: "gid",
+        sub: "g-bo",
+        email,
+        email_verified: true,
+        nonce: nonce.providerNonce,
+        iat,
+        exp: iat + 3600,
+      };
+      return post(
+        "/social/google/id-token",
+        { idToken: `h.${payload}.s`, nonce: nonce.nonce },
+        b.jar(),
+      );
+    };
+    /** The rows that the claim and the upgrade write, read on the binding. */
+    const state = async () => {
+      const user = await env.DB.prepare(
+        "SELECT id, email_verified AS v FROM ta_user WHERE email = ?",
+      )
+        .bind(email)
+        .first<{ id: string; v: number }>();
+      const ids = async (table: string) =>
+        (
+          await env.DB.prepare(`SELECT id FROM ${table} WHERE user_id = ? ORDER BY id`)
+            .bind(user?.id ?? "")
+            .all<{ id: string }>()
+        ).results.map((r) => r.id);
+      const anonymous = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM ta_user WHERE is_anonymous = 1",
+      ).first<{ n: number }>();
+      return {
+        verified: user?.v === 1,
+        identities: await ids("ta_identity"),
+        passwords: await ids("ta_password"),
+        sessions: await ids("ta_session"),
+        anonymous: anonymous?.n ?? 0,
+      };
+    };
+    const before = await state();
+    // The sign-up opened one session too.
+    expect(before.sessions).toHaveLength(11);
+    expect(before.anonymous).toBe(1);
+    const gone = await createD1Adapter(env.DB).findOne("session", [
+      { field: "tokenHash", op: "eq", value: await hashOf(tokens[0] ?? "") },
+    ]);
+    const request = await idToken("e30");
+    live = true;
+    const race = await measure(w, request);
+    live = false;
+    expect(outs).toBe(1);
+    expect(race.res.status).toBe(409);
+    expect(await race.res.json()).toEqual({ error: "conflict" });
+    expect(setToken(race.res)).toBeNull();
+    // The undo of the first run leaves every row as it was, less the session of the sign-out.
+    expect(await state()).toEqual({
+      ...before,
+      sessions: before.sessions.filter((id) => id !== gone?.id),
+    });
+    // The client sends the request again in a new invocation, with a new nonce and a new token.
+    const again = await measure(w, await idToken("eyJuIjoyfQ"));
+    expect(b.take(again.res).status).toBe(200);
+    const after = await state();
+    expect(after.verified).toBe(true);
+    // The claim ended every claimant session; the sign-in made one.
+    expect(after.sessions).toHaveLength(1);
+    expect(after.anonymous).toBe(0);
+    expect({ race: race.queries, again: again.queries }).toEqual(RACE_PINS);
+    expect(race.queries).toBeLessThanOrEqual(BUDGET);
+    expect(again.queries).toBeLessThanOrEqual(BUDGET);
+  });
+
+  // The count of the run of 2026-11-03 (rr-final L-7 of plan 12n): the
+  // worst claim join after one unique-key retry. A sign-up of the address
+  // commits between the first run's read of the user and its user create.
+  // So the create meets the unique key, and the second run claims the user
+  // of the sign-up with 11 claimant sessions.
+  const UNIQUE_PINS = { retry: 46 };
+
+  it("signs in after a unique-key retry on the worst claim join within the D1 Free budget (rr-final L-7 of plan 12n)", async () => {
+    // The sign-up and the sign-ins run on the binding with no count, as requests in other invocations.
+    const other = make({}, false);
+    const email = "bo@example.com";
+    let live = false;
+    let identityReads = 0;
+    let raced = 0;
+    let signedUp = "";
+    const w = make({ multiSession: { max: 10 }, hooks: ALL_HOOKS }, true, async (sql) => {
+      if (!live) return;
+      if (/^SELECT\b[\s\S]*\bFROM\s+"?ta_identity"?\s+WHERE\s+"?provider"?/i.test(sql))
+        identityReads++;
+      else if (
+        identityReads === 1 &&
+        raced === 0 &&
+        /^SELECT\b[\s\S]*\bFROM\s+"?ta_user"?\s+WHERE\s+"?email"?/i.test(sql)
+      ) {
+        raced++;
+        // The claimant signs up and signs in on other devices after the read found no user.
+        await call(other, post("/password/sign-up", { email, password: PASSWORD }));
+        for (let i = 0; i < 10; i++)
+          expect(
+            (await call(other, post("/password/sign-in", { email, password: PASSWORD }))).status,
+          ).toBe(200);
+        const row = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+          .bind(email)
+          .first<{ id: string }>();
+        signedUp = row?.id ?? "";
+      }
+    });
+    const b = await fullBagAnonymous(w, (address) => verifiedUser(w, address));
+    const nonce = (await (await call(w, post("/social/google/id-token/nonce", {}))).json()) as {
+      nonce: string;
+      providerNonce: string;
+    };
+    const iat = Math.floor(Date.now() / 1000);
+    w.claims.current = {
+      iss: "https://accounts.google.com",
+      aud: "gid",
+      sub: "g-bo",
+      email,
+      email_verified: true,
+      nonce: nonce.providerNonce,
+      iat,
+      exp: iat + 3600,
+    };
+    live = true;
+    const done = await measure(
+      w,
+      post("/social/google/id-token", { idToken: "h.e30.s", nonce: nonce.nonce }, b.jar()),
+    );
+    live = false;
+    // Each run reads the identity of the provider. The claim of the second
+    // run reads the email identity too, with the same SQL text.
+    expect({ raced, identityReads }).toEqual({ raced: 1, identityReads: 3 });
+    expect(b.take(done.res).status).toBe(200);
+    const user = await env.DB.prepare("SELECT id, email_verified AS v FROM ta_user WHERE email = ?")
+      .bind(email)
+      .first<{ id: string; v: number }>();
+    // The second run claimed the user of the sign-up: the first run's create wrote no user.
+    expect(user?.id).toBe(signedUp);
+    expect(user?.v).toBe(1);
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM ta_session WHERE user_id = ?")
+      .bind(user?.id ?? "")
+      .first<{ n: number }>();
+    // The claim ended the 11 claimant sessions; the sign-in made one.
+    expect(left?.n).toBe(1);
+    expect(done.queries).toBe(UNIQUE_PINS.retry);
+    expect(done.queries).toBeLessThanOrEqual(BUDGET);
+  });
 
   for (const uniformSignUp of [false, true])
     it(`keeps the sign-up confirm by code with a full bag within the D1 Free budget (uniformSignUp ${uniformSignUp})`, async () => {

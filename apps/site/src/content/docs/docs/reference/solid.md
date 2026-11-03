@@ -57,7 +57,7 @@ On the server of Solid Start:
 | Export | What it does |
 | --- | --- |
 | `authRouteHandlers` | Answers the `GET`, `POST`, and `OPTIONS` of `src/routes/auth/[...path].ts`. Export each method by name. |
-| `authOnRequest` | Answers the `onRequest` that sets `locals.session`, sends a person with no session on a protected path to the sign-in page, and writes the renewed cookie to the response headers of the event. |
+| `authOnRequest` | Answers the `onRequest` that sets `locals.session`. It sends a person with no session on a protected path to the sign-in page. It writes the renewed cookie to the response headers of the event. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
 | `StartEventLike` | The fields of the event that the entry reads. |

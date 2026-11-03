@@ -12,15 +12,16 @@ import type { RouteKey } from "./route-list.js";
  * The derivation, done 2026-10-30. `body-cap.test.ts` walks the body schema
  * of each route of `ROUTE_CONTRACT` and computes its largest valid body. It
  * takes each `max` of length and of items, and 3 bytes for each UTF-16 unit
- * of a string: a character that is not a control character takes at most 3
+ * of a string. A character that is not a control character takes at most 3
  * bytes in UTF-8. A form value takes 9 bytes for each unit (`%XX%XX%XX`).
- * The count leaves out two forms of 6 bytes for one unit: the `\u` escape
- * of a control character other than a line break or a tab, and the `\u`
- * escape that an ASCII-only encoder (such as the default of Python's
- * `json.dumps`) writes for each unit that is not ASCII. No field of a route
- * holds a control character in normal use. A body of such an encoder can
- * take up to twice the count. When most of its text is not ASCII, it can
- * pass the cap and answer 413: such a client must send UTF-8 for long text.
+ * The count leaves out two forms of 6 bytes for one unit. The first is the
+ * `\u` escape of a control character other than a line break or a tab. The
+ * second is the `\u` escape of each unit that is not ASCII from an
+ * ASCII-only encoder. The default of Python's `json.dumps` is such an
+ * encoder. No field of a route holds a control character in normal use. A
+ * body of such an encoder can take up to twice the count. When most of its
+ * text is not ASCII, it can pass the cap and answer 413: such a client must
+ * send UTF-8 for long text.
  *
  * Each route gets the next power of two above its own largest valid body,
  * and at least `BODY_CAP_FLOOR`. The test emits the table and fails when a
@@ -57,14 +58,13 @@ export const REQUEST_BODY_MAX = 8_388_608;
 /**
  * The deepest nesting of `[` and `{` that a JSON body may have. The deepest
  * schema is 4 (`POST /oauth/register`: the body, `jwks`, `keys`, one key).
- * The margin is 12 for the nodes that no schema bounds: a passkey response
- * holds the extension outputs of the client (`prf.results.first` nests 3
- * more levels), a JWK may hold an array, and the `metadata` of an
- * organization or of an API token is a record of any values. That record
- * is at depth 2 of its body, so its values nest at most 14 levels: a deeper
- * value answers `invalid_body` (ruling 51 Low 5 of the 12j lane). No
- * release exists, so no stored row holds a deeper value. The test holds
- * each number.
+ * The margin is 12 for the nodes that no schema bounds. A passkey response
+ * holds the extension outputs of the client: `prf.results.first` nests 3
+ * more levels. A JWK may hold an array. The `metadata` of an organization
+ * or of an API token is a record of any values. That record is at depth 2
+ * of its body, so its values nest at most 14 levels. A deeper value answers
+ * `invalid_body` (ruling 51 Low 5 of the 12j lane). No release exists, so
+ * no stored row holds a deeper value. The test holds each number.
  */
 export const BODY_DEPTH_MAX = 16;
 
@@ -74,81 +74,82 @@ export const BODY_DEPTH_MAX = 16;
  * update), 328 with `scimRoles` at its engine bound of 100 entries. It had
  * 230 and 329 until plan 12l moved the id of the update into its query on
  * 2026-11-01. The next power of two is 512. The limit is 8 times that, for
- * the nodes that no schema bounds: a passkey response, a JWK set, and the
- * keys that an object that is not strict ignores. Each item makes at most
- * one value, so a parsed body holds at most this many values beside its
- * strings, and an 8 MiB body of empty arrays cannot exhaust a 128 MB
- * isolate.
+ * the nodes that no schema bounds. Such nodes are a passkey response, a JWK
+ * set, and the keys that an object that is not strict ignores. Each item
+ * makes at most one value, so a parsed body holds at most this many values
+ * beside its strings. So an 8 MiB body of empty arrays cannot exhaust a
+ * 128 MB isolate.
  */
 export const BODY_ITEMS_MAX = 4096;
 
 /**
- * The most pairs of a form body: one more than its `&` separators, as
- * `URLSearchParams` splits the text (ruling 51 Major 1 of the 12j lane).
- * Node's `URLSearchParams` takes time of the pairs times the length for a
- * key with no `=`: 540 759 pairs of `a&` at `SAML_FORM_MAX` took 5.2 s,
- * and a form of `=&` pairs kept 64 to 80 MB of heap. The derivation, done
- * 2026-10-30: the form route with the most fields is `POST /oauth/token`,
- * 12. The next power of two is 16. The limit is 8 times that, as for the
- * items, for the fields that a client adds and a route ignores. At this
- * limit a form of `SAML_FORM_MAX` in 128 pairs of long keys with no `=`
- * parses in about 2 ms on Node 26 (1.4 ms in a run of 2026-10-30). The
- * pair count does not bound each cost: one key of `+` at `SAML_FORM_MAX`
- * parses in 23 to 27 ms and peaks at 60 MB of heap, as Node turns each
- * `+` into a space (ruling 59 Low 2). The `form-plus` shape of
- * `body-memory.test.ts` bounds that heap.
+ * The most pairs of a form body. A form has one more pair than its `&`
+ * separators, as `URLSearchParams` splits the text (ruling 51 Major 1 of the
+ * 12j lane). Node's `URLSearchParams` takes time of the pairs times the
+ * length for a key with no `=`. A form of 540 759 pairs of `a&` at
+ * `SAML_FORM_MAX` took 5.2 s. A form of `=&` pairs kept 64 to 80 MB of
+ * heap. The derivation, done 2026-10-30: the form route with the most
+ * fields is `POST /oauth/token`, 12. The next power of two is 16. The limit
+ * is 8 times that, as for the items, for the fields that a client adds and
+ * a route ignores. At this limit a form of `SAML_FORM_MAX` in 128 pairs of
+ * long keys with no `=` parses in about 2 ms on Node 26. A run of
+ * 2026-10-30 took 1.4 ms. The pair count does not bound each cost. One key
+ * of `+` at `SAML_FORM_MAX` parses in 23 to 27 ms and peaks at 60 MB of
+ * heap. Node turns each `+` into a space (ruling 59 Low 2). The `form-plus`
+ * shape of `body-memory.test.ts` bounds that heap.
  */
 export const FORM_PAIRS_MAX = 128;
 
 /**
  * The most bytes that the request reads above the floor may hold at once in
- * one isolate (ruling 51 Minor 2 of the 12j lane): the reads of
- * `BODY_CAPS`, of the SAML ACS form, and of the SCIM body. The limit of the
+ * one isolate. These are the reads of `BODY_CAPS`, of the SAML ACS form, and
+ * of the SCIM body (ruling 51 Minor 2 of the 12j lane). The limit of the
  * SSO writes bounds their rate, not how many run at once. A read past its
  * half of the budget answers 503 `body_busy` with `Retry-After`. A read
  * counts the bytes that it holds, so a small body at a route of a large cap
  * holds little.
  *
- * The derivation, measured 2026-10-30 (Node 26.10.0, load about 4, a
- * child with a heap of 128 MB, K reads of 8 MiB at once in chunks of 64
- * KiB: `body-memory-child.mjs budget K`). With no budget, the live heap and
- * array buffers, sampled after a GC, grew by 11 MB for K = 1, 35 MB for 4,
- * 68 MB for 8, 132 MB for 16, and 245 MB for 30. Each read in flight holds
- * about 8 MB of chunks, so a heap limit cannot see this memory. Sampled
- * with no GC, the garbage of the reads that ended counts too. A budget of 4
- * reads held the live growth at 36 MB, but its growth with garbage reached
- * 112 to 118 MB over a base of 21 MB, past the 128 MB of an isolate. A
- * budget of 2 reads holds the live growth at 20 MB, and the growth with
- * garbage at 97 MB or less for every K up to 60. So the budget is 2 reads
- * of `REQUEST_BODY_MAX`. `body-memory.test.ts` runs the budget's reads at
- * once and one more, and a burst of 30, and measures them.
+ * The derivation, measured 2026-10-30 with Node 26.10.0 at a load of about
+ * 4. A child with a heap of 128 MB ran K reads of 8 MiB at once in chunks of
+ * 64 KiB (`body-memory-child.mjs budget K`). With no budget, the live heap
+ * and array buffers grew with K. Sampled after a GC, the growth was 11 MB
+ * for K = 1, 35 MB for 4, and 68 MB for 8. It was 132 MB for 16 and 245 MB
+ * for 30. Each read in flight holds about 8 MB of chunks, so a heap limit
+ * cannot see this memory. Sampled with no GC, the garbage of the reads that
+ * ended counts too. A budget of 4 reads held the live growth at 36 MB. But
+ * its growth with garbage reached 112 to 118 MB over a base of 21 MB, past
+ * the 128 MB of an isolate. A budget of 2 reads holds the live growth at
+ * 20 MB. It holds the growth with garbage at 97 MB or less for every K up to
+ * 60. So the budget is 2 reads of `REQUEST_BODY_MAX`. `body-memory.test.ts`
+ * runs the budget's reads at once and one more, and a burst of 30, and
+ * measures them.
  *
  * The budget is two halves that do not lend bytes to each other (ruling 66
- * Major 1 of the 12j lane): `LARGE_READ_USER_BUDGET` for the reads of
- * signed-in users, and `LARGE_READ_ANON_BUDGET` for every other read. The
+ * Major 1 of the 12j lane). `LARGE_READ_USER_BUDGET` is for the reads of
+ * signed-in users, and `LARGE_READ_ANON_BUDGET` is for every other read. The
  * two halves add up to the budget, and the test holds it.
  */
 export const LARGE_READ_BUDGET = 2 * 8_388_608;
 
 /**
  * The most bytes that the large reads of signed-in users hold at once in
- * one isolate: half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
- * lane). A read counts here when its client is a user (`user:<id>`), which
- * `managedLargeCall` and `countSsoLargeRead` bind after the session check
- * (plan 12l). Each user may hold up to the cap of its read in this half
+ * one isolate. It is half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the
+ * 12j lane). A read counts here when its client is a user (`user:<id>`),
+ * which `managedLargeCall` and `countSsoLargeRead` bind after the session
+ * check (plan 12l). Each user may hold up to the cap of its read in this half
  * (`largeShareOf`). So the reads of any count of accounts cannot reach the
  * other half: SAML sign-in, the Apple callback, and SCIM writes keep it.
  *
  * The derivation, done 2026-10-30. Before the halves, two free accounts
- * each held 8 MiB of one SSO write for 64 s, and together they filled the
+ * each held 8 MiB of one SSO write for 64 s. Together they filled the
  * budget (Major 1 of rr-12j-bodycap4). Half of the budget is 8 MiB, the cap
  * of an SSO write. So this half holds one SSO write of the largest valid
  * body (4 705 416 bytes since plan 12l). A second such write at the same
  * time answers 503, and its client sends it again after `Retry-After`. One
  * account that stalls a write holds this half for at most 32 s
- * (`LARGE_READ_USER_MIN_RATE`), with one read at a time
- * (`LARGE_READS_PER_USER`), 6 times in an hour (`SSO_LARGE_READ_PER_USER`
- * in routes/sso.ts, ruling 69 of the 12j lane).
+ * (`LARGE_READ_USER_MIN_RATE`). It runs one read at a time
+ * (`LARGE_READS_PER_USER`), 6 times in an hour. The hour limit is
+ * `SSO_LARGE_READ_PER_USER` in routes/sso.ts (ruling 69 of the 12j lane).
  */
 export const LARGE_READ_USER_BUDGET = 8_388_608;
 
@@ -159,15 +160,16 @@ export const LARGE_READ_USER_BUDGET = 8_388_608;
  *
  * The derivation, done 2026-10-30. The user half holds one SSO write of the
  * cap, and a person who sets up SSO sends one write at a time. So a second
- * read of one account at once serves no setup. One read at a time,
- * `LARGE_READ_USER_MIN_RATE`, and the limit of 6 reads per hour bound one
- * account to 6 holds of at most 32 s in an hour.
+ * read of one account at once serves no setup. Three rules bound one
+ * account: one read at a time, `LARGE_READ_USER_MIN_RATE`, and the limit of
+ * 6 reads per hour. So an account holds the user half at most 6 times in an
+ * hour, each time for at most 32 s.
  */
 export const LARGE_READS_PER_USER = 1;
 
 /**
- * The most bytes that every other large read holds at once in one isolate:
- * the other half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
+ * The most bytes that every other large read holds at once in one isolate.
+ * It is the other half of `LARGE_READ_BUDGET` (ruling 66 Major 1 of the 12j
  * lane). A read counts here when its client is an IP (`ip:<key>`), or when
  * no bind names its client. So stalled anonymous posts cannot reach the
  * half of the users, and the SSO write of a signed-in user still reads.
@@ -191,21 +193,21 @@ export const BODY_BUSY_RETRY_SECONDS = 1;
  * (ruling 59 Major 1 of the 12j lane). Past it, the read stops, frees its
  * bytes of the budget, and answers 408 `body_timeout`. Before this limit, a
  * client that sent most of a large body and stalled held its bytes of the
- * budget while its socket lived: Fastify 5.12.5 sets no request timeout,
+ * budget while its socket lived. Fastify 5.12.5 sets no request timeout,
  * and the Node http server ends a request only after 300 s.
  *
  * The derivation, done 2026-10-30. A client at `LARGE_READ_MIN_RATE` sends
  * a chunk of 64 KiB each 0.5 s. A TCP sender that loses a segment tries
- * again after 1 s, then 2 s, then 4 s (RFC 6298 sections 2.1 and 5.5: an
- * initial timeout of 1 s, which doubles at each loss). So three lost tries
+ * again after 1 s, then 2 s, then 4 s. RFC 6298 sections 2.1 and 5.5 set an
+ * initial timeout of 1 s, which doubles at each loss. So three lost tries
  * in a row take 7 s, and 10 s keeps a margin over them.
  */
 export const LARGE_READ_IDLE_MS = 10_000;
 
 /**
  * The slowest rate, in bytes per second, at which a read above the floor
- * may arrive in all (ruling 59 Major 1 of the 12j lane). A read must end
- * within the time of its cap at this rate, and at least within
+ * may arrive in all. Ruling 59 Major 1 of the 12j lane sets it. A read
+ * must end within the time of its cap at this rate, and at least within
  * `LARGE_READ_DEADLINE_FLOOR_MS` (`largeReadDeadlineMs`). Past it, the read
  * stops as at the idle limit. So a client that sends a byte each few
  * seconds cannot hold its bytes of the budget for long.
@@ -220,24 +222,25 @@ export const LARGE_READ_MIN_RATE = 131_072;
 
 /**
  * The slowest rate, in bytes per second, at which a large read of a
- * signed-in user may arrive in all (ruling 69 of the 12j lane). Such a read
- * is an SSO connection write: no other route above the floor reads after a
- * session check.
+ * signed-in user may arrive in all. Ruling 69 of the 12j lane sets it. Such
+ * a read is an SSO connection write: no other route above the floor reads
+ * after a session check.
  *
  * The derivation, done 2026-10-30. At `LARGE_READ_MIN_RATE`, one free
  * account that stalled a write of the cap held the user half for 64 s. At
- * 256 KiB per second (2 Mbit/s), a write of the cap (8 MiB) takes 32 s, and
- * the largest valid write (4 705 416 bytes since plan 12l) takes 18 s. So
+ * 256 KiB per second (2 Mbit/s), a write of the cap (8 MiB) takes 32 s. The
+ * largest valid write (4 705 416 bytes since plan 12l) takes 18 s. So
  * one stall holds the user half for at most 32 s. An admin whose link is
  * slower than this gets 408 for a large write, and the limits page says so.
  */
 export const LARGE_READ_USER_MIN_RATE = 262_144;
 
 /**
- * The least time that a read above the floor may take in all: the idle
- * limit, so a read of a small cap never ends sooner than a read that only
- * waits. The SAML form, the Apple callback, and the SCIM body each get this
- * time; an SSO connection write of a user gets 32 s (2026-10-30, ruling 69).
+ * The least time that a read above the floor may take in all. It is the
+ * idle limit, so a read of a small cap never ends sooner than a read that
+ * only waits. The SAML form, the Apple callback, and the SCIM body each get
+ * this time. An SSO connection write of a user gets 32 s (2026-10-30,
+ * ruling 69).
  */
 export const LARGE_READ_DEADLINE_FLOOR_MS = 10_000;
 
@@ -278,8 +281,9 @@ export const LARGE_READ_SLOW_LINK_RATE = 1_048_576;
 
 /**
  * The time in ms that a whole read above the floor of a cap of `cap` bytes
- * may take at `rate` bytes per second: `LARGE_READ_MIN_RATE` for a read
- * before a session, `LARGE_READ_USER_MIN_RATE` for a read of a user.
+ * may take at `rate` bytes per second. The rate is `LARGE_READ_MIN_RATE`
+ * for a read before a session, and `LARGE_READ_USER_MIN_RATE` for a read of
+ * a user.
  */
 export function largeReadDeadlineMs(cap: number, rate: number = LARGE_READ_MIN_RATE): number {
   return Math.max(LARGE_READ_DEADLINE_FLOOR_MS, Math.ceil((cap * 1000) / rate));
@@ -287,8 +291,8 @@ export function largeReadDeadlineMs(cap: number, rate: number = LARGE_READ_MIN_R
 
 /**
  * The most bytes that the large reads of one IP hold at once (rulings 59
- * and 66 Major 1 of the 12j lane): a quarter of `LARGE_READ_BUDGET`, half
- * of `LARGE_READ_ANON_BUDGET`. A client is its IP for a read before a
+ * and 66 Major 1 of the 12j lane). It is a quarter of `LARGE_READ_BUDGET`,
+ * half of `LARGE_READ_ANON_BUDGET`. A client is its IP for a read before a
  * session (`bindBodyClient`). A read past the share of its IP answers 503
  * `body_busy`, as a read past its half does. So 16 stalled posts of one IP
  * hold at most half of the anonymous half, and the other IPs keep the rest.
@@ -303,9 +307,9 @@ export function largeReadDeadlineMs(cap: number, rate: number = LARGE_READ_MIN_R
 export const LARGE_READ_SHARE = 4_194_304;
 
 /**
- * The bytes that `client` may hold in a read of `cap`: the cap for a user,
- * and `LARGE_READ_SHARE` for every other client, an IP or the one client
- * with no IP (ruling 69 of the 12j lane).
+ * The bytes that `client` may hold in a read of `cap`. A user may hold the
+ * cap. Every other client, an IP or the one client with no IP, may hold
+ * `LARGE_READ_SHARE` (ruling 69 of the 12j lane).
  */
 export function largeShareOf(client: string, cap: number): number {
   return isUserClient(client) ? cap : LARGE_READ_SHARE;
@@ -382,11 +386,11 @@ export function bodyCapOfRequest(request: Request): number {
 const CLIENT_OF = new WeakMap<Request, string>();
 
 /**
- * Binds `request` to its client for the large reads: `ip:<key>` by the
- * router before each handler (the key of `ipKey`), and `user:<id>` after a
- * session check. The reads of a user count in `LARGE_READ_USER_BUDGET`, the
- * others in `LARGE_READ_ANON_BUDGET`. A later bind takes the place of an
- * earlier one.
+ * Binds `request` to its client for the large reads. The router binds
+ * `ip:<key>` before each handler (the key of `ipKey`), and a session check
+ * binds `user:<id>`. The reads of a user count in
+ * `LARGE_READ_USER_BUDGET`, the others in `LARGE_READ_ANON_BUDGET`. A later
+ * bind takes the place of an earlier one.
  */
 export function bindBodyClient(request: Request, client: string): void {
   CLIENT_OF.set(request, client);
@@ -433,12 +437,12 @@ export class BodyTooLarge extends Error {
 }
 
 /**
- * A read above the floor while the reads of its half of the isolate hold
- * that half (`LARGE_READ_USER_BUDGET` or `LARGE_READ_ANON_BUDGET`), or
- * while the reads of its client hold its share (`largeShareOf`), or while
- * its user runs another large read (`LARGE_READS_PER_USER`). The router
- * answers it 503 `body_busy` with `Retry-After` for every route, and the
- * SCIM routes answer their own 503.
+ * A read above the floor in one of three states. The reads of its half of
+ * the isolate hold that half (`LARGE_READ_USER_BUDGET` or
+ * `LARGE_READ_ANON_BUDGET`). The reads of its client hold its share
+ * (`largeShareOf`). Its user runs another large read
+ * (`LARGE_READS_PER_USER`). The router answers it 503 `body_busy` with
+ * `Retry-After` for every route, and the SCIM routes answer their own 503.
  */
 export class BodyBusy extends Error {
   constructor() {
@@ -461,8 +465,8 @@ export class BodyTimeout extends Error {
 }
 
 /**
- * True when a large read of `client` at the cap `cap` can start now, for a
- * body that declares `length` bytes (ruling 72 Minor 1 of the 12j lane).
+ * True when a large read of `client` at the cap `cap` can start now. The
+ * body declares `length` bytes (ruling 72 Minor 1 of the 12j lane).
  * False while the user runs a large read (`LARGE_READS_PER_USER`), or when
  * the half or the share of `client` has no room for the declared bytes. A
  * body with no length needs 1 byte. A length past `cap` gives true: that
@@ -510,21 +514,21 @@ export function bodyReadable(request: Request): boolean {
  * past the cap stops the read before the first byte. It throws
  * `BodyTooLarge` past the cap, on a read error, and when the request
  * aborts. A read with a cap above the floor holds its bytes against the
- * half of `client` and against the share of `client` until it ends, and
+ * half of `client` and against the share of `client` until it ends. It
  * throws `BodyBusy` past either one (ruling 66). A user runs one such read
  * at a time: a second throws `BodyBusy` before any byte (ruling 69). It
- * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`, or
- * when it does not end within `largeReadDeadlineMs` of its cap, at the rate
- * of a user for a user (ruling 69). Each end frees its bytes (ruling 59 of
- * the 12j lane). Then a large read of a user that took more than
- * `LARGE_READ_SLOW_MS`, or that stopped at a deadline, runs its slow work.
- * That is the work that `bindSlowRead` bound to the request, and it runs at
- * any end (rulings 75 and 79). The user runs no other large read until that
- * work ends. Workers, Node, Bun,
- * and Deno each give `request.body` as a stream. Null when the body was read
- * or locked before, such as by app middleware, and at a chunk that is not
- * bytes: each reader answers it `invalid_body`, not 500 (ruling 46 Low 1,
- * ruling 51 Low 3, and ruling 59 Low 1 of the 12j lane).
+ * throws `BodyTimeout` when it gets no chunk for `LARGE_READ_IDLE_MS`. It
+ * also throws it when it does not end within `largeReadDeadlineMs` of its
+ * cap, at the rate of a user for a user (ruling 69). Each end frees its
+ * bytes (ruling 59 of the 12j lane). Then a large read of a user that took
+ * more than `LARGE_READ_SLOW_MS`, or that stopped at a deadline, runs its
+ * slow work. That is the work that `bindSlowRead` bound to the request, and
+ * it runs at any end (rulings 75 and 79). The user runs no other large read
+ * until that work ends. Workers, Node, Bun, and Deno each give
+ * `request.body` as a stream. Null when the body was read or locked before,
+ * such as by app middleware. It is also null at a chunk that is not bytes.
+ * Each reader answers it `invalid_body`, not 500 (ruling 46 Low 1, ruling
+ * 51 Low 3, and ruling 59 Low 1 of the 12j lane).
  */
 export async function readBodyBytes(
   request: Request,
@@ -626,12 +630,13 @@ export async function readBodyBytes(
 }
 
 /**
- * The request body as text, at most `cap` bytes (the cap of the request's
- * route by default), by `readBodyBytes`, for the share of `client` (the
- * client bound to the request by default). A compat package that reads a
- * clone names the client of the request it cloned. The decode is that of
- * `request.text()`: UTF-8, with a replacement character for a bad byte and
- * a leading BOM removed. Null when the body was read before.
+ * The request body as text, at most `cap` bytes, by `readBodyBytes`. The
+ * cap is that of the request's route by default. The read counts on the
+ * share of `client`, by default the client bound to the request. A compat
+ * package that reads a clone names the client of the request it cloned.
+ * The decode is that of `request.text()`: UTF-8, with a replacement
+ * character for a bad byte and a leading BOM removed. Null when the body
+ * was read before.
  */
 export async function readBodyText(
   request: Request,
@@ -644,11 +649,12 @@ export async function readBodyText(
 
 /**
  * True when the JSON text nests `[` and `{` at most `depthMax` deep and has
- * at most `itemsMax` items outside its strings: by default the limits of a
- * route body. The SCIM body passes its own item limit (`SCIM_ITEMS_MAX`,
- * ruling 56 of the 12j lane). One pass over the text, before `JSON.parse`,
- * so a body that would take more memory than its bytes never becomes
- * values. The scan does not check the grammar: `JSON.parse` does that next.
+ * at most `itemsMax` items outside its strings. By default these are the
+ * limits of a route body. The SCIM body passes its own item limit
+ * (`SCIM_ITEMS_MAX`, ruling 56 of the 12j lane). One pass over the text,
+ * before `JSON.parse`, so a body that would take more memory than its bytes
+ * never becomes values. The scan does not check the grammar: `JSON.parse`
+ * does that next.
  */
 export function jsonShapeFits(
   text: string,
@@ -676,8 +682,8 @@ export function jsonShapeFits(
 }
 
 /**
- * The value of a JSON body text, or `undefined` for text that is not JSON,
- * that does not fit the shape limits, or for a body read before (null).
+ * The value of a JSON body text. It is `undefined` for text that is not
+ * JSON, that does not fit the shape limits, or for a body read before (null).
  */
 export function parseBodyJson(text: string | null): unknown {
   if (text === null || !jsonShapeFits(text)) return undefined;

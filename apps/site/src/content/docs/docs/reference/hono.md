@@ -30,7 +30,7 @@ sidebar:
 | Export | What it does |
 | --- | --- |
 | `authHandler` | Answers the handler of the routes of core. |
-| `authSession` | Answers the middleware that sets the session, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
+| `authSession` | Answers the middleware that sets the session. It sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session that the middleware set, or `null`. |
 | `AuthEnv` | The type of the app's variables: `session`. |
 | `HonoHandlerOptions` | The options of `authHandler`: `waitUntil`, the hook that keeps work alive after the answer. Default: `c.executionCtx.waitUntil` when the runtime gives one. |

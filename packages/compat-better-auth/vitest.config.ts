@@ -4,11 +4,13 @@ import { conformanceCountReporter } from "../../scripts/conformance-count-report
 
 // The count reporter fails the run when one of these runs is missing or has
 // no passed test (ruling 7 of plan 12g). The D1 runs are in vitest.d1.config.ts.
+// The bun:sqlite run is in vitest.bun.config.ts (plan 12n).
 const RUNS = [
   "storage conformance: Better Auth tables on postgres, camelCase (Better Auth's own SQL)",
   "storage conformance: Better Auth tables on postgres, snake_case (consumer-i's tables)",
   "storage conformance: compat sqlite node",
   "storage conformance: compat sqlite better-sqlite3",
+  "storage conformance: compat sqlite libsql file",
 ];
 
 // The Node tests: unit tests and the Postgres storage. The D1 storage runs in
@@ -23,7 +25,8 @@ export default defineConfig({
   oxc: { jsx: { runtime: "automatic" } },
   test: {
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
-    exclude: ["test/d1/**"],
+    // test/sqlite/bun runs under the Bun runtime (vitest.bun.config.ts).
+    exclude: ["test/d1/**", "test/sqlite/bun/**"],
     reporters: ["default", conformanceCountReporter({ expected: RUNS })],
   },
 });

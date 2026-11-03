@@ -869,8 +869,9 @@ export async function organizationsOfDelete(
   const o = on(config);
   // With organizations off, the engine has no ranks. The member rows still go.
   if (!o) return ok(plan);
-  // Three reads for any count of organizations (ruling 30 of plan 12d):
-  // the memberships, their organizations, and the members of those.
+  // Three reads for up to IN_CHUNK memberships (ruling 30 of plan 12d): the
+  // memberships, their organizations, and the members of those. The last
+  // two read in chunks of IN_CHUNK, so each further IN_CHUNK adds 2.
   const mine = await storage.findMany("member", [{ field: "userId", op: "eq", value: userId }]);
   if (mine.length === 0) return ok(plan);
   const organizations = new Map(

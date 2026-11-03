@@ -4,6 +4,7 @@ import { deliverLogouts } from "../../engine/oauth-logout.js";
 import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/session-list.js";
 import {
   destroySession,
+  markRequestUser,
   publicSession,
   readModeOf,
   readSessionToken,
@@ -73,6 +74,8 @@ async function sessionAnswer(config: ResolvedConfig, request: Request): Promise<
       : {};
     return json({ error: "unauthorized" }, 401, headers);
   }
+  // The read resolved the request's own session (ruling 27 a of plan 12n).
+  markRequestUser(request, resolved.user.id);
   // A sliding refresh moved the expiry. Renew the cookie, or the
   // browser drops it at its old Max-Age. A read-only read renews nothing.
   const renewed = renewedSessionCookie(config, request, resolved);
@@ -107,7 +110,11 @@ export function sessionRoutes(_config: ResolvedConfig): Route[] {
         const token = readSessionToken(ctx.config, ctx.request);
         // After the commit: the back-channel logouts of the session (plan 12e Task 16).
         const ended = token ? await destroySession(ctx.config, token) : null;
-        if (ended) await deliverLogouts(ctx.config, ended.userId);
+        if (ended) {
+          // The sign-out ended the request's own session (ruling 37 of plan 12n).
+          markRequestUser(ctx.request, ended.userId);
+          await deliverLogouts(ctx.config, ended.userId);
+        }
         const res = await signedOut(ctx.config, ctx.request, token);
         // Multi-session (plan 12i, owner decision 4): the sign-out ends every
         // session of the browser, so the sessions of the bag end too.

@@ -276,9 +276,11 @@ export type BeforeResolveWrite = (
 
 /**
  * The runs of one claim that a session race can undo (ruling 46 of plan
- * 12i). A flow retries a `ClaimLostError` while its attempt is below this
- * count. A claim throws on at most `CLAIM_RUNS - 1` races and on one lost
- * flip, so the retries never run out.
+ * 12i). A flow retries a `ClaimLostError` while its count of claim retries
+ * is below this count. A claim throws on at most `CLAIM_RUNS - 1` races and
+ * on one lost flip. A flow counts its claim retries apart from a unique-key
+ * retry, so the retries never run out (decision 13 of plan 12n). On a
+ * store with a query limit per invocation, a flow runs none (`claimRetry`).
  */
 export const CLAIM_RUNS = 3;
 
@@ -300,6 +302,38 @@ export class ClaimLostError extends Error {
     super("authtempo: another flow claimed this user first");
     this.name = "ClaimLostError";
   }
+}
+
+/**
+ * The step of a claim flow after an attempt threw `err`, outside the
+ * transaction that the throw undid. "retry" runs the attempt again,
+ * "conflict" answers 409 `conflict`, and null passes `err` on. `lost` is
+ * the count of claim retries that the flow ran before this throw.
+ *
+ * On a store with `queryLimitPerInvocation`, a flow runs no claim retry
+ * (ruling 32 of plan 12n). There a second run does not fit the 50 queries
+ * of one invocation. The D1 measure of 2026-11-03 used the worst claim join:
+ * an ID-token claim with a full bag, 11 claimant sessions, and every hook.
+ * It sent 39 queries with no race, 58 with one race, and 85 with two. At the
+ * cap of 50, one race answered 500 and kept writes of the claim. The answer
+ * `conflict` comes after the undo of the first run, so no claim write stays.
+ * With this rule that race answers in 24 queries (adapter-d1 test
+ * anonymous-upgrade-budget.test.ts). A flow that spent its link, code, or
+ * provider token before the claim needs a new one. The reset and the
+ * invitation confirm keep their link, so the same request works again.
+ *
+ * The unique-key retry of a flow is no claim retry, and it runs on every
+ * store. The same D1 join after one unique-key retry sent 46 queries on
+ * 2026-11-03, inside the cap (the same adapter-d1 test file).
+ */
+export function claimRetry(
+  storage: StorageAdapter,
+  err: unknown,
+  lost: number,
+): "retry" | "conflict" | null {
+  if (!(err instanceof ClaimLostError)) return null;
+  if (storage.queryLimitPerInvocation === true) return "conflict";
+  return lost < CLAIM_RUNS ? "retry" : null;
 }
 
 /**
@@ -405,6 +439,8 @@ export async function findOrCreateUserByEmail<T>(
   before?: BeforeResolveWrite,
   steps?: CreateSteps,
 ): Promise<{ user: UserRow; created: boolean; after?: T }> {
+  // The claim retries, apart from the unique-key retry (CLAIM_RUNS).
+  let lost = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await createOrFindInTransaction(
@@ -432,7 +468,10 @@ export async function findOrCreateUserByEmail<T>(
       }
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user. Or a session race undid the claim: the retry claims again.
-      if (attempt < CLAIM_RUNS && err instanceof ClaimLostError) continue;
+      const next = claimRetry(storage, err, lost++);
+      if (next === "retry") continue;
+      // The callers run this resolution inside `hookGuard`.
+      if (next === "conflict") stopWith("conflict");
       throw err;
     }
   }

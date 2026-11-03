@@ -21,6 +21,19 @@ jobs:
     # A GitHub-hosted runner with a fixed image. npm trusted publishing
     # accepts only a cloud-hosted runner.
     runs-on: ubuntu-24.04
+    # The timer of vitest cannot end a sync spawn, so this limit is the last
+    # guard of a hung step. Without it, a hung step holds the runner for 360
+    # minutes, the default (docs.github.com, workflow syntax, read 2026-11-03).
+    # On 2026-11-03, nine full local runs took 3 minutes 10 seconds to 3 minutes
+    # 37 seconds on one host with 18 cores. The 1-minute load was 1.2 to 12.0 at
+    # the start of the runs, and the peak of each run was 40.0 to 45.1. One dry
+    # run took 29.5 seconds on the same host. Its 1-minute load was 5.54 at the
+    # start and 7.73 at the end (log:
+    # .superpowers/tools/logs/dry-run-12n-fix1-2026-11-03.log). A GitHub-hosted
+    # Linux runner has 4 cores in a public repository and 2 in a private one
+    # (read 2026-11-03). No job ran on a 2-core runner, so no measure of it exists
+    # yet. The first real run gives it.
+    timeout-minutes: 40
     permissions:
       contents: read
     # The SHA-256 list of the tarballs, from the step sums. The job publish
@@ -126,6 +139,16 @@ jobs:
     # Only after the job check passes for the same tag.
     needs: check
     runs-on: ubuntu-24.04
+    # This limit is the last guard of a hung step. Without it, a hung step holds
+    # the runner for 360 minutes, the default (docs.github.com, workflow syntax,
+    # read 2026-11-03). The job runs one npm publish and at most three npm view
+    # reads for each released package. On 2026-11-03, one npm view read took at
+    # most 1.0 seconds on one host with 18 cores. The 1-minute load was 2.69 at
+    # the start and 2.64 at the end (log:
+    # .superpowers/tools/logs/measure-12n-t1-2026-11-03.log). No publish ran
+    # before the first release, so a publish has no measure yet, and this job
+    # has none. The first real run gives it.
+    timeout-minutes: 30
     # The owner is the required reviewer of this environment. Without it, the
     # publish starts with no person who approves it.
     environment: release

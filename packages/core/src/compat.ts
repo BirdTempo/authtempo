@@ -27,9 +27,15 @@ export {
   withDomainRecord,
 } from "./create-auth.js";
 /**
+ * The providers of core's ID-token route (plan 12n decision 18). A compat
+ * package takes its list of ID-token providers from here, so the two lists
+ * cannot drift.
+ */
+export { ID_TOKEN_PROVIDERS } from "./engine/id-token.js";
+/**
  * The capped body read of core (ruling 46 of the 12j lane). A compat
  * package reads each request body with it, at the cap of the core route
- * that the body goes to, so no read of the package is unbounded. A read
+ * that the body goes to. So no read of the package is unbounded. A read
  * past the cap throws `BodyTooLarge`. A read above the floor past the
  * budget of the large reads of the isolate throws `BodyBusy` (ruling 51).
  * A read above the floor past its deadlines throws `BodyTimeout` (ruling 59).

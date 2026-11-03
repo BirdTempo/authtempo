@@ -29,6 +29,13 @@ export default defineConfig(async () => {
     // file its own storage), keyless, keyed, or with other names.
     test: {
       include: ["test/d1/**/*.test.ts"],
+      // The D1 budget tests here sign in many times on the workerd binding. On 2026-10-30
+      // three of them timed out together at the default 5 s, at 5.30 to 5.59 s. That release
+      // rehearsal ran at load 5.2 to 15.7 while other lanes ran tests. In the 20 evidence runs
+      // of 2026-10-30 to 2026-11-03, at sampled peak load 36 to 56, they passed in up to 3.32 s.
+      // In the logs the ban copy took up to 3.72 s, and the D1 run of the SSO copy up to 2.46 s.
+      // So one limit covers the pool, as in the demo pool.
+      testTimeout: 20_000,
       reporters: ["default", conformanceCountReporter({ expected: RUNS })],
     },
   };

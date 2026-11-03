@@ -29,6 +29,14 @@ export default defineConfig(async () => {
     test: {
       include: ["test/**/*.test.ts"],
       setupFiles: ["./test/setup.ts"],
+      // On 2026-11-03 five D1 budget tests timed out together at the default 5 s, at 5.47 to
+      // 6.06 s. Their files are multi-session-budget, anonymous-upgrade-budget,
+      // operator-sessions-budget, operator-access-end-budget, and operator-loss-budget. That run
+      // of the Task 5 review of plan 12n started at load 18.2, beside seven other agents. In the
+      // other logs of 2026-10-30 to 2026-11-03 these five did not time out, and their highest
+      // pass is 2.65 s. So one limit covers the pool, as in the compat and import D1 pools. A
+      // test with a longer limit of its own keeps it.
+      testTimeout: 20_000,
       reporters: ["default", conformanceCountReporter({ expected: RUNS })],
     },
   };
