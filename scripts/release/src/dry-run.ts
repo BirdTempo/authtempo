@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -624,9 +623,9 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       const read = readTarball(t.path);
       if (read.manifest.name !== t.name)
         failures.push(`${t.path} holds ${read.manifest.name}, not ${t.name}`);
-      const sha = createHash("sha256").update(readFileSync(t.path)).digest("hex");
+      // The hash names the bytes that tar read (ruling 67 of plan 12j).
       lines.push(
-        `${read.manifest.name}@${read.manifest.version} ${sha} files=${read.files.length}`,
+        `${read.manifest.name}@${read.manifest.version} ${read.sha256} files=${read.files.length}`,
       );
       counts.files += read.files.length;
       tag.set(t.name, `${read.manifest.name}@${read.manifest.version}`);

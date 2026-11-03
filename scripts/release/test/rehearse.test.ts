@@ -261,7 +261,15 @@ function biomeForm(text: string): string {
   const r = spawnSync(
     join(ROOT, "node_modules/.bin/biome"),
     ["format", "--stdin-file-path=release/support.json"],
-    { cwd: ROOT, input: text, encoding: "utf8" },
+    {
+      cwd: ROOT,
+      input: text,
+      encoding: "utf8",
+      // A sync spawn with input and no limit can hang a run (follow-up 15 of plan 12l).
+      // The limit turns a stall into a failed test. SIGKILL also ends a Biome that ignores SIGTERM.
+      killSignal: "SIGKILL",
+      timeout: 60_000,
+    },
   );
   expect(r.status, r.stderr).toBe(0);
   return r.stdout;

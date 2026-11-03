@@ -6,6 +6,10 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
+    // The folder test of check-pack.test.ts counts the private folders of its
+    // own pid. A threads pool shares one pid across files, so each file runs in
+    // its own fork (ruling 10 of plan 12m).
+    pool: "forks",
     testTimeout: 120_000,
     hookTimeout: 180_000,
   },
