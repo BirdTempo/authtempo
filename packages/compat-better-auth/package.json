@@ -75,7 +75,7 @@
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p typetest/tsconfig.json && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",
-    "test": "vitest run && vitest run -c vitest.d1.config.ts"
+    "test": "vitest run && bun --bun vitest run -c vitest.bun.config.ts && vitest run -c vitest.d1.config.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0"
@@ -107,11 +107,13 @@
     "@authtempo/client": "workspace:*",
     "@authtempo/core": "workspace:*",
     "@authtempo/handoff": "workspace:*",
+    "@libsql/client": "0.18.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.19.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "better-sqlite3": "13.0.3",
+    "bun": "1.4.3",
     "postgres": "3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

@@ -1200,6 +1200,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261007.1
         version: 5.20261007.1
+      '@libsql/client':
+        specifier: 0.18.0
+        version: 0.18.0
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0
@@ -1215,6 +1218,9 @@ importers:
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
+      bun:
+        specifier: 1.4.3
+        version: 1.4.3
       postgres:
         specifier: 3.4.9
         version: 3.4.9

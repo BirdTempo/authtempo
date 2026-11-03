@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { SqliteDriver } from "@authtempo/adapter-sqlite";
 import { SCHEMA_VERSION } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import type { SqliteVariant } from "../../src/storage/migration.js";
 import { before17 } from "../d1/sql.js";
@@ -11,8 +11,11 @@ import { at, eq, mappingCases } from "../mapping-cases.js";
 /** One SQLite database that a test opened through one driver entry. */
 export interface OpenSqlite {
   driver: SqliteDriver;
-  /** Runs a SQL text of one or more statements on the handle. */
-  exec(text: string): void;
+  /**
+   * Runs a SQL text of one or more statements on the handle. It is async,
+   * because a libSQL client runs a text only as a promise (plan 12n).
+   */
+  exec(text: string): Promise<void>;
   close(): void;
 }
 
@@ -38,10 +41,10 @@ const shippedD1 = (name: string) =>
   readFileSync(new URL(`../../migrations/d1/${name}.sql`, import.meta.url), "utf8");
 
 /** A new memory database through the driver, with foreign keys on, that holds `schema`. */
-function withSchema(open: () => OpenSqlite, schema: string): OpenSqlite {
+async function withSchema(open: () => OpenSqlite, schema: string): Promise<OpenSqlite> {
   const db = open();
-  db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(schema);
+  await db.exec("PRAGMA foreign_keys = ON;");
+  await db.exec(schema);
   return db;
 }
 
@@ -74,7 +77,9 @@ const metaRows = async (db: OpenSqlite) =>
  * app opens its file.
  */
 export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): Promise<void> {
-  const main = withSchema(open, BETTER_AUTH_SQLITE);
+  const main = await withSchema(open, BETTER_AUTH_SQLITE);
+  // A libSQL file lives in a temp folder, which its close removes (plan 12n).
+  afterAll(() => main.close());
   const compat = (variant?: SqliteVariant) =>
     betterAuthSchemaStorage({
       dialect: "sqlite",
@@ -91,8 +96,8 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
   const oldStore = async () => {
     const cut = ALL_NAMES.findIndex((n) => n.endsWith(`_schema_v${SCHEMA_VERSION}`));
     if (cut < 1) throw new Error(`no compat migration file of version ${SCHEMA_VERSION}`);
-    const old = withSchema(open, BETTER_AUTH_SQLITE);
-    for (const name of ALL_NAMES.slice(0, cut)) old.exec(shippedD1(name));
+    const old = await withSchema(open, BETTER_AUTH_SQLITE);
+    for (const name of ALL_NAMES.slice(0, cut)) await old.exec(shippedD1(name));
     const s = betterAuthSchemaStorage({ dialect: "sqlite", driver: old.driver });
     return { adapter: s.storage, close: async () => old.close() };
   };
@@ -121,7 +126,7 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
 
     it("reads Better Auth's own dates", async () => {
       // Better Auth writes a date as ISO text; SQLite's own form has no T and no zone.
-      main.exec(
+      await main.exec(
         `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES ('ba-u','Bea','bea@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-07 10:11:12')`,
       );
       try {
@@ -137,7 +142,7 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
         expect(row?.createdAt).toEqual(new Date("2026-09-01T00:00:00.000Z"));
         expect(row?.updatedAt).toEqual(new Date("2026-09-07T10:11:12.000Z"));
       } finally {
-        main.exec(`DELETE FROM "user" WHERE "id" = 'ba-u'`);
+        await main.exec(`DELETE FROM "user" WHERE "id" = 'ba-u'`);
       }
     });
 
@@ -173,7 +178,7 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
     });
 
     it("refuses every call with schema_mismatch while account has no unique index on (issuer, accountId)", async () => {
-      main.exec('DROP INDEX "account_issuer_accountId_uidx"');
+      await main.exec('DROP INDEX "account_issuer_accountId_uidx"');
       try {
         await expect(compat().storage.findOne("user", [eq("id", "x")])).rejects.toMatchObject({
           code: "schema_mismatch",
@@ -181,7 +186,7 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
           message: expect.stringMatching(/no unique index on account \(issuer, accountId\)/),
         });
       } finally {
-        main.exec(
+        await main.exec(
           'CREATE UNIQUE INDEX "account_issuer_accountId_uidx" ON "account" ("issuer", "accountId")',
         );
       }
@@ -189,7 +194,7 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
     });
 
     it("applies the before-1.7 files with variant before-1.7", async () => {
-      const old = withSchema(open, before17(BETTER_AUTH_SQLITE));
+      const old = await withSchema(open, before17(BETTER_AUTH_SQLITE));
       try {
         const s = betterAuthSchemaStorage({
           dialect: "sqlite",
@@ -237,10 +242,10 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
 
     it("skips the migrations that ta_meta already records", async () => {
       // As the D1 flow leaves a database: the first two files, version 2 in ta_meta, no ta_migrations.
-      const d1Flow = withSchema(open, BETTER_AUTH_SQLITE);
+      const d1Flow = await withSchema(open, BETTER_AUTH_SQLITE);
       try {
-        d1Flow.exec(shippedD1("0001_compat_better_auth"));
-        d1Flow.exec(shippedD1("0002_compat_schema_v5"));
+        await d1Flow.exec(shippedD1("0001_compat_better_auth"));
+        await d1Flow.exec(shippedD1("0002_compat_schema_v5"));
         const s = betterAuthSchemaStorage({ dialect: "sqlite", driver: d1Flow.driver });
         expect(await s.migrate()).toEqual(ALL_NAMES.slice(2));
         expect(await metaRows(d1Flow)).toEqual([

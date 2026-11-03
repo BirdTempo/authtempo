@@ -9,7 +9,7 @@ await sqliteCompatSuite("better-sqlite3", () => {
   const db = new Database(":memory:");
   return {
     driver: betterSqlite3(db),
-    exec: (text) => {
+    exec: async (text) => {
       db.exec(text);
     },
     close: () => db.close(),

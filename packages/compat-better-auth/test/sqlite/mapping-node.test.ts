@@ -7,7 +7,13 @@ import { sqliteCompatSuite } from "./suite.js";
 
 await sqliteCompatSuite("node", () => {
   const db = new DatabaseSync(":memory:");
-  return { driver: nodeSqlite(db), exec: (text) => db.exec(text), close: () => db.close() };
+  return {
+    driver: nodeSqlite(db),
+    exec: async (text) => {
+      db.exec(text);
+    },
+    close: () => db.close(),
+  };
 });
 
 it("refuses a node:sqlite handle that reads integers as BigInt with config_mismatch", async () => {
