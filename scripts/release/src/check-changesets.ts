@@ -36,6 +36,11 @@ export interface ChangesetsInput {
   dirs: Record<string, string>;
   /** The `files` field of each workspace package, by name; undefined when the manifest has none. */
   files: Record<string, readonly string[] | undefined>;
+  /**
+   * The `build` script of each workspace package, by name; undefined when the
+   * manifest has none. With no map, a row with `unbuilt` exempts no file.
+   */
+  builds?: Record<string, string | undefined>;
   /** The count of commits since the merge base. */
   commits: number;
   /** The version of the group in the working tree. */
@@ -51,9 +56,16 @@ export interface ChangesetsInput {
 /**
  * The files of a released package that need no changeset, each with its reason
  * (spec 33 item 2). A path is relative to the package folder. A row exempts no
- * file that the `files` field packs, unless the row says `packed: true`.
+ * file that the `files` field packs, unless the row says `packed: true`. A row
+ * with `unbuilt: true` exempts no file of a package whose build runs a file
+ * of its own scripts/ folder.
  */
-export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string; packed?: true }[] = [
+export const EXEMPT_PATTERNS: readonly {
+  pattern: RegExp;
+  reason: string;
+  packed?: true;
+  unbuilt?: true;
+}[] = [
   // Each fixture of a released package is under test/, so this row holds it too.
   { pattern: /^test\//, reason: "a test or a fixture is not in the pack" },
   { pattern: /(^|\/)proof\//, reason: "a proof checks the pack and changes no runtime code" },
@@ -67,7 +79,26 @@ export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string; packed
     // Each released package lists CHANGELOG.md in files (spec 33 item 3).
     packed: true,
   },
+  // A vitest config at the package root runs the tests, as a test file does
+  // (ruling 25 of plan 12n).
+  {
+    pattern: /^vitest(\.[\w-]+)?\.config\.ts$/,
+    reason: "a vitest config runs the tests and is not in the pack",
+  },
+  // A script under scripts/ checks the package, such as check-seam-dts.mjs of
+  // adapter-d1 (ruling 28 of plan 12n). packedBy reads the files field, so a
+  // packed script still needs a changeset. A build that runs a script of the
+  // package writes dist with it, as the CLI does with copy-templates.mjs. So
+  // the row exempts no file under scripts/ of such a package.
+  {
+    pattern: /^scripts\//,
+    reason: "a script that the build does not run is not in the pack",
+    unbuilt: true,
+  },
 ];
+
+/** A command of a build script that runs a file of the package's own scripts/ folder. */
+const OWN_SCRIPT = /(?:^|[\s&|;(])(?:\.\/)?scripts\//;
 
 /** A files entry that the check reads: folder names and file names with "/", and no glob. */
 const PLAIN_PATH = /^[\w@-][\w@.-]*(\/[\w@.-]+)*$/;
@@ -108,8 +139,8 @@ export const RUNTIME_KEYS = [
 
 /**
  * The pin of the compiler in a released manifest. Each released package
- * builds dist with tsc of its own `typescript` pin, so a new pin can change
- * the bytes of dist with no change of source. So the pin counts as a runtime
+ * builds dist with tsc of its own `typescript` pin. A new pin can change the
+ * bytes of dist with no change of source. So the pin counts as a runtime
  * change (follow-up 6 of plan 12j). It is a key of its own, not a part of
  * RUNTIME_KEYS: a change of each other dev dependency still needs no
  * changeset. The lockfile and turbo.json stay out of ROOT_INPUTS. A row for
@@ -287,7 +318,16 @@ export function checkChangesets(input: ChangesetsInput): Report {
     let label = file.path;
     // A file in the tarball changes what an app installs, so it is never exempt.
     const packed = packedBy(inner, files[name]);
-    if (EXEMPT_PATTERNS.some((row) => row.pattern.test(inner) && (!packed || row.packed))) {
+    // With no build map, the check does not guess, so each build counts as one that runs a script.
+    const builtWithScript = input.builds === undefined || OWN_SCRIPT.test(input.builds[name] ?? "");
+    if (
+      EXEMPT_PATTERNS.some(
+        (row) =>
+          row.pattern.test(inner) &&
+          (!packed || row.packed === true) &&
+          !(row.unbuilt === true && builtWithScript),
+      )
+    ) {
       exempt++;
       continue;
     }
@@ -326,6 +366,12 @@ export function checkChangesets(input: ChangesetsInput): Report {
 }
 
 const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/;
+
+/** The `build` script of a manifest, or undefined. */
+function buildOf(manifest: Record<string, unknown>): string | undefined {
+  const build = (manifest.scripts as Record<string, unknown> | undefined)?.build;
+  return typeof build === "string" ? build : undefined;
+}
 
 /**
  * Reads the input of `checkChangesets` from the checkout at `root`, against the
@@ -367,6 +413,7 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     released,
     dirs: Object.fromEntries(workspace.map((p) => [p.name, p.dir])),
     files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
+    builds: Object.fromEntries(workspace.map((p) => [p.name, buildOf(p.manifest)])),
     commits: commitCount(root, base),
     version,
     baseVersion,

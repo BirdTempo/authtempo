@@ -33,10 +33,12 @@ while (queue.length > 0) {
     if (m) failures.push(`${file} names ${m[0]}`);
   }
   // A local import or export of a declaration (`from "./x.js"`) or an inline
-  // type import (`import("./x.js")`): "./x.js" is the file "./x.d.ts".
-  for (const m of text.matchAll(/(?:from\s+|import\(\s*)"(\.{1,2}\/[^"]+)\.js"/g)) {
-    const next = join(dirname(file), `${m[1]}.d.ts`);
-    if (!existsSync(next)) failures.push(`${file} imports ${m[1]}.js, which has no declaration`);
+  // type import (`import("./x.js")`): "./x.js" is the file "./x.d.ts". Each
+  // quote form counts, so the walk does not depend on the double quotes that
+  // tsc 7.0.2 writes (follow-up 4 of plan 12g). Group 2 is the path.
+  for (const m of text.matchAll(/(?:from\s+|import\(\s*)(["'])(\.{1,2}\/[^"']+)\.js\1/g)) {
+    const next = join(dirname(file), `${m[2]}.d.ts`);
+    if (!existsSync(next)) failures.push(`${file} imports ${m[2]}.js, which has no declaration`);
     else queue.push(next);
   }
 }

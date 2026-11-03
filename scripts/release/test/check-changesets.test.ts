@@ -228,6 +228,80 @@ describe("check-changesets", () => {
     ]);
   });
 
+  it("exempts a vitest config at the package root, and no other path (ruling 25 of plan 12n)", () => {
+    const r = run(
+      paths(
+        "packages/core/vitest.config.ts",
+        "packages/core/vitest.measure.config.ts",
+        "packages/core/src/vitest.config.ts",
+      ),
+      [],
+    );
+    expect(r.failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/src/vitest.config.ts",
+    ]);
+    expect(summaryLine(r)).toBe(
+      "check-changesets: FAIL changed=1 covered=0 exempt=2 empty=0 failures=1",
+    );
+  });
+
+  it("exempts a script that the build does not run and the pack does not hold (ruling 28 of plan 12n)", () => {
+    const script = "packages/core/scripts/check-seam-dts.mjs";
+    const missing = [`@authtempo/core changes and no changeset names it: ${script}`];
+    const check = (builds?: Record<string, string | undefined>, packs = files) =>
+      checkChangesets({
+        changed: paths(script),
+        changesets: [],
+        released,
+        dirs,
+        files: packs,
+        commits: 1,
+        version: "0.0.0",
+        ...(builds === undefined ? {} : { builds }),
+      });
+    // The build of adapter-d1 runs a script of the root only, and a package may have no build.
+    const rootOnly = {
+      "@authtempo/core": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    };
+    expect(summaryLine(check(rootOnly))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
+    );
+    expect(check({}).failures).toEqual([]);
+    // The build of the CLI runs a script of its own package, and that script writes dist.
+    for (const build of [
+      "tsc -p tsconfig.json && node scripts/copy-templates.mjs",
+      "node ./scripts/copy-migrations.mjs",
+    ])
+      expect(check({ "@authtempo/core": build }).failures, build).toEqual(missing);
+    // A files field that packs scripts, a package with no files field, and no build map.
+    expect(check(rootOnly, { ...files, "@authtempo/core": ["dist", "scripts"] }).failures).toEqual(
+      missing,
+    );
+    expect(check(rootOnly, { ...files, "@authtempo/core": undefined }).failures).toEqual(missing);
+    expect(check().failures).toEqual(missing);
+  });
+
+  it("reads the build script of each package from its manifest (ruling 28 of plan 12n)", () => {
+    const manifest = (build: string) =>
+      `{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist", "CHANGELOG.md"],\n  "scripts": { "build": "${build}" }\n}\n`;
+    const changedScript = (build: string) => {
+      const r = fixtureRepo({
+        "packages/a/package.json": manifest(build),
+        "packages/a/scripts/check.mjs": "// one\n",
+      });
+      try {
+        r.write("packages/a/scripts/check.mjs", "// two\n");
+        return checkChangesets(readInput(r.root, "main")).failures;
+      } finally {
+        r.remove();
+      }
+    };
+    expect(changedScript("tsc -p tsconfig.json")).toEqual([]);
+    expect(changedScript("tsc -p tsconfig.json && node scripts/check.mjs")).toEqual([
+      "@fixture/a changes and no changeset names it: packages/a/scripts/check.mjs",
+    ]);
+  });
+
   it("fails on a files entry that is not a plain path", () => {
     const r = run(paths("packages/core/test/a.test.ts"), [], 1, {
       ...files,
