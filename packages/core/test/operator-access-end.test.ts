@@ -6,7 +6,7 @@ import { sweepExpired } from "../src/engine/sweep.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, LONG_TEST_MS } from "./helpers.js";
 import { OPERATOR_SECRETS, type OperatorAuth, operatorFixture } from "./operator-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
@@ -120,8 +120,13 @@ async function sweepAll(w: World) {
 const asOperator = (w: World) => ({ ...w.cookieOf(w.operator.token), origin: APP_ORIGIN });
 
 describe("the ban and the revoke inside the call budget (rulings 44 and 45 of plan 12f)", () => {
+  // Each case signs in 60 times. Its lowest time in the logs is 0.30 s, and its highest pass
+  // is 1.20 s (2026-10-31). The user case timed out at the default 5 s once, at 5.03 s, in a
+  // core run beside another lane at load 39.7 (2026-10-31). One limit covers both cases.
   for (const actor of ["secret", "user"] as const)
-    it(`bans a user with 60 sessions and a hook in 50 calls or fewer, and the sweep ends the rest (${actor})`, async () => {
+    it(`bans a user with 60 sessions and a hook in 50 calls or fewer, and the sweep ends the rest (${actor})`, {
+      timeout: LONG_TEST_MS,
+    }, async () => {
       const w = await world();
       const ada = await signIns(w, "ada@example.com", 60);
       // The sign-up opened one more session.

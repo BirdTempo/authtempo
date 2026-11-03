@@ -69,6 +69,9 @@ describe("a refused page view", () => {
     expect(apiWait).toBeLessThanOrEqual(apiHigh);
   });
 
+  // It sends 601 requests, as the flood test does, so it takes the same limit. Its lowest time
+  // in the logs is 4.24 s. Its highest is 41.25 s, in a release rehearsal of 2026-10-30 (peak
+  // load 35). It did not time out from 2026-10-30 to 2026-11-03.
   it("names the limit requestsPerIpPerMinute", async () => {
     const flood: Jar = { cookies: new Map(), ip: "198.51.100.42" };
     // A post with no sandbox makes no Durable Object call, so it is the cheapest request to count.
@@ -83,8 +86,7 @@ describe("a refused page view", () => {
       "This address sent more than 600 requests in one minute. That is the limit requestsPerIpPerMinute.",
     ]);
     expect(text[2]).toMatch(/^Try again after \d\d:\d\d UTC\.$/);
-    // 601 requests take over 5 s under the load of other lanes.
-  }, 60_000);
+  }, 120_000);
 
   it("explains a cross-site post to /reset", async () => {
     const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams(), {

@@ -4,7 +4,7 @@ import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { fromBase64Url } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, LONG_TEST_MS, post } from "./helpers.js";
 import {
   authorized,
   basicHeader,
@@ -523,7 +523,13 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     expect((await ask(h, rs, "garbage", {}, "198.51.100.40")).status).toBe(200);
   });
 
-  it("limits one IP to 600 per 60 seconds before the client auth", async () => {
+  // It sends 600 requests from one IP. Its lowest time in the logs is 0.43 s. In the 20
+  // evidence runs of 2026-10-30 to 2026-11-03 it passed in up to 1.76 s, at sampled peak load
+  // 36 to 56. It timed out at the default 5 s once, at 5.01 s, in a core run beside another
+  // lane at load 39.7 (2026-10-31).
+  it("limits one IP to 600 per 60 seconds before the client auth", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const h = oauthHandle();
     const rs = await apiClient(h);
     const wrong = { clientId: rs.clientId, secret: `${rs.secret}x` };

@@ -41,7 +41,9 @@ export default defineConfig({
     // 10 s default. On 2026-10-25 each hook took 0.25 to 1.3 s alone (load
     // 6 to 60). In the full pool at load 64 to 88 they took 9.0 and 9.2 s.
     // At load 86 to 111 both timed out at 10 s, as in two full runs of main.
-    // With this limit they passed in 15.2 to 16.3 s at load 104 to 151.
+    // With a limit of 20 s they passed in 15.2 to 16.3 s at load 104 to 151.
+    // On 2026-10-30 both timed out at 20 s in two runs, at peak load 35 and
+    // 55.9. Up to 2026-11-03 their files took 3.15 to 18.70 s in the logs.
     hookTimeout: LONG_TEST_MS,
     // The teardown fails the run on any request that left the Worker, from any file.
     globalSetup: ["./test/outbound-teardown.ts"],

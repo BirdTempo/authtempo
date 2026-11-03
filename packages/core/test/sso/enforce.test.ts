@@ -22,7 +22,16 @@ import { setUsername } from "../../src/engine/username.js";
 import type { PasswordHashSeam } from "../../src/seams/password-hash.js";
 import { createRecordingSms } from "../../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled, tokenFromMail } from "../helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  get,
+  LONG_TEST_MS,
+  makeAuth,
+  post,
+  settled,
+  tokenFromMail,
+} from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
 import { GOOGLE, tokenEndpoint } from "../social-helpers.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
@@ -449,7 +458,13 @@ async function newSessions(w: World, before: Set<string>): Promise<number> {
 }
 
 describe("the enforcement of a domain (plan 12d Task 5)", () => {
-  it("has a door for each SessionVia value but the named exceptions", async () => {
+  // It opens every door. Its lowest time in the logs is 0.42 s. In the 20 evidence runs of
+  // 2026-10-30 to 2026-11-03 it passed in up to 1.98 s, at sampled peak load 36 to 56. It
+  // timed out at the default 5 s once, at 5.01 s, in a core run beside another lane at load
+  // 39.7 (2026-10-31).
+  it("has a door for each SessionVia value but the named exceptions", {
+    timeout: LONG_TEST_MS,
+  }, async () => {
     const vias = Object.keys(SESSION_VIA) as SessionVia[];
     const withDoor = new Set<SessionVia>();
     for (const door of DOORS) for (const via of (await opened(door)).vias) withDoor.add(via);

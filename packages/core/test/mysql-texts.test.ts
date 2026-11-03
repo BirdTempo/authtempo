@@ -8,6 +8,7 @@ import {
   selectStatement,
   updateStatement,
 } from "../src/storage/sql.js";
+import { LONG_TEST_MS } from "./helpers.js";
 
 // MySQL keeps one server prepared statement per SQL text (ruling 85 of plan 12d, MA-3 of
 // the review). The server holds at most 16382 of them for all clients. A statement
@@ -17,7 +18,13 @@ const ids = (n: number) => Array.from({ length: n }, (_, i) => `id-${i}`);
 const at = new Date("2026-10-24T00:00:00.000Z");
 
 describe("the SQL texts of MySQL over the list and insert sizes", () => {
-  it("binds an in list of 1 to 2000 values in 56 texts per statement kind, padded by the last value", () => {
+  // It builds 2000 lists for each statement kind. It took 0.90 s alone at load 12.7 (2026-10-31).
+  // It passed in 19 of the 20 evidence runs of 2026-10-30 to 2026-11-03, in up to 4.91 s, at
+  // sampled peak load 36 to 56. In that time it timed out at the default 5 s in 7 runs, at 5.30
+  // to 6.88 s. The last was the release rehearsal of 2026-11-03 (plan 12m).
+  it("binds an in list of 1 to 2000 values in 56 texts per statement kind, padded by the last value", {
+    timeout: LONG_TEST_MS,
+  }, () => {
     const texts = {
       select: new Set<string>(),
       update: new Set<string>(),
