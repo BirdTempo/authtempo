@@ -295,30 +295,47 @@ export const TAR_TIMEOUT_MS = 60_000;
 /**
  * The start of the name of the private folder of one tar read. The pid lets
  * a test count the folders of its own process while other test files read.
+ * The release tests run in the forks pool of vitest, so each test file has
+ * its own pid (scripts/release/vitest.config.ts).
  */
 export const TAR_FOLDER_PREFIX = `authtempo-check-pack-tar-${process.pid}-`;
 
 /**
  * Runs the system tar with `args` and answers its output. This is the one
- * child process call of the file. tar reads no pipe: on 2026-11-01 a sync
- * spawn that fed the bytes of a tarball to bsdtar through its input hung
- * one full run for 41 hours on macOS, with tar in a read of its input
+ * child process call of the file. tar reads no pipe. On 2026-11-01, a sync
+ * spawn fed the bytes of a tarball to bsdtar through its input. That spawn
+ * hung one full run for 41 hours on macOS. tar was in a read of its input
  * (follow-up 15 of plan 12l). A call that does not end in `timeoutMs`
  * throws an error that names the call. So a stall fails the check in
- * place of a hang of the run. tar's own messages go to the parent's stderr,
- * as they did before.
+ * place of a hang of the run. A call that exits with an error throws
+ * `tar <args> failed: <reason>`. The reason is the stderr of tar, or the
+ * exit status when stderr is empty. tar's reason goes in the thrown
+ * message, and nothing goes to the parent's stderr (ruling 8 of plan 12m).
  */
 export function tar(args: readonly string[], timeoutMs = TAR_TIMEOUT_MS): string {
+  const call = `tar ${args.join(" ")}`;
   try {
     return execFileSync("tar", args, {
       encoding: "utf8",
+      // A tar that ignores SIGTERM, the default signal, must not block a run.
+      // SIGKILL ends it at the limit, and the private folder goes away either way.
+      killSignal: "SIGKILL",
+      // The longest output is the -tv listing of the largest tarball, 72 KB for
+      // core 0.1.0 (read 2026-11-03). That is far under 256 MiB, the value of plan 12j.
       maxBuffer: 256 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "inherit"],
+      stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,
     });
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ETIMEDOUT")
-      throw new Error(`tar ${args.join(" ")} did not end in ${timeoutMs} ms`);
+    if (!(error instanceof Error)) throw error;
+    const { code, status, stderr } = error as Error & {
+      code?: unknown;
+      status?: unknown;
+      stderr?: unknown;
+    };
+    if (code === "ETIMEDOUT") throw new Error(`${call} did not end in ${timeoutMs} ms`);
+    if (typeof status === "number" && status !== 0)
+      throw new Error(`${call} failed: ${String(stderr ?? "").trim() || `exit ${status}`}`);
     throw error;
   }
 }
@@ -326,8 +343,8 @@ export function tar(args: readonly string[], timeoutMs = TAR_TIMEOUT_MS): string
 /**
  * Runs `use` with the bytes of a tarball in `tarball.tgz` of a new private
  * folder, and removes the folder after it. The file holds the bytes that
- * the SHA-256 of the check names, so tar reads the bytes that the check
- * read and never a second read of the path (ruling 67 of plan 12j, Low 4).
+ * the SHA-256 of the check names. So tar reads the bytes that the check
+ * read. It never reads the path a second time (ruling 67 of plan 12j, Low 4).
  */
 export function withTarballFile<T>(bytes: Buffer, use: (file: string, dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), TAR_FOLDER_PREFIX));
@@ -346,14 +363,25 @@ export function withTarballFile<T>(bytes: Buffer, use: (file: string, dir: strin
  * ".." part. pnpm pack writes neither, so a foreign tarball is the reach.
  * It reads the file once, and tar reads those bytes from a private file. So
  * the SHA-256 names the bytes that the check read, not a second read of the
- * path (ruling 67 of plan 12j, Low 4).
+ * path (ruling 67 of plan 12j, Low 4). A tar error starts with the path of
+ * the tarball, as each refusal does. The private file is gone after the
+ * read (ruling 8 of plan 12m).
  */
 export function readTarball(path: string): Tarball {
   const bytes = readFileSync(path);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   return withTarballFile(bytes, (file) => {
+    /** Runs one tar call, and puts the path of the tarball before its error. */
+    const named = (call: () => string): string => {
+      try {
+        return call();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${path}: ${message}`, { cause: error });
+      }
+    };
     const lines = (args: string[]) =>
-      tar([...args, file])
+      named(() => tar([...args, file]))
         .split("\n")
         .slice(0, -1);
     const names = lines(["-tzf"]);
@@ -374,7 +402,7 @@ export function readTarball(path: string): Tarball {
       })
       .sort();
     const read = (entry: string) =>
-      files.includes(entry) ? tar(["-xzOf", file, `package/${entry}`]) : null;
+      files.includes(entry) ? named(() => tar(["-xzOf", file, `package/${entry}`])) : null;
     const manifest = read("package.json");
     if (manifest === null) throw new Error(`${path}: the tarball has no package.json`);
     return {

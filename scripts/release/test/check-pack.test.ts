@@ -1141,10 +1141,15 @@ describe("the note of UNPUBLISHED_FILES (rulings 47 and 53 of the plan 12j lane)
 /** The private folders of the tar reads of this process that remain in the temp folder. */
 const tarFolders = () => readdirSync(tmpdir()).filter((f) => f.startsWith(TAR_FOLDER_PREFIX));
 
-/** Runs `use` with a `tar` first on PATH that sleeps `seconds` and prints nothing. */
+/**
+ * Runs `use` with a `tar` first on PATH that ignores SIGTERM, sleeps `seconds`,
+ * and prints nothing. Only SIGKILL ends it before the sleep ends.
+ */
 function withSlowTar<T>(seconds: number, use: () => T): T {
   const bin = mkdtempSync(join(tmpdir(), "authtempo-slow-tar-"));
-  writeFileSync(join(bin, "tar"), `#!/bin/sh\nexec sleep ${seconds}\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "tar"), `#!/bin/sh\ntrap '' TERM\nexec sleep ${seconds}\n`, {
+    mode: 0o755,
+  });
   const path = process.env.PATH ?? "";
   process.env.PATH = `${bin}:${path}`;
   try {
@@ -1157,14 +1162,29 @@ function withSlowTar<T>(seconds: number, use: () => T): T {
 
 describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () => {
   it("fails a tar call that does not end in the limit, and names the call", () => {
-    const start = Date.now();
-    withSlowTar(30, () => {
-      expect(() => tar(["-tzf", "none.tgz"], 300)).toThrow(
-        "tar -tzf none.tgz did not end in 300 ms",
-      );
-    });
-    expect(Date.now() - start).toBeLessThan(10_000);
-    expect(TAR_TIMEOUT_MS).toBe(60_000);
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const good = join(out, "good.tgz");
+      writeTar(good, [manifestEntry("@authtempo/fixture")]);
+      const bytes = readFileSync(good);
+      const before = tarFolders();
+      const start = Date.now();
+      // The slow tar ignores SIGTERM, so the two calls end in time only with SIGKILL.
+      withSlowTar(30, () => {
+        expect(() => tar(["-tzf", "none.tgz"], 300)).toThrow(
+          "tar -tzf none.tgz did not end in 300 ms",
+        );
+        expect(() => withTarballFile(bytes, (file) => tar(["-tzf", file], 300))).toThrow(
+          /^tar -tzf \S+\/tarball\.tgz did not end in 300 ms$/,
+        );
+      });
+      expect(Date.now() - start).toBeLessThan(10_000);
+      // No private folder remains after a time limit.
+      expect(tarFolders()).toEqual(before);
+      expect(TAR_TIMEOUT_MS).toBe(60_000);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 
   it("gives tar a file of the bytes, never a pipe and never the path", () => {
@@ -1176,7 +1196,7 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
     expect(source.match(/execFileSync\(/g)).toHaveLength(1);
     // checkPack takes a parameter named input, so the fact reads only an input property.
     expect(source).not.toMatch(/[{,]\s*input:/);
-    expect(source).toMatch(/stdio: \["ignore", "pipe", "inherit"\],\n\s*timeout: timeoutMs,/);
+    expect(source).toMatch(/stdio: \["ignore", "pipe", "pipe"\],\n\s*timeout: timeoutMs,/);
     // readTarball runs tar on the private file only.
     const reader = source.slice(
       source.indexOf("export function readTarball"),
@@ -1204,7 +1224,7 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
         { name: "package/../x.js", body: "x" },
       ]);
       expect(() => readTarball(dotdot)).toThrow(`${dotdot}: package/../x.js has a .. part`);
-      // A file that is not a tarball: tar's own failure, not the time limit.
+      // A file that is not a tarball: tar's own failure with its reason, not the time limit.
       const bad = join(out, "bad.tgz");
       writeFileSync(bad, "not a tarball");
       let message = "";
@@ -1213,7 +1233,10 @@ describe("the tar calls of the reader (plan 12m, follow-up 15 of plan 12l)", () 
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message).toMatch(/^Command failed: tar -tzf /);
+      // bsdtar and GNU tar give other words for the reason, so the test reads the form only.
+      expect(message).toMatch(/tar -tzf \S+ failed: \S/);
+      const head = `${bad}: tar -tzf `;
+      expect(message.slice(0, head.length)).toBe(head);
       expect(message).not.toMatch(/did not end/);
       // The helper runs use once with the file and its folder, and removes the folder.
       const seen = withTarballFile(readFileSync(good), (file, dir) => {
