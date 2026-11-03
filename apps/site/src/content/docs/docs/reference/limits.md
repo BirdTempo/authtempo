@@ -106,7 +106,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
 | `operator-users:ip:<ip>` | 1 hour | 600 | Every secret call to the user, session, and audit routes, right or wrong secret. `OPERATOR_USERS_PER_IP` |
 | `operator-users:secret:<name>` | 1 hour | 600 | Every call of one operator secret to the user, session, and audit routes, after the secret matches, from any IP. `OPERATOR_USERS_PER_SECRET` |
-| `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes |
+| `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes. A `/sso/register` of the compatibility package counts three times, one per core write |
 | `operator-impersonate:user:<userId>` | 1 hour | 20 | Impersonation starts of one platform operator |
 | `operator-delete:actor:<kind>:<id>` | 1 hour | 100 | Every call of one actor to the operator delete route, before the body and the scope check. The subject is `secret:<name>` or `user:<userId>`. A delete cannot be undone, so the count bounds what a leaked credential destroys. `OPERATOR_DELETE_PER_ACTOR` |
 | `operator-create:actor:<kind>:<id>` | 1 hour | 200 | Every call of one actor to the operator create route, before the body and the scope check. The subject is `secret:<name>` or `user:<userId>`. Each create can mail the person once, so a leaked credential must not become a mail cannon. `OPERATOR_CREATE_PER_ACTOR` |
@@ -209,7 +209,7 @@ These counts live in their rows, so they hold under every limiter.
 | The bytes that every other body read above the floor holds at once, in each isolate | 8388608, the anonymous half of the budget: the SAML ACS, the Apple callback, and SCIM | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The bytes that the body reads above the floor of one client hold at once | 4194304, a quarter of the budget, for an IP. A user may hold the cap of its read in the user half. A user runs one large read at a time: a second answers 503 before any byte. A client is its IP before a session and its user after one. A request with no client IP is one client, `unknown`, with the share of one IP | 503 `body_busy` with `Retry-After: 1`, SCIM 503 |
 | The wait of a body read above the floor for its next bytes | 10 s | 408 `body_timeout`, SCIM 408 |
-| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, or at 262144 for a signed-in user, and at least 10 s: 32 s for an SSO connection write, 10 s for the others | 408 `body_timeout`, SCIM 408 |
+| The time of one whole body read above the floor | The time of its cap at 131072 bytes per second, or at 262144 for a signed-in user, and at least 10 s. That is 32 s for an SSO connection write, 10 s for the others | 408 `body_timeout`, SCIM 408 |
 | One SAML form at the ACS | 1 081 519 bytes | `sso_failed` |
 | One decoded SAML Response | 256 KB, depth 64, 5000 elements | `sso_failed` |
 | The metadata XML of a provider | 100 KB | `invalid_body` |

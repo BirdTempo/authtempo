@@ -36,3 +36,21 @@ describe("the via rows of the hooks guide", () => {
     expect(row(label)).toEqual(members);
   });
 });
+
+// The sweep ends each left session with the reason of the act that left it
+// (12f2 follow-up 3 of plan 12n). The keys of PENDING_STOP_CAUSE in
+// access-end.ts are those reasons, so the sweep bullet names each key.
+const ACCESS_END = readFileSync(`${REPO}packages/core/src/engine/operator/access-end.ts`, "utf8");
+
+describe("the sweep bullet of the hooks guide", () => {
+  it("names each reason of a pending end that access-end.ts holds", () => {
+    const body = /const PENDING_STOP_CAUSE[^=]*= \{([^}]*)\};/.exec(ACCESS_END)?.[1];
+    if (body === undefined) throw new Error("no PENDING_STOP_CAUSE in access-end.ts");
+    const keys = [...body.matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1] ?? "").sort();
+    expect(keys.length).toBeGreaterThan(4);
+    const bullet = GUIDE.split("\n").find((l) => l.startsWith("- The sweep fires two hooks."));
+    if (bullet === undefined) throw new Error("no sweep bullet in the hooks guide");
+    const reasons = /with the reason of that act: ([^.]*)\./.exec(bullet)?.[1] ?? "";
+    expect([...reasons.matchAll(/`([a-z_]+)`/g)].map((m) => m[1] ?? "").sort()).toEqual(keys);
+  });
+});

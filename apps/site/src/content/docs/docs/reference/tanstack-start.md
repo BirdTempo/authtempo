@@ -31,7 +31,7 @@ sidebar:
 | Export | What it does |
 | --- | --- |
 | `authRouteHandlers` | Answers the `GET`, `POST`, and `OPTIONS` handlers of the splat route of core. |
-| `authRequestServer` | Answers the server function of a request middleware: it gives `{ session }` to the context, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
+| `authRequestServer` | Answers the server function of a request middleware. It gives `{ session }` to the context, sends a person with no session on a protected path to the sign-in page, and adds the renewed cookie. |
 | `getSession` | Answers the session of a context, or `null`. |
 | `AuthSource` | The auth instance, or a function that makes it at the first request. |
 | `RouteHandler` | The type of one server handler. |

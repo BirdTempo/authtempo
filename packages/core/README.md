@@ -1251,7 +1251,7 @@ The delete holds the user row by a compare-and-set, the rule of the profile upda
 
 Five more writers hold the user row. They are the organization create, the member add, the accept of an invitation, the password change, and a reset that answers a second-factor challenge. Each also reads the user row after its insert. So a member row or an `email` identity of a deleted user never commits. A writer that loses the race answers 409 `conflict`. An organization that goes loses its invitations first. An accept that comes later finds no invitation. An accept that commits first makes the delete answer `conflict`, and the organization stays.
 
-`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires once per session with `account_deleted`. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
+`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. The cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
 
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
@@ -1366,17 +1366,17 @@ const auth = createAuth({
 | Flow | Before hooks | Rows locked before the hook |
 | --- | --- | --- |
 | Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
-| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; none in an SSO sign-in or a SCIM write, whose hook runs before any lock and write |
+| Member add | `organization.beforeAddMember` | The added user's row, and with `membersPerOrganization` the organization row. An SSO sign-in or a SCIM write locks none: its hook runs before any lock and write. |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
-| Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
-| Member role change | `organization.beforeUpdateMemberRole` | for an owner demotion, the organization row; for a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened; for a gain of the platform role, the member's user row, and with an owner demotion the member's sessions too |
+| Member removal or leave | `organization.beforeRemoveMember` | The person's user row and sessions. For an owner or with `revokeTokens`, the organization row. For a loss of the platform role, the sessions of each impersonation that the person opened. |
+| Member role change | `organization.beforeUpdateMemberRole` | For an owner demotion, the organization row. For a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened. For a gain of the platform role, the member's user row, and with an owner demotion the member's sessions too. |
 | Organization delete | `organization.beforeDelete` | the sessions that act in the organization; on Postgres, the organization row |
 | Team create | `organization.beforeCreateTeam` | the organization row |
 | Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
-| SCIM group write | `organization.beforeUpdateMemberRole` | the scimGroup row, first; the users of the added and removed members, and of each member whose role the write computes; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
+| SCIM group write | `organization.beforeUpdateMemberRole` | The scimGroup row, first. The users of the added and removed members, and of each member whose role the write computes. The sessions of the persons who leave the group's team. The organization row of a team create, or the team row. On Postgres, the member rows of each role change. |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Phone remove | `user.beforeUpdate` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
