@@ -24,7 +24,10 @@ const APP = { kind: "app", name: "copy-test" } as const;
 
 export function copySsoSuite(name: string, setup: () => Promise<CopyDatabase>) {
   describe(`copyBetterAuthSso on ${name} (plan 12d Task 14)`, () => {
-    it("copies providers, domains, tokens, and SCIM rows once", async () => {
+    // In the logs of 2026-10-30 to 2026-11-03 this test did not time out. Its highest pass is
+    // 3.09 s on Postgres, in the evidence run 12j-integ1 of 2026-10-30 (sampled peak load 55.9).
+    // On D1 its highest pass is 2.46 s. So both runs get 20 s, the limit of the compat D1 pool.
+    it("copies providers, domains, tokens, and SCIM rows once", { timeout: 20_000 }, async () => {
       const db = await setup();
       try {
         const answers = new Map<string, string[]>();

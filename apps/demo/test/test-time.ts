@@ -18,10 +18,11 @@
  * pool test runs a full Worker sandbox, so vitest.config.ts sets this limit
  * for every pool test, and no test waits for its own review.
  *
- * On 2026-10-30 the pool timed out at 20 s in two runs while other lanes ran
- * tests. A release rehearsal (peak load 35) timed out the two hooks of
+ * On 2026-10-30 the pool timed out at 20 s in two runs. A release rehearsal
+ * ran beside other agents, at a peak load of 35. It timed out the two hooks of
  * cookies.test.ts and mailbox-only.test.ts, and four tests at 20.01 to 20.19 s.
- * An evidence run at sampled peak load 55.9 timed out the same two hooks.
+ * The evidence run 12j-integ1 held the evidence lock and started at load 5.00.
+ * At a sampled peak load of 55.9, it timed out the same two hooks.
  * From 2026-10-30 to 2026-11-03 these four tests passed in up to 17.56 s. The
  * two hook files took up to 18.70 s. So the limit is 60 s (plan 12n).
  */
