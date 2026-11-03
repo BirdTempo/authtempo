@@ -1102,6 +1102,17 @@ describe("the account delete of a solo organization's owner through the route on
 const OWNED_EDGE = { direct: 2, confirm: 2 } as const;
 const OWNED_COUNTS = { direct: 49, confirm: 50 } as const;
 
+/**
+ * The edge of the same scene with no solo organization (item 12f2 (4) of
+ * plan 12n). The scimUser row goes into the first shared organization. The
+ * run of 2026-11-03 on the binding gave 49 queries for the direct delete of
+ * a co-owner of 4, and 50 for the confirm. Both refuse 5 with
+ * `delete_too_large`. So the edge is 4, as O-12f2-1 of the plan index gives
+ * by arithmetic. The solo organization costs as much as 2 shared ones.
+ */
+const SHARED_EDGE = { direct: 4, confirm: 4 } as const;
+const SHARED_COUNTS = { direct: 49, confirm: 50 } as const;
+
 describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () => {
   beforeEach(async () => {
     await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
@@ -1118,9 +1129,16 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
   /**
    * The owner of one solo organization who owns `shared` organizations with
    * another user, and the call of the self delete in the worst scene. The
-   * clock moves 80 minutes before the call, so the refresh is due.
+   * clock moves 80 minutes before the call, so the refresh is due. With
+   * `solo` false the user owns no solo organization. Then the scimUser row
+   * goes into the first shared organization, and `organizationId` names it.
    */
-  async function coOwner(scene: "direct" | "confirm" | "probe", shared: number, tool = true) {
+  async function coOwner(
+    scene: "direct" | "confirm" | "probe",
+    shared: number,
+    tool = true,
+    solo = true,
+  ) {
     const sent: MailMessage[] = [];
     const worst = await dueWithSaml();
     // With the impersonation tool off, the hold reads no audit row: 1 call fewer.
@@ -1132,11 +1150,13 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
         : scene === "direct"
           ? due
           : { ...due, account: { deleteConfirm: { ttlMinutes: 1440 } } };
-    const { token, userId, organizationId } = await soloOwner(sent, extra);
+    const own = solo ? await soloOwner(sent, extra) : null;
     const { auth: setup } = await engine(env.DB, sent, undefined, extra);
+    const { token, userId } = own ?? (await signIns(setup, sent, "solo@example.com", 1));
     const other = await signIns(setup, sent, "bob@example.com", 1);
     const bob = await setup.api.getSession(other.token);
     if (!bob) throw new Error("no session");
+    const sharedIds: string[] = [];
     for (let i = 0; i < shared; i++) {
       const made = await setup.api.createOrganization({
         user: bob.user,
@@ -1144,6 +1164,7 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
         name: "Shared",
       });
       if (!made.ok) throw new Error(made.code);
+      sharedIds.push(made.value.organization.id);
       const added = await setup.api.addMember({
         user: bob.user,
         organizationId: made.value.organization.id,
@@ -1152,6 +1173,8 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
       });
       if (!added.ok) throw new Error(added.code);
     }
+    const organizationId = own?.organizationId ?? sharedIds[0];
+    if (organizationId === undefined) throw new Error("no organization for the scimUser row");
     if (scene !== "probe")
       await env.DB.prepare(
         "INSERT INTO ta_scim_user (id, created_at, updated_at, organization_id, user_id, user_name, user_name_key, active, data, version) VALUES ('scim-solo', 0, 0, ?, ?, 'solo@example.com', 'solo@example.com', 1, '{}', 1)",
@@ -1280,6 +1303,39 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
     const { auth } = await engine(env.DB, w.sent, undefined, w.extra);
     expect(await auth.api.getSession(w.token)).not.toBeNull();
   });
+
+  for (const scene of ["direct", "confirm"] as const) {
+    it(`deletes a co-owner of ${SHARED_EDGE[scene]} organizations and no solo one at the edge in ${SHARED_COUNTS[scene]} queries: ${scene}`, async () => {
+      const w = await coOwner(scene, SHARED_EDGE[scene], true, false);
+      const r = await w.call();
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(
+        await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(w.userId).first(),
+      ).toBe(null);
+      // The shared organizations stay with their other owner. The user owned no other.
+      const kept = await env.DB.prepare(
+        "SELECT (SELECT COUNT(*) FROM ta_organization WHERE slug LIKE 'shared-%') AS shared, (SELECT COUNT(*) FROM ta_organization) AS total",
+      ).first<{ shared: number; total: number }>();
+      expect([kept?.shared, kept?.total]).toEqual([SHARED_EDGE[scene], SHARED_EDGE[scene]]);
+      const sweeps = await sweepAll(w.sent, w.extra);
+      // The scimUser row in the first shared organization went with the user.
+      expect(await restOf(w.organizationId)).toBe(0);
+      expect(r.queries).toBe(SHARED_COUNTS[scene]);
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
+
+    it(`refuses a co-owner of ${SHARED_EDGE[scene] + 1} organizations and no solo one with delete_too_large in 50 queries, and changes nothing: ${scene}`, async () => {
+      const w = await coOwner(scene, SHARED_EDGE[scene] + 1, true, false);
+      const before = await store();
+      const r = await w.call();
+      expect([r.status, r.body.error]).toEqual([409, "delete_too_large"]);
+      expect(r.queries).toBeLessThanOrEqual(50);
+      expect(await store()).toEqual(before);
+      expect(endings).toEqual([]);
+      const { auth } = await engine(env.DB, w.sent, undefined, w.extra);
+      expect(await auth.api.getSession(w.token)).not.toBeNull();
+    });
+  }
 });
 
 /**
