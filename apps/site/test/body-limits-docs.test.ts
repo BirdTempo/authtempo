@@ -628,7 +628,14 @@ const NARROWED: [FileKey, string, number][] = [
   ["errors", "So a read that ends after its window ended fills the next window.", 1],
   [
     "errors",
-    "Until that window ends, up to 1 hour from the end of that read, each SSO connection write of the user answers 429 `rate_limited`.",
+    "Until that window ends, up to 1 hour from the end of that read, both SSO connection writes of the user answer 429 `rate_limited`.",
+    1,
+  ],
+  // Of the three SSO connection writes, only the create and the update have a cap above the floor
+  // in BODY_CAPS. So only they count on `sso-large-read:user` (12l follow-up (12)).
+  [
+    "limits",
+    "`POST /sso/connections/create` and `POST /sso/connections/update`, at the start of their body read, after `sso-manage:user` and the manager guard.",
     1,
   ],
   [
