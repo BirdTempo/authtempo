@@ -1,4 +1,5 @@
 import type { Auth, UserRow } from "@authtempo/core";
+import { ID_TOKEN_PROVIDERS } from "@authtempo/core/compat";
 import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { Session, User } from "../types.js";
 import { readObjectOf } from "./body.js";
@@ -34,8 +35,16 @@ const DEVICE_SESSIONS = "/multi-session/list-device-sessions";
 const SET_ACTIVE = "/multi-session/set-active";
 const REVOKE_DEVICE = "/multi-session/revoke";
 
-/** The providers of core's ID-token route (plan 12i Task 10). */
-const ID_TOKEN_PROVIDERS: ReadonlySet<string> = new Set(["google", "apple"]);
+/**
+ * The providers of core's ID-token route (plan 12i Task 10). The list is
+ * core's own, so the two lists cannot drift (plan 12n).
+ */
+const ID_TOKEN_NAMES: ReadonlySet<string> = new Set(ID_TOKEN_PROVIDERS);
+/** The names of a list in prose: "a and b", or "a, b, and c". */
+const prose = (names: readonly string[]) =>
+  names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
+/** The 501 text of a provider outside core's list, built from that list. */
+const ID_TOKEN_ONLY = `core takes an ID token of ${prose(ID_TOKEN_PROVIDERS)} only`;
 /**
  * Better Auth stores these with the account for its `getAccessToken`.
  * Core keeps no provider token and serves no `/get-access-token` (README),
@@ -272,8 +281,7 @@ async function idTokenSignIn(
     return failure(NOT_SUPPORTED, 501, `core takes no ${extra.join(", ")} with an ID token`);
   const provider = body.provider;
   if (typeof provider !== "string") return failure(BETTER_AUTH_CODES.invalid_body, 400);
-  if (!ID_TOKEN_PROVIDERS.has(provider))
-    return failure(NOT_SUPPORTED, 501, "core takes an ID token of google and apple only");
+  if (!ID_TOKEN_NAMES.has(provider)) return failure(NOT_SUPPORTED, 501, ID_TOKEN_ONLY);
   const t = body.idToken;
   if (typeof t !== "object" || t === null || Array.isArray(t))
     return failure(BETTER_AUTH_CODES.invalid_body, 400);

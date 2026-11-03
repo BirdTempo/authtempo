@@ -4,12 +4,14 @@ import { createAuth, crossSiteRefusal } from "../src/create-auth.js";
 import { validCimdUrl } from "../src/engine/oauth-clients.js";
 import { createSession } from "../src/engine/sessions.js";
 import { json } from "../src/http/json.js";
+import { ROUTES } from "../src/http/route-list.js";
 import { createRouter, type Route } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { newId } from "../src/primitives/ids.js";
 import { tiktokEntry } from "../src/social/entries/index.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
+import { SOCIAL } from "./every-feature.js";
 import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
 import tiktokUserText from "./fixtures/providers/tiktok/user.json?raw";
 import { makeAuth, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
@@ -591,38 +593,93 @@ describe("the phone and anonymous routes on a base URL list (plan 12i Tasks 5, 6
   const C = "https://c.example";
   const fromIp = (n: number) => ({ "cf-connecting-ip": `198.51.100.${n}` });
 
-  /** The list [A, B] with phone and anonymous on, and the router with no wait of its own. */
+  /**
+   * The list [A, B] with every feature on, as `everyFeature` turns them on,
+   * so each route of `ROUTES` has its handler. The router has no wait of its own.
+   */
   function joinWorld() {
     const sms = createRecordingSms();
     const w = world({
+      social: SOCIAL,
+      passkey: {
+        rpID: "a.example",
+        rpName: "Example",
+        origins: [A, B],
+        relatedOrigins: true,
+        signUp: { isolateLimiter: "allow" },
+      },
+      handoff: { schemes: ["example://"] },
+      organizations: {
+        platformRole: "owner",
+        platformOrganization: "platform-co",
+        dynamicRoles: {},
+        teams: {},
+      },
+      password: {},
+      oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
+      operator: {
+        secrets: [
+          {
+            name: "default",
+            secretHash: "0".repeat(64),
+            scopes: ["keys", "secrets", "users", "sessions", "audit", "sso"],
+          },
+        ],
+        users: true,
+        impersonation: {},
+      },
+      sso: { dns: [{ name: "none", txt: async () => [] }] },
+      scim: {},
+      openapi: true,
+      username: {},
       phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
       anonymous: { isolateLimiter: "allow" },
+      multiSession: {},
+      observe: { sink: { write: () => {} }, readiness: true },
     });
     return { ...w, sms, route: createRouter(w.config, coreRoutes(w.config)) };
   }
 
-  it("answers 421 to each phone and anonymous route on another host, and runs no work", async () => {
+  /** A sample value for each path parameter of `ROUTES`. A new parameter fails the walk until it has one. */
+  const SAMPLE: Readonly<Record<string, string>> = {
+    provider: "google",
+    connectionId: "c-1",
+    id: "u-1",
+  };
+  const pathOf = (path: string) =>
+    path.replace(/:([A-Za-z]+)/g, (_, name: string) => {
+      const value = SAMPLE[name];
+      if (value === undefined) throw new Error(`no sample value for the parameter ${name}`);
+      return value;
+    });
+
+  it("answers 421 to each route of ROUTES on another host, and runs no work (plan 12n decision 18)", async () => {
     const w = joinWorld();
     const work: Promise<unknown>[] = [];
     const options = { waitUntil: (p: Promise<unknown>) => void work.push(p) };
-    const calls: [string, unknown][] = [
-      ["/auth/phone/request", { phone: PHONE }],
-      ["/auth/phone/verify", { phone: PHONE, code: "000000" }],
-      ["/auth/phone/add", { phone: PHONE }],
-      ["/auth/phone/add/verify", { code: "000000" }],
-      ["/auth/phone/remove", {}],
-      ["/auth/anonymous/sign-in", {}],
-      ["/auth/anonymous/delete", {}],
-    ];
-    for (const [path, body] of calls) {
-      const res = await w.route(postOn(C, path, body, fromIp(1)), options);
-      expect({ path, status: res.status }).toEqual({ path, status: 421 });
-      expect(await res.json()).toEqual({ error: "host_not_allowed" });
+    expect(ROUTES.length).toBeGreaterThan(0);
+    for (const r of ROUTES) {
+      const key = `${r.method} ${r.path}`;
+      const url = `${C}/auth${pathOf(r.path)}`;
+      // A route with a body answers 421 before the body read, so an empty JSON object serves each.
+      const req =
+        r.method === "GET"
+          ? new Request(url, { headers: fromIp(1) })
+          : new Request(url, {
+              method: r.method,
+              headers: { "content-type": "application/json", origin: C, ...fromIp(1) },
+              body: "{}",
+            });
+      const res = await w.route(req, options);
+      expect({ key, status: res.status }).toEqual({ key, status: 421 });
+      expect({ key, body: await res.json() }).toEqual({ key, body: { error: "host_not_allowed" } });
     }
     // The router checks the host before any route: no send after the answer, and no row.
     expect(work).toEqual([]);
     expect(w.sms.sent).toEqual([]);
+    expect(w.mail).toEqual([]);
     expect(await w.storage.findMany("user", [])).toEqual([]);
+    expect(await w.storage.findMany("verification", [])).toEqual([]);
     // On B the request sends the code after the answer, under the waitUntil of the request.
     const res = await w.route(
       postOn(B, "/auth/phone/request", { phone: PHONE }, fromIp(2)),
