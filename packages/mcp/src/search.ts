@@ -97,6 +97,26 @@ export function tokenize(text: string, terms: Readonly<Record<string, string>>):
   return out;
 }
 
+/**
+ * A link whose text is one route in a code span, such as
+ * [`POST /reauth`](https://authtempo.com/docs/reference/routes/#post-reauth).
+ */
+const ROUTE_LINK = /\[`[A-Z]+ \/[^`]*`\]\([^)\s]*\)/g;
+
+/**
+ * The body text that the score reads (ruling 24 of plan 12n). In a table
+ * row, a route link gives no token, and the other words of the row stay. A
+ * Routes cell lists each route that answers a code. So a longer cell must
+ * not move its section up. The section text of the index keeps each link,
+ * because docs.read answers that text.
+ */
+function scoredText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (/^\s*\|/.test(line) ? line.replace(ROUTE_LINK, "") : line))
+    .join("\n");
+}
+
 const FIELDS = ["title", "heading", "body"] as const;
 type Field = (typeof FIELDS)[number];
 
@@ -139,7 +159,7 @@ function prepare(index: AgentIndex): Prepared {
     const text: Record<Field, string> = {
       title: index.pages[page]?.title ?? "",
       heading: s.heading,
-      body: s.text,
+      body: scoredText(s.text),
     };
     const tokens = {
       title: tokenize(text.title, index.header.terms),
