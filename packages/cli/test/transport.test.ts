@@ -195,4 +195,16 @@ describe("the transport rule (plan 12g Task 6)", () => {
     for (const h of ["127.0.0.256", "128.0.0.1", "10.0.0.1", "db.example.com", "::2", "127.1"])
       expect(isLoopbackHost(h), h).toBe(false);
   });
+
+  it("reads each long form of ::1 as loopback, and no other IPv6 address", () => {
+    // The libSQL parser keeps the form of the URL, so the rule reads each form.
+    for (const h of ["[0:0:0:0:0:0:0:1]", "0:0:0:0:0:0:0:1", "[0::1]", "0::1", "[0:0::0:1]"])
+      expect(isLoopbackHost(h), h).toBe(true);
+    // An IPv4-mapped address is no form of ::1, so the rule asks for TLS there.
+    for (const h of ["[0:0:0:0:0:0:0:2]", "[::ffff:127.0.0.1]", "::ffff:7f00:1", "[fe80::1%25en0]"])
+      expect(isLoopbackHost(h), h).toBe(false);
+    expect(() => libsql("http://[0:0:0:0:0:0:0:1]:8080")).not.toThrow();
+    expect(() => libsql("ws://[0::1]:8080")).not.toThrow();
+    expect(stopOf(() => libsql("http://[0:0:0:0:0:0:0:2]:8080"))).toContain("TLS");
+  });
 });

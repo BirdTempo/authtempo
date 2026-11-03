@@ -8,10 +8,22 @@ import { describeUrl } from "./output.js";
 // connect. The Postgres seam has no such rule yet (plan 12g, deviation 10):
 // it is an open point for the owner.
 
-/** True for `localhost`, an IPv4 address in 127.0.0.0/8, and `::1`. A URL host `[::1]` keeps its brackets. */
+/**
+ * True for `localhost`, an IPv4 address in 127.0.0.0/8, and each form of
+ * `::1`, such as `0:0:0:0:0:0:0:1`. A URL host `[::1]` keeps its brackets.
+ */
 export function isLoopbackHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[(.*)\]$/, "$1");
   if (h === "localhost" || h === "::1") return true;
+  if (h.includes(":")) {
+    // WHATWG URL writes an IPv6 address in its shortest form, so each form of
+    // ::1 reads as [::1]. The libSQL parser keeps the form of the URL.
+    try {
+      return new URL(`http://[${h}]/`).hostname === "[::1]";
+    } catch {
+      return false;
+    }
+  }
   const v4 = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (v4 === null) return false;
   return v4.slice(1).every((n) => Number(n) <= 255);
