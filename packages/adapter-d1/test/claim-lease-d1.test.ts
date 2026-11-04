@@ -5,16 +5,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter, createD1Limiter } from "../src/index.js";
 
 // The lease of a claim on D1 (ruling 16 of plan 12p). D1 does not isolate a
-// transaction, so the first statement of a claim is the lease: a
-// `claim-lease` verification row of the user that lives 60 seconds
+// transaction. So the first statement of a claim is the lease: a
+// `claim-lease` verification row of the user. It lives 60 seconds
 // (`CLAIM_LEASE_MS` of core). A request that runs out of queries after its
 // lease cannot undo it either, so the lease stays and the next claim meets
 // it. After 60 seconds a claim takes the stale lease.
 //
 // Every step is a real request through `auth.handle`. The request of a step
-// runs on a view of the binding that counts each query and refuses query
-// 51, as D1 Free does (D1 limits page updated 21 April 2026, read
-// 2026-10-24, as anonymous-upgrade-budget.test.ts says).
+// runs on a view of the binding. The view counts each query and refuses
+// query 51, as D1 Free does. The source is the D1 limits page, updated 21
+// April 2026 and read 2026-10-24 (anonymous-upgrade-budget.test.ts).
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -27,10 +27,11 @@ const LEASE_MS = 60_000;
 /** The lease create, the first statement of a claim on D1. The magic link writes no other verification row before it. */
 const LEASE_INSERT = /^INSERT INTO ta_verification\b/;
 
-// The counts of the run of 2026-11-04 20:33 CST on the owner's Mac Studio
-// (load 1.6 3.1 5.1), the D1 binding of this pool, with the D1 limiter on
-// the same view. `plain` is the magic link that claims a password claimant
-// with two sessions, the lease create included. `held` is a proof that
+// The counts come from the run of 2026-11-04 20:33 CST on
+// <local-host> (load 1.6 3.1 5.1). The run used the D1 binding
+// of this pool, with the D1 limiter on the same view. `plain` is the magic
+// link that claims a password claimant with two sessions, the lease create
+// included. `held` is a proof that
 // meets a live lease: 409 with no claim write. `stale` is the same claim
 // after it takes a stale lease. The create that meets the key (1), then the
 // read of the undo and the update of the lease (2), replace the create (1).

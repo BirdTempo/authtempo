@@ -864,7 +864,7 @@ describe("session end hooks (plan 9d)", () => {
   // limit, the counter holds (adapter-d1 invite-claim-race.test.ts).
   // Since plan 12o a session race throws nothing, so only a lost claim uses
   // a claim retry. Since plan 12p a claim loses at its first statement, the
-  // lease on this store: the rival's lease stays, so the loser's create
+  // lease on this store. The rival's lease stays, so the loser's create
   // meets its key.
   it.each(["magic link", "social", "reset"] as const)(
     "signs in after a unique-key retry and a lost claim (decision 13 of plan 12n, %s)",

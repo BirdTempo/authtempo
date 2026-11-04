@@ -48,9 +48,11 @@ export interface ProofCaller {
 
 /**
  * False when the caller's session was made before the proof of its user
- * (plan 12p). The flag is set once, at the session's creation. So the
- * session of a claimant stays unproved after the claim's flip, and acts as
- * unverified until the claim deletes it. A caller with no session passes.
+ * (plan 12p). Core sets the flag once at the session's creation. Only the
+ * confirm of a change of address changes it later, to true on the session
+ * it keeps. So the session of a claimant stays unproved after the claim's
+ * flip, and acts as unverified until the claim deletes it. A caller with no
+ * session passes.
  */
 export function sessionProved(caller: ProofCaller): boolean {
   return caller.session == null || caller.session.proved;

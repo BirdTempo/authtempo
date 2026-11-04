@@ -1404,7 +1404,7 @@ export interface CheckedScimCaller {
 /**
  * The user token create of a server call with no session (plan 12p). The
  * compat package of Better Auth calls it for `createApiKey` with a user id
- * and no headers: only that call may set the quota and the set.
+ * and no headers. Only that call may set the quota and the set.
  * `api.tokens.create` takes a session. This seam takes the user that the
  * package names, with the user row's rule, as for a caller with no
  * session. The app checks the person's session before it calls. Throws a

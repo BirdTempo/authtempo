@@ -106,9 +106,9 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
   const ended: string[] = [];
   const created: SessionRow[] = [];
   /**
-   * The claimant's requests to run inside the owner's flow: right after the
-   * claim's lease, its delete of the identities, of the passwords, or of the
-   * handoff codes, or its flip (plan 12p).
+   * The claimant's requests to run inside the owner's flow (plan 12p). They
+   * run right after one statement of the claim. It is the lease, the flip,
+   * or the delete of the identities, the passwords, or the handoff codes.
    */
   const armed: {
     run: (() => Promise<void>) | null;
@@ -457,8 +457,8 @@ async function deviceCode(w: World, clientId: string): Promise<string> {
 
 /**
  * Each open flow and each reachable gate of a closed flow, as a request of the
- * claimant's session, and the answer that the rule gives at the flip. The
- * nine open flows come first (inventory-window.md section 1).
+ * claimant's session. Each comes with the answer that the rule gives at the
+ * flip. The nine open flows come first (inventory-window.md section 1).
  */
 function gateRequests(cookie: string, ctx: { clientId: string; userCode: string }) {
   return [
@@ -1198,9 +1198,9 @@ describe("a social sign-in that straddles the claim (ruling 16 of plan 12p)", ()
 });
 
 /**
- * A flow that creates a row of a new user that the claim deletes: the claim
- * runs between the user create and that row's create (deviation of Task
- * 2b). The claim's delete then finds no row, and its flip comes after the
+ * A flow that creates a row of a new user that the claim deletes (deviation
+ * of Task 2b). The claim runs between the user create and that row's
+ * create. The claim's delete then finds no row, and its flip comes after the
  * flow's guard. The guard reads the lease, so the row goes.
  */
 describe("a sign-up that straddles the claim (ruling 16 of plan 12p, the lease read)", () => {

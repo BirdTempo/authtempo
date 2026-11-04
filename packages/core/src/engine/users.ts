@@ -175,12 +175,13 @@ export function claimLeaseId(userId: string): string {
 /**
  * A user created through an unverified email is a claim, not proof. When a
  * sign-in proves the address, the claim first takes the hold or the lease.
- * Then it deletes every identity that came in before (except the one that
- * carries the proof, and the `email` identity), every password row (except
- * the one `keep.passwordId` names), every passkey, every pending passkey
- * challenge, and every unredeemed handoff code. Then it flips the flag to
- * verified. Last it deletes every session. The username is cleared, except
- * where `keep.username` says so. The phone is always cleared.
+ * Then it deletes every identity that came in before, except the one that
+ * carries the proof and the `email` identity. It deletes every password row
+ * except the one `keep.passwordId` names. It deletes every passkey, every
+ * pending passkey challenge, and every unredeemed handoff code. Then it
+ * flips the flag to verified. Last it deletes every session. The username
+ * is cleared, except where `keep.username` says so. The phone is always
+ * cleared.
  *
  * The order (ruling 16 of plan 12p). The old order flipped the flag first.
  * Then a sign-in that read the user after the flip got a proved session.
@@ -228,9 +229,9 @@ export async function claimEmail(
   if (keep?.identityId) where.push({ field: "id", op: "ne", value: keep.identityId });
   // Every row that a sign-in trusts goes before the flip (ruling 16 of plan
   // 12p). A sign-in that trusts a row ends its transaction with a
-  // conditional update on that row: the identity, the password, the
-  // passkey, or the handoff code. A sign-in that read the user after the
-  // flip finds that row gone, so its guard undoes its session.
+  // conditional update on that row. The rows are the identity, the
+  // password, the passkey, and the handoff code. A sign-in that read the
+  // user after the flip finds that row gone, so its guard undoes its session.
   await tx.delete("identity", where);
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
@@ -523,12 +524,11 @@ export async function userStillUnverified(
 }
 
 /**
- * Runs inside the caller's transaction, after the caller created a row of
- * the user that a claim deletes before its flip: a password row or an
- * identity row (ruling 16 of plan 12p). False when a claim of the user
- * started since the caller read or created the user. A claim deletes that
- * row before its flip, so a check of the flip alone can miss it. Then the
- * row would outlive the claim, a way in of the claimant.
+ * Runs inside the caller's transaction, after the caller created a password
+ * row or an identity row of the user (ruling 16 of plan 12p). False when a
+ * claim of the user started since the caller read or created the user. A
+ * claim deletes that row before its flip, so a check of the flip alone can
+ * miss it. Then the row would outlive the claim, a way in of the claimant.
  *
  * On Postgres and MySQL the update of the user row is enough. A claim's
  * hold of that row waits for this transaction, or this update waits for the

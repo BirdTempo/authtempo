@@ -47,10 +47,10 @@ interface CodeData {
   redirect: string;
   /**
    * The user's flag when the code was minted, with the `proved` flag of the
-   * browser session (plan 12p). A code minted for an unverified user, or by
-   * a session made before the proof, runs the claim guard at redeem,
-   * whatever a later read of the user says. A code without the flag counts
-   * as unverified.
+   * browser session (plan 12p). A code minted for an unverified user runs
+   * the claim guard at redeem. So does a code minted by a session made
+   * before the proof, whatever a later read of the user says. A code without
+   * the flag counts as unverified.
    */
   emailVerified?: boolean;
   /**
@@ -205,7 +205,7 @@ export async function continueHandoff(
       if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
         return fail("invalid_token");
       // Read before the code row is written. A claim deletes the codes before
-      // its flip and its sessions (plan 12p), so a code written after that
+      // its flip and its sessions (plan 12p). So a code written after that
       // delete can pass the session check below. A claimant's browser session
       // has `proved` false, so its code runs the redeem guard. That guard sees
       // the claim's flip, and the claim's session delete comes after the flip.

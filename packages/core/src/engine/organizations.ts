@@ -161,8 +161,8 @@ export async function standing(
 }
 
 /**
- * A write of an organization or a team needs a verified address, and a
- * session made after its proof when the caller has one (plan 12p).
+ * A write of an organization or a team needs a verified address (plan 12p).
+ * When the caller has a session, it must be a session made after the proof.
  */
 export function verified(caller: ProofCaller): Result<true> {
   return provedAddress(caller) ? ok(true) : fail("email_unverified");

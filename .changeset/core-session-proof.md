@@ -8,7 +8,7 @@ Every verified-only action reads the flag of the caller's session with the user'
 
 Breaking: `api.tokens.create`, `api.passkeyRegistrationOptions`, `api.verifyPasskeyRegistration`, `api.totp.setup`, and `api.organizationTokens.create` take `session` in place of `user` or `userId`. Pass the answer of `api.getSession` or `auth.session`. A call with `user` or `userId` fails the type check. The input types `ApiTokenCreate`, `TotpSetupInput`, and `OrganizationTokenCreate` changed the same way.
 
-Each route passes the session it holds to the other verified-only checks. They are the token list, revoke, and update, and the organization, team, invitation, slug, and organization token calls. An in-process call with `user` only keeps the rule of the user row.
+Each route passes the session it holds to the other verified-only checks. They are the token list, revoke, and update, and the organization, team, invitation, slug, and organization token calls. Except `api.tokens.update` and `api.organizationTokens.update`, the app API forms of these closed flows take no session. So an in-process call there keeps the rule of the user row.
 
 A claim now deletes the identities, the passwords, the passkeys, the passkey challenges, and the handoff codes before the sessions. The passkey sign-in and the handoff redeem end with a conditional update of the row that they trust, on every path. When a claim took that row, the sign-in deletes its own session and answers its failure. The password sign-in and the social sign-in already did so.
 

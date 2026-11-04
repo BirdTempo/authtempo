@@ -14,7 +14,9 @@
  * lane). `moveSsoManageCount` moves each mark to the request that core
  * gets. Each route step stays core's. `createApiTokenAs` and
  * `createOrganizationTokenAs` make a token for a server call that names its
- * user and has no session (plan 12p), with the user row's rule.
+ * user and has no session (plan 12p), with the user row's rule. This entry
+ * is public, and no check holds it to a compat package. So any importer of
+ * the two seams gets the user row's rule, with no session and no fresh rule.
  */
 export type { DomainRecordOf } from "./compat-seams.js";
 export {

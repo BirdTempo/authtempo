@@ -1202,9 +1202,9 @@ export async function resolveSocialUser<T extends AfterWrite>(
             // The guard is on the user row, not on the identity row: a claim
             // that ran before this transaction created its identity did not
             // delete that identity (re-review R-1). A claim deletes the
-            // identities before its flip (ruling 16 of plan 12p), so the
-            // check sees the claim's first statement, the hold or the lease:
-            // any claim since the user create makes it false. Then delete the
+            // identities before its flip (ruling 16 of plan 12p). So the
+            // check sees the claim's first statement, the hold or the lease.
+            // Any claim since the user create makes it false. Then delete the
             // own session and the own identity by id, and commit, so no undo
             // runs. When it passes it is the last statement, so no undo runs
             // after it, and a later claim deletes the identity and the session.

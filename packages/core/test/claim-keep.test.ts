@@ -502,9 +502,9 @@ describe("an error answer after keep fires the claim's after points once (L1 of 
 /**
  * A lost claim on the D1 view of the memory store (`d1Like`). It has no
  * transaction lock. Its undo writes back a column only while the column
- * holds the written value, as on D1. At the first statement of the next
- * claim, its lease (ruling 16 of plan 12p), `winner` claims the user first,
- * as a commit of another invocation does. The winner's lease stays, so the
+ * holds the written value, as on D1. The first statement of the next claim
+ * is its lease (ruling 16 of plan 12p). There `winner` claims the user
+ * first, as a commit of another invocation does. The winner's lease stays, so the
  * loser's lease fails on the key, and the loser writes nothing. The view
  * claims a query limit per invocation, as D1 does, so the loser answers 409
  * with no claim retry.
