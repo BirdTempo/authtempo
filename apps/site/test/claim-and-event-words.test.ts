@@ -280,6 +280,10 @@ const GATE_WORDS = [
   "An in-process call that passes a user and no session keeps the rule of the user row.",
 ];
 
+/** The session JWT of a claimant (decision 8 of plan 12p): it outlives the claim, and its claim reads the flag. */
+const JWT_WORDS =
+  "A claimant's session JWT lives to its `exp`, [as every session JWT does](/docs/concepts/threat-model/#what-stays-open), with `email_verified` false and the owner's account as `sub`.";
+
 const CLOSURE_WORDS = [
   "The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The session proof](#the-session-proof) tells why no session of the claimant gains a power from the claim.",
   "- An API token needs a proved session at its creation. A session of a claimant is never proved, so a claimant cannot mint one.",
@@ -413,6 +417,14 @@ describe("the session proof of the claim-rule page (plan 12p)", () => {
     const text = page("concepts/claim-rule.md");
     for (const words of [...CREATION_WORDS, ...GATE_WORDS])
       expect(text, PROOF_PAGE).toContain(words);
+    // The session JWT reads the flag, so a claimant's JWT says false. The threat model names its life.
+    expect(source("jwt.ts")).toContain(
+      "{ email: user.email, email_verified: session.proved && user.emailVerified }",
+    );
+    expect(page("concepts/threat-model.md")).toContain(
+      "A session JWT and an OAuth access token live to their `exp`. A sign-out does not end them.",
+    );
+    expect(text, PROOF_PAGE).toContain(JWT_WORDS);
   });
 
   it("names the five forms that take the session, each name read from the code", () => {
