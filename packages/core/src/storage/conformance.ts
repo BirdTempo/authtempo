@@ -2179,6 +2179,17 @@ export function runAdapterConformance(
         expect(await db.keep()).toBe(true);
       });
 
+      it("isolated answers the opposite of keep in an empty transaction (plan 12p)", async () => {
+        // A claim reads the flag to choose the hold or the lease (claimEmail).
+        expect(typeof db.isolated).toBe("boolean");
+        expect(db.isolated).toBe(options.rowLocks === true);
+        const seen = await db.transaction(async (tx) => ({
+          tx: tx.isolated,
+          kept: await tx.keep(),
+        }));
+        expect(seen).toEqual({ tx: db.isolated, kept: !db.isolated });
+      });
+
       if (options.rowLocks)
         it("keep does nothing on a store with row locks: the transaction is isolated, so a throw reverses all of it", async () => {
           await seed(["s1", "s2"]);

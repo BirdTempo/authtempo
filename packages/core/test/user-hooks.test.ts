@@ -404,6 +404,7 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
       deleteRows: (m, w) => a.deleteRows(m, w),
+      isolated: a.isolated,
       keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
@@ -728,6 +729,7 @@ describe("hooks.identity (plan 12a, spec 8.9)", () => {
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
       deleteRows: (m, w) => a.deleteRows(m, w),
+      isolated: a.isolated,
       keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });

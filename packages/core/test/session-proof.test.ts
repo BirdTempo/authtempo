@@ -120,6 +120,7 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
       wrote("deleteRows", m);
       return a.deleteRows(m, w);
     },
+    isolated: a.isolated,
     keep: () => a.keep(),
     transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
   });
@@ -141,6 +142,7 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
     update: (m, w, d) => inner.update(m, w, d),
     delete: (m, w) => inner.delete(m, w),
     deleteRows: (m, w) => inner.deleteRows(m, w),
+    isolated: inner.isolated,
     keep: () => inner.keep(),
     transaction: (fn) => fn(open),
   };

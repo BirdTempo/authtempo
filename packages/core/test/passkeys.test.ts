@@ -465,6 +465,7 @@ describe("passkey authentication", () => {
       },
       delete: (m, w) => inner.delete(m, w),
       deleteRows: (m, w) => inner.deleteRows(m, w),
+      isolated: inner.isolated,
       keep: () => inner.keep(),
       transaction: (fn) => inner.transaction(fn),
     };

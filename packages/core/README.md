@@ -1898,7 +1898,9 @@ and no file under `src/` imports it. The test
 
 Ten methods: `create`, `createMany`, `rowsPerInsert`, `findOne`,
 `findMany`, `update`, `delete`, `deleteRows`, `keep`, `transaction`.
-Clauses join with AND. Operators: `eq ne in lt lte gt gte
+One flag, `isolated`: true where the open transaction is isolated and
+`keep` answers false in it (Postgres, MySQL). A claim reads it to choose
+the hold of the user row or the lease. Clauses join with AND. Operators: `eq ne in lt lte gt gte
 startsWith`. One sort field. No joins. Run `runAdapterConformance` from
 `@authtempo/core/conformance` against a new adapter; it is the contract.
 

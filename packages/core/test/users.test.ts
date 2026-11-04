@@ -36,6 +36,7 @@ function concurrentWinner(inner: StorageAdapter, winner: UserRow): StorageAdapte
     update: (m, w, d) => a.update(m, w, d),
     delete: (m, w) => a.delete(m, w),
     deleteRows: (m, w) => a.deleteRows(m, w),
+    isolated: a.isolated,
     keep: () => a.keep(),
     transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
   });

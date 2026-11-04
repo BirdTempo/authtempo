@@ -162,6 +162,8 @@ function adapterOn(
   const d1 = coreStatements(SQLITE);
 
   return {
+    // An undo log, and each write is seen at once (plan 12p): the claim takes a lease.
+    isolated: false,
     async create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]> {
       sent.statements++;
       const t = table(model);

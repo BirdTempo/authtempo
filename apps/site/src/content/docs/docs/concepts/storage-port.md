@@ -35,6 +35,14 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 | `keep` | Inside a transaction, makes the writes so far final: a later throw undoes only the writes after it. D1, SQLite, and memory drop their undo entries so far, and answer true. Postgres and MySQL do nothing and answer false: they isolate the open transaction, so a throw still undoes all of it. |
 | `transaction` | Runs a function with a port whose writes commit together. |
 
+## The flag
+
+An adapter sets this flag on the port and on each transaction port.
+
+| Flag | What it means |
+| --- | --- |
+| `isolated` | True when the open transaction is isolated, so `keep` answers false in it. Postgres and MySQL set it true. D1, SQLite, and memory set it false: they keep an undo log, and each write lands at once. A claim reads it to choose its first statement. On an isolated store that is the hold, an update of the user row that takes its lock. Else it is the lease, a `claim-lease` verification row of the user that lives 60 seconds. The suite holds the flag to `keep`. |
+
 ## The optional methods
 
 An adapter can leave these out. Core then takes a fixed worst case.

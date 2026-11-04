@@ -916,6 +916,7 @@ describe("the bounds and the guards of the email method (plan 12c, Task 7 review
       },
       delete: (m, w) => inner.delete(m, w),
       deleteRows: (m, w) => inner.deleteRows(m, w),
+      isolated: inner.isolated,
       keep: () => inner.keep(),
       transaction: (fn) => inner.transaction(fn),
     };

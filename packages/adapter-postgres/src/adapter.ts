@@ -54,6 +54,8 @@ async function query(ctx: Ctx, s: Statement): Promise<{ rows: Row[]; count: numb
 
 function adapterOn(ctx: Ctx): StorageAdapter {
   const self: StorageAdapter = {
+    // The open transaction is isolated, and `keep` answers false in it (plan 12p).
+    isolated: true,
     async create(model, data) {
       await ctx.ready();
       assertModel(model);

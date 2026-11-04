@@ -196,6 +196,17 @@ export interface StorageAdapter {
    */
   queryLimitPerInvocation?: boolean;
   /**
+   * True when the open transaction is isolated, so `keep()` answers false
+   * in it: Postgres and MySQL (plan 12p). There no other caller reads the
+   * writes of a transaction before its commit, and a writer of a row waits
+   * for its row lock. False where the adapter keeps an undo log and each
+   * write is seen at once: D1, the SQLite drivers, and the memory store.
+   * The transaction adapter of a store has the value of its store. A claim
+   * reads it to choose its first statement: the hold of the user row, or
+   * the lease (`claimEmail`). The conformance kit checks it against `keep`.
+   */
+  readonly isolated: boolean;
+  /**
    * Optional. True when a delete of a user row also deletes, by a foreign
    * key, the rows that name the user: the sessions, the accounts, the
    * member rows, and the invitations that the user sent. The Better Auth

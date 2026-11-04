@@ -128,6 +128,9 @@ async function rethrowAfterUndo(
 function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
   const st = ctx.statements;
   const self: StorageAdapter = {
+    // An undo log, and each write is seen at once (plan 12p). The SQLite
+    // adapter and the Better Auth storage run this code, so they get it too.
+    isolated: false,
     async create(model, data) {
       await ctx.ready();
       assertModel(model);

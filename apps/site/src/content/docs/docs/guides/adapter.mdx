@@ -25,6 +25,7 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 ## Steps
 
 1. Write an object with `create`, `createMany`, `rowsPerInsert`, `findOne`, `findMany`, `update`, `delete`, `deleteRows`, `keep`, and `transaction`, of the type `StorageAdapter`.
+   - Set `isolated` on it and on each transaction port: true when the open transaction is isolated, and `keep` answers false in it.
 2. Read the models and fields from `schema` of `@authtempo/core`.
    - Map each model to a table and each field to a column.
 3. Write one migration for each schema version.

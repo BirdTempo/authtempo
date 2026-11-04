@@ -108,6 +108,7 @@ function auditCreateFails(inner: StorageAdapter): StorageAdapter {
     update: (model, where, data) => s.update(model, where, data),
     delete: (model, where) => s.delete(model, where),
     deleteRows: (model, where) => s.deleteRows(model, where),
+    isolated: s.isolated,
     keep: () => s.keep(),
     transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
   });
@@ -233,6 +234,7 @@ describe("the operator audit row (plan 12f Task 4)", () => {
       update: (model, where, data) => inner.update(model, where, data),
       delete: (model, where) => inner.delete(model, where),
       deleteRows: (model, where) => inner.deleteRows(model, where),
+      isolated: inner.isolated,
       keep: () => inner.keep(),
       transaction: (fn) => inner.transaction(fn),
     };
@@ -280,6 +282,7 @@ describe("the operator audit row (plan 12f Task 4)", () => {
       update: (model, where, data) => inner.update(model, where, data),
       delete: (model, where) => inner.delete(model, where),
       deleteRows: (model, where) => inner.deleteRows(model, where),
+      isolated: inner.isolated,
       keep: () => inner.keep(),
       transaction: (fn) => inner.transaction(fn),
     };
