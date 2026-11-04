@@ -41,7 +41,7 @@ No other flow writes a null. The unique key on the address stays, and two users 
 A user has a proved handle when it holds a verified address, a phone that signs in under the `phone` config, or a passkey.
 
 - A user with no address and a proved handle can update the profile, set a username, add a phone, and make an API token.
-- It can register a passkey and turn on the second factor, when it is not anonymous.
+- It can register a passkey, and turn on TOTP and the passkey method of the second factor, when it is not anonymous.
 - It can add an address with `POST /user/change-email` and a fresh session. The proof of the new address then verifies it.
 - An anonymous user has no proved handle. Its session is its only key, and `anonymous_refused` holds every way in.
 
