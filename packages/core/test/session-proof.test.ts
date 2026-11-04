@@ -24,7 +24,7 @@ import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { CLAIM_LEASE_MS, CLAIM_RUNS, claimLeaseId } from "../src/engine/users.js";
-import { ROUTES } from "../src/http/route-list.js";
+import { coreRoutes } from "../src/http/routes/index.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
@@ -1587,7 +1587,8 @@ describe("the lease row in the answers (open point 7 of the Task 2b report of pl
       queries[path] = `organizationId=${organizationId}`;
     const marks = [lease.purpose, lease.id, lease.valueHash];
     const answered = new Set<string>();
-    const reads = ROUTES.filter((r) => r.method === "GET" && !r.path.includes(":"));
+    // Each GET route that this deployment mounts, with no path parameter.
+    const reads = coreRoutes(w.config).filter((r) => r.method === "GET" && !r.path.includes(":"));
     for (const { path } of reads)
       for (const headers of [{ cookie }, operatorHeader(OPERATOR_SECRETS.support)]) {
         const query = queries[path] ? `?${queries[path]}` : "";
