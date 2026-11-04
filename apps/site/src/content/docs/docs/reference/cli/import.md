@@ -163,7 +163,7 @@ The conflicts are `unmatched_row`, `duplicate_row`, `status_compromised`, `statu
 - The import never merges two accounts. A taken address or identity skips the record.
 - A second run of the same export writes nothing.
 - A repair writes nothing for a user that a claim verified since the import. The record then stays `partial` with `not repaired: verified_since_import`.
-- A first run can list a new unverified user as `partial` with `not repaired: claimed`. A claim of the address landed beside its writes, and the import deleted its own rows. Run the import again.
+- A first run can list a new unverified user as `partial` with `not repaired: claimed`. A claim of the address landed beside its writes, and the import deleted its own rows. The owner of the address now holds the account, and the record stays `partial`. A second run writes nothing for it, with or without `--repair`. A claim that threw leaves its lease, and the user stays unverified. After the sweep removes that lease, a run with `--repair` writes the rows.
 
 Each conflict below has its remedy. The reason in the report is the anchor of its section.
 
