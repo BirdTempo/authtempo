@@ -20,8 +20,8 @@ for (const { title, tables, casing } of CASES) {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing });
       const n = s.names;
       // Rows as Better Auth wrote them before the cutover. A verified user with an
-      // address, a claimant with an unverified address, and an anonymous user with
-      // Better Auth's placeholder (a user with no address in core).
+      // address, a claimant with an unverified address, and an anonymous user. Its
+      // address is Better Auth's placeholder, so core reads no address.
       const u = (f: string) => n.column("user", f);
       const user = (id: string, email: string, verified: boolean) =>
         pg.sql.unsafe(

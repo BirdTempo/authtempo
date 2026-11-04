@@ -106,8 +106,8 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
     const text = printed("mysql");
     const rows = records(text);
     expect(rows[0]).toMatch(/^CREATE TABLE IF NOT EXISTS `ta_migrations` \(/);
-    // The runner records each step: the baseline 0001_schema_v13 has 30 steps,
-    // 0002_schema_v14 of plan 12d has 7, 0003_schema_v15 of plan 12i has 6, and
+    // The runner records each step. The baseline 0001_schema_v13 has 30 steps, and
+    // 0002_schema_v14 of plan 12d has 7. 0003_schema_v15 of plan 12i has 6, and
     // 0004_schema_v16 of plan 12p has 3.
     expect(rows.slice(1).map((s) => /VALUES \('([^']+)', (\d+),/.exec(s)?.slice(1))).toEqual([
       ...Array.from({ length: 30 }, (_, i) => ["0001_schema_v13", String(i + 1)]),

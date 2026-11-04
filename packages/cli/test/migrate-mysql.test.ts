@@ -15,9 +15,8 @@ import { freshMysqlDatabase, MYSQL_SERVERS } from "./support/mysql.js";
 // password in each output line.
 
 /**
- * The MySQL migrations, typed here: the baseline of adapter-mysql at version
- * 13, the file of version 14 (plan 12d), the file of version 15 (plan 12i), and the file
- * of version 16 (plan 12p).
+ * The MySQL migrations, typed here. The first is the baseline of adapter-mysql at version
+ * 13. Then come the files of version 14 (plan 12d), 15 (plan 12i), and 16 (plan 12p).
  */
 const CORE = ["0001_schema_v13", "0002_schema_v14", "0003_schema_v15", "0004_schema_v16"];
 

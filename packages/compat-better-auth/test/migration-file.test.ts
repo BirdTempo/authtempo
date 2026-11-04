@@ -1106,7 +1106,7 @@ describe("migration 0013 (plan 12p)", () => {
       db.exec(text);
     // The users and sessions of a store at compat 12, as core 15 writes them through the mapping.
     // A verified user with an address, a claimant with an unverified address, and an
-    // anonymous user with Better Auth's placeholder (a user with no address in core).
+    // anonymous user. Its address is Better Auth's placeholder, so core reads no address.
     const user = (id: string, email: string, verified: 0 | 1) =>
       db.exec(
         `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","isAnonymous") VALUES ('${id}','','${email}',${verified},NULL,'2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z',0)`,

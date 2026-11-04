@@ -97,9 +97,10 @@ for (const server of MYSQL_SERVERS) {
       const cleanShape = await readMysqlShape(clean.pool);
       await clean.close();
       const last = ALL_STEPS.length;
-      // The version row of the baseline, the ALTER of 0003 that adds the user columns and
-      // their unique keys (plan 12i), the column and the fill of 0004 (plan 12p), and the
-      // version update of the last file. The fill sets the same value when it runs again.
+      // The stops include the version row of the baseline, and the ALTER of 0003 with the
+      // user columns and their unique keys (plan 12i). They also include the column and the
+      // fill of 0004 (plan 12p), and the version update of the last file. The fill sets the
+      // same value when it runs again.
       const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
       const proved = ALL_STEPS.indexOf("0004_schema_v16:1") + 1;
       const fill = ALL_STEPS.indexOf("0004_schema_v16:2") + 1;
@@ -211,7 +212,7 @@ for (const server of MYSQL_SERVERS) {
       expect(stopped).toMatchObject({ message: "stop before 0004" });
       expect(await version(d)).toBe("15");
       // A verified user with an address, a claimant with an unverified address, and a phone
-      // user with no address, each with a live session, as a writer of version 15 makes them.
+      // user with no address. Each has a live session, as a writer of version 15 makes them.
       const user = (id: string, email: string | null, verified: number, phone: string | null) =>
         d.pool.query(
           "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, 1, 1, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 0)",
