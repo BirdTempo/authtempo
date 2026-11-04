@@ -818,8 +818,13 @@ async function fillName(tx: StorageAdapter, user: UserRow, doc: UserDoc, now: Da
   );
 }
 
-/** The detail of the code `conflict`: a resend can pass (decision 1 of plan 12o). */
-const RACE_DETAIL = "Another request changed this user at the same time. Send the request again.";
+/**
+ * The detail of the code `conflict`: a resend can pass (decision 1 of plan
+ * 12o). It says "this resource", because the Group writes answer it too
+ * (ruling 15 of plan 12o).
+ */
+const RACE_DETAIL =
+  "Another request changed this resource at the same time. Send the request again.";
 
 /** The detail of the code `member_limit` (decision 1 of plan 12o). */
 const MEMBER_LIMIT_DETAIL = "The organization is at its member limit.";

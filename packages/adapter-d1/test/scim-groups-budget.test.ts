@@ -622,7 +622,7 @@ describe("the late conflicts of the SCIM Groups on D1 at the member cap (ruling 
         {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
           status: "409",
-          detail: "Another request changed this user at the same time. Send the request again.",
+          detail: "Another request changed this resource at the same time. Send the request again.",
         },
       ]);
       await undo();

@@ -44,7 +44,7 @@ const IDENTITY_INSERT = /^INSERT INTO ta_identity\b/;
 /** The flip of a claim, not the undo of a flip. */
 const FLIP = /^UPDATE ta_user SET email_verified = \?/;
 /** The detail of the SCIM answer to a lost claim race (decision 1 of plan 12o). */
-const RACE = "Another request changed this user at the same time. Send the request again.";
+const RACE = "Another request changed this resource at the same time. Send the request again.";
 
 /** A step that runs after each statement of a view, with its SQL text. */
 type Watch = (sql: string) => Promise<void>;

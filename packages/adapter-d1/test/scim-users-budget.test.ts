@@ -314,11 +314,13 @@ const CLAIMANT: Partial<AuthConfig> = {
 /**
  * The count of a SCIM create that claims an unverified user with no race,
  * on the binding, 2026-11-04 (decision 2 of plan 12o). The claimant signed
- * up by password and holds one session. With the session.afterEnd hook, the
- * claim reads that session and deletes it by id. The create also writes the
- * email identity, the member row, the scimUser row, and the audit row. It
- * sent 32 queries. The create of the first case links a verified user and
- * claims nothing: 20 queries (`MEASURED`).
+ * up by password and holds one session. The claim reads the sessions when
+ * its flow collects the ended sessions. `scimCreateUser` always collects
+ * them, with or without the session.afterEnd hook. So the claim reads that
+ * session and deletes it by id. The create also writes the email identity,
+ * the member row, the scimUser row, and the audit row. It sent 32 queries.
+ * The create of the first case links a verified user and claims nothing: 20
+ * queries (`MEASURED`).
  */
 const MEASURED_CLAIM = { create: 32 };
 

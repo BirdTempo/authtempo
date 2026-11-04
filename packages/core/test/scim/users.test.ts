@@ -51,7 +51,7 @@ const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const ERROR_URN = "urn:ietf:params:scim:api:messages:2.0:Error";
 const ADA = "ada@acme.example";
 /** The detail of a lost race of a SCIM write (decision 1 of plan 12o). */
-const RACE = "Another request changed this user at the same time. Send the request again.";
+const RACE = "Another request changed this resource at the same time. Send the request again.";
 
 beforeEach(() => {
   // A refused sign-in writes one log line.
