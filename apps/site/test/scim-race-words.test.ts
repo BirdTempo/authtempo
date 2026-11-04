@@ -12,7 +12,7 @@ const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
 const ENGINE = `${REPO}packages/core/src/engine/`;
 
 /** The detail of the code `conflict` on a SCIM route. */
-const DETAIL = "Another request changed this user at the same time. Send the request again.";
+const DETAIL = "Another request changed this resource at the same time. Send the request again.";
 
 /** The text of the errors page from the heading of `code` to the next heading. */
 function errorSection(code: string): string {
@@ -25,7 +25,7 @@ function errorSection(code: string): string {
 
 const ERRORS_WORDS = `**On a SCIM route:** The code answers 409 in the SCIM error message, with no \`scimType\`. Its \`detail\` is "${DETAIL}" A resend can pass, so the directory sends the same request again.`;
 
-const GUIDE_WORDS = `A create can race another request on the same user. On D1, a magic link or another proof can verify an unverified user before the create claims it. On any store, an account delete of the user can stop the create. Core then answers 409 with no \`scimType\`, and keeps no row of the create. The \`detail\` is "${DETAIL}" The directory sends the same request again. On D1, that request links the verified user. A \`userName\` in use still answers 409 \`uniqueness\`, and a resend does not pass.`;
+const GUIDE_WORDS = `A create can race another request on the same user. On D1, a magic link or another proof can verify an unverified user before the create claims it. On D1 and the SQLite adapter, an account delete of the user can stop the create. Core then answers 409 with no \`scimType\`, and keeps no row of the create. The \`detail\` is "${DETAIL}" The directory sends the same request again. On D1, that request links the verified user. A \`userName\` in use still answers 409 \`uniqueness\`, and a resend does not pass.`;
 
 const ERROR_FORM_WORDS =
   "A SCIM route answers the SCIM error message of RFC 7644. A value in use has the `scimType` `uniqueness`, and a race has no `scimType`.";
@@ -46,9 +46,14 @@ describe("the SCIM race answer on the pages (decision 1 of plan 12o)", () => {
   it("names the two causes of the guide as the engine stops them", () => {
     // On D1 a lost claim answers conflict, with no claim retry.
     expect(users).toContain('if (storage.queryLimitPerInvocation === true) return "conflict";');
-    // On any store a user that an account delete took answers conflict at the claim.
+    // A user that an account delete took answers conflict at the claim.
     expect(users).toContain(
       'if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]))) stopWith("conflict");',
+    );
+    // The guide names the stores with no isolation (ruling 17 of plan 12o). The SQLite
+    // adapter runs the code of the D1 adapter.
+    expect(flat(`${REPO}packages/adapter-sqlite/src/adapter.ts`)).toContain(
+      "return createD1AdapterOn(driver.db, {",
     );
   });
 
