@@ -210,12 +210,38 @@ async function requestCode(
   if (await ssoRequiredFor(config, email)) return ok({ sent: true });
   // A sign-in code records the anonymous user of the request (plan 12i Task 7). A reset code links nothing.
   const data = purpose === "email-otp" ? anonymousData(input.anonymous) : {};
+  await mailCode(config, otp, purpose, email, data);
+  return ok({ sent: true });
+}
+
+/** One live code of `purpose` and one mail. The mail goes after the row, never inside a transaction. */
+async function mailCode(
+  config: ResolvedConfig,
+  otp: NonNullable<ResolvedConfig["emailOtp"]>,
+  purpose: EmailOtpPurpose,
+  email: string,
+  data: Record<string, unknown>,
+): Promise<void> {
   const code = await issueCode(config, otp, purpose, email, data);
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
   // To the address the code belongs to, whatever the builder wrote.
   await config.mail.send({ ...message, to: email });
-  return ok({ sent: true });
+}
+
+/**
+ * The fallback mail of a sign-in code that answers 409 `conflict` to a lost
+ * flip (plan 12o, spec 8.9). The code was spent before the transaction, so
+ * a new code goes to the address. It counts under the per-address limits of
+ * the request, the 15-minute key and the day key. A full limit sends
+ * nothing. The new code records no anonymous user.
+ */
+async function resendProofAfterLostClaim(config: ResolvedConfig, email: string): Promise<void> {
+  const otp = config.emailOtp;
+  if (!otp) return;
+  if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return;
+  if (!(await limit(config, "otp:email-day", email, MAILED_CODES_PER_EMAIL_DAY))) return;
+  await mailCode(config, otp, "email-otp", email, {});
 }
 
 /** A sign-in code (plan 9e). */
@@ -350,7 +376,8 @@ export async function consumeCode(
  * and the session, in one transaction, with the session hook before the
  * first write (plan 9d). The code is spent before the resolution, as the
  * magic link's row is: a failure after that point burns the code by design,
- * and the person requests a new one.
+ * and the person requests a new one. A 409 `conflict` to a lost flip mails
+ * a new code (plan 12o).
  */
 export async function verifyEmailOtp(
   config: ResolvedConfig,
@@ -413,7 +440,10 @@ export async function verifyEmailOtp(
       ),
     ),
   );
-  if (!resolved.ok) return resolved;
+  if (!resolved.ok) {
+    if (verified.lostFlip()) await resendProofAfterLostClaim(config, consumed.value.identifier);
+    return resolved;
+  }
   const { user, after } = resolved.value;
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);

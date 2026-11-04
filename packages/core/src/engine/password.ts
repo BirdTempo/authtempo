@@ -877,6 +877,21 @@ export async function mailVerifyAgain(
 }
 
 /**
+ * The fallback mail of a sign-up confirm that answers 409 `conflict` to a
+ * lost flip (plan 12o, spec 8.9). The link or the code was spent before the
+ * transaction, so a new one of the same kind goes to the address. It counts
+ * under the per-address limit of the resend route (`mailVerifyAgain`). A
+ * full limit sends nothing. The new proof records no anonymous user.
+ */
+async function resendProofAfterLostClaim(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+): Promise<void> {
+  await mailVerifyAgain(config, email, passwordId);
+}
+
+/**
  * Every failure after the limits answers `invalid_credentials` after one
  * `verify`: an unknown address, a malformed address, a user with no
  * password row, and a row a sign-up still holds pending
@@ -1355,8 +1370,11 @@ async function confirmSignUp(
       } else if (next !== "retry") throw err;
     }
   }
-  // An error answer after a kept claim: the claim's after points (plan 12o).
-  if (!verified.ok) await keptClaimEnded(config, verify, ended);
+  if (!verified.ok) {
+    await keptClaimEnded(config, verify, ended);
+    // The link or the code was spent before the transaction (plan 12o).
+    if (verify.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, passwordId);
+  }
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);

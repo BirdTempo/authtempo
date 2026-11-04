@@ -311,9 +311,9 @@ export class ClaimLostError extends Error {
  * writes before the flip, and no claim write stays. A session race ends no
  * claim: on 2026-11-04 that join signed in through one race in 39 queries
  * (adapter-d1 test anonymous-upgrade-budget.test.ts). A flow that spent its
- * link, code, or provider token before the claim needs a new one. The reset
- * and the invitation confirm keep their link, so the same request works
- * again.
+ * link or code before the claim mails a new one of its kind. A provider
+ * token needs a new sign-in. The reset and the invitation confirm keep
+ * their link, so the same request works again.
  *
  * The unique-key retry of a flow is no claim retry, and it runs on every
  * store. The same D1 join after one unique-key retry sent 46 queries on
