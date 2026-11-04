@@ -120,9 +120,19 @@ conditional updates.
 
 In a transaction, `update` runs its prior read and its write in one
 atomic D1 batch, and `delete` uses `RETURNING`. So a rollback never
-overwrites a write that landed between the read and the write. A write
-that lands after this transaction's own write and before its rollback is
-still overwritten.
+overwrites a write that landed between the read and the write. The
+rollback of an update writes back each column only while the column still
+holds the value that this transaction wrote. So a write of another request
+that lands before the rollback stays.
+
+`deleteRows` runs one `DELETE … RETURNING` and answers the rows that it
+removed. A row that another request deleted first is not in the answer.
+In a transaction, the undo log inserts those rows again on a rollback.
+
+`keep()` drops the undo entries of the transaction so far. A later throw
+then rolls back only the writes after the call. In a nested transaction it
+drops only the entries of the nested call. A claim calls it after its last
+write, so a failure after the claim keeps the claim.
 
 A nested transaction adds its entries to the same undo log. If the nested
 function throws, the rollback affects only the entries of the nested

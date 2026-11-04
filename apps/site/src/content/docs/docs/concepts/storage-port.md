@@ -31,6 +31,8 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 | `findMany` | Answers the rows that match, with an optional sort and limit. |
 | `update` | Writes the fields to every row that matches, and answers the count. |
 | `delete` | Deletes every row that matches, and answers the count. |
+| `deleteRows` | Deletes every row that matches, and answers the rows that it removed. A row that another caller removed first is not in the answer. D1, SQLite, and Postgres run one `DELETE … RETURNING`. MySQL reads the ids, reads the rows under their locks by id, and deletes them by id, in one transaction. |
+| `keep` | Inside a transaction, makes the writes so far final: a later throw undoes only the writes after it. D1, SQLite, and memory drop their undo entries so far, and answer true. Postgres and MySQL do nothing and answer false: they isolate the open transaction, so a throw still undoes all of it. |
 | `transaction` | Runs a function with a port whose writes commit together. |
 
 ## The optional methods
@@ -59,6 +61,7 @@ An adapter can leave these out. Core then takes a fixed worst case.
 - An `in` list of up to 1000 values is one statement on every store. On D1 and SQLite a list of more than 50 values binds as one JSON text, which `json_each` reads. No value enters the SQL text.
 - Two null values never conflict on a unique key.
 - Reads inside a transaction see the transaction's own writes.
+- A throw inside a transaction undoes the transaction's own writes. After `keep`, it undoes only the writes after that call. A claim calls `keep` after its last write, so a later failure keeps the claim.
 - A sort takes one key or a list of keys, each with its own direction. A key with `notNull: true` must name a field that is not nullable. The SQL then has no null term, so an index can give the order.
 - The field types are string, boolean, integer, date, and json.
 
@@ -70,7 +73,7 @@ The guards of core live in the `where` clauses and the unique keys, not in the i
 
 ## The contract
 
-`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. It also checks the optional methods: the count of each port call in `statementsSent`, and the row locks of `lockInOrder` and their order by id. A lock in scan order fails the suite: it can deadlock with a flow that locks by id. Pass `rowLocks: true` for a database with row locks: the suite then fails when `lockInOrder` is missing. Pass `updateInTransaction` when an update in a transaction sends more than one statement, as on D1 (2). An adapter that fails it does not ship.
+`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. It also checks the optional methods: the count of each port call in `statementsSent`, and the row locks of `lockInOrder` and their order by id. A lock in scan order fails the suite: it can deadlock with a flow that locks by id. Pass `rowLocks: true` for a database with row locks: the suite then fails when `lockInOrder` is missing. Pass `updateInTransaction` when an update in a transaction sends more than one statement, as on D1 (2). The suite holds `deleteRows` to a rival delete that runs first, and `keep` to a later throw. Pass `deleteRowsStatements` when one `deleteRows` sends more than one statement, as on MySQL (3). An adapter that fails it does not ship.
 
 ## The schema version
 

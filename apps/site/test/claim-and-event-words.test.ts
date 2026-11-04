@@ -29,15 +29,39 @@ function body(text: string, name: string): string {
 }
 
 const CONFLICT_WORDS =
-  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When a parallel request ends a claimant session or verifies the user first, the flow answers 409 with no claim write. A flow that spent its link, code, or provider token before the claim needs a new one. The password reset and the invitation confirm keep their link, so the same request can work again.";
+  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When another proof verifies the user first, the flow answers 409 with no claim write. The verify link, the magic link, and the email code spent their proof before the claim. So the flow mails a new one of its kind. That mail counts on the mail limit of its kind for the address. A social sign-in needs a new sign-in at the provider. The password reset and the invitation confirm keep their link, so the same request can work again.";
 
-describe("the conflict entry of the errors page (ruling 42 d of plan 12n)", () => {
+describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decision 11 of plan 12o)", () => {
   it("names the claim race on a store with a query limit, as claimRetry answers it", () => {
     // On such a store a lost claim answers conflict, with no retry in the invocation.
     expect(body(source("users.ts"), "claimRetry")).toContain(
       'if (storage.queryLimitPerInvocation === true) return "conflict";',
     );
     expect(errorSection("conflict")).toContain(CONFLICT_WORDS);
+  });
+
+  it("holds the new mail of the verify link, the magic link, and the email code, each under the limit of its kind", () => {
+    // Each sends on the conflict of a lost flip, and only then.
+    expect(source("password.ts")).toContain(
+      "if (verify.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, passwordId);",
+    );
+    expect(body(source("password.ts"), "mailVerifyAgain")).toContain(
+      "if (!(await allowResendMail(config, email))) return false;",
+    );
+    expect(source("magic-link.ts")).toContain(
+      "if (verified.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, next);",
+    );
+    expect(source("magic-link.ts")).toContain(
+      'if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return;',
+    );
+    expect(source("email-otp.ts")).toContain(
+      "if (verified.lostFlip()) await resendProofAfterLostClaim(config, consumed.value.identifier);",
+    );
+    expect(source("email-otp.ts")).toContain(
+      'if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return;',
+    );
+    // Social, the ID token, and SSO send none: their proof is the provider's.
+    expect(source("social.ts")).not.toContain("resendProofAfterLostClaim");
   });
 
   it("holds the spent link of the magic link, and the kept link of the reset and the invitation confirm", () => {
@@ -81,5 +105,70 @@ describe("the userId of the request event (ruling 49 a of plan 12n)", () => {
     expect(body(sessions, "sessionFromRequest")).toContain(
       "if (resolved) markRequestUser(request, resolved.user.id);",
     );
+  });
+});
+
+/** The text of a docs page with each run of white space as one space. */
+const page = (path: string) => flat(`${DOCS}docs/${path}`);
+const STORAGE = `${REPO}packages/core/src/storage/`;
+
+const HOOK_WORDS = [
+  "A claim is final once its last write is done. When the flow fails after that point, the claim stays. Before its error answer, the flow runs `user.afterVerify`, `session.afterEnd` with reason `claim`, and `operator.afterAction` for each stop row. On Postgres and MySQL such a failure undoes the whole claim, so no after point runs.",
+  "A sign-out of a claimant session during a claim fires `session.afterEnd` once, with `sign_out`. The claim fires no second `afterEnd` for that session, and goes on.",
+];
+
+const CLAIM_RULE_WORDS = [
+  "The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.",
+  "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a verify link, a magic link, or an email code then mails a new proof of its kind to the address.",
+];
+
+describe("the final claim of the hooks guide and the claim-rule page (decisions 8 and 10 of plan 12o)", () => {
+  it("states the after points of a kept claim on an error answer, as keptClaimEnded fires them", () => {
+    const steps = source("create-steps.ts");
+    const kept = body(steps, "keptClaimEnded");
+    expect(kept).toContain("await verified.after(user);");
+    expect(kept).toContain(
+      'await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());',
+    );
+    // A store that undoes the whole transaction keeps nothing, so no after point runs.
+    expect(steps).toContain("if (await tx.keep()) kept = user;");
+    expect(readFileSync(`${REPO}packages/adapter-postgres/src/adapter.ts`, "utf8")).toContain(
+      "return !ctx.inTransaction;",
+    );
+    expect(readFileSync(`${REPO}packages/adapter-mysql/src/adapter.ts`, "utf8")).toContain(
+      "return ctx.conn === null;",
+    );
+    for (const words of HOOK_WORDS) expect(page("guides/hooks.mdx")).toContain(words);
+    for (const words of CLAIM_RULE_WORDS) expect(page("concepts/claim-rule.md")).toContain(words);
+  });
+
+  it("states the exact session end of a claim, as endSessions ends each chunk by deleteRows", () => {
+    const end = body(source("sessions.ts"), "endSessions");
+    expect(end).toContain('await tx.deleteRows("session", [...where, ids])');
+    expect(end).not.toContain("raced");
+    // A claim throws ClaimLostError at a lost flip only.
+    expect(body(source("users.ts"), "claimEmail").match(/new ClaimLostError\(\)/g)).toHaveLength(1);
+  });
+});
+
+const PORT_ROWS = [
+  "| `deleteRows` | Deletes every row that matches, and answers the rows that it removed. A row that another caller removed first is not in the answer. D1, SQLite, and Postgres run one `DELETE … RETURNING`. MySQL reads the ids, reads the rows under their locks by id, and deletes them by id, in one transaction. |",
+  "| `keep` | Inside a transaction, makes the writes so far final: a later throw undoes only the writes after it. D1, SQLite, and memory drop their undo entries so far, and answer true. Postgres and MySQL do nothing and answer false: they isolate the open transaction, so a throw still undoes all of it. |",
+];
+
+describe("the two port calls of the storage-port page (decisions 7 and 9 of plan 12o)", () => {
+  it("lists deleteRows and keep as the port declares them, and the suite that holds them", () => {
+    const port = flat(`${STORAGE}port.ts`);
+    expect(port).toContain(
+      "deleteRows<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M][]>;",
+    );
+    expect(port).toContain("keep(): Promise<boolean>;");
+    const suite = readFileSync(`${STORAGE}conformance.ts`, "utf8");
+    expect(suite).toContain("deleteRowsStatements?: number;");
+    expect(suite).toContain("keep makes the writes so far final");
+    expect(readFileSync(`${REPO}packages/adapter-mysql/test/suites.ts`, "utf8")).toContain(
+      "deleteRowsStatements: 3,",
+    );
+    for (const row of PORT_ROWS) expect(page("concepts/storage-port.md")).toContain(row);
   });
 });

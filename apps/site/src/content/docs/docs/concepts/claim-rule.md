@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.2
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
   - README.md "Rules that the code enforces"
 ---
@@ -47,6 +48,10 @@ When a proof arrives for an unverified user, core runs the claim in the same tra
 5. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 
 The proof then opens a session for the person who proved the address. The claimant holds nothing. The owner holds the account.
+
+The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.
+
+Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a verify link, a magic link, or an email code then mails a new proof of its kind to the address.
 
 ## The edges
 
