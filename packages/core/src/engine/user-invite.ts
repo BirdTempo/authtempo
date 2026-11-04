@@ -12,7 +12,13 @@ import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
-import { claimEmail, claimedUser, claimRetry, ensureEmailIdentity } from "./users.js";
+import {
+  claimEmail,
+  claimedUser,
+  claimRetry,
+  claimRetryWait,
+  ensureEmailIdentity,
+} from "./users.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -193,7 +199,10 @@ export async function confirmUserInvite(
       // Another proof claimed the user first. The rollback undid the spend,
       // so the retry spends the link again.
       const next = claimRetry(config.storage, err, lost++);
-      if (next === "retry") continue;
+      if (next === "retry") {
+        await claimRetryWait(err);
+        continue;
+      }
       if (next === "conflict") {
         // The link stays usable, so no new mail goes (plan 12o).
         verified.flipLost();

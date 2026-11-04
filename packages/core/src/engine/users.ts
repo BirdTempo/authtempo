@@ -431,7 +431,8 @@ export class ClaimLostError extends Error {
  * works again.
  *
  * A claim that meets the live lease of another claim retries as above (plan
- * 12p). The retry finds a verified user when the rival ended. On a store
+ * 12p). Each such retry waits `CLAIM_HELD_WAIT_MS` first (`claimRetryWait`).
+ * The retry finds a verified user when the rival ended. On a store
  * with no query limit, a lease that holds through the last retry answers
  * `conflict`, not the error: the rival claim still runs.
  *
@@ -450,6 +451,26 @@ export function claimRetry(
   if (lost < CLAIM_RUNS) return "retry";
   // A live lease after the last retry: the rival claim still runs (plan 12p).
   return err.held ? "conflict" : null;
+}
+
+/**
+ * The wait before a retry of a claim that met the live lease of another
+ * claim (ruling 24 of plan 12p). Only a store with no isolation and no query
+ * limit runs that retry: the SQLite drivers and the memory store. A claim
+ * there ends in a few milliseconds. With no wait, the three retries met the
+ * rival's lease while it ran, and the answer was 409. After the wait, the
+ * retry finds the verified user and signs it in.
+ */
+export const CLAIM_HELD_WAIT_MS = 100;
+
+/**
+ * The wait of a "retry" of `claimRetry` after `err`: `CLAIM_HELD_WAIT_MS`
+ * after a held lease, else none. Each retry loop calls it outside the
+ * transaction, so the wait holds no lock and keeps no undo log open.
+ */
+export async function claimRetryWait(err: unknown): Promise<void> {
+  if (err instanceof ClaimLostError && err.held)
+    await new Promise((resolve) => setTimeout(resolve, CLAIM_HELD_WAIT_MS));
 }
 
 /**
@@ -621,7 +642,10 @@ export async function findOrCreateUserByEmail<T>(
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user.
       const next = claimRetry(storage, err, lost++);
-      if (next === "retry") continue;
+      if (next === "retry") {
+        await claimRetryWait(err);
+        continue;
+      }
       // The callers run this resolution inside `hookGuard`.
       if (next === "conflict") {
         verified.flipLost();

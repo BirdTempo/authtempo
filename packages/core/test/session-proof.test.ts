@@ -21,7 +21,7 @@ import { requestPhone, verifyPhone } from "../src/engine/phone.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
-import { CLAIM_LEASE_MS, claimLeaseId } from "../src/engine/users.js";
+import { CLAIM_LEASE_MS, CLAIM_RUNS, claimLeaseId } from "../src/engine/users.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
@@ -1449,6 +1449,57 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
       req("POST", "/password/sign-in", { email: CLAIMED, password: NEW }),
     );
     expect(await answer(signIn)).toBe("200 ok");
+  });
+
+  it("waits before the retry of a held lease, so a second proof at once signs in (ruling 24 of plan 12p)", async () => {
+    // Two magic links of the owner's address at once, on the D1 view of the
+    // memory store. It has no transaction lock, an undo log, and claim
+    // retries, as the SQLite drivers have. The first proof takes the lease.
+    // It waits until the second met the lease at each of its runs, or 50 ms.
+    const w = world();
+    const token = await claimant(w);
+    const first = await ownerLinkToken(w);
+    const second = await ownerLinkToken(w);
+    const held = { count: 0, every: latch() };
+    const raw = w.ownerConfig.storage;
+    const counted: StorageAdapter = {
+      ...raw,
+      create: async (m, d) => {
+        try {
+          return await raw.create(m, d);
+        } catch (err) {
+          if (isLease(m, d) && err instanceof StorageError && err.code === "unique_violation") {
+            held.count++;
+            if (held.count > CLAIM_RUNS) held.every.open();
+          }
+          throw err;
+        }
+      },
+    };
+    let rival: Promise<string> | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      rival = verifyMagicLink(d1Like({ ...w.ownerConfig, storage: counted }), {
+        token: second,
+        ip: null,
+        userAgent: null,
+      }).then((r) => (r.ok ? "ok" : r.code));
+      await Promise.race([held.every.wait, new Promise((r) => setTimeout(r, 50))]);
+    };
+    const won = await verifyMagicLink(d1Like(w.ownerConfig), {
+      token: first,
+      ip: null,
+      userAgent: null,
+    });
+    expect(won.ok).toBe(true);
+    expect(rival).not.toBeNull();
+    // The second proof met the lease once. After the wait, its retry found the verified user.
+    expect(await rival).toBe("ok");
+    expect(held.count).toBe(1);
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    expect(await rowOf(w, token)).toBeNull();
+    const rows = await w.storage.findMany("session", []);
+    expect(rows.map((x) => x.proved)).toEqual([true, true]);
   });
 
   it("stays after the claim, and the sweep deletes it after 60 seconds", async () => {

@@ -72,6 +72,7 @@ import {
   claimedUser,
   claimNotStarted,
   claimRetry,
+  claimRetryWait,
   createIdentity,
   draftUserRow,
   ensureEmailIdentity,
@@ -1233,7 +1234,10 @@ export async function resolveSocialUser<T extends AfterWrite>(
       // Another proof claimed the user first (review M1): the retry signs in
       // the verified user.
       const next = claimRetry(storage, err, lost++);
-      if (next === "retry") continue;
+      if (next === "retry") {
+        await claimRetryWait(err);
+        continue;
+      }
       if (next === "conflict") {
         // The provider's proof is not a mail, so no new mail goes (plan 12o).
         verified.flipLost();

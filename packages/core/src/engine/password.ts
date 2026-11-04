@@ -64,6 +64,7 @@ import {
   claimedUser,
   claimNotStarted,
   claimRetry,
+  claimRetryWait,
   draftUserRow,
   ensureEmailIdentity,
   mayCreateUser,
@@ -1368,7 +1369,8 @@ async function confirmSignUp(
           status: ERRORS.conflict,
           detail: CONFIRM_LOST_DETAIL,
         };
-      } else if (next !== "retry") throw err;
+      } else if (next === "retry") await claimRetryWait(err);
+      else throw err;
     }
   }
   if (!verified.ok) await keptClaimEnded(config, verify, ended);
@@ -1607,7 +1609,10 @@ export async function runReset(
       // the consume, so the retry spends the link again and finds a verified
       // user.
       const next = claimRetry(config.storage, err, lost++);
-      if (next === "retry") continue;
+      if (next === "retry") {
+        await claimRetryWait(err);
+        continue;
+      }
       if (next === "conflict") {
         // The link stays usable, so no new mail goes (plan 12o).
         verify.flipLost();
