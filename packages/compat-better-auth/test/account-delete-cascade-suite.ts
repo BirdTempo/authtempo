@@ -2,12 +2,14 @@ import {
   type AuthConfig,
   createAuth,
   type MailMessage,
+  type OperatorAuditRow,
   type ResolvedSession,
   type StorageAdapter,
 } from "@authtempo/core";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { expect, it } from "vitest";
 import type { CompatDatabase } from "../src/types.js";
-import { adminApp } from "./admin-helpers.js";
+import { adminApp, cookieOf, PASSWORD, APP as SETUP } from "./admin-helpers.js";
 
 // Ruling 13 of plan 12f2 (final-12f2-B H1 and M1). On the Better Auth
 // tables a user delete cascades to the sessions, the accounts, and the
@@ -34,6 +36,12 @@ export interface CascadeStore {
    * it answers `delete_too_large` before any write (rulings 5 and 10).
    */
   removeSolo: "removed" | "too_large";
+  /**
+   * The own sessions that a delete with a `session.afterEnd` hook ends in its
+   * page, in the scene of 501 own sessions and 3 impersonation sessions.
+   * Default 500: off D1 the page holds 500 rows. On D1 the call budget bounds it.
+   */
+  ownPage?: number;
 }
 
 /** The rows that name one user, read through core's models. */
@@ -111,6 +119,147 @@ export async function soloOwner(store: CascadeStore, sessions: number) {
   });
   if (!made.ok) throw new Error(made.code);
   return { auth, sent, me, organizationId: made.value.organization.id };
+}
+
+type Setup = Awaited<ReturnType<typeof adminApp>>;
+
+/**
+ * The app of the admin plugin on one database, made once, because its first
+ * operator holds one fixed address. Its limiter allows all, as an app can set
+ * it. So a scene can sign in 501 times and start 101 impersonations.
+ */
+const setups = new WeakMap<CompatDatabase, Promise<Setup>>();
+export function setupOf(database: CompatDatabase): Promise<Setup> {
+  const made =
+    setups.get(database) ?? adminApp({ ...database, limiter: { allow: async () => true } });
+  setups.set(database, made);
+  return made;
+}
+
+let operatorsMade = 0;
+
+/**
+ * One more platform operator through the product's flows, in the order of
+ * adminApp. They are the sign-up, the mailed verify, the grant by the app,
+ * the sign-in, and TOTP through Better Auth's two paths. It answers the user
+ * id and the cookie of the session.
+ */
+export async function newOperator(a: Setup): Promise<{ id: string; cookie: string }> {
+  operatorsMade++;
+  const email = `operator-${operatorsMade}@example.com`;
+  await a.call("/password/sign-up", { email, password: PASSWORD });
+  await a.call("/password/verify", { token: a.links.at(-1) });
+  const made = await a.auth.tempo.api.operator.createAdmin({
+    actor: SETUP,
+    email,
+    reason: "Another operator",
+    ip: null,
+    userAgent: null,
+  });
+  if (!made.ok) throw new Error(made.code);
+  const cookie = cookieOf(await a.call("/password/sign-in", { email, password: PASSWORD }));
+  const enable = await a.call("/two-factor/enable", { password: PASSWORD }, cookie);
+  const { totpURI } = (await enable.json()) as { totpURI: string };
+  const secret = base32Decode(new URL(totpURI).searchParams.get("secret") ?? "");
+  const confirm = await a.call(
+    "/two-factor/verify-totp",
+    { code: await totpCode(secret, new Date()) },
+    cookie,
+  );
+  if (confirm.status !== 200) throw new Error(`verify-totp answered ${confirm.status}`);
+  return { id: made.value.userId, cookie };
+}
+
+/** The cookies of `count` platform operators of the setup app. Each is made once per database. */
+const operatorLists = new WeakMap<CompatDatabase, string[]>();
+async function operatorsOf(database: CompatDatabase, count: number): Promise<string[]> {
+  const a = await setupOf(database);
+  const list = operatorLists.get(database) ?? [a.op];
+  operatorLists.set(database, list);
+  while (list.length < count) list.push((await newOperator(a)).cookie);
+  return list.slice(0, count);
+}
+
+let targets = 0;
+
+/**
+ * A verified user with `own` sessions, then `imps` impersonation sessions,
+ * through the shim's routes. The `operators` take turns at the starts. The
+ * impersonation sessions sort last, because each id holds its time.
+ */
+export async function impersonatedUser(
+  database: CompatDatabase,
+  own: number,
+  imps: number,
+  operators: number,
+) {
+  const a = await setupOf(database);
+  const cookies = await operatorsOf(database, operators);
+  targets++;
+  const email = `target-${targets}@example.com`;
+  // The sign-up's verify and the first sign-in open two sessions.
+  const user = await a.user(email);
+  for (let i = 2; i < own; i++) await a.call("/password/sign-in", { email, password: PASSWORD });
+  await new Promise((r) => setTimeout(r, 5));
+  for (let i = 0; i < imps; i++) {
+    const start = await a.call(
+      "/admin/impersonate-user",
+      { userId: user.id },
+      cookies[i % cookies.length] ?? "",
+    );
+    if (start.status !== 200) throw new Error(`impersonate-user answered ${start.status}`);
+  }
+  const sessions = await database.storage.findMany(
+    "session",
+    [{ field: "userId", op: "eq", value: user.id }],
+    { sort: { field: "id", dir: "asc" } },
+  );
+  return {
+    setup: a,
+    userId: user.id,
+    sessions,
+    impersonations: sessions.filter((r) => r.actorId !== null),
+  };
+}
+
+/** Every audit row of one target, oldest first, read by the app in pages of 100. */
+export async function auditOf(a: Setup, targetUserId: string): Promise<OperatorAuditRow[]> {
+  const all: OperatorAuditRow[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const page = await a.auth.tempo.api.operator.audit.list({
+      actor: SETUP,
+      targetUserId,
+      limit: 100,
+      ...(after === undefined ? {} : { after }),
+    });
+    if (!page.ok) throw new Error(page.code);
+    all.push(...page.value.rows);
+    if (page.value.next === null) return all;
+    after = page.value.next;
+  }
+}
+
+/** The pending-end rows of one user. */
+export function pendingOf(storage: StorageAdapter, userId: string) {
+  return storage.findMany("verification", [
+    { field: "purpose", op: "eq", value: "session-end" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+}
+
+/**
+ * Core on `storage` with the impersonation tool on, at the fixed time `at`.
+ * `acted` takes each row that `operator.afterAction` gets.
+ */
+export function operatorEngine(storage: StorageAdapter, at: Date) {
+  const acted: OperatorAuditRow[] = [];
+  const { auth, ends } = engine(storage, [], {
+    operator: { users: true, impersonation: { ttlMinutes: 60 } },
+    clock: { now: () => new Date(at) },
+    hooks: { operator: { afterAction: (e) => void acted.push(e.audit) } },
+  });
+  return { auth, ends, acted };
 }
 
 /** The suite of ruling 13 on one store. */
@@ -205,7 +354,7 @@ export function accountDeleteCascadeSuite(open: () => Promise<CascadeStore>): vo
 
   it("removes through /admin/remove-user a member and a solo owner, or refuses the owner before any write", async () => {
     const store = await open();
-    const a = await adminApp(store.database);
+    const a = await setupOf(store.database);
     const rowOf = async (id: string) => {
       const row = await store.database.storage.findOne("user", [
         { field: "id", op: "eq", value: id },
@@ -270,5 +419,60 @@ export function accountDeleteCascadeSuite(open: () => Promise<CascadeStore>): vo
       ...gone,
       organization: false,
     });
+  });
+
+  it("records the impersonation sessions past the page, and the sweep writes their stop rows (decisions 3 and 5 of plan 12o)", {
+    timeout: 600_000,
+  }, async () => {
+    // 501 own sessions, then 3 impersonation sessions of one operator. The
+    // page ends `ownPage` own sessions, and the cascade takes the rest.
+    const store = await open();
+    const scene = await impersonatedUser(store.database, 501, 3, 1);
+    expect(scene.sessions).toHaveLength(504);
+    expect(scene.sessions.slice(-3)).toEqual(scene.impersonations);
+    const at = new Date();
+    const act = store.act();
+    const { auth, ends } = operatorEngine(act.storage, at);
+    const answer = await auth.api.operator.users.delete({
+      actor: APP,
+      userId: scene.userId,
+      reason: "Ticket 4",
+      ip: null,
+      userAgent: null,
+    });
+    expect(answer.ok, JSON.stringify(answer)).toBe(true);
+    const queries = act.queries();
+    if (queries !== null) expect(queries).toBeLessThanOrEqual(50);
+    expect(ends).toHaveLength(store.ownPage ?? 500);
+    expect((await rowsOf(store.database.storage, scene.userId, "none")).sessions).toBe(0);
+    const stops = async () =>
+      (await auditOf(scene.setup, scene.userId)).filter((r) => r.action === "impersonation_stop");
+    expect(await stops()).toEqual([]);
+    expect(
+      (await pendingOf(store.database.storage, scene.userId)).map((r) => r.data?.stops),
+    ).toEqual([scene.impersonations.map((r) => ({ sessionId: r.id, actorId: r.actorId }))]);
+    // One sweep a minute later, in a new invocation.
+    const later = new Date(at.getTime() + 60_000);
+    const run = store.act();
+    const sweep = operatorEngine(run.storage, later);
+    await sweep.auth.api.sweepExpired();
+    const swept = run.queries();
+    if (swept !== null) expect(swept).toBeLessThanOrEqual(50);
+    const rows = await stops();
+    expect(
+      rows.map((r) => ({
+        actorId: r.actorId,
+        data: r.data,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    ).toEqual(
+      scene.impersonations.map((r) => ({
+        actorId: r.actorId,
+        data: { sessionId: r.id, cause: "account_delete", endedAt: at.toISOString() },
+        createdAt: later.toISOString(),
+      })),
+    );
+    expect(sweep.acted.map((r) => r.id)).toEqual(rows.map((r) => r.id));
+    expect(await pendingOf(store.database.storage, scene.userId)).toEqual([]);
   });
 }
