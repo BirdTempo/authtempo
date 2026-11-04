@@ -39,7 +39,7 @@ By default the cookie is `__Host-tempo_session`. A session can have an absolute 
 
 Every core route that needs a person calls `auth.session`, which reads sessions only. So an API token, a JWT, and an access token cannot create a token, change a password, or touch passkeys or organizations.
 
-A session row holds a flag, `proved`. It is true when the session came after the proof of its address. For a user with no address that is not anonymous, it is true at its creation. Each verified-only action reads it with the user row. So a session that came before the proof of its address never gains verified powers. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
+A session row holds a flag, `proved`. It is true when the session came after the proof of its address. For a user with no address that is not anonymous, it is true at its creation. A handoff copies the flag of its browser session. Each verified-only action reads it with the user row. So a session that came before the proof of its address never gains verified powers. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
 
 ## An API token
 
