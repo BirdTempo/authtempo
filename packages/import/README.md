@@ -96,11 +96,14 @@ after its password or identity write. When it finds a claim, it deletes
 those rows, and the record is `partial` with `not repaired: claimed`. The
 password row of a repair or of a new unverified user is pending until the
 last statement activates it, after the checks. So a sign-in with it fails
-until then. A repaired passkey or social identity is active at once, and
-so is the social identity of a new unverified user. On D1, for a few round
-trips before the check, it can sign in a claimant who also holds the
-authenticator or the provider login. Without `--repair` the importer
-writes nothing for a `partial` record.
+until then. A run that stops before that statement, as at the D1 cap,
+leaves the pending row. A later run counts that row as missing, so the
+record is `partial` with `password` missing. A repair deletes the pending
+row and writes the password again. A repaired passkey or social identity
+is active at once, and so is the social identity of a new unverified user.
+On D1, for a few round trips before the check, it can sign in a claimant
+who also holds the authenticator or the provider login. Without
+`--repair` the importer writes nothing for a `partial` record.
 
 A repair also gives back a credential that the user removed in the app
 since the first run, for example a password or a passkey. The importer
@@ -137,8 +140,9 @@ verify: the database does not hold this export: 2 records would be written, 1 pa
 It refuses `--repair`, `--dry-run`, `--on-email-taken`, and `--target
 memory`. Run it after each real run: on a copy of the database before
 the cutover, and on the real database at the cutover. It reads that each
-row exists, not its text, so it does not see a change in the old system
-that a second import did not carry. On D1, write a
+row exists, not its text. So it does not see a change in the old system
+that a second import did not carry. A pending password row is the one
+exception: it counts as missing. On D1, write a
 verify bundle with `--target d1-bundle --out <file>` and run the Worker
 again (`worker/README.md`). `verifyReport` of this package is the one rule,
 and the D1 Worker reads it too.

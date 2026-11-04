@@ -267,7 +267,8 @@ export interface ImportReport {
    * `identity:email`, `passkey`, or `member`. Three causes give the same entry,
    * and the importer cannot tell them apart. A fourth gives `claimed` (below).
    * - A run that stopped inside the record on D1 (an isolate that dies does
-   *   not roll back, spec 6).
+   *   not roll back, spec 6). The pending password row that such a run
+   *   leaves counts as missing: no sign-in takes it.
    * - A claim since the first run: it deletes the claimant's password, social
    *   identities, and passkeys.
    * - Another app change since the first run, such as a removed password or

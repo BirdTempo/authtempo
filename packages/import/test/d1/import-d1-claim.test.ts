@@ -5,10 +5,12 @@ import {
   createAuth,
   createPbkdf2PasswordHash,
   type MailMessage,
+  PENDING_HASH_PREFIX,
 } from "@authtempo/core";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
+import { verifyReport } from "../../src/report.js";
 import { BCRYPT, listSource, user } from "../source.js";
 
 // The importer beside an owner's claim on D1 (ruling 31 of plan 12p). D1
@@ -18,7 +20,8 @@ import { BCRYPT, listSource, user } from "../source.js";
 // and flip after its check of the user row. The import then runs core's
 // claim check, which reads the lease. The scenes come from probes I1 and I2
 // of review-12p-fix34, and S1 of review-12p-fix5w. Each step of the owner is
-// a real magic link.
+// a real magic link. The last scene is a run that stops after its pending
+// password create, from probe K of review-12p-fix5w.
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
@@ -483,6 +486,59 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
       repair: true,
     });
     expect(second.repaired).toEqual([{ kind: "user", sourceId: "gil", rows: ["password"] }]);
+    expect(await claimantSignIn(email)).toBe("ok");
+  });
+});
+
+describe("a run that stops after the pending password create of a new unverified user on D1", () => {
+  it("lists the user as partial with the password missing, and a repair writes the password, which signs in", async () => {
+    const email = "ivy@example.com";
+    const record = () => [user("ivy", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    // The isolate dies right after the pending create, as at the D1 cap.
+    // Every later statement throws, so the undo fails too.
+    let dead = false;
+    const dying = view(
+      env.DB,
+      async () => {
+        if (dead) throw new Error("the isolate died");
+      },
+      async (sql) => {
+        if (PASSWORD_INSERT.test(sql)) dead = true;
+      },
+    );
+    await expect(
+      importUsers(createD1Adapter(dying), listSource(record()), { formats: ["bcrypt"] }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(dead).toBe(true);
+    const left = await env.DB.prepare(
+      "SELECT p.hash AS hash FROM ta_password p JOIN ta_user u ON u.id = p.user_id WHERE u.email = ?",
+    )
+      .bind(email)
+      .all<{ hash: string }>();
+    expect(left.results.map((r) => r.hash.startsWith(PENDING_HASH_PREFIX))).toEqual([true]);
+    // The user's sign-in with the imported password: no sign-in takes a pending row.
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    // The dry run, as `import verify` runs it, lists the password as missing.
+    const dry = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      dryRun: true,
+    });
+    expect(dry.exists.user).toBe(0);
+    expect(dry.partial).toEqual([{ kind: "user", sourceId: "ivy", missing: ["password"] }]);
+    expect(verifyReport(dry)).toMatchObject({ held: false, partial: 1, code: 1 });
+    // A run with --repair deletes the pending row, then writes the password.
+    const repair = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+    });
+    expect(repair.partial).toEqual([]);
+    expect(repair.repaired).toEqual([{ kind: "user", sourceId: "ivy", rows: ["password"] }]);
+    expect(await rowsOf(email)).toEqual({
+      verified: 0,
+      passwords: 1,
+      identities: [],
+      sessions: 0,
+    });
     expect(await claimantSignIn(email)).toBe("ok");
   });
 });

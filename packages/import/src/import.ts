@@ -138,6 +138,12 @@ interface CredentialRows {
 interface RepairRows extends CredentialRows {
   /** The address as the guard read it. A core user can have no address (plan 12i); an import never writes one. */
   seen: { email: string | null; emailVerified: boolean };
+  /**
+   * The pending password row of a run that stopped after its create, or
+   * null. The repair deletes it before its own create: the key of a
+   * password row is its user.
+   */
+  stopped: { id: string; hash: string } | null;
 }
 
 /** The ids of the rows `writeCredentials` wrote, so a write or a repair can delete exactly its own rows. */
@@ -444,7 +450,9 @@ function userRows(
  * again. When it lacks a row its record maps to, the report lists it as
  * `partial` with each missing row kind. The importer cannot tell why a row
  * is missing (see `ImportReport.partial`), so with `repair` it writes the
- * missing rows only when no guard of `repairRefusal` objects.
+ * missing rows only when no guard of `repairRefusal` objects. A pending
+ * password row counts as missing (`PENDING_HASH_PREFIX`). A run that stopped
+ * after its create left it, and no sign-in takes it.
  */
 async function existingUser(
   db: StorageAdapter,
@@ -468,12 +476,14 @@ async function existingUser(
       fill.identities.push(i);
     }
   }
-  if (
-    rows.password !== null &&
-    !(await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]))
-  ) {
-    missing.push("password");
-    fill.password = rows.password;
+  let stopped: RepairRows["stopped"] = null;
+  if (rows.password !== null) {
+    const row = await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]);
+    if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
+      missing.push("password");
+      fill.password = rows.password;
+      if (row) stopped = { id: row.id, hash: row.hash };
+    }
   }
   for (const p of rows.passkeys) {
     const row = await db.findOne("passkey", [
@@ -492,7 +502,7 @@ async function existingUser(
   const guard = await repairRefusal(db, rows, fill, planned);
   return "refused" in guard
     ? { kind: "partial", missing, repairRefused: guard.refused }
-    : { kind: "repair", missing, rows: { ...fill, seen: guard.seen } };
+    : { kind: "repair", missing, rows: { ...fill, seen: guard.seen, stopped } };
 }
 
 /**
@@ -512,8 +522,11 @@ async function repairRefusal(
   if (found.email !== rows.email && fill.identities.some((i) => i.provider === "email"))
     return { refused: "email_changed" };
   if (!rows.verified) {
+    // A pending password row is no credential: no sign-in takes it (`existingUser`).
+    const password = await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]);
+    const active = password !== null && !password.hash.startsWith(PENDING_HASH_PREFIX);
     const held =
-      (await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }])) ??
+      (active ? password : null) ??
       (await db.findOne("identity", [
         { field: "userId", op: "eq", value: rows.id },
         { field: "provider", op: "ne", value: "email" },
@@ -645,12 +658,13 @@ async function deleteWritten(tx: StorageAdapter, written: Written): Promise<void
 }
 
 /**
- * Writes the missing rows of a user. Then a conditional update of the user
- * row, by its id and by the `email` and `emailVerified` that the guards
- * read. It comes from I-3 of the plan 9b2 final review. For an unverified
- * user, then core's claim check (`claimNotStarted`). Last, the activation
- * of the password row. This is the pattern of core's sign-up
- * (`engine/password.ts`, `insertSignUp`).
+ * Deletes the pending password row of a stopped run, if any, then writes the
+ * missing rows of a user. Then a conditional update of the user row, by its
+ * id and by the `email` and `emailVerified` that the guards read. It comes
+ * from I-3 of the plan 9b2 final review. For an unverified user, then
+ * core's claim check (`claimNotStarted`). Last, the activation of the
+ * password row. This is the pattern of core's sign-up (`engine/password.ts`,
+ * `insertSignUp`).
  * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
  *   refuses a pending row. On D1 the writes are visible at once. So a row
  *   with the real hash could sign a claimant in before the checks (fix round
@@ -677,6 +691,13 @@ async function repairUser(
   p: Extract<Plan<UserRows, RepairRows>, { kind: "repair" }>,
   now: Date,
 ): Promise<Plan<UserRows, RepairRows>> {
+  // By its id and its string, as `deleteWritten` deletes.
+  const { stopped } = p.rows;
+  if (stopped)
+    await tx.delete("password", [
+      { field: "id", op: "eq", value: stopped.id },
+      { field: "hash", op: "eq", value: stopped.hash },
+    ]);
   const written = await writeCredentials(tx, p.rows, now, true);
   const { seen } = p.rows;
   const kept = await tx.update(
