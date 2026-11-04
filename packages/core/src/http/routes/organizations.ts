@@ -150,7 +150,11 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const r = await listOrganizations(ctx.config, { user: s.user });
+        // The session too, as at each engine call whose input has one (session-pass-sites.test.ts).
+        const r = await listOrganizations(ctx.config, {
+          user: s.user,
+          session: s.resolved.session,
+        });
         return send(r.ok ? json({ organizations: r.value }) : respond(r), s.renewed);
       },
     },
@@ -168,8 +172,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     post("/organizations/delete", orgBody, null, (s, b, ctx) =>
       deleteOrganization(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
-    getByOrg("/organizations/members", "members", (user, organizationId, ctx) =>
-      listMembers(ctx.config, { user, organizationId }),
+    getByOrg("/organizations/members", "members", (user, organizationId, ctx, session) =>
+      listMembers(ctx.config, { user, session, organizationId }),
     ),
     post("/organizations/members/add", memberBody, "member", (s, b, ctx) =>
       addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
@@ -202,8 +206,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         ...(b.teamIds !== undefined && { teamIds: b.teamIds }),
       }),
     ),
-    getByOrg("/organizations/invitations", "invitations", (user, organizationId, ctx) =>
-      listInvitations(ctx.config, { user, organizationId }),
+    getByOrg("/organizations/invitations", "invitations", (user, organizationId, ctx, session) =>
+      listInvitations(ctx.config, { user, session, organizationId }),
     ),
     post("/organizations/invitations/revoke", revokeBody, null, (s, b, ctx) =>
       revokeInvitation(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
