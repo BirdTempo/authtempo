@@ -738,7 +738,7 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       { formats: LEGACY_FORMATS, now },
     );
     const u2 = await importId("user", "supabase", "u2");
-    // A claim, as core's claimEmail writes it (see the test above).
+    // The end state of a claim, as core's claimEmail leaves it (see the test above).
     await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
       emailVerified: true,
       updatedAt: AT,
