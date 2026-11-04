@@ -345,9 +345,10 @@ when the address is in use. A profile with no email answers
 
 An account created through an unverified email is a claim. When a sign-in
 proves the address (a magic link, or a provider that reports the email
-verified), core deletes that user's other identities and every session,
-then marks the email verified. The claimant loses access; the owner keeps
-the account.
+verified), core marks the email verified first. Then it deletes that user's
+other identities and every session. The claimant loses those ways in, and
+the owner keeps the account. A request of the claimant between those writes
+acts as a verified user, as "The window" of the claim-rule page tells.
 
 GitHub and LinkedIn are presets: `social.github` and `social.linkedin` each
 take `{ clientId, clientSecret }`. GitHub issues no ID token, so core reads

@@ -195,7 +195,7 @@ const HOOK_WORDS = [
 ];
 
 const CLAIM_RULE_WORDS = [
-  "The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.",
+  "The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the rows that the claim deleted stay deleted. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.",
   "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`.",
 ];
 
@@ -225,6 +225,109 @@ describe("the final claim of the hooks guide and the claim-rule page (decisions 
     expect(end).not.toContain("raced");
     // A claim throws ClaimLostError at a lost flip only.
     expect(body(source("users.ts"), "claimEmail").match(/new ClaimLostError\(\)/g)).toHaveLength(1);
+  });
+});
+
+/** The page and the section that the fact of the window holds (ruling 29 of plan 12o). */
+const WINDOW_PAGE = 'concepts/claim-rule.md, the section "The window"';
+
+const WINDOW_WORDS = [
+  "The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The window](#the-window) tells what a claimant can still get.",
+  "- An API token needs a verified address at its creation. Outside [the window](#the-window), a claimant cannot mint one.",
+  "- A passkey needs a verified address at its registration. The claim deletes the passkeys after it ends the sessions.",
+  "- An OAuth authorize request refuses an unverified user. A grant that a claimant gets in [the window](#the-window) can outlive the claim.",
+  "## The window The claim marks the address verified in its first write. It ends the sessions in a later write. On D1 and the SQLite adapter, each write lands at once.",
+  "A request of a claimant's session that reaches the engine between those writes acts as a verified user. It can mint an API token, start a change of address, or authorize an OAuth client. The claim deletes none of those rows, so they stay after it. Of the proofs, only a password reset deletes the OAuth codes and refresh tokens of the user, in a step after its claim. The confirm of the change of address by link needs no session, so the claimant can still confirm it after the claim. The account then has the claimant's address.",
+  "This is an open gap of the engine, and the next planned change closes it.",
+];
+
+// The claim flips the flag first and ends the sessions later (rr-final M1 of
+// plan 12o). It deletes no API token, no change of address, and no OAuth row.
+// A change that closes the window fails here and names the page.
+describe("the window of the claim-rule page (ruling 29 of plan 12o)", () => {
+  it("holds the window to claimEmail: the flip is its first write, before endSessions, and it deletes no API token, no change of address, and no OAuth row", () => {
+    const claim = body(source("users.ts"), "claimEmail");
+    // The first write of the claim is the flip of the flag, and the session end comes later.
+    const first = claim.search(/await tx\.(?:create|update|delete|deleteRows)\(/);
+    expect(claim.slice(first), WINDOW_PAGE).toMatch(
+      /^await tx\.update\(\s*"user",[\s\S]*?\? \{ emailVerified: true,/,
+    );
+    expect(claim.indexOf("emailVerified: true"), WINDOW_PAGE).toBeGreaterThan(0);
+    expect(claim.indexOf("await endSessions("), WINDOW_PAGE).toBeGreaterThan(
+      claim.indexOf("emailVerified: true"),
+    );
+    // The names come from the code that writes each row.
+    const tokens = body(source("tokens.ts"), "createApiToken");
+    const tokenModel = /await tx\.create\("(\w+)", row\);/.exec(tokens)?.[1];
+    const change = source("email-change.ts");
+    const changePurposes =
+      /const CHANGE_PURPOSES: readonly VerificationPurpose\[\] = \[([^\]]+)\];/
+        .exec(change)?.[1]
+        ?.match(/"[\w-]+"/g) ?? [];
+    const grants = source("oauth-grants.ts");
+    const codePurpose = /\{ field: "purpose", op: "eq", value: ("[\w-]+") \}/.exec(
+      body(grants, "deleteOAuthCodes"),
+    )?.[1];
+    const consentModel = /config\.storage\.create\("(\w+)", \{/.exec(
+      body(source("oauth-authorize.ts"), "grantConsent"),
+    )?.[1];
+    expect([
+      typeof tokenModel,
+      changePurposes.length,
+      typeof codePurpose,
+      typeof consentModel,
+    ]).toEqual(["string", 2, "string", "string"]);
+    expect(body(grants, "deleteOAuthTokens")).toContain("await deleteOAuthCodes(tx, userId);");
+    for (const name of [
+      `"${tokenModel}"`,
+      ...changePurposes,
+      "CHANGE_PURPOSES",
+      `${codePurpose}`,
+      `"${consentModel}"`,
+      "deleteOAuthTokens(",
+      "deleteOAuthCodes(",
+    ])
+      expect(claim, `${WINDOW_PAGE}: claimEmail names ${name}`).not.toContain(name);
+    // Each of the three writes acts on the user of the request's session, with no guard on its session row.
+    expect(tokens).toContain("if (!(await handleProved(config, config.storage, user)))");
+    expect(tokens, WINDOW_PAGE).not.toContain('"session"');
+    const request = body(change, "requestEmailChange");
+    expect(request).toContain("hasAddress(user) ? !user.emailVerified");
+    expect(request, WINDOW_PAGE).not.toContain('"session"');
+    expect(body(source("oauth-authorize.ts"), "decideAuthorize")).toContain(
+      "!provedAccount(input.session.user)",
+    );
+    // The code exchange and the confirm by link need no session.
+    expect(body(source("oauth-token.ts"), "exchangeCode"), WINDOW_PAGE).not.toContain('"session"');
+    expect(change, WINDOW_PAGE).toMatch(
+      /export async function confirmEmailChange\(\s*config: ResolvedConfig,\s*input: \{ token: string; ip: string \| null; userAgent: string \| null \},/,
+    );
+    // The reset deletes the OAuth rows after its claim. No other proof deletes them.
+    const reset = source("password.ts");
+    const claimed = reset.indexOf(
+      "await claimEmail(tx, user.id, { passwordId }, now, verify, ended.claim);",
+    );
+    expect(claimed).toBeGreaterThan(0);
+    expect(
+      reset.indexOf("await deleteOAuthTokens(tx, user.id, families);", claimed),
+    ).toBeGreaterThan(claimed);
+    // The verify link of password.ts claims too: the one call of the file is the reset's.
+    expect(reset.match(/deleteOAuthTokens\(/g), WINDOW_PAGE).toHaveLength(1);
+    for (const file of [
+      "magic-link.ts",
+      "email-otp.ts",
+      "social.ts",
+      "user-invite.ts",
+      "scim/users.ts",
+      "users.ts",
+    ])
+      expect(source(file), `${WINDOW_PAGE}: ${file}`).not.toMatch(/deleteOAuth(?:Tokens|Codes)\(/);
+    // The SQLite adapter runs the D1 code, so each write lands at once there too.
+    expect(readFileSync(`${REPO}packages/adapter-sqlite/src/adapter.ts`, "utf8")).toContain(
+      "return createD1AdapterOn(driver.db, {",
+    );
+    for (const words of WINDOW_WORDS)
+      expect(page("concepts/claim-rule.md"), WINDOW_PAGE).toContain(words);
   });
 });
 

@@ -60,7 +60,7 @@ sources:
 - **Limits.** Every flow that starts a mail or accepts a guess has a limit per IP, and most have a limit per address. The verify routes of a link, the social callbacks, and the token resolve have no limit, because each checks a token of 32 random bytes. A per-IP limit counts an IPv6 address by its `/64`. [Limits](/docs/reference/limits/) lists each key.
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
-- **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
+- **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how. Its section [the window](/docs/concepts/claim-rule/#the-window) names the ways in that a claim does not close.
 - **Trusted origins.** A POST with an `Origin` header outside `trustedOrigins` answers 403. A `next` path must start with `/` and not `//`.
 - **A `__Host-` session cookie.** By default the session cookie is `__Host-tempo_session`. A host on a sibling subdomain cannot set it.
 - **An absolute session lifetime.** With `session.absoluteDays`, a session ends that many days after it opened, whatever its refresh.
