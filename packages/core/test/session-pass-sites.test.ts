@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
  * Each route of core passes the session that it holds (Low 2 of the Task 2
  * review of plan 12p). The scan reads each call in `src/http/routes` of an
  * engine function whose input has a `session` member. That call must pass a
- * `session`. A route that drops it reads the user row's rule, so a session
- * made before the proof of its address passes a gate it must fail.
+ * `session`. A route that drops it reads the user row's rule. Then a
+ * session made before the proof of its address passes a gate that it must
+ * fail.
  *
  * The type check holds a required `session`. It does not hold an optional
  * one, such as the one of `Caller`. So `OPTIONAL` names each engine function
