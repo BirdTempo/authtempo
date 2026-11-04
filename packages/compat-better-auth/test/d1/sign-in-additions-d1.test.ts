@@ -194,7 +194,9 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
     // that the path checks, as every session ties (see the top).
     const exact: Record<string, number> = {
       "/sign-in/anonymous": 10,
-      "sign-up over anonymous": 31,
+      // Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1).
+      // Run of 20:42 CST on the owner's Mac Studio, load 10.8 7.4 6.1.
+      "sign-up over anonymous": 32,
       "/delete-anonymous-user": 13,
       "/is-username-available": 6,
       "/sign-in/username": 12,
