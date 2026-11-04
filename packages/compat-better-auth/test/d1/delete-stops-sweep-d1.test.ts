@@ -29,15 +29,15 @@ await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);
 const database = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });
 const APP = { kind: "app", name: "support-tool" } as const;
 
-/** A new storage over a counting binding: one invocation. */
-function invocation() {
-  const { db, count } = counting(env.DB);
+/** A new storage over a counting view of `binding`: one invocation. */
+function invocation(binding: D1Database = env.DB) {
+  const { db, count } = counting(binding);
   return { storage: betterAuthSchemaStorage({ dialect: "d1", db }).storage, count };
 }
 
-/** The app actor deletes the user at `at`, in one invocation. */
-async function deleteAt(userId: string, at: Date) {
-  const act = invocation();
+/** The app actor deletes the user at `at`, in one invocation over `binding`. */
+async function deleteAt(userId: string, at: Date, binding: D1Database = env.DB) {
+  const act = invocation(binding);
   const e = operatorEngine(act.storage, at);
   const answer = await e.auth.api.operator.users.delete({
     actor: APP,
@@ -55,6 +55,52 @@ async function sweepAt(at: Date) {
   const e = operatorEngine(run.storage, at);
   await e.auth.api.sweepExpired({ callBudget: 50 });
   return { queries: run.count.queries, acted: e.acted };
+}
+
+/** The key that gives the statement of the binding under a racing view. */
+const RAW = Symbol("raw");
+
+/**
+ * A view of `binding` that runs `between` once, right after the first
+ * statement whose SQL matches `match` answers. So another flow lands at that
+ * point of the act. D1 has no row lock, so a parallel request can land there.
+ */
+function racing(binding: D1Database, match: RegExp, between: () => Promise<void>) {
+  let fired = false;
+  const wrap = (s: D1PreparedStatement, sql: string): D1PreparedStatement =>
+    new Proxy(s, {
+      get(target, key) {
+        if (key === RAW) return target;
+        if (key === "bind") return (...values: unknown[]) => wrap(target.bind(...values), sql);
+        if (key === "run" || key === "all" || key === "first" || key === "raw")
+          return async (...args: unknown[]) => {
+            const answer = await (target[key] as (...a: unknown[]) => Promise<unknown>).apply(
+              target,
+              args,
+            );
+            if (!fired && match.test(sql)) {
+              fired = true;
+              await between();
+            }
+            return answer;
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const view = new Proxy(binding, {
+    get(target, key) {
+      if (key === "prepare") return (sql: string) => wrap(target.prepare(sql), sql);
+      if (key === "batch")
+        return (statements: D1PreparedStatement[]) =>
+          target.batch(
+            statements.map((s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s),
+          );
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { db: view, fired: () => fired };
 }
 
 type Scene = Awaited<ReturnType<typeof impersonatedUser>>;
@@ -111,8 +157,9 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
     expect(ofScene(swept.acted, scene).map((r) => r.id)).toEqual(stops.map((r) => r.id));
     expect(await pendingOf(database.storage, scene.userId)).toEqual([]);
     // Run of 2026-11-04: the queries of the delete, the own sessions that its page ended with
-    // the hook, and the queries of the sweep.
-    expect([deleted.queries, deleted.ends.length, swept.queries]).toEqual([47, 14, 26]);
+    // the hook, and the queries of the sweep. The sweep's read of the stop rows (ruling 19 of
+    // plan 12o) made it 27, from 26.
+    expect([deleted.queries, deleted.ends.length, swept.queries]).toEqual([47, 14, 27]);
   });
 
   it("writes the stop rows of 100 impersonation sessions of 5 operators over sweeps of 50 calls", {
@@ -143,9 +190,10 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
       expect(await owedOf(scene)).toEqual(owed > 0 ? [owed] : []);
     }
     // Run of 2026-11-04: the queries of the delete and the stop rows of its page. Then the
-    // stop rows of each sweep, and the queries of each sweep.
+    // stop rows of each sweep, and the queries of each sweep. Each sweep reads the stop rows
+    // of the user once (ruling 19 of plan 12o), so it writes 25, not 26.
     expect([deleted.queries, inPage, ...written, ...queries]).toEqual([
-      47, 6, 26, 26, 26, 16, 50, 50, 50, 39,
+      47, 6, 25, 25, 25, 19, 50, 50, 50, 43,
     ]);
     const stops = await stopsOf(scene);
     expect(stops.map((r) => r.data?.sessionId).sort()).toEqual(
@@ -218,6 +266,149 @@ describe("the stop rows of a cascading delete on the compat D1 storage (decision
     ]);
     expect(ofScene(acted, scene).map((r) => r.id)).toEqual(stops.map((r) => r.id));
     expect(await pendingOf(database.storage, scene.userId)).toEqual([]);
+  });
+
+  it("writes no second stop row for a session that a stop ends between the delete's read and its page", {
+    timeout: 120_000,
+  }, async () => {
+    // Ruling 19 of plan 12o. The operator stops the impersonation through the
+    // shim right after the delete reads the impersonation sessions. The page
+    // then finds no session left, and the pending-end row still names the
+    // stopped session. The sweep reads the stop row of the stop, and writes no
+    // row for that session.
+    const scene = await impersonatedUser(database, 2, 1, 1);
+    const [imp] = scene.impersonations;
+    const [cookie] = scene.cookies;
+    if (!imp || !cookie) throw new Error("no impersonation session");
+    let stopped = 0;
+    const view = racing(env.DB, /"taActorId" IS NOT NULL/, async () => {
+      stopped = (await scene.setup.call("/admin/stop-impersonating", {}, cookie)).status;
+    });
+    const at = new Date();
+    const deleted = await deleteAt(scene.userId, at, view.db);
+    expect(deleted.answer.ok, JSON.stringify(deleted.answer)).toBe(true);
+    expect([view.fired(), stopped]).toEqual([true, 200]);
+    const stops = await stopsOf(scene);
+    expect(stops.map((r) => r.data)).toEqual([{ sessionId: imp.id, cause: "stop" }]);
+    // The delete cannot see the stop, so its pending-end row names the session.
+    expect((await pendingOf(database.storage, scene.userId)).map((r) => r.data?.stops)).toEqual([
+      [{ sessionId: imp.id, actorId: imp.actorId }],
+    ]);
+    const swept = await sweepAt(new Date(at.getTime() + 60_000));
+    expect(await stopsOf(scene)).toEqual(stops);
+    expect(ofScene(swept.acted, scene)).toEqual([]);
+    expect(await pendingOf(database.storage, scene.userId)).toEqual([]);
+  });
+
+  it("writes no second stop row for a session that a stop ends between the page and the cascade, with a clock 3 s behind", {
+    timeout: 120_000,
+  }, async () => {
+    // The page ends 14 own sessions, and the pending-end row names the
+    // impersonation session. The stop lands right after that row, before the
+    // user delete. It runs on an instance whose clock runs 3 s behind the
+    // clock of the delete. So its stop row holds a time before the delete.
+    const scene = await impersonatedUser(database, 20, 1, 1);
+    const [imp] = scene.impersonations;
+    const [cookie] = scene.cookies;
+    if (!imp || !cookie) throw new Error("no impersonation session");
+    const behind = new Date();
+    const at = new Date(behind.getTime() + 3_000);
+    const other = operatorEngine(database.storage, behind);
+    // The shim resolves the session with its own config. The stop of the other instance needs no role read.
+    const session = await scene.setup.auth.tempo.api.getSession(
+      cookie.slice(cookie.indexOf("=") + 1),
+    );
+    if (!session) throw new Error("no impersonation session");
+    let stopped: unknown = null;
+    const view = racing(env.DB, /^INSERT INTO "verification"/, async () => {
+      stopped = await other.auth.api.operator.stopImpersonating({
+        session,
+        ip: null,
+        userAgent: null,
+      });
+    });
+    const deleted = await deleteAt(scene.userId, at, view.db);
+    expect(deleted.answer.ok, JSON.stringify(deleted.answer)).toBe(true);
+    expect(view.fired()).toBe(true);
+    expect(stopped).toMatchObject({ ok: true });
+    const stops = await stopsOf(scene);
+    expect(stops.map((r) => ({ data: r.data, createdAt: r.createdAt.toISOString() }))).toEqual([
+      { data: { sessionId: imp.id, cause: "stop" }, createdAt: behind.toISOString() },
+    ]);
+    expect((await pendingOf(database.storage, scene.userId)).map((r) => r.data?.stops)).toEqual([
+      [{ sessionId: imp.id, actorId: imp.actorId }],
+    ]);
+    const swept = await sweepAt(new Date(at.getTime() + 60_000));
+    expect(await stopsOf(scene)).toEqual(stops);
+    expect(ofScene(swept.acted, scene)).toEqual([]);
+    expect(await pendingOf(database.storage, scene.userId)).toEqual([]);
+  });
+
+  it("counts the read in the size check of a secret's delete: with the tool on, 4 organizations owned with another owner answer delete_too_large", {
+    timeout: 120_000,
+  }, async () => {
+    // Low 4 of the Task 2 review of plan 12o. A secret with the scope `delete`
+    // deletes a user with no solo organization. Each organization that the
+    // user owns with another owner costs 3 queries. With the tool on, the read
+    // of the impersonation sessions costs 1 more, so 3 such organizations fit
+    // and 4 do not. With the tool off the read does not run, and 4 fit.
+    const a = await setupOf(database);
+    const coOwner = await a.user("secret-co-owner@example.com");
+    const SECRET = { kind: "secret", name: "erasure", scopes: ["users", "delete"] } as const;
+    let made = 0;
+    const userWith = async (owned: number) => {
+      made++;
+      const { id } = await a.user(`secret-target-${made}@example.com`);
+      const user = await database.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
+      if (!user) throw new Error("no user row");
+      for (let i = 0; i < owned; i++) {
+        const org = await a.auth.tempo.api.createOrganization({
+          user,
+          slug: `shared-${made}-${i}`,
+          name: `Shared ${i}`,
+        });
+        if (!org.ok) throw new Error(org.code);
+        const added = await a.auth.tempo.api.addMember({
+          user,
+          organizationId: org.value.organization.id,
+          userId: coOwner.id,
+          role: "owner",
+        });
+        if (!added.ok) throw new Error(added.code);
+      }
+      return id;
+    };
+    const deleteBy = async (userId: string, tool: boolean) => {
+      const act = invocation();
+      const at = new Date();
+      const { auth } = tool
+        ? operatorEngine(act.storage, at)
+        : engine(act.storage, [], {
+            operator: { users: true },
+            clock: { now: () => new Date(at) },
+          });
+      const answer = await auth.api.operator.users.delete({
+        actor: SECRET,
+        userId,
+        reason: "Ticket 12o-2",
+        ip: null,
+        userAgent: null,
+      });
+      return { answer, queries: act.count.queries };
+    };
+    const four = await userWith(4);
+    const refused = await deleteBy(four, true);
+    expect(refused.answer).toMatchObject({ ok: false, code: "delete_too_large" });
+    expect(await rowsOf(database.storage, four, "none")).toMatchObject({ user: true, members: 4 });
+    const toolOff = await deleteBy(four, false);
+    expect(toolOff.answer.ok, JSON.stringify(toolOff.answer)).toBe(true);
+    const three = await userWith(3);
+    const fits = await deleteBy(three, true);
+    expect(fits.answer.ok, JSON.stringify(fits.answer)).toBe(true);
+    expect(fits.queries).toBeLessThanOrEqual(50);
+    // Run of 2026-11-04: the queries of the refused delete with the tool on and of the same
+    // delete with the tool off. Then the queries of the delete of 3 such organizations.
+    expect([refused.queries, toolOff.queries, fits.queries]).toEqual([14, 44, 45]);
   });
 
   it("counts the read of the impersonation sessions in the size check of the delete", {

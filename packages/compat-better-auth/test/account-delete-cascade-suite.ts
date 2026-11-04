@@ -42,6 +42,12 @@ export interface CascadeStore {
    * Default 500: off D1 the page holds 500 rows. On D1 the call budget bounds it.
    */
   ownPage?: number;
+  /**
+   * The stop rows that one sweep of 50 calls writes in the scene of 501 own
+   * sessions and 40 impersonation sessions. Review Focus 3 of plan 12o asks
+   * for it. The runner of each store gives its measure, with the date.
+   */
+  sweepStops: number;
 }
 
 /** The rows that name one user, read through core's models. */
@@ -186,6 +192,7 @@ let targets = 0;
  * A verified user with `own` sessions, then `imps` impersonation sessions,
  * through the shim's routes. The `operators` take turns at the starts. The
  * impersonation sessions sort last, because each id holds its time.
+ * `cookies` holds the session cookie of each start, in the order of the starts.
  */
 export async function impersonatedUser(
   database: CompatDatabase,
@@ -201,6 +208,7 @@ export async function impersonatedUser(
   const user = await a.user(email);
   for (let i = 2; i < own; i++) await a.call("/password/sign-in", { email, password: PASSWORD });
   await new Promise((r) => setTimeout(r, 5));
+  const starts: string[] = [];
   for (let i = 0; i < imps; i++) {
     const start = await a.call(
       "/admin/impersonate-user",
@@ -208,6 +216,7 @@ export async function impersonatedUser(
       cookies[i % cookies.length] ?? "",
     );
     if (start.status !== 200) throw new Error(`impersonate-user answered ${start.status}`);
+    starts.push(cookieOf(start));
   }
   const sessions = await database.storage.findMany(
     "session",
@@ -219,6 +228,7 @@ export async function impersonatedUser(
     userId: user.id,
     sessions,
     impersonations: sessions.filter((r) => r.actorId !== null),
+    cookies: starts,
   };
 }
 
@@ -474,5 +484,58 @@ export function accountDeleteCascadeSuite(open: () => Promise<CascadeStore>): vo
     );
     expect(sweep.acted.map((r) => r.id)).toEqual(rows.map((r) => r.id));
     expect(await pendingOf(store.database.storage, scene.userId)).toEqual([]);
+  });
+
+  it("leaves the rest of the owed stop rows on the row when one sweep cannot write them all, and the next sweep ends the row", {
+    timeout: 600_000,
+  }, async () => {
+    // Review Focus 3 of plan 12o. 501 own sessions, then 40 impersonation
+    // sessions of 2 operators. The cascade takes the 40 past the page, so the
+    // row owes 40 stop rows. One sweep of 50 calls writes fewer.
+    const store = await open();
+    const scene = await impersonatedUser(store.database, 501, 40, 2);
+    expect(scene.impersonations).toHaveLength(40);
+    const at = new Date();
+    const act = store.act();
+    const { auth } = operatorEngine(act.storage, at);
+    const answer = await auth.api.operator.users.delete({
+      actor: APP,
+      userId: scene.userId,
+      reason: "Ticket 5",
+      ip: null,
+      userAgent: null,
+    });
+    expect(answer.ok, JSON.stringify(answer)).toBe(true);
+    const stops = async () =>
+      (await auditOf(scene.setup, scene.userId)).filter((r) => r.action === "impersonation_stop");
+    const owedOf = async () =>
+      (await pendingOf(store.database.storage, scene.userId)).map((r) =>
+        Array.isArray(r.data?.stops) ? r.data.stops.length : 0,
+      );
+    expect(await owedOf()).toEqual([40]);
+    const written: number[] = [];
+    let owed = 40;
+    for (let i = 1; owed > 0 && i <= 5; i++) {
+      const before = (await stops()).length;
+      const run = store.act();
+      const sweep = operatorEngine(run.storage, new Date(at.getTime() + i * 60_000));
+      await sweep.auth.api.sweepExpired({ callBudget: 50 });
+      const queries = run.queries();
+      if (queries !== null) expect(queries).toBeLessThanOrEqual(50);
+      const now = (await stops()).length - before;
+      expect(sweep.acted.filter((r) => r.targetUserId === scene.userId)).toHaveLength(now);
+      written.push(now);
+      owed -= now;
+      // A row that the sweep cannot finish stays with the rest of the list.
+      expect(await owedOf()).toEqual(owed > 0 ? [owed] : []);
+    }
+    expect(written).toEqual([store.sweepStops, 40 - store.sweepStops]);
+    const rows = await stops();
+    expect(rows.map((r) => r.data?.sessionId).sort()).toEqual(
+      scene.impersonations.map((r) => r.id).sort(),
+    );
+    expect(rows.map((r) => [r.data?.cause, r.data?.endedAt])).toEqual(
+      rows.map(() => ["account_delete", at.toISOString()]),
+    );
   });
 }

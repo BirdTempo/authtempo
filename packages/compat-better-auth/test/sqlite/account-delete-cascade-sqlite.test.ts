@@ -26,6 +26,8 @@ describe("the account delete on the compat SQLite storage (ruling 13 of plan 12f
       database,
       act: () => ({ storage: database.storage, queries: () => null }),
       removeSolo: "removed",
+      // Run of 2026-11-04: one sweep of 50 calls writes 29 of the 40 owed stop rows.
+      sweepStops: 29,
     };
   });
 });

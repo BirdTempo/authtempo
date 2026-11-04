@@ -26,6 +26,8 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
     database,
     removeSolo: "too_large",
     ownPage: 14,
+    // Run of 2026-11-04: one sweep of 50 calls writes 25 of the 40 owed stop rows.
+    sweepStops: 25,
     act() {
       const { db, count } = counting(env.DB);
       return {
@@ -53,6 +55,7 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
       },
       removeSolo: "too_large" as const,
       ownPage: 14,
+      sweepStops: 25,
     };
     const { me, organizationId } = await soloOwner(store, 60);
     expect((await rowsOf(database.storage, me.user.id, organizationId)).sessions).toBe(60);
