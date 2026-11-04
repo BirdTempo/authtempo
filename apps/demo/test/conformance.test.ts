@@ -59,6 +59,11 @@ function forwardedAdapter(name: string): StorageAdapter {
     findMany: (model, where, opts) => inside(name, (db) => on(db).findMany(model, where, opts)),
     update: (model, where, data) => inside(name, (db) => on(db).update(model, where, data)),
     delete: (model, where) => inside(name, (db) => on(db).delete(model, where)),
+    // The D1 adapter's one DELETE … RETURNING, in the object (plan 12o).
+    deleteRows: (model, where) => inside(name, (db) => on(db).deleteRows(model, where)),
+    // Outside a transaction the D1 adapter reverses no write, so it answers true.
+    // A transaction's own handle is the D1 adapter of its call, with its undo log.
+    keep: () => inside(name, (db) => on(db).keep()),
     // The whole transaction runs inside one call, with the adapter of that call.
     transaction: (fn) => inside(name, (db) => on(db).transaction(fn)),
   };
