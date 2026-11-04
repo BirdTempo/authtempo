@@ -65,6 +65,7 @@ authtempo migrate --target postgres --url-env DATABASE_URL
 - A migration of a newer version runs safely under the older code. So apply it first, then deploy.
 - `applyPostgresMigrations` is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.
 - `wrangler d1 migrations apply` rolls back a file that fails, so a refused file changes nothing.
+- Version 16 fills `ta_session.proved` in one statement. On D1 an app with more than 100,000 live sessions of verified users applies that fill by hand, in pages, before step 3. [Schema and migrations](/docs/reference/schema/#the-versions) gives the steps, and the [Better Auth guide](/docs/migrate/better-auth/#the-fill-of-0013-on-a-large-database) gives them for the compat tables.
 
 :::caution
 Warning: do not deploy a new core before its migrations run. Every request then answers 500 until they run.
@@ -73,6 +74,7 @@ Warning: do not deploy a new core before its migrations run. Every request then 
 ## If it fails
 
 - Every route answers 500, and the log shows `schema_mismatch`: a migration did not run. Apply it.
+- On D1 the file of version 16 fails at the execution limits of D1: its fill met too many sessions. The version stays 15. Apply the fill by hand, as the schema page tells.
 - `no such table` on D1 at a compat file: its number is lower than the Better Auth table migration. Give it the next number.
 - Two copies of `@authtempo/core` in the app: two derive gates, and twice the legacy derives at once. Keep one version.
 

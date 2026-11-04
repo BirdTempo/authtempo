@@ -65,9 +65,9 @@ export function makeRepo(): Repo {
       git(["commit", "--quiet", "--no-verify", "-m", message]);
     },
     remove() {
-      // A delete under load answered ENOTEMPTY once (evidence run 3 of plan
-      // 12o). The wait is owned here: on Node 26.10.0 the retry wait of
-      // `rmSync` is in whole seconds (src/node_file.cc, RmSync, read
+      // An rmSync call under load failed with ENOTEMPTY once (evidence run 3
+      // of plan 12o). This loop owns the wait: on Node 26.10.0 the retry wait
+      // of `rmSync` is in whole seconds (src/node_file.cc, RmSync, read
       // 2026-11-04). The last throw names the entries that are left.
       for (let i = 1; ; i++) {
         try {

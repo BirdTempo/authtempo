@@ -41,13 +41,14 @@ An account that a person made with an address that nobody proved is a claim, not
 
 When a proof arrives for an unverified user, core runs the claim in the same transaction as the sign-in:
 
-1. It marks the address verified first. A sign-in of the claimant that runs at the same moment then sees the flag. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it (plan 12i).
+1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.
 2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
 3. It deletes the password row, except the row that a verify link confirms.
-4. It deletes every session.
-5. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
+4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
+5. It marks the address verified. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it.
+6. It deletes every session, as its last step.
 
-The proof then opens a session for the person who proved the address. The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The window](#the-window) tells what a claimant can still get.
+The proof then opens a session for the person who proved the address. The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The session proof](#the-session-proof) tells why no session of the claimant gains a power from the claim.
 
 The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the rows that the claim deleted stay deleted. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.
 
@@ -58,21 +59,36 @@ Two proofs of one address can arrive at the same time. One claims the user. On D
 - A provider's verified address counts only when it equals the user's address. A different verified address links nothing and verifies nothing.
 - Core links a social identity to an existing user only when the provider says that the address is verified. Else the sign-in answers [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified).
 - A reset of a verified user ends every session, and keeps the passkeys and the social identities. Mail access already grants a reset, so the kept credentials give an attacker nothing more.
-- An API token needs a verified address at its creation. Outside [the window](#the-window), a claimant cannot mint one.
-- A passkey needs a verified address at its registration. The claim deletes the passkeys after it ends the sessions.
-- An OAuth authorize request refuses an unverified user. A grant that a claimant gets in [the window](#the-window) can outlive the claim.
+- An API token needs a proved session at its creation. A session of a claimant is never proved, so a claimant cannot mint one.
+- A passkey needs a proved session at its registration, for the same reason. The claim deletes the passkeys before it marks the address verified.
+- An OAuth authorize request and a device approval need a proved session. So a claimant gets no grant that outlives the claim.
 
-## The window
+## The session proof
 
-The claim marks the address verified in its first write. It ends the sessions in a later write. On D1 and the SQLite adapter, each write lands at once.
+Each session row holds a flag, `proved`. Core sets it once, at the creation of the session:
 
-A request of a claimant's session that reaches the engine between those writes acts as a verified user. It can mint an API token, start a change of address, or authorize an OAuth client. The claim deletes none of those rows, so they stay after it. Of the proofs, only a password reset deletes the OAuth codes and refresh tokens of the user, in a step after its claim. The confirm of the change of address by link needs no session, so the claimant can still confirm it after the claim. The account then has the claimant's address.
+- It is false for an anonymous user.
+- For a user with an address, it is the verified flag of that address.
+- For any other user, it is true, because a user with no address has nothing to claim.
+- A handoff copies the flag of its browser session, and an impersonation takes the state of its target.
 
-This is an open gap of the engine, and the next planned change closes it.
+Only the confirm of a change of address changes the flag later, to true on the session that it keeps. A `session.beforeCreate` hook cannot set it.
+
+Each verified-only action reads the flag of the caller's session with the user row. The terms of the user row stay as before:
+
+- An API token, a username, a phone add, a profile change, and a change of address need a verified address. A user with no address needs a phone or a passkey that signs in.
+- A passkey registration, a second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.
+- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address.
+
+An in-process call that passes a user and no session keeps the rule of the user row. `api.tokens.create`, `api.passkeyRegistrationOptions`, `api.verifyPasskeyRegistration`, `api.totp.setup`, and `api.organizationTokens.create` take the session for this reason.
+
+So a session that came before the proof of its address never gains verified powers. On D1 and SQLite each statement of a claim lands at once. A claimant's session is still live between the mark of the address and the session delete. In that gap the user reads as verified, but the session is not proved. Its requests answer [`email_unverified`](/docs/reference/errors/#email_unverified), and they leave no token, no change of address, no grant, and no factor. On Postgres and MySQL a request can read the session before the claim's commit and the user after it. The flag refuses that request too.
+
+The claim deletes every row that a sign-in trusts before it marks the address verified. A sign-in that reads the user after that mark finds its row gone, and its guard deletes its own session. A sign-in that read the user before the mark has an unproved session. The session delete at the end of the claim removes it. The first step decides a race of two claims of one user, so a claim that loses there writes nothing. A claim that loses at the mark undoes its deletes.
 
 ## Why in one transaction
 
-A claim and a sign-in of the claimant can run at the same moment. Each sign-in of an unverified user ends its transaction with a guard: a conditional update on the row that it trusted. When the claim deleted or changed that row, the guard matches zero rows. The sign-in then deletes its own new session and answers a failure. [The race rules](/docs/concepts/races/) tell more.
+A claim and a sign-in of the claimant can run at the same moment. Each sign-in that trusts a row of the claim ends its transaction with a guard, for a verified user too. The guard is a conditional update on that row. When the claim deleted or changed that row, the guard matches zero rows. The sign-in then deletes its own new session and answers a failure. [The race rules](/docs/concepts/races/) tell more.
 
 ## Next
 

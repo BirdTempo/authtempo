@@ -171,7 +171,11 @@ export {
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
-export type { PasskeySummary } from "./engine/passkeys.js";
+export type {
+  PasskeyRegistrationInput,
+  PasskeyRegistrationOptionsInput,
+  PasskeySummary,
+} from "./engine/passkeys.js";
 export type {
   ExistingAccountMailInput,
   PasswordChange,

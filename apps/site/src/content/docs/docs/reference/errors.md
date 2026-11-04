@@ -124,8 +124,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="email_unverified"><code>email_unverified</code> 403</h3>
 
-- **Meaning:** The flow needs a verified address, and the user has none.
-- **Do:** Send a magic link or the verify mail, so that the person proves the address.
+- **Meaning:** The flow needs a verified address, and the user has none. It also comes when the session came before the proof of the address: its `proved` flag is false. A claimant's session gets this answer while a claim runs.
+- **Do:** Send a magic link or the verify mail, so that the person proves the address. A session from before the proof signs in again. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
 
 | Routes |
 | --- |

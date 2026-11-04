@@ -42,7 +42,7 @@ A stale session gets 403 `session_not_fresh`, and nothing changes. The rule answ
 
 ## The server calls
 
-The in-process calls that take a user apply no fresh rule. They are `api.passkeyRegistrationOptions`, `api.deletePasskey`, `api.tokens.create`, `api.totp.disableWithCode`, and `api.totp.regenerateBackupCodesWithCode`. The app's server code calls `api.session.requireFresh(resolved)` first. `api.totp.enable` and `api.password.change` take a session, and they apply the rule themselves.
+Some in-process calls apply no fresh rule. `api.tokens.create` and `api.passkeyRegistrationOptions` take a session. `api.deletePasskey`, `api.totp.disableWithCode`, and `api.totp.regenerateBackupCodesWithCode` take a user. The app's server code calls `api.session.requireFresh(resolved)` first. `api.totp.enable` and `api.password.change` take a session, and they apply the rule themselves.
 
 ## Next
 

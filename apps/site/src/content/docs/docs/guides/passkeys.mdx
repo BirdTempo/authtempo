@@ -51,7 +51,7 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 - The options have the [limit](/docs/reference/limits/) `passkey-options:ip:<ip>` 30 per 15 minutes. The verify has `passkey-verify:ip:<ip>` 20 per 15 minutes.
 - A passkey sign-in has no second factor gate. A passkey can also be a method of the [second factor](/docs/guides/second-factor/) after a password.
 - The register and the delete need a [fresh session](/docs/concepts/fresh-sessions/). A stale one answers `session_not_fresh`. Wrap the call in `client.withFresh`.
-- `api.passkeyRegistrationOptions` and `api.deletePasskey` take a user, so they apply no fresh rule. Call `api.session.requireFresh` first.
+- `api.passkeyRegistrationOptions` takes the session, and `api.deletePasskey` takes a user. Neither applies the fresh rule. Call `api.session.requireFresh` first.
 - A passkey name has 1 to 64 characters, with no control or format character except the zero-width joiners. The rename refuses a name that breaks this rule. The register keeps the passkey and stores no name.
 - The rename has the [limit](/docs/reference/limits/) `passkey-rename:user:<userId>` 30 per 15 minutes. It sends no notice mail.
 

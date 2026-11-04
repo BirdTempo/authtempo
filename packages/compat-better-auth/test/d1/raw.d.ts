@@ -6,3 +6,7 @@ declare module "*.md?raw" {
   const text: string;
   export default text;
 }
+declare module "*.mdx?raw" {
+  const text: string;
+  export default text;
+}

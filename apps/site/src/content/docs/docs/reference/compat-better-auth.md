@@ -82,6 +82,8 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 
 Any other plugin is refused at start by its id.
 
+A call of `auth.api.createApiKey` with `headers` reads the session of those headers, and its `proved` flag must hold. A server call with `userId` and no `headers` reads no session. It goes through `createApiTokenAs` or `createOrganizationTokenAs` of `@authtempo/core/compat`, which keep the rule of the user row for any importer. For the person of a request, pass the request's `headers`, so that core reads the flag of that person's session.
+
 An anonymous user or a phone user has no address. Such a user holds Better Auth's placeholder address in `user.email`, because that column is NOT NULL. The storage reads each placeholder as no address, so core never mails one and never counts one as proved.
 
 ## The defaults

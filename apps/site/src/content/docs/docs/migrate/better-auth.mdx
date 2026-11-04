@@ -163,6 +163,27 @@ The app applies the files to 0009, its own 0010, and the shipped 0011 to 0013 wi
 
 Better Auth's username, phone number, and anonymous plugins add columns that the shipped 0012 adds too. On such tables the shipped 0012 fails with `duplicate column name`. An app with one of these plugins writes its own 0012 file. It is the shipped file without the `ADD COLUMN` line of each column that the table holds, and without the unique key that it holds. On Postgres, the 0012 adds each column and each key only when it is absent.
 
+### The fill of 0013 on a large database
+
+On D1, the fill of `0013_compat_schema_v16.sql` is one statement. It changes one row for each session of a verified user. The Cloudflare D1 limits page, read 2026-11-04, says that a single query that changes hundreds of thousands of rows exceeds the execution limits. It says that a large `UPDATE` must run in batches. When the fill fails at that limit, the file fails, and the versions stay 15 and 12. Core at version 16 then refuses the database with `schema_mismatch`.
+
+Run the sweep before the file, so that the expired sessions are gone. Call `auth.tempo.api.sweepExpired()` once, or wait for its next scheduled run. Then count the sessions of verified users with the first command below. An app with more than 100,000 live sessions of verified users applies 0013 by hand, in pages. The ceiling keeps the one statement of the shipped fill below hundreds of thousands of rows. The steps by hand are the other four commands, in this order, before you deploy core at version 16:
+
+1. Add the column. When the column exists already, the command fails with `duplicate column name: taProved`. Then go to step 2.
+2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0. Each page scans the rows that earlier pages marked, about 50 million row reads for a million sessions.
+3. Write version 16 in `ta_meta`.
+4. Write the compat version 13 in `ta_meta`. With it, `authtempo migrate --tables compat` copies no 0013.
+
+```sh
+wrangler d1 execute my-app --remote --command "SELECT COUNT(*) AS sessions FROM session s JOIN user u ON u.id = s.userId WHERE u.emailVerified = 1 AND u.email IS NOT NULL AND NOT (lower(u.email) LIKE '%@placeholder.invalid' OR lower(u.email) LIKE '%.placeholder.invalid')"
+wrangler d1 execute my-app --remote --command "ALTER TABLE session ADD COLUMN taProved INTEGER NOT NULL DEFAULT 0"
+wrangler d1 execute my-app --remote --json --command "UPDATE session SET taProved = 1 WHERE taProved = 0 AND id IN (SELECT s.id FROM session s JOIN user u ON u.id = s.userId WHERE u.emailVerified = 1 AND u.email IS NOT NULL AND NOT (lower(u.email) LIKE '%@placeholder.invalid' OR lower(u.email) LIKE '%.placeholder.invalid') AND s.taProved = 0 LIMIT 10000)"
+wrangler d1 execute my-app --remote --command "UPDATE ta_meta SET value = '16' WHERE key = 'schema_version'"
+wrangler d1 execute my-app --remote --command "UPDATE ta_meta SET value = '13' WHERE key = 'compat_better_auth'"
+```
+
+The commands use the default names of Better Auth. Tables with other names take the names of `compatMigration0013Sql("sqlite", storage.names)`. The fill skips a placeholder address, as the shipped file does. An app that keeps a copy of 0013 in its `migrations_dir` marks that copy as applied in `d1_migrations`, by the name of the copy.
+
 The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
 
 ## Cutover of API tokens

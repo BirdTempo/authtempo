@@ -53,7 +53,7 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 - Create has one [limit](/docs/reference/limits/): `token-create:user:<userId>` 20 per hour.
 - A password reset, a password change, and a sign-out delete no token. The person revokes a token from the list.
 - The create needs a [fresh session](/docs/concepts/fresh-sessions/). A stale one answers `session_not_fresh`. Wrap the call in `client.withFresh`.
-- `api.tokens.create` takes a user, so it applies no fresh rule. Call `api.session.requireFresh` first.
+- `api.tokens.create` takes the session, and it applies no fresh rule. Call `api.session.requireFresh` first. A session from before the proof of its address answers `email_unverified`.
 
 ### Scopes
 

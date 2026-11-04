@@ -39,15 +39,17 @@ By default the cookie is `__Host-tempo_session`. A session can have an absolute 
 
 Every core route that needs a person calls `auth.session`, which reads sessions only. So an API token, a JWT, and an access token cannot create a token, change a password, or touch passkeys or organizations.
 
+A session row holds a flag, `proved`. It is true when the session came after the proof of its address, or when its user has no address and is not anonymous. Each verified-only action reads it with the user row. So a session that came before the proof of its address never gains verified powers. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
+
 ## An API token
 
-An API token is a credential of one verified user, never a session. Only a person with a session creates or revokes one. It counts only in the bearer header, because a browser sends a cookie on a cross-site request. A token may name one organization. When the user leaves that organization, the token stops, and the list still shows it.
+An API token is a credential of one verified user, never a session. Only a person with a proved session creates or revokes one. It counts only in the bearer header, because a browser sends a cookie on a cross-site request. A token may name one organization. When the user leaves that organization, the token stops, and the list still shows it.
 
 A password reset, a password change, and a sign-out delete no API token.
 
 ## A session JWT
 
-A session JWT is a signed statement about the session user, for a server that cannot call `auth.session`. The other server checks it against the public keys at `/auth/jwks`. It lives to its `exp`, so keep its life short. A server that must end access at a sign-out checks the `sid` claim with `api.jwt.sessionLive`.
+A session JWT is a signed statement about the session user, for a server that cannot call `auth.session`. Its `email_verified` claim is true only when the session is proved and the address is verified. The other server checks it against the public keys at `/auth/jwks`. It lives to its `exp`, so keep its life short. A server that must end access at a sign-out checks the `sid` claim with `api.jwt.sessionLive`.
 
 ## An access token
 

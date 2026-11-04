@@ -24,7 +24,7 @@ function errorSection(code: string): string {
 
 /** The body of the function `name` of `text`, from its head to the next top-level function. */
 function body(text: string, name: string): string {
-  const at = text.search(new RegExp(`\\nexport (?:async )?function ${name}\\b`));
+  const at = text.search(new RegExp(`\\n(?:export )?(?:async )?function ${name}\\b`));
   if (at < 0) throw new Error(`no function ${name}`);
   const end = text.indexOf("\n}\n", at);
   return text.slice(at, end < 0 ? undefined : end);
@@ -232,112 +232,206 @@ describe("the final claim of the hooks guide and the claim-rule page (decisions 
     const end = body(source("sessions.ts"), "endSessions");
     expect(end).toContain('await tx.deleteRows("session", [...where, ids])');
     expect(end).not.toContain("raced");
-    // A claim throws ClaimLostError at a lost flip only.
-    expect(body(source("users.ts"), "claimEmail").match(/new ClaimLostError\(\)/g)).toHaveLength(1);
+    // A claim throws ClaimLostError at its first statement or at a lost flip (ruling 24 of plan 12p).
+    // The flip of claimEmail throws it once. takeClaim throws it at the hold and at a held lease.
+    const users = source("users.ts");
+    expect(body(users, "claimEmail").match(/new ClaimLostError\(/g)).toEqual([
+      "new ClaimLostError(",
+    ]);
+    expect(body(users, "claimEmail")).toContain("throw new ClaimLostError();");
+    const take = body(users, "takeClaim");
+    expect(take.match(/new ClaimLostError\(/g)).toHaveLength(2);
+    expect(take).toContain("throw new ClaimLostError();");
+    expect(take).toContain('throw new ClaimLostError("held");');
+    expect(page("concepts/claim-rule.md")).toContain(
+      "The first step decides a race of two claims of one user, so a claim that loses there writes nothing. A claim that loses at the mark undoes its deletes.",
+    );
   });
 });
 
-/** The page and the section that the fact of the window holds (ruling 29 of plan 12o). */
-const WINDOW_PAGE = 'concepts/claim-rule.md, the section "The window"';
+/** The page and the section that the fact of the session proof holds (plan 12p). */
+const PROOF_PAGE = 'concepts/claim-rule.md, the section "The session proof"';
+// The changeset of the session proof (plan 12p). The version branch deletes it, so its fact skips there.
+const SESSION_PROOF_CHANGESET = `${REPO}.changeset/core-session-proof.md`;
 
-const WINDOW_WORDS = [
-  "The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The window](#the-window) tells what a claimant can still get.",
-  "- An API token needs a verified address at its creation. Outside [the window](#the-window), a claimant cannot mint one.",
-  "- A passkey needs a verified address at its registration. The claim deletes the passkeys after it ends the sessions.",
-  "- An OAuth authorize request refuses an unverified user. A grant that a claimant gets in [the window](#the-window) can outlive the claim.",
-  "## The window The claim marks the address verified in its first write. It ends the sessions in a later write. On D1 and the SQLite adapter, each write lands at once.",
-  "A request of a claimant's session that reaches the engine between those writes acts as a verified user. It can mint an API token, start a change of address, or authorize an OAuth client. The claim deletes none of those rows, so they stay after it. Of the proofs, only a password reset deletes the OAuth codes and refresh tokens of the user, in a step after its claim. The confirm of the change of address by link needs no session, so the claimant can still confirm it after the claim. The account then has the claimant's address.",
-  "This is an open gap of the engine, and the next planned change closes it.",
+/** The steps of the claim on the page, in the order of claimEmail. */
+const ORDER_WORDS = [
+  "1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.",
+  "2. It deletes the other identities of the user.",
+  "3. It deletes the password row, except the row that a verify link confirms.",
+  "4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.",
+  "5. It marks the address verified.",
+  "6. It deletes every session, as its last step.",
 ];
 
-// The claim flips the flag first and ends the sessions later (rr-final M1 of
-// plan 12o). It deletes no API token, no change of address, and no OAuth row.
-// A change that closes the window fails here and names the page.
-describe("the window of the claim-rule page (ruling 29 of plan 12o)", () => {
-  it("holds the window to claimEmail: the flip is its first write, before endSessions, and it deletes no API token, no change of address, and no OAuth row", () => {
+/** The value of `proved` at the creation of a session (ruling 20 of plan 12p), and the one later change. */
+const CREATION_WORDS = [
+  "Each session row holds a flag, `proved`. Core sets it once, at the creation of the session:",
+  "- It is false for an anonymous user. - For a user with an address, it is the verified flag of that address. - For any other user, it is true, because a user with no address has nothing to claim. - A handoff copies the flag of its browser session, and an impersonation takes the state of its target.",
+  "Only the confirm of a change of address changes the flag later, to true on the session that it keeps. A `session.beforeCreate` hook cannot set it.",
+];
+
+/** The terms of the user row at the gates (ruling 14 of plan 12p), each read with the session flag. */
+const GATE_WORDS = [
+  "Each verified-only action reads the flag of the caller's session with the user row.",
+  "- An API token, a username, a phone add, a profile change, and a change of address need a verified address. A user with no address needs a phone or a passkey that signs in.",
+  "- A passkey registration, a second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.",
+  "- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address.",
+  "An in-process call that passes a user and no session keeps the rule of the user row.",
+];
+
+const CLOSURE_WORDS = [
+  "The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The session proof](#the-session-proof) tells why no session of the claimant gains a power from the claim.",
+  "- An API token needs a proved session at its creation. A session of a claimant is never proved, so a claimant cannot mint one.",
+  "- A passkey needs a proved session at its registration, for the same reason. The claim deletes the passkeys before it marks the address verified.",
+  "- An OAuth authorize request and a device approval need a proved session. So a claimant gets no grant that outlives the claim.",
+  "So a session that came before the proof of its address never gains verified powers. On D1 and SQLite each statement of a claim lands at once.",
+  "On Postgres and MySQL a request can read the session before the claim's commit and the user after it. The flag refuses that request too.",
+  "The claim deletes every row that a sign-in trusts before it marks the address verified. A sign-in that reads the user after that mark finds its row gone, and its guard deletes its own session.",
+];
+
+/** The engine functions of the five forms that take the session (decision 4 of plan 12p), by file. */
+const FIVE = [
+  ["createApiToken", "tokens.ts"],
+  ["passkeyRegistrationOptions", "passkeys.ts"],
+  ["verifyPasskeyRegistration", "passkeys.ts"],
+  ["setupTotp", "totp.ts"],
+  ["createOrganizationToken", "organization-tokens.ts"],
+] as const;
+
+/**
+ * The app API form that takes `type`, as `api.<member>.<method>`. Both names
+ * come from create-auth.ts. The method is the one whose input is `type`. The
+ * member is the one of `AuthApi` that holds the interface of that method.
+ */
+function appForm(api: string, type: string): string {
+  const m = new RegExp(`(\\w+)\\(\\s*input: ${type}\\b`).exec(api);
+  if (!m) throw new Error(`no app form takes ${type}`);
+  const owner = [...api.slice(0, m.index).matchAll(/\nexport interface (\w+)/g)].at(-1)?.[1];
+  if (owner === "AuthApi") return `api.${m[1]}`;
+  const member = new RegExp(`\\n\\s+(\\w+)\\??: ${owner};`).exec(api)?.[1];
+  if (!member) throw new Error(`no member of AuthApi holds ${owner}`);
+  return `api.${member}.${m[1]}`;
+}
+
+/** The five app API forms that take the session, each name read from the code. */
+function fiveForms(): string[] {
+  const api = readFileSync(`${REPO}packages/core/src/create-auth.ts`, "utf8");
+  return FIVE.map(([fn, file]) => {
+    const text = source(file);
+    const type = new RegExp(
+      `export (?:async )?function ${fn}\\(\\s*config: ResolvedConfig,\\s*input: (\\w+),`,
+    ).exec(text)?.[1];
+    if (!type) throw new Error(`${fn} takes no named input type`);
+    // The input holds the resolved session, and no bare user or user id.
+    const at = text.indexOf(`export interface ${type} {`);
+    expect(at, `${fn}: ${type}`).toBeGreaterThan(0);
+    const members = text.slice(at, text.indexOf("\n}\n", at));
+    expect(members, `${fn}: ${type}`).toContain("\n  session: ResolvedSession;");
+    expect(members, `${fn}: ${type}`).not.toMatch(/\n {2}(?:user|userId)\??:/);
+    return appForm(api, type);
+  });
+}
+
+/** A list of names as the pages write it: `a`, `b`, and `c`. */
+const listOf = (names: string[]) =>
+  `${names
+    .slice(0, -1)
+    .map((n) => `\`${n}\``)
+    .join(", ")}, and \`${names.at(-1)}\``;
+
+// The session proof closes the window of plan 12o (decisions 3 to 5 and
+// rulings 14, 16, and 20 of plan 12p). The page states the order of the
+// claim, the flag at creation, and the gates' terms. A change of the code
+// fails here and names the page.
+describe("the session proof of the claim-rule page (plan 12p)", () => {
+  it("holds the order of claimEmail: the hold or the lease, the trusted rows, the flip, and the sessions last", () => {
     const claim = body(source("users.ts"), "claimEmail");
-    // The first write of the claim is the flip of the flag, and the session end comes later.
-    const first = claim.search(/await tx\.(?:create|update|delete|deleteRows)\(/);
-    expect(claim.slice(first), WINDOW_PAGE).toMatch(
-      /^await tx\.update\(\s*"user",[\s\S]*?\? \{ emailVerified: true,/,
+    // The first statement is the hold or the lease.
+    const first = claim.search(/await (?:tx\.\w+|takeClaim)\(/);
+    expect(claim.slice(first), PROOF_PAGE).toMatch(/^await takeClaim\(tx, userId, now\);/);
+    const take = body(source("users.ts"), "takeClaim");
+    expect(take).toMatch(
+      /if \(tx\.isolated\) \{\s+if \(await userStillUnverified\(tx, userId, now\)\) return;/,
     );
-    expect(claim.indexOf("emailVerified: true"), WINDOW_PAGE).toBeGreaterThan(0);
-    expect(claim.indexOf("await endSessions("), WINDOW_PAGE).toBeGreaterThan(
-      claim.indexOf("emailVerified: true"),
-    );
-    // The names come from the code that writes each row.
-    const tokens = body(source("tokens.ts"), "createApiToken");
-    const tokenModel = /await tx\.create\("(\w+)", row\);/.exec(tokens)?.[1];
-    const change = source("email-change.ts");
-    const changePurposes =
-      /const CHANGE_PURPOSES: readonly VerificationPurpose\[\] = \[([^\]]+)\];/
-        .exec(change)?.[1]
-        ?.match(/"[\w-]+"/g) ?? [];
-    const grants = source("oauth-grants.ts");
-    const codePurpose = /\{ field: "purpose", op: "eq", value: ("[\w-]+") \}/.exec(
-      body(grants, "deleteOAuthCodes"),
-    )?.[1];
-    const consentModel = /config\.storage\.create\("(\w+)", \{/.exec(
-      body(source("oauth-authorize.ts"), "grantConsent"),
-    )?.[1];
-    expect([
-      typeof tokenModel,
-      changePurposes.length,
-      typeof codePurpose,
-      typeof consentModel,
-    ]).toEqual(["string", 2, "string", "string"]);
-    expect(body(grants, "deleteOAuthTokens")).toContain("await deleteOAuthCodes(tx, userId);");
-    for (const name of [
-      `"${tokenModel}"`,
-      ...changePurposes,
-      "CHANGE_PURPOSES",
-      `${codePurpose}`,
-      `"${consentModel}"`,
-      "deleteOAuthTokens(",
-      "deleteOAuthCodes(",
-    ])
-      expect(claim, `${WINDOW_PAGE}: claimEmail names ${name}`).not.toContain(name);
-    // Each of the three writes acts on the user of the request's session, with no guard on its session row.
-    expect(tokens).toContain("if (!(await handleProved(config, config.storage, user)))");
-    expect(tokens, WINDOW_PAGE).not.toContain('"session"');
-    const request = body(change, "requestEmailChange");
-    expect(request).toContain("hasAddress(user) ? !user.emailVerified");
-    expect(request, WINDOW_PAGE).not.toContain('"session"');
-    expect(body(source("oauth-authorize.ts"), "decideAuthorize")).toContain(
-      "!provedAccount(input.session.user)",
-    );
-    // The code exchange and the confirm by link need no session.
-    expect(body(source("oauth-token.ts"), "exchangeCode"), WINDOW_PAGE).not.toContain('"session"');
-    expect(change, WINDOW_PAGE).toMatch(
-      /export async function confirmEmailChange\(\s*config: ResolvedConfig,\s*input: \{ token: string; ip: string \| null; userAgent: string \| null \},/,
-    );
-    // The reset deletes the OAuth rows after its claim. No other proof deletes them.
-    const reset = source("password.ts");
-    const claimed = reset.indexOf(
-      "await claimEmail(tx, user.id, { passwordId }, now, verify, ended.claim);",
-    );
-    expect(claimed).toBeGreaterThan(0);
-    expect(
-      reset.indexOf("await deleteOAuthTokens(tx, user.id, families);", claimed),
-    ).toBeGreaterThan(claimed);
-    // The verify link of password.ts claims too: the one call of the file is the reset's.
-    expect(reset.match(/deleteOAuthTokens\(/g), WINDOW_PAGE).toHaveLength(1);
-    for (const file of [
-      "magic-link.ts",
-      "email-otp.ts",
-      "social.ts",
-      "user-invite.ts",
-      "scim/users.ts",
-      "users.ts",
-    ])
-      expect(source(file), `${WINDOW_PAGE}: ${file}`).not.toMatch(/deleteOAuth(?:Tokens|Codes)\(/);
-    // The SQLite adapter runs the D1 code, so each write lands at once there too.
+    expect(take).toContain('purpose: "claim-lease",');
+    expect(take).toContain("CLAIM_LEASE_MS");
+    expect(source("users.ts")).toContain("export const CLAIM_LEASE_MS = 60_000;");
+    // Then the trusted rows, the flip, and the sessions, each once and in this order.
+    const steps = [
+      "await takeClaim(tx, userId, now);",
+      'await tx.delete("identity", where);',
+      'await tx.delete("password", passwords);',
+      'await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);',
+      '{ field: "purpose", op: "eq", value: "passkey-challenge" },',
+      '{ field: "purpose", op: "eq", value: "handoff-code" },',
+      "? { emailVerified: true, phone: null, updatedAt: now }",
+      "await endSessions(",
+    ];
+    const at = steps.map((step) => {
+      expect(claim.split(step), `${PROOF_PAGE}: claimEmail holds ${step} once`).toHaveLength(2);
+      return claim.indexOf(step);
+    });
+    expect(at, PROOF_PAGE).toEqual([...at].sort((a, b) => a - b));
+    const text = page("concepts/claim-rule.md");
+    const where = ORDER_WORDS.map((words) => {
+      expect(text, PROOF_PAGE).toContain(words);
+      return text.indexOf(words);
+    });
+    expect(where, PROOF_PAGE).toEqual([...where].sort((a, b) => a - b));
+    // The SQLite adapter runs the D1 code, so each statement lands at once there too.
     expect(readFileSync(`${REPO}packages/adapter-sqlite/src/adapter.ts`, "utf8")).toContain(
       "return createD1AdapterOn(driver.db, {",
     );
-    for (const words of WINDOW_WORDS)
-      expect(page("concepts/claim-rule.md"), WINDOW_PAGE).toContain(words);
+    for (const words of CLOSURE_WORDS) expect(text, PROOF_PAGE).toContain(words);
   });
+
+  it("holds the flag at creation and the proved read of address.ts at each verified-only helper", () => {
+    const open = body(source("sessions.ts"), "provedAtOpen");
+    expect(open).toContain("if (input.carriedProved !== undefined) return input.carriedProved;");
+    expect(open).toContain("if (input.user.isAnonymous) return false;");
+    expect(open).toContain("return hasAddress(input.user) ? input.user.emailVerified : true;");
+    const address = source("address.ts");
+    expect(body(address, "sessionProved")).toContain(
+      "return caller.session == null || caller.session.proved;",
+    );
+    for (const helper of ["handleProved", "provedAccount", "provedAddress"])
+      expect(body(address, helper), `${PROOF_PAGE}: ${helper}`).toContain("sessionProved(caller)");
+    expect(body(address, "handleProved")).toContain(
+      "return hasAddress(user) ? user.emailVerified : verifiedHandle(config, storage, user);",
+    );
+    expect(body(address, "provedAccount")).toContain(
+      "return hasAddress(user) ? user.emailVerified : !user.isAnonymous;",
+    );
+    expect(body(address, "provedAddress")).toContain(
+      "return sessionProved(caller) && caller.user.emailVerified;",
+    );
+    // A handle that signs in: a phone of the config, or a passkey of the user.
+    expect(body(address, "verifiedHandle")).toContain(
+      "if (phoneSignsIn(config, user)) return true;",
+    );
+    const text = page("concepts/claim-rule.md");
+    for (const words of [...CREATION_WORDS, ...GATE_WORDS])
+      expect(text, PROOF_PAGE).toContain(words);
+  });
+
+  it("names the five forms that take the session, each name read from the code", () => {
+    const forms = fiveForms();
+    expect(page("concepts/claim-rule.md"), PROOF_PAGE).toContain(
+      `${listOf(forms)} take the session for this reason.`,
+    );
+  });
+
+  // The version branch deletes each changeset. There the summary counts a skip (ruling 70 of plan 12j).
+  it.skipIf(!existsSync(SESSION_PROOF_CHANGESET))(
+    "names the five forms in the Breaking line of the changeset, and what to pass",
+    () => {
+      const forms = fiveForms();
+      expect(flat(SESSION_PROOF_CHANGESET)).toContain(
+        `Breaking: ${listOf(forms)} take \`session\` in place of \`user\` or \`userId\`. Pass the answer of \`api.getSession\` or \`auth.session\`.`,
+      );
+    },
+  );
 });
 
 const PORT_ROWS = [
