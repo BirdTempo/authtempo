@@ -20,7 +20,9 @@ const RAW = Symbol("raw");
 // any read by address. The uniform sign-up takes no name (ruling 16 M1).
 const SET_QUERIES = 6;
 const CHECK_QUERIES = 2;
-const SIGN_UP_QUERIES = 14;
+// Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1).
+// Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const SIGN_UP_QUERIES = 15;
 const TAKEN_QUERIES = 3;
 // The uniform sign-up with a name stops before any read of a user (ruling 16
 // M1): one query, the per-IP limit.

@@ -245,7 +245,9 @@ describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
     // 4.1 to 15.2): a link of a verified user 21, and the known identity 11 after it.
     expect({ created, claimed, factor }).toEqual({
       created: [23, 15],
-      claimed: [35, 15],
+      // Update 2026-11-04 by plan 12p: the claim writes the lease (+1).
+      // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+      claimed: [36, 15],
       factor: [21, 11],
     });
     for (const n of [...created, ...claimed, ...factor]) expect(n).toBeLessThanOrEqual(50);

@@ -325,7 +325,9 @@ const CLAIMANT: Partial<AuthConfig> = {
  * The create of the first case links a verified user and claims nothing: 20
  * queries (`MEASURED`).
  */
-const MEASURED_CLAIM = { create: 32 };
+// Update 2026-11-04 by plan 12p: the claim writes the lease, 33 queries.
+// Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const MEASURED_CLAIM = { create: 33 };
 
 describe("the SCIM create that claims an unverified user on D1 (decision 2 of plan 12o)", () => {
   it("claims the user inside 50 queries", async () => {

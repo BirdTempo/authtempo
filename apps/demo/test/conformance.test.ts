@@ -51,6 +51,8 @@ function inside<R>(name: string, fn: (db: D1Database) => Promise<R>): Promise<R>
 function forwardedAdapter(name: string): StorageAdapter {
   const on = (db: D1Database) => createD1Adapter(db);
   return {
+    // The D1 adapter keeps an undo log, so its transaction is not isolated (plan 12p).
+    isolated: false,
     create: (model, data) => inside(name, (db) => on(db).create(model, data)),
     createMany: (model, rows) => inside(name, (db) => on(db).createMany(model, rows)),
     // The chunk of the D1 adapter, with no call into the object.

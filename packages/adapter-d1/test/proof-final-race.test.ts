@@ -272,7 +272,9 @@ async function expectFinal(other: World, email: string, claimantSessions: string
 // confirm, or the reset in the mirror. After ruling 23 of plan 12o, scene A
 // sends no mail (17 before), and the identity race signs in (22 before, with
 // the answer 500). `other` is the Google sign-in of the race of ruling 26.
-const PINS = { a: 14, b: 23, c: 23, identity: 25, mirror: 37, other: 23 };
+// Update 2026-11-04 by plan 12p: each claim that runs writes the lease (+1).
+// Scene A loses its claim and writes nothing. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const PINS = { a: 14, b: 24, c: 24, identity: 26, mirror: 38, other: 24 };
 
 describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
   beforeEach(async () => {

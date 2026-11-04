@@ -774,6 +774,9 @@ const TOUCHED: Record<string, string[]> = {
   "a password set": ["user", "session"],
   "a password change": ["user", "session"],
   "a password reset": ["user", "session"],
+  // Plan 12p: the first statement of a claim on Postgres is the hold, an
+  // update of the user row while it is unverified. So the user row stays
+  // first. The lease, a verification row and no kind, runs on D1 only.
   "an email claim by a magic link": ["user", "session"],
   "an email claim by the sign-up link": ["user", "session"],
   "a second factor enable": ["user", "session"],

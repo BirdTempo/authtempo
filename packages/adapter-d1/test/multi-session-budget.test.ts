@@ -32,8 +32,10 @@ const now = () => new Date(NOW.getTime() + shift);
 // switch resolve each of the nine bag tokens. The switch then reads its
 // target as a request does, 3 queries more (ruling 34 H1 of plan 12i). The
 // sign-out ends ten sessions.
-const SIGN_UP_EMPTY_QUERIES = 13;
-const SIGN_UP_FULL_QUERIES = 17;
+// Update 2026-11-04 by plan 12p: each sign-up reads the claim lease (+1).
+// Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const SIGN_UP_EMPTY_QUERIES = 14;
+const SIGN_UP_FULL_QUERIES = 18;
 const LIST_QUERIES = 31;
 const SWITCH_QUERIES = 34;
 const SESSION_READ_QUERIES = 3;

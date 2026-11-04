@@ -24,7 +24,9 @@ const PASSWORD = "correct horse battery";
 // the second factor on. `replay` is the refusal of a token used before.
 // The claim ends the claimant's sessions in one delete since final review
 // B M of plan 12i, so `claim` went from 26 to 25 (run of 2026-10-25).
-const PINS = { nonce: 3, create: 25, claim: 25, challenge: 9, replay: 3 };
+// Update 2026-11-04 by plan 12p: the claim writes the lease, so `claim` went
+// from 25 to 26. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const PINS = { nonce: 3, create: 25, claim: 26, challenge: 9, replay: 3 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {

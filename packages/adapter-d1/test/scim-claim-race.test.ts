@@ -39,10 +39,16 @@ const BUDGET = 50;
 const RAW = Symbol("raw");
 const SQL = Symbol("sql");
 
-/** The claim's insert of the email identity. The flip of the claim comes next. */
+/** The claim's insert of the email identity. The lease of the claim comes next (plan 12p). */
 const IDENTITY_INSERT = /^INSERT INTO ta_identity\b/;
 /** The flip of a claim, not the undo of a flip. */
 const FLIP = /^UPDATE ta_user SET email_verified = \?/;
+/**
+ * The take of a stale lease (plan 12p). A claim runs it only when its lease
+ * create met the key of another lease. The watch sees no statement that
+ * throws, so it sees this one in place of the create.
+ */
+const LEASE = /^UPDATE ta_verification SET expires_at = \?/;
 /** The detail of the SCIM answer to a lost claim race (decision 1 of plan 12o). */
 const RACE = "Another request changed this resource at the same time. Send the request again.";
 
@@ -279,12 +285,14 @@ describe("the SCIM User create that loses a claim race on D1 (decisions 1 and 2 
     const side = engine(env.DB, false);
     const magic: { answer: Response | null } = { answer: null };
     let flips = 0;
+    let leases = 0;
     const v = view(
       env.DB,
       async (sql) => {
         if (FLIP.test(sql)) flips++;
+        else if (LEASE.test(sql)) leases++;
         else if (magic.answer === null && IDENTITY_INSERT.test(sql)) {
-          // The create inserted the email identity, and its flip comes next. The magic link claims first.
+          // The create inserted the email identity, and its lease comes next. The magic link claims first.
           magic.answer = await side.handle(post("/magic-link/verify", { token: link }));
         }
       },
@@ -292,8 +300,9 @@ describe("the SCIM User create that loses a claim race on D1 (decisions 1 and 2 
     );
     const race = await measure(engine(v.db, true), v.count, create(token));
     expect(magic.answer?.status).toBe(200);
-    // The flip of the create matched no row. The create ran no claim retry.
-    expect(flips).toBe(1);
+    // The lease of the create met the lease of the magic link (plan 12p): no
+    // flip, and no claim retry.
+    expect({ leases, flips }).toEqual({ leases: 1, flips: 0 });
     expect(race.res.status).toBe(409);
     expect(race.res.headers.get("content-type")).toContain("application/scim+json");
     expect(await race.res.json()).toStrictEqual({

@@ -24,9 +24,12 @@ const PASSWORD = "correct horse battery";
 // ruling 39 adds one query to each sign-up and each resend. A wrong code and
 // an unknown address do the same count: two limits and two reads, or two
 // limits, a read, and the count.
-const SIGN_UP_NEW_QUERIES = 14;
+// Update 2026-11-04 by plan 12p: the sign-up of a new address reads the
+// claim lease after the answer (+1), and the confirm's claim writes it (+1).
+// The queries before the answer stay the same. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+const SIGN_UP_NEW_QUERIES = 15;
 const SIGN_UP_KNOWN_QUERIES = 4;
-const CONFIRM_QUERIES = 23;
+const CONFIRM_QUERIES = 24;
 const WRONG_QUERIES = 4;
 const UNKNOWN_QUERIES = 4;
 const RESEND_QUERIES = 8;

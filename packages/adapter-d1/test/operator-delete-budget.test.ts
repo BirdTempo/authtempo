@@ -929,7 +929,9 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    * answer. A verified user skips the
    * identity write and the claim: 16. The confirm has no loop and no page.
    */
-  const INVITE_COUNTS = { create: 9, confirm: [27, 16] };
+  // Update 2026-11-04 by plan 12p: the claim of the confirm writes the lease
+  // (+1), so 28. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+  const INVITE_COUNTS = { create: 9, confirm: [28, 16] };
 
   it("creates a user with an invitation in 50 calls (plan 12f2 Task 3)", async () => {
     const sent: MailMessage[] = [];

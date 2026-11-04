@@ -47,6 +47,12 @@ const IDENTITY_INSERT = /^INSERT INTO ta_identity\b/;
 const CONSUME = /^UPDATE ta_verification SET consumed_at = \?/;
 /** The flip of a claim, not the undo of a flip. */
 const FLIP = /^UPDATE ta_user SET email_verified = \?/;
+/**
+ * The take of a stale lease (plan 12p). A claim runs it only when its lease
+ * create met the key of another lease. The watch sees no statement that
+ * throws, so it sees this one in place of the create.
+ */
+const LEASE = /^UPDATE ta_verification SET expires_at = \?/;
 /** The claim's read of the claimant sessions, before their delete by id. */
 const SESSION_READ = /^SELECT\b[\s\S]*\bFROM ta_session WHERE user_id = \?/;
 
@@ -436,8 +442,8 @@ describe("the invitation confirm beside a magic link of the address on D1 (rulin
 
   // The counter case of decision 13 holds on a store with no query limit.
   // Since plan 12o a session race throws nothing, so the one claim retry is
-  // the lost flip.
-  it("signs in after a unique-key retry and a lost flip on the D1 code with no query limit", async () => {
+  // the lost claim. Since plan 12p the claim loses at its lease.
+  it("signs in after a unique-key retry and a lost claim on the D1 code with no query limit", async () => {
     const sent: MailMessage[] = [];
     const s = await invitedWithSessions(sent, 4);
     const quiet = engine(env.DB, sent, { impersonation: false, limit: false }).auth;
@@ -449,10 +455,12 @@ describe("the invitation confirm beside a magic link of the address on D1 (rulin
     let answer: Promise<Response> | null = null;
     let stage = 0;
     let flips = 0;
+    let leases = 0;
     const v = view(
       env.DB,
       async (sql) => {
         if (FLIP.test(sql)) flips++;
+        if (LEASE.test(sql)) leases++;
         if (stage === 0 && IDENTITY_READ.test(sql)) {
           // The confirm read no identity. The magic link runs up to its insert.
           stage = 1;
@@ -465,8 +473,8 @@ describe("the invitation confirm beside a magic link of the address on D1 (rulin
           m.resume.open();
           await m.flipped.opened;
         } else if (stage === 2 && CONSUME.test(sql)) {
-          // 4. The flip of the confirm matched no row: a claim retry spent the
-          // link again. The magic link ends its claim first.
+          // 4. The lease of the confirm met the lease of the magic link: a
+          // claim retry spent the link again. The magic link ends its claim first.
           stage = 3;
           m.race.open();
           await answer;
@@ -484,8 +492,8 @@ describe("the invitation confirm beside a magic link of the address on D1 (rulin
     expect(stage).toBe(3);
     expect(outs).toEqual(["magic link"]);
     expect(res.status).toBe(200);
-    // The lost flip only: the retry found a verified user and claimed nothing.
-    expect(flips).toBe(1);
+    // The lost lease only (plan 12p): no flip, and the retry found a verified user and claimed nothing.
+    expect({ leases, flips }).toEqual({ leases: 1, flips: 0 });
     const me = await quiet.api.getSession(setToken(res) ?? "");
     expect(me?.user.id).toBe(s.userId);
     expect(me?.user.emailVerified).toBe(true);
