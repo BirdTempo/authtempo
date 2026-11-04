@@ -1046,6 +1046,67 @@ describe("a password sign-in that straddles the claim (ruling 16 of plan 12p)", 
   });
 });
 
+/** A handoff code that the claimant's browser session mints before the claim, with its verifier. */
+async function claimantCode(w: World, token: string) {
+  const live = await resolveSession(w.config, token);
+  if (!live) throw new Error("no browser session");
+  const verifier = recordCredential("s".repeat(43));
+  const started = await startHandoff(w.config, {
+    challenge: await sha256Base64UrlOf(verifier),
+    redirect: "consumera://auth",
+    ip: null,
+  });
+  if (!started.ok) throw new Error(started.code);
+  const cont = await continueHandoff(w.config, {
+    handoffId: started.value.handoffId,
+    userId: live.user.id,
+    sessionId: live.session.id,
+  });
+  if (!cont.ok) throw new Error(cont.code);
+  const code = recordCredential(new URL(cont.value.location).searchParams.get("code") ?? "");
+  return { code, verifier };
+}
+
+describe("a handoff redeem that straddles the claim (ruling 16 of plan 12p)", () => {
+  it("(a) runs after the flip, finds no code, and opens no session", async () => {
+    const w = world();
+    const minted = await claimantCode(w, await claimant(w));
+    const verify = await ownerLink(w);
+    let late: string | null = null;
+    w.armed.run = async () => {
+      const r = await redeemHandoff(w.config, { ...minted, ip: null, userAgent: null });
+      late = r.ok ? "ok" : r.code;
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(late).toBe("invalid_token");
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("(b) runs before the delete of the code, commits an unproved session, and the claim's session delete removes it", async () => {
+    const w = world();
+    const minted = await claimantCode(w, await claimant(w));
+    const verify = await ownerLink(w);
+    let inside: { code: string; proved: boolean | undefined; token: string } | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      const r = await redeemHandoff(w.config, { ...minted, ip: null, userAgent: null });
+      if (!r.ok) throw new Error(r.code);
+      const made = recordCredential(r.value.token);
+      inside = {
+        code: "ok",
+        proved: (await rowOf(w, made))?.proved,
+        token: await tokenCreate(w, made),
+      };
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(inside).toEqual({ code: "ok", proved: false, token: "403 email_unverified" });
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+    expect(await w.storage.findMany("apiToken", [])).toEqual([]);
+  });
+});
+
 /**
  * A world with Google sign-in. `callback` runs one Google sign-in on
  * `config`: the subject `g-claimant`, the claimed address, and the address
@@ -1320,6 +1381,61 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
       await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user.id }]),
     ).toEqual([]);
     expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("undoes the deletes of a late claim whose lease came after a rival claim ended: the rival's password is back", async () => {
+    // The late claim reads the user before the rival's claim. Its
+    // user.beforeVerify waits while the rival claims, and 60 seconds go by.
+    // So it takes the rival's lease as stale, deletes, and its flip matches
+    // no row. The D1 view undoes only what the late claim wrote.
+    const hook: { run: (() => Promise<void>) | null } = { run: null };
+    const w = world({
+      extra: {
+        hooks: {
+          user: {
+            beforeVerify: async () => {
+              const run = hook.run;
+              hook.run = null;
+              await run?.();
+            },
+          },
+        },
+      },
+    });
+    await claimant(w);
+    const link = await ownerLinkToken(w);
+    const NEW = recordCredential("the owner's new password");
+    let reset: string | null = null;
+    hook.run = async () => {
+      // The rival: the owner's reset, on the claimant's store with no lock. It claims the user.
+      const asked = await w.claimant.handle(
+        req("POST", "/password/reset/request", { email: CLAIMED }),
+      );
+      expect(asked.status).toBe(200);
+      const text = w.mail.findLast((m) => m.to === CLAIMED)?.text ?? "";
+      const done = await w.claimant.handle(
+        req("POST", "/password/reset", { token: tokenFromMail(text), password: NEW }),
+      );
+      expect(await answer(done)).toBe("200 ok");
+      reset = setToken(done);
+      w.clock.advance(CLAIM_LEASE_MS + 1);
+    };
+    const late = await verifyMagicLink(d1Like(w.ownerConfig), {
+      token: link,
+      ip: null,
+      userAgent: null,
+    });
+    expect(hook.run).toBeNull();
+    // The flip of the late claim matched no row, so it threw and undid its
+    // deletes. Its retry found the verified user and signed in.
+    expect(late.ok).toBe(true);
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    // The rival's kept rows are back: its password signs in, and its session lives.
+    expect((await rowOf(w, reset ?? ""))?.userId).toBe((await userAt(w, CLAIMED)).id);
+    const signIn = await w.claimant.handle(
+      req("POST", "/password/sign-in", { email: CLAIMED, password: NEW }),
+    );
+    expect(await answer(signIn)).toBe("200 ok");
   });
 
   it("stays after the claim, and the sweep deletes it after 60 seconds", async () => {
