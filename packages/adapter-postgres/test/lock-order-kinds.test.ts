@@ -1290,7 +1290,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "oauth-client-store deleteClient": "no kind: oauth rows only",
   "oauth-clients refreshCimdRow": "no kind: oauth rows only",
   "oauth-grants revokeGrant": "no kind: oauth rows only",
-  "organization-tokens createOrganizationToken": ["an organization token create"],
+  "organization-tokens mintOrganizationToken": ["an organization token create"],
   "organizations ownerWrite": [
     "an owner removal",
     "an operator removal with an impersonation",
@@ -1367,7 +1367,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "user-invite confirmUserInvite": ["an invitation confirm"],
   "teams removeTeamMember": ["a team member removal", "a team leave"],
   "teams setActiveTeam": ["a set of the active team"],
-  "tokens createApiToken": "one kind: the user hold, then token rows",
+  "tokens mintApiToken": "one kind: the user hold, then token rows",
   "totp enableTotp": ["a second factor enable"],
   "totp disableTotpWithCode": "no kind: the factor rows only",
   "totp twoFactorGate": "no kind: the password row and the challenge row",
