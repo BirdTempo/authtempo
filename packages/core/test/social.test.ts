@@ -471,6 +471,8 @@ describe("resolveSocialUser", () => {
       findMany: (m, w, o) => a.findMany(m, w, o),
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
+      deleteRows: (m, w) => a.deleteRows(m, w),
+      keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
     const r = await resolveSocialUser(wrap(inner), "google", profile, now, noVerifyHooks("social"));

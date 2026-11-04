@@ -659,6 +659,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       findMany: (m, w, o) => a.findMany(m, w, o),
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
+      deleteRows: (m, w) => a.deleteRows(m, w),
+      keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
     const r = await findOrCreateUserByEmail(
@@ -998,6 +1000,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       findMany: (m, w, o) => a.findMany(m, w, o),
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
+      deleteRows: (m, w) => a.deleteRows(m, w),
+      keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
     const loser = await passwordSignUp(
@@ -1046,6 +1050,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       findMany: (m, w, o) => a.findMany(m, w, o),
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
+      deleteRows: (m, w) => a.deleteRows(m, w),
+      keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
     const loser = await passwordSignUp(
@@ -1162,6 +1168,8 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       findMany: (m, w, o) => a.findMany(m, w, o),
       update: (m, w, d) => a.update(m, w, d),
       delete: (m, w) => a.delete(m, w),
+      deleteRows: (m, w) => a.deleteRows(m, w),
+      keep: () => a.keep(),
       transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
     });
     const loser = await resetPassword(

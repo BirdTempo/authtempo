@@ -420,6 +420,8 @@ describe("passkey authentication", () => {
         return inner.update(m, w, d);
       },
       delete: (m, w) => inner.delete(m, w),
+      deleteRows: (m, w) => inner.deleteRows(m, w),
+      keep: () => inner.keep(),
       transaction: (fn) => inner.transaction(fn),
     };
     const r = await verifyPasskeyAuthentication(

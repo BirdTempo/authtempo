@@ -1117,6 +1117,11 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         tick();
         return s.delete(m, w);
       },
+      deleteRows: (m, w) => {
+        tick();
+        return s.deleteRows(m, w);
+      },
+      keep: () => s.keep(),
       transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
     });
     const inner = { ...store };
@@ -1336,6 +1341,8 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       findMany: (m, wh, o) => capped(() => s.findMany(m, wh, o)),
       update: (m, wh, d) => capped(() => s.update(m, wh, d)),
       delete: (m, wh) => capped(() => s.delete(m, wh)),
+      deleteRows: (m, wh) => capped(() => s.deleteRows(m, wh)),
+      keep: () => s.keep(),
       transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
     });
     Object.assign(store, wrap(inner));

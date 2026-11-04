@@ -69,8 +69,15 @@ export function runMysqlSuites(server: MysqlServer): void {
 
   // MySQL has row locks, so the adapter must have lockInOrder (ruling 37 of
   // plan 12f). Its lock is two statements: the ids, then the lock by id. The
-  // adapter must have its ping (ruling 26 of the 12g lane).
-  runAdapterConformance(name, target, { rowLocks: true, lockStatements: 2, ping: true, oldStore });
+  // adapter must have its ping (ruling 26 of the 12g lane). Its deleteRows is
+  // three: the ids, the rows under their locks, and the delete by id (plan 12o).
+  runAdapterConformance(name, target, {
+    rowLocks: true,
+    lockStatements: 2,
+    deleteRowsStatements: 3,
+    ping: true,
+    oldStore,
+  });
 
   runLimiterConformance(name, async () => {
     const db = await supply.take();

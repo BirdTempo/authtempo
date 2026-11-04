@@ -117,6 +117,11 @@ export class StorageError extends Error {
  * writes are reversed. Rows that other callers wrote in the meantime stay.
  * Two concurrent transactions that read and then create the same unique
  * value leave one row. The loser may fail with `unique_violation`.
+ *
+ * Update 2026-11-04 by plan 12o: `keep` makes the writes so far final, so a
+ * later throw reverses only the later writes. That holds on a store with no
+ * isolation (D1, SQLite) and on memory. On Postgres and MySQL it does
+ * nothing, and a throw still reverses the whole transaction.
  */
 export interface StorageAdapter {
   create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]>;
@@ -141,6 +146,30 @@ export interface StorageAdapter {
     data: Partial<Omit<Models[M], "id">>,
   ): Promise<number>;
   delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number>;
+  /**
+   * Deletes the rows that `where` matches and answers them, in the shape of
+   * `findMany` (plan 12o). A row that another caller removed first is not
+   * in the answer, so the answer is the rows that this call removed. It
+   * keeps the argument rules of `delete`. D1, SQLite, and Postgres run one
+   * `DELETE … RETURNING`. MySQL has no RETURNING: it reads the ids, reads
+   * the rows under their locks by id, and deletes them by id, in one
+   * transaction. So no other caller removes a row between the read and the
+   * delete. Inside a transaction a throw puts the rows back, as for `delete`.
+   */
+  deleteRows<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M][]>;
+  /**
+   * Makes the writes of the open transaction so far final (plan 12o): a
+   * later throw reverses only the writes after this call. Inside a nested
+   * transaction, it makes final only the writes of that nested call.
+   * Answers true when a later throw keeps those writes. That holds on D1,
+   * on SQLite, on memory, and outside a transaction, where no write is
+   * reversed. On Postgres and MySQL it does nothing and answers false. There
+   * the open transaction is isolated, and a parallel writer of the same
+   * row waits for its row lock. So a throw still reverses the whole
+   * transaction, and no other caller saw its writes. A claim calls it after
+   * its last write, so a throw after the claim keeps the claim (spec 8.9).
+   */
+  keep(): Promise<boolean>;
   transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T>;
   /**
    * Optional. The count of statements that this adapter sent to its

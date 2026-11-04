@@ -41,6 +41,10 @@ export const SQLITE_BOUND_PARAMS = 32_766;
  * which keeps a pass and not a failure (ruling 27 of the 12g lane). Then it
  * reads the schema version with no cache, each call, as on D1 (ruling 26,
  * plan 12h Task 8). That query counts in `statementsSent` only.
+ * The port calls `deleteRows` and `keep` of plan 12o are the D1 code too:
+ * one DELETE … RETURNING, and the undo log. The conformance cases of both
+ * passed on node:sqlite, better-sqlite3, bun:sqlite, and libSQL by file and
+ * by HTTP on 2026-11-04.
  */
 export function createSqliteAdapter(driver: SqliteDriver): StorageAdapter {
   const sent = { statements: 0, ready: 0 };

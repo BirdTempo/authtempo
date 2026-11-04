@@ -118,6 +118,12 @@ export interface ConformanceOptions {
    * compat storage writes a placeholder for a null and reads it back as null.
    */
   nullEmail?: boolean;
+  /**
+   * The statements of one `deleteRows` that removes rows, for
+   * `statementsSent` (plan 12o). MySQL sends 3: the read of the ids, the
+   * read of the rows under their locks, and the delete by id. Default 1.
+   */
+  deleteRowsStatements?: number;
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -1982,6 +1988,189 @@ export function runAdapterConformance(
           ["u2", "Bea"],
         ]);
       });
+    });
+
+    describe("the transaction calls deleteRows and keep (plan 12o)", () => {
+      const at = new Date("2026-11-04T00:00:00.000Z");
+      /** A session of user `u-dr`, with its own token hash. */
+      const session = (id: string, userId = "u-dr"): SessionRow => ({
+        id,
+        userId,
+        tokenHash: `hash-${id}`,
+        expiresAt: new Date(at.getTime() + 60_000),
+        lastSeenAt: at,
+        ip: "203.0.113.9",
+        userAgent: `agent ${id}`,
+        activeOrganizationId: null,
+        freshAt: at,
+        actorId: null,
+        activeTeamId: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      /** The user `u-dr` and its sessions `ids`, as `findMany` reads them back. */
+      const seed = async (ids: string[]) => {
+        // A session names a user; the compatibility storage has a foreign key on it.
+        await db.create("user", { ...user("u-dr", "dr@example.com", at), name: "Dee" });
+        for (const id of ids) await db.create("session", session(id));
+        return db.findMany("session", [{ field: "id", op: "in", value: ids }], {
+          sort: { field: "id", dir: "asc" },
+        });
+      };
+      const byUser = [{ field: "userId" as const, op: "eq" as const, value: "u-dr" }];
+      const left = async () =>
+        (await db.findMany("session", byUser, { sort: { field: "id", dir: "asc" } })).map(
+          (r) => r.id,
+        );
+      const sorted = <T extends { id: string }>(rows: T[]) =>
+        [...rows].sort((a, b) => (a.id < b.id ? -1 : 1));
+
+      it("deleteRows answers the rows it removed in the shape of findMany, outside and inside a transaction", async () => {
+        const rows = await seed(["s1", "s2", "s3"]);
+        const outside = await db.deleteRows("session", [
+          ...byUser,
+          { field: "id", op: "in", value: ["s1", "s2", "s9"] },
+        ]);
+        expect(sorted(outside)).toEqual(rows.slice(0, 2));
+        expect(await left()).toEqual(["s3"]);
+        const inside = await db.transaction((tx) => tx.deleteRows("session", byUser));
+        expect(inside).toEqual(rows.slice(2));
+        expect(await left()).toEqual([]);
+        // Every field comes back as the reads give it, also on a table with mapped columns.
+        const person = await db.findOne("user", [{ field: "id", op: "eq", value: "u-dr" }]);
+        expect(await db.deleteRows("user", [{ field: "id", op: "eq", value: "u-dr" }])).toEqual([
+          person,
+        ]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u-dr" }])).toBeNull();
+      });
+
+      it("deleteRows keeps the argument rules of delete", async () => {
+        await seed(["s1"]);
+        expect(await db.deleteRows("session", [{ field: "id", op: "in", value: [] }])).toEqual([]);
+        expect(await db.deleteRows("session", [{ field: "id", op: "eq", value: "s9" }])).toEqual(
+          [],
+        );
+        await expect(db.deleteRows("session", [])).rejects.toMatchObject({
+          name: "StorageError",
+          code: "invalid_argument",
+        });
+        expect(await left()).toEqual(["s1"]);
+      });
+
+      it("deleteRows sends the statements of one call in statementsSent", async () => {
+        if (!db.statementsSent) return;
+        await seed(["s1", "s2"]);
+        const one = async (step: () => Promise<unknown>) => {
+          const before = db.statementsSent?.() ?? 0;
+          await step();
+          return (db.statementsSent?.() ?? 0) - before;
+        };
+        const counts = [await one(() => db.deleteRows("session", byUser))];
+        await db.create("session", session("s3"));
+        await db.transaction(async (tx) => {
+          counts.push(await one(() => tx.deleteRows("session", byUser)));
+        });
+        const n = options.deleteRowsStatements ?? 1;
+        expect(counts).toEqual([n, n]);
+      });
+
+      it("deleteRows leaves out a row that another caller removed first, and waits for its lock where the store has row locks", async () => {
+        const rows = await seed(["s1", "s2", "s3"]);
+        let removed: () => void = () => {};
+        const gone = new Promise<void>((r) => {
+          removed = r;
+        });
+        let commit: () => void = () => {};
+        const held = new Promise<void>((r) => {
+          commit = r;
+        });
+        // The rival deletes s2 and holds its transaction open.
+        const rival = db.transaction(async (tx) => {
+          expect(await tx.delete("session", [{ field: "id", op: "eq", value: "s2" }])).toBe(1);
+          removed();
+          await held;
+        });
+        await gone;
+        const mine = db.transaction((tx) => tx.deleteRows("session", byUser));
+        // With row locks, the call waits for the rival's lock on s2 until the commit.
+        await new Promise((r) => setTimeout(r, 300));
+        commit();
+        await rival;
+        expect(sorted(await mine)).toEqual([rows[0], rows[2]]);
+        expect(await left()).toEqual([]);
+      });
+
+      it("a throw after deleteRows in a transaction puts back the rows it answered", async () => {
+        const rows = await seed(["s1", "s2"]);
+        await expect(
+          db.transaction(async (tx) => {
+            expect(sorted(await tx.deleteRows("session", byUser))).toEqual(rows);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await db.findMany("session", byUser, { sort: { field: "id", dir: "asc" } })).toEqual(
+          rows,
+        );
+      });
+
+      it("keep answers true outside a transaction, where no write is reversed", async () => {
+        expect(await db.keep()).toBe(true);
+      });
+
+      if (options.rowLocks)
+        it("keep does nothing on a store with row locks: the transaction is isolated, so a throw reverses all of it", async () => {
+          await seed(["s1", "s2"]);
+          await expect(
+            db.transaction(async (tx) => {
+              await tx.create("session", session("s3"));
+              await tx.deleteRows("session", [{ field: "id", op: "eq", value: "s1" }]);
+              expect(await tx.keep()).toBe(false);
+              await tx.create("session", session("s4"));
+              throw new Error("boom");
+            }),
+          ).rejects.toThrow("boom");
+          expect(await left()).toEqual(["s1", "s2"]);
+        });
+      else
+        it("keep makes the writes so far final: a later throw reverses only the later writes", async () => {
+          await seed(["s1", "s2", "s3"]);
+          await expect(
+            db.transaction(async (tx) => {
+              await tx.create("session", session("s4"));
+              await tx.update("user", [{ field: "id", op: "eq", value: "u-dr" }], { name: "Ada" });
+              await tx.deleteRows("session", [{ field: "id", op: "eq", value: "s1" }]);
+              await tx.delete("session", [{ field: "id", op: "eq", value: "s2" }]);
+              expect(await tx.keep()).toBe(true);
+              await tx.create("session", session("s5"));
+              await tx.update("user", [{ field: "id", op: "eq", value: "u-dr" }], { name: "Bea" });
+              await tx.delete("session", [{ field: "id", op: "eq", value: "s3" }]);
+              throw new Error("boom");
+            }),
+          ).rejects.toThrow("boom");
+          expect(await left()).toEqual(["s3", "s4"]);
+          const person = await db.findOne("user", [{ field: "id", op: "eq", value: "u-dr" }]);
+          expect(person?.name).toBe("Ada");
+        });
+
+      if (!options.rowLocks)
+        it("keep in a nested transaction makes final only the writes of that nested call", async () => {
+          await seed([]);
+          await expect(
+            db.transaction(async (tx) => {
+              await tx.create("session", session("s1"));
+              await expect(
+                tx.transaction(async (inner) => {
+                  await inner.create("session", session("s2"));
+                  expect(await inner.keep()).toBe(true);
+                  await inner.create("session", session("s3"));
+                  throw new Error("inner");
+                }),
+              ).rejects.toThrow("inner");
+              throw new Error("outer");
+            }),
+          ).rejects.toThrow("outer");
+          expect(await left()).toEqual(["s2"]);
+        });
     });
 
     describe("createMany (ruling 57 of plan 12d)", () => {

@@ -1025,8 +1025,48 @@ export interface SqlStatements {
     rows: readonly Record<string, unknown>[],
     data: Partial<Omit<Models[M], "id">>,
   ): Statement[];
-  /** A delete inside a D1 transaction, with RETURNING of every raw column the undo needs. */
+  /**
+   * A delete with RETURNING of every raw column the undo needs: the delete
+   * inside a D1 transaction. On core's tables each raw column is a field, so
+   * `decode` takes a returned row. Then it is also the delete of the port
+   * call `deleteRows` on D1, SQLite, and Postgres (plan 12o).
+   */
   deleteReturning<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+  /**
+   * Optional. The delete of `deleteRows` for a table set whose raw columns
+   * are not its fields (plan 12o). Its RETURNING holds each raw column, as
+   * `deleteReturning`, then the read form of `select` under `READ_ALIAS`.
+   * `returnedParts` splits each returned row. Without it, the adapter runs
+   * `deleteReturning`.
+   */
+  deleteReturningRead?<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+}
+
+/**
+ * The prefix of each read column in the RETURNING list of
+ * `deleteReturningRead` (plan 12o). No raw column name starts with it.
+ */
+export const READ_ALIAS = "ta_read:";
+
+/**
+ * One row of `deleteReturning` or `deleteReturningRead`: the raw row for the
+ * undo, and the row that `decode` takes. A row with no column under
+ * `READ_ALIAS` comes from `deleteReturning`, and its raw row is its read row.
+ */
+export function returnedParts(row: Record<string, unknown>): {
+  raw: Record<string, unknown>;
+  read: Record<string, unknown>;
+} {
+  const raw: Record<string, unknown> = {};
+  const read: Record<string, unknown> = {};
+  let split = false;
+  for (const [key, value] of Object.entries(row)) {
+    if (key.startsWith(READ_ALIAS)) {
+      read[key.slice(READ_ALIAS.length)] = value;
+      split = true;
+    } else raw[key] = value;
+  }
+  return { raw, read: split ? read : raw };
 }
 
 /** Core's own statements on the `ta_` tables. The D1 strings are the ones the adapter built before plan 9. */
