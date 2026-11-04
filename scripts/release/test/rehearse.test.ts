@@ -514,7 +514,7 @@ describe("rehearse", () => {
         '    "minor": "0.1",',
         '    "status": "security",',
         '    "released": "2026-11-02",',
-        '    "schemaFrom": [15],',
+        '    "schemaFrom": [16],',
         '    "securityUntil": "2027-04-05"',
         "  }",
         "]",

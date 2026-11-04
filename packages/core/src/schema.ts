@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 export interface BaseRow {
   id: string;
@@ -64,6 +64,15 @@ export interface SessionRow extends BaseRow {
   actorId: string | null;
   /** The team the session acts in, of its active organization (plan 12k). Null: none. */
   activeTeamId: string | null;
+  /**
+   * True when the sign-in that made the session proved the account (plan
+   * 12p). The engine sets it once, at the creation, and a hook cannot set
+   * it. A verified-only action reads it with the user row. So a session
+   * made before the proof of its address never gains verified powers.
+   * Migration 0016 fills a row of version 15 from its user: true for a
+   * verified user with an address, else false.
+   */
+  proved: boolean;
 }
 
 export type VerificationPurpose =
@@ -916,6 +925,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       freshAt: { type: "date", nullable: true },
       actorId: { type: "string", nullable: true },
       activeTeamId: { type: "string", nullable: true },
+      // NOT NULL. The default false lives in migration 0016 only (plan 12p):
+      // a field here has no default, and core writes every field on each insert.
+      proved: { type: "boolean" },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"], ["activeOrganizationId"]],

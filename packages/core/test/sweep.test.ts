@@ -70,6 +70,7 @@ describe("sweepExpired", () => {
         freshAt: now,
         actorId: null,
         activeTeamId: null,
+        proved: false,
         createdAt: now,
         updatedAt: now,
       });

@@ -19,8 +19,8 @@ describe("schema version 12 (plan 12f)", () => {
       ["banReason", { type: "string", nullable: true }],
       ["banUntil", { type: "date", nullable: true }],
     ]);
-    // Plan 12k adds activeTeamId after actorId.
-    expect(Object.entries(schema.session.fields).at(-2)).toEqual([
+    // Plan 12k adds activeTeamId after actorId, and plan 12p adds proved after it.
+    expect(Object.entries(schema.session.fields).at(-3)).toEqual([
       "actorId",
       { type: "string", nullable: true },
     ]);

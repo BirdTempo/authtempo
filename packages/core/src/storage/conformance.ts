@@ -1501,6 +1501,8 @@ export function runAdapterConformance(
         freshAt: null,
         actorId: null,
         activeTeamId: null,
+        // The user is not verified, so the engine sets false (plan 12p).
+        proved: false,
         createdAt: at,
         updatedAt: at,
       };
@@ -1528,6 +1530,62 @@ export function runAdapterConformance(
       expect(
         (await db.findOne("session", [{ field: "id", op: "eq", value: "s2" }]))?.freshAt,
       ).toEqual(at);
+    });
+
+    it("round-trips the proof mark of a session, true and false (plan 12p)", async () => {
+      const at = new Date("2026-11-04T00:00:00.000Z");
+      // A phone user with no address: the phone code proves the account, so the engine
+      // sets true. A claimant with an unverified address: the engine sets false.
+      await db.create("user", {
+        ...user("u-phone", "unused@example.com", at),
+        email: null,
+        phone: "+14155550199",
+      });
+      await db.create("user", user("u-claim", "claim@example.com", at));
+      const row = (id: string, userId: string, proved: boolean): SessionRow => ({
+        id,
+        userId,
+        tokenHash: `h-${id}`,
+        expiresAt: new Date(at.getTime() + 60_000),
+        lastSeenAt: at,
+        ip: null,
+        userAgent: null,
+        activeOrganizationId: null,
+        freshAt: at,
+        actorId: null,
+        activeTeamId: null,
+        proved,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const phone = row("s-phone", "u-phone", true);
+      const claim = row("s-claim", "u-claim", false);
+      await db.create("session", phone);
+      await db.create("session", claim);
+      expect(await db.findOne("session", [{ field: "id", op: "eq", value: "s-phone" }])).toEqual(
+        phone,
+      );
+      expect(await db.findOne("session", [{ field: "id", op: "eq", value: "s-claim" }])).toEqual(
+        claim,
+      );
+      for (const [value, ids] of [
+        [true, ["s-phone"]],
+        [false, ["s-claim"]],
+      ] as const)
+        expect(
+          (await db.findMany("session", [{ field: "proved", op: "eq", value }])).map((s) => s.id),
+        ).toEqual(ids);
+      // A write of another field keeps the mark.
+      const later = new Date(at.getTime() + 1000);
+      expect(
+        await db.update("session", [{ field: "id", op: "eq", value: "s-phone" }], {
+          lastSeenAt: later,
+          updatedAt: later,
+        }),
+      ).toBe(1);
+      expect(
+        (await db.findOne("session", [{ field: "id", op: "eq", value: "s-phone" }]))?.proved,
+      ).toBe(true);
     });
 
     describe("schema version 12 round-trips (plan 12f)", () => {
@@ -1566,6 +1624,8 @@ export function runAdapterConformance(
           freshAt: null,
           actorId: "u-operator",
           activeTeamId: null,
+          // An impersonation takes the state of its target, who is not verified (plan 12p).
+          proved: false,
           createdAt: at,
           updatedAt: at,
         };
@@ -2005,6 +2065,8 @@ export function runAdapterConformance(
         freshAt: at,
         actorId: null,
         activeTeamId: null,
+        // The user is not verified, so the engine sets false (plan 12p).
+        proved: false,
         createdAt: at,
         updatedAt: at,
       });

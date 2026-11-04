@@ -11,7 +11,8 @@ describe("schema version 13 (plan 12k)", () => {
   });
 
   it("adds the new fields of session, invitation, and apiToken as the last nullable fields", () => {
-    expect(Object.entries(schema.session.fields).at(-1)).toEqual([
+    // Plan 12p adds proved after activeTeamId.
+    expect(Object.entries(schema.session.fields).at(-2)).toEqual([
       "activeTeamId",
       { type: "string", nullable: true },
     ]);

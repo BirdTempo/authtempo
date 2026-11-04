@@ -648,6 +648,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       freshAt: null,
       actorId: null,
       activeTeamId: null,
+      proved: false,
       createdAt: t0,
       updatedAt: t0,
     });

@@ -2584,7 +2584,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_session WHERE id = ? RETURNING id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id",
+    "sql": "DELETE FROM ta_session WHERE id = ? RETURNING id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved",
   },
   "session.insert": {
     "params": [
@@ -2601,8 +2601,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-actorId",
       "s-activeTeamId",
+      1,
     ],
-    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "session.reinsertRow": {
     "params": [
@@ -2619,8 +2620,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-actorId",
       "s-activeTeamId",
+      1,
     ],
-    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "session.restoreRow": {
     "params": [
@@ -2648,9 +2650,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-actorId",
       "s-activeTeamId",
       "s-activeTeamId",
+      1,
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_session SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, user_id = CASE WHEN user_id IS ? THEN ? ELSE user_id END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, last_seen_at = CASE WHEN last_seen_at IS ? THEN ? ELSE last_seen_at END, ip = CASE WHEN ip IS ? THEN ? ELSE ip END, user_agent = CASE WHEN user_agent IS ? THEN ? ELSE user_agent END, active_organization_id = CASE WHEN active_organization_id IS ? THEN ? ELSE active_organization_id END, fresh_at = CASE WHEN fresh_at IS ? THEN ? ELSE fresh_at END, actor_id = CASE WHEN actor_id IS ? THEN ? ELSE actor_id END, active_team_id = CASE WHEN active_team_id IS ? THEN ? ELSE active_team_id END WHERE id = ?",
+    "sql": "UPDATE ta_session SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, user_id = CASE WHEN user_id IS ? THEN ? ELSE user_id END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, last_seen_at = CASE WHEN last_seen_at IS ? THEN ? ELSE last_seen_at END, ip = CASE WHEN ip IS ? THEN ? ELSE ip END, user_agent = CASE WHEN user_agent IS ? THEN ? ELSE user_agent END, active_organization_id = CASE WHEN active_organization_id IS ? THEN ? ELSE active_organization_id END, fresh_at = CASE WHEN fresh_at IS ? THEN ? ELSE fresh_at END, actor_id = CASE WHEN actor_id IS ? THEN ? ELSE actor_id END, active_team_id = CASE WHEN active_team_id IS ? THEN ? ELSE active_team_id END, proved = CASE WHEN proved IS ? THEN ? ELSE proved END WHERE id = ?",
   },
   "session.select": {
     "params": [
@@ -2660,7 +2664,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id FROM ta_session WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved FROM ta_session WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "session.undoCreate": {
     "params": [
@@ -2672,7 +2676,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id FROM ta_session WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved FROM ta_session WHERE id = ?",
   },
   "session.update": {
     "params": [
@@ -2688,9 +2692,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-actorId",
       "s-activeTeamId",
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_session SET created_at = ?, updated_at = ?, user_id = ?, token_hash = ?, expires_at = ?, last_seen_at = ?, ip = ?, user_agent = ?, active_organization_id = ?, fresh_at = ?, actor_id = ?, active_team_id = ? WHERE id = ?",
+    "sql": "UPDATE ta_session SET created_at = ?, updated_at = ?, user_id = ?, token_hash = ?, expires_at = ?, last_seen_at = ?, ip = ?, user_agent = ?, active_organization_id = ?, fresh_at = ?, actor_id = ?, active_team_id = ?, proved = ? WHERE id = ?",
   },
   "ssoConnection.delete": {
     "params": [
@@ -6144,7 +6149,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_session WHERE id = $1 RETURNING id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id",
+    "sql": "DELETE FROM ta_session WHERE id = $1 RETURNING id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved",
   },
   "session.insert": {
     "params": [
@@ -6161,8 +6166,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-actorId",
       "s-activeTeamId",
+      true,
     ],
-    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "session.reinsertRow": {
     "params": [
@@ -6179,8 +6185,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-actorId",
       "s-activeTeamId",
+      true,
     ],
-    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    "sql": "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "session.restoreRow": {
     "params": [
@@ -6208,9 +6215,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-actorId",
       "s-activeTeamId",
       "s-activeTeamId",
+      true,
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_session SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, user_id = CASE WHEN user_id IS NOT DISTINCT FROM $5 THEN $6 ELSE user_id END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $7 THEN $8 ELSE token_hash END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $9 THEN $10 ELSE expires_at END, last_seen_at = CASE WHEN last_seen_at IS NOT DISTINCT FROM $11 THEN $12 ELSE last_seen_at END, ip = CASE WHEN ip IS NOT DISTINCT FROM $13 THEN $14 ELSE ip END, user_agent = CASE WHEN user_agent IS NOT DISTINCT FROM $15 THEN $16 ELSE user_agent END, active_organization_id = CASE WHEN active_organization_id IS NOT DISTINCT FROM $17 THEN $18 ELSE active_organization_id END, fresh_at = CASE WHEN fresh_at IS NOT DISTINCT FROM $19 THEN $20 ELSE fresh_at END, actor_id = CASE WHEN actor_id IS NOT DISTINCT FROM $21 THEN $22 ELSE actor_id END, active_team_id = CASE WHEN active_team_id IS NOT DISTINCT FROM $23 THEN $24 ELSE active_team_id END WHERE id = $25",
+    "sql": "UPDATE ta_session SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, user_id = CASE WHEN user_id IS NOT DISTINCT FROM $5 THEN $6 ELSE user_id END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $7 THEN $8 ELSE token_hash END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $9 THEN $10 ELSE expires_at END, last_seen_at = CASE WHEN last_seen_at IS NOT DISTINCT FROM $11 THEN $12 ELSE last_seen_at END, ip = CASE WHEN ip IS NOT DISTINCT FROM $13 THEN $14 ELSE ip END, user_agent = CASE WHEN user_agent IS NOT DISTINCT FROM $15 THEN $16 ELSE user_agent END, active_organization_id = CASE WHEN active_organization_id IS NOT DISTINCT FROM $17 THEN $18 ELSE active_organization_id END, fresh_at = CASE WHEN fresh_at IS NOT DISTINCT FROM $19 THEN $20 ELSE fresh_at END, actor_id = CASE WHEN actor_id IS NOT DISTINCT FROM $21 THEN $22 ELSE actor_id END, active_team_id = CASE WHEN active_team_id IS NOT DISTINCT FROM $23 THEN $24 ELSE active_team_id END, proved = CASE WHEN proved IS NOT DISTINCT FROM $25 THEN $26 ELSE proved END WHERE id = $27",
   },
   "session.select": {
     "params": [
@@ -6220,7 +6229,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id FROM ta_session WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved FROM ta_session WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "session.undoCreate": {
     "params": [
@@ -6232,7 +6241,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id FROM ta_session WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id, proved FROM ta_session WHERE id = $1",
   },
   "session.update": {
     "params": [
@@ -6248,9 +6257,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-actorId",
       "s-activeTeamId",
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_session SET created_at = $1, updated_at = $2, user_id = $3, token_hash = $4, expires_at = $5, last_seen_at = $6, ip = $7, user_agent = $8, active_organization_id = $9, fresh_at = $10, actor_id = $11, active_team_id = $12 WHERE id = $13",
+    "sql": "UPDATE ta_session SET created_at = $1, updated_at = $2, user_id = $3, token_hash = $4, expires_at = $5, last_seen_at = $6, ip = $7, user_agent = $8, active_organization_id = $9, fresh_at = $10, actor_id = $11, active_team_id = $12, proved = $13 WHERE id = $14",
   },
   "ssoConnection.delete": {
     "params": [

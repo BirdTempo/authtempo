@@ -6,8 +6,9 @@ import { SCHEMA_VERSION, schema } from "../src/schema.js";
 // every adapter runs them.
 
 describe("schema version 15 (plan 12i)", () => {
-  it("is schema version 15", () => {
-    expect(SCHEMA_VERSION).toBe(15);
+  it("is schema version 15 or a later version", () => {
+    // Plan 12p moves the version to 16: test/schema-v16.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(15);
   });
 
   it("makes the address nullable and adds four user fields as the last fields", () => {

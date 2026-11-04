@@ -136,13 +136,13 @@ describe("schemaDdl (plan 12g)", () => {
 
   it("ends with the version row", () => {
     expect(schemaDdl(SQLITE).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '15')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '16')",
     );
     expect(schemaDdl(POSTGRES).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '15')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '16')",
     );
     expect(schemaDdl(MYSQL).at(-1)).toBe(
-      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '15')",
+      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '16')",
     );
   });
 

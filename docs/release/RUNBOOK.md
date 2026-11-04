@@ -178,7 +178,7 @@ apps/site/src/content/docs/docs/reference/routes.md
 The row of the first minor in `release/support.json`. Write the UTC day of the publish in `released`, and `SCHEMA_VERSION` of `packages/core/src/schema.ts` in `schemaFrom`:
 
 ```json
-[{ "minor": "0.1", "status": "current", "released": "2026-11-02", "schemaFrom": [15] }]
+[{ "minor": "0.1", "status": "current", "released": "2026-11-02", "schemaFrom": [16] }]
 ```
 
 The table of the section "Supported versions" of `SECURITY.md`, in the place of its first text above:
@@ -186,7 +186,7 @@ The table of the section "Supported versions" of `SECURITY.md`, in the place of 
 ```text
 | Minor | Status | Released | Security fixes until | Schema versions |
 | --- | --- | --- | --- | --- |
-| 0.1 | current | 2026-11-02 | none | 15 |
+| 0.1 | current | 2026-11-02 | none | 16 |
 ```
 
 ### The token fallback

@@ -89,7 +89,7 @@
     "node": ">=22"
   },
   "authtempo": {
-    "schemaVersion": 15
+    "schemaVersion": 16
   },
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && node ../../scripts/write-version.mjs VERSION && tsc -p tsconfig.json",
