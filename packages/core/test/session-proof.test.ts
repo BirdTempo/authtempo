@@ -15,6 +15,8 @@ import {
 } from "../src/engine/address.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { verifyMagicLink } from "../src/engine/magic-link.js";
+import { hasPendingEnd, readPendingEnds } from "../src/engine/operator/access-end.js";
+import { revokedFor } from "../src/engine/operator/guards.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { verified } from "../src/engine/organizations.js";
 import { requestPhone, verifyPhone } from "../src/engine/phone.js";
@@ -22,6 +24,7 @@ import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { CLAIM_LEASE_MS, CLAIM_RUNS, claimLeaseId } from "../src/engine/users.js";
+import { ROUTES } from "../src/http/route-list.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
@@ -34,12 +37,13 @@ import {
   type VerificationRow,
 } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import { meterOf } from "../src/storage/meter.js";
 import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { d1Like } from "./d1-like.js";
 import { APP_ORIGIN, BASE_URL, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
-import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
+import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
 import {
   type FakeIdToken,
@@ -1527,6 +1531,101 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     const swept = await sweepExpired(w.config);
     expect(await lease()).toBeNull();
     expect(swept.verificationExpired).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("the lease row in the answers (open point 7 of the Task 2b report of plan 12p)", () => {
+  it("is in no client answer and no list, and the operator reads of verification rows skip it", async () => {
+    const operator: AuthConfig["operator"] = {
+      secrets: [
+        {
+          name: "support",
+          secretHash: await sha256Hex(recordCredential(OPERATOR_SECRETS.support)),
+          scopes: ["users", "sessions", "audit", "keys", "secrets"],
+        },
+      ],
+      users: true,
+    };
+    const w = world({ extra: { operator } });
+    await claimant(w);
+    const ownerToken = setToken(await w.owner.handle(await ownerLink(w))) ?? "";
+    const user = await userAt(w, CLAIMED);
+    const lease = await w.storage.findOne("verification", [
+      { field: "id", op: "eq", value: claimLeaseId(user.id) },
+    ]);
+    if (!lease) throw new Error("no lease");
+    // The owner makes an organization and invites a person, so the lists have rows.
+    const cookie = cookieOf(ownerToken);
+    const made = await w.claimant.handle(
+      req("POST", "/organizations/create", { slug: "ada-co", name: "Ada Co" }, cookie),
+    );
+    expect(await answer(made)).toBe("200 ok");
+    const organizationId = ((await made.json()) as { organization: { id: string } }).organization
+      .id;
+    const invited = await w.claimant.handle(
+      req(
+        "POST",
+        "/organizations/invite",
+        { organizationId, email: recordAddress("bob@example.com"), role: "member" },
+        cookie,
+      ),
+    );
+    expect(await answer(invited)).toBe("200 ok");
+    // The query of each route that reads one; every other route gets none.
+    const queries: Record<string, string> = {
+      "/operator/users/get": `userId=${user.id}`,
+      "/operator/users/search": `email=${encodeURIComponent(CLAIMED)}`,
+    };
+    for (const path of [
+      "/organizations/members",
+      "/organizations/invitations",
+      "/organizations/permissions",
+      "/organizations/tokens",
+      "/organizations/roles",
+      "/organizations/teams",
+    ])
+      queries[path] = `organizationId=${organizationId}`;
+    const marks = [lease.purpose, lease.id, lease.valueHash];
+    const answered = new Set<string>();
+    const reads = ROUTES.filter((r) => r.method === "GET" && !r.path.includes(":"));
+    for (const { path } of reads)
+      for (const headers of [{ cookie }, operatorHeader(OPERATOR_SECRETS.support)]) {
+        const query = queries[path] ? `?${queries[path]}` : "";
+        const res = await w.claimant.handle(
+          new Request(`${BASE_URL}/auth${path}${query}`, {
+            headers: { ...headers, "cf-connecting-ip": `198.51.100.${(++ip % 250) + 1}` },
+          }),
+        );
+        const text = await res.text();
+        for (const mark of marks) expect(text, `GET ${path}`).not.toContain(mark);
+        if (res.status === 200) answered.add(path);
+      }
+    // The lists of the person and of the operator answered, so the check read real answers.
+    expect([...answered]).toEqual(
+      expect.arrayContaining([
+        "/session",
+        "/sessions",
+        "/identities",
+        "/tokens",
+        "/organizations",
+        "/organizations/members",
+        "/organizations/invitations",
+        "/operator/users",
+        "/operator/users/get",
+        "/operator/users/search",
+        "/operator/audit",
+        "/operator/secrets/status",
+      ]),
+    );
+    // The operator reads of verification rows by the user id: each skips the lease.
+    expect(await hasPendingEnd(w.storage, user.id)).toBe(false);
+    const session = await rowOf(w, ownerToken);
+    if (!session) throw new Error("no owner session");
+    expect(await revokedFor(w.config, user, session)).toBe(false);
+    const pending = await readPendingEnds(w.storage, meterOf(w.storage, 0), 50, [
+      "organization-rest",
+    ]);
+    expect(pending.map((r) => r.id)).not.toContain(lease.id);
   });
 });
 
