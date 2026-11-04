@@ -188,7 +188,7 @@ A moved key counts against the cap of 50 live tokens per owner, because it acts.
 - The one key that is not Better Auth's is `authtempo`. `authtempo.appURL` is the origin where each sign-in lands, by default the origin of `baseURL`. An absolute `callbackURL` off that origin answers 403 with `INVALID_CALLBACK_URL`. `authtempo.passwordHash` replaces `betterAuthPasswordHash()`.
 - `session.token` holds the SHA-256 of the token. App SQL that reads it reads a hash.
 - A reset ends every session, where Better Auth kept the others.
-- Compat 0013 sets `taProved` true on each session of a verified user, also on a session that Better Auth made before the proof. Better Auth 1.7.2, read 2026-11-04, ends no session at its verify, so the fill makes no session stronger than before.
+- Compat 0013 sets `taProved` true on each session of a verified user, also on a session that Better Auth made before the proof. Better Auth 1.7.7, read 2026-11-04, ends no session when its email verification link proves an address. So the fill makes no session stronger than before.
 - `requireEmailVerification: true` maps to `password.requireVerified`. An unverified sign-in answers `EMAIL_NOT_VERIFIED` and gets a new verify link, also when `sendOnSignIn` is absent.
 - `secrets: [{ version, value }]` maps to core's `secrets`. Version 0 is refused: renumber from 1. With `secret`, version 1 must be the value of `secret`. The shim does not read `BETTER_AUTH_SECRETS`.
 - `autoSignIn: false` is refused unless `requireEmailVerification` is true. The sign-up answer stays Better Auth's: a session unless `requireEmailVerification` is true, and `USER_ALREADY_EXISTS` for a taken address.
