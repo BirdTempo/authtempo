@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
@@ -9,6 +9,8 @@ import { DOCS, REPO } from "../scripts/lib/paths.ts";
 /** The text of a file with each run of white space as one space: a line wraps. */
 const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
 const ENGINE = `${REPO}packages/core/src/engine/`;
+// The changeset of the final proof (plan 12o). The version branch deletes it, so its fact skips there.
+const PROOF_FINAL_CHANGESET = `${REPO}.changeset/core-proof-final.md`;
 const source = (file: string) => readFileSync(`${ENGINE}${file}`, "utf8");
 
 /** The text of the errors page from the heading of `code` to the next heading. */
@@ -138,8 +140,15 @@ describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decisi
     expect(body(redirects, "redirect")).toContain("return new Response(null, {");
     for (const words of [errorSection("conflict"), page("concepts/claim-rule.md")])
       expect(words).toContain(JSON_WORDS);
-    expect(flat(`${REPO}.changeset/core-proof-final.md`)).toContain(JSON_WORDS);
   });
+
+  // The version branch deletes each changeset. There the summary counts a skip (ruling 70 of plan 12j).
+  it.skipIf(!existsSync(PROOF_FINAL_CHANGESET))(
+    "holds the two answers of the lost verify link in the changeset of plan 12o (ruling 26)",
+    () => {
+      expect(flat(PROOF_FINAL_CHANGESET)).toContain(JSON_WORDS);
+    },
+  );
 
   it("holds the spent link of the magic link, and the kept link of the reset and the invitation confirm", () => {
     // The magic link spends its row before the claim, outside the claim's transaction.
