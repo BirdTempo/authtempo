@@ -8,6 +8,7 @@ import {
   compatMigration0010Sql,
   compatMigration0011Sql,
   compatMigration0012Sql,
+  compatMigration0013Sql,
   resolveNames,
 } from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
@@ -89,6 +90,12 @@ await env.DB.batch(statements(compatMigration0011Sql("sqlite")).map((s) => env.D
 // 0012 names the user and passkey tables and their columns, so its text takes the naming (plan 12i).
 await env.DB.batch(
   statements(compatMigration0012Sql("sqlite", resolveNames({ casing: "snake" }))).map((s) =>
+    env.DB.prepare(s),
+  ),
+);
+// 0013 names the session and user tables and their columns, so its text takes the naming (plan 12p).
+await env.DB.batch(
+  statements(compatMigration0013Sql("sqlite", resolveNames({ casing: "snake" }))).map((s) =>
     env.DB.prepare(s),
   ),
 );

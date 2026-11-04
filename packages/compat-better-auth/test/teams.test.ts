@@ -596,8 +596,8 @@ describe("the teams shim (spec 29 item 19)", () => {
           expect(
             await pg.sql.unsafe(`SELECT key, value FROM ta_meta ORDER BY key`).then((r) => [...r]),
           ).toEqual([
-            { key: "compat_better_auth", value: "12" },
-            { key: "schema_version", value: "15" },
+            { key: "compat_better_auth", value: "13" },
+            { key: "schema_version", value: "16" },
           ]);
         } finally {
           await pg.close();
@@ -614,7 +614,7 @@ describe("the teams shim (spec 29 item 19)", () => {
       const shipped = Object.keys(files)
         .sort()
         .map((k) => files[k] as string);
-      expect(shipped.length).toBe(12);
+      expect(shipped.length).toBe(13);
       // An app whose tables hold the two teams columns runs 0010 without its two ADD COLUMN lines (ruling 19).
       const teamsLines = [
         `ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT;`,
@@ -683,8 +683,8 @@ describe("the teams shim (spec 29 item 19)", () => {
           ),
         ).toThrow(/UNIQUE constraint failed/);
         expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
-          { key: "compat_better_auth", value: "12" },
-          { key: "schema_version", value: "15" },
+          { key: "compat_better_auth", value: "13" },
+          { key: "schema_version", value: "16" },
         ]);
       }
     });

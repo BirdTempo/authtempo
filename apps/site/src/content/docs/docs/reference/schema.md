@@ -14,7 +14,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 15 needs the migrations up to `0015_schema_v15`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 16 needs the migrations up to `0016_schema_v16`.
 
 ## Before you start
 
@@ -39,8 +39,9 @@ sources:
 | 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 | 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
 | 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the back-channel sign-out message names the issuer that the client saw (plan 12i Task 18). |
+| 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`: true when the sign-in of the session proved the account. A fill sets it from the user of each live session (plan 12p). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 15.
+`SCHEMA_VERSION` of `@authtempo/core` is 16.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -119,6 +120,14 @@ Version 15 comes from the `0015_schema_v15` migration of D1 and Postgres, from `
 | `passkey.largeBlob` | `large_blob` | boolean | True when the authenticator said that it supports the `largeBlob` extension. Default false (plan 12i). |
 | `oauthSessionClient.issuer` | `issuer` | string, nullable | The issuer of the ID tokens of the link: the entry of a `baseURL` list where the client got them. Null for a link of version 14 (plan 12i Task 18). |
 | `oauthLogout.issuer` | `issuer` | string, nullable | The `issuer` of the link that the row replaced. The back-channel sign-out message names it; null names the primary (plan 12i Task 18). |
+
+Version 16 comes from the `0016_schema_v16` migration of D1 and Postgres, from `0004_schema_v16` on MySQL, and from `0013_compat_schema_v16` in the compatibility package (plan 12p). It adds no table.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `session.proved` | `ta_session.proved` | boolean | True when the sign-in that made the session proved the account. Core sets it once, at the creation of the session. A hook cannot set it. A verified-only action reads it with the user row (plan 12p). |
+
+The column is NOT NULL with the default false. Then the migration sets true on each session whose user has a verified address. So a verified user keeps the powers of each live session. A session of a user with no address, or with an unverified address, reads false. That user signs in again for verified powers. A Worker at version 15 that still runs after the migration writes false into each new session. So deploy core at version 16 at once.
 
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 
@@ -238,6 +247,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0010_compat_schema_v13` | `activeTeamId` on `session` and `teamId` on `invitation`, the columns of Better Auth's teams option. No default and no fill. On Postgres it adds each column only when it is absent. It creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). It creates Better Auth's `team` and `teamMember` when they are absent. It adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. On Postgres it adds these two columns only when they are absent. On D1, tables that hold `session.activeTeamId` and `invitation.teamId` already take an own 0010 file, applied before `authtempo migrate`. It is the shipped file of its directory without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. The text names the session, invitation, organization, organizationRole, team, and teamMember tables, so tables with other names take the text of `compatMigration0010Sql`. |
 | `0011_compat_schema_v14` | The six tables of version 14. Better Auth's `ssoProvider` table and the tables of its SCIM plugin stay as they are. The text names `ta_` tables only, so it is the same for every naming. |
 | `0012_compat_schema_v15` | The columns of Better Auth's username, phone number, and anonymous plugins on `user`. They are `username`, `displayUsername`, `phoneNumber`, `phoneNumberVerified`, and `isAnonymous` (default false), with a unique key on `username` and on `phoneNumber`. On Postgres it adds each column only when it is absent. It adds `taDiscoverable`, `taPrf`, and `taLargeBlob` to `passkey`, and `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`. Better Auth's `user.email` stays NOT NULL. The text names the user and passkey tables, so tables with other names take the text of `compatMigration0012Sql`. |
+| `0013_compat_schema_v16` | `taProved` on `session`, which holds `proved`. NOT NULL with the default false. The fill sets true on each session whose user has a verified address. A placeholder address of Better Auth counts as no address. The text names the session and user tables, so tables with other names take the text of `compatMigration0013Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

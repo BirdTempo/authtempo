@@ -350,6 +350,7 @@ export function mappingCases(
             freshAt: at,
             actorId: null,
             activeTeamId: null,
+            proved: true,
             createdAt: at,
             updatedAt: at,
           });

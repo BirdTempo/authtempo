@@ -1,4 +1,4 @@
-// authtempo schema version 15, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 16, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -65,6 +65,7 @@ export const taSession = pgTable(
     freshAt: timestamp("fresh_at", { withTimezone: true, mode: "date" }),
     actorId: text("actor_id"),
     activeTeamId: text("active_team_id"),
+    proved: boolean("proved").notNull(),
   },
   (t) => [
     uniqueIndex("ux_ta_session__token_hash").on(t.tokenHash),

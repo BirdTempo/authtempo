@@ -9,6 +9,7 @@ import {
 import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
 import { type BaseTable, BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
+import { placeholderSql } from "./placeholder.js";
 
 /**
  * The lowest `compat_better_auth` value this code reads. Migration 0002
@@ -1313,6 +1314,44 @@ export function compatMigration0012Sql(dialect: "postgres" | "sqlite", n: Names)
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0013_NAME = "0013_compat_schema_v16";
+
+/**
+ * Migration 0013 (plan 12p): core's schema version 16. Core 16 adds
+ * `session.proved`, the mark that the sign-in of the session proved the
+ * account. Better Auth's `session` gets `taProved`, which holds core's
+ * field. It is NOT NULL with the default false, so a row that Better Auth
+ * writes reads false. Then the fill sets true on each session whose user
+ * has a verified address, as core 0016 does. The join reads Better Auth's
+ * `user` through the app's naming, as 0009 does for the bans. A session of
+ * a user with no address, or with an unverified address, keeps false. That
+ * user signs in again for verified powers.
+ *
+ * Better Auth's `user.email` is NOT NULL, and the storage reads each
+ * placeholder address as no address (placeholder.ts). So the fill skips a
+ * user on a placeholder domain, with the SQL test of the read, `placeholderSql`. The
+ * `temp-` form needs the domain of the anonymous plugin, and a static file
+ * cannot know it. Core writes that form only for a user with no address,
+ * and core never verifies such a user (`createUserIn`). The columns take
+ * the app's naming, so the text depends on `names`. The D1 files in this
+ * package are the text of the default naming. Append-only once it ships.
+ */
+export function compatMigration0013Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const pg = dialect === "postgres";
+  const S = n.table("session");
+  const proved = n.column("session", "taProved");
+  const U = n.table("user");
+  const u = (field: string) => n.column("user", field);
+  const verified = pg ? `${u("emailVerified")} IS TRUE` : `${u("emailVerified")} = 1`;
+  const placeholder = placeholderSql(u("email"), null, u("id"));
+  return `${[
+    `ALTER TABLE ${S} ADD COLUMN ${proved} ${pg ? "boolean" : "INTEGER"} NOT NULL DEFAULT ${pg ? "false" : "0"};`,
+    `UPDATE ${S} SET ${proved} = ${pg ? "true" : "1"} WHERE ${n.column("session", "userId")} IN (SELECT ${u("id")} FROM ${U} WHERE ${verified} AND ${u("email")} IS NOT NULL AND NOT ${placeholder});`,
+    "UPDATE ta_meta SET value = '16' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '13' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /**
  * The names of the compat migrations, in order (plan 11c). Each name is the
  * file name, without `.sql`, under `migrations/d1/` and
@@ -1332,6 +1371,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0010_NAME,
   MIGRATION_0011_NAME,
   MIGRATION_0012_NAME,
+  MIGRATION_0013_NAME,
 ];
 
 /**
@@ -1353,6 +1393,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   (names) => compatMigration0010Sql("postgres", names),
   () => compatMigration0011Sql("postgres"),
   (names) => compatMigration0012Sql("postgres", names),
+  (names) => compatMigration0013Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(
@@ -1398,6 +1439,8 @@ const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[
   () => compatMigration0011Sql("sqlite"),
   // Plan 12i: core's schema version 15, the same text for both variants.
   (names) => compatMigration0012Sql("sqlite", names),
+  // Plan 12p: core's schema version 16, the same text for both variants.
+  (names) => compatMigration0013Sql("sqlite", names),
 ];
 if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

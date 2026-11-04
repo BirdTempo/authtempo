@@ -40,13 +40,14 @@ it("reads a version 10 client and token row with every default after 0008 on Pos
     );
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
     // The runner applies 0008 and each later migration (0009 since plan 12f, 0010 since plan 12k,
-    // 0011 since plan 12d, 0012 since plan 12i).
+    // 0011 since plan 12d, 0012 since plan 12i, 0013 since plan 12p).
     expect(await s.migrate()).toEqual([
       "0008_compat_schema_v11",
       "0009_compat_schema_v12",
       "0010_compat_schema_v13",
       "0011_compat_schema_v14",
       "0012_compat_schema_v15",
+      "0013_compat_schema_v16",
     ]);
     const client = await s.storage.findOne("oauthClient", [
       { field: "id", op: "eq", value: "cl_10" },

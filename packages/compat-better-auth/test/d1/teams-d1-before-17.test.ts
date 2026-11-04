@@ -64,8 +64,8 @@ it("migrates the team tables of Better Auth 1.4.21 with the d1-before-1.7 files,
   expect(old.results).toEqual([{ n: 0, k: null }]);
   const meta = await env.DB.prepare("SELECT key, value FROM ta_meta ORDER BY key").all();
   expect(meta.results).toEqual([
-    { key: "compat_better_auth", value: "12" },
-    { key: "schema_version", value: "15" },
+    { key: "compat_better_auth", value: "13" },
+    { key: "schema_version", value: "16" },
   ]);
 
   const database = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });

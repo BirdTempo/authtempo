@@ -106,6 +106,8 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taFreshAt",
     "taActorId",
     "activeTeamId",
+    // Core's proof mark of the session, from migration 0013 (plan 12p).
+    "taProved",
   ],
   account: [
     "id",

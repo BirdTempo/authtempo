@@ -69,6 +69,7 @@ const SESSION: Models["session"] = {
   freshAt: at("2026-10-22T01:02:04.005Z"),
   actorId: null,
   activeTeamId: null,
+  proved: true,
 };
 const VERIFICATION: Models["verification"] = {
   id: "verification-drizzle-1",

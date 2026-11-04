@@ -65,15 +65,15 @@ The environment line lists each secret name of the templates as `set` or `unset`
 The report prints one line per part:
 
 ```text
-authtempo 0.0.0 (schema version 15)
+authtempo 0.0.0 (schema version 16)
 runtime: node v26.10.0, linux, x64
 package manager: pnpm 12.8.1 (from npm_config_user_agent)
 packages: @authtempo/adapter-d1 0.0.0, @authtempo/core 0.0.0
 adapters: adapter-d1
 wrangler: 1 D1 database: auth
 env: AUTHTEMPO_OPERATOR_SECRET set, AUTH_SECRET set, DATABASE_URL unset
-database: d1, schema version 15, 15 migrations applied, compat version none
-deployment: core 0.0.0, schema version 15, 9 config keys, 0 dropped
+database: d1, schema version 16, 16 migrations applied, compat version none
+deployment: core 0.0.0, schema version 16, 9 config keys, 0 dropped
 config key: baseURL
 config key: operator.secretHash
 ```

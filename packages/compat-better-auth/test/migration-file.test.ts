@@ -17,6 +17,7 @@ import shipped0009 from "../migrations/d1/0009_compat_schema_v12.sql?raw";
 import shipped0010 from "../migrations/d1/0010_compat_schema_v13.sql?raw";
 import shipped0011 from "../migrations/d1/0011_compat_schema_v14.sql?raw";
 import shipped0012 from "../migrations/d1/0012_compat_schema_v15.sql?raw";
+import shipped0013 from "../migrations/d1/0013_compat_schema_v16.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -29,6 +30,7 @@ import shipped0009Before17 from "../migrations/d1-before-1.7/0009_compat_schema_
 import shipped0010Before17 from "../migrations/d1-before-1.7/0010_compat_schema_v13.sql?raw";
 import shipped0011Before17 from "../migrations/d1-before-1.7/0011_compat_schema_v14.sql?raw";
 import shipped0012Before17 from "../migrations/d1-before-1.7/0012_compat_schema_v15.sql?raw";
+import shipped0013Before17 from "../migrations/d1-before-1.7/0013_compat_schema_v16.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -42,6 +44,7 @@ import {
   compatMigration0010Sql,
   compatMigration0011Sql,
   compatMigration0012Sql,
+  compatMigration0013Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
@@ -49,6 +52,7 @@ import {
   MIGRATION_0010_NAME,
   MIGRATION_0011_NAME,
   MIGRATION_0012_NAME,
+  MIGRATION_0013_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
@@ -1050,6 +1054,118 @@ describe("migration 0012 (plan 12i)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "12" },
       { key: "schema_version", value: "15" },
+    ]);
+  });
+});
+
+describe("migration 0013 (plan 12p)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0013Sql("sqlite", resolveNames());
+    expect(normalize(shipped0013)).toBe(normalize(text));
+    expect(normalize(shipped0013Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0012, and the step writes '13' and '16'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0013_NAME)).toBe(names.indexOf(MIGRATION_0012_NAME) + 1);
+    expect(MIGRATION_0013_NAME).toBe("0013_compat_schema_v16");
+    for (const dialect of ["postgres", "sqlite"] as const) {
+      const text = compatMigration0013Sql(dialect, resolveNames());
+      expect(text).toContain("UPDATE ta_meta SET value = '13' WHERE key = 'compat_better_auth';");
+      expect(text).toContain("UPDATE ta_meta SET value = '16' WHERE key = 'schema_version';");
+    }
+    // The fill joins the user table through the app's naming (0009's rule).
+    const snake = compatMigration0013Sql(
+      "postgres",
+      resolveNames({ casing: "snake", tables: { user: "users", session: "sessions" } }),
+    );
+    expect(snake).toContain(
+      'ALTER TABLE "sessions" ADD COLUMN "ta_proved" boolean NOT NULL DEFAULT false;',
+    );
+    expect(snake).toContain(
+      'UPDATE "sessions" SET "ta_proved" = true WHERE "user_id" IN (SELECT "id" FROM "users" WHERE "email_verified" IS TRUE AND "email" IS NOT NULL AND NOT ',
+    );
+  });
+
+  it("adds taProved and fills it from the user of each session, and the mapping reads it", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+      shipped0011,
+      shipped0012,
+    ])
+      db.exec(text);
+    // The users and sessions of a store at compat 12, as core 15 writes them through the mapping.
+    // A verified user with an address, a claimant with an unverified address, and an
+    // anonymous user with Better Auth's placeholder (a user with no address in core).
+    const user = (id: string, email: string, verified: 0 | 1) =>
+      db.exec(
+        `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","isAnonymous") VALUES ('${id}','','${email}',${verified},NULL,'2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z',0)`,
+      );
+    user("uv", "uv@example.com", 1);
+    user("uu", "uu@example.com", 0);
+    user("ua", "ua@anonymous.placeholder.invalid", 0);
+    // A Better Auth row that holds a placeholder and the verified flag. The storage reads
+    // its address as none, so the fill must not trust the flag.
+    user("ut", "ut@tiktok.placeholder.invalid", 1);
+    for (const [id, userId] of [
+      ["sv", "uv"],
+      ["sv2", "uv"],
+      ["su", "uu"],
+      ["sa", "ua"],
+      ["st", "ut"],
+    ])
+      db.exec(
+        `INSERT INTO "session" ("id","expiresAt","token","createdAt","updatedAt","ipAddress","userAgent","userId","activeOrganizationId","taLastSeenAt","taFreshAt","taActorId","activeTeamId") VALUES ('${id}','2100-01-01T00:00:00.000Z','h-${id}','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z',NULL,NULL,'${userId}',NULL,'2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z',NULL,NULL)`,
+      );
+    db.exec(shipped0013);
+    type Column = { name: string; type: string; notnull: number; dflt_value: string | null };
+    const last = (db.prepare(`PRAGMA table_info("session")`).all() as Column[]).at(-1);
+    expect(last).toMatchObject({
+      name: "taProved",
+      type: "INTEGER",
+      notnull: 1,
+      dflt_value: "0",
+    });
+    expect(db.prepare(`SELECT "id", "taProved" FROM "session" ORDER BY "id"`).all()).toEqual([
+      { id: "sa", taProved: 0 },
+      { id: "st", taProved: 0 },
+      { id: "su", taProved: 0 },
+      { id: "sv", taProved: 1 },
+      { id: "sv2", taProved: 1 },
+    ]);
+    // Core's field reads the column through the mapping.
+    const read = compatStatements("sqlite", resolveNames()).select(
+      "session",
+      [{ field: "proved", op: "eq", value: true }],
+      { sort: [{ field: "id", dir: "asc", notNull: true }] },
+    );
+    expect(read?.sql).toContain('"taProved"');
+    expect(
+      db
+        .prepare(read?.sql ?? "")
+        .all(...((read?.params ?? []) as never[]))
+        .map((r) => (r as { id: string }).id),
+    ).toEqual(["sv", "sv2"]);
+    // A session that Better Auth writes after the fill names no taProved: the default gives false.
+    db.exec(
+      `INSERT INTO "session" ("id","expiresAt","token","createdAt","updatedAt","userId") VALUES ('sb','2100-01-01T00:00:00.000Z','h-sb','2026-10-02T00:00:00.000Z','2026-10-02T00:00:00.000Z','uv')`,
+    );
+    expect(db.prepare(`SELECT "taProved" FROM "session" WHERE "id" = 'sb'`).all()).toEqual([
+      { taProved: 0 },
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "13" },
+      { key: "schema_version", value: "16" },
     ]);
   });
 });

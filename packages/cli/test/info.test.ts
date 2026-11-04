@@ -125,7 +125,7 @@ describe("authtempo info (plan 11c2)", () => {
     const doc = docOf(io.stdout);
     expect(doc).toEqual({
       cli: VERSION,
-      schemaVersion: 15,
+      schemaVersion: 16,
       runtime: { node: "v26.10.0", platform: "linux", arch: "x64" },
       packageManager: { name: "pnpm", version: "12.8.1", source: "user-agent" },
       packages: { "@authtempo/core": "0.0.0", "@authtempo/adapter-d1": null },
@@ -143,7 +143,7 @@ describe("authtempo info (plan 11c2)", () => {
     const human = fakeIo({ files: PROJECT, env: { npm_config_user_agent: AGENT } });
     expect(await main(["info"], human)).toBe(0);
     expect(human.stdout).toEqual([
-      `authtempo ${VERSION} (schema version 15)`,
+      `authtempo ${VERSION} (schema version 16)`,
       "runtime: node v26.10.0, linux, x64",
       "package manager: pnpm 12.8.1 (from npm_config_user_agent)",
       "packages: @authtempo/adapter-d1 not installed, @authtempo/core 0.0.0",
@@ -339,7 +339,7 @@ describe("authtempo info (plan 11c2)", () => {
     // The deployment runs the core of the workspace, which answers its own version.
     expect(doc.deployment).toEqual({
       core: versionOf("core"),
-      schemaVersion: 15,
+      schemaVersion: 16,
       configKeys: CONFIG_KEYS,
       dropped: 0,
     });
@@ -358,7 +358,7 @@ describe("authtempo info (plan 11c2)", () => {
     });
     expect(await main(["info", BASE], human)).toBe(0);
     const at = human.stdout.indexOf(
-      `deployment: core ${versionOf("core")}, schema version 15, 9 config keys, 0 dropped`,
+      `deployment: core ${versionOf("core")}, schema version 16, 9 config keys, 0 dropped`,
     );
     expect(at).toBeGreaterThan(0);
     expect(human.stdout.slice(at + 1)).toEqual(CONFIG_KEYS.map((k) => `config key: ${k}`));

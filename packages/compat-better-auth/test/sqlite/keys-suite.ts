@@ -40,6 +40,7 @@ const session = (id: string, userId: string) => ({
   freshAt: at,
   actorId: null,
   activeTeamId: null,
+  proved: false,
   createdAt: at,
   updatedAt: at,
 });

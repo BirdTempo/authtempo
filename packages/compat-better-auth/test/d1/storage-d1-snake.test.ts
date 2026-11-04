@@ -13,6 +13,7 @@ import {
   compatMigration0010Sql,
   compatMigration0011Sql,
   compatMigration0012Sql,
+  compatMigration0013Sql,
 } from "../../src/storage/migration.js";
 import { type NamingOptions, resolveNames } from "../../src/storage/names.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
@@ -63,6 +64,7 @@ await execD1(compatMigration0009Sql("sqlite", resolveNames(naming)));
 await execD1(compatMigration0010Sql("sqlite", resolveNames(naming)));
 await execD1(compatMigration0011Sql("sqlite"));
 await execD1(compatMigration0012Sql("sqlite", resolveNames(naming)));
+await execD1(compatMigration0013Sql("sqlite", resolveNames(naming)));
 
 it("builds the tables with snake_case columns and plural names", async () => {
   const cols = await env.DB.prepare(

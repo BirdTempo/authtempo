@@ -1,4 +1,4 @@
-// authtempo schema version 15, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 16, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
@@ -59,6 +59,7 @@ model TaSession {
   freshAt DateTime? @map("fresh_at") @db.Timestamptz(6)
   actorId String? @map("actor_id")
   activeTeamId String? @map("active_team_id")
+  proved Boolean @map("proved")
 
   @@unique([tokenHash], map: "ux_ta_session__token_hash")
   @@index([userId], map: "ix_ta_session__user_id")

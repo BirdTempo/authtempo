@@ -67,6 +67,7 @@ const signUpRows =
       freshAt: at,
       actorId: null,
       activeTeamId: null,
+      proved: false,
       createdAt: at,
       updatedAt: at,
     });

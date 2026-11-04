@@ -50,6 +50,7 @@ async function seed(db: StorageAdapter) {
       activeTeamId: null,
       freshAt: at,
       actorId: null,
+      proved: true,
       createdAt: at,
       updatedAt: at,
     });

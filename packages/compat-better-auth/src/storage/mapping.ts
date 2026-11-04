@@ -230,6 +230,8 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       actorId: as("taActorId"),
       // Better Auth's own column of its teams option (plan 12k).
       activeTeamId: as("activeTeamId"),
+      // Core's proof mark (plan 12p). Migration 0013 adds it with the default false.
+      proved: as("taProved"),
     },
   },
   verification: {
