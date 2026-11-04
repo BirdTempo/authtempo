@@ -46,11 +46,19 @@ interface CodeData {
   challenge: string;
   redirect: string;
   /**
-   * The user's flag when the code was minted. A code minted for an
-   * unverified user runs the claim guard at redeem, whatever a later read
-   * of the user says. A code without the flag counts as unverified.
+   * The user's flag when the code was minted, with the `proved` flag of the
+   * browser session (plan 12p). A code minted for an unverified user, or by
+   * a session made before the proof, runs the claim guard at redeem,
+   * whatever a later read of the user says. A code without the flag counts
+   * as unverified.
    */
   emailVerified?: boolean;
+  /**
+   * The `proved` flag of the browser session when the code was minted (plan
+   * 12p). The redeemed session copies it, so a claimant's browser session
+   * passes on no verified power. A code without the flag counts as false.
+   */
+  proved?: boolean;
   /**
    * The browser session's last sign-in in epoch ms: its `freshAt`, else its
    * `createdAt` (plan 12e ruling 41). The handoff checks no credential, so
@@ -196,8 +204,10 @@ export async function continueHandoff(
       const data = start.value.data as StartData | null;
       if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
         return fail("invalid_token");
-      // Read before the code row is written: a claim after this read deletes
-      // the code row, or the redeem guard sees the claim's flip.
+      // Read before the code row is written. A claim deletes the codes before
+      // the sessions (plan 12p), so a code written after that delete can pass
+      // the session check below. A claimant's browser session has `proved`
+      // false, so its code runs the redeem guard, which sees the claim's flip.
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
       // The same where as the check below: a session of another user gives no time.
       const browser = await tx.findOne("session", [
@@ -208,7 +218,8 @@ export async function continueHandoff(
       const codeData: CodeData = {
         challenge: data.challenge,
         redirect: data.redirect,
-        emailVerified: user?.emailVerified === true,
+        emailVerified: user?.emailVerified === true && browser.proved,
+        proved: browser.proved,
         signedInAt: (browser.freshAt ?? browser.createdAt).getTime(),
       };
       await tx.create("verification", {
@@ -288,6 +299,8 @@ export async function redeemHandoff(
               userAgent: input.userAgent,
               via: "handoff",
               signedInAt: new Date(data.signedInAt),
+              // The browser session's flag, not the user's state now (plan 12p).
+              carriedProved: data.proved === true,
             },
             tx,
           );

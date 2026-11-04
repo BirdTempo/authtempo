@@ -12,6 +12,7 @@ import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { IN_CHUNK } from "../storage/batch.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import {
   type PatchShapeRefusal,
   patchFields,
@@ -136,6 +137,12 @@ export interface SessionInput {
   userId: string;
   ip: string | null;
   userAgent: string | null;
+  /**
+   * The proof flag of the row (plan 12p, spec 8.9). It is set once, here:
+   * `prepareSession` computes it from the user and the flow. Required, so
+   * the type check names each caller. No hook can set it.
+   */
+  proved: boolean;
   /** Set only through `openSession`, after the membership check of a hook's patch (plan 9d). */
   activeOrganizationId?: string | null;
   /** The last sign-in, when it is older than the session: a handoff (plan 12e ruling 41). Default now. */
@@ -178,6 +185,29 @@ export interface SessionOpen {
    * answers `conflict` when the row holds another address by then.
    */
   sameAddress?: boolean;
+  /**
+   * True when the sign-in itself proved a handle of a user with no address:
+   * the phone code or the passkey (plan 12p). It sets `proved` for such a
+   * user only. Absent: false, as for an anonymous, social, or SSO user with
+   * no address.
+   */
+  handleProved?: boolean;
+  /**
+   * The flag of the session that this one carries on: the browser session
+   * of a handoff (plan 12p). It sets `proved` in place of the user's state,
+   * so a handoff never gains what its browser session did not have.
+   */
+  carriedProved?: boolean;
+}
+
+/**
+ * The `proved` flag of a new session (plan 12p, spec 8.9). A user with an
+ * address gives its verified flag. A user with no address gives the flow's
+ * hint. A handoff gives the flag of its browser session.
+ */
+export function provedAtOpen(input: SessionOpen): boolean {
+  if (input.carriedProved !== undefined) return input.carriedProved;
+  return hasAddress(input.user) ? input.user.emailVerified : input.handleProved === true;
 }
 
 export interface ResolvedSession {
@@ -245,6 +275,8 @@ export async function createSession(
     freshAt: input.impersonation ? null : (input.freshAt ?? now),
     actorId: input.impersonation?.actorId ?? null,
     activeTeamId: null,
+    // Once, at the insert: only the confirm of a change of address sets it later (plan 12p).
+    proved: input.proved,
     createdAt: now,
     updatedAt: now,
   });
@@ -284,8 +316,15 @@ async function patchedInput(
   storage: StorageAdapter,
   draft: SessionDraft,
   patch: unknown,
+  proved: boolean,
 ): Promise<SessionInput> {
-  const input: SessionInput = { userId: draft.userId, ip: draft.ip, userAgent: draft.userAgent };
+  // `proved` is not a patch key, so a hook that names it is refused below (plan 12p).
+  const input: SessionInput = {
+    userId: draft.userId,
+    ip: draft.ip,
+    userAgent: draft.userAgent,
+    proved,
+  };
   const refuse = (what: PatchShapeRefusal | SessionPatchRefusal | { field: string }) =>
     refusePatch(config.observe, what);
   const fields = patchFields(patch, refuse);
@@ -358,7 +397,7 @@ export async function prepareSession(
       via: input.via,
     },
   );
-  const patched = await patchedInput(config, storage, draft, patch);
+  const patched = await patchedInput(config, storage, draft, patch, provedAtOpen(input));
   const signedIn = input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched;
   const capped = input.notAfter ? { ...signedIn, notAfter: input.notAfter } : signedIn;
   const prepared = {

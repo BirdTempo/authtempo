@@ -306,6 +306,17 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
               now,
               move.stops,
             );
+            // The kept session now holds a proved address (plan 12p). A user
+            // who had no address gains the verified powers on it at once.
+            // The one write of `proved` after the session's creation.
+            await tx.update(
+              "session",
+              [
+                { field: "id", op: "eq", value: move.keep },
+                { field: "userId", op: "eq", value: previous.id },
+              ],
+              { proved: true, updatedAt: now },
+            );
             return ok({
               previous,
               user: { ...previous, email: data.newEmail, emailVerified: true, updatedAt },

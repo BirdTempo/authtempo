@@ -1040,9 +1040,11 @@ async function answerChallenge(
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
       // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
       await upgrade.before(tx, user, upgradeProof(user), via);
+      const open = { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) };
+      // A phone code as the first factor proved a handle of a user with no address (plan 12p).
       const prepared = await prepareSession(
         config,
-        { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) },
+        via === "phone" ? { ...open, handleProved: true } : open,
         tx,
       );
       const s = await writeSession(config, prepared, tx);
