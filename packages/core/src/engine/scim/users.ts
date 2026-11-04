@@ -114,7 +114,15 @@ export type ScimUserCaller = ScimCaller | ScimAppCaller;
  */
 export const SCIM_ROUTE_CALLS_BEFORE = 3;
 
-/** The SCIM error of an answer, in the shape of RFC 7644 section 3.12. */
+/**
+ * The SCIM error of an answer, in the shape of RFC 7644 section 3.12.
+ *
+ * RFC 7644, read 2026-11-04: section 3.12 makes `scimType` optional. Table 9
+ * ties `uniqueness` to a value that is in use or reserved. So a value in use
+ * answers 409 `uniqueness`, as section 3.3 says for a duplicate `userName`.
+ * A race that a resend passes is no value in use. It answers 409 with no
+ * `scimType` (decision 1 of plan 12o).
+ */
 export function scimFail(status: number, detail: string, scimType?: ScimType): ScimResult {
   return {
     status,
@@ -810,8 +818,23 @@ async function fillName(tx: StorageAdapter, user: UserRow, doc: UserDoc, now: Da
   );
 }
 
-/** A refusal of a hook or a rule of core, as a SCIM error: the status of the code, and the code. */
+/** The detail of the code `conflict`: a resend can pass (decision 1 of plan 12o). */
+const RACE_DETAIL = "Another request changed this user at the same time. Send the request again.";
+
+/** The detail of the code `member_limit` (decision 1 of plan 12o). */
+const MEMBER_LIMIT_DETAIL = "The organization is at its member limit.";
+
+/**
+ * A refusal of a hook or a rule of core, as a SCIM error with the status of
+ * the code. The code `conflict` is a lost race, such as a lost claim, a user
+ * that an account delete took, or a lost hold. A resend can pass, so the
+ * detail says to send the request again, with no `scimType`. The code
+ * `member_limit` answers a sentence too. Each other code answers its message,
+ * or the code.
+ */
 export function failAnswer(r: { status: number; code: string; message?: string }): ScimResult {
+  if (r.code === "conflict") return scimFail(r.status, RACE_DETAIL);
+  if (r.code === "member_limit") return scimFail(r.status, MEMBER_LIMIT_DETAIL);
   return scimFail(r.status, r.message ?? r.code);
 }
 
