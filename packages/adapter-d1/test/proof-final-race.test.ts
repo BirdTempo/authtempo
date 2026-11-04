@@ -221,8 +221,10 @@ async function expectFinal(other: World, email: string, claimantSessions: string
 
 // The counts of the run of 2026-11-04 on the D1 binding of this pool, with
 // the D1 limiter on the same view. Each is the request of the scene: the
-// confirm, or the reset in the mirror.
-const PINS = { a: 17, b: 23, c: 23, identity: 22, mirror: 37 };
+// confirm, or the reset in the mirror. After ruling 23 of plan 12o, scene A
+// sends no mail (17 before), and the identity race signs in (22 before, with
+// the answer 500).
+const PINS = { a: 14, b: 23, c: 23, identity: 25, mirror: 37 };
 
 describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
   beforeEach(async () => {
@@ -231,7 +233,7 @@ describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
     endings.length = 0;
   });
 
-  it("scene A: the reset claims between the confirm's password write and its flip; the confirm answers 409, mails a new link, and the same link is spent", async () => {
+  it("scene A: the reset claims between the confirm's password write and its flip; the confirm answers 409 with a detail that says to sign in, mails nothing, and the same link is spent", async () => {
     const email = "eve@example.com";
     const other = make(false);
     const c = await claimant(other, email);
@@ -249,18 +251,17 @@ describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
     // The reset claimed first, so the flip of the confirm matched no row.
     expect(await answer(v.res)).toBe("409 conflict");
     expect(setToken(v.res)).toBeNull();
-    // The link was spent before the transaction: a new one goes (decision 11).
-    const fresh = confirmLink(w.mail, email);
-    expect(fresh).not.toBe("");
-    expect(fresh).not.toBe(c.link);
+    // The address is verified, so the answer says to sign in and no new
+    // link goes (ruling 23 of plan 12o).
+    expect(((await v.res.clone().json()) as { detail?: string }).detail).toBe(
+      "Another proof verified this address first. Sign in.",
+    );
+    expect(confirmLink(w.mail, email)).toBe("");
     await expectFinal(other, email, c.sessions);
-    // The same link again is spent. The new link finds a verified user: no session.
+    // The same link again is spent.
     expect(await answer(await call(other, post("/password/verify", { token: c.link })))).toBe(
       "400 invalid_token",
     );
-    const again = await call(other, post("/password/verify", { token: fresh }));
-    expect(await answer(again)).toBe("200 ok");
-    expect(setToken(again)).toBeNull();
     expect(v.queries).toBe(PINS.a);
     expect(v.queries).toBeLessThanOrEqual(BUDGET);
   });
@@ -329,7 +330,7 @@ describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
     expect(v.queries).toBeLessThanOrEqual(BUDGET);
   });
 
-  it("the identity race: the reset writes the email identity between the confirm's read of it and its create; the confirm keeps its claim and answers 500", async () => {
+  it("the identity race: the reset writes the email identity between the confirm's read of it and its create; the confirm finds the row and signs in", async () => {
     const email = "hal@example.com";
     const other = make(false);
     const c = await claimant(other, email);
@@ -346,17 +347,21 @@ describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
     const v = await measure(w, post("/password/verify", { token: c.link }));
     expect(stage).toBe("fired");
     expect(r.reset?.done).toBe("200 ok");
-    // The create of the confirm meets the reset's row: a throw after `keep`.
-    expect(await answer(v.res)).toBe("500 internal");
-    expect(setToken(v.res)).toBeNull();
-    // The claim stays, and its after points fired on the error answer (decision 10).
+    // The create of the confirm meets the reset's row after `keep`. One read
+    // finds the row of the same user. So the row counts as present, and the
+    // confirm goes on to its session (ruling 23 of plan 12o).
+    expect(await answer(v.res)).toBe("200 ok");
+    const mine = setToken(v.res);
+    expect(mine).not.toBeNull();
     expect(endings.filter((e) => c.sessions.includes(e.id))).toEqual(
       c.sessions.map((id) => ({ id, reason: "claim" })),
     );
     const end = await expectFinal(other, email, c.sessions);
-    // The reset ran after the claim's last session delete, so its session stays.
-    const session = await other.auth.api.getSession(r.reset?.token ?? "");
-    expect(end.sessions).toContain(session?.session.id);
+    // The reset ran after the claim's last session delete, so its session stays beside the confirm's.
+    const reset = await other.auth.api.getSession(r.reset?.token ?? "");
+    const confirm = await other.auth.api.getSession(mine ?? "");
+    expect(end.sessions).toContain(reset?.session.id);
+    expect(end.sessions).toContain(confirm?.session.id);
     expect(v.queries).toBe(PINS.identity);
     expect(v.queries).toBeLessThanOrEqual(BUDGET);
   });
