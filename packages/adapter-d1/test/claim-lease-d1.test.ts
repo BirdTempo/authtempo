@@ -1,5 +1,10 @@
 import { env } from "cloudflare:test";
-import { createAuth, createPbkdf2PasswordHash, type MailMessage } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type MailMessage,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter, createD1Limiter } from "../src/index.js";
@@ -15,6 +20,11 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // runs on a view of the binding. The view counts each query and refuses
 // query 51, as D1 Free does. The source is the D1 limits page, updated 21
 // April 2026 and read 2026-10-24 (anonymous-upgrade-budget.test.ts).
+//
+// A flow fixes its time at its start, and a claim writes its lease with that
+// time (ruling 26 of plan 12p). So the owner's Google callback that waits 61
+// seconds in its provider call writes a lease that is stale at its birth. A
+// password sign-up of the address in that wait must keep no password.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -105,8 +115,11 @@ const clock = { now: () => current };
 /** The mail of every invocation of a test. */
 const mail: MailMessage[] = [];
 
+/** The claims that the fake verify of an ID token answers. */
+const idClaims: { current: Record<string, unknown> } = { current: {} };
+
 /** One invocation: the engine on the counted view, or on the binding with no count. */
-function make(counted: boolean, watch?: Watch) {
+function make(counted: boolean, watch?: Watch, extra: Partial<AuthConfig> = {}) {
   const { db, count } = counted ? counting(env.DB, watch) : { db: env.DB, count: { queries: 0 } };
   const auth = createAuth({
     baseURL: BASE,
@@ -119,6 +132,7 @@ function make(counted: boolean, watch?: Watch) {
     password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
     // An `afterEnd` hook: the claim reads its sessions and ends them by `deleteRows`.
     hooks: { session: { afterEnd: () => {} } },
+    ...extra,
   });
   return { auth, count };
 }
@@ -273,4 +287,128 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
     });
     expect(Math.max(held.queries, stale.queries)).toBeLessThanOrEqual(BUDGET);
   });
+
+  for (const late of [LEASE_MS + 1_000, 0])
+    it(`keeps no password of a sign-up beside a Google claim that waited ${late / 1000} s in its provider call`, async () => {
+      const email = "cy@example.com";
+      const inFetch = latch();
+      const goFetch = latch();
+      const atDelete = latch();
+      const goDelete = latch();
+      const atUser = latch();
+      const goUser = latch();
+      // The owner's Google account proves the address. Its token answer comes
+      // late: the callback fixed its time before this call.
+      const google: Partial<AuthConfig> = {
+        social: {
+          google: { clientId: "gid", clientSecret: "gsecret" },
+          fetch: async () => {
+            inFetch.open();
+            await goFetch.wait;
+            return Response.json({ id_token: "idtok", access_token: "at", token_type: "Bearer" });
+          },
+        },
+        jwt: { verifyIdToken: async () => idClaims.current, signES256: async () => "es256" },
+      };
+      let deleted = false;
+      // After the claim's delete of the passwords, before its flip.
+      const owner = make(
+        true,
+        async (sql) => {
+          if (!deleted && /^DELETE FROM ta_password\b/.test(sql)) {
+            deleted = true;
+            atDelete.open();
+            await goDelete.wait;
+          }
+        },
+        google,
+      );
+      let created = false;
+      // After the sign-up's user create, before its password create.
+      const signer = make(true, async (sql) => {
+        if (!created && /^INSERT INTO ta_user\b/.test(sql)) {
+          created = true;
+          atUser.open();
+          await goUser.wait;
+        }
+      });
+      const start = await measure(
+        make(false, undefined, google),
+        new Request(`${BASE}/auth/social/google/start`, { headers: { origin: APP_ORIGIN } }),
+      );
+      const location = new URL(start.res.headers.get("location") ?? "");
+      const bind = start.res.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+      const iat = Math.floor(current.getTime() / 1000);
+      idClaims.current = {
+        iss: "https://accounts.google.com",
+        aud: "gid",
+        sub: "g-owner",
+        email,
+        email_verified: true,
+        nonce: location.searchParams.get("nonce"),
+        iat,
+        exp: iat + 3600,
+      };
+      const state = location.searchParams.get("state") ?? "";
+      const claim = measure(
+        owner,
+        new Request(`${BASE}/auth/social/google/callback?state=${state}&code=c`, {
+          headers: { origin: APP_ORIGIN, cookie: bind },
+        }),
+      );
+      await inFetch.wait;
+      // The clock moves while the owner waits; the test does not sleep.
+      current = new Date(current.getTime() + late);
+      const signUp = measure(signer, post("/password/sign-up", { email, password: PASSWORD }));
+      await atUser.wait;
+      goFetch.open();
+      await atDelete.wait;
+      const user = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+        .bind(email)
+        .first<{ id: string }>();
+      if (!user) throw new Error("no user");
+      // The claim wrote its lease with the time of its start: stale at 61 s, live at 0 s.
+      const lease = await env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
+        .bind(`claim-lease:${user.id}`)
+        .first<{ e: number | string }>();
+      expect(new Date(lease?.e ?? 0).getTime() < current.getTime()).toBe(late > 0);
+      goUser.open();
+      const up = await signUp;
+      goDelete.open();
+      const done = await claim;
+      expect(await answer(up.res)).toBe("409 email_taken_unverified");
+      expect(done.res.status).toBe(302);
+      expect(
+        done.res.headers.getSetCookie().some((c) => /^__Host-tempo_session=[^;]/.test(c)),
+      ).toBe(true);
+      expect(await rowsOf(user.id)).toEqual({
+        verified: true,
+        passwords: 0,
+        sessions: 1,
+        lease: { purpose: "claim-lease", identifier: user.id },
+      });
+      const identities = await env.DB.prepare(
+        "SELECT provider, subject FROM ta_identity WHERE user_id = ? ORDER BY provider",
+      )
+        .bind(user.id)
+        .all<{ provider: string; subject: string }>();
+      expect(identities.results).toEqual([
+        { provider: "email", subject: email },
+        { provider: "google", subject: "g-owner" },
+      ]);
+      const signIn = await measure(
+        make(false),
+        post("/password/sign-in", { email, password: PASSWORD }),
+      );
+      expect(await answer(signIn.res)).toBe("401 invalid_credentials");
+      expect(Math.max(up.queries, done.queries)).toBeLessThanOrEqual(BUDGET);
+    });
 });
+
+function latch() {
+  let open = () => {};
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
