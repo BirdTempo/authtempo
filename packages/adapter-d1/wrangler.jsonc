@@ -29,6 +29,19 @@
       "binding": "DDL_DB",
       "database_name": "authtempo-test-ddl",
       "database_id": "ddl-test"
+    },
+    {
+      // Plan 12p: the same rows at version 15 in two databases. PAGED takes
+      // the fill by hand in pages, and PAGED_COPY the shipped 0016 file. No
+      // migrations_dir: the test applies the files itself.
+      "binding": "PAGED",
+      "database_name": "authtempo-test-paged",
+      "database_id": "authtempo-test-paged"
+    },
+    {
+      "binding": "PAGED_COPY",
+      "database_name": "authtempo-test-paged-copy",
+      "database_id": "authtempo-test-paged-copy"
     }
   ]
 }

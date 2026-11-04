@@ -79,6 +79,25 @@ Version 15 (plan 12i, 2026-10-24) is the account with no address. `ta_user.email
 
 Version 16 (plan 12p, 2026-11-04) is the session proof. `ta_session` gets `proved`, NOT NULL with the default 0. The fill sets 1 on each session whose user has a verified address, so a verified user keeps each live session. A session of a user with no address, or with an unverified address, reads 0. That user signs in again for verified powers. Apply `0016_schema_v16` before you deploy a core at version 16; the adapter refuses a database at version 15.
 
+On D1, the fill of `0016_schema_v16` is one statement. It changes one row for each session of a verified user. The Cloudflare D1 limits page, read 2026-11-04, says that a single query that changes hundreds of thousands of rows exceeds the execution limits. It says that a large `UPDATE` must run in batches. When the fill fails at that limit, the migration fails, and the version stays 15. The adapter then refuses the database with `schema_mismatch`.
+
+Run the sweep before the migration, so that the expired sessions are gone. Call `auth.api.sweepExpired()` once, or wait for its next scheduled run. Then count the sessions of verified users with the first command below. An app with more than 100,000 live sessions of verified users applies the migration by hand, in pages. The ceiling keeps the one statement of the shipped fill below hundreds of thousands of rows. The steps by hand are the other four commands, in this order, before you deploy core at version 16:
+
+1. Add the column. When the column exists already, the command fails with `duplicate column name: proved`. Then go to step 2.
+2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0.
+3. Write version 16 in `ta_meta`.
+4. Mark `0016_schema_v16.sql` as applied in `d1_migrations`, the table that `wrangler d1 migrations` keeps. A `migrations_table` in the wrangler config names another table. Then use that name in the last command.
+
+```sh
+wrangler d1 execute my-app --remote --command "SELECT COUNT(*) AS sessions FROM ta_session s JOIN ta_user u ON u.id = s.user_id WHERE u.email_verified = 1 AND u.email IS NOT NULL"
+wrangler d1 execute my-app --remote --command "ALTER TABLE ta_session ADD COLUMN proved INTEGER NOT NULL DEFAULT 0"
+wrangler d1 execute my-app --remote --json --command "UPDATE ta_session SET proved = 1 WHERE proved = 0 AND id IN (SELECT s.id FROM ta_session s JOIN ta_user u ON u.id = s.user_id WHERE u.email_verified = 1 AND u.email IS NOT NULL AND s.proved = 0 LIMIT 10000)"
+wrangler d1 execute my-app --remote --command "UPDATE ta_meta SET value = '16' WHERE key = 'schema_version'"
+wrangler d1 execute my-app --remote --command "INSERT INTO d1_migrations (name) VALUES ('0016_schema_v16.sql')"
+```
+
+After the mark, `wrangler d1 migrations apply` and `authtempo migrate` skip `0016_schema_v16`. The table and its columns `id`, `name`, and `applied_at` come from the migrations code of wrangler 4.148.0, read 2026-11-04. Wrangler writes the file name with `.sql` in `name`.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

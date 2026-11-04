@@ -8,6 +8,8 @@ declare global {
       DB: D1Database;
       STAGED: D1Database;
       DDL_DB: D1Database;
+      PAGED: D1Database;
+      PAGED_COPY: D1Database;
       TEST_MIGRATIONS: D1Migration[];
     }
   }
