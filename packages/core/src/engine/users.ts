@@ -163,7 +163,7 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
  * whose throw left its row behind. The next claim of the user takes it.
  * The sweep deletes it, as it deletes each verification row past
  * `expiresAt`. The flows that create a row of a user that a claim deletes
- * read a live lease (`claimNotStarted`).
+ * read the lease, live or stale (`claimNotStarted`).
  */
 export const CLAIM_LEASE_MS = 60_000;
 
@@ -526,17 +526,24 @@ export async function userStillUnverified(
 /**
  * Runs inside the caller's transaction, after the caller created a password
  * row or an identity row of the user (ruling 16 of plan 12p). False when a
- * claim of the user started since the caller read or created the user. A
- * claim deletes that row before its flip, so a check of the flip alone can
- * miss it. Then the row would outlive the claim, a way in of the claimant.
+ * claim of the user started since the caller created the user. A claim
+ * deletes that row before its flip, so a check of the flip alone can miss
+ * it. Then the row would outlive the claim, a way in of the claimant.
  *
  * On Postgres and MySQL the update of the user row is enough. A claim's
  * hold of that row waits for this transaction, or this update waits for the
- * claim's commit and then sees the flip. On a store with no isolation the
- * check also reads the live lease. A lease that came before this read means
- * a claim that may have deleted before the caller's create. A lease after
- * this read comes after the create, so the claim's delete takes the row.
- * A user with no address has no claim, so it gets no read.
+ * claim's commit and then sees the flip.
+ *
+ * On a store with no isolation the check also reads the lease, live or
+ * stale (ruling 26 of plan 12p). Each caller passes a user that its own
+ * transaction created. So each lease of that user comes from a claim that
+ * started after the create. A claim writes its lease with the time that its
+ * flow fixed at its start. So after a wait of 60 seconds, as in a provider
+ * call, the lease is stale when the claim writes it. That claim can still
+ * delete before the caller's create, so a stale lease counts as a live
+ * one. A lease after this read comes after the create, so the claim's
+ * delete takes the row. A user with no address has no claim, so it gets no
+ * read.
  */
 export async function claimNotStarted(
   tx: StorageAdapter,
@@ -547,7 +554,6 @@ export async function claimNotStarted(
   if (tx.isolated || user.email === null) return true;
   const lease = await tx.findOne("verification", [
     { field: "id", op: "eq", value: claimLeaseId(user.id) },
-    { field: "expiresAt", op: "gt", value: now },
   ]);
   return lease === null;
 }

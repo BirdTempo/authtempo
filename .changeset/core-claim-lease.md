@@ -11,7 +11,7 @@ A claim of an address now takes its first statement, then deletes every row that
 
 The first statement decides a race of two claims of one user, so a lost claim writes nothing. On Postgres and MySQL it is the hold: an update of the user row while it is unverified, which takes the row lock first. On D1, the SQLite drivers, and the memory store it is the lease: a `claim-lease` verification row of the user. A second claim meets the lease and writes nothing. It retries, and while the lease holds it answers 409 `conflict`. The lease lives 60 seconds, `CLAIM_LEASE_MS`, and the sweep deletes it then. The next claim takes a stale lease.
 
-The password sign-up, the uniform sign-up, and the social sign-up of a new user read the live lease in their claim check. A claim can delete before their password or identity create, so that row never outlives the claim.
+The password sign-up, the uniform sign-up, and the social sign-up of a new user read the lease in their claim check, live or stale. Each of them created the user, so each lease of that user comes from a claim that started later. A claim can delete before their password or identity create, so that row never outlives the claim.
 
 The storage port gains the flag `isolated`. Postgres and MySQL set it true: the open transaction is isolated, and `keep` answers false in it. D1, the SQLite drivers, and the memory store set it false. The storage of the Better Auth tables takes the value of the adapter under it. The conformance suite holds the flag to `keep`.
 
