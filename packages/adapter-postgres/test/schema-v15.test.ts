@@ -66,7 +66,9 @@ describe("schema version 15 on Postgres (plan 12i)", () => {
       // The issuer of a back-channel link and of its logout (plan 12i Task 18).
       for (const table of ["ta_oauth_session_client", "ta_oauth_logout"])
         expect((await columnsOf(table)).at(-1)).toEqual(column("issuer", "text"));
-      // The gate passes: the adapter reads the database at version 15.
+      // The adapter reads only a database of the current version: apply the later migrations first (0016 since plan 12p).
+      for (const m of MIGRATIONS.slice(i0015 + 1)) await a.unsafe(m.sql);
+      // The gate passes: the adapter reads the rows of version 14.
       const db = createPostgresAdapter(a);
       expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u14" }])).toEqual({
         id: "u14",

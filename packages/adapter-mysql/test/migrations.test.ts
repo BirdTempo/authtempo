@@ -66,7 +66,7 @@ for (const server of MYSQL_SERVERS) {
       // The lock lets one runner apply every step; the other finds each step recorded.
       expect(results.flat()).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("15");
+      expect(await version(db)).toBe("16");
       expect(await applyMysqlMigrations(db.pool)).toEqual([]);
     });
 
@@ -84,7 +84,7 @@ for (const server of MYSQL_SERVERS) {
       expect(await version(db)).toBeNull();
       expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("15");
+      expect(await version(db)).toBe("16");
       // The third step made its table: a step recorded before it ran would leave it out.
       const tables = await db.q<RowDataPacket[]>`SELECT COUNT(*) AS n FROM information_schema.tables
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ta\\_%'`;
@@ -98,10 +98,14 @@ for (const server of MYSQL_SERVERS) {
       await clean.close();
       const last = ALL_STEPS.length;
       // The version row of the baseline, the ALTER of 0003 that adds the user columns and
-      // their unique keys (plan 12i), and the version update of the last file.
+      // their unique keys (plan 12i), the column and the fill of 0004 (plan 12p), and the
+      // version update of the last file. The fill sets the same value when it runs again.
       const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
+      const proved = ALL_STEPS.indexOf("0004_schema_v16:1") + 1;
+      const fill = ALL_STEPS.indexOf("0004_schema_v16:2") + 1;
       expect(userColumns).toBeGreaterThan(baseline.length);
-      for (const at of [2, baseline.length, userColumns, last]) {
+      expect([proved > userColumns, fill, last]).toEqual([true, proved + 1, fill + 1]);
+      for (const at of [2, baseline.length, userColumns, proved, fill, last]) {
         db = await freshDatabase(server, { migrate: false });
         await stopAfter(db, at);
         // The step ran, and its record is missing.
@@ -111,7 +115,7 @@ for (const server of MYSQL_SERVERS) {
         const open = MYSQL_MIGRATIONS.slice(MYSQL_MIGRATIONS.findIndex((m) => m.name === file));
         expect(await applyMysqlMigrations(db.pool)).toEqual(open.map((m) => m.name));
         expect(await recorded(db)).toEqual(ALL_STEPS);
-        expect(await version(db)).toBe("15");
+        expect(await version(db)).toBe("16");
         expect(await readMysqlShape(db.pool)).toEqual(cleanShape);
         await db.close();
         db = null;
@@ -195,6 +199,58 @@ for (const server of MYSQL_SERVERS) {
       }
     });
 
+    it("fills proved from the user of each session at schema version 16 (plan 12p)", async () => {
+      const d = await freshDatabase(server, { migrate: false });
+      db = d;
+      const [column] = MYSQL_MIGRATIONS.find((m) => m.name === "0004_schema_v16")?.statements ?? [];
+      // The runner stops before the first step of 0004: the database is at version 15.
+      const stopped = await applyMysqlMigrationsWith(d.pool, async (conn, sql) => {
+        if (sql === column) throw new Error("stop before 0004");
+        await conn.query(sql);
+      }).catch((e: unknown) => e);
+      expect(stopped).toMatchObject({ message: "stop before 0004" });
+      expect(await version(d)).toBe("15");
+      // A verified user with an address, a claimant with an unverified address, and a phone
+      // user with no address, each with a live session, as a writer of version 15 makes them.
+      const user = (id: string, email: string | null, verified: number, phone: string | null) =>
+        d.pool.query(
+          "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, 1, 1, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 0)",
+          [id, email, verified, phone],
+        );
+      const session = (id: string, userId: string) =>
+        d.pool.query(
+          "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, ip, user_agent, active_organization_id, fresh_at, actor_id, active_team_id) VALUES (?, 1, 1, ?, ?, 4102444800000, 1, NULL, NULL, NULL, 1, NULL, NULL)",
+          [id, userId, `h-${id}`],
+        );
+      await user("uv", "uv@example.com", 1, null);
+      await user("uu", "uu@example.com", 0, null);
+      await user("un", null, 0, "+14155550100");
+      for (const [id, userId] of [
+        ["sv", "uv"],
+        ["sv2", "uv"],
+        ["su", "uu"],
+        ["sn", "un"],
+      ] as const)
+        await session(id, userId);
+      expect(await applyMysqlMigrations(d.pool)).toEqual(["0004_schema_v16"]);
+      expect(await version(d)).toBe("16");
+      const rows = await d.q<RowDataPacket[]>`SELECT id, proved FROM ta_session ORDER BY id`;
+      expect(rows.map((r) => [r.id, r.proved])).toEqual([
+        ["sn", 0],
+        ["su", 0],
+        ["sv", 1],
+        ["sv2", 1],
+      ]);
+      const [meta] = await d.pool.query<RowDataPacket[]>(
+        "SELECT IS_NULLABLE AS n, COLUMN_DEFAULT AS d, COLUMN_TYPE AS t FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ta_session' AND COLUMN_NAME = 'proved'",
+      );
+      expect(meta.map((r) => [r.n, r.d, r.t])).toEqual([["NO", "0", "tinyint(1)"]]);
+      // A writer of version 15 after the fill names no proved: the default gives false.
+      await session("sv3", "uv");
+      const late = await d.q<RowDataPacket[]>`SELECT proved FROM ta_session WHERE id = 'sv3'`;
+      expect(late.map((r) => r.proved)).toEqual([0]);
+    });
+
     it("holds the baseline record to its digest", () => {
       // The record 0001_schema_v13 is append-only. On 2026-10-21 its text was
       // schemaDdl(MYSQL). Schema 14 changes schemaDdl, and a compare with it
@@ -203,11 +259,13 @@ for (const server of MYSQL_SERVERS) {
       // live tables to the schema.
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
       expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
-      // Plan 12d appends the file of schema version 14 after it, and plan 12i the file of 15.
+      // Plan 12d appends the file of schema version 14 after it, plan 12i the file of 15,
+      // and plan 12p the file of 16.
       expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual([
         "0001_schema_v13",
         "0002_schema_v14",
         "0003_schema_v15",
+        "0004_schema_v16",
       ]);
     });
 
@@ -226,6 +284,8 @@ for (const server of MYSQL_SERVERS) {
         // before 0003 left the lane. No database outside the tests ran the old text.
         // Plan 12i Task 18 added the issuer of the logout tables on 2026-10-25.
         ["0003_schema_v15", "d08a803c1d282c2f512b9f0acc857baca8e63ea382d22a2460a1f61d8b48a59e"],
+        // Plan 12p Task 1 (2026-11-04): the proof mark of the session and its fill.
+        ["0004_schema_v16", "56442d040411910b0b8da831efa1508c2a04fea5b002726e6145ccf9a98a71da"],
       ]);
     });
   });

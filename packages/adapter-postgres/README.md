@@ -107,6 +107,8 @@ Version 14 (plan 12d, 2026-10-21) is enterprise SSO and SCIM. It adds the tables
 
 Version 15 (plan 12i, 2026-10-24) is the account with no address. `ta_user.email` drops NOT NULL, and `ta_user` gets `username`, `display_username`, `phone`, and `is_anonymous` (default false), with a unique index on each of `username` and `phone`. `ta_passkey` gets `discoverable`, `prf`, and `large_blob`. `ta_oauth_session_client` and `ta_oauth_logout` get a nullable `issuer`: a logout token names the issuer that its client saw. A row of version 14 reads with no username, no phone, and not anonymous. Apply `0015_schema_v15` before you deploy a core at version 15; the adapter refuses a database at version 14.
 
+Version 16 (plan 12p, 2026-11-04) is the session proof. `ta_session` gets `proved`, NOT NULL with the default false. The fill sets true on each session whose user has a verified address, so a verified user keeps each live session. A session of a user with no address, or with an unverified address, reads false. That user signs in again for verified powers. Apply `0016_schema_v16` before you deploy a core at version 16; the adapter refuses a database at version 15.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

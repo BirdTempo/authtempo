@@ -107,6 +107,7 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         freshAt: t0,
         actorId: null,
         activeTeamId: null,
+        proved: false,
         createdAt: t0,
         updatedAt: t0,
       }),

@@ -58,7 +58,9 @@ describe("schema version 15 on D1 (plan 12i)", () => {
     // The issuer of a back-channel link and of its logout (plan 12i Task 18).
     for (const table of ["ta_oauth_session_client", "ta_oauth_logout"])
       expect((await columns(env.STAGED, table)).at(-1)).toEqual(column("issuer", "TEXT"));
-    // The gate passes: the adapter reads the database at version 15.
+    // The adapter reads only a database of the current version: apply the later migrations first (0016 since plan 12p).
+    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
+    // The gate passes: the adapter reads the rows of version 14.
     const db = createD1Adapter(env.STAGED);
     expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u14" }])).toEqual({
       id: "u14",

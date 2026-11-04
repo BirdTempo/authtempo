@@ -97,7 +97,7 @@ it("a row written before the migration reads secretVersion 1 after 0009 (plan 12
     }
     for (const { model, row } of ROWS) await insertOld(sql, model, row);
     // The runner applies 0009 and each later migration (0010 since plan 12a, 0011 since plan 12e, 0012 since plan 12f,
-    // 0013 since plan 12k, 0014 since plan 12d, 0015 since plan 12i).
+    // 0013 since plan 12k, 0014 since plan 12d, 0015 since plan 12i, 0016 since plan 12p).
     expect(await applyPostgresMigrations(sql)).toEqual([
       "0009_schema_v9",
       "0010_schema_v10",
@@ -106,6 +106,7 @@ it("a row written before the migration reads secretVersion 1 after 0009 (plan 12
       "0013_schema_v13",
       "0014_schema_v14",
       "0015_schema_v15",
+      "0016_schema_v16",
     ]);
     const db = createPostgresAdapter(sql);
     for (const { model, row } of ROWS) {

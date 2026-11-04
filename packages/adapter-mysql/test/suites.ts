@@ -57,7 +57,7 @@ export function runMysqlSuites(server: MysqlServer): void {
   /**
    * A database at the version before SCHEMA_VERSION: the ping must throw
    * schema_mismatch there (plan 12h Task 8). It holds every MySQL file but
-   * the last, the file of SCHEMA_VERSION (0003_schema_v15 since plan 12i).
+   * the last, the file of SCHEMA_VERSION (0004_schema_v16 since plan 12p).
    * An app has such a database before it runs the new file.
    */
   const oldStore = async () => {

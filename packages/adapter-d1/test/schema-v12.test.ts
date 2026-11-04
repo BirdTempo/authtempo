@@ -19,8 +19,8 @@ describe("schema version 12 on D1 (plan 12f)", () => {
       { name: "ban_reason", type: "TEXT", notnull: 0, dflt_value: null },
       { name: "ban_until", type: "INTEGER", notnull: 0, dflt_value: null },
     ]);
-    // Plan 12k adds active_team_id after actor_id.
-    expect((await columns("ta_session")).at(-2)).toEqual({
+    // Plan 12k adds active_team_id after actor_id, and plan 12p adds proved after it.
+    expect((await columns("ta_session")).at(-3)).toEqual({
       name: "actor_id",
       type: "TEXT",
       notnull: 0,

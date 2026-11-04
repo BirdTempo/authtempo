@@ -47,7 +47,8 @@ describe("schema version 13 on D1 (plan 12k)", () => {
     ).toBe("13");
     // The adapter reads only a database of the current version: apply the later migrations first (0014 since plan 12d).
     await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
-    expect((await columns(env.STAGED, "ta_session")).at(-1)).toEqual(
+    // Plan 12p adds proved after active_team_id.
+    expect((await columns(env.STAGED, "ta_session")).at(-2)).toEqual(
       nullable("active_team_id", "TEXT"),
     );
     expect((await columns(env.STAGED, "ta_invitation")).at(-1)).toEqual(

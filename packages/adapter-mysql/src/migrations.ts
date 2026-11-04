@@ -2,6 +2,7 @@ import type { Connection, Pool, RowDataPacket } from "mysql2/promise";
 import * as m0001 from "./migrations/0001_schema_v13.js";
 import * as m0002 from "./migrations/0002_schema_v14.js";
 import * as m0003 from "./migrations/0003_schema_v15.js";
+import * as m0004 from "./migrations/0004_schema_v16.js";
 
 export interface MysqlMigration {
   name: string;
@@ -13,6 +14,7 @@ export const MYSQL_MIGRATIONS: readonly MysqlMigration[] = [
   { name: m0001.name, statements: m0001.statements },
   { name: m0002.name, statements: m0002.statements },
   { name: m0003.name, statements: m0003.statements },
+  { name: m0004.name, statements: m0004.statements },
 ];
 
 /** The runner's own table: one row per statement that ran, by migration name and step. */
