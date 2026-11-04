@@ -310,6 +310,22 @@ export async function redeemHandoff(
             // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
             await undoSessionIfClaimed(tx, user.id, now);
           }
+          // The code row, as the last statement, for a verified user too
+          // (plan 12p). `claimEmail` deletes the handoff codes before the
+          // sessions. One row means that delete has not run, so the claim's
+          // session delete still removes this session. Zero rows means the
+          // claim took the code: delete the own session by id, commit, and
+          // answer the failure. A conditional update, not a read, so that it
+          // sees the claim's statements on D1.
+          const held = await tx.update(
+            "verification",
+            [{ field: "id", op: "eq", value: row.value.id }],
+            { updatedAt: now },
+          );
+          if (held === 0) {
+            await tx.delete("session", [{ field: "id", op: "eq", value: session.id }]);
+            return fail("invalid_token");
+          }
           return ok({ token, user, session });
         },
       ),

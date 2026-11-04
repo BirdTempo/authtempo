@@ -699,9 +699,9 @@ export async function verifyPasskeyAuthentication(
     "bound",
   );
   // One transaction, so a session hook's membership check and the write read the same state.
-  const opened = await hookGuard(async () =>
-    ok(
-      await config.storage.transaction(async (tx) => {
+  const opened = await hookGuard(() =>
+    config.storage.transaction(
+      async (tx): Promise<Result<{ token: string; session: SessionRow }>> => {
         // Before the session hook and its hold of the user row, as at the other pathways.
         await upgrade.before(tx, user, upgradeProof(user), "passkey");
         // The assertion proved the passkey, a handle of a user with no address (plan 12p).
@@ -710,9 +710,27 @@ export async function verifyPasskeyAuthentication(
           { user, ip: input.ip, userAgent: input.userAgent, via: "passkey", handleProved: true },
           tx,
         );
+        const s = await writeSession(config, prepared, tx);
+        // The passkey row after the insert, for a verified user too (plan
+        // 12p). `claimEmail` deletes the passkeys before the sessions. One
+        // row means that delete has not run, so the claim's session delete
+        // still removes this session. Zero rows means the claim took the
+        // passkey: delete the own session by id, commit, and answer the
+        // failure. A conditional update, not a read, so that it sees the
+        // claim's statements on D1.
+        const held = await tx.update(
+          "passkey",
+          [{ field: "id", op: "eq", value: checked.value.id }],
+          { updatedAt: config.clock.now() },
+        );
+        if (held === 0) {
+          await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
+          return fail("passkey_failed");
+        }
+        // The claim after the row check, so no path commits a claim without its session.
         await upgrade.claim(tx);
-        return writeSession(config, prepared, tx);
-      }),
+        return ok(s);
+      },
     ),
   );
   if (!opened.ok) return opened;

@@ -206,14 +206,30 @@ export async function claimEmail(
     { field: "provider", op: "ne", value: "email" },
   ];
   if (keep?.identityId) where.push({ field: "id", op: "ne", value: keep.identityId });
+  // Every row that a sign-in trusts goes before the sessions (plan 12p).
+  // The flip comes first for the guards of the sign-ins that read the user.
+  // A sign-in that trusts a row ends its transaction with a conditional
+  // update on that row: the identity, the password, the passkey, or the
+  // handoff code. When that update still finds the row, its delete below
+  // has not run, so the session delete after it still removes the session.
   await tx.delete("identity", where);
-  // Before the session delete. A password sign-in of an unverified user
-  // checks its password row as the last statement after its session
-  // insert. When that check still finds the row, this delete has not run,
-  // so the session delete below still removes that sign-in's session.
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
+  // A claimant's passkeys would keep the account open after the claim.
+  // Registration already needs a proved session; this closes any other path.
+  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "passkey-challenge" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+  // A handoff code minted for the claimant would trade for a session after the claim.
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "handoff-code" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+  // The sessions last (plan 12p), so a sign-in whose guard passed above has
+  // its session removed here.
   // With an `afterEnd` hook, one read and one `deleteRows` of the read ids
   // per chunk; with none, one statement (plan 9h). So the claimant's session
   // count adds no query (final review B M of plan 12i). The ended list holds
@@ -232,18 +248,6 @@ export async function claimEmail(
       true,
     ),
   );
-  // A claimant's passkeys would keep the account open after the claim.
-  // Registration already needs a verified email; this closes any other path.
-  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "passkey-challenge" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
-  // A handoff code minted for the claimant would trade for a session after the claim.
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "handoff-code" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
 }
 
 /**
