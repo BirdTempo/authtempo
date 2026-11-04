@@ -26,6 +26,11 @@ const env = {
   GIT_AUTHOR_EMAIL: "fixture@example.com",
   GIT_COMMITTER_NAME: "fixture",
   GIT_COMMITTER_EMAIL: "fixture@example.com",
+  // No background gc after a commit: a detached git process could still
+  // write in the folder while `remove` deletes it (evidence run 3 of plan 12o).
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "gc.auto",
+  GIT_CONFIG_VALUE_0: "0",
 };
 
 export function makeRepo(): Repo {
@@ -47,7 +52,9 @@ export function makeRepo(): Repo {
       git(["commit", "--quiet", "--no-verify", "-m", message]);
     },
     remove() {
-      rmSync(root, { recursive: true, force: true });
+      // Retries: on macOS under load a delete of a folder that another
+      // process still writes answers ENOTEMPTY (evidence run 3 of plan 12o).
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     },
   };
 }
