@@ -1327,7 +1327,8 @@ export const MIGRATION_0013_NAME = "0013_compat_schema_v16";
  * session whose user has a verified address, as core 0016 does. The join
  * reads Better Auth's `user` through the app's naming, as 0009 does for
  * the bans. A session of a user with no address, or with an unverified
- * address, keeps false. That user signs in again for verified powers.
+ * address, keeps false. A user with no address signs in again for verified
+ * powers. A user with an unverified address proves it first.
  *
  * Better Auth's `user.email` is NOT NULL, and the storage reads each
  * placeholder address as no address (placeholder.ts). So the fill skips a

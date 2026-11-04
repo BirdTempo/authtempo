@@ -3,8 +3,8 @@
 -- session table gets taProved, NOT NULL with the default 0, so a row that
 -- Better Auth writes reads false. Then the fill sets 1 on each session whose
 -- user has a verified address. A placeholder address of Better Auth reads as
--- no address, so its session keeps 0. A user with no address, or with an
--- unverified address, signs in again for verified powers.
+-- no address, so its session keeps 0. A user with no address signs in again
+-- for verified powers. A user with an unverified address proves it first.
 -- The text of the default naming (camel case), the same for both variants.
 -- Another naming: run compatMigration0013Sql("sqlite", resolveNames(options))
 -- for its text.

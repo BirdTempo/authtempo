@@ -9,9 +9,10 @@
  * NULL with the default 0, so a row of version 15 reads false. Then the
  * fill sets 1 on each session whose user has a verified address. So a
  * verified user keeps the powers of each live session. A session of a user
- * with no address, or with an unverified address, keeps 0. That user signs
- * in again for verified powers. MySQL 8.0 runs each statement as one
- * atomic statement. The fill sets the same value when it runs again, so
+ * with no address, or with an unverified address, keeps 0. A user with no
+ * address signs in again for verified powers. A user with an unverified
+ * address proves it first. MySQL 8.0 runs each statement as one atomic
+ * statement. The fill sets the same value when it runs again, so
  * the runner can resume after it. The last statement writes the version,
  * so a migration that stops early never reports its version. Append-only:
  * never edit a shipped migration.

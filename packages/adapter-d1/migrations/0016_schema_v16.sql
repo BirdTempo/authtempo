@@ -9,8 +9,9 @@
 -- false. Then the fill sets 1 on each session whose user has a verified
 -- address. So a verified user keeps the powers of each live session. A
 -- session of a user with no address, or with an unverified address, keeps
--- 0. That user signs in again for verified powers. A session that a Worker
--- of version 15 writes after the fill reads false too. Booleans are INTEGER.
+-- 0. A user with no address signs in again for verified powers. A user with
+-- an unverified address proves it first. A session that a Worker of
+-- version 15 writes after the fill reads false too. Booleans are INTEGER.
 -- The columns keep the field order of the schema.
 --
 -- The fill is one statement. It changes one row for each session of a

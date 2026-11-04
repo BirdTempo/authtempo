@@ -10,10 +10,11 @@
  * reads false. Then the fill sets true on each session whose user has a
  * verified address. So a verified user keeps the powers of each live
  * session. A session of a user with no address, or with an unverified
- * address, keeps false. That user signs in again for verified powers. The
- * runner applies the text in one transaction, so no session of version 15
- * goes in between the column and the fill. The columns keep the field
- * order of the schema.
+ * address, keeps false. A user with no address signs in again for verified
+ * powers. A user with an unverified address proves it first. The runner
+ * applies the text in one transaction, so no session of version 15 goes in
+ * between the column and the fill. The columns keep the field order of the
+ * schema.
  */
 export const name = "0016_schema_v16";
 export const sql = `
