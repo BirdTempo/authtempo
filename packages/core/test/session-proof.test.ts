@@ -1072,14 +1072,20 @@ describe("a handoff redeem that straddles the claim (ruling 16 of plan 12p)", ()
     const w = world();
     const minted = await claimantCode(w, await claimant(w));
     const verify = await ownerLink(w);
-    let late: string | null = null;
+    let late: { codes: number; redeem: string } | null = null;
     w.armed.run = async () => {
+      // The claim deleted the codes of the user before the flip. The start row names no user.
+      const user = await userAt(w, CLAIMED);
+      const codes = await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "handoff-code" },
+        { field: "identifier", op: "eq", value: user.id },
+      ]);
       const r = await redeemHandoff(w.config, { ...minted, ip: null, userAgent: null });
-      late = r.ok ? "ok" : r.code;
+      late = { codes: codes.length, redeem: r.ok ? "ok" : r.code };
     };
     const owner = await w.owner.handle(verify);
     expect(await answer(owner)).toBe("200 ok");
-    expect(late).toBe("invalid_token");
+    expect(late).toEqual({ codes: 0, redeem: "invalid_token" });
     expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
   });
 
@@ -1384,19 +1390,24 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
   });
 
   it("undoes the deletes of a late claim whose lease came after a rival claim ended: the rival's password is back", async () => {
-    // The late claim reads the user before the rival's claim. Its
-    // user.beforeVerify waits while the rival claims, and 60 seconds go by.
-    // So it takes the rival's lease as stale, deletes, and its flip matches
-    // no row. The D1 view undoes only what the late claim wrote.
-    const hook: { run: (() => Promise<void>) | null } = { run: null };
+    // A flow fixes its time at its start. The rival, the owner's reset,
+    // starts first and waits in user.beforeVerify while 61 seconds go by.
+    // So its lease is stale when it writes it. The late claim, a magic
+    // link, reads the user unverified, then lets the rival end. It takes the
+    // stale lease, deletes, and its flip matches no row. The D1 view undoes
+    // only what the late claim wrote.
+    const rival = { arrived: latch(), wait: latch(), done: latch() };
     const w = world({
       extra: {
         hooks: {
           user: {
-            beforeVerify: async () => {
-              const run = hook.run;
-              hook.run = null;
-              await run?.();
+            beforeVerify: async ({ via }) => {
+              if (via === "password_reset") {
+                rival.arrived.open();
+                return rival.wait.wait;
+              }
+              rival.wait.open();
+              await rival.done.wait;
             },
           },
         },
@@ -1405,33 +1416,35 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     await claimant(w);
     const link = await ownerLinkToken(w);
     const NEW = recordCredential("the owner's new password");
-    let reset: string | null = null;
-    hook.run = async () => {
-      // The rival: the owner's reset, on the claimant's store with no lock. It claims the user.
-      const asked = await w.claimant.handle(
-        req("POST", "/password/reset/request", { email: CLAIMED }),
-      );
-      expect(asked.status).toBe(200);
-      const text = w.mail.findLast((m) => m.to === CLAIMED)?.text ?? "";
-      const done = await w.claimant.handle(
-        req("POST", "/password/reset", { token: tokenFromMail(text), password: NEW }),
-      );
-      expect(await answer(done)).toBe("200 ok");
-      reset = setToken(done);
-      w.clock.advance(CLAIM_LEASE_MS + 1);
-    };
+    const asked = await w.claimant.handle(
+      req("POST", "/password/reset/request", { email: CLAIMED }),
+    );
+    expect(asked.status).toBe(200);
+    const resetToken = tokenFromMail(w.mail.findLast((m) => m.to === CLAIMED)?.text ?? "");
+    // The rival runs on the claimant's store with no lock, and waits in its hook.
+    const reset = w.claimant
+      .handle(req("POST", "/password/reset", { token: resetToken, password: NEW }))
+      .then(async (res) => {
+        rival.done.open();
+        return { answer: await answer(res), token: setToken(res) };
+      });
+    // The rival fixed its time before its hook, so its lease will be stale.
+    await rival.arrived.wait;
+    w.clock.advance(CLAIM_LEASE_MS + 1);
     const late = await verifyMagicLink(d1Like(w.ownerConfig), {
       token: link,
       ip: null,
       userAgent: null,
     });
-    expect(hook.run).toBeNull();
+    const won = await reset;
+    expect(won.answer).toBe("200 ok");
     // The flip of the late claim matched no row, so it threw and undid its
     // deletes. Its retry found the verified user and signed in.
     expect(late.ok).toBe(true);
-    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    const user = await userAt(w, CLAIMED);
+    expect(user.emailVerified).toBe(true);
     // The rival's kept rows are back: its password signs in, and its session lives.
-    expect((await rowOf(w, reset ?? ""))?.userId).toBe((await userAt(w, CLAIMED)).id);
+    expect((await rowOf(w, won.token ?? ""))?.userId).toBe(user.id);
     const signIn = await w.claimant.handle(
       req("POST", "/password/sign-in", { email: CLAIMED, password: NEW }),
     );
