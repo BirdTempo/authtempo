@@ -271,6 +271,76 @@ function winnerRace(provider: string) {
   return { w, armed };
 }
 
+/**
+ * A world whose next identity create of `provider` first runs `armed.run`,
+ * a whole flow of `other` (ruling 26 of plan 12o). `other` uses the same
+ * store with no transaction lock, as a parallel connection on D1 does. So
+ * the rows of its flow land between this attempt's read of the identity and
+ * its create.
+ */
+function parallelRace(provider: string) {
+  const inner = createMemoryAdapter();
+  const armed: { run: (() => Promise<void>) | null } = { run: null };
+  const wrap = (a: StorageAdapter): StorageAdapter => ({
+    createMany: (m, r) => a.createMany(m, r),
+    rowsPerInsert: (m) => a.rowsPerInsert(m),
+    create: async (m, d) => {
+      const run = armed.run;
+      if (m === "identity" && run && (d as unknown as IdentityRow).provider === provider) {
+        armed.run = null;
+        await run();
+      }
+      return a.create(m, d);
+    },
+    findOne: (m, w) => a.findOne(m, w),
+    findMany: (m, w, o) => a.findMany(m, w, o),
+    update: (m, w, d) => a.update(m, w, d),
+    delete: (m, w) => a.delete(m, w),
+    deleteRows: (m, w) => a.deleteRows(m, w),
+    keep: () => a.keep(),
+    transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+  });
+  // Each call of `open` goes to the store at once, also in a transaction.
+  const open: StorageAdapter = {
+    createMany: (m, r) => inner.createMany(m, r),
+    rowsPerInsert: (m) => inner.rowsPerInsert(m),
+    create: (m, d) => inner.create(m, d),
+    findOne: (m, w) => inner.findOne(m, w),
+    findMany: (m, w, o) => inner.findMany(m, w, o),
+    update: (m, w, d) => inner.update(m, w, d),
+    delete: (m, w) => inner.delete(m, w),
+    deleteRows: (m, w) => inner.deleteRows(m, w),
+    keep: () => inner.keep(),
+    transaction: (fn) => fn(open),
+  };
+  const made = world({ storage: wrap(inner) });
+  const w: World = { ...made, auth: { ...made.auth, storage: inner } };
+  const beside = world({ storage: open });
+  const other: World = { ...beside, auth: { ...beside.auth, storage: inner } };
+  return { w, other, armed };
+}
+
+/** A verified user of `email`: a detailed password sign-up and its verify link. */
+async function provedUser(w: World, email: string): Promise<UserRow> {
+  const up = await passwordSignUp(w.auth.config, {
+    email,
+    password: "correct horse battery",
+    ip: null,
+    userAgent: null,
+  });
+  if (!up.ok) throw new Error(up.code);
+  const mail = w.auth.mail.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
+  const done = await verifyPasswordEmail(w.auth.config, {
+    token: tokenFromMail(mail?.text ?? ""),
+    ip: null,
+    userAgent: null,
+  });
+  if (!done.ok) throw new Error(done.code);
+  const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user?.emailVerified) throw new Error("no verified user");
+  return user;
+}
+
 describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
   for (const path of PATHS) {
     it(`runs the pair once at ${path.name}`, async () => {
@@ -511,6 +581,31 @@ describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
     const held = await heldBy(race.w, "email");
     expect(held.identities).toBe(1);
     expect(held.sessions).toHaveLength(1);
+  });
+
+  it("does not sign in when a social link after a kept claim meets a parallel link of another user (ruling 26 of plan 12o)", async () => {
+    const race = parallelRace("google");
+    await signUp(race.w);
+    // Bea proves her own address. Then the Google account g-1 carries her
+    // address, and her Google sign-in links g-1 to her in parallel.
+    const bea = await provedUser(race.other, "bea@example.com");
+    race.armed.run = async () => {
+      const linked = await google(race.other, { email: bea.email });
+      if (!linked.ok) throw new Error(linked.code);
+    };
+    // The claim of Ada's address stays. Its create of g-1 meets the row of
+    // Bea. A row of another user does not count as present, so the error
+    // passes on, and Ada gets no session.
+    await expect(google(race.w)).rejects.toMatchObject({ code: "unique_violation" });
+    expect(race.armed.run).toBeNull();
+    expect((await userRow(race.w)).emailVerified).toBe(true);
+    const held = await heldBy(race.w, "google");
+    expect(held.identities).toBe(0);
+    expect(held.sessions).toEqual([]);
+    const linked = await race.w.auth.storage.findMany("identity", [
+      { field: "provider", op: "eq", value: "google" },
+    ]);
+    expect(linked.map((i) => i.userId)).toEqual([bea.id]);
   });
 
   it("logs a throw of user.afterVerify in one line, and the verify stands", async () => {

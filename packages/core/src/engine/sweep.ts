@@ -506,8 +506,10 @@ export async function sweepExpired(
   // A row of a cascading account delete owes the stop rows of the
   // impersonation sessions that the cascade took. The step writes them in
   // the same calls, one call each (decision 5 of plan 12o). One read of the
-  // user's stop rows comes first, so a session that another flow ended gets
-  // no second row (ruling 19 of plan 12o).
+  // user's stop rows comes first: the rows from `ACCESS_END_SKEW_MS` (5 s)
+  // before the delete, at most the newest `STOPPED_READ_LIMIT` (200). The step
+  // writes no second row for a session that one of them names (ruling 19 of
+  // plan 12o).
   const pendingSessions = await softStep(
     config.observe,
     "pending end",
