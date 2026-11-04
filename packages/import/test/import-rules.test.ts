@@ -591,8 +591,9 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     const claimant = () => [user("u2", { emailVerified: false, password: { hash: BCRYPT } })];
     await importUsers(db, listSource(claimant()), { formats: LEGACY_FORMATS, now });
     const u2 = await importId("user", "supabase", "u2");
-    // A claim, as core's claimEmail writes it: the flag first, then the
-    // claimant's password goes, then the owner's email identity.
+    // The end state of a claim, as core's claimEmail leaves it: the
+    // claimant's password gone, the flag set, the owner's email identity
+    // made. Since plan 12p the claim deletes before it flips the flag.
     await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
       emailVerified: true,
       updatedAt: AT,
@@ -890,8 +891,9 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
    * after the guard reads and before the first write. The claim runs outside
    * that transaction, as on D1 (no isolation) or as a second connection on
    * Postgres: the memory adapter does not make a write outside a transaction
-   * wait. It is core's `claimEmail` order: the flag first, then the
-   * claimant's credentials go, then the owner's email identity.
+   * wait. It writes what core's `claimEmail` leaves: the flag set, the
+   * claimant's credentials gone, the owner's email identity made. Core
+   * deletes before it flips since plan 12p; all three land before the write.
    */
   function claimBeforeFirstWrite(db: StorageAdapter, userId: string, email: string) {
     let fired = false;

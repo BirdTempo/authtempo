@@ -117,8 +117,9 @@ describe("importUsers", () => {
     const db = createMemoryAdapter();
     await importUsers(db, listSource(records()), { formats: LEGACY_FORMATS, now });
     const u2 = await importId("user", "supabase", "u2");
-    // A claim of the unverified u2, as core's claimEmail writes it: the flag
-    // first, then the claimant's credentials go, then the owner's email identity.
+    // A claim of the unverified u2 ended, as core's claimEmail leaves it: the
+    // flag set, the credentials gone, the email identity made. Since plan 12p
+    // the claim deletes before it flips.
     await db.update("user", [{ field: "id", op: "eq", value: u2 }], {
       emailVerified: true,
       updatedAt: AT,
