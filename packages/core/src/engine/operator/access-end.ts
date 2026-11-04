@@ -21,6 +21,7 @@ import {
   impersonationStops,
   type OperatorActEnds,
   type StopCause,
+  writeStopRow,
 } from "./audit.js";
 import { ACCESS_END_RECORD } from "./guards.js";
 import type { ImpersonationHold } from "./impersonation.js";
@@ -395,6 +396,27 @@ export const ACCESS_END_KEEP = ACCESS_END_LEAST + PAGE_LEAST;
 export const SESSIONS_PAGE_LEAST = 2;
 
 /**
+ * The most impersonation sessions of one user that an account delete on a
+ * cascading store records for the sweep. Decisions 3 and 4 of plan 12o set
+ * it. A delete whose read finds more answers `delete_too_large` before the
+ * user delete, so the undo holds on D1. With ids of 26 characters, a list of
+ * 100 entries is 8201 bytes of JSON (measured 2026-11-04). Each compat
+ * dialect keeps `data` in a text column with no length bound (migration.ts,
+ * read 2026-11-04).
+ */
+export const STOPS_LIMIT = 100;
+
+/**
+ * An impersonation session that the cascade of a user delete takes, for its
+ * stop row at the sweep (decision 3 of plan 12o). The session is gone then,
+ * and the sweep never reads the audit table. So the row holds both ids.
+ */
+export interface PendingStop {
+  sessionId: string;
+  actorId: string;
+}
+
+/**
  * Ends a page of the own sessions of a user whose row the caller deletes,
  * inside `budget` calls of `meter` (ruling 1 of plan 12f2, item B1). The
  * account delete calls it in its transaction. One read by the `userId`
@@ -405,6 +427,16 @@ export const SESSIONS_PAGE_LEAST = 2;
  * row left, a last delete takes a session that a sign-in wrote after the
  * read, with no hook (plan 9d). The answer is the count of ended sessions,
  * and `left` when rows stay.
+ *
+ * `impersonated` holds the user's live impersonation sessions that the
+ * caller read before the page (decision 3 of plan 12o). The caller reads
+ * them only on a store whose user delete cascades. Elsewhere it is empty.
+ * There the cascade takes each row that the page does not end, and the
+ * sweep cannot see it. A session of the list that the page ends gets its
+ * stop row in the page. The other sessions of the list go into the
+ * pending-end row as `data.stops`, with `data.endedAt` from `now`. The sweep
+ * writes their stop rows. The row is written also when no own row stays.
+ * Then no last delete runs, because the cascade takes a late session.
  */
 export async function endOwnSessionsPage(
   tx: StorageAdapter,
@@ -417,6 +449,7 @@ export async function endOwnSessionsPage(
   keep: number,
   reason: PendingEndReason,
   stops: ImpersonationStops | null,
+  impersonated: readonly SessionRow[],
 ): Promise<{ ended: number; left: boolean }> {
   const byUser: Where<"session">[] = [{ field: "userId", op: "eq", value: userId }];
   const read = await tx.findMany("session", byUser, {
@@ -427,6 +460,8 @@ export async function endOwnSessionsPage(
   const rows = read.slice(0, END_ALL_LIMIT.default);
   // The page counts its read again, so it gets 1 more. The calls of the caller and the last step stay out.
   const pageBudget = budget - meter.used + 1 - keep - 1;
+  // The stop rows that the page writes come after this mark.
+  const mark = stops?.rows.length ?? 0;
   // No lock of its own: the caller took the locks of these rows (holdImpersonations).
   const page =
     rows.length > 0 && pageBudget >= PAGE_LEAST
@@ -434,17 +469,25 @@ export async function endOwnSessionsPage(
       : { deleted: 0, stopped: rows.length > 0, used: 1 };
   meter.step(page.used - 1);
   const left = page.stopped || read.length > rows.length;
+  // The sessions of the list that got no stop row in the page.
+  const paid = new Set(stops?.rows.slice(mark).map((r) => r.data?.sessionId));
+  const owed: PendingStop[] =
+    stops === null
+      ? []
+      : impersonated.flatMap((r) =>
+          r.actorId !== null && !paid.has(r.id) ? [{ sessionId: r.id, actorId: r.actorId }] : [],
+        );
   let late = 0;
   // The newest session that the read holds: a row of a clock that runs ahead stays covered
   // (rulings 55 and 58 of plan 12d), as in `endImpersonationsPage`.
-  if (left)
+  if (left || owed.length > 0)
     await writePendingEnd(
       tx,
       config,
       userId,
       reason,
       Math.max(...read.map((r) => r.createdAt.getTime())),
-      {},
+      owed.length > 0 ? { stops: { owed, endedAt: now } } : {},
     );
   // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
   else late = await tx.delete("session", byUser);
@@ -471,7 +514,9 @@ function impersonationWhere(operatorId: string, targets: readonly string[]): Whe
  * row names the impersonation sessions that the user opened as an
  * operator. These are the sessions of those users whose `actorId` is the
  * user. With
- * `families`, it names the OAuth families that the act did not end. The
+ * `families`, it names the OAuth families that the act did not end. With
+ * `stops`, it names the impersonation sessions that a cascade takes, and
+ * the time of their end (decision 3 of plan 12o). The
  * sweep never reads the audit table, so the row holds the ids. The answer
  * is `data.before`.
  */
@@ -481,7 +526,11 @@ async function writePendingEnd(
   userId: string,
   reason: PendingEndReason,
   newest: number,
-  names: { targets?: readonly string[]; families?: readonly string[] },
+  names: {
+    targets?: readonly string[];
+    families?: readonly string[];
+    stops?: { owed: readonly PendingStop[]; endedAt: Date };
+  },
 ): Promise<Date> {
   const now = config.clock.now();
   // The clock plus the skew bound covers a row of an instance whose clock runs ahead,
@@ -504,6 +553,12 @@ async function writePendingEnd(
       ...(names.families === undefined || names.families.length === 0
         ? {}
         : { families: [...names.families] }),
+      ...(names.stops === undefined || names.stops.owed.length === 0
+        ? {}
+        : {
+            stops: names.stops.owed.map((x) => ({ sessionId: x.sessionId, actorId: x.actorId })),
+            endedAt: names.stops.endedAt.toISOString(),
+          }),
       // The record life from the config of the act (ruling 58).
       ...(recordOf(reason, names.targets) ? { recordLife: recordLife(config) } : {}),
     },
@@ -534,9 +589,40 @@ export const PENDING_END_PAGE = 5;
 /**
  * The least calls of the page of one pending-end row: the session read,
  * the lock, a link read, a delete, and the row delete. The sweep keeps
- * them from the outbox while a row waits (ruling 50 of plan 12f).
+ * them from the outbox while a row waits (ruling 50 of plan 12f). A row
+ * that owes stop rows gets the read, 2 stop rows, and the update of the
+ * row from them (decision 5 of plan 12o).
  */
 export const PENDING_PAGE_RESERVE = 5;
+
+/**
+ * The calls of an update of a pending-end row in the sweep's transaction.
+ * On D1 an update there is 2 statements, the undo read and the update.
+ */
+const ROW_UPDATE_CALLS = 2;
+
+/** True for one entry of `data.stops` of a pending-end row. */
+function isPendingStop(entry: unknown): entry is PendingStop {
+  if (typeof entry !== "object" || entry === null) return false;
+  const { sessionId, actorId } = entry as Record<string, unknown>;
+  return typeof sessionId === "string" && typeof actorId === "string";
+}
+
+/**
+ * The stop rows that a pending-end row still owes, and `endedAt`, the time
+ * of the delete (decision 5 of plan 12o). A row with no such list owes none.
+ */
+function owedStops(row: VerificationRow): { owed: PendingStop[]; endedAt: string | undefined } {
+  const list: unknown = row.data?.stops;
+  const owed = Array.isArray(list)
+    ? list.filter(isPendingStop).map((x) => ({ sessionId: x.sessionId, actorId: x.actorId }))
+    : [];
+  const at = row.data?.endedAt;
+  return {
+    owed,
+    endedAt: typeof at === "string" && Number.isFinite(Date.parse(at)) ? at : undefined,
+  };
+}
 
 /**
  * The read of the sweep step of the pending-end rows (ruling 44 of plan
@@ -575,6 +661,15 @@ export async function readPendingEnds(
  * deactivate is not deleted: it becomes the record of the act
  * (`ACCESS_END_RECORD`). A row that does not fit waits for the next sweep.
  * The answer is the count of ended sessions.
+ *
+ * A row with `data.stops` owes the stop rows of the impersonation sessions
+ * that a cascade took (decision 5 of plan 12o). After the page, the same
+ * transaction writes one `impersonation_stop` row per entry, one call each,
+ * in the calls that stay. Each row holds `data.endedAt`, the time of the
+ * delete. Then one update leaves the rest of the list on the row, or the
+ * row goes when no entry and no session stays. A row with entries left
+ * waits for the next sweep. `operator.afterAction` runs once per stop row
+ * after the commit, through `sessionsEnded`.
  */
 export async function endPendingRows(
   config: ResolvedConfig,
@@ -596,12 +691,18 @@ export async function endPendingRows(
         : [{ field: "userId" as const, op: "eq" as const, value: row.identifier }]),
       { field: "createdAt", op: "lte", value: before },
     ];
+    const byId: Where<"verification">[] = [{ field: "id", op: "eq", value: row.id }];
     const ended = endedList(config);
     // The impersonation sessions of the row end with their stop rows (ruling 43 of plan 12f).
-    const stops = impersonationStops(config, PENDING_STOP_CAUSE[reason]);
+    const cause = PENDING_STOP_CAUSE[reason];
+    const stops = impersonationStops(config, cause);
+    const { owed, endedAt } = owedStops(row);
+    // The delete ran while the tool was on. So the owed rows are written also while it is off now.
+    const written = stops ?? (owed.length > 0 ? { cause, rows: [] } : null);
     const now = config.clock.now();
+    const calls = limit - meter.used;
     // The delete of the row stays out of the page.
-    const pageBudget = limit - meter.used - 1;
+    const pageBudget = calls - 1;
     const done = await storage.transaction(async (tx) => {
       const read = await tx.findMany("session", where, {
         sort: { field: "id", dir: "asc" },
@@ -613,17 +714,44 @@ export async function endPendingRows(
           ? await endSessionPage(tx, config, rows, ended ?? null, now, pageBudget, where, stops)
           : { deleted: 0, stopped: false, used: 1 };
       const finished = !page.stopped && read.length <= rows.length;
+      // The owed stop rows: all of them and the row delete, or some of them and the update.
+      let paid = 0;
+      if (finished && written !== null && owed.length > 0) {
+        const room = calls - page.used;
+        paid = room - 1 >= owed.length ? owed.length : Math.max(0, room - ROW_UPDATE_CALLS);
+        for (const stop of owed.slice(0, paid))
+          await writeStopRow(
+            tx,
+            written,
+            { id: stop.sessionId, userId: row.identifier, actorId: stop.actorId },
+            now,
+            endedAt,
+          );
+      }
+      const rest = owed.slice(paid);
+      const data =
+        rest.length > 0
+          ? { ...row.data, stops: rest }
+          : Object.fromEntries(
+              Object.entries(row.data ?? {}).filter(([k]) => k !== "stops" && k !== "endedAt"),
+            );
       // A row that names families stays until they end, after this commit. A
       // record row stays too: endPendingFamilies writes the record.
-      const drop = finished && families.length === 0 && !keepsRecord(row);
-      if (drop) await tx.delete("verification", [{ field: "id", op: "eq", value: row.id }]);
-      return { page, finished, drop };
+      const drop = finished && rest.length === 0 && families.length === 0 && !keepsRecord(row);
+      if (drop) await tx.delete("verification", byId);
+      else if (paid > 0) await tx.update("verification", byId, { data });
+      return { page, finished: finished && rest.length === 0, drop, paid, data };
     });
-    meter.step(done.page.used + (done.drop ? 1 : 0));
+    const rowCalls = done.drop ? 1 : done.paid > 0 ? ROW_UPDATE_CALLS : 0;
+    meter.step(done.page.used + done.paid + rowCalls);
     n += done.page.deleted;
-    await sessionsEnded(config, ended, reason, stops, done.page.deleted);
+    await sessionsEnded(config, ended, reason, written, done.page.deleted);
     if (!done.finished) break;
-    if (!done.drop && !(await endPendingFamilies(config, row, families, meter, limit))) break;
+    if (
+      !done.drop &&
+      !(await endPendingFamilies(config, { ...row, data: done.data }, families, meter, limit))
+    )
+      break;
   }
   return n;
 }

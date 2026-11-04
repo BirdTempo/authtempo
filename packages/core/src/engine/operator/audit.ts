@@ -371,12 +371,18 @@ export function impersonationStops(
  * ended, on the flow's handle (ruling 43 of plan 12f). The actor is the
  * operator of the session, the target is its user, and `data` holds
  * `{ sessionId, cause }`. A session with no `actorId` writes nothing.
+ *
+ * The row's time is `now`, the time of the writer. The sweep writes the
+ * rows of the sessions that the cascade of a user delete took (decision 5
+ * of plan 12o). It passes `endedAt`, the time of the delete, and `data`
+ * holds it too.
  */
 export async function writeStopRow(
   tx: StorageAdapter,
   stops: ImpersonationStops,
   session: Pick<SessionRow, "id" | "userId" | "actorId">,
   now: Date,
+  endedAt?: string,
 ): Promise<void> {
   if (session.actorId === null) return;
   const row = await writeAuditIn(
@@ -387,7 +393,11 @@ export async function writeStopRow(
       action: "impersonation_stop",
       targetUserId: session.userId,
       reason: STOP_REASONS[stops.cause],
-      data: { sessionId: session.id, cause: stops.cause },
+      data: {
+        sessionId: session.id,
+        cause: stops.cause,
+        ...(endedAt === undefined ? {} : { endedAt }),
+      },
       ip: null,
       userAgent: null,
     },

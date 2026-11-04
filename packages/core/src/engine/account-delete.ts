@@ -21,6 +21,7 @@ import {
   endImpersonationsPage,
   endOwnSessionsPage,
   SESSIONS_PAGE_LEAST,
+  STOPS_LIMIT,
 } from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { holdImpersonations } from "./operator/impersonation.js";
@@ -35,7 +36,13 @@ import {
 } from "./organizations.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
-import { endedList, type ResolvedSession, sessionIsLive, sessionsEnded } from "./sessions.js";
+import {
+  endedList,
+  liveSessionWhere,
+  type ResolvedSession,
+  sessionIsLive,
+  sessionsEnded,
+} from "./sessions.js";
 import { holdUser } from "./user-hold.js";
 
 // Per hour, per user (plan 12a). A delete succeeds once. 5 lets a person
@@ -584,6 +591,14 @@ export async function accountDeleted(
  * the user opened as an operator. The rows that do not fit stay, each set
  * with one pending-end row of the reason `account_deleted`, and the sweep
  * ends them. The doors refuse them before that: the user row is gone.
+ *
+ * On a store whose user delete cascades, the cascade takes the own rows
+ * that do not fit, and no sweep sees them. So with the impersonation tool
+ * on, one read takes the user's live impersonation sessions before the
+ * page. It takes at most `STOPS_LIMIT` (decisions 3 and 4 of plan 12o). More
+ * answer `delete_too_large` before the user delete. The pending-end row
+ * names the ones that the page does not end, and the sweep writes their
+ * stop rows.
  */
 export async function deleteAccountRows(
   tx: StorageAdapter,
@@ -644,17 +659,26 @@ export async function deleteAccountRows(
     early === null
       ? DELETE_KEEP
       : DELETE_KEEP - 1 + Math.max(0, Math.ceil(early.length / IN_CHUNK) - 1);
+  // On a store whose user delete cascades (ruling 13 of plan 12f2), every
+  // check that can refuse and the pages of the sessions run before the user
+  // delete. With the impersonation tool on, one read there takes the user's
+  // impersonation sessions before the page (decision 3 of plan 12o).
+  const cascades = config.storage.userDeleteCascades === true;
+  const readsStops = cascades && proof.stops !== null;
   // The least calls after this point, at the worst. First the owner lock (a
   // batch of 2 on D1) and the recount of each organization that the user
   // owns with another owner. Then the user delete, the solo organizations,
   // and the deletes of the invitations and the member rows of the user. Last
-  // the least of each page of sessions, and `keep`. The size check comes
-  // before the scimUser locks, which D1 does not have.
+  // the read of the impersonation sessions on a cascading store, the least
+  // of each page of sessions, and `keep`. The pending-end row with stops
+  // takes the call of the last delete, so it needs no call more. The size
+  // check comes before the scimUser locks, which D1 does not have.
   const least =
     3 * owned.length +
     1 +
     (going.length > 0 ? SOLO_CALLS : 0) +
     2 +
+    (readsStops ? 1 : 0) +
     SESSIONS_PAGE_LEAST * (hold.targets.length > 0 ? 2 : 1) +
     keep;
   if (proof.refuseAfter !== null) {
@@ -700,11 +724,9 @@ export async function deleteAccountRows(
     if (held === 0) stopWith("conflict");
   }
   const solo = organizationList(going.map((x) => x.id));
-  // On a store whose user delete cascades (ruling 13 of plan 12f2), every
-  // check that can refuse and the pages of the sessions run before the user
-  // delete. Elsewhere the user row goes first: D1 has no lock, and a flow
-  // that writes a row of the user reads the user row after its insert.
-  const cascades = config.storage.userDeleteCascades === true;
+  // On a store whose user delete cascades, the user row goes after the pages
+  // of the sessions. Elsewhere the user row goes first: D1 has no lock, and a
+  // flow that writes a row of the user reads the user row after its insert.
   // The user row, then the rows of the solo organizations that give access or hold a
   // claim, set-based (rulings 30 and 78 of plan 12d). The rest waits for the sweep.
   const dropHead = async () => {
@@ -747,6 +769,20 @@ export async function deleteAccountRows(
   const tail = cascades ? 1 + (solo.length > 0 ? SOLO_HEAD_CALLS : 0) : 0;
   const ownBudget =
     config.storage.queryLimitPerInvocation === true ? proof.budget : Number.POSITIVE_INFINITY;
+  // The user's live impersonation sessions by id, for the stop rows past the
+  // page (decisions 3 and 4 of plan 12o). An expiry writes no stop row (spec
+  // 26 item 9), so an expired session does not count. More than
+  // `STOPS_LIMIT` answer delete_too_large here. No cascade has run yet, so
+  // the undo holds on D1.
+  const impersonated = readsStops
+    ? await tx.findMany(
+        "session",
+        [...liveSessionWhere(config, user.id, now), { field: "actorId", op: "ne", value: null }],
+        { sort: { field: "id", dir: "asc" }, limit: STOPS_LIMIT + 1 },
+      )
+    : [];
+  if (readsStops) proof.meter.step(1);
+  if (impersonated.length > STOPS_LIMIT) stopWith("delete_too_large");
   proof.counted.sessions = (
     await endOwnSessionsPage(
       tx,
@@ -759,6 +795,7 @@ export async function deleteAccountRows(
       keep + tail + (hold.targets.length > 0 ? SESSIONS_PAGE_LEAST : 0),
       "account_deleted",
       proof.stops,
+      impersonated,
     )
   ).ended;
   proof.counted.sessions += (

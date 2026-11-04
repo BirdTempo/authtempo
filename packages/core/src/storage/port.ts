@@ -177,6 +177,11 @@ export interface StorageAdapter {
    * D1, and the session hooks saw no session. Core's tables have no
    * foreign key and leave it out: there the user row goes first, because
    * D1 has no lock (user-hold.ts).
+   * Update 2026-11-04 by plan 12o: the cascade also takes the sessions past
+   * the page, and no sweep can see them. So with the impersonation tool on,
+   * the delete first reads the user's live impersonation sessions, at most
+   * 100. More answer `delete_too_large`. The pending-end row names those
+   * that the page does not end, and the sweep writes their stop rows.
    */
   userDeleteCascades?: boolean;
   /**
