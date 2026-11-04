@@ -1534,8 +1534,9 @@ export function runAdapterConformance(
 
     it("round-trips the proof mark of a session, true and false (plan 12p)", async () => {
       const at = new Date("2026-11-04T00:00:00.000Z");
-      // A phone user with no address: the phone code proves the account, so the engine
-      // sets true. A claimant with an unverified address: the engine sets false.
+      // A phone user with no address: the engine sets true, as for each user with no
+      // address that is not anonymous. A claimant with an unverified address: the
+      // engine sets false.
       await db.create("user", {
         ...user("u-phone", "unused@example.com", at),
         email: null,
