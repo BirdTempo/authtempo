@@ -499,7 +499,7 @@ export const EVENTS = {
     event: { kind: "identifier" },
     errorName: ERROR_NAME,
   }),
-  // A step of the new proof after a lost claim threw: the limiter, a row write, the
+  // A step of the new proof after a lost claim threw: the limiter, a storage call, the
   // app's builder, or the mail port. The answer stays 409 `conflict` (plan 12o). No address.
   "claim.mail_failed": fault("error", "authtempo: claim mail failed", {
     method: enumOf(["magic_link", "email_otp"]),
