@@ -206,6 +206,12 @@ export interface SessionOpen {
  * gates still read its user row: `handleProved` needs a verified handle. An
  * anonymous session stays unproved, because an upgrade can give it an
  * address. The owner's claim must not find it proved then.
+ *
+ * The flag of a user with no address rests on one invariant: no flow
+ * writes an unverified address onto an existing user. The confirm of a
+ * change of address and the move of SCIM set `emailVerified` true with the
+ * address. The anonymous upgrade makes a new user, and its session is
+ * unproved. The source check `address-write-sites.test.ts` holds this.
  */
 export function provedAtOpen(input: SessionOpen): boolean {
   if (input.carriedProved !== undefined) return input.carriedProved;
