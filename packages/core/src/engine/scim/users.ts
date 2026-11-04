@@ -31,7 +31,7 @@ import type {
 import { findManyIn } from "../../storage/batch.js";
 import { type Meter, meterOf } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../../storage/port.js";
-import { createSteps, verifySteps } from "../create-steps.js";
+import { claimAnswer, createSteps, verifySteps } from "../create-steps.js";
 import { OLD_ADDRESS_PROOFS } from "../email-change.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
 import { endFamilies, familyEnds } from "../oauth-family.js";
@@ -1053,27 +1053,30 @@ export async function scimCreateUser(
       );
       return true;
     };
-    const resolved = await hookGuard(async () => {
-      const r = await findOrCreateUserByEmail(
-        config.storage,
-        doc.address,
-        now,
-        verified,
-        after,
-        ended,
-        before,
-        {
-          ...made,
-          async user(tx, user) {
-            // A SCIM create is an act of the organization, as an invitation is:
-            // `open` and `invited` let it make a user, and `false` does not.
-            if (config.signUp === false) stopWith("sign_up_closed");
-            return made.user(tx, user);
+    // An error answer after a kept claim fires the claim's after points (plan 12o).
+    const resolved = await claimAnswer(config, verified, ended, () =>
+      hookGuard(async () => {
+        const r = await findOrCreateUserByEmail(
+          config.storage,
+          doc.address,
+          now,
+          verified,
+          after,
+          ended,
+          before,
+          {
+            ...made,
+            async user(tx, user) {
+              // A SCIM create is an act of the organization, as an invitation is:
+              // `open` and `invited` let it make a user, and `false` does not.
+              if (config.signUp === false) stopWith("sign_up_closed");
+              return made.user(tx, user);
+            },
           },
-        },
-      );
-      return { ok: true as const, value: r };
-    });
+        );
+        return { ok: true as const, value: r };
+      }),
+    );
     if (!resolved.ok) return failAnswer(resolved);
     const { user } = resolved.value;
     await made.after(user);

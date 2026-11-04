@@ -10,7 +10,7 @@ import type {
   UserRow,
 } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
-import { type CreateSteps, createSteps, verifySteps } from "../create-steps.js";
+import { type CreateSteps, claimAnswer, createSteps, verifySteps } from "../create-steps.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
 import { addMemberIn, atMemberLimit, holdsMember, publicOrganization } from "../organizations.js";
 import { effectiveIn } from "../permissions.js";
@@ -271,29 +271,32 @@ export async function resolveSsoUser(
   const summary = publicConnection(config, connection);
   let join: Join | null = null;
   let joined: MemberRow | null = null;
-  const resolved = await hookGuard(() =>
-    resolveSocialUser(
-      config.storage,
-      `sso:${connection.id}`,
-      // The domain proof is the proof of the address (Behavior 1).
-      { ...profile, email, emailVerified: true },
-      now,
-      verified,
-      async (tx, user) => {
-        const j = join;
-        joined = j ? await joinWrite(config, tx, j, user) : null;
-        return gate.write(tx);
-      },
-      ended,
-      async (tx, user, created) => {
-        // A retry reads again, so the newer reads win.
-        join = null;
-        await beforeSignIn(config, tx, { connection: summary, profile }, email, user, created);
-        // Before the gate: the session step holds the user row, a write.
-        join = await joinChecks(config, tx, connection, user, now);
-        await gate.before(tx, user);
-      },
-      steps,
+  // An error answer after a kept claim fires the claim's after points (plan 12o).
+  const resolved = await claimAnswer(config, verified, ended, () =>
+    hookGuard(() =>
+      resolveSocialUser(
+        config.storage,
+        `sso:${connection.id}`,
+        // The domain proof is the proof of the address (Behavior 1).
+        { ...profile, email, emailVerified: true },
+        now,
+        verified,
+        async (tx, user) => {
+          const j = join;
+          joined = j ? await joinWrite(config, tx, j, user) : null;
+          return gate.write(tx);
+        },
+        ended,
+        async (tx, user, created) => {
+          // A retry reads again, so the newer reads win.
+          join = null;
+          await beforeSignIn(config, tx, { connection: summary, profile }, email, user, created);
+          // Before the gate: the session step holds the user row, a write.
+          join = await joinChecks(config, tx, connection, user, now);
+          await gate.before(tx, user);
+        },
+        steps,
+      ),
     ),
   );
   if (!resolved.ok) return refused(config, connection, resolved.code, input.ip, resolved);

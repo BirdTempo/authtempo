@@ -477,25 +477,30 @@ describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
     ]);
   });
 
-  it("fires no afterVerify when a social retry after a unique-key race finds the user verified by the winner", async () => {
-    // A parallel Google sign-in of the same account links it and claims the user.
+  // Since plan 12o the memory store keeps a claim after `keep`. So a unique
+  // key that a parallel flow takes after the claim ends the flow with the
+  // error, and no retry runs. The claim stays, and its after points fire on
+  // the error. On Postgres and MySQL `keep` does nothing, and the retry of
+  // review M1 runs.
+  it("keeps the claim and fires afterVerify on the error when a social link after the claim meets a parallel link (plan 12o)", async () => {
+    // A parallel Google sign-in of the same account links it.
     const race = winnerRace("google");
     await signUp(race.w);
     race.armed.on = true;
-    expect((await google(race.w)).ok).toBe(true);
+    await expect(google(race.w)).rejects.toMatchObject({ code: "unique_violation" });
     expect(race.armed.on).toBe(false);
-    expect(race.w.verify).toEqual(["before:social:false"]);
+    expect(race.w.verify).toEqual(["before:social:false", "after:social:true"]);
     expect((await userRow(race.w)).emailVerified).toBe(true);
   });
 
-  it("fires no afterVerify when a reset retry after a unique-key race finds the user verified by the winner", async () => {
-    // A parallel magic link of the address writes the email identity and claims the user.
+  it("keeps the claim and fires afterVerify on the error when the email identity of a reset meets a parallel one (plan 12o)", async () => {
+    // A parallel magic link of the address writes the email identity.
     const race = winnerRace("email");
     await signUp(race.w);
     race.armed.on = true;
-    expect((await resetLink(race.w)).ok).toBe(true);
+    await expect(resetLink(race.w)).rejects.toMatchObject({ code: "unique_violation" });
     expect(race.armed.on).toBe(false);
-    expect(race.w.verify).toEqual(["before:password_reset:false"]);
+    expect(race.w.verify).toEqual(["before:password_reset:false", "after:password_reset:true"]);
     expect((await userRow(race.w)).emailVerified).toBe(true);
   });
 

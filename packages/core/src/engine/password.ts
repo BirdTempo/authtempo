@@ -18,7 +18,13 @@ import {
   upgradeProof,
   upgradeSteps,
 } from "./anonymous.js";
-import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
+import {
+  type CreateSteps,
+  createSteps,
+  keptClaimEnded,
+  type VerifySteps,
+  verifySteps,
+} from "./create-steps.js";
 import { compareCode, consumeCode, issueCode } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard, stopWith } from "./hooks.js";
@@ -1318,7 +1324,11 @@ async function confirmSignUp(
         if (kept === 0) return fail(refused);
         if (prepared === null) return ok({ user, signedIn: null });
         await claimEmail(tx, user.id, { passwordId, username: true }, now, verify, ended);
+        // A mailbox proof is final (plan 12o): a later throw keeps the claim.
+        await verify.keep(tx, claimed);
         await ensureEmailIdentity(tx, user.id, row.identifier, now);
+        // The `email` identity comes after the claim here, so it is kept too.
+        await verify.keep(tx, claimed);
         await upgrade.claim(tx);
         const s = await writeSession(config, prepared, tx);
         return ok({ user: claimed, signedIn: s });
@@ -1329,16 +1339,24 @@ async function confirmSignUp(
     try {
       verified = await run();
     } catch (err) {
+      // A kept claim cannot run again (plan 12o): its after points fire, and the error passes on.
+      if (verify.kept()) {
+        await keptClaimEnded(config, verify, ended);
+        throw err;
+      }
       // Another proof claimed the user first (review M1). The retry finds a
       // verified user: it answers as for a verified user and fires no pair.
-      // Or a session race undid the claim: the retry claims again. This
-      // loop has no unique-key retry, so each attempt after the first is a
-      // claim retry.
+      // This loop has no unique-key retry, so each attempt after the first
+      // is a claim retry.
       const next = claimRetry(config.storage, err, attempt);
-      if (next === "conflict") verified = fail("conflict");
-      else if (next !== "retry") throw err;
+      if (next === "conflict") {
+        verify.flipLost();
+        verified = fail("conflict");
+      } else if (next !== "retry") throw err;
     }
   }
+  // An error answer after a kept claim: the claim's after points (plan 12o).
+  if (!verified.ok) await keptClaimEnded(config, verify, ended);
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);
@@ -1548,6 +1566,11 @@ export async function runReset(
         applyReset(config, input, proof, consume, hash, now, ended, trust, made, verify, families),
       );
     } catch (err) {
+      // A kept claim cannot run again (plan 12o): its after points fire, and the error passes on.
+      if (verify.kept()) {
+        await keptClaimEnded(config, verify, ended.claim);
+        throw err;
+      }
       // Caught outside the transaction, so its deletes are undone.
       if (err instanceof ResetRefusedError) {
         reset = fail(err.code);
@@ -1567,16 +1590,20 @@ export async function runReset(
         continue;
       // Another proof claimed the user first (review M1). The rollback undid
       // the consume, so the retry spends the link again and finds a verified
-      // user. Or a session race undid the claim: the retry claims again.
+      // user.
       const next = claimRetry(config.storage, err, lost++);
       if (next === "retry") continue;
       if (next === "conflict") {
+        // The link stays usable, so no new mail goes (plan 12o).
+        verify.flipLost();
         reset = fail("conflict");
         break;
       }
       throw err;
     }
   }
+  // An error answer after a kept claim: the claim's after points (plan 12o).
+  if (!reset.ok) await keptClaimEnded(config, verify, ended.claim);
   if (reset.ok) {
     // After the commit, before the session hooks and before a challenge answer (plan 12a).
     await verify.after(reset.value.user);
@@ -1794,6 +1821,9 @@ function applyReset(
       // The claim deletes the claimant's sessions, identities, passkeys,
       // handoff codes, and every other password row, and keeps the new password.
       await claimEmail(tx, user.id, { passwordId }, now, verify, ended.claim);
+      // A mailbox proof is final (plan 12o): a later throw keeps the claim.
+      // The spend of the link and the new hash came before it, so they stay too.
+      await verify.keep(tx, user);
     } else {
       ended.resetCount = await endSessions(
         tx,
@@ -1816,6 +1846,8 @@ function applyReset(
       { field: "consumedAt", op: "eq", value: null },
     ]);
     await ensureEmailIdentity(tx, user.id, email, now);
+    // The `email` identity comes after the claim here, so it is kept too.
+    await verify.keep(tx, user);
     if (gatedRow) {
       // The last write, after the challenge delete above, so this reset's
       // own challenge survives it. A second reset of the address deletes it

@@ -13,7 +13,7 @@ import {
   recordedAnonymous,
   upgradeSteps,
 } from "./anonymous.js";
-import { createSteps, verifySteps } from "./create-steps.js";
+import { claimAnswer, createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
@@ -147,17 +147,20 @@ export async function verifyMagicLink(
   const made = createSteps(config, "magic_link", { signUpRule: true });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "magic_link");
-  const resolved = await hookGuard(async () =>
-    ok(
-      await findOrCreateUserByEmail(
-        config.storage,
-        row.identifier,
-        now,
-        verified,
-        (tx) => steps.write(tx),
-        ended,
-        steps.before,
-        made,
+  // An error answer after a kept claim fires the claim's after points (plan 12o).
+  const resolved = await claimAnswer(config, verified, ended, () =>
+    hookGuard(async () =>
+      ok(
+        await findOrCreateUserByEmail(
+          config.storage,
+          row.identifier,
+          now,
+          verified,
+          (tx) => steps.write(tx),
+          ended,
+          steps.before,
+          made,
+        ),
       ),
     ),
   );

@@ -543,13 +543,13 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       expect(done.queries).toBeLessThanOrEqual(BUDGET);
     });
 
-  // The counts of the run of 2026-11-03 (ruling 32 of plan 12n): the
-  // request of the race, and the request that the client sends again. The
-  // race answers after the undo of its one run. Before the ruling the flow
-  // ran the claim again, and the race reached query 51 (58 with no cap).
-  const RACE_PINS = { race: 24, again: 39 };
+  // The count of the run of 2026-11-04 (plan 12o): the request of the race.
+  // The claim ends each chunk by `deleteRows`, so the race ends one row and
+  // the claim goes on in one run. On 2026-11-03 (ruling 32 of plan 12n) the
+  // race answered 409 in 24 queries, and the request again took 39.
+  const RACE_PINS = { race: 39 };
 
-  it("answers 409 conflict to a session race on the worst claim join, with no claim write, within the D1 Free budget (ruling 32 of plan 12n)", async () => {
+  it("signs in through a session race on the worst claim join in one run, within the D1 Free budget (plan 12o)", async () => {
     // The sign-out runs on the binding with no count, as a request in another invocation.
     const other = make({}, false);
     const tokens: string[] = [];
@@ -638,25 +638,16 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
     const race = await measure(w, request);
     live = false;
     expect(outs).toBe(1);
-    expect(race.res.status).toBe(409);
-    expect(await race.res.json()).toEqual({ error: "conflict" });
-    expect(setToken(race.res)).toBeNull();
-    // The undo of the first run leaves every row as it was, less the session of the sign-out.
-    expect(await state()).toEqual({
-      ...before,
-      sessions: before.sessions.filter((id) => id !== gone?.id),
-    });
-    // The client sends the request again in a new invocation, with a new nonce and a new token.
-    const again = await measure(w, await idToken("eyJuIjoyfQ"));
-    expect(b.take(again.res).status).toBe(200);
+    expect(b.take(race.res).status).toBe(200);
     const after = await state();
     expect(after.verified).toBe(true);
-    // The claim ended every claimant session; the sign-in made one.
+    // The claim ended each claimant session but the signed-out one; the sign-in made one.
     expect(after.sessions).toHaveLength(1);
+    expect(after.sessions.filter((id) => before.sessions.includes(id))).toEqual([]);
+    expect(gone?.id).toBeDefined();
     expect(after.anonymous).toBe(0);
-    expect({ race: race.queries, again: again.queries }).toEqual(RACE_PINS);
+    expect({ race: race.queries }).toEqual(RACE_PINS);
     expect(race.queries).toBeLessThanOrEqual(BUDGET);
-    expect(again.queries).toBeLessThanOrEqual(BUDGET);
   });
 
   // The count of the run of 2026-11-03 (rr-final L-7 of plan 12n): the

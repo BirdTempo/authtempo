@@ -14,7 +14,7 @@ import {
   recordedAnonymous,
   upgradeSteps,
 } from "./anonymous.js";
-import { createSteps, verifySteps } from "./create-steps.js";
+import { claimAnswer, createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
@@ -396,17 +396,20 @@ export async function verifyEmailOtp(
   const made = createSteps(config, "email_otp", { signUpRule: true });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "email_otp");
-  const resolved = await hookGuard(async () =>
-    ok(
-      await findOrCreateUserByEmail(
-        config.storage,
-        consumed.value.identifier,
-        now,
-        verified,
-        (tx) => steps.write(tx),
-        ended,
-        steps.before,
-        made,
+  // An error answer after a kept claim fires the claim's after points (plan 12o).
+  const resolved = await claimAnswer(config, verified, ended, () =>
+    hookGuard(async () =>
+      ok(
+        await findOrCreateUserByEmail(
+          config.storage,
+          consumed.value.identifier,
+          now,
+          verified,
+          (tx) => steps.write(tx),
+          ended,
+          steps.before,
+          made,
+        ),
       ),
     ),
   );
