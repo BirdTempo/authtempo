@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -26,12 +26,25 @@ const env = {
   GIT_AUTHOR_EMAIL: "fixture@example.com",
   GIT_COMMITTER_NAME: "fixture",
   GIT_COMMITTER_EMAIL: "fixture@example.com",
-  // No background gc after a commit: a detached git process could still
-  // write in the folder while `remove` deletes it (evidence run 3 of plan 12o).
-  GIT_CONFIG_COUNT: "1",
+  // Git forks no detached maintenance process after a commit (git 2.54, read
+  // 2026-11-04): `maintenance.auto` false stops the fork; `gc.auto` 0 alone
+  // does not. The cause of the ENOTEMPTY of evidence run 3 of plan 12o is
+  // not shown; this removes one possible writer of the folder.
+  GIT_CONFIG_COUNT: "2",
   GIT_CONFIG_KEY_0: "gc.auto",
   GIT_CONFIG_VALUE_0: "0",
+  GIT_CONFIG_KEY_1: "maintenance.auto",
+  GIT_CONFIG_VALUE_1: "false",
 };
+
+/** The tries of `remove`, and the wait before the second try; each later wait grows by the first. */
+const REMOVE_TRIES = 10;
+const REMOVE_WAIT_MS = 50;
+
+/** A wait of `ms` on this thread. Node allows `Atomics.wait` on its main thread. */
+function wait(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 export function makeRepo(): Repo {
   const root = mkdtempSync(join(tmpdir(), "authtempo-release-git-"));
@@ -52,9 +65,28 @@ export function makeRepo(): Repo {
       git(["commit", "--quiet", "--no-verify", "-m", message]);
     },
     remove() {
-      // Retries: on macOS under load a delete of a folder that another
-      // process still writes answers ENOTEMPTY (evidence run 3 of plan 12o).
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      // A delete under load answered ENOTEMPTY once (evidence run 3 of plan
+      // 12o). The wait is owned here: on Node 26.10.0 the retry wait of
+      // `rmSync` is in whole seconds (src/node_file.cc, RmSync, read
+      // 2026-11-04). The last throw names the entries that are left.
+      for (let i = 1; ; i++) {
+        try {
+          rmSync(root, { recursive: true, force: true });
+          return;
+        } catch (err) {
+          let left: string[] = [];
+          try {
+            left = readdirSync(root, { recursive: true }).map(String);
+          } catch {
+            left = [];
+          }
+          if (i === REMOVE_TRIES)
+            throw new Error(`remove of ${root}: ${i} tries; left: ${left.join(", ")}`, {
+              cause: err,
+            });
+          wait(REMOVE_WAIT_MS * i);
+        }
+      }
     },
   };
 }
