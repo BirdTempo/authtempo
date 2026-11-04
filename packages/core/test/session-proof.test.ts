@@ -1393,6 +1393,56 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
   });
 
+  it("takes a stale lease with an expiry from the clock at the take, after a flow that waited 61 seconds (ruling 35 of plan 12p)", async () => {
+    // A capped claim leaves its lease, and 61 seconds go by. Then a proof
+    // fixes its time and waits 61 seconds more in user.beforeVerify. Its
+    // take of the stale lease must count the life from the clock there.
+    const late = { armed: false };
+    const w = world({
+      extra: {
+        hooks: {
+          user: {
+            beforeVerify: async () => {
+              if (!late.armed) return;
+              late.armed = false;
+              w.clock.advance(CLAIM_LEASE_MS + 1_000);
+            },
+          },
+        },
+      },
+    });
+    await claimant(w);
+    const user = await userAt(w, CLAIMED);
+    const link = await ownerLinkToken(w);
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      w.cap.on = true;
+    };
+    const failed = await verifyMagicLink(d1Like(w.ownerConfig), {
+      token: link,
+      ip: null,
+      userAgent: null,
+    }).then(
+      (r) => (r.ok ? "ok" : r.code),
+      (e: unknown) => (e instanceof StorageError ? e.code : String(e)),
+    );
+    w.cap.on = false;
+    expect(failed).toBe("rollback_failed");
+    w.clock.advance(CLAIM_LEASE_MS + 1);
+    const proof = await ownerLink(w);
+    late.armed = true;
+    const owner = await w.owner.handle(proof);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(late.armed).toBe(false);
+    const lease = () =>
+      w.storage.findOne("verification", [{ field: "id", op: "eq", value: claimLeaseId(user.id) }]);
+    expect((await lease())?.expiresAt).toEqual(new Date(w.clock.now().getTime() + CLAIM_LEASE_MS));
+    // So a sweep at that time keeps it.
+    await sweepExpired(w.config);
+    expect(await lease()).not.toBeNull();
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+  });
+
   it("undoes the deletes of a late claim whose lease came after a rival claim ended: the rival's password is back", async () => {
     // The rival, the owner's reset, takes its lease. Then 61 seconds go by
     // before its deletes, so its lease is stale. A claim runs no hook after
