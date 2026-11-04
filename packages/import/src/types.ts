@@ -224,12 +224,15 @@ export interface ImportOptions {
  *   repair would write a password, a passkey, or a social identity. A claim
  *   always writes that identity, and the importer cannot tell a claim from a
  *   newer export, so a verified user's missing credential is an operator
- *   action. The same reason also comes from the repair's two last updates:
- *   a conditional update of the user row by the `email` and `emailVerified`
- *   that the guards read, then the activation of its pending password row.
- *   Zero rows from either means a claim or an address change landed after
- *   the guards; the repair deletes the rows it wrote and keeps the record
- *   here.
+ *   action. The same reason also comes from the repair's checks after its
+ *   writes. They are a conditional update of the user row by the `email` and
+ *   `emailVerified` that the guards read, and core's claim check for an
+ *   unverified user. The last is the activation of its pending password row.
+ *   A failed check means a claim or an address change landed after the
+ *   guards. The repair then deletes the rows it wrote and keeps the record
+ *   here. The write of a new unverified user runs the same claim check. When
+ *   it finds a claim, the write deletes its credential rows, and the record
+ *   is `partial` with this reason, with or without `repair`.
  * - `no_owner`: an organization with no member, whose members map to no owner.
  */
 export type RepairRefusal =
@@ -261,7 +264,7 @@ export interface ImportReport {
    * A record whose id exists but whose rows are not all the rows the record
    * maps to. `missing` names each absent row kind, for example `password`,
    * `identity:email`, `passkey`, or `member`. Three causes give the same entry,
-   * and the importer cannot tell them apart:
+   * and the importer cannot tell them apart. A fourth gives `claimed` (below).
    * - A run that stopped inside the record on D1 (an isolate that dies does
    *   not roll back, spec 6).
    * - A claim since the first run: it deletes the claimant's password, social
@@ -269,6 +272,8 @@ export interface ImportReport {
    * - Another app change since the first run (a removed password or passkey),
    *   or a newer export or other options (for example a row the source now
    *   states as verified, so the record maps to an `email` identity).
+   * The fourth is a claim during the write of a new unverified user. The
+   * entry then holds `repairRefused: "claimed"`, with or without `repair`.
    * Without `repair` the importer never writes an entry's rows and never
    * counts it as `exists`. The operator checks that user in the app before a
    * repair. With `repair`, an entry stays here only with `repairRefused`. The

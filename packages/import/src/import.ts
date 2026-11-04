@@ -1,4 +1,5 @@
 import {
+  claimNotStarted,
   DEFAULT_RESERVED_SLUGS,
   isGithubSubject,
   LEGACY_VERIFY_HASH,
@@ -131,15 +132,15 @@ interface CredentialRows {
 
 /**
  * The rows a user repair writes, and the user row as the guards read it. The
- * last statement of the repair is a conditional update on `seen` (I-3 of the
- * plan 9b2 final review).
+ * repair checks that row again after its writes, with a conditional update
+ * on `seen` (I-3 of the plan 9b2 final review).
  */
 interface RepairRows extends CredentialRows {
   /** The address as the guard read it. A core user can have no address (plan 12i); an import never writes one. */
   seen: { email: string | null; emailVerified: boolean };
 }
 
-/** The ids of the rows `writeCredentials` wrote, so a repair can delete exactly its own rows. */
+/** The ids of the rows `writeCredentials` wrote, so a write or a repair can delete exactly its own rows. */
 interface Written {
   identities: string[];
   password: { id: string; hash: string } | null;
@@ -496,7 +497,7 @@ async function existingUser(
 
 /**
  * Why a repair must not write `fill`, or the user row as the guards read it
- * (the repair's last statement checks that row again). The cases are
+ * (the repair checks that row again after its writes). The cases are
  * `RepairRefusal`'s.
  */
 async function repairRefusal(
@@ -548,7 +549,10 @@ async function writeCredentials(
   tx: StorageAdapter,
   c: CredentialRows,
   now: Date,
-  /** A repair writes the password row pending (`PENDING_HASH_PREFIX`) and activates it last. */
+  /**
+   * A repair, and the write of an unverified user, write the password row
+   * pending (`PENDING_HASH_PREFIX`) and activate it last.
+   */
   pending = false,
 ): Promise<Written> {
   const written: Written = { identities: [], password: null, passkeys: [] };
@@ -596,65 +600,39 @@ async function writeCredentials(
 }
 
 /**
- * Writes the missing rows of a user, then a conditional update of the user
- * row by its id and by the `email` and `emailVerified` the guards read (I-3
- * of the plan 9b2 final review), then the last statement: the activation of
- * the password row. This is the pattern of core's sign-up
- * (`engine/password.ts`, `insertSignUp`).
- * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
- *   refuses a pending row. On D1 the writes are visible at once, so a row
- *   with the real hash could sign a claimant in before the conditional
- *   update ran (fix round 2). The activation updates the row by its id and
- *   the pending string. A passkey and a social identity go in active: a
- *   passkey needs the authenticator and a social identity needs the
- *   provider's login, and the window is a few D1 round trips (spec 17.1).
- * - A claim (core `claimEmail`) flips `emailVerified` in its first statement,
- *   and then deletes the claimant's credentials. A claim that lands between
- *   the guard read and the writes does not see these new rows, so they would
- *   stay on a user that the owner of the address now holds.
- * - Zero rows from the user update means a claim or an address change
- *   landed since the guards; zero rows from the activation means a claim
- *   deleted the pending row after the user update. The repair then deletes
- *   its own rows by id (the password row also by the pending string it
- *   wrote: an owner's reset can keep a row id and write the owner's hash),
- *   commits, and the record stays `partial` with `claimed`. It never
- *   throws to undo, as core's sign-up never does: on D1 a throw runs the
- *   adapter's undo log, which deletes a created row by its id only, with no
- *   check of what a claim or a reset wrote into that row since.
- * - One row on Postgres holds the row lock until the commit, so a claim's
- *   flag flip waits, and its delete then sees these rows. One row on D1 means
- *   no claim flipped the flag before this statement; a claim after it deletes
- *   these rows as it deletes any claimant credential.
+ * The last statement of a write or a repair: the activation of the pending
+ * password row, by its id and the pending string. True when it updated the
+ * row, or when the write holds no password. Zero rows means a claim deleted
+ * the pending row, or a reset wrote the owner's hash into it.
  */
-async function repairUser(
+async function activated(
   tx: StorageAdapter,
-  p: Extract<Plan<UserRows, RepairRows>, { kind: "repair" }>,
+  written: Written,
+  hash: string | null,
   now: Date,
-): Promise<Plan<UserRows, RepairRows>> {
-  const written = await writeCredentials(tx, p.rows, now, true);
-  const kept = await tx.update(
-    "user",
-    [
-      { field: "id", op: "eq", value: p.rows.userId },
-      { field: "email", op: "eq", value: p.rows.seen.email },
-      { field: "emailVerified", op: "eq", value: p.rows.seen.emailVerified },
-    ],
-    { updatedAt: now },
+): Promise<boolean> {
+  if (written.password === null) return true;
+  return (
+    (await tx.update(
+      "password",
+      [
+        { field: "id", op: "eq", value: written.password.id },
+        { field: "hash", op: "eq", value: written.password.hash },
+      ],
+      { hash: hash as string, updatedAt: now },
+    )) > 0
   );
-  // Zero rows from the activation means a claim deleted the pending row (or
-  // a reset wrote the owner's hash into it) after the user update.
-  const active =
-    kept > 0 &&
-    (written.password === null ||
-      (await tx.update(
-        "password",
-        [
-          { field: "id", op: "eq", value: written.password.id },
-          { field: "hash", op: "eq", value: written.password.hash },
-        ],
-        { hash: p.rows.password as string, updatedAt: now },
-      )) > 0);
-  if (active) return p;
+}
+
+/**
+ * Deletes the rows that `writeCredentials` wrote, by id. The password row
+ * goes also by the string it wrote: an owner's reset can keep a row id and
+ * write the owner's hash. The caller then commits, with no throw. On D1 a
+ * throw runs the adapter's undo log, which deletes a created row by its id
+ * only. That undo does not check what a claim or a reset wrote into the row
+ * since.
+ */
+async function deleteWritten(tx: StorageAdapter, written: Written): Promise<void> {
   for (const id of written.identities)
     await tx.delete("identity", [{ field: "id", op: "eq", value: id }]);
   if (written.password !== null)
@@ -664,15 +642,81 @@ async function repairUser(
     ]);
   for (const id of written.passkeys)
     await tx.delete("passkey", [{ field: "id", op: "eq", value: id }]);
+}
+
+/**
+ * Writes the missing rows of a user. Then a conditional update of the user
+ * row by its id and by the `email` and `emailVerified` that the guards read
+ * (I-3 of the plan 9b2 final review). For an unverified user, then core's
+ * claim check (`claimNotStarted`). Last, the activation of the password
+ * row. This is the pattern of core's sign-up (`engine/password.ts`,
+ * `insertSignUp`).
+ * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
+ *   refuses a pending row. On D1 the writes are visible at once, so a row
+ *   with the real hash could sign a claimant in before the checks ran (fix
+ *   round 2). A passkey and a social identity go in active: a passkey needs
+ *   the authenticator and a social identity needs the provider's login, and
+ *   the window is a few D1 round trips (spec 17.1).
+ * - A claim (core `claimEmail`) runs in the order of ruling 16 of plan 12p.
+ *   Its first statement is the hold, or the lease on D1. Then it deletes the
+ *   claimant's credentials, flips `emailVerified`, and deletes the sessions.
+ * - On D1 a claim can delete before these writes and flip after the update
+ *   of the user row. So that update alone misses it, and the claim check
+ *   reads its lease. The update still catches an address change.
+ * - Zero rows from the update, false from the check, or zero rows from the
+ *   activation means that a claim or an address change landed. The repair
+ *   then deletes its own rows by id (`deleteWritten`) and commits. The
+ *   record stays `partial` with `claimed`. It never throws to undo, as
+ *   core's sign-up never does.
+ * - On Postgres the update holds the row lock until the commit, so a
+ *   claim's hold waits, and its delete then sees these rows. On D1 a claim
+ *   whose lease comes after the check deletes these rows before its flip.
+ */
+async function repairUser(
+  tx: StorageAdapter,
+  p: Extract<Plan<UserRows, RepairRows>, { kind: "repair" }>,
+  now: Date,
+): Promise<Plan<UserRows, RepairRows>> {
+  const written = await writeCredentials(tx, p.rows, now, true);
+  const { seen } = p.rows;
+  const kept = await tx.update(
+    "user",
+    [
+      { field: "id", op: "eq", value: p.rows.userId },
+      { field: "email", op: "eq", value: seen.email },
+      { field: "emailVerified", op: "eq", value: seen.emailVerified },
+    ],
+    { updatedAt: now },
+  );
+  // A verified user has no claim. An unverified one gets the check before the activation.
+  const unclaimed =
+    kept > 0 &&
+    (seen.emailVerified ||
+      (await claimNotStarted(tx, { id: p.rows.userId, email: seen.email }, now)));
+  if (unclaimed && (await activated(tx, written, p.rows.password, now))) return p;
+  await deleteWritten(tx, written);
   return { kind: "partial", missing: p.missing, repairRefused: "claimed" };
 }
 
+/**
+ * Writes a new user, then its rows. A verified user has no claim, so its
+ * rows go in active with no check. For an unverified user the password row
+ * goes in pending. After its password or identity write, core's claim check
+ * runs (`claimNotStarted`), then the activation, as in `repairUser`.
+ * - On D1 a claim can read the new user before this transaction ends. It
+ *   can delete before these writes and flip after them, so the claimant's
+ *   row would stay on the owner's account (probe I1 of review-12p-fix34).
+ * - False from the check, or zero rows from the activation, deletes the
+ *   rows of this write by id, and the record is `partial` with `claimed`.
+ *   The user row stays: after a claim it is the owner's.
+ */
 async function writeUser(
   tx: StorageAdapter,
   r: ImportUser,
-  rows: UserRows,
+  p: Extract<Plan<UserRows, RepairRows>, { kind: "write" }>,
   now: Date,
-): Promise<void> {
+): Promise<Plan<UserRows, RepairRows>> {
+  const rows = p.rows;
   // The user row first: a password or identity row can carry a foreign key to it (plan 9).
   await tx.create("user", {
     id: rows.id,
@@ -690,7 +734,7 @@ async function writeUser(
     createdAt: r.createdAt ?? now,
     updatedAt: now,
   });
-  await writeCredentials(
+  const written = await writeCredentials(
     tx,
     {
       userId: rows.id,
@@ -701,7 +745,19 @@ async function writeUser(
       passkeys: rows.passkeys,
     },
     now,
+    !rows.verified,
   );
+  // An unverified user keeps no passkey (`userRows`), so its rows are a password or an identity.
+  if (rows.verified || (written.password === null && written.identities.length === 0)) return p;
+  if (
+    (await claimNotStarted(tx, { id: rows.id, email: rows.email }, now)) &&
+    (await activated(tx, written, rows.password, now))
+  )
+    return p;
+  await deleteWritten(tx, written);
+  const missing = rows.identities.map((i) => `identity:${i.provider}`);
+  if (rows.password !== null) missing.push("password");
+  return { kind: "partial", missing, repairRefused: "claimed" };
 }
 
 function count(report: ImportReport, rows: UserRows): void {
@@ -734,7 +790,7 @@ async function importUser(
         ? await planUser(storage, source, r, o, planned)
         : await storage.transaction(async (tx) => {
             const p = await planUser(tx, source, r, o, planned);
-            if (p.kind === "write") await writeUser(tx, r, p.rows, now);
+            if (p.kind === "write") return writeUser(tx, r, p, now);
             if (p.kind === "repair") return repairUser(tx, p, now);
             return p;
           });
