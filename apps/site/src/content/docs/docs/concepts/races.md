@@ -33,7 +33,7 @@ Core does not depend on the isolation of a transaction. It uses three guards tha
 
 ## The re-check at the end
 
-A sign-in of an unverified user can race with a claim of the same address. The sign-in ends its transaction with a conditional update of the row that it trusted. When a claim deleted or changed that row, the update matches zero rows. The sign-in then deletes its own session and answers a failure. A password sign-in also re-checks its password row by id and by the hash that it verified. So a reset or a change in between wins.
+A sign-in of any user can race with a claim of the same address. Each sign-in that trusts a row of the claim ends its transaction with a guard. The guard is a conditional update of that row. When a claim deleted or changed that row, the update matches zero rows. The sign-in then deletes its own session and answers a failure. A password sign-in also re-checks its password row by id and by the hash that it verified. So a reset or a change in between wins.
 
 ## The rehash race
 
