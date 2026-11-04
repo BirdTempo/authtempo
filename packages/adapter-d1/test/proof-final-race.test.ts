@@ -1,5 +1,10 @@
 import { env } from "cloudflare:test";
-import { createAuth, createPbkdf2PasswordHash, type MailMessage } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type MailMessage,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter, createD1Limiter } from "../src/index.js";
@@ -9,7 +14,8 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // isolate a transaction (src/adapter.ts), so each flow reads the writes of
 // the other before its commit. These are the scenes of the 12n re-review
 // probe (tools/12n/tmp/rrc/probe-reset-confirm.test.ts), and two more of
-// inventory-claim 3.5 of plan 12o.
+// inventory-claim 3.5 of plan 12o. The last scene is the race of ruling 26:
+// two Google sign-ins by the ID-token route, for two users.
 //
 // Every step is a real request through `auth.handle`. The request of the
 // scene runs on a view of the binding that counts each query and refuses
@@ -100,7 +106,7 @@ function counting(db: D1Database, watch?: Watch) {
 const endings: { id: string; reason: string }[] = [];
 
 /** One invocation: the engine on the counted view, or on the binding with no count. */
-function make(counted: boolean, watch?: Watch) {
+function make(counted: boolean, watch?: Watch, extra: Partial<AuthConfig> = {}) {
   const { db, count } = counted ? counting(env.DB, watch) : { db: env.DB, count: { queries: 0 } };
   const mail: MailMessage[] = [];
   const auth = createAuth({
@@ -114,6 +120,7 @@ function make(counted: boolean, watch?: Watch) {
     hooks: {
       session: { afterEnd: ({ session, reason }) => void endings.push({ id: session.id, reason }) },
     },
+    ...extra,
   });
   return { auth, count, mail };
 }
@@ -202,6 +209,47 @@ async function resetBy(other: World, email: string) {
   return { done: await answer(done), token: setToken(done) };
 }
 
+/** Google with the ID-token route. The seam answers `claims`: the key set is not this test's subject. */
+function googleSeam() {
+  const claims: { current: Record<string, unknown> } = { current: {} };
+  const extra: Partial<AuthConfig> = {
+    social: { google: { clientId: "gid", clientSecret: "gsecret" } },
+    jwt: { verifyIdToken: async () => claims.current, signES256: async () => "es256" },
+  };
+  return { claims, extra };
+}
+
+let tokens = 0;
+/**
+ * The ID-token sign-in of the Google account `sub` with the address `email`.
+ * The nonce comes from `w`. The claims go to the seam of the world that
+ * takes the request.
+ */
+async function idTokenRequest(
+  w: World,
+  seam: ReturnType<typeof googleSeam>,
+  sub: string,
+  email: string,
+) {
+  const nr = await call(w, post("/social/google/id-token/nonce", {}));
+  const { nonce, providerNonce } = (await nr.json()) as { nonce: string; providerNonce: string };
+  const iat = Math.floor(Date.now() / 1000);
+  // The provider gets the SHA-256 hex of the nonce, as id-token-budget.test.ts says.
+  seam.claims.current = {
+    iss: "https://accounts.google.com",
+    aud: "gid",
+    sub,
+    email,
+    email_verified: true,
+    nonce: providerNonce,
+    iat,
+    exp: iat + 3600,
+  };
+  // Each token text has its own payload part, so each is a new token to the used-token row.
+  const idToken = `h.${btoa(JSON.stringify({ n: ++tokens })).replace(/=+$/, "")}.s`;
+  return post("/social/google/id-token", { idToken, nonce });
+}
+
 /** The end of every scene: a verified user, the reset's hash, one `email` identity, and no claimant session. */
 async function expectFinal(other: World, email: string, claimantSessions: string[]) {
   const end = await state(email);
@@ -223,8 +271,8 @@ async function expectFinal(other: World, email: string, claimantSessions: string
 // the D1 limiter on the same view. Each is the request of the scene: the
 // confirm, or the reset in the mirror. After ruling 23 of plan 12o, scene A
 // sends no mail (17 before), and the identity race signs in (22 before, with
-// the answer 500).
-const PINS = { a: 14, b: 23, c: 23, identity: 25, mirror: 37 };
+// the answer 500). `other` is the Google sign-in of the race of ruling 26.
+const PINS = { a: 14, b: 23, c: 23, identity: 25, mirror: 37, other: 23 };
 
 describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
   beforeEach(async () => {
@@ -363,6 +411,64 @@ describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
     expect(end.sessions).toContain(reset?.session.id);
     expect(end.sessions).toContain(confirm?.session.id);
     expect(v.queries).toBe(PINS.identity);
+    expect(v.queries).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("the race of another user: a verified user links the same Google account between the claim's flip and its identity create; the claim stays, and the claimant gets no session", async () => {
+    const email = "jon@example.com";
+    const kim = "kim@example.com";
+    const seam = { claim: googleSeam(), link: googleSeam() };
+    const other = make(false, undefined, seam.link.extra);
+    const c = await claimant(other, email);
+    // Kim proves her own address by the link of her sign-up.
+    expect(
+      await answer(await call(other, post("/password/sign-up", { email: kim, password: OLD }))),
+    ).toBe("200 ok");
+    expect(
+      await answer(
+        await call(other, post("/password/verify", { token: confirmLink(other.mail, kim) })),
+      ),
+    ).toBe("200 ok");
+    const owner = await env.DB.prepare(
+      "SELECT id FROM ta_user WHERE email = ? AND email_verified = 1",
+    )
+      .bind(kim)
+      .first<{ id: string }>();
+    expect(owner).not.toBeNull();
+    let stage: "idle" | "armed" | "fired" = "idle";
+    let link = "";
+    const w = make(
+      true,
+      async (sql) => {
+        if (stage !== "armed" || !FLIP.test(sql)) return;
+        stage = "fired";
+        // The Google account g-1 now carries Kim's address, so her sign-in links it to her.
+        const r = await idTokenRequest(other, seam.link, "g-1", kim);
+        link = await answer(await call(other, r));
+      },
+      seam.claim.extra,
+    );
+    const request = await idTokenRequest(other, seam.claim, "g-1", email);
+    stage = "armed";
+    const v = await measure(w, request);
+    expect(stage).toBe("fired");
+    expect(link).toBe("200 ok");
+    // The create of the claim meets Kim's row after `keep`. A row of another
+    // user does not count as present (ruling 26 of plan 12o). So the error
+    // passes on, and the flow opens no session.
+    expect(await answer(v.res)).toBe("500 internal");
+    expect(setToken(v.res)).toBeNull();
+    const end = await state(email);
+    expect(end.verified).toBe(true);
+    expect(end.sessions).toEqual([]);
+    expect(endings.filter((e) => c.sessions.includes(e.id))).toEqual(
+      c.sessions.map((id) => ({ id, reason: "claim" })),
+    );
+    const google = await env.DB.prepare(
+      "SELECT user_id FROM ta_identity WHERE provider = 'google'",
+    ).all<{ user_id: string }>();
+    expect(google.results.map((r) => r.user_id)).toEqual([owner?.id]);
+    expect(v.queries).toBe(PINS.other);
     expect(v.queries).toBeLessThanOrEqual(BUDGET);
   });
 
