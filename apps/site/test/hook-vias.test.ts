@@ -129,19 +129,31 @@ describe("the delete residual of the compatibility package", () => {
     );
   });
 
-  it("the operator tools guide names the one read of the audit table by the sweep", () => {
+  it("the operator tools guide names the one read of the audit table by the sweep, with its bound", () => {
     // Ruling 19 of plan 12o. The sweep step of a pending-end row with stops
     // reads the user's stop rows. It skips a session that another flow ended.
-    // audit.ts stays the one reader of the table.
+    // audit.ts stays the one reader of the table. Ruling 24 of plan 12o: the
+    // guide names the bound of the read, the skew before the delete and the
+    // newest rows of the limit.
     const reader = /export async function stoppedSessions\([\s\S]*?\n\}/.exec(AUDIT)?.[0] ?? "";
     expect(reader).toContain('{ field: "targetUserId", op: "eq", value: userId }');
     expect(reader).toContain('{ field: "action", op: "eq", value: "impersonation_stop" }');
+    expect(reader).toContain('{ field: "createdAt", op: "gte", value: since }');
+    expect(reader).toContain('{ sort: { field: "id", dir: "desc" }, limit }');
     const step = /export async function endPendingRows\([\s\S]*?\n\}/.exec(ACCESS_END)?.[0] ?? "";
     expect(step).toMatch(/owed\.length > 0 &&[\s\S]*await stoppedSessions\(/);
+    expect(step).toContain("const since = new Date(at - ACCESS_END_SKEW_MS);");
+    expect(step).toContain(
+      "const stopped = await stoppedSessions(tx, row.identifier, since, STOPPED_READ_LIMIT);",
+    );
     expect(step).toContain("due = owed.filter((x) => !stopped.has(x.sessionId));");
     expect(ACCESS_END.split('"operatorAudit"').length - 1).toBe(0);
+    const skew = /export const ACCESS_END_SKEW_MS = (\d+)_000;/.exec(ACCESS_END)?.[1];
+    if (skew === undefined) throw new Error("no ACCESS_END_SKEW_MS in access-end.ts");
+    expect(ACCESS_END).toContain("const STOPPED_READ_LIMIT = 2 * STOPS_LIMIT;");
+    const newest = 2 * Number(stopsLimit());
     expect(flat(`${DOCS}docs/guides/operator-tools.mdx`)).toContain(
-      "Core never updates or deletes a row. The sweep reads the table only for a user whose delete recorded impersonation sessions. It reads the stop rows of that user, so a session that another flow ended gets no second stop row.",
+      `Core never updates or deletes a row. The sweep reads the table only for a user whose delete recorded impersonation sessions. It reads the stop rows of that user from ${skew} s before the delete, at most the newest ${newest}. It writes no second stop row for a session that one of these rows names.`,
     );
   });
 

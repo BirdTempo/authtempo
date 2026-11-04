@@ -14,7 +14,7 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 
 **For:** a developer who wants authtempo on a database that has no adapter yet.
 
-**What it does:** you write the six methods of the storage port, and core's conformance suite proves the adapter.
+**What it does:** you write the ten methods of the storage port, and core's conformance suite proves the adapter.
 
 ## Before you start
 
@@ -24,7 +24,7 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 
 ## Steps
 
-1. Write an object with `create`, `createMany`, `rowsPerInsert`, `findOne`, `findMany`, `update`, `delete`, and `transaction`, of the type `StorageAdapter`.
+1. Write an object with `create`, `createMany`, `rowsPerInsert`, `findOne`, `findMany`, `update`, `delete`, `deleteRows`, `keep`, and `transaction`, of the type `StorageAdapter`.
 2. Read the models and fields from `schema` of `@authtempo/core`.
    - Map each model to a table and each field to a column.
 3. Write one migration for each schema version.

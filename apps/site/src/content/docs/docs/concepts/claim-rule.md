@@ -51,7 +51,7 @@ The proof then opens a session for the person who proved the address. The claima
 
 The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.
 
-Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. Its answer says to sign in.
+Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`.
 
 ## The edges
 

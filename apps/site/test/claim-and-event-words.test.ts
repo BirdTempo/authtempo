@@ -28,8 +28,12 @@ function body(text: string, name: string): string {
   return text.slice(at, end < 0 ? undefined : end);
 }
 
+/** The two answers of a lost verify link (L2 of the Task 3 fix review of plan 12o). */
+const JSON_WORDS =
+  "A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`.";
+
 const CONFLICT_WORDS =
-  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When another proof verifies the user first, the flow answers 409 with no claim write. The magic link and the email code spent their proof before the claim. So the flow mails a new one of its kind. That mail counts on the mail limit of its kind for the address. A failure of that mail leaves the 409 and emits the event `claim.mail_failed`. The verify link mails nothing, because the address is now verified. Its answer has a `detail` that says to sign in. A social sign-in needs a new sign-in at the provider. The password reset and the invitation confirm keep their link, so the same request can work again.";
+  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When another proof verifies the user first, the flow answers 409 with no claim write. The magic link and the email code spent their proof before the claim. So the flow mails a new one of its kind. That mail counts on the mail limit of its kind for the address. A failure of that mail leaves the 409 and emits the event `claim.mail_failed`. The verify link mails nothing, because the address is now verified. A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`. A social sign-in needs a new sign-in at the provider. The password reset and the invitation confirm keep their link, so the same request can work again.";
 
 describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decision 11 of plan 12o)", () => {
   it("names the claim race on a store with a query limit, as claimRetry answers it", () => {
@@ -70,6 +74,71 @@ describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decisi
     );
     // Social, the ID token, and SSO send none: their proof is the provider's.
     expect(source("social.ts")).not.toContain("resendProofAfterLostClaim");
+  });
+
+  it("names each step of the new proof that emits claim.mail_failed in the observability row (ruling 26 of plan 12o)", () => {
+    // The try block of each fallback holds the limit calls and the mail step.
+    // The mail step calls the storage, the app's builder, and the mail port.
+    const local = (text: string, name: string) => {
+      const at = text.indexOf(`\nasync function ${name}(`);
+      if (at < 0) throw new Error(`no function ${name}`);
+      return text.slice(at, text.indexOf("\n}\n", at));
+    };
+    const magic = local(source("magic-link.ts"), "mailMagicLink");
+    expect(magic).toContain('await config.storage.create("verification", {');
+    expect(magic).toContain("const link = config.magicLink.linkBuilder(token, next);");
+    expect(magic).toContain("await config.mail.send({");
+    const code = local(source("email-otp.ts"), "mailCode");
+    expect(code).toContain("const code = await issueCode(config, otp, purpose, email, data);");
+    expect(code).toContain('const build = purpose === "email-otp" ? otp.mail : otp.resetMail;');
+    expect(code).toContain("await config.mail.send({ ...message, to: email });");
+    for (const [file, call] of [
+      ["magic-link.ts", "await mailMagicLink(config, email, next, {});"],
+      ["email-otp.ts", 'await mailCode(config, otp, "email-otp", email, {});'],
+    ] as const) {
+      const text = source(file);
+      const fallback = text.slice(text.indexOf("async function resendProofAfterLostClaim("));
+      const steps = fallback.slice(fallback.indexOf("try {"), fallback.indexOf("} catch (e) {"));
+      expect(steps).toContain("if (!(await limit(config, ");
+      expect(steps).toContain(call);
+    }
+    const row = readFileSync(`${DOCS}docs/operations/observability.mdx`, "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("| `authtempo: claim mail failed` |"));
+    expect(row).toContain(
+      "A step of the new proof of a lost claim threw. The step is the limiter, a storage call of the new link or code, the app's link or mail builder, or the mail port.",
+    );
+  });
+
+  it("holds the two answers of the lost verify link: the 409 with the detail to a JSON caller, the redirect with the code to the form (ruling 26 of plan 12o)", () => {
+    const http = (file: string) => readFileSync(`${REPO}packages/core/src/http/${file}`, "utf8");
+    // The mail link opens a page with a plain form, and a form post is no JSON caller.
+    expect(body(http("password-pages.ts"), "defaultPasswordVerifyPage")).toMatch(
+      /<form method="post" action="\$\{escapeHtml\(input\.action\)\}">/,
+    );
+    expect(body(http("body.ts"), "isJsonRequest")).toContain('return type === "application/json";');
+    // The route answers a JSON caller with the result, and the form with the failure redirect.
+    const routes = http("routes/password.ts");
+    const verify = routes.slice(routes.indexOf('key: "POST /password/verify",'));
+    expect(verify).toMatch(
+      /^key: "POST \/password\/verify",[\s\S]*?const jsonCaller = isJsonRequest\(ctx\.request\);[\s\S]*?if \(!r\.ok\) return jsonCaller \? respond\(r\) : failed\(ctx, r\.code\);/,
+    );
+    expect(routes).toContain(
+      "const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);",
+    );
+    // `respond` writes the detail. The failure redirect goes to the app with the code and no body.
+    expect(body(http("json.ts"), "respond")).toContain(
+      "if (result.detail !== undefined) body.detail = result.detail;",
+    );
+    const redirects = http("redirect.ts");
+    expect(redirects).toContain('export const AUTH_ERROR_PARAM = "auth_error";');
+    expect(body(redirects, "authErrorRedirect")).toMatch(
+      /const res = redirect\(`\$\{config\.appURL\}\/\?\$\{AUTH_ERROR_PARAM\}=\$\{code\}`\);/,
+    );
+    expect(body(redirects, "redirect")).toContain("return new Response(null, {");
+    for (const words of [errorSection("conflict"), page("concepts/claim-rule.md")])
+      expect(words).toContain(JSON_WORDS);
+    expect(flat(`${REPO}.changeset/core-proof-final.md`)).toContain(JSON_WORDS);
   });
 
   it("holds the spent link of the magic link, and the kept link of the reset and the invitation confirm", () => {
@@ -127,7 +196,7 @@ const HOOK_WORDS = [
 
 const CLAIM_RULE_WORDS = [
   "The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.",
-  "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. Its answer says to sign in.",
+  "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`.",
 ];
 
 describe("the final claim of the hooks guide and the claim-rule page (decisions 8 and 10 of plan 12o)", () => {
@@ -178,5 +247,52 @@ describe("the two port calls of the storage-port page (decisions 7 and 9 of plan
       "deleteRowsStatements: 3,",
     );
     for (const row of PORT_ROWS) expect(page("concepts/storage-port.md")).toContain(row);
+  });
+
+  it("counts the required methods of StorageAdapter on each page that counts them (ruling 25 of plan 12o)", () => {
+    // A member with no `?` is required: an adapter must write it.
+    const port = readFileSync(`${STORAGE}port.ts`, "utf8");
+    const at = port.indexOf("export interface StorageAdapter {");
+    expect(at).toBeGreaterThan(0);
+    const block = port.slice(at, port.indexOf("\n}\n", at));
+    const methods = [...block.matchAll(/^ {2}([a-zA-Z]+)[<(]/gm)].map((m) => m[1] ?? "");
+    const word = [
+      "",
+      "one",
+      "two",
+      "three",
+      "four",
+      "five",
+      "six",
+      "seven",
+      "eight",
+      "nine",
+      "ten",
+    ][methods.length];
+    if (word === undefined) throw new Error(`no word for ${methods.length} methods`);
+    const Word = `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+    expect(methods).toContain("deleteRows");
+    expect(methods).toContain("keep");
+    const listed = methods.map((m) => `\`${m}\``);
+    const sentence = `${listed.slice(0, -1).join(", ")}, and ${listed.at(-1)}`;
+    expect(page("concepts/storage-port.md")).toContain(
+      `description: The ${word} storage methods that core calls,`,
+    );
+    for (const m of listed) expect(page("concepts/storage-port.md")).toContain(`| ${m} |`);
+    expect(page("concepts/architecture.md")).toContain(
+      `| The storage port | \`@authtempo/core\` | ${Word} storage methods on model and field names. |`,
+    );
+    expect(page("reference/glossary.md")).toContain(
+      `| storage port | The ${word} storage methods that core calls. | |`,
+    );
+    expect(page("guides/adapter.mdx")).toContain(
+      `**What it does:** you write the ${word} methods of the storage port,`,
+    );
+    expect(page("guides/adapter.mdx")).toContain(
+      `1. Write an object with ${sentence}, of the type \`StorageAdapter\`.`,
+    );
+    expect(flat(`${REPO}packages/core/README.md`)).toContain(
+      `${Word} methods: ${listed.join(", ")}.`,
+    );
   });
 });
