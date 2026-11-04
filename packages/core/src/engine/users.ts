@@ -163,7 +163,8 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
  * whose throw left its row behind. The next claim of the user takes it.
  * The sweep deletes it, as it deletes each verification row past
  * `expiresAt`. The flows that create a row of a user that a claim deletes
- * read the lease, live or stale (`claimNotStarted`).
+ * read the lease, live or stale (`claimNotStarted`). They are the three
+ * sign-ups of a new user and the importer, for a new user and for a repair.
  */
 export const CLAIM_LEASE_MS = 60_000;
 
@@ -524,11 +525,16 @@ export async function userStillUnverified(
 }
 
 /**
- * Runs inside the caller's transaction, after the caller created a password
- * row or an identity row of the user (ruling 16 of plan 12p). False when a
- * claim of the user started since the caller created the user. A claim
- * deletes that row before its flip, so a check of the flip alone can miss
- * it. Then the row would outlive the claim, a way in of the claimant.
+ * The claim check of a credential write (ruling 16 of plan 12p). The
+ * contract: the caller's transaction created or read the user while it was
+ * unverified. The check runs in that transaction, after the caller wrote a
+ * password row or an identity row of the user. A pending password row stays
+ * pending until the check passes. False when a claim of the user started
+ * since the create or the read. The caller then deletes its own rows by id
+ * and commits, with no throw. A claim deletes those rows before its flip,
+ * so a check of the flip alone can miss it. Then the row would outlive the
+ * claim, a way in of the claimant. The three sign-ups of core and the
+ * importer call it (ruling 31 of plan 12p).
  *
  * On Postgres and MySQL the update of the user row is enough. A claim
  * cannot read the user that this open transaction created, so it never
@@ -536,18 +542,23 @@ export async function userStillUnverified(
  * verify does. That create waits on the unique key of the address. After
  * this commit it fails, and the retry of the unique key reads the user and
  * claims it. Its delete then takes the row of the caller. After a rollback
- * here that create passes, and no claim runs.
+ * here that create passes, and no claim runs. For a user that the caller
+ * read, the update takes the row lock. A claim's hold then waits for this
+ * commit, and its delete sees the row of the caller. A claim that held the
+ * row first has flipped it at its commit, so the update matches zero rows.
  *
  * On a store with no isolation the check also reads the lease, live or
- * stale (ruling 26 of plan 12p). Each caller passes a user that its own
- * transaction created. So each lease of that user comes from a claim that
- * started after the create. A claim writes its lease with the time that its
- * flow fixed at its start. So after a wait of 60 seconds, as in a provider
- * call, the lease is stale when the claim writes it. That claim can still
- * delete before the caller's create, so a stale lease counts as a live
- * one. A lease after this read comes after the create, so the claim's
- * delete takes the row. A user with no address has no claim, so it gets no
- * read.
+ * stale (ruling 26 of plan 12p). A lease of a user that is still unverified
+ * comes from a claim that has not flipped, or from one that threw and left
+ * it. For a user that the caller created, that claim started after the
+ * create. A claim writes its lease with the time that its flow fixed at its
+ * start. So after a wait of 60 seconds, as in a provider call, the lease is
+ * stale when the claim writes it. That claim can still delete before the
+ * caller's write, so a stale lease counts as a live one. For a user that
+ * the caller read, the claim can also have taken its lease and deleted
+ * before the read. A lease after this read comes after the caller's write,
+ * so the claim's delete takes the row. A user with no address has no
+ * claim, so it gets no read.
  */
 export async function claimNotStarted(
   tx: StorageAdapter,

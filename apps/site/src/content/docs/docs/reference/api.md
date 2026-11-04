@@ -115,6 +115,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |
+| `claimNotStarted` | The claim check of a credential write. It runs in the caller's transaction, after a password or identity write of an unverified user that this transaction created or read. It answers false when a claim of the user started since then. The caller then deletes its own rows by id and commits. On a store with no isolation it also reads the lease of the claim. The importer calls it. |
 | `validTokenName`, `validMetadata` | The create rules of a token. A name holds 1 to 80 characters and no control character. Metadata is a plain object whose JSON is at most 4096 bytes. The Better Auth key move reads them. |
 | `checkCaptcha` | The captcha check of one flow, after its per-IP limit and before its per-email limits. It answers null when the flow goes on. An `api` call with no `captchaToken` skips it, so an app that proxies a browser request through `api` must pass the browser's token. |
 
@@ -144,7 +145,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `LEGACY_VERIFY_HASH` | The hash value of a user whose password the old system checks. |
 | `PBKDF2_ITERATIONS` | 100000. |
 | `PASSKEY_HINTS` | `security-key`, `client-device`, and `hybrid`: the hints of WebAuthn Level 3. |
-| `PENDING_HASH_PREFIX` | The prefix of a password row that an import repair holds back. |
+| `PENDING_HASH_PREFIX` | The prefix of a password row that an import holds back until its claim check passes. |
 | `CAPTCHA_FLOWS`, `DEFAULT_CAPTCHA_FLOWS` | The five flows that a captcha can check, and the four that it checks by default. |
 | `CAPTCHA_HEADER` | `x-captcha-response`, the header of the captcha token. |
 | `CAPTCHA_TOKEN_MAX` | 2048. A longer token answers `captcha_failed` with no call. |
