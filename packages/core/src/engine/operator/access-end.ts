@@ -21,6 +21,7 @@ import {
   impersonationStops,
   type OperatorActEnds,
   type StopCause,
+  stoppedSessions,
   writeStopRow,
 } from "./audit.js";
 import { ACCESS_END_RECORD } from "./guards.js";
@@ -408,8 +409,8 @@ export const STOPS_LIMIT = 100;
 
 /**
  * An impersonation session that the cascade of a user delete takes, for its
- * stop row at the sweep (decision 3 of plan 12o). The session is gone then,
- * and the sweep never reads the audit table. So the row holds both ids.
+ * stop row at the sweep (decision 3 of plan 12o). The session row is gone
+ * then, and the sweep reads no start row. So the row holds both ids.
  */
 export interface PendingStop {
   sessionId: string;
@@ -517,8 +518,8 @@ function impersonationWhere(operatorId: string, targets: readonly string[]): Whe
  * `families`, it names the OAuth families that the act did not end. With
  * `stops`, it names the impersonation sessions that a cascade takes, and
  * the time of their end (decision 3 of plan 12o). The
- * sweep never reads the audit table, so the row holds the ids. The answer
- * is `data.before`.
+ * sweep reads no start row of the audit table, so the row holds the ids. The
+ * answer is `data.before`.
  */
 async function writePendingEnd(
   tx: StorageAdapter,
@@ -590,8 +591,9 @@ export const PENDING_END_PAGE = 5;
  * The least calls of the page of one pending-end row: the session read,
  * the lock, a link read, a delete, and the row delete. The sweep keeps
  * them from the outbox while a row waits (ruling 50 of plan 12f). A row
- * that owes stop rows gets the read, 2 stop rows, and the update of the
- * row from them (decision 5 of plan 12o).
+ * that owes stop rows gets the session read, the stop row read, 1 stop row,
+ * and the update of the row. Decision 5 and ruling 19 of plan 12o set these
+ * calls.
  */
 export const PENDING_PAGE_RESERVE = 5;
 
@@ -600,6 +602,18 @@ export const PENDING_PAGE_RESERVE = 5;
  * On D1 an update there is 2 statements, the undo read and the update.
  */
 const ROW_UPDATE_CALLS = 2;
+
+/**
+ * The stop rows that the sweep reads for one pending-end row that owes stop
+ * rows (ruling 19 of plan 12o). Each session of the delete's read has one
+ * stop row at most: of the page, of another flow, or of an earlier sweep.
+ * So at most `STOPS_LIMIT` rows name a session of the list. The bound leaves
+ * room for as many rows of other sessions of the user.
+ */
+const STOPPED_READ_LIMIT = 2 * STOPS_LIMIT;
+
+/** The calls that the read of the stop rows needs after it: 1 stop row and the update of the row. */
+const STOPPED_READ_ROOM = 1 + ROW_UPDATE_CALLS;
 
 /** True for one entry of `data.stops` of a pending-end row. */
 function isPendingStop(entry: unknown): entry is PendingStop {
@@ -663,13 +677,17 @@ export async function readPendingEnds(
  * The answer is the count of ended sessions.
  *
  * A row with `data.stops` owes the stop rows of the impersonation sessions
- * that a cascade took (decision 5 of plan 12o). After the page, the same
- * transaction writes one `impersonation_stop` row per entry, one call each,
- * in the calls that stay. Each row holds `data.endedAt`, the time of the
- * delete. Then one update leaves the rest of the list on the row, or the
- * row goes when no entry and no session stays. A row with entries left
- * waits for the next sweep. `operator.afterAction` runs once per stop row
- * after the commit, through `sessionsEnded`.
+ * that a cascade took (decision 5 of plan 12o). After the page, one read
+ * takes the user's stop rows from `ACCESS_END_SKEW_MS` before
+ * `data.endedAt` (`stoppedSessions`, ruling 19). Another flow can end a
+ * session of the list after the delete's read, because D1 and SQLite have
+ * no row lock. That flow wrote the stop row, so the step skips the entry.
+ * The same transaction then writes one `impersonation_stop` row per other
+ * entry, one call each, in the calls that stay. Each row holds
+ * `data.endedAt`, the time of the delete. Then one update leaves the rest of
+ * the list on the row, or the row goes when no entry and no session stays.
+ * A row with entries left waits for the next sweep. `operator.afterAction`
+ * runs once per stop row after the commit, through `sessionsEnded`.
  */
 export async function endPendingRows(
   config: ResolvedConfig,
@@ -716,10 +734,24 @@ export async function endPendingRows(
       const finished = !page.stopped && read.length <= rows.length;
       // The owed stop rows: all of them and the row delete, or some of them and the update.
       let paid = 0;
-      if (finished && written !== null && owed.length > 0) {
-        const room = calls - page.used;
-        paid = room - 1 >= owed.length ? owed.length : Math.max(0, room - ROW_UPDATE_CALLS);
-        for (const stop of owed.slice(0, paid))
+      let due = owed;
+      let looked = false;
+      if (
+        finished &&
+        written !== null &&
+        owed.length > 0 &&
+        calls - page.used >= 1 + STOPPED_READ_ROOM
+      ) {
+        // A writer whose clock runs behind, or a flow that took its time before the
+        // delete's read, wrote an earlier time. The skew bound of `data.before` covers it.
+        const at = endedAt === undefined ? row.createdAt.getTime() : Date.parse(endedAt);
+        const since = new Date(at - ACCESS_END_SKEW_MS);
+        const stopped = await stoppedSessions(tx, row.identifier, since, STOPPED_READ_LIMIT);
+        looked = true;
+        due = owed.filter((x) => !stopped.has(x.sessionId));
+        const room = calls - page.used - 1;
+        paid = room - 1 >= due.length ? due.length : Math.max(0, room - ROW_UPDATE_CALLS);
+        for (const stop of due.slice(0, paid))
           await writeStopRow(
             tx,
             written,
@@ -728,7 +760,7 @@ export async function endPendingRows(
             endedAt,
           );
       }
-      const rest = owed.slice(paid);
+      const rest = due.slice(paid);
       const data =
         rest.length > 0
           ? { ...row.data, stops: rest }
@@ -740,10 +772,10 @@ export async function endPendingRows(
       const drop = finished && rest.length === 0 && families.length === 0 && !keepsRecord(row);
       if (drop) await tx.delete("verification", byId);
       else if (paid > 0) await tx.update("verification", byId, { data });
-      return { page, finished: finished && rest.length === 0, drop, paid, data };
+      return { page, finished: finished && rest.length === 0, drop, paid, looked, data };
     });
     const rowCalls = done.drop ? 1 : done.paid > 0 ? ROW_UPDATE_CALLS : 0;
-    meter.step(done.page.used + done.paid + rowCalls);
+    meter.step(done.page.used + (done.looked ? 1 : 0) + done.paid + rowCalls);
     n += done.page.deleted;
     await sessionsEnded(config, ended, reason, written, done.page.deleted);
     if (!done.finished) break;

@@ -407,6 +407,36 @@ export async function writeStopRow(
 }
 
 /**
+ * The ids of the sessions of `userId` that an `impersonation_stop` row
+ * names, of the rows written at or after `since` (ruling 19 of plan 12o).
+ * One read by the index on `targetUserId` takes the newest `limit` rows. The
+ * sweep reads them for a pending-end row that owes stop rows. So it writes no
+ * second row for a session that another flow ended after the delete's read.
+ */
+export async function stoppedSessions(
+  storage: StorageAdapter,
+  userId: string,
+  since: Date,
+  limit: number,
+): Promise<Set<string>> {
+  const rows = await storage.findMany(
+    "operatorAudit",
+    [
+      { field: "targetUserId", op: "eq", value: userId },
+      { field: "action", op: "eq", value: "impersonation_stop" },
+      { field: "createdAt", op: "gte", value: since },
+    ],
+    { sort: { field: "id", dir: "desc" }, limit },
+  );
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row.data?.sessionId;
+    if (typeof id === "string") ids.add(id);
+  }
+  return ids;
+}
+
+/**
  * The users whose impersonation `operatorId` started at or after `since`.
  * They are the `targetUserId` of each `impersonation_start` row of that
  * user actor, read by the index on `actorId` (plan 12f Task 11, ruling 31).
