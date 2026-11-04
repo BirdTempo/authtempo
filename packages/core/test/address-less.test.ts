@@ -57,7 +57,11 @@ async function addressless(storage: Auth["storage"], now: Date, name: string | n
   return storage.create("user", draftUserRow({ email: null, emailVerified: false, name }, now));
 }
 
-/** A session of `user`, as a sign-in opens it. */
+/**
+ * A session of `user`, as a sign-in opens it. `proved` is true. That is the
+ * value that the engine now sets for a user with no address that is not
+ * anonymous (`provedAtOpen`, ruling 20 of plan 12p).
+ */
 async function sessionOf(auth: Auth, user: UserRow): Promise<ResolvedSession> {
   const { token } = await createSession(auth.config, {
     userId: user.id,

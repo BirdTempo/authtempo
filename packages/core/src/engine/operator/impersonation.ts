@@ -3,7 +3,6 @@ import { limit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
-import { provedAccount } from "../address.js";
 import { sendNotice } from "../notices.js";
 import { endSessionById } from "../oauth-outbox.js";
 import { openSession, type ResolvedSession, sessionOpened, sessionsEnded } from "../sessions.js";
@@ -128,8 +127,7 @@ export async function startImpersonation(
           userAgent: null,
           via: "impersonation",
           impersonation: { actorId: actor.user.id, expiresAt },
-          // The target's state (plan 12p): its user row's rule, as for a caller with no session.
-          handleProved: provedAccount({ user: target }),
+          // The target's state (plan 12p): `provedAtOpen` reads the target as at its own sign-in.
         },
         tx,
       );

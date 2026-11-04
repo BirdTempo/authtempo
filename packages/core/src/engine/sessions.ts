@@ -138,9 +138,11 @@ export interface SessionInput {
   ip: string | null;
   userAgent: string | null;
   /**
-   * The proof flag of the row (plan 12p, spec 8.9). It is set once, here:
-   * `prepareSession` computes it from the user and the flow. Required, so
-   * the type check names each caller. No hook can set it.
+   * The proof flag of the row (plan 12p, spec 8.9). Core sets it once at the
+   * session's creation: `prepareSession` computes it (`provedAtOpen`). Only
+   * the confirm of a change of address changes it later, to true on the
+   * session it keeps. Required, so the type check names each caller. No hook
+   * can set it.
    */
   proved: boolean;
   /** Set only through `openSession`, after the membership check of a hook's patch (plan 9d). */
@@ -186,13 +188,6 @@ export interface SessionOpen {
    */
   sameAddress?: boolean;
   /**
-   * True when the sign-in itself proved a handle of a user with no address:
-   * the phone code or the passkey (plan 12p). It sets `proved` for such a
-   * user only. Absent: false, as for an anonymous, social, or SSO user with
-   * no address.
-   */
-  handleProved?: boolean;
-  /**
    * The flag of the session that this one carries on: the browser session
    * of a handoff (plan 12p). It sets `proved` in place of the user's state,
    * so a handoff never gains what its browser session did not have.
@@ -201,13 +196,21 @@ export interface SessionOpen {
 }
 
 /**
- * The `proved` flag of a new session (plan 12p, spec 8.9). A user with an
- * address gives its verified flag. A user with no address gives the flow's
- * hint. A handoff gives the flag of its browser session.
+ * The `proved` flag of a new session (ruling 20 of plan 12p, spec 8.9). A
+ * handoff gives the flag of its browser session. An anonymous user gives
+ * false. A user with an address gives its verified flag. Any other user
+ * gives true.
+ *
+ * The flag marks a session made before the proof of its address. A user
+ * with no address has nothing to claim, so its sessions start proved. The
+ * gates still read its user row: `handleProved` needs a verified handle. An
+ * anonymous session stays unproved, because an upgrade can give it an
+ * address. The owner's claim must not find it proved then.
  */
 export function provedAtOpen(input: SessionOpen): boolean {
   if (input.carriedProved !== undefined) return input.carriedProved;
-  return hasAddress(input.user) ? input.user.emailVerified : input.handleProved === true;
+  if (input.user.isAnonymous) return false;
+  return hasAddress(input.user) ? input.user.emailVerified : true;
 }
 
 export interface ResolvedSession {

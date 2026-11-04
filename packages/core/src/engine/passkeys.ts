@@ -520,10 +520,9 @@ export async function verifyPasskeySignUp(
           );
           // Every hook runs before the first write: the D1 undo (`BeforeResolveWrite` in users.ts).
           await upgrade.before(tx, user, upgradeProof(user), "passkey");
-          // The ceremony proved the passkey, a handle of a user with no address (plan 12p).
           const prepared = await prepareSession(
             config,
-            { user, ip: input.ip, userAgent: input.userAgent, via: "passkey", handleProved: true },
+            { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" },
             tx,
           );
           await tx.create("passkey", {
@@ -704,10 +703,9 @@ export async function verifyPasskeyAuthentication(
       async (tx): Promise<Result<{ token: string; session: SessionRow }>> => {
         // Before the session hook and its hold of the user row, as at the other pathways.
         await upgrade.before(tx, user, upgradeProof(user), "passkey");
-        // The assertion proved the passkey, a handle of a user with no address (plan 12p).
         const prepared = await prepareSession(
           config,
-          { user, ip: input.ip, userAgent: input.userAgent, via: "passkey", handleProved: true },
+          { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" },
           tx,
         );
         const s = await writeSession(config, prepared, tx);

@@ -17,7 +17,7 @@ import type {
   UserRow,
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
-import { hasAddress, passkeyUserName, provedAccount, verifiedHandle } from "./address.js";
+import { passkeyUserName, provedAccount } from "./address.js";
 import {
   type AnonymousCaller,
   type CarriedUpgrade,
@@ -1042,21 +1042,13 @@ async function answerChallenge(
     kind === "mailed" || kind === "bound" ? recordedAnonymous(challenge.data) : null,
     kind === "mailed" ? "mailed" : "bound",
   );
-  // The hint of a password first factor (ruling 17 of plan 12p), read as the
-  // password sign-in reads it. A user with an address gets no read.
-  const passwordHint =
-    via === "password" && !hasAddress(user) && (await verifiedHandle(config, config.storage, user));
   const opened = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
       // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
       await upgrade.before(tx, user, upgradeProof(user), via);
-      const open = { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) };
-      // A phone code as the first factor proved a handle of a user with no
-      // address (plan 12p). A password gives the hint of the password
-      // sign-in: the user's verified handle (ruling 17).
       const prepared = await prepareSession(
         config,
-        via === "phone" || passwordHint ? { ...open, handleProved: true } : open,
+        { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) },
         tx,
       );
       const s = await writeSession(config, prepared, tx);

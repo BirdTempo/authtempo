@@ -2,7 +2,7 @@
 "@authtempo/core": minor
 ---
 
-A session now holds a proof flag, `proved`, that core sets once at its creation. It is true when the user has a verified address. For a user with no address, it is true when the sign-in proved a handle: a phone code or a passkey. A handoff copies the flag of its browser session, and an impersonation takes the state of its target. A `session.beforeCreate` hook cannot set it.
+A session now holds a proof flag, `proved`, that core sets once at its creation. Only the confirm of a change of address changes it later, to true on the session it keeps. It is false for an anonymous user. For a user with an address, it is the verified flag of that address. For any other user, it is true, because a user with no address has nothing to claim. A handoff copies the flag of its browser session, and an impersonation takes the state of its target. A `session.beforeCreate` hook cannot set it.
 
 Every verified-only action reads the flag of the caller's session with the user's flag. So a session made before the proof of its address never gains verified powers. A claimant's session acts as unverified between the claim's flip and its session delete. It makes no token, no address change, no grant, and no factor there. A caller with no session, such as a `tk_` token, keeps the rule of the user row.
 
@@ -14,6 +14,6 @@ A claim now deletes the identities, the passwords, the passkeys, the passkey cha
 
 The `email_verified` claim of a session JWT reads the session flag with the user's flag. `publicUser`, the ID token, and userinfo keep the user's flag. The confirm of a change of address sets the flag on the session that it keeps.
 
-A password sign-in of a user with no address gets the flag when that user holds a verified handle. That handle is a phone that signs in, or a passkey. So a phone user's password session holds the verified powers, and a username-only user's does not.
+A user with no address that is not anonymous gets the flag at every sign-in, the password sign-in too. Each verified-only action still reads the user row. So a username-only user can change its password, and it makes no API token, because it holds no verified handle.
 
 The compat entry of core exports `createApiTokenAs` and `createOrganizationTokenAs` for a server call that names its user and has no session. They keep the rule of the user row.

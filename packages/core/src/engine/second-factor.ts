@@ -616,8 +616,6 @@ export function gatedSteps(
     notAfter?: Date | undefined;
     /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
     sameAddress?: boolean;
-    /** The sign-in proved a handle of a user with no address (`SessionOpen.handleProved`, plan 12p). */
-    handleProved?: boolean;
     stateData?: OpenedStateData;
     /** The last method of the sign-in (plan 12i Task 12), kept in a challenge for its verify. */
     method?: LastMethod;
@@ -662,7 +660,6 @@ export function gatedSteps(
           via: open.via,
           ...(open.notAfter ? { notAfter: open.notAfter } : {}),
           ...(open.sameAddress ? { sameAddress: true } : {}),
-          ...(open.handleProved ? { handleProved: true } : {}),
         },
         tx,
       );

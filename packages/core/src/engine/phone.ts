@@ -388,8 +388,6 @@ export async function verifyPhone(
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.phone ?? false,
-      // The code proved the phone, a handle of a user with no address (plan 12p).
-      handleProved: true,
       upgrade,
     },
     now,

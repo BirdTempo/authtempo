@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig, ResolvedConfig } from "../src/config.js";
+import { provedAccount } from "../src/engine/address.js";
+import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
 import { draftUserRow } from "../src/engine/users.js";
 import { newId } from "../src/primitives/ids.js";
@@ -441,6 +443,20 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
     )
       expect(second.done.value.user.id).toBe(first.done.value.user.id);
     else throw new Error("no user");
+  });
+
+  it("opens a proved session for the sign-in of a user with no address (ruling 20 of plan 12p)", async () => {
+    const w = tiktokWorld();
+    // The new user, then the returning user: each sign-in opens a proved session.
+    for (const round of ["new", "returning"]) {
+      const { done } = await signIn(w.config, "tiktok");
+      if (!done.ok || !("token" in done.value)) throw new Error(`no session (${round})`);
+      const live = await resolveSession(w.config, recordCredential(done.value.token));
+      expect(live?.user, round).toMatchObject({ email: null, isAnonymous: false });
+      expect(live?.session.proved, round).toBe(true);
+      // The account gates read the flag with the user row, so this session passes them.
+      expect(live && provedAccount(live), round).toBe(true);
+    }
   });
 
   it("answers oauth_failed on a TikTok error envelope", async () => {

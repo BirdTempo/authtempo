@@ -1508,17 +1508,18 @@ async function firstPassword(w: World, cookie: string): Promise<void> {
 }
 
 /**
- * A user with a username and a password and no address, phone, or passkey:
- * a phone user who set both and then removed the phone. Answers the phone
- * session, which is proved, and the session of a sign-in by the username.
+ * A user with a username and a password and no address, phone, or passkey,
+ * through the routes in the order of probe P6 of rr-task2.md. A phone
+ * sign-up sets a username and a first password, then removes the phone.
+ * Answers the phone session and the session of a sign-in by the username.
  */
 async function usernameUser(w: World) {
   const first = await phoneUser(w);
-  await firstPassword(w, cookieOf(first));
   const named = await w.claimant.handle(
     req("POST", "/user/username", { username: "pat" }, cookieOf(first)),
   );
   expect(await answer(named)).toBe("200 ok");
+  await firstPassword(w, cookieOf(first));
   const removed = await w.claimant.handle(req("POST", "/phone/remove", {}, cookieOf(first)));
   expect(await answer(removed)).toBe("200 ok");
   const signIn = await w.claimant.handle(
@@ -1530,7 +1531,7 @@ async function usernameUser(w: World) {
   return { first, second };
 }
 
-describe("the hint of a password sign-in with no address (ruling 17 of plan 12p)", () => {
+describe("the flag of a user with no address (ruling 20 of plan 12p)", () => {
   it("proves the session of a phone user's password sign-in: a token create passes", async () => {
     const w = world();
     await firstPassword(w, cookieOf(await phoneUser(w)));
@@ -1543,11 +1544,46 @@ describe("the hint of a password sign-in with no address (ruling 17 of plan 12p)
     expect(await tokenCreate(w, token)).toBe("200 ok");
   });
 
-  it("does not prove the session of a username-only user's password sign-in: a token create answers email_unverified", async () => {
+  it("proves the session of a username-only user's password sign-in: the password change passes, and a token create answers email_unverified", async () => {
     const w = world();
     const { second } = await usernameUser(w);
-    expect((await rowOf(w, second))?.proved).toBe(false);
+    const user = await w.storage.findOne("user", [{ field: "username", op: "eq", value: "pat" }]);
+    expect(user).toMatchObject({ email: null, phone: null, isAnonymous: false });
+    expect((await rowOf(w, second))?.proved).toBe(true);
+    // `provedAccount` passes: the user is not anonymous, and the session is proved.
+    const changed = await w.claimant.handle(
+      req(
+        "POST",
+        "/password/change",
+        { currentPassword: PW, newPassword: recordCredential("username only password 2") },
+        cookieOf(second),
+      ),
+    );
+    expect(await answer(changed)).toBe("200 ok");
+    // `handleProved` still reads the user row: no phone, no passkey, so no verified handle.
     expect(await tokenCreate(w, second)).toBe("403 email_unverified");
+  });
+
+  it("keeps an anonymous session unproved, and the session of its upgrade to an unverified address too", async () => {
+    const w = world();
+    const anon = await w.claimant.handle(req("POST", "/anonymous/sign-in", {}));
+    expect(await answer(anon)).toBe("200 ok");
+    const anonToken = setToken(anon) ?? "";
+    expect((await rowOf(w, anonToken))?.proved).toBe(false);
+    // The upgrade: a password sign-up from the anonymous session, of an
+    // address that no proof verified.
+    const up = await w.claimant.handle(
+      req("POST", "/password/sign-up", { email: CLAIMED, password: PW }, cookieOf(anonToken)),
+    );
+    expect(await answer(up)).toBe("200 ok");
+    const upToken = setToken(up) ?? "";
+    const upgraded = await rowOf(w, upToken);
+    expect(upgraded?.userId).toBe((await userAt(w, CLAIMED)).id);
+    expect(upgraded?.proved).toBe(false);
+    expect(await tokenCreate(w, upToken)).toBe("403 email_unverified");
+    // The upgrade ended the anonymous session, and no session of the address is proved.
+    expect(await rowOf(w, anonToken)).toBeNull();
+    expect((await w.storage.findMany("session", [])).map((x) => x.proved)).toEqual([false]);
   });
 
   it("proves the session of a challenge after a phone user's password sign-in", async () => {
@@ -1576,60 +1612,6 @@ describe("the hint of a password sign-in with no address (ruling 17 of plan 12p)
     const token = setToken(done) ?? "";
     expect((await rowOf(w, token))?.proved).toBe(true);
     expect(await tokenCreate(w, token)).toBe("200 ok");
-  });
-});
-
-describe("the confirm of a change of address (plan 12p decision 7)", () => {
-  it("sets proved on the session that the confirm keeps, for a user who had no address", async () => {
-    const w = world();
-    // A username-only user: its sign-in by the username proved no handle.
-    const { first, second } = await usernameUser(w);
-    expect((await rowOf(w, second))?.proved).toBe(false);
-    expect(await tokenCreate(w, second)).toBe("403 email_unverified");
-    // The proved phone session registers a passkey, a verified handle.
-    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
-    const options = await w.claimant.handle(
-      req("POST", "/passkey/register/options", {}, cookieOf(first)),
-    );
-    expect(await answer(options)).toBe("200 ok");
-    const o = (await options.json()) as { challenge: string; user: { id: string } };
-    const userId = Uint8Array.from(atob(o.user.id.replaceAll("-", "+").replaceAll("_", "/")), (c) =>
-      c.charCodeAt(0),
-    );
-    const registered = await w.claimant.handle(
-      req(
-        "POST",
-        "/passkey/register/verify",
-        { response: await soft.register(o.challenge, userId) },
-        cookieOf(first),
-      ),
-    );
-    expect(await answer(registered)).toBe("200 ok");
-    // The proved session asks for the address; the second session confirms the code and stays.
-    const asked = await w.claimant.handle(
-      req(
-        "POST",
-        "/user/change-email",
-        { newEmail: "pat@example.com", method: "code" },
-        cookieOf(first),
-      ),
-    );
-    expect(await answer(asked)).toBe("200 ok");
-    const code = /\b(\d{6})\b/.exec(
-      w.mail.findLast((m) => m.to === "pat@example.com")?.text ?? "",
-    )?.[1];
-    const confirmed = await w.claimant.handle(
-      req(
-        "POST",
-        "/user/change-email/verify",
-        { code: recordCredential(code ?? "") },
-        cookieOf(second),
-      ),
-    );
-    expect(await answer(confirmed)).toBe("200 ok");
-    expect(await rowOf(w, first)).toBeNull();
-    expect((await rowOf(w, second))?.proved).toBe(true);
-    expect(await tokenCreate(w, second)).toBe("200 ok");
   });
 });
 

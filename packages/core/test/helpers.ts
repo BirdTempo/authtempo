@@ -127,16 +127,11 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
 }
 
 /**
- * The address of a test user that has one. A user can have no address
- * from schema version 15 (plan 12i), so a test reads it through this
- * check, never an assertion. It throws for a user with no address.
- */
-/**
  * A resolved session of `user`, as a sign-in by the user's own proof opens
- * it (plan 12p). Its `proved` flag is the one the engine sets: the verified
- * flag of the address, or, for a user with no address, true unless the user
- * is anonymous (a phone or a passkey sign-in). A test of a form that takes
- * the session in place of a bare user calls it.
+ * it (plan 12p). Its `proved` flag is the value that the engine now sets
+ * (`provedAtOpen`, ruling 20 of plan 12p). That is the verified flag of an
+ * address, false for an anonymous user, and true for any other user. A test
+ * of a form that takes the session in place of a bare user calls it.
  */
 export async function sessionFor(
   config: ResolvedConfig,
@@ -154,6 +149,11 @@ export async function sessionFor(
   return { ...resolved, token };
 }
 
+/**
+ * The address of a test user that has one. A user can have no address
+ * from schema version 15 (plan 12i), so a test reads it through this
+ * check, never an assertion. It throws for a user with no address.
+ */
 export function emailOf(user: { email: string | null }): string {
   if (user.email === null) throw new Error("the test user has no address");
   return user.email;

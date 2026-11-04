@@ -422,6 +422,8 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
       "user",
       draftUserRow({ email: null, emailVerified: false, name: null }, w.auth.clock.now()),
     );
+    // True: the value that the engine now sets for a user with no address
+    // that is not anonymous (ruling 20 of plan 12p).
     const { token } = await createSession(w.auth.config, {
       userId: lone.id,
       ip: null,
