@@ -1394,23 +1394,23 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
   });
 
   it("undoes the deletes of a late claim whose lease came after a rival claim ended: the rival's password is back", async () => {
-    // A flow fixes its time at its start. The rival, the owner's reset,
-    // starts first and waits in user.beforeVerify while 61 seconds go by.
-    // So its lease is stale when it writes it. The late claim, a magic
-    // link, reads the user unverified, then lets the rival end. It takes the
-    // stale lease, deletes, and its flip matches no row. The D1 view undoes
-    // only what the late claim wrote.
-    const rival = { arrived: latch(), wait: latch(), done: latch() };
+    // The rival, the owner's reset, takes its lease. Then 61 seconds go by
+    // before its deletes, so its lease is stale. A claim runs no hook after
+    // its lease, so only slow statements make that wait. The test forces it.
+    // The late claim, a magic link, starts in that wait and reads the user
+    // unverified. It lets the rival end, takes the stale lease, deletes, and
+    // its flip matches no row. The D1 view undoes only what the late claim
+    // wrote. A wait before the rival's lease makes no stale lease (ruling 35
+    // of plan 12p): the next test holds that scene.
+    const rival = { done: latch() };
+    const arrived = latch();
     const w = world({
       extra: {
         hooks: {
           user: {
             beforeVerify: async ({ via }) => {
-              if (via === "password_reset") {
-                rival.arrived.open();
-                return rival.wait.wait;
-              }
-              rival.wait.open();
+              if (via !== "magic_link") return;
+              arrived.open();
               await rival.done.wait;
             },
           },
@@ -1425,26 +1425,33 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     );
     expect(asked.status).toBe(200);
     const resetToken = tokenFromMail(w.mail.findLast((m) => m.to === CLAIMED)?.text ?? "");
-    // The rival runs on the claimant's store with no lock, and waits in its hook.
-    const reset = w.claimant
-      .handle(req("POST", "/password/reset", { token: resetToken, password: NEW }))
-      .then(async (res) => {
-        rival.done.open();
-        return { answer: await answer(res), token: setToken(res) };
-      });
-    // The rival fixed its time before its hook, so its lease will be stale.
-    await rival.arrived.wait;
-    w.clock.advance(CLAIM_LEASE_MS + 1);
-    const late = await verifyMagicLink(d1Like(w.ownerConfig), {
-      token: link,
-      ip: null,
-      userAgent: null,
-    });
-    const won = await reset;
+    // The rival runs on the owner's store. Right after its lease, the clock
+    // moves, and the late claim starts on the D1 view with no lock.
+    let late: ReturnType<typeof verifyMagicLink> | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      w.clock.advance(CLAIM_LEASE_MS + 1);
+      late = verifyMagicLink(d1Like(w.ownerConfig), { token: link, ip: null, userAgent: null });
+      await arrived.wait;
+    };
+    const res = await w.owner.handle(
+      req("POST", "/password/reset", { token: resetToken, password: NEW }),
+    );
+    const won = { answer: await answer(res), token: setToken(res) };
     expect(won.answer).toBe("200 ok");
-    // The flip of the late claim matched no row, so it threw and undid its
-    // deletes. Its retry found the verified user and signed in.
-    expect(late.ok).toBe(true);
+    // The writes of the late claim, from here.
+    w.log.writes = [];
+    rival.done.open();
+    const lateAnswer = await (late as ReturnType<typeof verifyMagicLink> | null);
+    const writes = w.log.writes ?? [];
+    w.log.writes = null;
+    // It took the stale lease and deleted. Its flip matched no row, so it
+    // threw and undid its deletes. Its retry found the verified user and signed in.
+    const take = writes.indexOf("update:verification");
+    expect(take).toBeGreaterThan(writes.indexOf("create:verification"));
+    expect(writes.indexOf("delete:password")).toBeGreaterThan(take);
+    expect(writes.indexOf("flip:user")).toBeGreaterThan(writes.indexOf("delete:password"));
+    expect(lateAnswer?.ok).toBe(true);
     const user = await userAt(w, CLAIMED);
     expect(user.emailVerified).toBe(true);
     // The rival's kept rows are back: its password signs in, and its session lives.
@@ -1453,6 +1460,63 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
       req("POST", "/password/sign-in", { email: CLAIMED, password: NEW }),
     );
     expect(await answer(signIn)).toBe("200 ok");
+  });
+
+  it("keeps the lease of a claim whose flow waited 61 seconds through a sweep, and a second claim answers 409 (ruling 35 of plan 12p)", async () => {
+    // A flow fixes its time at its start. The owner's magic link then waits
+    // 61 seconds in user.beforeVerify, as a slow hook does. Its lease lives
+    // 60 seconds from the clock at its write. So a sweep inside the claim
+    // keeps it, and a second proof meets it and writes nothing.
+    let waited = false;
+    const w = world({
+      extra: {
+        hooks: {
+          user: {
+            beforeVerify: async () => {
+              if (waited) return;
+              waited = true;
+              w.clock.advance(CLAIM_LEASE_MS + 1_000);
+            },
+          },
+        },
+      },
+    });
+    const token = await claimant(w);
+    const user = await userAt(w, CLAIMED);
+    const first = await ownerLink(w);
+    const second = await ownerLink(w);
+    const lease = () =>
+      w.storage.findOne("verification", [{ field: "id", op: "eq", value: claimLeaseId(user.id) }]);
+    const seen: { atLease: unknown; afterSweep: unknown; rival: string | null } = {
+      atLease: null,
+      afterSweep: null,
+      rival: null,
+    };
+    // Right after the lease: the sweep, then the second proof.
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      seen.atLease = await lease();
+      await sweepExpired(w.config);
+      seen.afterSweep = await lease();
+      seen.rival = await answer(await w.claimant.handle(second));
+    };
+    const start = w.clock.now();
+    const owner = await w.owner.handle(first);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(waited).toBe(true);
+    // The flow's time is 61 seconds old at the lease. The expiry counts from the clock there.
+    expect((seen.atLease as VerificationRow | null)?.expiresAt).toEqual(
+      new Date(start.getTime() + CLAIM_LEASE_MS + 1_000 + CLAIM_LEASE_MS),
+    );
+    expect(seen.afterSweep).toEqual(seen.atLease);
+    expect(seen.rival).toBe("409 conflict");
+    // The first claim completed: the claimant keeps no session and no password.
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    expect(await rowOf(w, token)).toBeNull();
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
   });
 
   it("waits before the retry of a held lease, so a second proof at once signs in (ruling 24 of plan 12p)", async () => {

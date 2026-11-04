@@ -353,17 +353,20 @@ describe("the session proof of the claim-rule page (plan 12p)", () => {
     const claim = body(source("users.ts"), "claimEmail");
     // The first statement is the hold or the lease.
     const first = claim.search(/await (?:tx\.\w+|takeClaim)\(/);
-    expect(claim.slice(first), PROOF_PAGE).toMatch(/^await takeClaim\(tx, userId, now\);/);
+    expect(claim.slice(first), PROOF_PAGE).toMatch(
+      /^await takeClaim\(tx, userId, now, verified\.clock\);/,
+    );
     const take = body(source("users.ts"), "takeClaim");
     expect(take).toMatch(
       /if \(tx\.isolated\) \{\s+if \(await userStillUnverified\(tx, userId, now\)\) return;/,
     );
     expect(take).toContain('purpose: "claim-lease",');
-    expect(take).toContain("CLAIM_LEASE_MS");
+    // The page says that the lease lives 60 seconds: from the clock at its write (ruling 35 of plan 12p).
+    expect(take).toContain("new Date(clock.now().getTime() + CLAIM_LEASE_MS)");
     expect(source("users.ts")).toContain("export const CLAIM_LEASE_MS = 60_000;");
     // Then the trusted rows, the flip, and the sessions, each once and in this order.
     const steps = [
-      "await takeClaim(tx, userId, now);",
+      "await takeClaim(tx, userId, now, verified.clock);",
       'await tx.delete("identity", where);',
       'await tx.delete("password", passwords);',
       'await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);',

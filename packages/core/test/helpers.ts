@@ -216,6 +216,7 @@ export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
 /**
  * The verify steps of a flow with no hook set (plan 12a, Task 18), for a
  * test that calls a resolver directly. The resolver runs `before` itself.
+ * A claim's lease reads the host clock.
  */
 export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
   return verifySteps(
@@ -231,6 +232,7 @@ export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
         anonymous: {},
       },
       observe: DEFAULT_OBSERVE,
+      clock: systemClock,
     },
     via,
   );

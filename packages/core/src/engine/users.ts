@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import type { Clock } from "../primitives/clock.js";
 import { sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
@@ -159,12 +160,18 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
 /**
  * The life of the lease of a claim on a store with no isolation (ruling 16
  * of plan 12p). A claim sends a few statements and runs no hook between
- * them, so it ends long before. A lease past this life is stale: a claim
- * whose throw left its row behind. The next claim of the user takes it.
- * The sweep deletes it, as it deletes each verification row past
- * `expiresAt`. The flows that create a row of a user that a claim deletes
- * read the lease, live or stale (`claimNotStarted`). They are the three
- * sign-ups of a new user and the importer, for a new user and for a repair.
+ * them, so it ends long before. The life starts at the write of the lease.
+ * `takeClaim` reads the clock there, not the time that the flow fixed at its
+ * start (ruling 35 of plan 12p). A flow can wait 60 seconds before its
+ * lease, in a hook or a provider call. A lease from the flow's time would
+ * then be stale at its write. The sweep would delete it while its claim
+ * runs, and the lease read of a sign-up or of the importer would miss that
+ * claim. A lease past this life is stale: a claim whose throw left its row
+ * behind. The next claim of the user takes it. The sweep deletes it, as it
+ * deletes each verification row past `expiresAt`. The flows that create a
+ * row of a user that a claim deletes read the lease, live or stale
+ * (`claimNotStarted`). They are the three sign-ups of a new user and the
+ * importer, for a new user and for a repair.
  */
 export const CLAIM_LEASE_MS = 60_000;
 
@@ -222,7 +229,7 @@ export async function claimEmail(
 ): Promise<void> {
   verified.claimed(userId);
   // The first statement decides the race: a lost claim throws before any write of its own.
-  await takeClaim(tx, userId, now);
+  await takeClaim(tx, userId, now, verified.clock);
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -300,8 +307,19 @@ export async function claimEmail(
  * for its lock, then matches zero rows. On a store with no isolation it is
  * the lease, a `claim-lease` verification row with a fixed id. A rival's
  * create then fails on the key, and only a stale lease can be taken.
+ *
+ * The expiry of the lease comes from a read of `clock` at the create and at
+ * the take (ruling 35 of plan 12p). It does not come from `now`, the time of
+ * the flow. A flow can wait 60 seconds or more before its lease. So no lease
+ * is stale at its write, and the sweep keeps it while the claim runs. `now`
+ * stays the time of the other writes of the claim and of the stale test.
  */
-async function takeClaim(tx: StorageAdapter, userId: string, now: Date): Promise<void> {
+async function takeClaim(
+  tx: StorageAdapter,
+  userId: string,
+  now: Date,
+  clock: Clock,
+): Promise<void> {
   if (tx.isolated) {
     if (await userStillUnverified(tx, userId, now)) return;
     // An account delete took the row: `conflict`, as at the flip.
@@ -310,7 +328,8 @@ async function takeClaim(tx: StorageAdapter, userId: string, now: Date): Promise
     throw new ClaimLostError();
   }
   const id = claimLeaseId(userId);
-  const expiresAt = new Date(now.getTime() + CLAIM_LEASE_MS);
+  // A fresh read at each write: see `CLAIM_LEASE_MS`.
+  const expiry = () => new Date(clock.now().getTime() + CLAIM_LEASE_MS);
   try {
     await tx.create("verification", {
       id,
@@ -318,7 +337,7 @@ async function takeClaim(tx: StorageAdapter, userId: string, now: Date): Promise
       identifier: userId,
       // The key of `valueHash` is unique, so each user's lease has its own hash.
       valueHash: await sha256Hex(id),
-      expiresAt,
+      expiresAt: expiry(),
       consumedAt: null,
       data: null,
       secretVersion: 1,
@@ -343,7 +362,7 @@ async function takeClaim(tx: StorageAdapter, userId: string, now: Date): Promise
       { field: "id", op: "eq", value: id },
       { field: "expiresAt", op: "lt", value: now },
     ],
-    { expiresAt, createdAt: now, updatedAt: now },
+    { expiresAt: expiry(), createdAt: now, updatedAt: now },
   );
   if (taken === 0) throw new ClaimLostError("held");
 }
@@ -551,10 +570,10 @@ export async function userStillUnverified(
  * stale (ruling 26 of plan 12p). A lease of a user that is still unverified
  * comes from a claim that has not flipped, or from one that threw and left
  * it. For a user that the caller created, that claim started after the
- * create. A claim writes its lease with the time that its flow fixed at its
- * start. So after a wait of 60 seconds, as in a provider call, the lease is
- * stale when the claim writes it. That claim can still delete before the
- * caller's write, so a stale lease counts as a live one. For a user that
+ * create. A claim writes the expiry of its lease from a fresh read of the
+ * clock (ruling 35 of plan 12p). So its lease is live at its write. A stale
+ * lease still counts as a live one. A claim whose statements ran past 60
+ * seconds can still delete before the caller's write. For a user that
  * the caller read, the claim can also have taken its lease and deleted
  * before the read. A lease after this read comes after the caller's write,
  * so the claim's delete takes the row. A user with no address has no

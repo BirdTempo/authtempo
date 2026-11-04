@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import type { Observer } from "../observe/observer.js";
+import type { Clock } from "../primitives/clock.js";
 import type { Result } from "../result.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
@@ -192,10 +193,16 @@ export interface VerifySteps {
    * a retry keeps no row of an attempt that rolled back.
    */
   readonly stops: ImpersonationStops | null;
+  /**
+   * The clock of the flow. `claimEmail` reads it at its lease, so the life of
+   * a lease starts at its write (ruling 35 of plan 12p).
+   */
+  readonly clock: Clock;
 }
 
 export function verifySteps(
-  config: Pick<ResolvedConfig, "hooks" | "observe"> & Partial<Pick<ResolvedConfig, "operator">>,
+  config: Pick<ResolvedConfig, "hooks" | "observe" | "clock"> &
+    Partial<Pick<ResolvedConfig, "operator">>,
   via: UserVerifyVia,
 ): VerifySteps {
   const hooks = config.hooks;
@@ -207,6 +214,7 @@ export function verifySteps(
   const stops = impersonationStops(config, "claim");
   return {
     stops,
+    clock: config.clock,
     begin() {
       checked = null;
       claimed = null;

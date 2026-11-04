@@ -24,11 +24,11 @@ import {
 } from "./social-helpers.js";
 
 // The claim check of a sign-up, `claimNotStarted` (ruling 26 of plan 12p).
-// A flow fixes its time at its start, and a claim writes its lease with that
-// time. So a proof that waits 60 seconds or more before its user read writes
-// a lease that is stale at its birth. The check of a sign-up that created
-// the user must count that lease. Each scene runs on the D1 view of the
-// memory store (`d1-like.ts`). It has no transaction lock, and each
+// A flow fixes its time at its start. A proof can wait 60 seconds or more
+// before its user read. Its lease still lives 60 seconds from the clock at
+// its write (ruling 35 of plan 12p). The check of a sign-up that created the
+// user counts that lease, live or stale. Each scene runs on the D1 view of
+// the memory store (`d1-like.ts`). It has no transaction lock, and each
 // statement lands at once. A gate before each statement of a flow pauses
 // that flow at a named point. Every row comes from a flow of the product.
 
@@ -266,15 +266,15 @@ async function race(kind: SignUp, late: number) {
   return { w, user, lease, up, done };
 }
 
-describe("a sign-up beside a claim whose lease is stale at its birth (ruling 26 of plan 12p)", () => {
+describe("a sign-up beside a claim whose flow waited before its lease (rulings 26 and 35 of plan 12p)", () => {
   for (const late of [CLAIM_LEASE_MS + 1_000, 0]) {
     const at = `${late / 1000} s`;
 
     it(`the password sign-up keeps no password when the claim's time is ${at} old at its lease`, async () => {
       const { w, user, lease, up, done } = await race("password", late);
-      // The claim wrote its lease with the time of its start: stale at 61 s, live at 0 s.
-      expect(lease?.expiresAt).toEqual(new Date(Date.parse("2026-11-04T00:01:00.000Z")));
-      expect((lease?.expiresAt ?? new Date(0)) < w.clock.now()).toBe(late > 0);
+      // The claim wrote its lease from the clock at its write: live at 61 s and at 0 s.
+      expect(lease?.expiresAt).toEqual(new Date(Date.parse("2026-11-04T00:01:00.000Z") + late));
+      expect((lease?.expiresAt ?? new Date(0)) > w.clock.now()).toBe(true);
       expect(up).toBe("409 email_taken_unverified");
       expect(done).toBe("200 ok a session");
       expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
@@ -292,7 +292,7 @@ describe("a sign-up beside a claim whose lease is stale at its birth (ruling 26 
 
     it(`the uniform sign-up keeps no password when the claim's time is ${at} old at its lease`, async () => {
       const { w, user, lease, up, done } = await race("uniform", late);
-      expect((lease?.expiresAt ?? new Date(0)) < w.clock.now()).toBe(late > 0);
+      expect((lease?.expiresAt ?? new Date(0)) > w.clock.now()).toBe(true);
       // The uniform answer tells nothing.
       expect(up).toBe("200 ok");
       expect(done).toBe("200 ok a session");
@@ -308,7 +308,7 @@ describe("a sign-up beside a claim whose lease is stale at its birth (ruling 26 
 
     it(`the social sign-up of a new user keeps no identity when the claim's time is ${at} old at its lease`, async () => {
       const { w, user, lease, up, done } = await race("social", late);
-      expect((lease?.expiresAt ?? new Date(0)) < w.clock.now()).toBe(late > 0);
+      expect((lease?.expiresAt ?? new Date(0)) > w.clock.now()).toBe(true);
       expect(up).toBe("email_taken_unverified");
       expect(done).toBe("200 ok a session");
       expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
