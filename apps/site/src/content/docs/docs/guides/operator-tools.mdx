@@ -234,6 +234,7 @@ An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. 
 - Each act writes one row of `operatorAudit` (table `ta_operator_audit`), as the last write of its transaction. The act commits with its row, or neither commits.
 - A row holds `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, `userAgent`, and the time. `ip` and `userAgent` are the actor's, never the target's.
 - An impersonation start and its stop each write a row. An expiry writes none. Each other end of an impersonation session writes a stop row, with its cause in `data`.
+- On a storage whose user delete cascades, an account delete records the impersonation sessions that the cascade ends. The sweep writes their stop rows from its next run. Such a row also holds `endedAt` in `data`, the time of the delete. A delete with more than 100 such sessions answers `delete_too_large`.
 - `afterAction` runs for these stop rows too, after the commit of the flow. `beforeAction` does not run for them.
 - Core never updates or deletes a row, and the sweep does not read the table. A person with write access to the database can still change a row.
 - ASVS 5.0.0 16.4.3: "Verify that logs are securely transmitted to a logically separate system for analysis, detection, alerting, and escalation." `hooks.operator.afterAction` is that path.

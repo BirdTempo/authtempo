@@ -76,7 +76,23 @@ const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
 const guideWords = (n: string) =>
   `On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to ${n} of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook.`;
 const compatWords = (n: string) =>
-  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
+  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook.`;
+
+// On a cascading store the delete reads the user's live impersonation
+// sessions before its page, at most STOPS_LIMIT of access-end.ts. The
+// pending-end row names those that the page does not end, and the sweep
+// writes their stop rows (decisions 3 to 5 of plan 12o). Each place of the
+// residual names the rule, with the limit of the code.
+const stopsWords = (limit: string) =>
+  `With the impersonation tool on, the delete records the impersonation sessions that the cascade ends. The sweep writes their \`impersonation_stop\` rows from its next run. A delete with more than ${limit} such sessions answers \`delete_too_large\` and changes nothing.`;
+const AUDIT = readFileSync(`${REPO}packages/core/src/engine/operator/audit.ts`, "utf8");
+
+/** STOPS_LIMIT of access-end.ts. */
+function stopsLimit(): string {
+  const limit = /export const STOPS_LIMIT = (\d+);/.exec(ACCESS_END)?.[1];
+  if (limit === undefined) throw new Error("no STOPS_LIMIT in access-end.ts");
+  return limit;
+}
 
 describe("the delete residual of the compatibility package", () => {
   it("claims the query limit on the D1 storage only", () => {
@@ -90,9 +106,26 @@ describe("the delete residual of the compatibility package", () => {
     ["the core README", `${REPO}packages/core/README.md`, guideWords],
     ["the compat page", `${DOCS}docs/reference/compat-better-auth.md`, compatWords],
     ["the compat README", `${REPO}packages/compat-better-auth/README.md`, compatWords],
-  ])("%s names both cases, with the page size of sessions.ts", (_, path, words) => {
-    const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
-    if (size === undefined) throw new Error("no END_ALL_LIMIT in sessions.ts");
-    expect(flat(path)).toContain(words(size));
+  ])(
+    "%s names both cases, with the page size of sessions.ts, and the stop rows of the sweep",
+    (_, path, words) => {
+      const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
+      if (size === undefined) throw new Error("no END_ALL_LIMIT in sessions.ts");
+      expect(flat(path)).toContain(`${words(size)} ${stopsWords(stopsLimit())}`);
+    },
+  );
+
+  it("the operator tools guide names the stop rows of the sweep, with endedAt of writeStopRow", () => {
+    const writer = /export async function writeStopRow\([\s\S]*?\n\}/.exec(AUDIT)?.[0] ?? "";
+    expect(writer).toMatch(/\{ endedAt \}/);
+    expect(flat(`${DOCS}docs/guides/operator-tools.mdx`)).toContain(
+      `On a storage whose user delete cascades, an account delete records the impersonation sessions that the cascade ends. The sweep writes their stop rows from its next run. Such a row also holds \`endedAt\` in \`data\`, the time of the delete. A delete with more than ${stopsLimit()} such sessions answers \`delete_too_large\`.`,
+    );
+  });
+
+  it("the errors page names the second cause of delete_too_large, with STOPS_LIMIT", () => {
+    expect(flat(`${DOCS}docs/reference/errors.md`)).toContain(
+      `There an account delete answers it when the user has more than ${stopsLimit()} live impersonation sessions, with the impersonation tool on.`,
+    );
   });
 });

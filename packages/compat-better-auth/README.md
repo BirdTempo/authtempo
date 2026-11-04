@@ -848,7 +848,11 @@ The deviations from Better Auth (ruling 53 of plan 12f):
   `session.afterEnd`, such as 8 of 60. On the Postgres and SQLite storages,
   a delete ends up to 500 of the user's own sessions with
   `session.afterEnd`. In both cases, the cascade of the user row deletes
-  the rest with no hook and no `impersonation_stop` row.
+  the rest with no hook. With the impersonation tool on, the delete
+  records the impersonation sessions that the cascade ends. The sweep
+  writes their `impersonation_stop` rows from its next run. A delete with
+  more than 100 such sessions answers `delete_too_large` and changes
+  nothing.
 - `/admin/create-user` takes no password, no role but `user`, no ban key,
   and no added field. Better Auth sets each one. A server call with no
   headers answers 401: Better Auth creates the user there with no session.
