@@ -530,9 +530,13 @@ export async function userStillUnverified(
  * deletes that row before its flip, so a check of the flip alone can miss
  * it. Then the row would outlive the claim, a way in of the claimant.
  *
- * On Postgres and MySQL the update of the user row is enough. A claim's
- * hold of that row waits for this transaction, or this update waits for the
- * claim's commit and then sees the flip.
+ * On Postgres and MySQL the update of the user row is enough. A claim
+ * cannot read the user that this open transaction created, so it never
+ * holds that row. A proof that finds no user creates one, as the magic link
+ * verify does. That create waits on the unique key of the address. After
+ * this commit it fails, and the retry of the unique key reads the user and
+ * claims it. Its delete then takes the row of the caller. After a rollback
+ * here that create passes, and no claim runs.
  *
  * On a store with no isolation the check also reads the lease, live or
  * stale (ruling 26 of plan 12p). Each caller passes a user that its own
