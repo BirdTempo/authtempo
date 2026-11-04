@@ -67,10 +67,11 @@ export interface SessionRow extends BaseRow {
   /**
    * True when the sign-in that made the session proved the account (plan
    * 12p). The engine sets it once, at the creation, and a hook cannot set
-   * it. A verified-only action reads it with the user row. So a session
-   * made before the proof of its address never gains verified powers.
-   * Migration 0016 fills a row of version 15 from its user: true for a
-   * verified user with an address, else false.
+   * it. Only the confirm of a change of address changes it later, to true
+   * on the session it keeps. A verified-only action reads it with the user
+   * row. So a session made before the proof of its address never gains
+   * verified powers. Migration 0016 fills a row of version 15 from its
+   * user: true for a verified user with an address, else false.
    */
   proved: boolean;
 }

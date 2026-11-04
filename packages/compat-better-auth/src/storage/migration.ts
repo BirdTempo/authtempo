@@ -1319,13 +1319,14 @@ export const MIGRATION_0013_NAME = "0013_compat_schema_v16";
 /**
  * Migration 0013 (plan 12p): core's schema version 16. Core 16 adds
  * `session.proved`, the mark that the sign-in of the session proved the
- * account. Better Auth's `session` gets `taProved`, which holds core's
- * field. It is NOT NULL with the default false, so a row that Better Auth
- * writes reads false. Then the fill sets true on each session whose user
- * has a verified address, as core 0016 does. The join reads Better Auth's
- * `user` through the app's naming, as 0009 does for the bans. A session of
- * a user with no address, or with an unverified address, keeps false. That
- * user signs in again for verified powers.
+ * account. Only the confirm of a change of address changes it later, to
+ * true on the session it keeps. Better Auth's `session` gets `taProved`,
+ * which holds core's field. It is NOT NULL with the default false, so a
+ * row that Better Auth writes reads false. Then the fill sets true on each
+ * session whose user has a verified address, as core 0016 does. The join
+ * reads Better Auth's `user` through the app's naming, as 0009 does for
+ * the bans. A session of a user with no address, or with an unverified
+ * address, keeps false. That user signs in again for verified powers.
  *
  * Better Auth's `user.email` is NOT NULL, and the storage reads each
  * placeholder address as no address (placeholder.ts). So the fill skips a

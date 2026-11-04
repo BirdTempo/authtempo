@@ -2,7 +2,9 @@
  * authtempo schema version 16 for Postgres: the session proof (plan 12p).
  * Append-only: never edit a shipped migration. ta_session gets proved, the
  * mark that the sign-in of the session proved the account. Core sets it
- * once, at the creation of each session. A verified-only action reads it.
+ * once, at the creation of each session. Only the confirm of a change of
+ * address changes it later, to true on the session it keeps. A verified-only
+ * action reads it.
  * The column is NOT NULL with the default false, so a row of version 15
  * reads false. Then the fill sets true on each session whose user has a
  * verified address. So a verified user keeps the powers of each live
