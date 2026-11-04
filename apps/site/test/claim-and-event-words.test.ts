@@ -275,8 +275,8 @@ const CREATION_WORDS = [
 const GATE_WORDS = [
   "Each verified-only action reads the flag of the caller's session with the user row.",
   "- An API token, a username, a phone add, a profile change, and a change of address need a verified address. A user with no address needs a phone or a passkey that signs in.",
-  "- A passkey registration, a second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.",
-  "- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address.",
+  "- A passkey registration, TOTP and the passkey method of the second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.",
+  "- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address. The email method of the second factor needs one too.",
   "An in-process call that passes a user and no session keeps the rule of the user row.",
 ];
 

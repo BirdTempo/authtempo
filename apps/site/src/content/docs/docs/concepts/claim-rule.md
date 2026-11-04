@@ -77,12 +77,12 @@ Only the confirm of a change of address changes the flag later, to true on the s
 Each verified-only action reads the flag of the caller's session with the user row. The terms of the user row stay as before:
 
 - An API token, a username, a phone add, a profile change, and a change of address need a verified address. A user with no address needs a phone or a passkey that signs in.
-- A passkey registration, a second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.
-- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address.
+- A passkey registration, TOTP and the passkey method of the second factor, a password change, and an OAuth grant need a verified address. A user with no address needs an account that is not anonymous.
+- An organization, a team, an invitation, an organization token, SSO, the operator tools, and the start of a social link need a verified address. The email method of the second factor needs one too.
 
 An in-process call that passes a user and no session keeps the rule of the user row. `api.tokens.create`, `api.passkeyRegistrationOptions`, `api.verifyPasskeyRegistration`, `api.totp.setup`, and `api.organizationTokens.create` take the session for this reason.
 
-So a session that came before the proof of its address never gains verified powers. On D1 and SQLite each statement of a claim lands at once. A claimant's session is still live between the mark of the address and the session delete. In that gap the user reads as verified, but the session is not proved. Its requests answer [`email_unverified`](/docs/reference/errors/#email_unverified), and they leave no token, no change of address, no grant, and no factor. On Postgres and MySQL a request can read the session before the claim's commit and the user after it. The flag refuses that request too.
+So a session that came before the proof of its address never gains verified powers. On D1 and SQLite each statement of a claim lands at once. A claimant's session is still live between the mark of the address and the session delete. In that gap the user reads as verified, but the session is not proved. Core refuses its verified-only requests. They leave no token, no change of address, no grant, and no factor. On Postgres and MySQL a request can read the session before the claim's commit and the user after it. The flag refuses that request too.
 
 The claim deletes every row that a sign-in trusts before it marks the address verified. A sign-in that reads the user after that mark finds its row gone, and its guard deletes its own session. A sign-in that read the user before the mark has an unproved session. The session delete at the end of the claim removes it. The first step decides a race of two claims of one user, so a claim that loses there writes nothing. A claim that loses at the mark undoes its deletes.
 

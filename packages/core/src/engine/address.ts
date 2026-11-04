@@ -64,10 +64,10 @@ export function sessionProved(caller: ProofCaller): boolean {
  * for a user with no address, read with the flag of the caller's session
  * (plan 12p). A claimant's session has neither, so the claim leaves no way
  * in that the claimant set. The profile update, the API tokens, the
- * username, the phone add, and the change of address read it. The factor
- * reads `provedAccount`. The two differ for a user with no address whose
- * handle does not sign in now, such as a phone outside the regions. That
- * user is not anonymous, but has no verified handle here.
+ * username, the phone add, and the change of address read it. TOTP and the
+ * passkey method read `provedAccount`. The two differ for a user with no
+ * address whose handle does not sign in now, such as a phone outside the
+ * regions. That user is not anonymous, but has no verified handle here.
  */
 export async function handleProved(
   config: ResolvedConfig,
@@ -83,9 +83,9 @@ export async function handleProved(
  * True when the account's own handle is proved: a verified address, or, for
  * a user with no address, an account that is not anonymous. Such a user
  * signed up by a proof that core checked (a phone code or a passkey). The
- * flag of the caller's session must hold too (plan 12p). The enable of a
- * passkey or a second factor and the OAuth grants read it in place of
- * `emailVerified`.
+ * flag of the caller's session must hold too (plan 12p). The passkey
+ * registration, TOTP, the passkey method of the second factor, the password
+ * change, and the OAuth grants read it in place of `emailVerified`.
  */
 export function provedAccount(caller: ProofCaller): boolean {
   if (!sessionProved(caller)) return false;
@@ -96,8 +96,9 @@ export function provedAccount(caller: ProofCaller): boolean {
 /**
  * True when the caller's address is verified, read with the flag of the
  * caller's session (plan 12p). The organization, team, invitation, SSO,
- * operator, and link checks read it. A user with no address fails it, as
- * the address check did before.
+ * operator, and link checks read it. The organization token and the email
+ * method of the second factor read it too. A user with no address fails it,
+ * as the address check did before.
  */
 export function provedAddress(caller: ProofCaller): boolean {
   return sessionProved(caller) && caller.user.emailVerified;
