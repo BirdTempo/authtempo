@@ -43,7 +43,7 @@ A session row holds a flag, `proved`. It is true when the session came after the
 
 ## An API token
 
-An API token is a credential of one verified user, never a session. Only a person with a proved session creates or revokes one. It counts only in the bearer header, because a browser sends a cookie on a cross-site request. A token may name one organization. When the user leaves that organization, the token stops, and the list still shows it.
+An API token is a credential of one verified user, never a session. Only a person with a proved session creates or revokes one. An in-process call that passes a user and no session keeps the rule of the user row. It counts only in the bearer header, because a browser sends a cookie on a cross-site request. A token may name one organization. When the user leaves that organization, the token stops, and the list still shows it.
 
 A password reset, a password change, and a sign-out delete no API token.
 
