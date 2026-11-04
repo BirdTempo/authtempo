@@ -6,6 +6,7 @@ import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
+import { provedAddress } from "../address.js";
 import { requireFresh } from "../fresh.js";
 import { holdsRolePart } from "../ranks.js";
 import type { ResolvedSession } from "../sessions.js";
@@ -292,7 +293,8 @@ export async function requireOperatorUser(
   // The grant time of the role: a session from before it holds no operator power.
   if (session.createdAt.getTime() < member.updatedAt.getTime())
     return refused(config.observe, route);
-  if (!user.emailVerified) return refused(config.observe, route);
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(resolved)) return refused(config.observe, route);
   if (!(await hasSecondFactor(config, user.id))) return refused(config.observe, route);
   if (!requireFresh(config, session).ok) return refused(config.observe, route);
   if (!(await limit(config, "operator:user", user.id, OPERATOR_PER_USER))) {

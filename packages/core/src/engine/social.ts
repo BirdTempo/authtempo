@@ -33,7 +33,7 @@ import {
   type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import { hasAddress } from "./address.js";
+import { hasAddress, provedAddress } from "./address.js";
 import { type AnonymousCaller, type UpgradeSteps, upgradeSteps } from "./anonymous.js";
 import {
   type CreateSteps,
@@ -374,7 +374,8 @@ export async function startLink(
   input: SocialLinkStart,
 ): Promise<Result<SocialStarted>> {
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(input.session)) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   return beginSocial(

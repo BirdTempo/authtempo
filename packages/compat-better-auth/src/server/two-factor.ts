@@ -190,8 +190,9 @@ export async function twoFactorRoute(
     // (plan 9h, owner decision 3a). This enable does no second check: a
     // `pw.verify` here would count on the sign-in's keys again, and a stolen
     // session could then hold the owner's password sign-in at rate_limited.
+    // The session, not the user id (plan 12p): a session made before the proof sets up nothing.
     const r = await totp.setup({
-      userId,
+      session,
       password: body.password,
       ip,
       ...(typeof issuer === "string" ? { issuer } : {}),

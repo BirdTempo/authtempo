@@ -406,7 +406,10 @@ export async function mintSessionJwt(
     iat,
     exp,
     sid: session.id,
-    ...(hasAddress(user) ? { email: user.email, email_verified: user.emailVerified } : {}),
+    // The session's flag with the user's (plan 12p): a claimant's session never says verified.
+    ...(hasAddress(user)
+      ? { email: user.email, email_verified: session.proved && user.emailVerified }
+      : {}),
     name: user.name,
     org: session.activeOrganizationId,
     // RFC 8693 section 4.1: the actor who acts for the subject.

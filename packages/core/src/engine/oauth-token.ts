@@ -179,7 +179,8 @@ export async function liveUser(
   issuedAt?: Date,
 ): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user || !provedAccount(user) || activeBan(user, config.clock.now())) return null;
+  // No session here: the user row's rule (plan 12p). The grant needed a proved session at the authorize.
+  if (!user || !provedAccount({ user }) || activeBan(user, config.clock.now())) return null;
   if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
 }

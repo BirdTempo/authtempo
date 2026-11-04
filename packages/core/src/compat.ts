@@ -12,7 +12,9 @@
  * read. Plan 12l moved that count out of `countSsoManageWrite`. So an
  * account that manages nothing counts no large read (ruling 69 of the 12j
  * lane). `moveSsoManageCount` moves each mark to the request that core
- * gets. Each route step stays core's.
+ * gets. Each route step stays core's. `createApiTokenAs` and
+ * `createOrganizationTokenAs` make a token for a server call that names its
+ * user and has no session (plan 12p), with the user row's rule.
  */
 export type { DomainRecordOf } from "./compat-seams.js";
 export {
@@ -21,6 +23,8 @@ export {
   checkSsoManager,
   countSsoLargeRead,
   countSsoManageWrite,
+  createApiTokenAs,
+  createOrganizationTokenAs,
   moveSsoManageCount,
   scimRequestAs,
   verifyDomainByRecord,
@@ -32,6 +36,9 @@ export {
  * cannot drift.
  */
 export { ID_TOKEN_PROVIDERS } from "./engine/id-token.js";
+/** The inputs of `createOrganizationTokenAs` and `createApiTokenAs` (plan 12p). */
+export type { OrganizationTokenCreateFor } from "./engine/organization-tokens.js";
+export type { ApiTokenCreateFor } from "./engine/tokens.js";
 /**
  * The capped body read of core (ruling 46 of the 12j lane). A compat
  * package reads each request body with it, at the cap of the core route

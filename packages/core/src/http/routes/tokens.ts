@@ -23,6 +23,7 @@ export function tokenRoutes(_config: ResolvedConfig): Route[] {
     const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
+      resolved,
       user: resolved.user,
       session: resolved.session,
       renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
@@ -48,8 +49,9 @@ export function tokenRoutes(_config: ResolvedConfig): Route[] {
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, createBody);
         if (!body.ok) return send(respond(body), s.renewed);
+        // The session, not the bare user: a session made before the proof mints nothing (plan 12p).
         const r = await createApiToken(ctx.config, {
-          user: s.user,
+          session: s.resolved,
           name: body.value.name,
           expiresInDays: body.value.expiresInDays,
           ...(body.value.organizationId == null
@@ -68,7 +70,7 @@ export function tokenRoutes(_config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const r = await listApiTokens(ctx.config, { user: s.user });
+        const r = await listApiTokens(ctx.config, { user: s.user, session: s.session });
         return send(r.ok ? json({ tokens: r.value }) : respond(r), s.renewed);
       },
     },
@@ -82,7 +84,13 @@ export function tokenRoutes(_config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, revokeBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await revokeApiToken(ctx.config, { user: s.user, id: body.value.id })),
+          respond(
+            await revokeApiToken(ctx.config, {
+              user: s.user,
+              session: s.session,
+              id: body.value.id,
+            }),
+          ),
           s.renewed,
         );
       },
@@ -103,6 +111,7 @@ export function tokenRoutes(_config: ResolvedConfig): Route[] {
         const { id, name, permissions, expiresAt } = body.value;
         const r = await updateApiToken(ctx.config, {
           user: s.user,
+          session: s.session,
           id,
           ...(name === undefined ? {} : { name }),
           ...(permissions === undefined ? {} : { permissions }),

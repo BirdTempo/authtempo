@@ -58,7 +58,8 @@ export async function updateProfile(
 ): Promise<Result<{ user: PublicUser }>> {
   const { user } = input.session;
   // A user with no address needs a verified handle (ruling 15 of plan 12i).
-  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  // The session's flag holds too (plan 12p).
+  if (!(await handleProved(config, config.storage, input.session))) return fail("email_unverified");
   const patch: Pick<UserPatch, "name" | "image"> = {};
   if (input.name !== undefined) {
     if (input.name !== null && !validUserName(input.name)) return fail("invalid_body");

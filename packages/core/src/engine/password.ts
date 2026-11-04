@@ -991,7 +991,7 @@ export async function passwordSignIn(
   // address is proved. The ruling of 2026-10-15 closed it for social and
   // for the sign-up session; this closes it for the sign-in.
   // A user with no address is proved by the proof that made it (`provedAccount`), and gets no mail.
-  if ((pw.requireVerified || config.signUp === "invited") && !provedAccount(user)) {
+  if ((pw.requireVerified || config.signUp === "invited") && !provedAccount({ user })) {
     if (hasAddress(user))
       await mailVerifyAgain(config, user.email, row.id, input.anonymous ?? null);
     return fail("email_unverified");
@@ -1943,7 +1943,8 @@ export async function changePassword(
   const pw = config.password;
   if (!pw) return fail("not_found");
   const { user, session } = input.session;
-  if (!provedAccount(user)) return fail("email_unverified");
+  // The session's flag with the account's (plan 12p).
+  if (!provedAccount(input.session)) return fail("email_unverified");
   const row = await config.storage.findOne("password", [
     { field: "userId", op: "eq", value: user.id },
   ]);

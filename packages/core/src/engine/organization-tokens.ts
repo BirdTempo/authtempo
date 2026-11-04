@@ -5,10 +5,12 @@ import { ORGANIZATION_TOKEN_PREFIX } from "../primitives/credentials.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { OrganizationTokenRow, UserRow } from "../schema.js";
+import type { OrganizationTokenRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
+import { type ProofCaller, provedAddress } from "./address.js";
 import { type OrganizationSummary, publicOrganization, standing } from "./organizations.js";
 import { effectiveIn } from "./permissions.js";
+import type { ResolvedSession } from "./sessions.js";
 import { lockOrganization } from "./teams.js";
 import {
   spendUse,
@@ -90,7 +92,12 @@ export interface ResolvedOrganizationToken {
 }
 
 export interface OrganizationTokenCreate {
-  user: UserRow;
+  /**
+   * The session of the member who makes the token, with its user (plan
+   * 12p). Its `proved` flag must hold: a session made before the proof of
+   * its address makes no token.
+   */
+  session: ResolvedSession;
   organizationId: string;
   /** 1 to 80 UTF-16 code units, no control character, not trimmed. */
   name: string;
@@ -110,9 +117,20 @@ export interface OrganizationTokenCreate {
   quota?: TokenQuota | null | undefined;
 }
 
+/**
+ * The organization token create of a caller with no session (plan 12p): the
+ * server call of a compat package, which names its user. It keeps the user
+ * row's rule. The app checks the person's session before it calls.
+ */
+export type OrganizationTokenCreateFor = Omit<OrganizationTokenCreate, "session"> & {
+  user: UserRow;
+};
+
 /** The narrow-only change of an organization token. An absent field stays as it is. */
 export interface OrganizationTokenUpdate extends Omit<TokenNarrow, "permissions"> {
   user: UserRow;
+  /** The caller's session (plan 12p). A route passes it. Absent: the user row's rule. */
+  session?: SessionRow | undefined;
   organizationId: string;
   id: string;
   /** A subset of the old set. */
@@ -174,13 +192,35 @@ async function creatorIn(config: ResolvedConfig, row: OrganizationTokenRow): Pro
  * the expired rows, one findMany (the count), and one create. One limiter
  * call runs before every storage call.
  */
-export async function createOrganizationToken(
+export function createOrganizationToken(
   config: ResolvedConfig,
   input: OrganizationTokenCreate,
 ): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>> {
+  return mintOrganizationToken(config, input.session, input);
+}
+
+/**
+ * `createOrganizationToken` for a caller with no session (plan 12p): the
+ * server call of a compat package. The user row's rule decides. Only the
+ * compat entry of core exports it.
+ */
+export function createOrganizationTokenFor(
+  config: ResolvedConfig,
+  input: OrganizationTokenCreateFor,
+): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>> {
+  return mintOrganizationToken(config, { user: input.user }, input);
+}
+
+async function mintOrganizationToken(
+  config: ResolvedConfig,
+  caller: ProofCaller,
+  input: Omit<OrganizationTokenCreate, "session">,
+): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>> {
   if (!config.organizations) return fail("not_found");
-  const { user, organizationId } = input;
-  if (!user.emailVerified) return fail("email_unverified");
+  const { organizationId } = input;
+  const { user } = caller;
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(caller)) return fail("email_unverified");
   if (!validTokenName(input.name)) return fail("invalid_body");
   const days = tokenDays(input.expiresInDays);
   if (!days.ok) return days;
@@ -268,10 +308,10 @@ export async function createOrganizationToken(
  */
 export async function listOrganizationTokens(
   config: ResolvedConfig,
-  input: { user: UserRow; organizationId: string },
+  input: { user: UserRow; session?: SessionRow | undefined; organizationId: string },
 ): Promise<Result<OrganizationTokenSummary[]>> {
   if (!config.organizations) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   const s = await standing(config, input.user, input.organizationId, READ);
   if (!s.ok) return s;
   const rows = await config.storage.findMany(
@@ -309,7 +349,7 @@ export async function updateOrganizationToken(
   input: OrganizationTokenUpdate,
 ): Promise<Result<OrganizationTokenSummary>> {
   if (!config.organizations) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   if (!narrowFormed(config, input)) return fail("invalid_body");
   const s = await standing(config, input.user, input.organizationId, UPDATE);
   if (!s.ok) return s;
@@ -360,10 +400,10 @@ export async function updateOrganizationToken(
  */
 export async function revokeOrganizationToken(
   config: ResolvedConfig,
-  input: { user: UserRow; organizationId: string; id: string },
+  input: { user: UserRow; session?: SessionRow | undefined; organizationId: string; id: string },
 ): Promise<Result<{ ok: true }>> {
   if (!config.organizations) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   const s = await standing(config, input.user, input.organizationId, REVOKE);
   if (!s.ok) return s;
   const n = await config.storage.delete("organizationToken", [

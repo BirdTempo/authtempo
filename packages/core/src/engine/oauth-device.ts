@@ -338,8 +338,9 @@ export async function decideDevice(
   if (!(await limit(config, "oauth-device-verify:code", row.userCodeHash, DEVICE_VERIFY_PER_CODE)))
     return { kind: "error", error: "rate_limited" };
   const { user } = input.session;
-  // A grant would outlive a claim of the address (spec 8.7), as at the authorize step.
-  if (!provedAccount(user)) return { kind: "code", userCode, error: "unverified" };
+  // A grant needs a proved session of a proved account (spec 8.7, plan 12p), as at the
+  // authorize step. A session made before the proof of its address approves no device.
+  if (!provedAccount(input.session)) return { kind: "code", userCode, error: "unverified" };
   const client = await config.storage.findOne("oauthClient", [
     { field: "id", op: "eq", value: row.clientId },
   ]);

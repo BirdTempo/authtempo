@@ -8,7 +8,7 @@ import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import { byAddressThenId } from "./address.js";
+import { byAddressThenId, type ProofCaller, provedAddress } from "./address.js";
 import {
   hookGuard,
   type MemberVia,
@@ -48,6 +48,13 @@ import { holdSessions, holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
   user: UserRow;
+  /**
+   * The caller's session (plan 12p). Each route passes the session it holds,
+   * so a session made before the proof of its address writes nothing that
+   * needs a verified address. Absent: the user row's rule, as for a caller
+   * with no session.
+   */
+  session?: SessionRow | undefined;
 }
 
 export interface OrganizationSummary {
@@ -153,9 +160,12 @@ export async function standing(
   return ok({ ...m, rank, granted, reads });
 }
 
-/** A write of an organization or a team needs a verified address. */
-export function verified(user: UserRow): Result<true> {
-  return user.emailVerified ? ok(true) : fail("email_unverified");
+/**
+ * A write of an organization or a team needs a verified address, and a
+ * session made after its proof when the caller has one (plan 12p).
+ */
+export function verified(caller: ProofCaller): Result<true> {
+  return provedAddress(caller) ? ok(true) : fail("email_unverified");
 }
 
 /** A dynamic role never has the owner rank (Task 4), so the last-owner rule reads the config only. */
@@ -375,7 +385,7 @@ export async function createOrganization(
 ): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const slug = normalizeSlug(input.slug);
   if (slug === null || !validOrganizationName(input.name)) return fail("invalid_body");
@@ -524,7 +534,7 @@ export async function updateOrganization(
 ): Promise<Result<OrganizationSummary>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.update);
   if (!s.ok) return s;
@@ -607,7 +617,7 @@ export async function deleteOrganization(
 ): Promise<Result<{ ok: true }>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.delete);
   if (!s.ok) return s;
@@ -1001,7 +1011,7 @@ export async function addMember(
 ): Promise<Result<MemberSummary>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.addMember);
   if (!s.ok) return s;
@@ -1162,7 +1172,7 @@ export async function updateMemberRole(
 ): Promise<Result<MemberSummary>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.updateRole);
   if (!s.ok) return s;
@@ -1339,7 +1349,7 @@ export async function removeMember(
 ): Promise<Result<{ ok: true }>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const self = input.userId === input.user.id;
   const revokeTokens = input.revokeTokens === true;

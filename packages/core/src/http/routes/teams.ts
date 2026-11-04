@@ -100,22 +100,22 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
       listTeams(ctx.config, { user: s.user, organizationId }),
     ),
     post("/organizations/teams/create", teamCreateBody, "team", (s, b, ctx) =>
-      createTeam(ctx.config, { user: s.user, ...b }),
+      createTeam(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     post("/organizations/teams/update", teamUpdateBody, "team", (s, b, ctx) =>
-      updateTeam(ctx.config, { user: s.user, ...b }),
+      updateTeam(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     post("/organizations/teams/delete", teamBody, null, (s, b, ctx) =>
-      deleteTeam(ctx.config, { user: s.user, ...b }),
+      deleteTeam(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     getBy("/organizations/teams/members", "teamId", "members", (s, teamId, ctx) =>
       listTeamMembers(ctx.config, { user: s.user, teamId }),
     ),
     post("/organizations/teams/members/add", teamMemberBody, "member", (s, b, ctx) =>
-      addTeamMember(ctx.config, { user: s.user, ...b }),
+      addTeamMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     post("/organizations/teams/members/remove", teamMemberBody, null, (s, b, ctx) =>
-      removeTeamMember(ctx.config, { user: s.user, ...b }),
+      removeTeamMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     // The active team answers the session, as the active organization does.
     post("/organizations/teams/active", teamActiveBody, null, (s, b, ctx) =>

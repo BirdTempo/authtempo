@@ -44,6 +44,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
+      resolved,
       user: resolved.user,
       session: resolved.session,
       renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
@@ -85,7 +86,8 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
         // A new way in: a stolen session must prove the person again (plan 12a).
-        // The engine takes a user, so the rule is here, before any write.
+        // The engine checks the session's proof, not its age (plan 12p), so the
+        // fresh rule is here, before any write.
         const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readOptionalJson(ctx.request, optionsBody);
@@ -93,7 +95,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         return send(
           respond(
             await passkeyRegistrationOptions(ctx.config, {
-              user: s.user,
+              session: s.resolved,
               hints: body.value.hints,
             }),
           ),
@@ -111,7 +113,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, registerVerifyBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await verifyPasskeyRegistration(ctx.config, {
-          user: s.user,
+          session: s.resolved,
           response: body.value.response,
           name: body.value.name,
         });

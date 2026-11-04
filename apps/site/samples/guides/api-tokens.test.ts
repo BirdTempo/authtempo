@@ -61,7 +61,7 @@ describe("give a script an API token", () => {
       new Request(`${API}/settings`, { headers: { cookie: ada } }),
     );
     if (!resolved) throw new Error("no session");
-    const created = await createMeteredToken(auth, resolved.user, 2);
+    const created = await createMeteredToken(auth, resolved, 2);
     if (!created.ok) throw new Error(created.code);
     expect(created.value.apiToken.remaining).toBe(2);
 

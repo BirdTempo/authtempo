@@ -4,11 +4,13 @@ import type {
   Auth,
   LimitWindow,
   OrganizationTokenSummary,
+  ResolvedSession,
   Result,
   TokenQuota,
   UserRow,
 } from "@authtempo/core";
 import { can, type Statements } from "@authtempo/core/access";
+import { createApiTokenAs, createOrganizationTokenAs } from "@authtempo/core/compat";
 import {
   APIError,
   type ApiKeyCode,
@@ -180,7 +182,7 @@ function apiKeyErrorText(code: ApiKeyCode): string {
 export function apiKeyApi(
   auth: Auth,
   mapped: Mapped,
-  caller: (headers: Headers) => Promise<{ user: UserRow }>,
+  caller: (headers: Headers) => Promise<ResolvedSession>,
 ): ApiKeyServerApi | null {
   const options: ApiKeyOptions | null = mapped.apiKey;
   if (!options) return null;
@@ -193,19 +195,30 @@ export function apiKeyApi(
     | Record<string, string[]>
     | undefined;
 
-  /** The acting user: the session of `headers`, or the body's `userId` of a server call. */
-  async function actor(headers: Headers | undefined, userId: string | undefined): Promise<UserRow> {
+  /**
+   * The acting user and its session: the session of `headers`, or the body's
+   * `userId` of a server call, with no session.
+   */
+  async function actorOf(
+    headers: Headers | undefined,
+    userId: string | undefined,
+  ): Promise<{ user: UserRow; session: ResolvedSession | null }> {
     if (headers) {
       const s = await caller(headers).catch(() => {
         throw apiKeyError("UNAUTHORIZED_SESSION");
       });
       if (userId !== undefined && userId !== s.user.id) throw apiKeyError("UNAUTHORIZED_SESSION");
-      return s.user;
+      return { user: s.user, session: s };
     }
     if (userId === undefined) throw apiKeyError("UNAUTHORIZED_SESSION");
     const user = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
     if (!user) throw apiKeyError("UNAUTHORIZED_SESSION");
-    return user;
+    return { user, session: null };
+  }
+
+  /** The acting user: the session of `headers`, or the body's `userId` of a server call. */
+  async function actor(headers: Headers | undefined, userId: string | undefined): Promise<UserRow> {
+    return (await actorOf(headers, userId)).user;
   }
 
   /** The organization of an organization token by id, for the calls that take only `keyId`. */
@@ -251,7 +264,10 @@ export function apiKeyApi(
           (body.remaining !== undefined && body.remaining !== null))
       )
         throw apiKeyError("SERVER_ONLY_PROPERTY");
-      const user = await actor(headers, body.userId);
+      // A call with headers passes its session to core, so a session made before
+      // the proof of its address makes no key (plan 12p). A server call names
+      // its user: core's compat seam keeps the user row's rule for it.
+      const { user, session } = await actorOf(headers, body.userId);
       if (body.metadata !== undefined) {
         if (options.enableMetadata !== true) throw apiKeyError("METADATA_DISABLED");
         if (typeof body.metadata !== "object" || body.metadata === null)
@@ -264,7 +280,6 @@ export function apiKeyApi(
       const rateLimit = windowOf(body);
       const quota = quotaOf(body);
       const common = {
-        user,
         name,
         expiresInDays,
         ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
@@ -278,22 +293,25 @@ export function apiKeyApi(
       if (organization) {
         const organizationId = body.organizationId;
         if (organizationId === undefined) throw apiKeyError("ORGANIZATION_ID_REQUIRED");
+        const fields = {
+          ...common,
+          organizationId,
+          // An organization token holds a set; none grants nothing (deviation 4 of plan 12k).
+          permissions: set === undefined ? {} : coreSet(set),
+        };
         const v = unwrapKey(
-          await auth.api.organizationTokens.create({
-            ...common,
-            organizationId,
-            // An organization token holds a set; none grants nothing (deviation 4 of plan 12k).
-            permissions: set === undefined ? {} : coreSet(set),
-          }),
+          session
+            ? await auth.api.organizationTokens.create({ ...fields, session })
+            : await createOrganizationTokenAs(auth, { ...fields, user }),
           true,
         );
         return { ...toApiKey(v.apiToken, organizationId, extra), key: v.token };
       }
+      const fields = { ...common, ...(set !== undefined ? { permissions: coreSet(set) } : {}) };
       const v = unwrapKey(
-        await auth.api.tokens.create({
-          ...common,
-          ...(set !== undefined ? { permissions: coreSet(set) } : {}),
-        }),
+        session
+          ? await auth.api.tokens.create({ ...fields, session })
+          : await createApiTokenAs(auth, { ...fields, user }),
         false,
       );
       return { ...toApiKey(v.apiToken, user.id, extra), key: v.token };

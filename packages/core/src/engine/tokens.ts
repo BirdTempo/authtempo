@@ -8,8 +8,8 @@ import { newId } from "../primitives/ids.js";
 import { JWS_RE } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { ApiTokenRow, UserRow } from "../schema.js";
-import { handleProved } from "./address.js";
+import type { ApiTokenRow, SessionRow, UserRow } from "../schema.js";
+import { handleProved, type ProofCaller } from "./address.js";
 import { hookGuard } from "./hooks.js";
 import type { OAuthClientAccess } from "./oauth-credentials.js";
 import { readDpopToken, resourceProofHolds } from "./oauth-dpop.js";
@@ -131,7 +131,12 @@ export type Caller =
   | ({ kind: "oauth-client" } & OAuthClientAccess);
 
 export interface ApiTokenCreate {
-  user: UserRow;
+  /**
+   * The session of the person who makes the token, with its user (plan 12p).
+   * Its `proved` flag must hold: a session made before the proof of its
+   * address makes no token. A token never mints a token.
+   */
+  session: ResolvedSession;
   /** 1 to 80 UTF-16 code units, no control character, not trimmed. */
   name: string;
   /** An integer from 1 to 3650. Default 90. `null`: the token never expires. */
@@ -153,9 +158,18 @@ export interface ApiTokenCreate {
   quota?: TokenQuota | null | undefined;
 }
 
+/**
+ * The token create of a caller with no session (plan 12p): the server call
+ * of a compat package, which names its user. It keeps the user row's rule.
+ * The app checks the person's session before it calls.
+ */
+export type ApiTokenCreateFor = Omit<ApiTokenCreate, "session"> & { user: UserRow };
+
 /** The narrow-only change of a token (spec 29 item 11). An absent field stays as it is. */
 export interface ApiTokenUpdate {
   user: UserRow;
+  /** The caller's session (plan 12p). A route passes it. Absent: the user row's rule. */
+  session?: SessionRow | undefined;
   id: string;
   name?: string | undefined;
   /** A subset of the old set. A set over null narrows; null over a set is `invalid_body`. */
@@ -248,10 +262,10 @@ export function lastUsedDue(lastUsedAt: Date | null, now: Date): boolean {
 }
 
 /**
- * A new token for a verified user. The answer holds the clear token, the one
- * time it leaves the server; the row holds its SHA-256. The caller's session
- * is the route's check: core's token routes take a session only, so a token
- * never mints a token.
+ * A new token for a proved session of a verified user (plan 12p). The
+ * answer holds the clear token, the one time it leaves the server; the row
+ * holds its SHA-256. The input takes the session, so a token never mints a
+ * token, and a claimant's session mints none.
  *
  * The cap is a limit that the product sells (ruling 43 of plan 12k). So the
  * delete of the expired rows, the count, and the create run in one
@@ -261,13 +275,34 @@ export function lastUsedDue(lastUsedAt: Date | null, now: Date): boolean {
  * D1 runs no isolated transaction, so there two creates at once can pass at
  * 49; the per-user limit of creates bounds that overshoot.
  */
-export async function createApiToken(
+export function createApiToken(
   config: ResolvedConfig,
   input: ApiTokenCreate,
 ): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>> {
-  const { user } = input;
+  return mintApiToken(config, input.session, input);
+}
+
+/**
+ * `createApiToken` for a caller with no session (plan 12p): the server call
+ * of a compat package. The user row's rule decides, as for a token caller.
+ * Only the compat entry of core exports it.
+ */
+export function createApiTokenFor(
+  config: ResolvedConfig,
+  input: ApiTokenCreateFor,
+): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>> {
+  return mintApiToken(config, { user: input.user }, input);
+}
+
+async function mintApiToken(
+  config: ResolvedConfig,
+  caller: ProofCaller,
+  input: Omit<ApiTokenCreate, "session">,
+): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>> {
+  const { user } = caller;
   // A user with no address needs a verified handle (ruling 15 of plan 12i).
-  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  // The session's flag holds too (plan 12p).
+  if (!(await handleProved(config, config.storage, caller))) return fail("email_unverified");
   if (!validTokenName(input.name)) return fail("invalid_body");
   const days = tokenDays(input.expiresInDays);
   if (!days.ok) return days;
@@ -440,9 +475,9 @@ export function currentApiToken(
 /** The caller's tokens, newest first. */
 export async function listApiTokens(
   config: ResolvedConfig,
-  input: { user: UserRow },
+  input: { user: UserRow; session?: SessionRow | undefined },
 ): Promise<Result<ApiTokenSummary[]>> {
-  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input))) return fail("email_unverified");
   const rows = await config.storage.findMany(
     "apiToken",
     [{ field: "userId", op: "eq", value: input.user.id }],
@@ -459,9 +494,9 @@ export async function listApiTokens(
 /** Deletes the caller's token by id and user id. Another user's id answers not_found. */
 export async function revokeApiToken(
   config: ResolvedConfig,
-  input: { user: UserRow; id: string },
+  input: { user: UserRow; session?: SessionRow | undefined; id: string },
 ): Promise<Result<{ ok: true }>> {
-  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input))) return fail("email_unverified");
   const n = await config.storage.delete("apiToken", [
     { field: "id", op: "eq", value: input.id },
     { field: "userId", op: "eq", value: input.user.id },
@@ -577,7 +612,7 @@ export async function updateApiToken(
   config: ResolvedConfig,
   input: ApiTokenUpdate,
 ): Promise<Result<ApiTokenSummary>> {
-  if (!(await handleProved(config, config.storage, input.user))) return fail("email_unverified");
+  if (!(await handleProved(config, config.storage, input))) return fail("email_unverified");
   if (!narrowFormed(config, input)) return fail("invalid_body");
   const row = await config.storage.findOne("apiToken", [
     { field: "id", op: "eq", value: input.id },

@@ -1,7 +1,8 @@
 import type { ResolvedConfig } from "../config.js";
 import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
-import type { UserRow } from "../schema.js";
+import type { SessionRow, UserRow } from "../schema.js";
+import { provedAddress } from "./address.js";
 import { normalizeSlug } from "./ranks.js";
 
 /**
@@ -29,11 +30,12 @@ export type SlugStatus = "available" | "taken" | "reserved" | "invalid";
  */
 export async function checkSlug(
   config: ResolvedConfig,
-  input: { user: UserRow; slug: string },
+  input: { user: UserRow; session?: SessionRow | undefined; slug: string },
 ): Promise<Result<{ slug: string | null; status: SlugStatus }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(input)) return fail("email_unverified");
   if (!(await spendSlugRead(config, input.user.id))) return fail("rate_limited");
   // normalizeSlug bounds the characters and the case. The slug is only a value in an eq read.
   const slug = normalizeSlug(input.slug);

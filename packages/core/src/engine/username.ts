@@ -83,7 +83,8 @@ export async function setUsername(
   if (!config.username) return fail("not_found");
   const { user, session } = input.session;
   // A claimant must not set what the owner inherits (the rule of the profile update).
-  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  // The session's flag holds too (plan 12p).
+  if (!(await handleProved(config, config.storage, input.session))) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   const name = normalizeUsername(config, input.username);

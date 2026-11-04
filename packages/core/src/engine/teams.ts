@@ -9,6 +9,7 @@ import { type StorageAdapter, StorageError, type Where } from "../storage/port.j
 import { byAddressThenId } from "./address.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
+  type Caller,
   type OrganizationSummary,
   publicOrganization,
   standing,
@@ -172,11 +173,11 @@ async function teamStanding(
  */
 export async function createTeam(
   config: ResolvedConfig,
-  input: { user: UserRow; organizationId: string; name: string },
+  input: Caller & { organizationId: string; name: string },
 ): Promise<Result<TeamSummary>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, { team: ["create"] });
   if (!s.ok) return s;
@@ -254,10 +255,10 @@ export async function createTeamIn(
 /** Renames a team. Needs `team:update`. */
 export async function updateTeam(
   config: ResolvedConfig,
-  input: { user: UserRow; teamId: string; name: string },
+  input: Caller & { teamId: string; name: string },
 ): Promise<Result<TeamSummary>> {
   if (!scope(config)) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, { team: ["update"] });
   if (!t.ok) return t;
@@ -345,10 +346,10 @@ export async function renameTeamIn(
  */
 export async function deleteTeam(
   config: ResolvedConfig,
-  input: { user: UserRow; teamId: string },
+  input: Caller & { teamId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!scope(config)) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, { team: ["delete"] });
   if (!t.ok) return t;
@@ -550,10 +551,10 @@ export async function listTeamMembers(
  */
 export async function addTeamMember(
   config: ResolvedConfig,
-  input: { user: UserRow; teamId: string; userId: string },
+  input: Caller & { teamId: string; userId: string },
 ): Promise<Result<TeamMemberSummary>> {
   if (!scope(config)) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, TEAM_MEMBER_ADD);
   if (!t.ok) return t;
@@ -743,10 +744,10 @@ export async function addTeamMembersIn(
  */
 export async function removeTeamMember(
   config: ResolvedConfig,
-  input: { user: UserRow; teamId: string; userId: string },
+  input: Caller & { teamId: string; userId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!scope(config)) return fail("not_found");
-  const v = verified(input.user);
+  const v = verified(input);
   if (!v.ok) return v;
   const self = input.userId === input.user.id;
   const t = await teamStanding(

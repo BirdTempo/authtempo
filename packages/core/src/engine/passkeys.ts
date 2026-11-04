@@ -36,7 +36,7 @@ import {
   withoutSecretOutputs,
 } from "./passkey-extensions.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
-import { prepareSession, sessionOpened, writeSession } from "./sessions.js";
+import { prepareSession, type ResolvedSession, sessionOpened, writeSession } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
 import { draftUserRow, mayCreateUser, validShownName } from "./users.js";
 
@@ -240,22 +240,39 @@ async function consumeChallenge(
   return ok(row);
 }
 
+/** The options of a passkey registration (plan 12p): the caller's session, not a bare user. */
+export interface PasskeyRegistrationOptionsInput {
+  /** The session that registers, with its user. Its `proved` flag must hold. */
+  session: ResolvedSession;
+  hints?: PasskeyHint[] | undefined;
+}
+
+/** The verify of a passkey registration (plan 12p): the caller's session, not a bare user. */
+export interface PasskeyRegistrationInput {
+  /** The session that registers, with its user. Its `proved` flag must hold. */
+  session: ResolvedSession;
+  response: unknown;
+  name?: string | undefined;
+}
+
 export async function passkeyRegistrationOptions(
   config: ResolvedConfig,
-  input: { user: UserRow; hints?: PasskeyHint[] | undefined },
+  input: PasskeyRegistrationOptionsInput,
 ): Promise<Result<PublicKeyCredentialCreationOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!provedAccount(input.user)) return fail("email_unverified");
+  // The session's flag with the account's (plan 12p).
+  if (!provedAccount(input.session)) return fail("email_unverified");
+  const { user } = input.session;
   const existing = await config.storage.findMany("passkey", [
-    { field: "userId", op: "eq", value: input.user.id },
+    { field: "userId", op: "eq", value: user.id },
   ]);
-  const { bytes } = await issueChallenge(config, input.user.id, "registration");
+  const { bytes } = await issueChallenge(config, user.id, "registration");
   const options = await config.webauthn.registrationOptions({
     rpID: config.passkey.rpID,
     rpName: config.passkey.rpName,
-    userID: userHandleOf(input.user.id),
-    userName: passkeyUserName(config, input.user),
-    userDisplayName: input.user.name ?? passkeyUserName(config, input.user),
+    userID: userHandleOf(user.id),
+    userName: passkeyUserName(config, user),
+    userDisplayName: user.name ?? passkeyUserName(config, user),
     challenge: bytes,
     excludeCredentials: existing.map((p) => ({
       id: p.credentialId,
@@ -277,15 +294,17 @@ function base64UrlBytes(text: string): number {
 
 export async function verifyPasskeyRegistration(
   config: ResolvedConfig,
-  input: { user: UserRow; response: unknown; name?: string | undefined },
+  input: PasskeyRegistrationInput,
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
   // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
   const response = withoutSecretOutputs(input.response);
-  if (!provedAccount(input.user)) return fail("email_unverified");
+  // The session's flag with the account's (plan 12p).
+  if (!provedAccount(input.session)) return fail("email_unverified");
+  const { user } = input.session;
   const challenge = challengeFromResponse(response);
   if (!challenge) return fail("invalid_token");
-  const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
+  const consumed = await consumeChallenge(config, challenge, user.id, "registration");
   if (!consumed.ok) return consumed;
   let registered: Awaited<ReturnType<typeof config.webauthn.verifyRegistration>>;
   try {
@@ -311,7 +330,7 @@ export async function verifyPasskeyRegistration(
   try {
     row = await config.storage.create("passkey", {
       id: newId(now),
-      userId: input.user.id,
+      userId: user.id,
       credentialId: registered.id,
       publicKey: toBase64Url(registered.publicKey),
       counter: registered.counter,
@@ -334,10 +353,10 @@ export async function verifyPasskeyRegistration(
     throw e;
   }
   // After the write (plan 12a). The create is one statement, with no transaction.
-  config.observe.emit({ name: "passkey.register", outcome: "success", userId: input.user.id });
+  config.observe.emit({ name: "passkey.register", outcome: "success", userId: user.id });
   await sendNotice(config, {
     event: "passkey_added",
-    email: input.user.email,
+    email: user.email,
     ip: null,
     userAgent: null,
   });

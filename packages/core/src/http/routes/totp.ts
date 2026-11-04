@@ -93,7 +93,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, setupBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await setupTotp(ctx.config, {
-          userId: s.resolved.user.id,
+          session: s.resolved,
           password: body.value.password,
           ip: ctx.ip,
         });

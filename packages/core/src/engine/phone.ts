@@ -487,7 +487,8 @@ export async function addPhone(
   const phone = config.phone;
   if (!phone) return fail("not_found");
   const { user, session } = input.session;
-  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!(await handleProved(config, config.storage, input.session))) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   if (!(await limit(config, "phone-add:user", user.id, ADD_PER_USER))) return fail("rate_limited");
@@ -543,7 +544,8 @@ export async function verifyAddPhone(
 ): Promise<Result<{ phone: string }>> {
   if (!config.phone) return fail("not_found");
   const { user, session } = input.session;
-  if (!(await handleProved(config, config.storage, user))) return fail("email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!(await handleProved(config, config.storage, input.session))) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   const checked = await checkPhoneCode(config, {

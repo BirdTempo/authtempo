@@ -95,9 +95,11 @@ import { refuseImpersonation } from "./engine/operator/impersonation.js";
 import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
   createOrganizationToken,
+  createOrganizationTokenFor,
   currentOrganizationToken,
   listOrganizationTokens,
   type OrganizationTokenCreate,
+  type OrganizationTokenCreateFor,
   type OrganizationTokenSummary,
   type OrganizationTokenUpdate,
   type ResolvedOrganizationToken,
@@ -120,6 +122,8 @@ import type { PasskeySignInExtensions } from "./engine/passkey-extensions.js";
 import {
   deletePasskey,
   listPasskeys,
+  type PasskeyRegistrationInput,
+  type PasskeyRegistrationOptionsInput,
   type PasskeySummary,
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
@@ -273,12 +277,14 @@ import {
 } from "./engine/teams.js";
 import {
   type ApiTokenCreate,
+  type ApiTokenCreateFor,
   type ApiTokenSummary,
   type ApiTokenUpdate,
   authenticateRequest,
   type Caller,
   callerFromRequest,
   createApiToken,
+  createApiTokenFor,
   currentApiToken,
   listApiTokens,
   type ResolvedApiToken,
@@ -743,8 +749,8 @@ export interface AnonymousApi {
  * `requireFresh` first (ASVS 5.0.0 7.5.3); so does an app that calls
  * `api.tokens.create`, `api.passkeyRegistrationOptions`,
  * `api.deletePasskey`, `api.totp.disableWithCode`, or
- * `api.totp.regenerateBackupCodesWithCode` in process, because those take a
- * user, not a session. Their routes apply the rule.
+ * `api.totp.regenerateBackupCodesWithCode` in process. Those calls apply
+ * no fresh rule; their routes apply it.
  */
 export interface SessionApi {
   /** `session_not_fresh` unless a sign-in or a re-authentication is younger than `session.freshMinutes`. */
@@ -841,17 +847,16 @@ export interface AuthApi {
   ): Promise<
     Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
   >;
-  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
-  /** `hints` replaces `passkey.hints.register` for this ceremony (plan 12i). */
-  passkeyRegistrationOptions(input: {
-    user: UserRow;
-    hints?: PasskeyHint[] | undefined;
-  }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
-  verifyPasskeyRegistration(input: {
-    user: UserRow;
-    response: unknown;
-    name?: string | undefined;
-  }): Promise<Result<PasskeySummary>>;
+  /**
+   * Takes the session, not a bare user (plan 12p): a session made before the
+   * proof of its address registers nothing. `hints` replaces
+   * `passkey.hints.register` for this ceremony (plan 12i). Applies no fresh
+   * rule: call `api.session.requireFresh` first (plan 12a).
+   */
+  passkeyRegistrationOptions(
+    input: PasskeyRegistrationOptionsInput,
+  ): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
+  verifyPasskeyRegistration(input: PasskeyRegistrationInput): Promise<Result<PasskeySummary>>;
   /**
    * `hints` replaces `passkey.hints.signIn` for this ceremony (plan 12i).
    * `extensions` takes PRF salts (base64url of 32 bytes) and a `largeBlob`
@@ -1394,6 +1399,38 @@ export interface CheckedScimCaller {
   id: string;
   organizationId: string;
   scopes: readonly ScimScope[];
+}
+
+/**
+ * The user token create of a server call with no session (plan 12p). The
+ * compat package of Better Auth calls it for `createApiKey` with a user id
+ * and no headers: only that call may set the quota and the set.
+ * `api.tokens.create` takes a session. This seam takes the user that the
+ * package names, with the user row's rule, as for a caller with no
+ * session. The app checks the person's session before it calls. Throws a
+ * TypeError for an Auth that `createAuth` did not make.
+ */
+export function createApiTokenAs(
+  auth: Auth,
+  input: ApiTokenCreateFor,
+): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>> {
+  const config = configs.get(auth);
+  if (!config) throw new TypeError("createApiTokenAs takes an Auth from createAuth");
+  return createApiTokenFor(config, input);
+}
+
+/**
+ * The organization token create of a server call with no session (plan
+ * 12p), for the compat package as `createApiTokenAs`. The user row's rule
+ * decides. Throws a TypeError for an Auth that `createAuth` did not make.
+ */
+export function createOrganizationTokenAs(
+  auth: Auth,
+  input: OrganizationTokenCreateFor,
+): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>> {
+  const config = configs.get(auth);
+  if (!config) throw new TypeError("createOrganizationTokenAs takes an Auth from createAuth");
+  return createOrganizationTokenFor(config, input);
 }
 
 /**

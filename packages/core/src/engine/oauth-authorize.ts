@@ -635,7 +635,8 @@ async function sessionStep(
   if (held && held.data.userId !== null && held.data.userId !== session.user.id)
     return { kind: "error", error: "invalid_request" };
   // A claim of an unproved address could take the grant (spec 8.7); a user with no address has none to claim (plan 12i).
-  if (!provedAccount(session.user))
+  // The session's flag holds too (plan 12p): a claimant's session at the flip gets no grant.
+  if (!provedAccount(session))
     return settle(config, held, () => Promise.resolve(denied(config, request, "access_denied")));
   if (
     request.prompt !== "consent" &&
@@ -759,7 +760,7 @@ export async function decideAuthorize(
   if (!(await spendHeld(config, held))) return { kind: "error", error: "invalid_request" };
   const c = await checkAuthorize(config, new URLSearchParams(held.data.params));
   if (!c.ok) return c.step;
-  if (input.decision !== "allow" || !provedAccount(input.session.user))
+  if (input.decision !== "allow" || !provedAccount(input.session))
     return denied(config, c.request, "access_denied");
   await grantConsent(config, input.session.user.id, c.request.clientId, c.request.scopes);
   return codeRedirect(config, c.request, input.session);

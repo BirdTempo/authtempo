@@ -30,6 +30,7 @@ import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.
 import { checkSlug } from "../../engine/slug-check.js";
 import { organizationTokenFromRequest } from "../../engine/tokens.js";
 import { fail, ok, type Result } from "../../result.js";
+import type { SessionRow } from "../../schema.js";
 import {
   activeBody,
   checkSlugBody,
@@ -102,6 +103,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       user: NonNullable<Awaited<ReturnType<typeof withSession>>>["user"],
       organizationId: string,
       ctx: RouteContext,
+      // The session row of the caller, for a check of its `proved` flag (plan 12p).
+      session: SessionRow,
     ) => Promise<Result<V>>,
   ): Route => ({
     method: "GET",
@@ -112,7 +115,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       if (!s) return unauthorized();
       const parsed = id.safeParse(ctx.url.searchParams.get("organizationId"));
       if (!parsed.success) return send(respond(fail("invalid_body")), s.renewed);
-      const r = await run(s.user, parsed.data, ctx);
+      const r = await run(s.user, parsed.data, ctx, s.resolved.session);
       if (!r.ok) return send(respond(r), s.renewed);
       return send(json({ [key]: r.value }), s.renewed);
     },
@@ -131,6 +134,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         if (!body.ok) return send(respond(body), s.renewed);
         const r = await createOrganization(ctx.config, {
           user: s.user,
+          // The session, so a session made before the proof makes no organization (plan 12p).
+          session: s.resolved.session,
           slug: body.value.slug,
           name: body.value.name,
           ...(body.value.metadata !== undefined && { metadata: body.value.metadata }),
@@ -153,6 +158,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       // exactOptionalPropertyTypes: pass only the keys the caller sent.
       updateOrganization(ctx.config, {
         user: s.user,
+        session: s.resolved.session,
         organizationId: b.organizationId,
         ...(b.name !== undefined && { name: b.name }),
         ...(b.slug !== undefined && { slug: b.slug }),
@@ -160,16 +166,16 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       }),
     ),
     post("/organizations/delete", orgBody, null, (s, b, ctx) =>
-      deleteOrganization(ctx.config, { user: s.user, ...b }),
+      deleteOrganization(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     getByOrg("/organizations/members", "members", (user, organizationId, ctx) =>
       listMembers(ctx.config, { user, organizationId }),
     ),
     post("/organizations/members/add", memberBody, "member", (s, b, ctx) =>
-      addMember(ctx.config, { user: s.user, ...b }),
+      addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     post("/organizations/members/role", memberBody, "member", (s, b, ctx) =>
-      updateMemberRole(ctx.config, { user: s.user, ...b }),
+      updateMemberRole(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     post("/organizations/members/remove", removeBody, null, async (s, b, ctx) => {
       // The revoke of tokens changes credentials, so it needs a fresh session (plan 12k), before any write.
@@ -179,6 +185,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       }
       return removeMember(ctx.config, {
         user: s.user,
+        session: s.resolved.session,
         organizationId: b.organizationId,
         userId: b.userId,
         ...(b.revokeTokens !== undefined && { revokeTokens: b.revokeTokens }),
@@ -188,6 +195,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       // exactOptionalPropertyTypes: pass teamIds only when the caller sent it.
       inviteMember(ctx.config, {
         user: s.user,
+        session: s.resolved.session,
         organizationId: b.organizationId,
         email: b.email,
         role: b.role,
@@ -198,11 +206,16 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       listInvitations(ctx.config, { user, organizationId }),
     ),
     post("/organizations/invitations/revoke", revokeBody, null, (s, b, ctx) =>
-      revokeInvitation(ctx.config, { user: s.user, ...b }),
+      revokeInvitation(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     // Accept answers { organization, member } as the engine returns it.
     post("/organizations/invitations/accept", tokenBody, null, (s, b, ctx) =>
-      acceptInvitation(ctx.config, { user: s.user, token: b.token, ip: ctx.ip }),
+      acceptInvitation(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        token: b.token,
+        ip: ctx.ip,
+      }),
     ),
     {
       // The link in the mail is the credential, so decline needs no session.
@@ -242,15 +255,16 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     },
     // A session only, as the create: a token never checks a slug (spec 29 items 8 and 17).
     post("/organizations/check-slug", checkSlugBody, null, (s, b, ctx) =>
-      checkSlug(ctx.config, { user: s.user, slug: b.slug }),
+      checkSlug(ctx.config, { user: s.user, session: s.resolved.session, slug: b.slug }),
     ),
     // Plan 12k: tokens that the organization owns. A session only: a token never makes or changes a token.
     // A token is a credential for its life (spec 8.8), so the create and the update need a fresh session.
     post("/organizations/tokens", orgTokenCreateBody, null, async (s, b, ctx) => {
       const fresh = requireFresh(ctx.config, s.resolved.session);
       if (!fresh.ok) return fresh;
+      // The session, not the bare user: a session made before the proof mints nothing (plan 12p).
       return createOrganizationToken(ctx.config, {
-        user: s.user,
+        session: s.resolved,
         organizationId: b.organizationId,
         name: b.name,
         permissions: b.permissions,
@@ -258,8 +272,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         ...(b.metadata != null && { metadata: b.metadata }),
       });
     }),
-    getByOrg("/organizations/tokens", "tokens", (user, organizationId, ctx) =>
-      listOrganizationTokens(ctx.config, { user, organizationId }),
+    getByOrg("/organizations/tokens", "tokens", (user, organizationId, ctx, session) =>
+      listOrganizationTokens(ctx.config, { user, session, organizationId }),
     ),
     post("/organizations/tokens/update", orgTokenUpdateBody, null, async (s, b, ctx) => {
       const fresh = requireFresh(ctx.config, s.resolved.session);
@@ -267,6 +281,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       const { organizationId, id: tokenId, name, permissions, expiresAt } = b;
       return updateOrganizationToken(ctx.config, {
         user: s.user,
+        session: s.resolved.session,
         organizationId,
         id: tokenId,
         ...(name !== undefined && { name }),
@@ -277,7 +292,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       });
     }),
     post("/organizations/tokens/revoke", orgTokenRevokeBody, null, (s, b, ctx) =>
-      revokeOrganizationToken(ctx.config, { user: s.user, ...b }),
+      revokeOrganizationToken(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),
     {
       // A script learns which organization it acts for. A `to_` bearer only: any

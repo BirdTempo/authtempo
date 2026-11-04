@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import type { ErrorCode } from "../../errors.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow, SSO_AUDIT_ACTIONS, UserRow } from "../../schema.js";
+import { provedAddress } from "../address.js";
 import { requireFresh } from "../fresh.js";
 import { sessionLive } from "../jwt.js";
 import {
@@ -93,7 +94,8 @@ export async function requireSsoManager(
     if (!(await ownsOrganization(config, user.id, organizationId))) return operator;
   } else if (!(await ownsOrganization(config, user.id, organizationId)))
     return refused(config, "rank");
-  if (!user.emailVerified) return refused(config, "email", "email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(resolved)) return refused(config, "email", "email_unverified");
   if (!(await hasSecondFactor(config, user.id)))
     return refused(config, "second_factor", "second_factor_required");
   if (!requireFresh(config, session).ok) return refused(config, "fresh", "session_not_fresh");
@@ -213,7 +215,8 @@ export async function requireSsoManagerOfAny(
     !(await ownsSomeOrganization(config, user.id))
   )
     return refused(config, "rank");
-  if (!user.emailVerified) return refused(config, "email", "email_unverified");
+  // The session's flag with the user's (plan 12p).
+  if (!provedAddress(resolved)) return refused(config, "email", "email_unverified");
   if (!(await hasSecondFactor(config, user.id)))
     return refused(config, "second_factor", "second_factor_required");
   if (!requireFresh(config, session).ok) return refused(config, "fresh", "session_not_fresh");

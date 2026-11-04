@@ -8,7 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { sendAccountMail } from "./account-mail.js";
-import { hasAddress, verifiedHandle } from "./address.js";
+import { handleProved } from "./address.js";
 import { checkCode, consumeCode, issueCode, newestCode, verifyGate } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
@@ -127,10 +127,8 @@ export async function requestEmailChange(
   const otp = config.emailOtp;
   if (method === "code" && !otp) return fail("not_found");
   // A user with no address (plan 12i) needs another proved handle: a phone that signs in, or a passkey.
-  if (
-    hasAddress(user) ? !user.emailVerified : !(await verifiedHandle(config, config.storage, user))
-  )
-    return fail("email_unverified");
+  // The session's flag holds too (plan 12p), so a claimant's session moves no address.
+  if (!(await handleProved(config, config.storage, input.session))) return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   if (method !== "link" && method !== "code") return fail("invalid_body");

@@ -302,9 +302,14 @@ export async function proveUserFactor(
     : fail("invalid_code");
 }
 
-/** The setup's input: the user and the user's password (plan 9f final fix wave, review I-1). */
+/**
+ * The setup's input: the session and the user's password (plan 9f final fix
+ * wave, review I-1). The session replaced the user id in plan 12p: its
+ * `proved` flag must hold.
+ */
 export interface TotpSetupInput {
-  userId: string;
+  /** The session that sets up the factor, with its user. */
+  session: ResolvedSession;
   password: string;
   /**
    * Not read since plan 9h: the setup counts per user only
@@ -334,17 +339,17 @@ export async function setupTotp(
 ): Promise<Result<TotpSetup>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  if (!(await limit(config, "totp-setup:user", input.userId, SETUP_PER_USER)))
+  const userId = input.session.user.id;
+  if (!(await limit(config, "totp-setup:user", userId, SETUP_PER_USER)))
     return fail("rate_limited");
-  const proved = await checkUserPassword(config, input.userId, input.password);
+  const proved = await checkUserPassword(config, userId, input.password);
   if (!proved.ok) return fail(proved.code);
-  const user = await config.storage.findOne("user", [
-    { field: "id", op: "eq", value: input.userId },
-  ]);
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
   // checkUserPassword found the password row; a user deleted since then gets no factor.
   if (!user) return fail("invalid_credentials");
   // A user with no address is proved by its own handle (`provedAccount`, plan 12i Task 5).
-  if (!provedAccount(user)) return fail("email_unverified");
+  // The user as read now, with the flag of the caller's session (plan 12p).
+  if (!provedAccount({ user, session: input.session.session })) return fail("email_unverified");
   const now = config.clock.now();
   const existing = await config.storage.findOne("totp", [
     { field: "userId", op: "eq", value: user.id },
@@ -444,7 +449,8 @@ export async function enableTotp(
   const totp = config.totp;
   if (!totp) return fail("not_found");
   const { user, session } = input.session;
-  if (!provedAccount(user)) return fail("email_unverified");
+  // The session's flag with the account's (plan 12p).
+  if (!provedAccount(input.session)) return fail("email_unverified");
   // A change of the second factor needs a fresh session (ASVS 5.0.0 7.5.1;
   // plan 12a). Before the code limit, so a stale session counts no try.
   const fresh = requireFresh(config, session);

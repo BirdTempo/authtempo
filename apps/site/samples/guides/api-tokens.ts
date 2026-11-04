@@ -2,8 +2,8 @@ import {
   type Auth,
   createAuth,
   type MailPort,
+  type ResolvedSession,
   type StorageAdapter,
-  type UserRow,
 } from "@authtempo/core";
 
 /** API tokens need no config key: the token routes exist in every deployment. */
@@ -40,11 +40,11 @@ export async function whoami(auth: Auth, request: Request): Promise<Response> {
 
 /**
  * A token with a quota of calls. No route takes a quota, so the app sets it
- * in process. `api.tokens.create` applies no fresh rule: the settings page
- * calls `api.session.requireFresh` first.
+ * in process, for the session of the person. `api.tokens.create` applies no
+ * fresh rule: the settings page calls `api.session.requireFresh` first.
  */
-export function createMeteredToken(auth: Auth, user: UserRow, calls: number) {
-  return auth.api.tokens.create({ user, name: "metered", quota: { remaining: calls } });
+export function createMeteredToken(auth: Auth, session: ResolvedSession, calls: number) {
+  return auth.api.tokens.create({ session, name: "metered", quota: { remaining: calls } });
 }
 
 /**

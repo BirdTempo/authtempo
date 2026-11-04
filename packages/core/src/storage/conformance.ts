@@ -3122,10 +3122,11 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
     }),
   );
   if (!("token" in signedIn)) throw new Error("rotation: no session token");
-  const setup = must(await v1.api.totp?.setup({ userId, password: PW }));
-  const seed = base32Decode(setup.secret);
   const session = await v1.api.getSession(signedIn.token);
   if (!session) throw new Error("rotation: no session");
+  // The setup takes the session (plan 12p).
+  const setup = must(await v1.api.totp?.setup({ session, password: PW }));
+  const seed = base32Decode(setup.secret);
   must(await v1.api.totp?.enable({ session, code: await totpCode(seed, clock.now()) }));
   const jwt = must(await v1.api.jwt?.mint({ userId, sessionId: session.session.id }));
   must(await v1.api.emailOtp?.request({ email: "bo@example.com", ip: null }));

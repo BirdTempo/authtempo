@@ -9,6 +9,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { InvitationRow, MemberRow, OrganizationRow, TeamRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { StorageError, type Where } from "../storage/port.js";
+import { provedAddress } from "./address.js";
 import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
   type Caller,
@@ -105,7 +106,7 @@ export async function inviteMember(
 ): Promise<Result<InvitationSummary>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   const s = await adminStanding(config, input, "invite");
   if (!s.ok) return s;
   const email = normalizeEmail(input.email);
@@ -228,7 +229,7 @@ export async function revokeInvitation(
 ): Promise<Result<{ ok: true }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   const s = await adminStanding(config, input, "revoke");
   if (!s.ok) return s;
   // The organization id is in the where, so an admin of another organization cannot reach this row.
@@ -307,7 +308,7 @@ export async function acceptInvitation(
   // The address compare comes first, so a user with no address answers
   // email_mismatch (spec 32 item 1, ruling 15 of plan 12i).
   if (input.user.email !== inv.email) return fail("email_mismatch");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAddress(input)) return fail("email_unverified");
   const organizationRow = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: inv.organizationId },
   ]);
