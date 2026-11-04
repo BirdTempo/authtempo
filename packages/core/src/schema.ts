@@ -65,9 +65,10 @@ export interface SessionRow extends BaseRow {
   /** The team the session acts in, of its active organization (plan 12k). Null: none. */
   activeTeamId: string | null;
   /**
-   * True when the sign-in that made the session proved the account (plan
-   * 12p). The engine sets it once, at the creation, and a hook cannot set
-   * it. Only the confirm of a change of address changes it later, to true
+   * The proof flag of the session (plan 12p). It is true when the session
+   * came after the proof of its address. It is also true when the user has
+   * no address and is not anonymous (ruling 20). The engine sets it once, at
+   * the creation, and a hook cannot set it. Only the confirm of a change of address changes it later, to true
    * on the session it keeps. A verified-only action reads it with the user
    * row. So a session made before the proof of its address never gains
    * verified powers. Migration 0016 fills a row of version 15 from its

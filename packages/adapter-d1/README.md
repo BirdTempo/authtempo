@@ -84,7 +84,7 @@ On D1, the fill of `0016_schema_v16` is one statement. It changes one row for ea
 Run the sweep before the migration, so that the expired sessions are gone. Call `auth.api.sweepExpired()` once, or wait for its next scheduled run. Then count the sessions of verified users with the first command below. An app with more than 100,000 live sessions of verified users applies the migration by hand, in pages. The ceiling keeps the one statement of the shipped fill below hundreds of thousands of rows. The steps by hand are the other four commands, in this order, before you deploy core at version 16:
 
 1. Add the column. When the column exists already, the command fails with `duplicate column name: proved`. Then go to step 2.
-2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0.
+2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0. Each page scans the rows that earlier pages marked, about 50 million row reads for a million sessions.
 3. Write version 16 in `ta_meta`.
 4. Mark `0016_schema_v16.sql` as applied in `d1_migrations`, the table that `wrangler d1 migrations` keeps. A `migrations_table` in the wrangler config names another table. Then use that name in the last command.
 

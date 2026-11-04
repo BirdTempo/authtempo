@@ -39,7 +39,7 @@ sources:
 | 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 | 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
 | 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the back-channel sign-out message names the issuer that the client saw (plan 12i Task 18). |
-| 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`: true when the sign-in of the session proved the account. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A fill sets it from the user of each live session (plan 12p). |
+| 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`. It is true when the session came after the proof of its address. It is also true when the user has no address and is not anonymous. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A fill sets it from the user of each live session (plan 12p). |
 
 `SCHEMA_VERSION` of `@authtempo/core` is 16.
 
@@ -125,7 +125,7 @@ Version 16 comes from the `0016_schema_v16` migration of D1 and Postgres, from `
 
 | Field | Column | Type | What it holds |
 | --- | --- | --- | --- |
-| `session.proved` | `ta_session.proved` | boolean | True when the sign-in that made the session proved the account. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A hook cannot set it. A verified-only action reads it with the user row (plan 12p). |
+| `session.proved` | `ta_session.proved` | boolean | True when the session came after the proof of its address. It is also true when the user has no address and is not anonymous. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A hook cannot set it. A verified-only action reads it with the user row (plan 12p). |
 
 The column is NOT NULL with the default false. Then the migration sets true on each session whose user has a verified address. So a verified user keeps the powers of each live session. A session of a user with no address, or with an unverified address, reads false. That user signs in again for verified powers. A Worker at version 15 that still runs after the migration writes false into each new session. So deploy core at version 16 at once.
 
@@ -134,7 +134,7 @@ On D1, the fill of `0016_schema_v16` is one statement. It changes one row for ea
 Run the sweep before the migration, so that the expired sessions are gone. Call `auth.api.sweepExpired()` once, or wait for its next scheduled run. Then count the sessions of verified users with the first command below. An app with more than 100,000 live sessions of verified users applies the migration by hand, in pages. The ceiling keeps the one statement of the shipped fill below hundreds of thousands of rows. The steps by hand are the other four commands, in this order, before you deploy core at version 16:
 
 1. Add the column. When the column exists already, the command fails with `duplicate column name: proved`. Then go to step 2.
-2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0.
+2. Fill one page of 10,000 sessions. Run the command again until `changes` in the `meta` of its answer is 0. Each page scans the rows that earlier pages marked, about 50 million row reads for a million sessions.
 3. Write version 16 in `ta_meta`.
 4. Mark `0016_schema_v16.sql` as applied in `d1_migrations`, the table that `wrangler d1 migrations` keeps. A `migrations_table` in the wrangler config names another table. Then use that name in the last command.
 

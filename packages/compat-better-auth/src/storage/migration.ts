@@ -1318,8 +1318,9 @@ export const MIGRATION_0013_NAME = "0013_compat_schema_v16";
 
 /**
  * Migration 0013 (plan 12p): core's schema version 16. Core 16 adds
- * `session.proved`, the mark that the sign-in of the session proved the
- * account. Only the confirm of a change of address changes it later, to
+ * `session.proved`. It is true when the session came after the proof of
+ * its address. It is also true when the user has no address and is not
+ * anonymous. Only the confirm of a change of address changes it later, to
  * true on the session it keeps. Better Auth's `session` gets `taProved`,
  * which holds core's field. It is NOT NULL with the default false, so a
  * row that Better Auth writes reads false. Then the fill sets true on each

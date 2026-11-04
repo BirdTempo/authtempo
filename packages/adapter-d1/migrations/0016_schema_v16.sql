@@ -1,6 +1,7 @@
 -- authtempo schema version 16 for D1 (SQLite): the session proof (plan
--- 12p). Append-only: never edit a shipped migration. ta_session gets proved,
--- the mark that the sign-in of the session proved the account. Core sets it
+-- 12p). Append-only: never edit a shipped migration. ta_session gets proved.
+-- It is true when the session came after the proof of its address. It is
+-- also true when the user has no address and is not anonymous. Core sets it
 -- once, at the creation of each session. Only the confirm of a change of
 -- address changes it later, to true on the session it keeps. A verified-only
 -- action reads it.

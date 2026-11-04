@@ -1,7 +1,8 @@
 /**
  * Schema version 16 (plan 12p): the session proof. `ta_session` gets
- * `proved`, the mark that the sign-in of the session proved the account.
- * Core sets it once, at the creation of each session. Only the confirm of
+ * `proved`. It is true when the session came after the proof of its
+ * address. It is also true when the user has no address and is not
+ * anonymous. Core sets it once, at the creation of each session. Only the confirm of
  * a change of address changes it later, to true on the session it keeps.
  * A verified-only action reads it. The column text is that of
  * schemaDdl(MYSQL) of core on the day of this file (2026-11-04). It is NOT
