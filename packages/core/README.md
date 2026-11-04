@@ -842,7 +842,7 @@ There is no per-account lockout. The sign-in's 10 per address and the 5 codes pe
 
 The limits are per isolate under the memory limiter: on Workers each isolate counts on its own, so the per-user budgets multiply by the isolate count. The owned D1 and Postgres limiters count once.
 
-- `api.totp` holds the TOTP operations in process. `api.totp.setup({ userId, password, ip })` takes the password, as the route does; `ip` is not read since plan 9h. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
+- `api.totp` holds the TOTP operations in process. `api.totp.setup({ session, password, ip })` takes the session and the password, as the route does; `ip` is not read since plan 9h. Pass the answer of `api.getSession` or `auth.session`. `api.password.verify({ userId, password, ip })` checks a password again with the sign-in's limits.
 - The default issuer is `appName`, and with no `appName` the host of `baseURL` with no port. A default that holds a colon (an IPv6 `baseURL` such as `http://[::1]:8787`, or an `appName` such as "Acme: Notes") stops `createAuth` with a message that names `totp.issuer`: the key URI uses the colon to split the issuer from the account. Set `totp.issuer`, or `totp: false`.
 
 ## JWT minting
