@@ -49,6 +49,7 @@ async function routeCreate(auth: ReturnType<typeof makeAuth>, user: UserRow, slu
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   return handle(
     post(

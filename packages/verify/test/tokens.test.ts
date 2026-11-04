@@ -4,11 +4,12 @@ import { FILES, ISSUER, makeServer, signedIn, withBearer } from "./harness.js";
 
 async function apiToken(server: ReturnType<typeof makeServer>) {
   const s = await signedIn(server);
-  const user = await server.storage.findOne("user", [{ field: "id", op: "eq", value: s.user.id }]);
-  if (!user) throw new Error("no user");
-  const t = await server.auth.api.tokens.create({ user, name: "ci" });
+  // The token create takes the session of the sign-in (plan 12p).
+  const session = await server.auth.api.getSession(s.sessionToken);
+  if (!session) throw new Error("no session");
+  const t = await server.auth.api.tokens.create({ session, name: "ci" });
   if (!t.ok) throw new Error(t.code);
-  return { ...s, token: t.value.token, id: t.value.apiToken.id, user };
+  return { ...s, token: t.value.token, id: t.value.apiToken.id, user: session.user, session };
 }
 
 describe("an API token and a session token (plan 11d)", () => {
@@ -53,12 +54,12 @@ describe("an API token and a session token (plan 11d)", () => {
     const server = makeServer();
     const s = await apiToken(server);
     const spent = await server.auth.api.tokens.create({
-      user: s.user,
+      session: s.session,
       name: "spent",
       quota: { remaining: 0 },
     });
     const windowed = await server.auth.api.tokens.create({
-      user: s.user,
+      session: s.session,
       name: "windowed",
       rateLimit: { seconds: 60, max: 1 },
     });
@@ -86,12 +87,12 @@ describe("an API token and a session token (plan 11d)", () => {
     const server = makeServer();
     const s = await apiToken(server);
     const quota = await server.auth.api.tokens.create({
-      user: s.user,
+      session: s.session,
       name: "quota",
       quota: { remaining: 10 },
     });
     const windowed = await server.auth.api.tokens.create({
-      user: s.user,
+      session: s.session,
       name: "windowed",
       rateLimit: { seconds: 60, max: 10 },
     });
@@ -212,7 +213,7 @@ describe("an organization token and a moved key (plan 12k, review finding m6)", 
     const server = movedServer();
     const o = await organizationOf(server);
     const t = await server.auth.api.organizationTokens.create({
-      user: o.user,
+      session: o.session,
       organizationId: o.organizationId,
       name: "deploy",
       permissions: {},

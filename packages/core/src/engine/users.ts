@@ -158,12 +158,15 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
 /**
  * A user created through an unverified email is a claim, not proof. When a
  * sign-in proves the address, every identity that came in before (except
- * the one that carries the proof, and the `email` identity), every
- * session, every password row (except the one `keep.passwordId` names),
- * every passkey, every pending passkey challenge, and every
- * unredeemed handoff code are deleted, so a claimant cannot keep access to the account.
- * The username is cleared, except where `keep.username` says so. The phone
- * is always cleared.
+ * the one that carries the proof, and the `email` identity), every password
+ * row (except the one `keep.passwordId` names), every passkey, every
+ * pending passkey challenge, every unredeemed handoff code, and every
+ * session are deleted, in that order. The username is cleared, except
+ * where `keep.username` says so. The phone is always cleared.
+ * The claimant's sessions were made before the proof, so their `proved`
+ * flag is false (plan 12p). Each check of a verified address reads that
+ * flag, so such a session makes no token, grant, factor, or address change
+ * between the flip and its delete. So the claimant keeps no way in.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so

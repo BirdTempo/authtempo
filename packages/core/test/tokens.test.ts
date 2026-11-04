@@ -12,7 +12,7 @@ import {
 } from "../src/engine/tokens.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
-import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, sessionFor } from "./helpers.js";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -38,12 +38,16 @@ async function unverifiedUser(auth: ReturnType<typeof makeAuth>) {
   });
 }
 
-function create(
+async function create(
   auth: ReturnType<typeof makeAuth>,
   user: Awaited<ReturnType<ReturnType<typeof makeAuth>["seedUser"]>>,
   over: { name?: string; expiresInDays?: number | null; organizationId?: string } = {},
 ) {
-  return createApiToken(auth.config, { user, name: over.name ?? "ci", ...over });
+  return createApiToken(auth.config, {
+    session: await sessionFor(auth.config, user),
+    name: over.name ?? "ci",
+    ...over,
+  });
 }
 
 function request(headers: Record<string, string>): Request {
@@ -313,6 +317,7 @@ describe("callerFromRequest", () => {
       userId: ada.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const r = await create(auth, ada);
     if (!r.ok) throw new Error(r.code);
@@ -357,6 +362,7 @@ describe("callerFromRequest", () => {
       userId: ada.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const req = request({ cookie: `__Host-tempo_session=${token}` });
     const fresh = await callerFromRequest(auth.config, req);
@@ -384,7 +390,10 @@ describe("callerFromRequest", () => {
       clock: base.clock,
     });
     const ada = await base.seedUser("ada@example.com");
-    const r = await auth.api.tokens.create({ user: ada, name: "ci" });
+    const r = await auth.api.tokens.create({
+      session: await sessionFor(base.config, ada),
+      name: "ci",
+    });
     if (!r.ok) throw new Error(r.code);
     const req = request({ authorization: `Bearer ${r.value.token}` });
     expect(await auth.session(req)).toBeNull();

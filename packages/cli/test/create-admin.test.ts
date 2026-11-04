@@ -116,12 +116,13 @@ describe("authtempo create-admin (plan 12f Task 12)", () => {
     if (!reset.ok || !("token" in reset.value)) throw new Error("the reset opened no session");
     const token = reset.value.token;
     expect(await listAs(token)).toBe(403);
-    const setup = await totp.setup({ userId, password: PW });
-    if (!setup.ok) throw new Error(setup.code);
     const session = await auth.session(
       new Request(`${BASE}/auth/session`, { headers: { authorization: `Bearer ${token}` } }),
     );
     if (!session) throw new Error("no session");
+    // The setup takes the session of the reset (plan 12p).
+    const setup = await totp.setup({ session, password: PW });
+    if (!setup.ok) throw new Error(setup.code);
     const enabled = await totp.enable({
       session,
       code: await totpCode(base32Decode(setup.value.secret), clock.now()),

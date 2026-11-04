@@ -5,7 +5,7 @@ import {
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { post } from "./helpers.js";
+import { post, sessionFor } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -30,10 +30,12 @@ async function withPasskey(h: Handle) {
   const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
   if (!user) throw new Error("no user");
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-  const options = await passkeyRegistrationOptions(h.config, { user });
+  const options = await passkeyRegistrationOptions(h.config, {
+    session: await sessionFor(h.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const registered = await verifyPasskeyRegistration(h.config, {
-    user,
+    session: await sessionFor(h.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!registered.ok) throw new Error(registered.code);

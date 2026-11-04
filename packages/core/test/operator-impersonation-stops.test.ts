@@ -194,7 +194,7 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
         expect(r.ok, how).toBe(true);
       } else {
         const setup = await setupTotp(w.auth.config, {
-          userId: w.target.user.id,
+          session: w.target,
           password: PASSWORD,
         });
         if (!setup.ok) throw new Error(setup.code);

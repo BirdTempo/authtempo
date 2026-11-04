@@ -109,7 +109,12 @@ function world() {
       createdAt: now,
       updatedAt: now,
     });
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     return token;
   }
   const cookie = (token: string) => ({ cookie: `${config.cookieName}=${token}` });

@@ -73,7 +73,12 @@ const codeRows = (h: Handle) =>
 
 /** A new session of the same user: a new sign-in at the clock's now. */
 async function signInAgain(h: Handle, userId: string) {
-  const { token, session } = await createSession(h.config, { userId, ip: null, userAgent: null });
+  const { token, session } = await createSession(h.config, {
+    userId,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return { session, cookie: `__Host-tempo_session=${token}` };
 }
 

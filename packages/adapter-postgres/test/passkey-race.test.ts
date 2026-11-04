@@ -57,7 +57,8 @@ function world() {
     if (!("token" in r.value)) throw new Error("the link answered a challenge");
     const s = await auth.api.getSession(r.value.token);
     if (!s) throw new Error("no session");
-    return s.user;
+    // The session, not the user: the registration takes it (plan 12p).
+    return s;
   }
   let ip = 0;
   const post = (path: string, body: unknown) =>
@@ -97,14 +98,14 @@ describe("the race of one passkey credential on Postgres (plan 12n decision 18)"
       const bob = await w.signIn(`bob-${delay}@example.com`);
       const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE });
       // Each user gets its own challenge, and the one authenticator answers both.
-      const ready = async (user: typeof ada) => {
-        const options = await w.auth.api.passkeyRegistrationOptions({ user });
+      const ready = async (session: typeof ada) => {
+        const options = await w.auth.api.passkeyRegistrationOptions({ session });
         if (!options.ok) throw new Error(options.code);
         const response = await soft.register(
           options.value.challenge,
-          new TextEncoder().encode(user.id),
+          new TextEncoder().encode(session.user.id),
         );
-        return () => w.auth.api.verifyPasskeyRegistration({ user, response });
+        return () => w.auth.api.verifyPasskeyRegistration({ session, response });
       };
       const [a, b] = [await ready(ada), await ready(bob)];
       const answers = await Promise.all([a(), delayed(delay, b)]);
@@ -115,7 +116,7 @@ describe("the race of one passkey credential on Postgres (plan 12n decision 18)"
       const rows = await w.rowsOf(soft.credentialId);
       expect(rows, `delay ${delay}`).toHaveLength(1);
       const winner = answers[0]?.ok ? ada : bob;
-      expect(rows[0]?.userId, `delay ${delay}`).toBe(winner.id);
+      expect(rows[0]?.userId, `delay ${delay}`).toBe(winner.user.id);
     }
   });
 

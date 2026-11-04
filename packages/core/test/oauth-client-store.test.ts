@@ -306,6 +306,7 @@ describe("api.oauth.clients (plan 12e)", () => {
       userId: g.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const secondCookie = `__Host-tempo_session=${second.token}`;
     const idToken = async (cookie: string, clientId: string) => {

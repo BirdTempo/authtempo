@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/create-auth.js";
-import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, sessionFor } from "./helpers.js";
 
 // Plan 12h Task 4, ruling 1 point 9. The router copies the config for each
 // request. So the per-request caller cache of tokens.ts keys on the instance,
@@ -18,7 +18,11 @@ describe("the caller cache under the request scope (plan 12h Task 4)", () => {
       clock: base.clock,
     });
     const ada = await base.seedUser("ada@example.com");
-    const made = await auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 5 } });
+    const made = await auth.api.tokens.create({
+      session: await sessionFor(base.config, ada),
+      name: "ci",
+      quota: { remaining: 5 },
+    });
     if (!made.ok) throw new Error(made.code);
     const one = new Request(`${BASE_URL}/auth/tokens/current`, {
       headers: { authorization: `Bearer ${made.value.token}` },
@@ -44,7 +48,11 @@ describe("the caller cache under the request scope (plan 12h Task 4)", () => {
       });
     const [a, b] = [make(), make()];
     const ada = await base.seedUser("ada@example.com");
-    const made = await a.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 5 } });
+    const made = await a.api.tokens.create({
+      session: await sessionFor(base.config, ada),
+      name: "ci",
+      quota: { remaining: 5 },
+    });
     if (!made.ok) throw new Error(made.code);
     const one = new Request(`${BASE_URL}/auth/tokens/current`, {
       headers: { authorization: `Bearer ${made.value.token}` },

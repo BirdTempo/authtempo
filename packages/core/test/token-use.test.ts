@@ -3,7 +3,7 @@ import { type AuthConfig, ConfigError } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { CORE_PREFIXES } from "../src/primitives/credentials.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, sessionFor } from "./helpers.js";
 
 // Plan 12k Task 7: the per-token window, the quota, the moved prefixes, and
 // `authenticate` (spec 29 items 12, 13, and 16; rulings 3, 4, and 12 of 12k).
@@ -60,10 +60,18 @@ describe("the per-token window (plan 12k Task 7)", () => {
     const ada = await h.seedUser("ada@example.com");
     const window = { seconds: 60, max: 1 };
     const one = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "one", rateLimit: window }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "one",
+        rateLimit: window,
+      }),
     );
     const two = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "two", rateLimit: window }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "two",
+        rateLimit: window,
+      }),
     );
     expect(one.apiToken.rateLimit).toEqual(window);
     expect([await code(h, one.token), await code(h, two.token)]).toEqual(["ok", "ok"]);
@@ -80,7 +88,11 @@ describe("the per-token window (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", rateLimit: { seconds: 60, max: 1 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        rateLimit: { seconds: 60, max: 1 },
+      }),
     );
     expect(await h.auth.caller(request(token))).toMatchObject({ kind: "token" });
     expect(await h.auth.authenticate(request(token))).toMatchObject({
@@ -97,7 +109,11 @@ describe("the per-token window (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const made = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", rateLimit: { seconds: 60, max: 1 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        rateLimit: { seconds: 60, max: 1 },
+      }),
     );
     expect(await code(h, made.token)).toBe("ok");
     expect(await code(h, made.token)).toBe("rate_limited");
@@ -118,9 +134,15 @@ describe("the per-token window (plan 12k Task 7)", () => {
   it("fills a new token with tokens.defaultRateLimit", async () => {
     const h = useHandle({ tokens: { defaultRateLimit: { seconds: 30, max: 1 } } });
     const ada = await h.seedUser("ada@example.com");
-    const filled = mustOk(await h.auth.api.tokens.create({ user: ada, name: "a" }));
+    const filled = mustOk(
+      await h.auth.api.tokens.create({ session: await sessionFor(h.config, ada), name: "a" }),
+    );
     const own = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "b", rateLimit: { seconds: 60, max: 5 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "b",
+        rateLimit: { seconds: 60, max: 5 },
+      }),
     );
     expect(filled.apiToken.rateLimit).toEqual({ seconds: 30, max: 1 });
     expect(own.apiToken.rateLimit).toEqual({ seconds: 60, max: 5 });
@@ -133,7 +155,7 @@ describe("the per-token window (plan 12k Task 7)", () => {
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
       await h.auth.api.tokens.create({
-        user: ada,
+        session: await sessionFor(h.config, ada),
         name: "ci",
         rateLimit: { seconds: 60, max: 1 },
         quota: { remaining: 5 },
@@ -152,7 +174,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 2 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 2 },
+      }),
     );
     const first = mustOk(await h.auth.authenticate(request(token)));
     expect(first.kind === "token" && first.apiToken.remaining).toBe(1);
@@ -172,7 +198,7 @@ describe("the quota (plan 12k Task 7)", () => {
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
       await h.auth.api.tokens.create({
-        user: ada,
+        session: await sessionFor(h.config, ada),
         name: "ci",
         quota: { remaining: 1, refillAmount: 5, refillSeconds: 60 },
       }),
@@ -196,7 +222,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 5 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 5 },
+      }),
     );
     const one = request(token);
     expect(await h.auth.caller(one)).toMatchObject({ kind: "token" });
@@ -212,7 +242,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 100 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 100 },
+      }),
     );
     // Before each spend of this instance, another instance on the same storage spends first.
     let rivals = 0;
@@ -254,7 +288,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 100 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 100 },
+      }),
     );
     const rival = createAuth({
       baseURL: BASE_URL,
@@ -292,7 +330,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 10 },
+      }),
     );
     // An adapter whose compare of the count never matches: each spend writes zero rows.
     let spends = 0;
@@ -323,7 +365,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const made = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 10 },
+      }),
     );
     // The person revokes the token after the resolve read the row and before its spend writes.
     const storage: StorageAdapter = {
@@ -356,7 +402,11 @@ describe("the quota (plan 12k Task 7)", () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const made = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada),
+        name: "ci",
+        quota: { remaining: 10 },
+      }),
     );
     // The first use stamps lastUsedAt; spends within the hour then write the count only.
     expect(await code(h, made.token)).toBe("ok");
@@ -397,7 +447,7 @@ describe("the quota (plan 12k Task 7)", () => {
     const ada = await h.seedUser("ada@example.com");
     const made = mustOk(
       await h.auth.api.tokens.create({
-        user: ada,
+        session: await sessionFor(h.config, ada),
         name: "ci",
         quota: { remaining: 10, refillAmount: 10, refillSeconds: 60 },
       }),
@@ -542,18 +592,26 @@ describe("the bounds of the window and the quota (plan 12k Task 7, ruling 9)", (
     const ada = await h.seedUser("ada@example.com");
     for (const quota of badQuotas)
       expect(
-        await h.auth.api.tokens.create({ user: ada, name: "ci", quota }),
+        await h.auth.api.tokens.create({
+          session: await sessionFor(h.config, ada),
+          name: "ci",
+          quota,
+        }),
         JSON.stringify(quota),
       ).toMatchObject({ ok: false, code: "invalid_body" });
     for (const rateLimit of badWindows)
       expect(
-        await h.auth.api.tokens.create({ user: ada, name: "ci", rateLimit }),
+        await h.auth.api.tokens.create({
+          session: await sessionFor(h.config, ada),
+          name: "ci",
+          rateLimit,
+        }),
         JSON.stringify(rateLimit),
       ).toMatchObject({ ok: false, code: "invalid_body" });
     expect(await h.storage.findMany("apiToken", [])).toEqual([]);
     const made = mustOk(
       await h.auth.api.tokens.create({
-        user: ada,
+        session: await sessionFor(h.config, ada),
         name: "ci",
         quota: topQuota,
         rateLimit: topWindow,
@@ -566,7 +624,9 @@ describe("the bounds of the window and the quota (plan 12k Task 7, ruling 9)", (
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     // A token with no window and no quota takes any valid one, so only the bounds refuse.
-    const { apiToken } = mustOk(await h.auth.api.tokens.create({ user: ada, name: "ci" }));
+    const { apiToken } = mustOk(
+      await h.auth.api.tokens.create({ session: await sessionFor(h.config, ada), name: "ci" }),
+    );
     const id = apiToken.id;
     for (const quota of badQuotas)
       expect(

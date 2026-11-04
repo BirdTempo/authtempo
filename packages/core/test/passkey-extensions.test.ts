@@ -11,7 +11,7 @@ import { passkeyRoutes } from "../src/http/routes/passkeys.js";
 import { fromBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webauthn.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, get, makeAuth, post, sessionFor } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 
 /**
@@ -89,6 +89,7 @@ async function world(passkey: Passkey, webauthn?: WebAuthnSeam) {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   return { auth, handle, user, cookie: `__Host-tempo_session=${token}` };
 }
@@ -491,10 +492,12 @@ describe("the passkey extensions (plan 12i Task 21)", () => {
     const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
     if (!user) throw new Error("no user");
     const soft = await SoftAuthenticator.create({ rpID: RP_ID, origin: APP_ORIGIN });
-    const regOptions = await passkeyRegistrationOptions(h.config, { user });
+    const regOptions = await passkeyRegistrationOptions(h.config, {
+      session: await sessionFor(h.config, user),
+    });
     if (!regOptions.ok) throw new Error(regOptions.code);
     const registered = await verifyPasskeyRegistration(h.config, {
-      user,
+      session: await sessionFor(h.config, user),
       response: await soft.register(regOptions.value.challenge),
     });
     expect(registered.ok).toBe(true);

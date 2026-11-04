@@ -33,7 +33,7 @@ import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { tokenFromMail } from "./helpers.js";
+import { sessionFor, tokenFromMail } from "./helpers.js";
 import { upSession } from "./password-helpers.js";
 import {
   type Auth,
@@ -147,7 +147,10 @@ describe("the factor row (plan 12c)", () => {
   it("keeps a setup that is not confirmed when the in-process disable finds the factor off, and writes nothing", async () => {
     const auth = totpAuth();
     const { user } = await verifiedSession(auth);
-    const setup = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, {
+      session: await sessionFor(auth.config, user),
+      password: PASSWORD,
+    });
     if (!setup.ok) throw new Error(setup.code);
     const [before] = await auth.storage.findMany("totp", []);
     expect(await disableTotp(auth.config, { userId: user.id })).toMatchObject({
@@ -163,10 +166,12 @@ const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.exam
 async function withPasskey(auth: Auth, email = EMAIL) {
   const session = await verifiedSession(auth, email);
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-  const options = await passkeyRegistrationOptions(auth.config, { user: session.user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, session.user),
+  });
   if (!options.ok) throw new Error(options.code);
   const registered = await verifyPasskeyRegistration(auth.config, {
-    user: session.user,
+    session: await sessionFor(auth.config, session.user),
     response: await soft.register(
       options.value.challenge,
       new TextEncoder().encode(session.user.id),
@@ -540,7 +545,7 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
   it("answers no backup codes at the TOTP setup when the passkey method is on, and the enable keeps the factor's list", async () => {
     const auth = totpAuth({ passkey: RP });
     const { session, factor } = await passkeyOn(auth);
-    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     expect(setup.value.backupCodes).toEqual([]);
     const enabled = await enableTotp(auth.config, {
@@ -557,7 +562,7 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
   it("refuses the TOTP enable with totp_not_enabled when the passkey method went off after the setup, and writes no factor row with no backup codes", async () => {
     const auth = totpAuth({ passkey: RP });
     const { session } = await passkeyOn(auth);
-    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     expect(setup.value.backupCodes).toEqual([]);
     const off = await disableMethod(auth.config, {
@@ -578,7 +583,7 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
     ]);
     expect(totp?.enabledAt).toBeNull();
     // A new setup with the factor off makes the codes, and its enable writes them.
-    const again = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const again = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!again.ok) throw new Error(again.code);
     expect(again.value.backupCodes).toHaveLength(10);
     auth.clock.advance(30_000);
@@ -593,7 +598,7 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
   it("refuses the TOTP enable with totp_not_enabled when the passkey method turned on after the setup, and a new setup answers no codes", async () => {
     const auth = totpAuth({ passkey: RP });
     const { session, soft } = await withPasskey(auth);
-    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     expect(setup.value.backupCodes).toHaveLength(10);
     const on = await enablePasskeyMethod(auth.config, {
@@ -614,7 +619,7 @@ describe("a TOTP setup while another method is on (plan 12c, Task 2 review note 
       { field: "userId", op: "eq", value: session.user.id },
     ]);
     expect(totp?.enabledAt).toBeNull();
-    const again = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const again = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!again.ok) throw new Error(again.code);
     expect(again.value.backupCodes).toEqual([]);
     auth.clock.advance(30_000);
@@ -664,7 +669,12 @@ describe("an email code as a second-factor method (plan 12c)", () => {
     const auth = totpAuth();
     // The enable of the first method kept the enabler's session, so it is still live.
     const { user, session } = await enrolled(auth);
-    const other = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+    const other = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const before = await auth.storage.findOne("secondFactor", [
       { field: "userId", op: "eq", value: user.id },
     ]);
@@ -937,7 +947,7 @@ describe("the bounds and the guards of the email method (plan 12c, Task 7 review
   it("refuses the TOTP enable with totp_not_enabled when the email method turned on after the setup, and the factor keeps its list", async () => {
     const auth = totpAuth();
     const session = await verifiedSession(auth);
-    const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     expect(setup.value.backupCodes).toHaveLength(10);
     const on = await enableEmailMethod(auth.config, { session, password: PASSWORD });

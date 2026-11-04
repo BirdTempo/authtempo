@@ -204,7 +204,7 @@ async function withFactor(w: World): Promise<void> {
   const session = await w.auth.api.getSession(v.value.signedIn.token);
   const totp = w.auth.api.totp;
   if (!session || !totp) throw new Error("no session or no totp");
-  const setup = await totp.setup({ userId: session.user.id, password });
+  const setup = await totp.setup({ session, password });
   if (!setup.ok) throw new Error(setup.code);
   const code = await totpCode(base32Decode(setup.value.secret), new Date());
   const on = await totp.enable({ session, code });

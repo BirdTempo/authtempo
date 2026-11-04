@@ -45,7 +45,7 @@ import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { SOCIAL } from "./every-feature.js";
-import { BASE_URL, emailOf, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
+import { BASE_URL, emailOf, makeAuth, seedPlatform, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   authorized,
   codeFor,
@@ -532,7 +532,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // A token with a window (plan 12k): its window is the limiter call of GET /tokens/current.
     const windowed = must(
       await createApiToken(config, {
-        user: me.user,
+        session: me,
         name: "windowed",
         rateLimit: { seconds: 60, max: 100 },
       }),
@@ -540,7 +540,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // The same for GET /organizations/tokens/current, with a token of the organization.
     const orgWindowed = must(
       await createOrganizationToken(config, {
-        user: me.user,
+        session: me,
         organizationId: org.organization.id,
         name: "windowed",
         permissions: {},
@@ -788,7 +788,12 @@ describe("the codes of one route (plan 11g)", () => {
     const w = world();
     const me = await verifiedSession(w.auth, "ada@example.com");
     for (let i = 0; i < API_TOKEN_CAP; i++)
-      must(await createApiToken(w.auth.config, { user: me.user, name: `t${i}` }));
+      must(
+        await createApiToken(w.auth.config, {
+          session: await sessionFor(w.auth.config, me.user),
+          name: `t${i}`,
+        }),
+      );
     expect(await call(w, "POST /tokens", w.cookie(me.token))).toEqual({
       status: 409,
       code: "token_limit",
@@ -804,7 +809,7 @@ describe("the codes of one route (plan 11g)", () => {
     for (let i = 0; i < ORGANIZATION_TOKEN_CAP; i++)
       must(
         await createOrganizationToken(w.auth.config, {
-          user: me.user,
+          session: await sessionFor(w.auth.config, me.user),
           organizationId: org.organization.id,
           name: `t${i}`,
           permissions: {},
@@ -899,6 +904,7 @@ describe("the codes of one route (plan 11g)", () => {
       userId: root.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     expect(
       await call(w, "POST /organizations/delete", w.cookie(session.token), {
@@ -1521,11 +1527,13 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       userId: ada.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const danAgain = await createSession(config, {
       userId: dan.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
       "POST /handoff/continue": { h: start.handoffId },
@@ -1701,10 +1709,14 @@ function hookOf(mode: "refuse" | "throw") {
 /** A passkey by the register ceremony, as a settings page adds one (as identities.test.ts does). */
 async function addPasskey(w: World, user: UserRow) {
   const soft = await SoftAuthenticator.create({ rpID: "api.example.com", origin: BASE_URL });
-  const options = must(await passkeyRegistrationOptions(w.auth.config, { user }));
+  const options = must(
+    await passkeyRegistrationOptions(w.auth.config, {
+      session: await sessionFor(w.auth.config, user),
+    }),
+  );
   const added = must(
     await verifyPasskeyRegistration(w.auth.config, {
-      user,
+      session: await sessionFor(w.auth.config, user),
       response: await soft.register(options.challenge, new TextEncoder().encode(user.id)),
     }),
   );
@@ -1959,7 +1971,12 @@ describe("the shapes of the OAuth answers (plan 11g)", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(h.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const clientId = await registered(h);
     const p = await pkce();
     const { code } = await authorized(h, `${h.config.cookieName}=${token}`, {

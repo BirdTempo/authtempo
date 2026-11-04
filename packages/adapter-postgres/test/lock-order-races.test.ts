@@ -8,6 +8,7 @@ import {
   type StorageAdapter,
   type UserRow,
 } from "@authtempo/core";
+import { createApiTokenAs, createOrganizationTokenAs } from "@authtempo/core/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
@@ -485,7 +486,8 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     const a = await user("a");
     const organizationId = await organization(plain, a);
 
-    const made = await one.api.organizationTokens.create({
+    // A user with no sign-in: the compat seam, with the user row's rule (plan 12p).
+    const made = await createOrganizationTokenAs(one, {
       user: a,
       organizationId,
       name: "ci",
@@ -705,16 +707,16 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     const two = instance(watch("user", g.reach), {}, sent);
     const one = instance(
       afterAnyRead("apiToken", async () => {
-        second = two.api.tokens.create({ user: a, name: "web" });
+        second = createApiTokenAs(two, { user: a, name: "web" });
         await Promise.race([g.at, second]);
       }),
       {},
       sent,
     );
     const a = await user("a");
-    for (let i = 0; i < 49; i++) must(await plain.api.tokens.create({ user: a, name: "ci" }));
+    for (let i = 0; i < 49; i++) must(await createApiTokenAs(plain, { user: a, name: "ci" }));
 
-    const first = await one.api.tokens.create({ user: a, name: "core" });
+    const first = await createApiTokenAs(one, { user: a, name: "core" });
 
     expect(first).toMatchObject({ ok: true });
     expect(await second).toMatchObject({ ok: false, code: "token_limit" });

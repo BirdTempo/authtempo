@@ -125,7 +125,7 @@ describe("the session delete of a reset, a change, a claim, and a TOTP enable (p
       if (!session) throw new Error("no session");
       // The verify link's session, one other sign-in, and the enabler's own.
       expect(await auth.storage.findMany("session", [])).toHaveLength(3);
-      const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+      const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
       if (!setup.ok) throw new Error(setup.code);
       const code = await totpCode(base32Decode(setup.value.secret), auth.clock.now());
       // The verify link is a claim: it fired `afterEnd` for the sign-up's session.

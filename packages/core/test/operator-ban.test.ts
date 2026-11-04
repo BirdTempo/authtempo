@@ -23,7 +23,7 @@ import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor } from "./helpers.js";
 import {
   approvedDevice,
   authorized,
@@ -254,7 +254,12 @@ async function raceRow(w: World, userId: string, until?: string) {
         ...tx,
         create: async (model, data) => {
           if (model === "operatorAudit" && raced === null)
-            raced = await createSession(w.config, { userId, ip: null, userAgent: null });
+            raced = await createSession(w.config, {
+              userId,
+              ip: null,
+              userAgent: null,
+              proved: true,
+            });
           return tx.create(model, data);
         },
       }),
@@ -274,7 +279,10 @@ describe("the ban (plan 12f Task 6)", () => {
     const before = await grant(w, s.cookie, clientId);
     const after = await grant(w, s.cookie, clientId);
     const code = await handoffCode(w, s.session);
-    const made = await w.auth.api.tokens.create({ user: s.user, name: "ci" });
+    const made = await w.auth.api.tokens.create({
+      session: await sessionFor(w.config, s.user),
+      name: "ci",
+    });
     if (!made.ok) throw new Error(made.code);
     const apiToken = made.value.token;
     const atResource = new Request(RESOURCE, { headers: bearer(before.access_token) });
@@ -565,7 +573,10 @@ describe("the ban (plan 12f Task 6)", () => {
   it("ends at banUntil", async () => {
     const w = await world();
     const s = await signedIn(w);
-    const made = await w.auth.api.tokens.create({ user: s.user, name: "ci" });
+    const made = await w.auth.api.tokens.create({
+      session: await sessionFor(w.config, s.user),
+      name: "ci",
+    });
     if (!made.ok) throw new Error(made.code);
     const until = new Date(w.clock.now().getTime() + 60 * MINUTE_MS);
     expect((await ban(w, s.user.id, until.toISOString())).ok).toBe(true);
@@ -1026,10 +1037,15 @@ describe("the pending-end row of a ban and a clock that runs ahead (ruling 55 of
     const w = await world();
     const s = await signedIn(w);
     for (let i = 0; i < 60; i++)
-      await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+      await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null, proved: true });
     // An instance whose clock runs 2 s ahead writes one more session.
     w.clock.advance(2000);
-    const ahead = await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+    const ahead = await createSession(w.config, {
+      userId: s.user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     w.clock.advance(-2000);
     expect((await ban(w, s.user.id)).ok).toBe(true);
     // The act ends a page; the session from ahead sorts last and waits for the sweep.

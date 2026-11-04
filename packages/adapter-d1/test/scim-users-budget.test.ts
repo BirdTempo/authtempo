@@ -169,8 +169,11 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
     const { user: ada, token: first } = await signIn(setup, ADA);
     const tokens = [first];
     for (let i = 1; i < 40; i++) tokens.push((await signIn(setup, ADA)).token);
+    // The token create takes the session (plan 12p): the first sign-in's own.
+    const adaSession = await setup.api.getSession(first);
+    if (!adaSession || adaSession.user.id !== ada.id) throw new Error("no session");
     for (const name of ["one", "two", "three"]) {
-      const t = await setup.api.tokens.create({ user: ada, name });
+      const t = await setup.api.tokens.create({ session: adaSession, name });
       if (!t.ok) throw new Error(t.code);
     }
     expect(await sessions()).toBe(40);

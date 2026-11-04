@@ -17,7 +17,7 @@ import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
-import { BASE_URL, get, recordCredential } from "./helpers.js";
+import { BASE_URL, get, recordCredential, sessionFor } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, secretActor } from "./operator-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
 
@@ -353,7 +353,14 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     const bob = await verifiedSession(w.auth, "bob@example.com");
     const live = await resolveSession(w.auth.config, ada.token);
     if (!live) throw new Error("no session");
-    expect((await createApiToken(w.auth.config, { user: ada.user, name: "ci" })).ok).toBe(true);
+    expect(
+      (
+        await createApiToken(w.auth.config, {
+          session: await sessionFor(w.auth.config, ada.user),
+          name: "ci",
+        })
+      ).ok,
+    ).toBe(true);
     const solo = await soloOrganization(w, ada.user, "ada-solo");
     const shared = await soloOrganization(w, bob.user, "bob-co");
     const joined = await addMember(w.auth.config, {

@@ -68,7 +68,12 @@ const verify = (w: World, phone: string, code: string, ip = w.ip()) =>
 /** A verified user with an address and the cookie of a fresh session. */
 async function addressUser(w: World, email: string) {
   const user = await w.seedUser(email);
-  const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(w.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return { user, cookie: `${w.config.cookieName}=${token}` };
 }
 
@@ -189,7 +194,12 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     const extra = { password: { hash: FAST, uniformSignUp: false }, passkey: RP };
     const w = world({}, extra);
     const { user, secret: enrolledSecret } = await enrolled(w);
-    const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const cookie = `${w.config.cookieName}=${token}`;
     await add(w, cookie, A);
     expect((await addVerify(w, cookie, codeTo(w, A))).body).toEqual({ phone: A });
@@ -233,6 +243,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       userId: other.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const c = `${open.config.cookieName}=${t.token}`;
     await add(open, c, A);
@@ -361,7 +372,13 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       expect(set.status).toBe(200);
       const signIn = await call(w, post("/auth/password/sign-in", { phone, password: PASSWORD }));
       expect(signIn.status).toBe(200);
-      return { ...up, cookie: `${w.config.cookieName}=${signIn.body.token as string}` };
+      // A password proves no handle, so that session holds no verified power (plan 12p).
+      // The session of the phone code does.
+      return {
+        ...up,
+        proved: up.cookie,
+        cookie: `${w.config.cookieName}=${signIn.body.token as string}`,
+      };
     }
     // The phone is the only identifier: with it gone no sign-in reaches the password.
     const lone = await withPassword(A);
@@ -374,7 +391,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     const named = await withPassword(B);
     const username = await call(
       w,
-      post("/auth/user/username", { username: "bea" }, { cookie: named.cookie }),
+      post("/auth/user/username", { username: "bea" }, { cookie: named.proved }),
     );
     expect(username.status).toBe(200);
     expect(await remove(named.cookie)).toMatchObject({ status: 200, body: { ok: true } });
@@ -387,7 +404,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     const cia = await withPassword("+14155550102");
     const named2 = await call(
       w,
-      post("/auth/user/username", { username: "cia" }, { cookie: cia.cookie }),
+      post("/auth/user/username", { username: "cia" }, { cookie: cia.proved }),
     );
     expect(named2.status).toBe(200);
     const off = { ...w.config, username: null };
@@ -737,6 +754,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       userId: me.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     expect((await add(adds, `${adds.config.cookieName}=${again.token}`, number(3))).body).toEqual({
       sent: true,

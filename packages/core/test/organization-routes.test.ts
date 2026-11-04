@@ -15,6 +15,7 @@ function setup(over: Parameters<typeof makeAuth>[0] = { organizations: {} }) {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     return { cookie: `${auth.config.cookieName}=${token}` };
   }
@@ -23,6 +24,7 @@ function setup(over: Parameters<typeof makeAuth>[0] = { organizations: {} }) {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     return { authorization: `Bearer ${token}` };
   }

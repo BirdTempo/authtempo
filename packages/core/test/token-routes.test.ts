@@ -41,7 +41,12 @@ async function signedIn(h: ReturnType<typeof tokenHandle>, email: string, verifi
     createdAt: now,
     updatedAt: now,
   });
-  const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(h.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: user.emailVerified,
+  });
   return { user, session: token };
 }
 

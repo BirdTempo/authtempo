@@ -41,7 +41,7 @@ import type { StorageAdapter } from "../src/storage/port.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { d1Like } from "./d1-like.js";
-import { post, tokenFromMail } from "./helpers.js";
+import { post, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -137,10 +137,12 @@ async function addPasskey(w: World, user: UserRow) {
     rpID: PASSKEY.rpID,
     origin: PASSKEY.origins[0] ?? "",
   });
-  const options = await passkeyRegistrationOptions(w.auth.config, { user });
+  const options = await passkeyRegistrationOptions(w.auth.config, {
+    session: await sessionFor(w.auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(w.auth.config, {
-    user,
+    session: await sessionFor(w.auth.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!added.ok) throw new Error(added.code);
@@ -305,7 +307,7 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     await googleSignIn(w.auth, w.jwtTokens);
     await addPasskey(w, me.user);
     // The second factor, then a sign-in that trusts this device.
-    const setup = await setupTotp(w.auth.config, { userId: me.user.id, password: PASSWORD });
+    const setup = await setupTotp(w.auth.config, { session: me, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     const secret = base32Decode(setup.value.secret);
     const on = await enableTotp(w.auth.config, {
@@ -328,7 +330,14 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       ip: null,
     });
     if (!second.ok) throw new Error(second.code);
-    expect((await createApiToken(w.auth.config, { user: me.user, name: "ci" })).ok).toBe(true);
+    expect(
+      (
+        await createApiToken(w.auth.config, {
+          session: await sessionFor(w.auth.config, me.user),
+          name: "ci",
+        })
+      ).ok,
+    ).toBe(true);
     await oauthGrant(w, me.token);
     await oauthGrant(w, me.token, "pairwise");
     await deviceGrant(w, me.token);
@@ -1557,7 +1566,7 @@ describe("the delete's own order and rows (review L1 to L3)", () => {
     });
     if (!role.ok) throw new Error(role.code);
     const made = await createOrganizationToken(w.auth.config, {
-      user: me.user,
+      session: await sessionFor(w.auth.config, me.user),
       organizationId: solo.id,
       name: "ci",
       permissions: {},

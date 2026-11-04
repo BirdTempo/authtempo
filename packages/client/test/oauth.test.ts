@@ -101,9 +101,17 @@ describe("oauth grants (plan 9g final fix wave)", () => {
     const no = { ok: false, code: "unauthorized", status: 401 };
     expect(await anonymous.oauth.grants()).toEqual(no);
     expect(await anonymous.oauth.revoke({ clientId })).toEqual(no);
-    const user = await server.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-    if (!user) throw new Error("no user");
-    const created = await server.auth.api.tokens.create({ user, name: "cli" });
+    // The token create takes a session of the user (plan 12p): a magic link in process.
+    await server.auth.api.requestMagicLink({ email: "ada@example.com", ip: null });
+    const link = await server.auth.api.verifyMagicLink({
+      token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    if (!link.ok || !("token" in link.value)) throw new Error("no session");
+    const session = await server.auth.api.getSession(link.value.token);
+    if (!session || session.user.id !== userId) throw new Error("no session");
+    const created = await server.auth.api.tokens.create({ session, name: "cli" });
     if (!created.ok) throw new Error(created.code);
     const cli = createClient({
       baseURL: BASE_URL,

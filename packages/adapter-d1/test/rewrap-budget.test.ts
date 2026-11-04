@@ -155,9 +155,12 @@ async function sixtyRows() {
       ip: null,
       userAgent: null,
     });
-    if (!verified.ok) throw new Error(verified.code);
+    if (!verified.ok || verified.value.signedIn === null) throw new Error("no verify session");
     owner ??= verified.value.user;
-    const setup = await totp.setup({ userId: up.value.user.id, password: PW });
+    // The setup takes the session of the verify link (plan 12p).
+    const session = await v1.api.getSession(verified.value.signedIn.token);
+    if (!session) throw new Error("no session");
+    const setup = await totp.setup({ session, password: PW });
     if (!setup.ok) throw new Error(setup.code);
   }
   await jwt.jwks();

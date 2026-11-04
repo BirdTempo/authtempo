@@ -94,8 +94,10 @@ export async function mailUserInvite(
  * door: an address of an enforced domain answers `sso_required` (plan 12d,
  * spec 30 item 12). Then `user.beforeVerify` of an unverified user, the
  * gate reads and the session hook, the `email` identity, the claim of an
- * unverified user (`claimEmail`: every way in of a claimant goes, the
- * username and the phone too), and the session or the challenge.
+ * unverified user, and the session or the challenge. The claim deletes the
+ * claimant's credentials, sessions, and handoff codes, and clears the
+ * username and the phone (`claimEmail`). A claimant's session had no
+ * verified powers (plan 12p), so it made no token, grant, or factor to keep.
  *
  * A wrong, spent, or expired token answers one code, `invalid_token`. A
  * user with the second factor on gets a challenge in place of the session,

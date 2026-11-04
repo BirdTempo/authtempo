@@ -679,6 +679,7 @@ describe("stale reads and removal (Review I-2, I-3, M-1)", () => {
         userId: u.id,
         ip: null,
         userAgent: null,
+        proved: true,
       });
       await auth.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
         activeOrganizationId: org.id,

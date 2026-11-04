@@ -27,7 +27,7 @@ import {
   type RoutePath,
 } from "../src/routes.js";
 import { ROUTES as TESTING_ROUTES } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, sessionFor } from "./helpers.js";
 
 /**
  * The one node:fs call of this file. Core's typecheck has no Node types,
@@ -111,9 +111,13 @@ describe("the SDK entries of core (plan 11d)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     expect(token.startsWith(SESSION_TOKEN_PREFIX)).toBe(true);
-    const api = await createApiToken(h.config, { user, name: "ci" });
+    const api = await createApiToken(h.config, {
+      session: await sessionFor(h.config, user),
+      name: "ci",
+    });
     if (!api.ok) throw new Error(api.code);
     expect(api.value.token.startsWith(API_TOKEN_PREFIX)).toBe(true);
     const jwt = await mintSessionJwt(h.config, { userId: user.id, sessionId: session.id });

@@ -50,7 +50,7 @@ export async function verifiedSession(
  */
 export async function enrolled(auth: Auth, email = EMAIL) {
   const session = await verifiedSession(auth, email);
-  const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+  const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
   if (!setup.ok) throw new Error(setup.code);
   recordCredential(setup.value.secret);
   for (const code of setup.value.backupCodes) recordCredential(code);

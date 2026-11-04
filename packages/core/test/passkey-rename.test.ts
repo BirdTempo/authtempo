@@ -9,7 +9,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { UserRow } from "../src/schema.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, post, sessionFor } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type Auth, totpAuth, verifiedSession } from "./totp-helpers.js";
 
@@ -25,10 +25,12 @@ afterEach(() => {
 /** A passkey of the user by the register ceremony, as the product makes one. */
 async function addPasskey(auth: Auth, user: UserRow, name?: string) {
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE_URL });
-  const options = await passkeyRegistrationOptions(auth.config, { user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(auth.config, {
-    user,
+    session: await sessionFor(auth.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
     ...(name !== undefined ? { name } : {}),
   });
@@ -306,7 +308,9 @@ describe("the passkey name at the registration (plan 12a Task 19, review M2)", (
     const s = await verifiedSession(auth);
     const handle = createRouter(auth.config, coreRoutes(auth.config));
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE_URL });
-    const options = await passkeyRegistrationOptions(auth.config, { user: s.user });
+    const options = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, s.user),
+    });
     if (!options.ok) throw new Error(options.code);
     const response = await soft.register(
       options.value.challenge,

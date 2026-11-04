@@ -8,7 +8,7 @@ import {
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { enablePasskeyMethod } from "../src/engine/second-factor-methods.js";
-import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
 import { sessionRoutes } from "../src/http/routes/sessions.js";
@@ -16,7 +16,7 @@ import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { get, makeAuth, post } from "./helpers.js";
+import { get, makeAuth, post, sessionFor } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
@@ -28,14 +28,17 @@ function passkeyAuth() {
 
 async function registered(auth: ReturnType<typeof makeAuth>, user: UserRow, name?: string) {
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: ORIGIN });
-  const options = await passkeyRegistrationOptions(auth.config, { user });
+  // The registration takes a session (plan 12p). It signs out after, so a test counts its own sessions only.
+  const session = await sessionFor(auth.config, user);
+  const options = await passkeyRegistrationOptions(auth.config, { session });
   if (!options.ok) throw new Error(options.code);
   const r = await verifyPasskeyRegistration(auth.config, {
-    user,
+    session,
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
     name,
   });
   if (!r.ok) throw new Error(r.code);
+  await destroySession(auth.config, session.token);
   return { soft, summary: r.value };
 }
 
@@ -50,7 +53,9 @@ describe("passkey registration", () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");
     const { summary } = await registered(auth, user);
-    const options = await passkeyRegistrationOptions(auth.config, { user });
+    const options = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, user),
+    });
     expect(options.ok).toBe(true);
     if (!options.ok) return;
     expect(options.value.rp).toEqual({ id: RP.rpID, name: RP.rpName });
@@ -73,10 +78,12 @@ describe("passkey registration", () => {
         origin: ORIGIN,
         credentialIdBytes: bytes,
       });
-      const options = await passkeyRegistrationOptions(auth.config, { user });
+      const options = await passkeyRegistrationOptions(auth.config, {
+        session: await sessionFor(auth.config, user),
+      });
       if (!options.ok) throw new Error(options.code);
       return verifyPasskeyRegistration(auth.config, {
-        user,
+        session: await sessionFor(auth.config, user),
         response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
       });
     };
@@ -123,11 +130,20 @@ describe("passkey registration", () => {
       createdAt: now,
       updatedAt: now,
     });
-    expect(await passkeyRegistrationOptions(auth.config, { user })).toMatchObject({
+    expect(
+      await passkeyRegistrationOptions(auth.config, {
+        session: await sessionFor(auth.config, user),
+      }),
+    ).toMatchObject({
       ok: false,
       code: "email_unverified",
     });
-    expect(await verifyPasskeyRegistration(auth.config, { user, response: {} })).toMatchObject({
+    expect(
+      await verifyPasskeyRegistration(auth.config, {
+        session: await sessionFor(auth.config, user),
+        response: {},
+      }),
+    ).toMatchObject({
       ok: false,
       code: "email_unverified",
     });
@@ -137,7 +153,11 @@ describe("passkey registration", () => {
   it("answers not_found when passkeys are not configured", async () => {
     const auth = makeAuth();
     const user = await auth.seedUser("ada@example.com");
-    expect(await passkeyRegistrationOptions(auth.config, { user })).toMatchObject({
+    expect(
+      await passkeyRegistrationOptions(auth.config, {
+        session: await sessionFor(auth.config, user),
+      }),
+    ).toMatchObject({
       ok: false,
       code: "not_found",
     });
@@ -154,7 +174,7 @@ describe("passkey registration", () => {
     const options = await passkeyAuthenticationOptions(auth.config, { ip: null });
     if (!options.ok) throw new Error(options.code);
     const r = await verifyPasskeyRegistration(auth.config, {
-      user,
+      session: await sessionFor(auth.config, user),
       response: await soft.register(options.value.challenge),
     });
     expect(r).toMatchObject({ ok: false, code: "invalid_token" });
@@ -165,10 +185,12 @@ describe("passkey registration", () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: "https://evil.example" });
-    const options = await passkeyRegistrationOptions(auth.config, { user });
+    const options = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, user),
+    });
     if (!options.ok) throw new Error(options.code);
     const r = await verifyPasskeyRegistration(auth.config, {
-      user,
+      session: await sessionFor(auth.config, user),
       response: await soft.register(options.value.challenge),
     });
     expect(r).toMatchObject({ ok: false, code: "passkey_failed" });
@@ -180,36 +202,53 @@ describe("passkey registration", () => {
     const ada = await auth.seedUser("ada@example.com");
     const bob = await auth.seedUser("bob@example.com");
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: ORIGIN });
-    const options = await passkeyRegistrationOptions(auth.config, { user: ada });
+    const options = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, ada),
+    });
     if (!options.ok) throw new Error(options.code);
     const response = await soft.register(options.value.challenge);
     // Bob presents Ada's challenge.
-    expect(await verifyPasskeyRegistration(auth.config, { user: bob, response })).toMatchObject({
+    expect(
+      await verifyPasskeyRegistration(auth.config, {
+        session: await sessionFor(auth.config, bob),
+        response,
+      }),
+    ).toMatchObject({
       ok: false,
       code: "invalid_token",
     });
     // Ada's row is consumed by that attempt, so Ada's own verify now fails too.
-    expect(await verifyPasskeyRegistration(auth.config, { user: ada, response })).toMatchObject({
+    expect(
+      await verifyPasskeyRegistration(auth.config, {
+        session: await sessionFor(auth.config, ada),
+        response,
+      }),
+    ).toMatchObject({
       ok: false,
       code: "invalid_token",
     });
-    const o2 = await passkeyRegistrationOptions(auth.config, { user: ada });
+    const o2 = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, ada),
+    });
     if (!o2.ok) throw new Error(o2.code);
     auth.clock.advance(5 * 60_000);
     expect(
       await verifyPasskeyRegistration(auth.config, {
-        user: ada,
+        session: await sessionFor(auth.config, ada),
         response: await soft.register(o2.value.challenge),
       }),
     ).toMatchObject({ ok: false, code: "token_expired" });
     expect(
       await verifyPasskeyRegistration(auth.config, {
-        user: ada,
+        session: await sessionFor(auth.config, ada),
         response: { id: "x", response: { clientDataJSON: "!!" } },
       }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
     expect(
-      await verifyPasskeyRegistration(auth.config, { user: ada, response: null }),
+      await verifyPasskeyRegistration(auth.config, {
+        session: await sessionFor(auth.config, ada),
+        response: null,
+      }),
     ).toMatchObject({ ok: false, code: "invalid_token" });
   });
 
@@ -217,8 +256,11 @@ describe("passkey registration", () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");
     const { soft } = await registered(auth, user);
-    const options = await passkeyRegistrationOptions(auth.config, { user });
+    const session = await sessionFor(auth.config, user);
+    const options = await passkeyRegistrationOptions(auth.config, { session });
     if (!options.ok) throw new Error(options.code);
+    // The session of the options signs out: the count below is of the verify's sessions.
+    await destroySession(auth.config, session.token);
     const r = await verifyPasskeyAuthentication(auth.config, {
       response: await soft.authenticate(options.value.challenge),
       ip: null,
@@ -234,10 +276,12 @@ describe("passkey registration", () => {
     const ada = await auth.seedUser("ada@example.com");
     const bob = await auth.seedUser("bob@example.com");
     const { soft } = await registered(auth, ada);
-    const options = await passkeyRegistrationOptions(auth.config, { user: bob });
+    const options = await passkeyRegistrationOptions(auth.config, {
+      session: await sessionFor(auth.config, bob),
+    });
     if (!options.ok) throw new Error(options.code);
     const r = await verifyPasskeyRegistration(auth.config, {
-      user: bob,
+      session: await sessionFor(auth.config, bob),
       response: await soft.register(options.value.challenge),
     });
     expect(r).toMatchObject({ ok: false, code: "passkey_failed" });
@@ -462,6 +506,7 @@ describe("passkey routes", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     return { user, cookie: `__Host-tempo_session=${token}` };
   }
@@ -562,7 +607,12 @@ describe("passkey routes", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const { token } = await createSession(auth.config, { userId: u.id, ip: null, userAgent: null });
+    const { token } = await createSession(auth.config, {
+      userId: u.id,
+      ip: null,
+      userAgent: null,
+      proved: u.emailVerified,
+    });
     const res = await handle(
       post("/auth/passkey/register/options", {}, { cookie: `__Host-tempo_session=${token}` }),
     );
@@ -593,6 +643,7 @@ describe("the last passkey of the passkey method (plan 12c)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const resolved = await resolveSession(auth.config, session.token);
     if (!resolved) throw new Error("no session");

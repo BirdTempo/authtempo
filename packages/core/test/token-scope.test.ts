@@ -5,7 +5,7 @@ import type { Caller } from "../src/engine/tokens.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor } from "./helpers.js";
 
 // Plan 12k Task 7: the permissions of a user token, and the narrow-only update (spec 29 items 10 and 11).
 
@@ -70,7 +70,12 @@ async function signedIn(h: Handle, email: string) {
     createdAt: now,
     updatedAt: now,
   });
-  const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(h.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return { user, session: token };
 }
 
@@ -144,7 +149,11 @@ describe("token permissions (plan 12k Task 7)", () => {
     const off = scopeHandle(false);
     const bob = await off.seedUser("bob@example.com");
     expect(
-      await off.auth.api.tokens.create({ user: bob, name: "x", permissions: { member: ["read"] } }),
+      await off.auth.api.tokens.create({
+        session: await sessionFor(off.config, bob),
+        name: "x",
+        permissions: { member: ["read"] },
+      }),
     ).toMatchObject({ ok: false, code: "invalid_body" });
     expect(await off.storage.findMany("apiToken", [])).toEqual([]);
   });
@@ -184,7 +193,11 @@ describe("token permissions (plan 12k Task 7)", () => {
     const plain = await signedIn(h, "plain@example.com");
     const organizationId = await organization(h, owner.user, admin.user, plain.user);
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: admin.user, name: "ci", organizationId }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, admin.user),
+        name: "ci",
+        organizationId,
+      }),
     );
     const wanted = { organizationId, permissions: { member: ["create"] } };
     expect(await h.auth.hasPermission(await callerOf(h, token), wanted)).toBe(true);
@@ -207,7 +220,7 @@ describe("token permissions (plan 12k Task 7)", () => {
     const organizationId = await organization(h, owner.user, admin.user, plain.user);
     const { token } = mustOk(
       await h.auth.api.tokens.create({
-        user: admin.user,
+        session: await sessionFor(h.config, admin.user),
         name: "reader",
         organizationId,
         permissions: { member: ["read"] },

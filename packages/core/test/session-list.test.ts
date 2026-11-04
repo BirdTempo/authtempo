@@ -69,7 +69,7 @@ async function stale(auth: Auth, token: string) {
 /** A session of `userId` that a sign-in opened, one second after the last one, so the ids sort by time. */
 async function open(auth: Auth, userId: string, ip: string) {
   auth.clock.advance(1000);
-  const { token } = await createSession(auth.config, { userId, ip, userAgent: null });
+  const { token } = await createSession(auth.config, { userId, ip, userAgent: null, proved: true });
   const s = await resolveSession(auth.config, token);
   if (!s) throw new Error("no session");
   return { ...s, token };
@@ -181,11 +181,21 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
         const config = edge === "cap" ? cappedConfig(auth) : auth.config;
         const user = await auth.seedUser("edge@example.com");
         // The target opens under the default config: its expiry is 30 days, past the cap of 1 day.
-        const t = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+        const t = await createSession(auth.config, {
+          userId: user.id,
+          ip: null,
+          userAgent: null,
+          proved: true,
+        });
         const target = await resolveSession(auth.config, t.token, "read-only");
         if (!target) throw new Error("no target");
         auth.clock.advance(DAY / 2);
-        const m = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+        const m = await createSession(config, {
+          userId: user.id,
+          ip: null,
+          userAgent: null,
+          proved: true,
+        });
         const me = await resolveSession(config, m.token);
         if (!me) throw new Error("no session");
         const end =
@@ -513,7 +523,10 @@ async function stocked() {
     sessionId: me.session.id,
   });
   if (!code.ok) throw new Error(code.code);
-  const apiToken = await createApiToken(auth.config, { user: me.user, name: "ci" });
+  const apiToken = await createApiToken(auth.config, {
+    session: me,
+    name: "ci",
+  });
   if (!apiToken.ok) throw new Error(apiToken.code);
   // An OAuth client: one exchanged code (a refresh token) and one unspent code.
   const cookie = `${auth.config.cookieName}=${me.token}`;
@@ -758,7 +771,12 @@ describe("api.session (plan 12a)", () => {
     const user = await base.seedUser("api@example.com");
     const opened = async () => {
       base.clock.advance(1000);
-      const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+      const { token } = await createSession(config, {
+        userId: user.id,
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
       const s = await api.getSession(token);
       if (!s) throw new Error("no session");
       return s;

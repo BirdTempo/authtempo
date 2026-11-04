@@ -29,6 +29,7 @@ import {
   LONG_TEST_MS,
   makeAuth,
   post,
+  sessionFor,
   settled,
   tokenFromMail,
 } from "../helpers.js";
@@ -360,10 +361,12 @@ const DOORS: Door[] = [
       const user = await w.storage.findOne("user", [{ field: "email", op: "eq", value: ADA }]);
       if (!user) throw new Error("no user");
       const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-      const reg = await passkeyRegistrationOptions(w.config, { user });
+      const reg = await passkeyRegistrationOptions(w.config, {
+        session: await sessionFor(w.config, user),
+      });
       if (!reg.ok) throw new Error(reg.code);
       const stored = await verifyPasskeyRegistration(w.config, {
-        user,
+        session: await sessionFor(w.config, user),
         response: await soft.register(reg.value.challenge, new TextEncoder().encode(user.id)),
       });
       if (!stored.ok) throw new Error(stored.code);

@@ -10,6 +10,7 @@ import {
 import { passwordSignIn } from "../src/engine/password.js";
 import { setupTotp } from "../src/engine/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { sessionFor } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
@@ -221,7 +222,10 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
     const auth = await operatorAuth();
     const { user } = await verifiedSession(auth, EMAIL);
     // A setup that is not confirmed: the factor is off, and a totp row exists.
-    const setup = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, {
+      session: await sessionFor(auth.config, user),
+      password: PASSWORD,
+    });
     if (!setup.ok) throw new Error(setup.code);
     const [pending] = await auth.storage.findMany("totp", []);
     expect(pending).toBeDefined();

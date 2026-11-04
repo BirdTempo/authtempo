@@ -27,6 +27,7 @@ import {
   makeAuth,
   post,
   recordCredential,
+  sessionFor,
   settled,
   tokenFromMail,
 } from "./helpers.js";
@@ -149,6 +150,7 @@ async function phoned(w: World) {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   const cookie = `${w.auth.config.cookieName}=${token}`;
   const added = await w.handle(post("/auth/phone/add", { phone: PHONE }, { cookie }));
@@ -195,10 +197,15 @@ const CASES: Record<string, (w: World) => Promise<{ res: Response; json: boolean
     const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
     if (!user) throw new Error("no user");
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
-    const reg = await passkeyRegistrationOptions(w.auth.config, { user });
+    const reg = await passkeyRegistrationOptions(w.auth.config, {
+      session: await sessionFor(w.auth.config, user),
+    });
     if (!reg.ok) throw new Error(reg.code);
     const response = await soft.register(reg.value.challenge, new TextEncoder().encode(user.id));
-    const done = await verifyPasskeyRegistration(w.auth.config, { user, response });
+    const done = await verifyPasskeyRegistration(w.auth.config, {
+      session: await sessionFor(w.auth.config, user),
+      response,
+    });
     if (!done.ok) throw new Error(done.code);
     const options = await passkeyAuthenticationOptions(w.auth.config, { ip: null });
     if (!options.ok) throw new Error(options.code);

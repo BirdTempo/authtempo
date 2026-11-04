@@ -189,7 +189,8 @@ describe("continueHandoff and redeemHandoff", () => {
   }
   /** A browser session for the user, as the continue route checks it. */
   async function sessionId(auth: ReturnType<typeof makeAuth>, userId: string) {
-    return (await createSession(auth.config, { userId, ip: null, userAgent: null })).session.id;
+    return (await createSession(auth.config, { userId, ip: null, userAgent: null, proved: true }))
+      .session.id;
   }
   async function continued(auth: ReturnType<typeof makeAuth>, handoffId: string, userId: string) {
     const browser = await sessionId(auth, userId);
@@ -466,6 +467,7 @@ describe("handoff routes", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     return `__Host-tempo_session=${token}`;
   }

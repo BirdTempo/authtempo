@@ -292,7 +292,12 @@ async function unverifiedHandoffCode(auth: ReturnType<typeof makeAuth>) {
     ip: null,
   });
   if (!start.ok) throw new Error(start.code);
-  const browser = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+  const browser = await createSession(auth.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: user.emailVerified,
+  });
   const cont = await continueHandoff(auth.config, {
     handoffId: start.value.handoffId,
     userId: user.id,
@@ -332,7 +337,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     );
     if (!claim.ok) throw new Error("no claimant");
     const userId = claim.value.id;
-    await createSession(auth.config, { userId, ip: null, userAgent: null });
+    await createSession(auth.config, { userId, ip: null, userAgent: null, proved: false });
 
     // The claimant's second callback is in flight.
     const s = await started(auth);
@@ -586,6 +591,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: user.emailVerified,
     });
     const cont = await continueHandoff(auth.config, {
       handoffId: start.value.handoffId,
@@ -651,7 +657,11 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
         if (m === "user" && !missed) {
           missed = true;
           await inner.create("user", winner);
-          await createSession(auth.config, { userId: winner.id, ip: null, userAgent: null }, inner);
+          await createSession(
+            auth.config,
+            { userId: winner.id, ip: null, userAgent: null, proved: true },
+            inner,
+          );
           return null;
         }
         return a.findOne(m, w);
@@ -668,7 +678,12 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       EMAIL,
       now,
       noVerifyHooks("magic_link"),
-      (tx, u) => createSession(auth.config, { userId: u.id, ip: null, userAgent: null }, tx),
+      (tx, u) =>
+        createSession(
+          auth.config,
+          { userId: u.id, ip: null, userAgent: null, proved: u.emailVerified },
+          tx,
+        ),
     );
     expect(missed).toBe(true);
     expect(r.created).toBe(false);
@@ -810,6 +825,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: user.emailVerified,
     });
     const start = await startHandoff(auth.config, {
       challenge: await sha256Base64Url(randomBase64Url(32)),

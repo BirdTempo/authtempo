@@ -107,9 +107,13 @@ async function enroll(f: Fixture, auth: Auth, email: string): Promise<void> {
     userAgent: null,
   });
   if (!verified.ok) throw new Error(`the verify answered ${verified.code}`);
+  if (verified.value.signedIn === null) throw new Error("the verify opened no session");
   const totp = auth.api.totp;
   if (!totp) throw new Error("no totp api");
-  const setup = await totp.setup({ userId: up.value.user.id, password: PW });
+  // The setup takes the session of the verify link (plan 12p).
+  const session = await auth.api.getSession(verified.value.signedIn.token);
+  if (!session) throw new Error("no session");
+  const setup = await totp.setup({ session, password: PW });
   if (!setup.ok) throw new Error(`the setup answered ${setup.code}`);
   const jwt = auth.api.jwt;
   if (!jwt) throw new Error("no jwt api");

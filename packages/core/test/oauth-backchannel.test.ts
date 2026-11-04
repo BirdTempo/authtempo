@@ -287,7 +287,7 @@ const FLOWS: Flow[] = [
     name: "the second-factor enable",
     target: "other",
     async run(w, actor) {
-      const setup = await setupTotp(w.auth.config, { userId: actor.user.id, password: PASSWORD });
+      const setup = await setupTotp(w.auth.config, { session: actor, password: PASSWORD });
       if (!setup.ok) throw new Error(setup.code);
       const code = await codeNow(w.auth, base32Decode(setup.value.secret));
       const r = await enableTotp(w.auth.config, { session: actor, code });
@@ -581,7 +581,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     w.status.set(BC2, 500);
     /** One linked session of `clientId` that a sign-out ends while the client fails: one due row. */
     const endLinked = async (clientId: string, userId: string) => {
-      const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
+      const s = await createSession(w.auth.config, {
+        userId,
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
       await linkIdToken(w.auth.config, {
         sessionId: s.session.id,
         clientId,
@@ -801,7 +806,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
   /** `count` live links of new sign-ins of `userId`, each one second older than the next. */
   async function liveLinks(w: World, userId: string, clientId: string, count: number) {
     for (let i = 0; i < count; i++) {
-      const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
+      const s = await createSession(w.auth.config, {
+        userId,
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
       await linkIdToken(w.auth.config, {
         sessionId: s.session.id,
         clientId,
@@ -1159,6 +1169,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         userId: actor.user.id,
         ip: null,
         userAgent: null,
+        proved: true,
       });
       await linkIdToken(w.auth.config, {
         sessionId: s.session.id,
@@ -1172,7 +1183,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     // A ban of a user with 60 sessions and a hook leaves sessions with a pending-end row.
     const bob = await verifiedSession(w.auth, "bob@example.com");
     for (let i = 0; i < 59; i++)
-      await createSession(w.auth.config, { userId: bob.user.id, ip: null, userAgent: null });
+      await createSession(w.auth.config, {
+        userId: bob.user.id,
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
     const banned = await banUser(w.auth.config, {
       actor: { kind: "app", name: "support-tool" },
       userId: bob.user.id,
@@ -1222,6 +1238,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
           userId: actor.user.id,
           ip: null,
           userAgent: null,
+          proved: true,
         });
         await linkIdToken(w.auth.config, {
           sessionId: s.session.id,
@@ -1317,6 +1334,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         userId: actor.user.id,
         ip: null,
         userAgent: null,
+        proved: true,
       });
       await linkIdToken(w.auth.config, {
         sessionId: s.session.id,

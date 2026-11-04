@@ -1745,6 +1745,7 @@ describe("the route contract (plan 11g)", () => {
       userId: carol.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     await check(
       "POST /organizations/invitations/accept",

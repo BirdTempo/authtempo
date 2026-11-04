@@ -632,13 +632,13 @@ describe("the anonymous branch of provedAccount and handleProved (plan 12i Task 
     const before = await dump(w);
     const refused = { ok: false, code: "email_unverified", status: 403 };
     const answers = {
-      passkeyOptions: await passkeyRegistrationOptions(config, { user: session.user }),
-      passkeyVerify: await verifyPasskeyRegistration(config, { user: session.user, response: {} }),
+      passkeyOptions: await passkeyRegistrationOptions(config, { session }),
+      passkeyVerify: await verifyPasskeyRegistration(config, { session, response: {} }),
       firstPassword: await changePassword(config, { session, newPassword: "a new password 1" }),
       totpEnable: await enableTotp(config, { session, code: "123456" }),
       passkeyMethod: await enablePasskeyMethod(config, { session, password: "x", response: {} }),
       profile: await updateProfile(config, { session, name: "Anon" }),
-      apiToken: await createApiToken(config, { user: session.user, name: "ci" }),
+      apiToken: await createApiToken(config, { session, name: "ci" }),
       username: await setUsername(config, { session, username: "anon", ip: null, userAgent: null }),
       phone: await addPhone(config, { session, phone: "+14155550100", ip: null }),
       phoneVerify: await verifyAddPhone(config, {
@@ -652,7 +652,7 @@ describe("the anonymous branch of provedAccount and handleProved (plan 12i Task 
     for (const [name, r] of Object.entries(answers)) expect([name, r]).toEqual([name, refused]);
     // The TOTP setup checks the password first, and an anonymous user has none.
     expect(
-      await setupTotp(config, { userId: session.user.id, password: "correct horse battery" }),
+      await setupTotp(config, { session: session, password: "correct horse battery" }),
     ).toMatchObject({ ok: false });
     expect(await dump(w)).toEqual(before);
   });

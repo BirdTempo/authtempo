@@ -117,6 +117,7 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     auth.clock.advance(2 * DAY);
     const res = await handle(
@@ -180,6 +181,7 @@ async function ownerProbe(): Promise<Map<string, { status: number; error: string
       userId: owner.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     w.clock.advance(2 * DAY);
     const res = await w.handle(

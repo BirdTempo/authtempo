@@ -16,7 +16,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { get, post, tokenFromMail } from "./helpers.js";
+import { get, post, sessionFor, tokenFromMail } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, googleSignIn, socialAuth } from "./social-helpers.js";
 import { PASSWORD, verifiedSession } from "./totp-helpers.js";
@@ -51,10 +51,12 @@ async function addPasskey(auth: World["auth"], user: UserRow) {
     rpID: PASSKEY.rpID,
     origin: PASSKEY.origins[0] ?? "",
   });
-  const options = await passkeyRegistrationOptions(auth.config, { user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(auth.config, {
-    user,
+    session: await sessionFor(auth.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!added.ok) throw new Error(added.code);

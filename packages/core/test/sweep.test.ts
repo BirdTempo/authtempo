@@ -3,7 +3,7 @@ import { findClient, publicClientFields } from "../src/engine/oauth-clients.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { setupTotp } from "../src/engine/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth, post } from "./helpers.js";
+import { makeAuth, post, sessionFor } from "./helpers.js";
 import { oauthHandle } from "./oauth-helpers.js";
 import { enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
@@ -259,7 +259,10 @@ describe("sweepExpired", () => {
     const auth = totpAuth();
     const setup = async (email: string) => {
       const { user } = await verifiedSession(auth, email);
-      const r = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+      const r = await setupTotp(auth.config, {
+        session: await sessionFor(auth.config, user),
+        password: PASSWORD,
+      });
       if (!r.ok) throw new Error(r.code);
       return user.id;
     };

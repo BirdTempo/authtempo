@@ -44,7 +44,7 @@ import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { post, tokenFromMail } from "./helpers.js";
+import { post, sessionFor, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
@@ -169,12 +169,13 @@ async function withPasskey(w: World) {
   must(await magicLink(w));
   const user = await userOf(w.auth);
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-  const reg = must(await passkeyRegistrationOptions(w.auth.config, { user }));
+  const session = await sessionFor(w.auth.config, user);
+  const reg = must(await passkeyRegistrationOptions(w.auth.config, { session }));
   const response = await soft.register(reg.challenge, new TextEncoder().encode(user.id));
   return {
     user,
     soft,
-    register: () => verifyPasskeyRegistration(w.auth.config, { user, response }),
+    register: () => verifyPasskeyRegistration(w.auth.config, { session, response }),
   };
 }
 
@@ -1008,7 +1009,11 @@ describe("the request scope of the flow events (ruling 25 of plan 12h)", () => {
     const token = tokenOf(await magicLink(w));
     const user = await userOf(w.auth);
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-    const reg = must(await passkeyRegistrationOptions(w.auth.config, { user }));
+    const reg = must(
+      await passkeyRegistrationOptions(w.auth.config, {
+        session: await sessionFor(w.auth.config, user),
+      }),
+    );
     const response = await soft.register(reg.challenge, new TextEncoder().encode(user.id));
     const { res, events } = await inScope(
       w,

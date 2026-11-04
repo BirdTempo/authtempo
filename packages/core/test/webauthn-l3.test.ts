@@ -13,7 +13,7 @@ import { passkeyRoutes } from "../src/http/routes/passkeys.js";
 import { onDomainTree } from "../src/primitives/host.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, get, makeAuth, post, sessionFor } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 
 /**
@@ -55,6 +55,7 @@ async function passkeyWorld(passkey: NonNullable<AuthConfig["passkey"]>) {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   return { auth, handle, user, cookie: `__Host-tempo_session=${token}` };
 }
@@ -445,10 +446,12 @@ async function factorWorld() {
   const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (!user) throw new Error("no user");
   const soft = await SoftAuthenticator.create({ rpID: RP_ID, origin: APP_ORIGIN });
-  const options = await passkeyRegistrationOptions(h.config, { user });
+  const options = await passkeyRegistrationOptions(h.config, {
+    session: await sessionFor(h.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const registered = await verifyPasskeyRegistration(h.config, {
-    user,
+    session: await sessionFor(h.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!registered.ok) throw new Error(registered.code);

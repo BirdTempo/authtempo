@@ -535,6 +535,7 @@ describe("invitation hooks (plan 9d)", () => {
       userId: carol.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const res = await handle(
       post(

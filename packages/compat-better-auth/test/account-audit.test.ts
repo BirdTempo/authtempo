@@ -328,10 +328,10 @@ describe("Task 19 update-passkey", () => {
       const me = await tempo.getSession(token);
       if (!me) throw new Error("no session");
       const soft = await SoftAuthenticator.create({ rpID: rp.rpID, origin: BASE });
-      const options = await tempo.passkeyRegistrationOptions({ user: me.user });
+      const options = await tempo.passkeyRegistrationOptions({ session: me });
       if (!options.ok) throw new Error(options.code);
       const r = await tempo.verifyPasskeyRegistration({
-        user: me.user,
+        session: me,
         response: await soft.register(options.value.challenge),
         name: "Phone",
       });

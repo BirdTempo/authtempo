@@ -363,6 +363,7 @@ describe("the user of the request event on every route (ruling 37 of plan 12n)",
         userId: caller,
         ip: null,
         userAgent: null,
+        proved: true,
       });
       return recordCredential(token);
     });

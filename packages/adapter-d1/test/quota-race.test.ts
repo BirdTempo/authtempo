@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { createAuth, type StorageAdapter } from "@authtempo/core";
+import { createApiTokenAs } from "@authtempo/core/compat";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
@@ -93,7 +94,8 @@ describe("token quota races on D1 (plan 12k Task 7)", () => {
 
   it("spends the last call once under a race", async () => {
     const w = await twoInstances();
-    const made = await w.plain.api.tokens.create({
+    // A user with no sign-in: the compat seam, with the user row's rule (plan 12p).
+    const made = await createApiTokenAs(w.plain, {
       user: w.user,
       name: "ci",
       quota: { remaining: 1 },
@@ -111,7 +113,7 @@ describe("token quota races on D1 (plan 12k Task 7)", () => {
 
   it("refills once under a race", async () => {
     const w = await twoInstances();
-    const made = await w.plain.api.tokens.create({
+    const made = await createApiTokenAs(w.plain, {
       user: w.user,
       name: "ci",
       quota: { remaining: 0, refillAmount: 1, refillSeconds: 60 },

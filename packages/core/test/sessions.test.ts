@@ -22,6 +22,7 @@ describe("sessions engine", () => {
       userId: user.id,
       ip: "1.2.3.4",
       userAgent: "ua",
+      proved: true,
     });
     expect(token.startsWith("ts_")).toBe(true);
     expect(session.tokenHash).not.toContain(token);
@@ -45,7 +46,12 @@ describe("sessions engine", () => {
   it("returns null for an expired session and deletes the row", async () => {
     const { config, storage, clock, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     clock.advance(31 * DAY);
     expect(await resolveSession(config, token)).toBeNull();
     expect(await storage.findMany("session", [])).toHaveLength(0);
@@ -54,7 +60,12 @@ describe("sessions engine", () => {
   it("expires at exactly the ttl", async () => {
     const { config, storage, clock, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     clock.advance(30 * DAY);
     expect(await resolveSession(config, token)).toBeNull();
     expect(await storage.findMany("session", [])).toHaveLength(0);
@@ -63,7 +74,12 @@ describe("sessions engine", () => {
   it("still resolves one millisecond before the ttl", async () => {
     const { config, clock, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     clock.advance(30 * DAY - 1);
     expect(await resolveSession(config, token)).not.toBeNull();
   });
@@ -75,6 +91,7 @@ describe("sessions engine", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const where = [{ field: "id" as const, op: "eq" as const, value: session.id }];
     clock.advance(7 * DAY - 1);
@@ -100,6 +117,7 @@ describe("sessions engine", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     clock.advance(3 * DAY);
     const early = await resolveSession(config, token);
@@ -117,6 +135,7 @@ describe("sessions engine", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     clock.advance(8 * DAY);
     const update = vi.spyOn(storage, "update");
@@ -136,7 +155,12 @@ describe("sessions engine", () => {
   it("answers null for an expired or capped session when refresh is false, and keeps the row", async () => {
     const { config, storage, clock, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     clock.advance(31 * DAY);
     const remove = vi.spyOn(storage, "delete");
     expect(await resolveSession(config, token, "read-only")).toBeNull();
@@ -147,7 +171,12 @@ describe("sessions engine", () => {
   it("returns null when the user row is gone", async () => {
     const { config, storage, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     await storage.delete("user", [{ field: "id", op: "eq", value: user.id }]);
     expect(await resolveSession(config, token)).toBeNull();
   });
@@ -155,7 +184,12 @@ describe("sessions engine", () => {
   it("destroys a session", async () => {
     const { config, seedUser } = makeAuth();
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     await destroySession(config, token);
     expect(await resolveSession(config, token)).toBeNull();
     // The second call ends nothing (plan 12e Task 16: the answer names the ended row).
@@ -193,7 +227,12 @@ describe("session routes", () => {
     const { config, seedUser } = makeAuth();
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const ok = await handle(get("/auth/session", { cookie: `__Host-tempo_session=${token}` }));
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as { user: { email: string }; session: { expiresAt: string } };
@@ -207,7 +246,12 @@ describe("session routes", () => {
     const { config, seedUser } = makeAuth();
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await handle(
       post("/auth/sign-out", {}, { cookie: `__Host-tempo_session=${token}` }),
     );
@@ -225,7 +269,12 @@ describe("session routes", () => {
     const { config, clock, seedUser } = makeAuth();
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const cookie = `__Host-tempo_session=${token}`;
     clock.advance(7 * DAY - 1);
     const before = await handle(get("/auth/session", { cookie }));
@@ -244,7 +293,12 @@ describe("session routes", () => {
     const { config, clock, seedUser } = makeAuth();
     const handle = createRouter(config, sessionRoutes(config));
     const user = await seedUser("a@example.com");
-    const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     clock.advance(7 * DAY);
     const res = await handle(get("/auth/session", { authorization: `Bearer ${token}` }));
     expect(res.status).toBe(200);
@@ -276,6 +330,7 @@ describe("session.freshAt (plan 12a, schema version 10)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     expect(session.freshAt).toEqual(session.createdAt);
     const stored = await auth.storage.findOne("session", [
@@ -293,6 +348,7 @@ describe("the session row of the router (rulings 78 and 79 of plan 12d)", () => 
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const request = get("/auth/session", { cookie: `${config.cookieName}=${token}` });
     const findOne = vi.spyOn(storage, "findOne");

@@ -38,6 +38,7 @@ async function withJwt(h: Live, email = "ada@example.com") {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   const res = await h.auth.handle(
     get("/auth/token", { cookie: `${DEFAULT_COOKIE_NAME}=${token}` }),
@@ -148,6 +149,7 @@ describe("POST /token/live (plan 11d)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     // Mint 5 minutes before the cap; the JWT lives 15 minutes, so it outlives the cap.
     h.clock.advance(DAY - 5 * 60_000);

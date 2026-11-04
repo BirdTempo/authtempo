@@ -8,7 +8,7 @@ import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, emailOf, get, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, emailOf, get, post, sessionFor } from "./helpers.js";
 import {
   basicHeader,
   codeFor,
@@ -351,13 +351,14 @@ describe("hasPermission (plan 12k Task 3)", () => {
       h.auth,
       new Request(`${BASE_URL}/app`, { headers: { cookie: s.cookie } }),
     );
-    const free = mustOk(await h.auth.api.tokens.create({ user, name: "free" }));
+    const proof = await sessionFor(h.config, user);
+    const free = mustOk(await h.auth.api.tokens.create({ session: proof, name: "free" }));
     const bound = mustOk(
-      await h.auth.api.tokens.create({ user, name: "bound", organizationId: O }),
+      await h.auth.api.tokens.create({ session: proof, name: "bound", organizationId: O }),
     );
     const elsewhere = mustOk(
       await h.auth.api.tokens.create({
-        user,
+        session: proof,
         name: "elsewhere",
         organizationId: other.organization.id,
       }),
@@ -487,7 +488,10 @@ describe("the permission routes (plan 12k Task 3)", () => {
       await w.auth.api.addMember({ user: ada, organizationId: id, userId: bob.id, role: "member" }),
     );
     const ts = await sessionOf(w.auth, sent, emailOf(ada));
-    const tk = mustOk(await w.auth.api.tokens.create({ user: ada, name: "script" })).token;
+    // The magic link's own session (plan 12p): the token create takes it.
+    const resolved = await w.auth.api.getSession(ts);
+    if (!resolved) throw new Error("no session");
+    const tk = mustOk(await w.auth.api.tokens.create({ session: resolved, name: "script" })).token;
     return { w, sent, ada, id, ts, tk };
   }
   const json = async (res: Response) => ({ status: res.status, body: await res.json() });

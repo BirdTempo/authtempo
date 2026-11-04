@@ -253,13 +253,20 @@ describe("api.secrets (plan 12b)", () => {
     // Ada has a live setup with backup codes. Cy has the factor on.
     await user("01JA0000000000000000000U11", "ada@example.com");
     await user("01JA0000000000000000000U12", "cy@example.com");
-    const live = await v1.api.totp?.setup({ userId: "01JA0000000000000000000U11", password: PW });
+    // Each setup takes a session of its user (plan 12p): a password sign-in for Ada.
+    const ada = must(
+      await v1.api.password?.signIn({
+        email: "ada@example.com",
+        password: PW,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    if (!("token" in ada)) throw new Error("no session");
+    const adaSession = await v1.api.getSession(ada.token);
+    if (!adaSession) throw new Error("no session");
+    const live = await v1.api.totp?.setup({ session: adaSession, password: PW });
     expect(live?.ok && live.value.backupCodes.length > 0).toBe(true);
-    const cySetup = await v1.api.totp?.setup({
-      userId: "01JA0000000000000000000U12",
-      password: PW,
-    });
-    if (!cySetup?.ok) throw new Error("no setup");
     must(await v1.api.emailOtp?.request({ email: "cy@example.com", ip: null }));
     const signedIn = must(
       await v1.api.emailOtp?.verify({
@@ -272,6 +279,8 @@ describe("api.secrets (plan 12b)", () => {
     if (!("token" in signedIn)) throw new Error("no session");
     const session = await v1.api.getSession(signedIn.token);
     if (!session) throw new Error("no session");
+    const cySetup = await v1.api.totp?.setup({ session, password: PW });
+    if (!cySetup?.ok) throw new Error("no setup");
     must(
       await v1.api.totp?.enable({
         session,

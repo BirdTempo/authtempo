@@ -76,7 +76,12 @@ describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
   it("caps the expiry at create", async () => {
     const w = world({ ttlDays: 30, absoluteDays: 3 });
     await user(w.storage);
-    const { session } = await createSession(w.config, { userId: "u1", ip: null, userAgent: null });
+    const { session } = await createSession(w.config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     expect(session.expiresAt.getTime() - session.createdAt.getTime()).toBe(3 * DAY);
   });
 
@@ -87,6 +92,7 @@ describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
       userId: "u1",
       ip: null,
       userAgent: null,
+      proved: true,
     });
     w.advance(9 * DAY);
     const r = await resolveSession(w.config, token);
@@ -98,7 +104,12 @@ describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
     const w = world({ ttlDays: 30 });
     await user(w.storage);
     // A row from before the key: its expiry is 30 days out.
-    const { token } = await createSession(w.config, { userId: "u1", ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     w.advance(6 * DAY);
     const capped = w.make({ ttlDays: 30, absoluteDays: 5 });
     expect(await resolveSession(capped, token)).toBeNull();
@@ -109,7 +120,12 @@ describe("session.absoluteDays (plan 12b, ASVS 5.0.0 7.3.2)", () => {
   it("renews the cookie with a Max-Age that never passes the cap", async () => {
     const w = world({ ttlDays: 30, slidingRefreshDays: 1, absoluteDays: 10 });
     await user(w.storage);
-    const { token } = await createSession(w.config, { userId: "u1", ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     w.advance(9 * DAY);
     const r = await resolveSession(w.config, token);
     if (!r) throw new Error("no session");

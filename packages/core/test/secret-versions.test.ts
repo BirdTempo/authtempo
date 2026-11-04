@@ -12,6 +12,7 @@ import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { sessionFor } from "./helpers.js";
 
 // Plan 12b, spec 22: each sealed value and keyed hash opens only under the
 // secret version its row names. The constants are today's format: sealed
@@ -302,7 +303,7 @@ describe("secret versions on read and write (plan 12b)", () => {
   it("writes the version of the new secret when a setup replaces an unconfirmed one", async () => {
     const w = world();
     const at = w.clock.now();
-    await w.storage.create("user", {
+    const cy = await w.storage.create("user", {
       id: "01JA0000000000000000000U02",
       email: "cy@example.com",
       emailVerified: true,
@@ -326,10 +327,12 @@ describe("secret versions on read and write (plan 12b)", () => {
       updatedAt: at,
     });
     const userId = "01JA0000000000000000000U02";
-    const first = await setupTotp(w.config(ONE), { userId, password: PW });
+    // The setup takes the session (plan 12p).
+    const cySession = await sessionFor(w.config(ONE), cy);
+    const first = await setupTotp(w.config(ONE), { session: cySession, password: PW });
     expect(first.ok).toBe(true);
     // The second setup runs after the switch to version 2 and replaces the first in place.
-    const setup = await setupTotp(w.config(PHASE_2), { userId, password: PW });
+    const setup = await setupTotp(w.config(PHASE_2), { session: cySession, password: PW });
     if (!setup.ok) throw new Error(setup.code);
     const row = await w.storage.findOne("totp", [{ field: "userId", op: "eq", value: userId }]);
     expect(row?.secretVersion).toBe(2);

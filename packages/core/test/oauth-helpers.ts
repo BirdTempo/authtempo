@@ -76,6 +76,7 @@ export async function signedIn(h: Handle, email = "ada@example.com", verified = 
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: user.emailVerified,
   });
   recordAddress(email);
   recordCredential(token);

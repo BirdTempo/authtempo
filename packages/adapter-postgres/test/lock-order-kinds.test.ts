@@ -984,7 +984,7 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
   },
   "an organization token create": (w, s) =>
     w.auth.api.organizationTokens.create({
-      user: s.ada.user,
+      session: s.ada,
       organizationId: s.acme,
       name: "ci",
       permissions: {},

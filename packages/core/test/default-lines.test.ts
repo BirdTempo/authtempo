@@ -57,7 +57,7 @@ import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { d1Like } from "./d1-like.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor, tokenFromMail } from "./helpers.js";
 import { codeFor, exchange, oauthHandle, REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
@@ -780,10 +780,12 @@ async function passkeyWorld(
     session: s,
     soft,
     async register(user = s.user, authenticator = soft) {
-      const options = await passkeyRegistrationOptions(auth.config, { user });
+      const options = await passkeyRegistrationOptions(auth.config, {
+        session: await sessionFor(auth.config, user),
+      });
       if (!options.ok) throw new Error(options.code);
       return verifyPasskeyRegistration(auth.config, {
-        user,
+        session: await sessionFor(auth.config, user),
         response: await authenticator.register(options.value.challenge),
       });
     },
@@ -1217,6 +1219,7 @@ describe("the signing key lines (plans 9b and 12b)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
       activeOrganizationId: null,
     });
     return { auth, input: { userId: user.id, sessionId: session.id } };

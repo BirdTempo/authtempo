@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { createAuth, type StorageAdapter } from "@authtempo/core";
+import { createOrganizationTokenAs } from "@authtempo/core/compat";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
@@ -86,7 +87,8 @@ describe("the D1 statements of an organization token resolve (plan 12k Task 8)",
     });
     const org = await plain.api.createOrganization({ user, slug: "acme", name: "Acme" });
     if (!org.ok) throw new Error(org.code);
-    const made = await plain.api.organizationTokens.create({
+    // A user with no sign-in: the compat seam, with the user row's rule (plan 12p).
+    const made = await createOrganizationTokenAs(plain, {
       user,
       organizationId: org.value.organization.id,
       name: "ci",

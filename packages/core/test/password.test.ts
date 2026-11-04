@@ -922,6 +922,7 @@ describe("requestPasswordReset and resetPassword", () => {
       userId: claimant.id,
       ip: null,
       userAgent: null,
+      proved: claimant.emailVerified,
     });
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const r = await resetPassword(auth.config, {
@@ -966,7 +967,12 @@ describe("requestPasswordReset and resetPassword", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const old = await createSession(auth.config, { userId: user.id, ip: null, userAgent: null });
+    const old = await createSession(auth.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     await requestPasswordReset(auth.config, { email: EMAIL, ip: null });
     const r = await resetPassword(auth.config, {
       token: resetToken(auth),
@@ -1092,6 +1098,7 @@ describe("changePassword", () => {
       userId: session.user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     expect(
       await changePassword(auth.config, {
@@ -1123,7 +1130,12 @@ describe("changePassword", () => {
     ).toMatchObject({ code: "invalid_credentials" });
     const fresh = pwAuth();
     const user = await fresh.seedUser(EMAIL);
-    const s = await createSession(fresh.config, { userId: user.id, ip: null, userAgent: null });
+    const s = await createSession(fresh.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const resolved = await resolveSession(fresh.config, s.token);
     if (!resolved) throw new Error("no session");
     expect(

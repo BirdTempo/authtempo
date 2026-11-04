@@ -42,7 +42,7 @@ import { sha256Hex } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { UserRow } from "../src/schema.js";
-import { BASE_URL, makeAuth, post, seedPlatform } from "./helpers.js";
+import { BASE_URL, makeAuth, post, seedPlatform, sessionFor } from "./helpers.js";
 import {
   approvedDevice,
   authorized,
@@ -128,7 +128,12 @@ describe("the token events (plan 12h Task 6)", () => {
   it("emits api_token.create on a token create through its route", async () => {
     const w = tokenWorld();
     const user = await seed(w, "ada@example.com");
-    const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await w.auth.handle(
       post("/auth/tokens", { name: "ci" }, { authorization: `Bearer ${token}` }),
     );
@@ -149,7 +154,12 @@ describe("the token events (plan 12h Task 6)", () => {
   it("emits api_token.update on a token update through its route", async () => {
     const w = tokenWorld();
     const user = await seed(w, "ada@example.com");
-    const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const auth = { authorization: `Bearer ${token}` };
     const made = (await (
       await w.auth.handle(post("/auth/tokens", { name: "ci" }, auth))
@@ -175,7 +185,12 @@ describe("the token events (plan 12h Task 6)", () => {
   it("emits api_token.revoke on a token revoke through its route, and none for an unknown id", async () => {
     const w = tokenWorld();
     const user = await seed(w, "ada@example.com");
-    const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const { token } = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const auth = { authorization: `Bearer ${token}` };
     const made = (await (
       await w.auth.handle(post("/auth/tokens", { name: "ci" }, auth))
@@ -206,7 +221,7 @@ describe("the token events (plan 12h Task 6)", () => {
     const owner = await seed(auth, "owner@example.com");
     const org = await orgOf(auth, owner);
     const made = await createOrganizationToken(auth.config, {
-      user: owner,
+      session: await sessionFor(auth.config, owner),
       organizationId: org.id,
       name: "deploy",
       permissions: {},
@@ -244,6 +259,7 @@ describe("the JWT events (plan 12h Task 6)", () => {
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const minted = await mintSessionJwt(auth.config, { userId: user.id, sessionId: session.id });
     if (!minted.ok) throw new Error(minted.code);

@@ -61,7 +61,12 @@ function endPost(params: Record<string, string>, headers: Record<string, string>
 
 /** A second session of `userId`, as a second sign-in makes it, and its cookie. */
 async function secondSession(h: Handle, userId: string) {
-  const { token, session } = await createSession(h.config, { userId, ip: null, userAgent: null });
+  const { token, session } = await createSession(h.config, {
+    userId,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return { session, cookie: `__Host-tempo_session=${token}` };
 }
 

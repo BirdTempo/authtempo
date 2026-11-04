@@ -32,7 +32,7 @@ import type { Result } from "../src/result.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { tokenFromMail } from "./helpers.js";
+import { sessionFor, tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { recordNextTransaction, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeFetch, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
@@ -247,10 +247,12 @@ const DOORS: Door[] = [
       tokenOf(await magicLink(w));
       const user = await userOf(w);
       const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-      const reg = await passkeyRegistrationOptions(w.auth.config, { user });
+      const reg = await passkeyRegistrationOptions(w.auth.config, {
+        session: await sessionFor(w.auth.config, user),
+      });
       if (!reg.ok) throw new Error(reg.code);
       const stored = await verifyPasskeyRegistration(w.auth.config, {
-        user,
+        session: await sessionFor(w.auth.config, user),
         response: await soft.register(reg.value.challenge, new TextEncoder().encode(user.id)),
       });
       if (!stored.ok) throw new Error(stored.code);

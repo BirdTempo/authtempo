@@ -46,7 +46,12 @@ describe("the session cookie name (plan 12b)", () => {
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
-    const s = await createSession(config, { userId: "u2", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u2",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await auth.handle(get("/session", `tempo_session=${s.token}`));
     const set = res.headers.getSetCookie();
     const moved = set.find((c) => c.startsWith("__Host-tempo_session="));
@@ -74,7 +79,12 @@ describe("the session cookie name (plan 12b)", () => {
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
-    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const first = await auth.handle(get("/session", `tempo_session=${s.token}`));
     expect(first.status).toBe(200);
     expect(first.headers.getSetCookie()).toEqual([
@@ -106,7 +116,12 @@ describe("the session cookie name (plan 12b)", () => {
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
-    const s = await createSession(config, { userId: "u3", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u3",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const caller = await auth.caller(get("/x", `tempo_session=${s.token}`));
     expect(caller?.kind).toBe("session");
     expect(caller?.kind === "session" ? caller.user.id : null).toBe("u3");
@@ -124,7 +139,12 @@ describe("the session cookie name (plan 12b)", () => {
   it("moves no session that is past the absolute cap, also on a route that reads no session", async () => {
     const storage = createMemoryAdapter();
     const { config } = setup({ storage });
-    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     // Two days later, with a cap of one day: the row's expiresAt is still 28 days out.
     const { auth } = setup({
       storage,
@@ -141,7 +161,12 @@ describe("the session cookie name (plan 12b)", () => {
   it("gives the moved cookie a Max-Age that never passes the absolute cap", async () => {
     const storage = createMemoryAdapter();
     const { config } = setup({ storage });
-    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     // One day later, with a cap of ten days: expiresAt is 29 days out, the cap 9.
     const { auth } = setup({
       storage,
@@ -156,7 +181,12 @@ describe("the session cookie name (plan 12b)", () => {
 
   it("signs out a browser that holds the old cookie and clears both names", async () => {
     const { auth, config } = setup();
-    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await auth.handle(
       new Request(`${BASE}/auth/sign-out`, {
         method: "POST",
@@ -190,9 +220,19 @@ describe("the session cookie name (plan 12b)", () => {
         createdAt: new Date("2026-10-14T00:00:00.000Z"),
         updatedAt: new Date("2026-10-14T00:00:00.000Z"),
       });
-    const fresh = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const fresh = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     // An old session of the same browser, or one a sibling subdomain planted.
-    const old = await createSession(config, { userId: "u2", ip: null, userAgent: null });
+    const old = await createSession(config, {
+      userId: "u2",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     // Both live before the sign-out, so the checks after it can fail.
     expect(await resolveSession(config, fresh.token)).not.toBeNull();
     expect(await resolveSession(config, old.token)).not.toBeNull();
@@ -221,7 +261,12 @@ describe("the session cookie name (plan 12b)", () => {
   it("reads no old cookie for an app that names its own cookie", async () => {
     const { auth, config } = setup({ cookieName: "sid" });
     expect(config.legacyCookieName).toBeNull();
-    const s = await createSession(config, { userId: "u1", ip: null, userAgent: null });
+    const s = await createSession(config, {
+      userId: "u1",
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await auth.handle(get("/session", `tempo_session=${s.token}`));
     expect(res.status).toBe(401);
     expect(res.headers.getSetCookie()).toEqual([]);

@@ -162,6 +162,7 @@ describe("account_banned at the sign-in routes (plan 12f Task 10, lead item 3)",
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const session = await resolveSession(w.auth.config, token);
     if (!session) throw new Error("no session");

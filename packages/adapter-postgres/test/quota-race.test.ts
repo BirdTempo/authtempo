@@ -1,4 +1,5 @@
 import { createAuth, type StorageAdapter } from "@authtempo/core";
+import { createApiTokenAs } from "@authtempo/core/compat";
 import postgres, { type Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
@@ -114,7 +115,8 @@ const request = (token: string) =>
 describe("token quota races on Postgres (plan 12k Task 7)", () => {
   it("spends the last call once under a race", async () => {
     const w = await twoInstances();
-    const made = await w.plain.api.tokens.create({
+    // A user with no sign-in: the compat seam, with the user row's rule (plan 12p).
+    const made = await createApiTokenAs(w.plain, {
       user: w.user,
       name: "ci",
       quota: { remaining: 1 },
@@ -132,7 +134,7 @@ describe("token quota races on Postgres (plan 12k Task 7)", () => {
 
   it("refills once under a race", async () => {
     const w = await twoInstances();
-    const made = await w.plain.api.tokens.create({
+    const made = await createApiTokenAs(w.plain, {
       user: w.user,
       name: "ci",
       quota: { remaining: 0, refillAmount: 1, refillSeconds: 60 },
@@ -151,7 +153,7 @@ describe("token quota races on Postgres (plan 12k Task 7)", () => {
 
   it("spends each call of a burst of 20 on a pool of 10", async () => {
     const w = await twoInstances();
-    const made = await w.plain.api.tokens.create({
+    const made = await createApiTokenAs(w.plain, {
       user: w.user,
       name: "ci",
       quota: { remaining: 1000 },

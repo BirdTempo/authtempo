@@ -106,7 +106,12 @@ async function signedIn(w: ReturnType<typeof world>, email = "ada@example.com") 
     createdAt: now,
     updatedAt: now,
   });
-  const { token } = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(w.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   recordCredential(token);
   return { user, cookie: `__Host-tempo_session=${token}` };
 }

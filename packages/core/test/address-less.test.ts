@@ -33,7 +33,7 @@ import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   authorized,
   exchange,
@@ -63,6 +63,7 @@ async function sessionOf(auth: Auth, user: UserRow): Promise<ResolvedSession> {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   const resolved = await resolveSession(auth.config, token);
   if (!resolved) throw new Error("no session");
@@ -72,10 +73,12 @@ async function sessionOf(auth: Auth, user: UserRow): Promise<ResolvedSession> {
 /** A passkey for `user`, by a real ceremony. */
 async function withPasskey(auth: Auth, user: UserRow): Promise<void> {
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
-  const options = await passkeyRegistrationOptions(auth.config, { user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(auth.config, {
-    user,
+    session: await sessionFor(auth.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!added.ok) throw new Error(added.code);
@@ -146,6 +149,7 @@ describe("the account with no address (plan 12i Task 1)", () => {
       userId: lone.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const sent = await requestMagicLink(auth.config, { email: "new@example.com", ip: "1.2.3.4" });
     expect(sent.ok).toBe(true);
@@ -200,7 +204,12 @@ describe("the account with no address (plan 12i Task 1)", () => {
       limiter: auth.config.limiter,
     });
     const lone = await addressless(auth.storage, auth.clock.now(), "Lone");
-    const s = await createSession(auth.config, { userId: lone.id, ip: null, userAgent: null });
+    const s = await createSession(auth.config, {
+      userId: lone.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const res = await jwtAuth.handle(get("/auth/token", { authorization: `Bearer ${s.token}` }));
     expect(res.status).toBe(200);
     const payload = decodeJws(((await res.json()) as { token: string }).token)?.payload ?? {};
@@ -210,7 +219,12 @@ describe("the account with no address (plan 12i Task 1)", () => {
     // The ID token and userinfo with the email scope.
     const h: Handle = oauthHandle();
     const user = await addressless(h.storage, h.clock.now(), "Lone");
-    const session = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+    const session = await createSession(h.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const cookie = `__Host-tempo_session=${session.token}`;
     const clientId = await registered(h);
     const p = await pkce();
@@ -306,6 +320,7 @@ describe("the account with no address (plan 12i Task 1)", () => {
       userId: lone.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const cookie = `__Host-tempo_session=${token}`;
     const res = await handle.handle(
@@ -563,6 +578,7 @@ describe("a user with no address and a verified handle (plan 12i Task 5, ruling 
       userId: lone.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const loneCookie = { cookie: `${w.auth.config.cookieName}=${loneToken}` };
     for (const [path, body] of [
@@ -603,7 +619,7 @@ describe("a user with no address and a verified handle (plan 12i Task 5, ruling 
     // The TOTP factor of a user with no address (`provedAccount`), then a phone sign-in.
     const session = await sessionOf(w.auth, w.user);
     const setup = await setupTotp(w.auth.config, {
-      userId: w.user.id,
+      session,
       password: "correct horse battery",
     });
     if (!setup.ok) throw new Error(setup.code);

@@ -33,7 +33,16 @@ import microsoftClaimsText from "./fixtures/providers/microsoft/claims.json?raw"
 import slackUserinfoText from "./fixtures/providers/slack/userinfo.json?raw";
 import twitterMeText from "./fixtures/providers/twitter/me.json?raw";
 import twitterMeEmailText from "./fixtures/providers/twitter/me-email.json?raw";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, recordCredential, settled } from "./helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  get,
+  makeAuth,
+  post,
+  recordCredential,
+  sessionFor,
+  settled,
+} from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { fakeFetch, type TokenCall } from "./social-helpers.js";
@@ -234,17 +243,19 @@ async function factorUser(
     if (!set.ok) throw new Error(set.code);
   }
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
-  const options = await passkeyRegistrationOptions(auth.config, { user: session.user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, session.user),
+  });
   if (!options.ok) throw new Error(options.code);
   const registered = await verifyPasskeyRegistration(auth.config, {
-    user: session.user,
+    session: await sessionFor(auth.config, session.user),
     response: await soft.register(
       options.value.challenge,
       new TextEncoder().encode(session.user.id),
     ),
   });
   if (!registered.ok) throw new Error(registered.code);
-  const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
+  const setup = await setupTotp(auth.config, { session: session, password: PASSWORD });
   if (!setup.ok) throw new Error(setup.code);
   recordCredential(setup.value.secret);
   for (const c of setup.value.backupCodes) recordCredential(c);
@@ -961,7 +972,7 @@ const GUESSES: Partial<
   "POST /totp/enable": async (w) => {
     // The factor user has TOTP on: a new user after the setup guesses the code.
     const session = await verifiedSession(w, BEA);
-    const setup = await setupTotp(w.config, { userId: session.user.id, password: PASSWORD });
+    const setup = await setupTotp(w.config, { session: session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     recordCredential(setup.value.secret);
     for (const c of setup.value.backupCodes) recordCredential(c);

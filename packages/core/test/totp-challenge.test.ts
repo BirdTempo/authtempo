@@ -13,7 +13,7 @@ import { setupTotp, type TwoFactorVerify, verifyTwoFactor } from "../src/engine/
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { SecondFactorRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth, tokenFromMail } from "./helpers.js";
+import { makeAuth, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   type Auth,
   codeNow,
@@ -117,7 +117,10 @@ describe("the gate (plan 9f)", () => {
     const auth = totpAuth();
     // A setup with no enable: the state a person leaves who never typed the first code.
     const { user } = await verifiedSession(auth);
-    const setup = await setupTotp(auth.config, { userId: user.id, password: PASSWORD });
+    const setup = await setupTotp(auth.config, {
+      session: await sessionFor(auth.config, user),
+      password: PASSWORD,
+    });
     if (!setup.ok) throw new Error(setup.code);
     expect(await auth.storage.findMany("totp", [])).toMatchObject([{ enabledAt: null }]);
     const r = await signIn(auth);

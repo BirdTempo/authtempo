@@ -617,10 +617,11 @@ function withoutLogin(params: URLSearchParams): URLSearchParams {
  * request bound to another user answers the stale-id error first, before
  * any read of consents and any spend: else that user's GET would spend the
  * row on the three branches below (spec 8.13, plan 9h final fix wave). An
- * unverified user is refused: a grant would outlive a claim of the address
- * (spec 8.7). A consent that covers every scope asked gives the code at
- * once, unless `prompt=consent`. Else the consent page shows the held
- * request, bound to this user.
+ * unverified user is refused, and so is a session made before the proof of
+ * its address (plan 12p). The claim deletes that session, but a grant would
+ * outlive it (spec 8.7). A consent that covers every scope asked gives the
+ * code at once, unless `prompt=consent`. Else the consent page shows the
+ * held request, bound to this user.
  */
 async function sessionStep(
   config: ResolvedConfig,

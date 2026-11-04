@@ -5,7 +5,7 @@ import { createSession } from "../src/engine/sessions.js";
 import type { Caller } from "../src/engine/tokens.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor } from "./helpers.js";
 
 // Plan 12k Task 8: tokens that an organization owns (spec 29 items 14 to 16).
 
@@ -91,13 +91,23 @@ type Handle = ReturnType<typeof orgHandle>;
 /** A verified user and a fresh `ts_` session token. */
 async function signedIn(h: Handle, email: string) {
   const user = await h.seedUser(email);
-  const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(h.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return { user, session: token };
 }
 
 /** A new fresh session of a user that already exists. */
 async function signInAgain(h: Handle, user: UserRow) {
-  const { token } = await createSession(h.config, { userId: user.id, ip: null, userAgent: null });
+  const { token } = await createSession(h.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+    proved: true,
+  });
   return token;
 }
 
@@ -404,9 +414,10 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const h = orgHandle();
     const ada = await signedIn(h, "ada@example.com");
     const org = await organization(h, ada.user, "acme");
+    const session = await sessionFor(h.config, ada.user);
     const create = (expiresInDays: number | null = null) =>
       h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session,
         organizationId: org,
         name: "ci",
         permissions: {},
@@ -414,7 +425,12 @@ describe("organization tokens (plan 12k Task 8)", () => {
       });
     // The user tokens of 8b share the key of 20 creates per hour per user.
     for (let i = 0; i < 19; i++) mustOk(await create());
-    mustOk(await h.auth.api.tokens.create({ user: ada.user, name: "mine" }));
+    mustOk(
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada.user),
+        name: "mine",
+      }),
+    );
     expect(await create()).toEqual(fault("rate_limited"));
     h.clock.advance(HOUR);
     mustOk(await create(1));
@@ -424,7 +440,12 @@ describe("organization tokens (plan 12k Task 8)", () => {
     expect(await h.storage.findMany("organizationToken", [])).toHaveLength(50);
     expect(await create()).toEqual(fault("organization_token_limit"));
     // The user token does not count against the cap of the organization.
-    mustOk(await h.auth.api.tokens.create({ user: ada.user, name: "mine2" }));
+    mustOk(
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada.user),
+        name: "mine2",
+      }),
+    );
     // An expired row goes first, so it does not count.
     h.clock.advance(DAY);
     mustOk(await create());
@@ -434,7 +455,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const other = await organization(h, ada.user, "other");
     mustOk(
       await h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session: await sessionFor(h.config, ada.user),
         organizationId: other,
         name: "ci",
         permissions: {},
@@ -578,7 +599,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     );
     const own = mustOk(
       await auth.api.tokens.create({
-        user: ada,
+        session: await sessionFor(base.config, ada),
         name: "own",
         rateLimit: { seconds: 60, max: 1 },
         quota: { remaining: 3 },
@@ -586,7 +607,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     );
     const shared = mustOk(
       await auth.api.organizationTokens.create({
-        user: ada,
+        session: await sessionFor(base.config, ada),
         organizationId: created.organization.id,
         name: "ci",
         permissions: {},
@@ -651,7 +672,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const org = await organization(h, ada.user, "acme");
     const made = mustOk(
       await h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session: await sessionFor(h.config, ada.user),
         organizationId: org,
         name: "ci",
         permissions: { member: ["create"], apiToken: ALL_TOKEN },
@@ -731,7 +752,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const org = await organization(h, ada.user, "acme");
     const made = mustOk(
       await h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session: await sessionFor(h.config, ada.user),
         organizationId: org,
         name: "ci",
         permissions: {},
@@ -786,7 +807,11 @@ describe("organization tokens (plan 12k Task 8)", () => {
       expiresInDays: null,
     });
     const user = mustOk(
-      await h.auth.api.tokens.create({ user: ada.user, name: "mine", quota: { remaining: 5 } }),
+      await h.auth.api.tokens.create({
+        session: await sessionFor(h.config, ada.user),
+        name: "mine",
+        quota: { remaining: 5 },
+      }),
     );
     const current = (headers: Record<string, string>) =>
       h.auth.handle(get("/auth/organizations/tokens/current", headers));
@@ -877,7 +902,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const org = await organization(h, ada.user, "acme");
     const { token } = mustOk(
       await h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session: await sessionFor(h.config, ada.user),
         organizationId: org,
         name: "ci",
         permissions: {},
@@ -909,9 +934,10 @@ describe("organization tokens (plan 12k Task 8)", () => {
     const h = orgHandle();
     const ada = await signedIn(h, "ada@example.com");
     const org = await organization(h, ada.user, "acme");
+    const session = await sessionFor(h.config, ada.user);
     const create = (expiresInDays: number | null) =>
       h.auth.api.organizationTokens.create({
-        user: ada.user,
+        session,
         organizationId: org,
         name: "ci",
         permissions: {},

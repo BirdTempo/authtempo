@@ -575,6 +575,7 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
       userId: su?.userId ?? "",
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const session = await resolveSession(w.config, s.token);
     if (!session) throw new Error("no session");
@@ -716,6 +717,7 @@ describe("the teams of the SCIM Groups (plan 12d Task 11 Behavior 3)", () => {
         userId: su?.userId ?? "",
         ip: null,
         userAgent: null,
+        proved: true,
       });
       let session = await resolveSession(w.config, s.token);
       if (!session) throw new Error("no session");

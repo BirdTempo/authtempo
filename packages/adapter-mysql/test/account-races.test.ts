@@ -581,15 +581,19 @@ describe("the last-credential guard on MySQL 8.4 (plan 12a Task 9)", () => {
       if (!s) throw new Error("no session");
       return s;
     }
+    // The registration takes the session, not the user (plan 12p).
     async function addPasskey(
-      user: Parameters<typeof auth.api.passkeyRegistrationOptions>[0]["user"],
+      session: Parameters<typeof auth.api.passkeyRegistrationOptions>[0]["session"],
     ) {
       const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE });
-      const options = await auth.api.passkeyRegistrationOptions({ user });
+      const options = await auth.api.passkeyRegistrationOptions({ session });
       if (!options.ok) throw new Error(options.code);
       const added = await auth.api.verifyPasskeyRegistration({
-        user,
-        response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
+        session,
+        response: await soft.register(
+          options.value.challenge,
+          new TextEncoder().encode(session.user.id),
+        ),
       });
       if (!added.ok) throw new Error(added.code);
       return added.value.id;
@@ -626,8 +630,8 @@ describe("the last-credential guard on MySQL 8.4 (plan 12a Task 9)", () => {
       const [identity] = await db.q<{ id: string }[]>`
         SELECT id FROM ta_identity WHERE user_id = ${me.user.id} AND provider = 'google'`;
       if (!identity) throw new Error("no google identity");
-      const one = await w.addPasskey(me.user);
-      const two = await w.addPasskey(me.user);
+      const one = await w.addPasskey(me);
+      const two = await w.addPasskey(me);
       w.unlinked.length = 0;
       const answers = await Promise.all([
         w.auth.api.identities.unlink({ session: me, id: identity.id, ip: null, userAgent: null }),

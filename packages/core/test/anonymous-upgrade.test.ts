@@ -16,6 +16,7 @@ import {
   makeAuth,
   post,
   recordCredential,
+  sessionFor,
   settled,
   tokenFromMail,
 } from "./helpers.js";
@@ -193,10 +194,12 @@ async function passkeyUser(w: World, email: string) {
   const user = await w.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (!user) throw new Error("no user");
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: BASE_URL });
-  const options = await passkeyRegistrationOptions(w.config, { user });
+  const options = await passkeyRegistrationOptions(w.config, {
+    session: await sessionFor(w.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(w.config, {
-    user,
+    session: await sessionFor(w.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!added.ok) throw new Error(added.code);

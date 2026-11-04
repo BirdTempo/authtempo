@@ -14,7 +14,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import { type ModelName, schema, type UserRow } from "../src/schema.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { post } from "./helpers.js";
+import { post, sessionFor } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, googleSignIn, socialAuth } from "./social-helpers.js";
 import { codeNow, EMAIL, PASSWORD, verifiedSession } from "./totp-helpers.js";
@@ -64,10 +64,12 @@ async function soft() {
 /** A passkey of the user by the register ceremony. Its id, and the authenticator for later assertions. */
 async function addPasskey(w: World, user: UserRow) {
   const authenticator = await soft();
-  const options = await passkeyRegistrationOptions(w.auth.config, { user });
+  const options = await passkeyRegistrationOptions(w.auth.config, {
+    session: await sessionFor(w.auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(w.auth.config, {
-    user,
+    session: await sessionFor(w.auth.config, user),
     response: await authenticator.register(
       options.value.challenge,
       new TextEncoder().encode(user.id),
@@ -79,7 +81,7 @@ async function addPasskey(w: World, user: UserRow) {
 
 /** The TOTP method on, through the engine. The backup codes, for a later re-authentication. */
 async function totpOn(w: World, me: Me) {
-  const setup = await setupTotp(w.auth.config, { userId: me.user.id, password: PASSWORD });
+  const setup = await setupTotp(w.auth.config, { session: me, password: PASSWORD });
   if (!setup.ok) throw new Error(setup.code);
   const secret = base32Decode(setup.value.secret);
   const on = await enableTotp(w.auth.config, {
@@ -143,7 +145,7 @@ const CASES: Case[] = [
   {
     path: "/totp/enable",
     setup: async (w, me) => {
-      const setup = await setupTotp(w.auth.config, { userId: me.user.id, password: PASSWORD });
+      const setup = await setupTotp(w.auth.config, { session: me, password: PASSWORD });
       if (!setup.ok) throw new Error(setup.code);
       const secret = base32Decode(setup.value.secret);
       return { body: async () => ({ code: await codeNow(w.auth, secret) }) };
@@ -433,12 +435,12 @@ describe("the in-process calls (plan 12a deviation 4)", () => {
       code: "session_not_fresh",
       status: 403,
     });
-    expect((await api.passkeyRegistrationOptions({ user: old.user })).ok).toBe(true);
+    expect((await api.passkeyRegistrationOptions({ session: old })).ok).toBe(true);
     expect(await api.deletePasskey({ user: old.user, id: pk.id })).toEqual({
       ok: true,
       value: { ok: true },
     });
-    expect((await api.tokens.create({ user: old.user, name: "script" })).ok).toBe(true);
+    expect((await api.tokens.create({ session: old, name: "script" })).ok).toBe(true);
     const totp = api.totp;
     if (!totp) throw new Error("no totp api");
     const codes = await totp.regenerateBackupCodesWithCode({
@@ -454,7 +456,7 @@ describe("the in-process calls (plan 12a deviation 4)", () => {
   it("the calls that take a session apply the rule: api.totp.enable and api.password.change", async () => {
     const w = world();
     const me = await verifiedSession(w.auth);
-    const setup = await setupTotp(w.auth.config, { userId: me.user.id, password: PASSWORD });
+    const setup = await setupTotp(w.auth.config, { session: me, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     w.auth.clock.advance(STALE);
     const api = apiOf(w);

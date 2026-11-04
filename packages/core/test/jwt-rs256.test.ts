@@ -4,7 +4,7 @@ import { ConfigError } from "../src/config.js";
 import { publicKeySet, signToken, verifyLocal } from "../src/engine/jwt.js";
 import { sha256Hex, toBase64Url } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
-import { BASE_URL, get, makeAuth } from "./helpers.js";
+import { BASE_URL, get, makeAuth, sessionFor } from "./helpers.js";
 import { codeFor, exchange, ISSUER, oauthHandle, RESOURCE, signedIn } from "./oauth-helpers.js";
 
 const DAY = 86_400_000;
@@ -118,7 +118,10 @@ describe("jwtMint.alg RS256 (plan 12e, owner decision 1)", () => {
   it("keeps a tk_ API token as an opaque token under RS256", async () => {
     const h = oauthHandle(RS256);
     const s = await signedIn(h);
-    const created = await h.auth.api.tokens.create({ user: s.user, name: "ci" });
+    const created = await h.auth.api.tokens.create({
+      session: await sessionFor(h.config, s.user),
+      name: "ci",
+    });
     if (!created.ok) throw new Error(created.code);
     expect(created.value.token.startsWith("tk_")).toBe(true);
     expect(created.value.token).not.toContain(".");

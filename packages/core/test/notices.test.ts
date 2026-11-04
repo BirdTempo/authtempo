@@ -47,7 +47,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { post, tokenFromMail } from "./helpers.js";
+import { post, sessionFor, tokenFromMail } from "./helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
@@ -122,10 +122,12 @@ function recorded(extra: Partial<AuthConfig> = {}) {
 /** A registered passkey of the session's user, by the engine's own ceremony. */
 async function addPasskey(auth: Auth, session: Awaited<ReturnType<typeof verifiedSession>>) {
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-  const options = await passkeyRegistrationOptions(auth.config, { user: session.user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, session.user),
+  });
   if (!options.ok) throw new Error(options.code);
   const added = await verifyPasskeyRegistration(auth.config, {
-    user: session.user,
+    session: await sessionFor(auth.config, session.user),
     response: await soft.register(
       options.value.challenge,
       new TextEncoder().encode(session.user.id),

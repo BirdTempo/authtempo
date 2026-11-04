@@ -7,7 +7,7 @@ import { changePassword, requestPasswordReset, resetPassword } from "../src/engi
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, emailOf, get, post } from "./helpers.js";
+import { APP_ORIGIN, emailOf, get, post, sessionFor } from "./helpers.js";
 import {
   authorized,
   authorizeGet,
@@ -335,7 +335,10 @@ describe("the grant routes (plan 9g final fix wave)", () => {
     const h = oauthHandle();
     const c = await codeFor(h);
     const { access_token } = await tokensOf(h, c);
-    const created = await h.auth.api.tokens.create({ user: c.user, name: "cli" });
+    const created = await h.auth.api.tokens.create({
+      session: await sessionFor(h.config, c.user),
+      name: "cli",
+    });
     if (!created.ok) throw new Error(created.code);
     const bearers = [
       {},
@@ -669,7 +672,7 @@ describe("a family end that fails after the commit (ruling 45 of plan 12e)", () 
     const c = await codeFor(h);
     await tokensOf(h, c);
     // A second session of the user, which the reset and the change end.
-    await createSession(h.config, { userId: c.user.id, ip: null, userAgent: null });
+    await createSession(h.config, { userId: c.user.id, ip: null, userAgent: null, proved: true });
     return { h, c, events };
   }
 

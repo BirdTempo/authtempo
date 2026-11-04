@@ -344,6 +344,7 @@ describe("setActiveOrganization", () => {
       userId: owner.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const session = await resolveSession(auth.config, token);
     if (!session) throw new Error("no session");

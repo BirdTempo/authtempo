@@ -1,4 +1,5 @@
 import { createAuth, type StorageAdapter } from "@authtempo/core";
+import { createOrganizationTokenAs } from "@authtempo/core/compat";
 import type { Pool } from "mysql2/promise";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMysqlAdapter } from "../src/index.js";
@@ -108,12 +109,13 @@ describe("the organization token cap on MySQL 8.4 (plan 12k Task 8)", () => {
       permissions: {},
     };
     for (let i = 0; i < CAP - 1; i++) {
-      const made = await plain.api.organizationTokens.create(input);
+      // A user with no sign-in: the compat seam, with the user row's rule (plan 12p).
+      const made = await createOrganizationTokenAs(plain, input);
       if (!made.ok) throw new Error(made.code);
     }
     const answers = await Promise.all([
-      a.api.organizationTokens.create(input),
-      b.api.organizationTokens.create(input),
+      createOrganizationTokenAs(a, input),
+      createOrganizationTokenAs(b, input),
     ]);
     const codes = answers.map((r) => (r.ok ? "ok" : r.code)).sort();
     expect(codes).toEqual(["ok", "organization_token_limit"]);
@@ -222,7 +224,7 @@ describe("an organization token create against a removal with revokeTokens on My
       const removed = signal();
       // The create waits at its lock until the removal has committed.
       const a = instance(held(first, "organization", () => removed.promise));
-      const create = a.api.organizationTokens.create({
+      const create = createOrganizationTokenAs(a, {
         user: admin,
         organizationId,
         name: "ci",
@@ -260,7 +262,7 @@ describe("an organization token create against a removal with revokeTokens on My
         }),
       );
       const b = instance(held(second, "organization", async () => atLock.fire()));
-      const create = a.api.organizationTokens.create({
+      const create = createOrganizationTokenAs(a, {
         user: admin,
         organizationId,
         name: "ci",

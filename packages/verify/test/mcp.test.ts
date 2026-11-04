@@ -64,12 +64,12 @@ function setup() {
 
 /**
  * A real API token of core, minted by its token API for the signed-in person.
- * `storage` is the storage that core uses: `setup` gives core its own, not the harness's.
+ * The create takes the session of the sign-in (plan 12p).
  */
-async function apiToken(server: Server, storage: StorageAdapter, userId: string): Promise<string> {
-  const user = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user) throw new Error("no user");
-  const t = await server.auth.api.tokens.create({ user, name: "ci" });
+async function apiToken(server: Server, sessionToken: string): Promise<string> {
+  const session = await server.auth.api.getSession(sessionToken);
+  if (!session) throw new Error("no session");
+  const t = await server.auth.api.tokens.create({ session, name: "ci" });
   if (!t.ok) throw new Error(t.code);
   return t.value.token;
 }
@@ -167,10 +167,10 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
   });
 
   it("answers 401 invalid_token for a bearer that is not an access token", async () => {
-    const { server, storage } = setup();
+    const { server } = setup();
     const s = await signedIn(server);
     const jwt = await sessionJwt(server, s.sessionToken);
-    const tk = await apiToken(server, storage, s.user.id);
+    const tk = await apiToken(server, s.sessionToken);
     expect(tk.startsWith("tk_")).toBe(true);
     const r = recorder();
     const route = requireMcpAuth(sourceOf(name, server), r.handler, {

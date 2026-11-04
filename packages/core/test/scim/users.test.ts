@@ -27,7 +27,7 @@ import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { meterOf } from "../../src/storage/meter.js";
 import type { StorageAdapter } from "../../src/storage/port.js";
 import { d1Like } from "../d1-like.js";
-import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
+import { BASE_URL, LONG_TEST_MS, sessionFor } from "../helpers.js";
 import {
   approvedDevice,
   authorized,
@@ -350,7 +350,10 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
     await signUpAndVerify(w, ADA);
     const user = await userAt(w, ADA);
     if (!user) throw new Error("no user");
-    const minted = await createApiToken(w.config, { user, name: "laptop" });
+    const minted = await createApiToken(w.config, {
+      session: await sessionFor(w.config, user),
+      name: "laptop",
+    });
     if (!minted.ok) throw new Error(minted.code);
     const id = await created(w, token, ADA);
     expect(
@@ -1082,7 +1085,7 @@ describe("the session door of a SCIM deactivate (ruling 50 of plan 12d)", () => 
   async function sessionsOf(w: World, userId: string, n: number) {
     const out: { token: string; id: string }[] = [];
     for (let i = 0; i < n; i++) {
-      const s = await createSession(w.config, { userId, ip: null, userAgent: null });
+      const s = await createSession(w.config, { userId, ip: null, userAgent: null, proved: true });
       out.push({ token: s.token, id: s.session.id });
     }
     return out;
@@ -1258,7 +1261,7 @@ describe("the OAuth families and the clock of a SCIM deactivate (ruling 55 of pl
    * ahead makes the families.
    */
   async function families(h: Handle, userId: string, n: number, ahead = 0) {
-    const s = await createSession(h.config, { userId, ip: null, userAgent: null });
+    const s = await createSession(h.config, { userId, ip: null, userAgent: null, proved: true });
     const cookie = `__Host-tempo_session=${s.token}`;
     const clientId = await registered(h);
     h.clock.advance(ahead);
@@ -1388,10 +1391,15 @@ describe("the OAuth families and the clock of a SCIM deactivate (ruling 55 of pl
     const { w, token, user, id } = await oauthWorld();
     w.clock.advance(MINUTE);
     for (let i = 0; i < 40; i++)
-      await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+      await createSession(w.config, { userId: user.id, ip: null, userAgent: null, proved: true });
     // An instance whose clock runs 2 s ahead writes one more session.
     w.clock.advance(2000);
-    const ahead = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const ahead = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     w.clock.advance(-2000);
     const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
     expect(off.status).toBe(200);
@@ -1433,7 +1441,12 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
     if (!user) throw new Error("no user");
     const id = await created(w, token, ADA);
     const h = { auth: { handle: w.handle }, config: w.config, storage: w.storage, clock: w.clock };
-    const s = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const s = await createSession(w.config, {
+      userId: user.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const cookie = `__Host-tempo_session=${s.token}`;
     return { w, h: h as unknown as Handle, token, user, id, cookie };
   }
@@ -1568,7 +1581,7 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
     const { w, token, user, id } = await oauthWorld();
     w.clock.advance(MINUTE);
     for (let i = 0; i < 40; i++)
-      await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+      await createSession(w.config, { userId: user.id, ip: null, userAgent: null, proved: true });
     w.clock.advance(MINUTE);
     expect((await scim(w, token, "PATCH", `/Users/${id}`, OFF)).status).toBe(200);
     await sweepAll(w, user.id);
@@ -1645,10 +1658,15 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
       const { w, token, user, id } = await oauthWorld();
       w.clock.advance(MINUTE);
       for (let i = 0; i < 520; i++)
-        await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+        await createSession(w.config, { userId: user.id, ip: null, userAgent: null, proved: true });
       // An instance whose clock runs 2 s ahead writes one more session.
       w.clock.advance(2000);
-      const ahead = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+      const ahead = await createSession(w.config, {
+        userId: user.id,
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
       w.clock.advance(-2000);
       expect((await scim(w, token, "PATCH", `/Users/${id}`, OFF)).status).toBe(200);
       // The page did not end it: it waits for the sweep.
@@ -1842,7 +1860,7 @@ describe("the credentials and the small round of a SCIM deprovision (ruling 69 o
     });
     if (!role.ok) throw new Error(role.code);
     const made = await createOrganizationToken(w.config, {
-      user: ada,
+      session: await sessionFor(w.config, ada),
       organizationId: w.organizationId,
       name: "ci",
       permissions: {},
@@ -1850,7 +1868,7 @@ describe("the credentials and the small round of a SCIM deprovision (ruling 69 o
     });
     if (!made.ok) throw new Error(made.code);
     const kept = await createOrganizationToken(w.config, {
-      user: owner,
+      session: await sessionFor(w.config, owner),
       organizationId: w.organizationId,
       name: "deploy",
       permissions: {},
@@ -1898,7 +1916,12 @@ describe("the credentials and the small round of a SCIM deprovision (ruling 69 o
     if (!ada) throw new Error("no user");
     // An instance whose clock runs 30 s ahead writes a session: past the 5 s bound of the act.
     w.clock.advance(30_000);
-    const ahead = await createSession(w.config, { userId: ada.id, ip: null, userAgent: null });
+    const ahead = await createSession(w.config, {
+      userId: ada.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     w.clock.advance(-30_000);
     const before = await w.storage.transaction((tx) =>
       markAllAccessEnd(tx, w.config, ada.id, meterOf(w.storage, 0), "revoked"),
@@ -1930,7 +1953,12 @@ describe("the credentials and the small round of a SCIM deprovision (ruling 69 o
     if (!ada) throw new Error("no user");
     const h = { auth: { handle: w.handle }, config: w.config, storage: w.storage, clock: w.clock };
     const handle = h as unknown as Handle;
-    const s = await createSession(w.config, { userId: ada.id, ip: null, userAgent: null });
+    const s = await createSession(w.config, {
+      userId: ada.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const cookie = `__Host-tempo_session=${s.token}`;
     const registeredRes = await w.handle(
       new Request(`${BASE_URL}/auth/oauth/register`, {

@@ -24,7 +24,7 @@ import { sweepExpired } from "../src/engine/sweep.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { makeAuth, tokenFromMail } from "./helpers.js";
+import { makeAuth, sessionFor, tokenFromMail } from "./helpers.js";
 import { FAST, sessionOnly, signUpAndVerify, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
@@ -367,10 +367,12 @@ describe("session create hooks (plan 9d)", () => {
     const passkey = recorded({}, { passkey: RP });
     const ada = await passkey.auth.seedUser("ada@example.com");
     const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-    const reg = await passkeyRegistrationOptions(passkey.auth.config, { user: ada });
+    const reg = await passkeyRegistrationOptions(passkey.auth.config, {
+      session: await sessionFor(passkey.auth.config, ada),
+    });
     if (!reg.ok) throw new Error(reg.code);
     const stored = await verifyPasskeyRegistration(passkey.auth.config, {
-      user: ada,
+      session: await sessionFor(passkey.auth.config, ada),
       response: await soft.register(reg.value.challenge, new TextEncoder().encode(ada.id)),
     });
     if (!stored.ok) throw new Error(stored.code);
@@ -399,6 +401,7 @@ describe("session create hooks (plan 9d)", () => {
       userId: grace.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const c = await continueHandoff(handoff.auth.config, {
       handoffId: h.value.handoffId,
@@ -1238,6 +1241,7 @@ describe("session end hooks (plan 9d)", () => {
       userId: upSession(bob.value).user.id,
       ip: null,
       userAgent: null,
+      proved: upSession(bob.value).user.emailVerified,
     });
     calls.length = 0;
     restore = signOutAfterRead(upSession(bob.value).token);
@@ -1249,13 +1253,19 @@ describe("session end hooks (plan 9d)", () => {
   it("fires afterEnd with sign_out and with expired, once each, and the sweep fires none", async () => {
     const { auth, calls } = recorded();
     const ada = await auth.seedUser("ada@example.com");
-    const out = await createSession(auth.config, { userId: ada.id, ip: null, userAgent: null });
+    const out = await createSession(auth.config, {
+      userId: ada.id,
+      ip: null,
+      userAgent: null,
+      proved: true,
+    });
     const expiring = await createSession(auth.config, {
       userId: ada.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
-    await createSession(auth.config, { userId: ada.id, ip: null, userAgent: null });
+    await createSession(auth.config, { userId: ada.id, ip: null, userAgent: null, proved: true });
     await destroySession(auth.config, out.token);
     auth.clock.advance(31 * 86_400_000);
     expect(await resolveSession(auth.config, expiring.token)).toBeNull();

@@ -244,6 +244,22 @@ const SITES: Site[] = [
     reason: "the sign-in drops its own new session after a password race",
   },
   {
+    file: "engine/passkeys.ts",
+    fn: "verifyPasskeyAuthentication",
+    call: 'delete("session"',
+    count: 1,
+    kind: "undo",
+    reason: "the sign-in drops its own new session when a claim took the passkey (plan 12p)",
+  },
+  {
+    file: "engine/handoff.ts",
+    fn: "redeemHandoff",
+    call: 'delete("session"',
+    count: 1,
+    kind: "undo",
+    reason: "the redeem drops its own new session when a claim took the code (plan 12p)",
+  },
+  {
     file: "engine/social.ts",
     fn: "resolveSocialUser",
     call: 'delete("session"',

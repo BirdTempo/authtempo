@@ -158,7 +158,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     if (!reset.ok || !("token" in reset.value)) throw new Error("the reset opened no session");
     const session = await resolveSession(auth.config, reset.value.token);
     if (!session) throw new Error("no session");
-    const setup = await setupTotp(auth.config, { userId: made.value.userId, password: PASSWORD });
+    const setup = await setupTotp(auth.config, { session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     const enabled = await enableTotp(auth.config, {
       session,

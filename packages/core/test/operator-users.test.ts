@@ -386,7 +386,12 @@ describe("operator user reads (plan 12f Task 5)", () => {
     const auth = await operatorAuth();
     const [id] = await signUpAll(auth, ["ada@example.com"]);
     for (let i = 0; i < 101; i++)
-      await createSession(auth.config, { userId: id ?? "", ip: null, userAgent: null });
+      await createSession(auth.config, {
+        userId: id ?? "",
+        ip: null,
+        userAgent: null,
+        proved: true,
+      });
     const live = await auth.storage.findMany("session", [
       { field: "userId", op: "eq", value: id ?? "" },
     ]);

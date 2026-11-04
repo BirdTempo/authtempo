@@ -426,6 +426,7 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
       userId: lone.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     const session = await resolveSession(w.auth.config, token);
     if (!session) throw new Error("no session");

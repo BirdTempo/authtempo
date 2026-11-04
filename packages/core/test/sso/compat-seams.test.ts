@@ -159,7 +159,7 @@ function seamWorld(extra: Partial<AuthConfig> = {}) {
   };
   /** TOTP on for the user of `session`, through the setup and the enable. */
   const enrol = async (session: ResolvedSession): Promise<void> => {
-    const setup = await totp.setup({ userId: session.user.id, password: PASSWORD });
+    const setup = await totp.setup({ session, password: PASSWORD });
     if (!setup.ok) throw new Error(setup.code);
     const code = await totpCode(base32Decode(setup.value.secret), clock.now());
     const enabled = await totp.enable({ session, code });

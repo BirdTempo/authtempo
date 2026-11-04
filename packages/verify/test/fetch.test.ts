@@ -103,11 +103,10 @@ describe("the verifier follows no redirect and owns its timeout (plan 11d)", () 
     const server = makeServer();
     const s = await signedIn(server);
     const jwt = await sessionJwt(server, s.sessionToken);
-    const user = await server.storage.findOne("user", [
-      { field: "id", op: "eq", value: s.user.id },
-    ]);
-    if (!user) throw new Error("no user");
-    const t = await server.auth.api.tokens.create({ user, name: "ci" });
+    // The token create takes the session of the sign-in (plan 12p).
+    const session = await server.auth.api.getSession(s.sessionToken);
+    if (!session) throw new Error("no session");
+    const t = await server.auth.api.tokens.create({ session, name: "ci" });
     if (!t.ok) throw new Error(t.code);
     const v = createVerifier({
       issuer: ISSUER,

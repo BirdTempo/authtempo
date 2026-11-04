@@ -3,7 +3,7 @@ import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createSession } from "../src/engine/sessions.js";
 import { decodeJws } from "../src/primitives/jwk.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, sessionFor } from "./helpers.js";
 
 /** One storage, clock, and limiter for the engine view and the routes. */
 function jwtHandle(extra: Partial<AuthConfig> = {}) {
@@ -27,6 +27,7 @@ async function signedIn(h: ReturnType<typeof jwtHandle>) {
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
   });
   return { user, token, session };
 }
@@ -69,7 +70,10 @@ describe("the JWT routes (plan 9g)", () => {
   it("GET /token answers 401 with no session, with a tk_ bearer, and with a JWT bearer", async () => {
     const h = jwtHandle();
     const s = await signedIn(h);
-    const tk = await h.auth.api.tokens.create({ user: s.user, name: "ci" });
+    const tk = await h.auth.api.tokens.create({
+      session: await sessionFor(h.config, s.user),
+      name: "ci",
+    });
     if (!tk.ok) throw new Error(tk.code);
     const jwt = await h.auth.api.jwt?.mint({ userId: s.user.id, sessionId: s.session.id });
     if (!jwt?.ok) throw new Error("no mint");

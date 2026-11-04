@@ -17,7 +17,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { makeAuth, post } from "./helpers.js";
+import { makeAuth, post, sessionFor } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
@@ -47,10 +47,12 @@ function passkeyAuth() {
 
 async function registered(auth: Auth, user: UserRow) {
   const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
-  const options = await passkeyRegistrationOptions(auth.config, { user });
+  const options = await passkeyRegistrationOptions(auth.config, {
+    session: await sessionFor(auth.config, user),
+  });
   if (!options.ok) throw new Error(options.code);
   const r = await verifyPasskeyRegistration(auth.config, {
-    user,
+    session: await sessionFor(auth.config, user),
     response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
   });
   if (!r.ok) throw new Error(r.code);

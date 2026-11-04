@@ -214,7 +214,7 @@ describe("the phone routes on D1 (plan 12i Task 5)", () => {
     expect(set.body).toEqual({ phone: A });
     const session = await api.getSession(v.value.signedIn.token);
     if (!session || !api.totp) throw new Error("no session or no totp");
-    const setup = await api.totp.setup({ userId: session.user.id, password });
+    const setup = await api.totp.setup({ session, password });
     if (!setup.ok) throw new Error(setup.code);
     const on = await api.totp.enable({
       session,

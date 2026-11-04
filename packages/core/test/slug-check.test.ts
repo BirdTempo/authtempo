@@ -5,7 +5,7 @@ import { createRouter } from "../src/http/router.js";
 import { organizationRoutes } from "../src/http/routes/organizations.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth, platformAuth, post, seedPlatform } from "./helpers.js";
+import { makeAuth, platformAuth, post, seedPlatform, sessionFor } from "./helpers.js";
 
 const CHECK = "/auth/organizations/check-slug";
 
@@ -16,6 +16,7 @@ function setup(auth: ReturnType<typeof makeAuth> = makeAuth({ organizations: {} 
       userId: user.id,
       ip: null,
       userAgent: null,
+      proved: true,
     });
     return { cookie: `${auth.config.cookieName}=${token}` };
   }
@@ -201,7 +202,10 @@ describe("the slug check (plan 12k Task 6)", () => {
   it("takes a session only", async () => {
     const s = setup();
     const ada = await s.auth.seedUser("ada@example.com");
-    const made = await createApiToken(s.auth.config, { user: ada, name: "ci" });
+    const made = await createApiToken(s.auth.config, {
+      session: await sessionFor(s.auth.config, ada),
+      name: "ci",
+    });
     if (!made.ok) throw new Error(made.code);
     expect(made.value.token.startsWith("tk_")).toBe(true);
     expect(await s.check({ authorization: `Bearer ${made.value.token}` }, "acme")).toEqual({

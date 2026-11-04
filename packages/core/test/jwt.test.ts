@@ -23,6 +23,7 @@ async function sessionOf(auth: Auth, email = "ada@example.com", org: string | nu
     userId: user.id,
     ip: null,
     userAgent: null,
+    proved: true,
     activeOrganizationId: org,
   });
   return { user, session };
