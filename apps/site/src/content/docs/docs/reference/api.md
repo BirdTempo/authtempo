@@ -52,7 +52,7 @@ sources:
 
 ## The in-process api
 
-Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, status }`. A failed `Result` of `hook_refused` also carries `message`, and one of `sso_required` carries `detail`, the SSO start URL on the origin of `baseURL`. No call checks the `Origin` header, so a server route that calls one must check its own caller.
+Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, status }`. A failed `Result` of `hook_refused` also carries `message`, and one of `sso_required` carries `detail`, the SSO start URL on the origin of `baseURL`. The `conflict` of a sign-up confirm that lost its claim carries `detail` too, a sentence that says to sign in. No call checks the `Origin` header, so a server route that calls one must check its own caller.
 
 | Group | Calls |
 | --- | --- |

@@ -1894,8 +1894,9 @@ and no file under `src/` imports it. The test
 
 ## The storage port
 
-Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
-`transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte
+Ten methods: `create`, `createMany`, `rowsPerInsert`, `findOne`,
+`findMany`, `update`, `delete`, `deleteRows`, `keep`, `transaction`.
+Clauses join with AND. Operators: `eq ne in lt lte gt gte
 startsWith`. One sort field. No joins. Run `runAdapterConformance` from
 `@authtempo/core/conformance` against a new adapter; it is the contract.
 

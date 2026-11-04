@@ -1,6 +1,6 @@
 ---
 title: The storage port
-description: The six storage methods that core calls, the rules that every adapter keeps, and why the port is so narrow.
+description: The ten storage methods that core calls, the rules that every adapter keeps, and why the port is so narrow.
 type: explanation
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6

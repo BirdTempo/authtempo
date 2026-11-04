@@ -29,7 +29,7 @@ function body(text: string, name: string): string {
 }
 
 const CONFLICT_WORDS =
-  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When another proof verifies the user first, the flow answers 409 with no claim write. The verify link, the magic link, and the email code spent their proof before the claim. So the flow mails a new one of its kind. That mail counts on the mail limit of its kind for the address. A social sign-in needs a new sign-in at the provider. The password reset and the invitation confirm keep their link, so the same request can work again.";
+  "**Meaning on D1:** A store with a query limit per invocation, such as D1, runs a [claim](/docs/concepts/claim-rule/) once. When another proof verifies the user first, the flow answers 409 with no claim write. The magic link and the email code spent their proof before the claim. So the flow mails a new one of its kind. That mail counts on the mail limit of its kind for the address. A failure of that mail leaves the 409 and emits the event `claim.mail_failed`. The verify link mails nothing, because the address is now verified. Its answer has a `detail` that says to sign in. A social sign-in needs a new sign-in at the provider. The password reset and the invitation confirm keep their link, so the same request can work again.";
 
 describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decision 11 of plan 12o)", () => {
   it("names the claim race on a store with a query limit, as claimRetry answers it", () => {
@@ -40,14 +40,15 @@ describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decisi
     expect(errorSection("conflict")).toContain(CONFLICT_WORDS);
   });
 
-  it("holds the new mail of the verify link, the magic link, and the email code, each under the limit of its kind", () => {
-    // Each sends on the conflict of a lost flip, and only then.
-    expect(source("password.ts")).toContain(
-      "if (verify.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, passwordId);",
+  it("holds the new mail of the magic link and the email code, each under the limit of its kind, and the detail of the verify link", () => {
+    // The verify link mails nothing after a lost flip. Its 409 carries the sentence (ruling 23 of plan 12o).
+    const password = source("password.ts");
+    expect(password).not.toContain("resendProofAfterLostClaim");
+    expect(password).toContain(
+      'export const CONFIRM_LOST_DETAIL = "Another proof verified this address first. Sign in.";',
     );
-    expect(body(source("password.ts"), "mailVerifyAgain")).toContain(
-      "if (!(await allowResendMail(config, email))) return false;",
-    );
+    expect(password).toContain("detail: CONFIRM_LOST_DETAIL,");
+    // The magic link and the email code send on the conflict of a lost flip, and only then.
     expect(source("magic-link.ts")).toContain(
       "if (verified.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, next);",
     );
@@ -59,6 +60,13 @@ describe("the conflict entry of the errors page (ruling 42 d of plan 12n, decisi
     );
     expect(source("email-otp.ts")).toContain(
       'if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return;',
+    );
+    // A throw of the mail port emits the event, and the answer stays 409.
+    expect(source("magic-link.ts")).toContain(
+      'config.observe.emit({ name: "claim.mail_failed", method: "magic_link", errorName: e });',
+    );
+    expect(source("email-otp.ts")).toContain(
+      'config.observe.emit({ name: "claim.mail_failed", method: "email_otp", errorName: e });',
     );
     // Social, the ID token, and SSO send none: their proof is the provider's.
     expect(source("social.ts")).not.toContain("resendProofAfterLostClaim");
@@ -119,7 +127,7 @@ const HOOK_WORDS = [
 
 const CLAIM_RULE_WORDS = [
   "The claim is final once its last write is done. When the sign-in fails after that point, the address stays verified, and the claimant still holds nothing. The flow answers an error and opens no session. On Postgres and MySQL such a failure undoes the whole claim.",
-  "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a verify link, a magic link, or an email code then mails a new proof of its kind to the address.",
+  "Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. Its answer says to sign in.",
 ];
 
 describe("the final claim of the hooks guide and the claim-rule page (decisions 8 and 10 of plan 12o)", () => {

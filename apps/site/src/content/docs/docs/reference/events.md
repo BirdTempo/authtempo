@@ -115,6 +115,7 @@ Each event has these fields too:
 | `username.set_gave_up` | error | `userId: id` | `authtempo: username set gave up` |
 | `phone.set_gave_up` | error | `userId: id` | `authtempo: phone set gave up` |
 | `notice.mail_failed` | error | `event: identifier`, `errorName: errorName` | `authtempo: notice mail failed` |
+| `claim.mail_failed` | error | `method: enum`, `errorName: errorName` | `authtempo: claim mail failed` |
 | `email_code.count_gave_up` | error | `rowId: id` | `authtempo: email code count gave up` |
 | `second_factor.count_gave_up` | error | `rowId: id` | `authtempo: second-factor challenge count gave up` |
 | `backup_code.spend_gave_up` | error | `rowId: id` | `authtempo: backup code spend gave up` |
@@ -212,6 +213,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `captcha.port_threw.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
 | `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
 | `sms.not_sent.reason` | `capped`, `unavailable`, `timeout` |
+| `claim.mail_failed.method` | `magic_link`, `email_otp` |
 | `hook.copy_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.before_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.after_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
