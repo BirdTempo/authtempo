@@ -366,7 +366,7 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
       // Plan 12i Task 10: the ID-token route runs the social resolution of the callbacks.
       "POST /social/:provider/id-token",
       "POST /handoff/redeem",
-      "POST /magic-link/verify",
+      // POST /magic-link/verify left: session-proof.test.ts answers 409 to a claim that meets a live lease (plan 12p).
       "POST /otp/reset",
       "POST /otp/verify",
       "POST /passkey/authenticate/verify",

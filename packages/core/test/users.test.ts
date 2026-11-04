@@ -319,7 +319,11 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
     const verified = await checkedFor(storage, "U1");
     await storage.transaction((tx) => claimEmail(tx, "U1", null, now, verified));
     expect((await storage.findMany("passkey", [])).map((p) => p.id)).toEqual(["P2"]);
-    expect((await storage.findMany("verification", [])).map((v) => v.id)).toEqual(["V2"]);
+    // The claim's lease stays until the sweep (plan 12p).
+    expect((await storage.findMany("verification", [])).map((v) => v.id)).toEqual([
+      "V2",
+      "claim-lease:U1",
+    ]);
     expect(
       (await storage.findOne("user", [{ field: "id", op: "eq", value: "U1" }]))?.emailVerified,
     ).toBe(true);
@@ -376,9 +380,11 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
     });
     const verified = await checkedFor(storage, "U1");
     await storage.transaction((tx) => claimEmail(tx, "U1", null, now, verified));
+    // The claim's lease stays until the sweep (plan 12p).
     expect((await storage.findMany("verification", [])).map((v) => v.id).sort()).toEqual([
       "H2",
       "H3",
+      "claim-lease:U1",
     ]);
   });
 });
@@ -448,10 +454,10 @@ describe("claimEmail and the password row (plan 8)", () => {
     expect(order.indexOf("password")).toBeLessThan(order.indexOf("session"));
   });
 
-  it("flips emailVerified in its first statement and deletes the password rows before the sessions (plan 8 final review T3)", async () => {
-    // Every sign-up and sign-in guard depends on this order. The
-    // interleave tests run whole claims, so a reorder inside claimEmail
-    // passes them; this test records each statement.
+  it("takes the lease first, deletes the password rows before the flip, and ends the sessions last (plan 8 final review T3, plan 12p)", async () => {
+    // Every sign-up and sign-in guard depends on this order (ruling 16 of
+    // plan 12p). The interleave tests run whole claims, so a reorder inside
+    // claimEmail passes them; this test records each statement.
     const { storage, now } = await unverifiedWithPassword();
     const order: string[] = [];
     const verified = await checkedFor(storage, "u1");
@@ -481,14 +487,17 @@ describe("claimEmail and the password row (plan 8)", () => {
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
-    // The claim clears the username and the phone in the same statement (ruling 16 M2, final review A M2).
-    expect(order[0]).toBe(
+    // The memory store has no isolation, so the first statement is the lease.
+    expect(order[0]).toBe("create:verification");
+    // The flip clears the username and the phone in the same statement (ruling 16 M2, final review A M2).
+    const flip = order.indexOf(
       `update:user:["emailVerified","username","displayUsername","phone","updatedAt"]`,
     );
-    expect(order.filter((x) => x.startsWith("update:"))).toHaveLength(1);
+    expect(order.filter((x) => x.startsWith("update:"))).toEqual([order[flip]]);
     const password = order.indexOf("delete:password");
     expect(password).toBeGreaterThan(0);
-    expect(password).toBeLessThan(order.indexOf("delete:session"));
+    expect(password).toBeLessThan(flip);
+    expect(flip).toBeLessThan(order.indexOf("delete:session"));
   });
 
   it.each([

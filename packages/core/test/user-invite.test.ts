@@ -14,6 +14,7 @@ import type { AuthEvent } from "../src/observe/port.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { SessionRow, UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
+import { d1Like } from "./d1-like.js";
 import { BASE_URL, get, makeAuth, post, recordCredential, settled } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorAuth, operatorFixture } from "./operator-helpers.js";
 import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
@@ -599,40 +600,43 @@ describe("the claim of the invitation confirm (12f2 follow-up 7, K6)", () => {
 describe("the invitation confirm on a store with a query limit per invocation (ruling 32 of plan 12n)", () => {
   it("answers conflict when another proof claims the user first, and keeps the invitation for the request again", async () => {
     const w = await world();
-    const storage = w.config.storage;
-    storage.queryLimitPerInvocation = true;
     const done = await invited(w);
     const token = inviteOf(w.mail);
     // The person also asks for a magic link of the address.
     expect((await w.handle(post("/auth/magic-link/request", { email: ADA }))).status).toBe(200);
     const link = linkTo(w.mail, ADA);
+    // The confirm runs on the D1 view of the store, with its query limit
+    // (plan 12p). Its undo writes back only the fields it set, as on D1, so
+    // the claim of the magic link stays.
+    const view = d1Like(w.config);
+    view.storage.queryLimitPerInvocation = true;
     // Memory runs one transaction at a time. So the magic link runs its
     // transaction on the store at once, as a commit of another request does.
-    const free: StorageAdapter = { ...storage, transaction: (fn) => fn(free) };
+    const free: StorageAdapter = { ...w.config.storage, transaction: (fn) => fn(free) };
     const side = { ...w.config, storage: free };
     let claims = 0;
-    const original = storage.transaction.bind(storage);
-    storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+    const original = view.storage.transaction.bind(view.storage);
+    view.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
       original((tx) =>
         fn({
           ...tx,
-          update: async (m, where, d) => {
-            if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true) {
+          create: async (m, d) => {
+            if (m === "verification" && (d as { purpose?: unknown }).purpose === "claim-lease") {
               claims++;
-              // The magic link claims the user before the flip of the confirm.
+              // The magic link claims the user before the lease of the confirm.
               const v = await verifyMagicLink(side, { token: link, ip: null, userAgent: null });
               if (!v.ok) throw new Error(v.code);
             }
-            return tx.update(m, where, d);
+            return tx.create(m, d);
           },
         }),
       );
-    const res = await confirm(w, token);
+    const onView = settled(createRouter(view, coreRoutes(view)));
+    const res = await onView(post(CONFIRM, { token }, { "cf-connecting-ip": "198.51.100.7" }));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "conflict" });
     // One run of the claim, and no retry.
     expect(claims).toBe(1);
-    storage.transaction = original;
     // The undo kept the invitation unspent, so the request again signs the person in.
     const [row] = await inviteRows(w);
     expect(row?.consumedAt).toBeNull();

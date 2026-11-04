@@ -104,7 +104,7 @@ async function mailMagicLink(
 
 /**
  * The fallback mail of a magic link that answers 409 `conflict` to a lost
- * flip (plan 12o, spec 8.9). The link was spent before the transaction, so
+ * claim (plan 12o, spec 8.9). The link was spent before the transaction, so
  * a new link goes to the address, with the same landing path. It counts
  * under the per-address limit of the request. A full limit sends nothing.
  * The new link records no anonymous user. A throw of this step emits
@@ -148,7 +148,7 @@ export async function verifyMagicLink(
   if (enforced) return enforced;
   const next = safeNext((row.data as { next?: unknown } | null)?.next);
   // A failure after this point burns the link by design. The person
-  // requests a new one. A 409 `conflict` to a lost flip mails a new link
+  // requests a new one. A 409 `conflict` to a lost claim mails a new link
   // (plan 12o).
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.

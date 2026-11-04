@@ -231,7 +231,7 @@ async function mailCode(
 
 /**
  * The fallback mail of a sign-in code that answers 409 `conflict` to a lost
- * flip (plan 12o, spec 8.9). The code was spent before the transaction, so
+ * claim (plan 12o, spec 8.9). The code was spent before the transaction, so
  * a new code goes to the address. It counts under the per-address limits of
  * the request, the 15-minute key and the day key. A full limit sends
  * nothing. The new code records no anonymous user. A throw of this step
@@ -381,7 +381,7 @@ export async function consumeCode(
  * and the session, in one transaction, with the session hook before the
  * first write (plan 9d). The code is spent before the resolution, as the
  * magic link's row is: a failure after that point burns the code by design,
- * and the person requests a new one. A 409 `conflict` to a lost flip mails
+ * and the person requests a new one. A 409 `conflict` to a lost claim mails
  * a new code (plan 12o).
  */
 export async function verifyEmailOtp(

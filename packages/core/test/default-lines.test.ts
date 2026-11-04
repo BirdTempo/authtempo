@@ -1342,8 +1342,9 @@ describe("the claim line (plan 12o)", () => {
     const asked = await requestMagicLink(auth.config, { email: EMAIL, ip: null });
     if (!asked.ok) throw new Error(asked.code);
     const link = tokenFromMail(auth.mail.at(-1)?.text ?? "");
-    // The D1 view: at the flip of the magic link, the verify link claims the
-    // user first. The view has a query limit, so the magic link answers 409.
+    // The D1 view: at the lease of the magic link's claim (plan 12p), the
+    // verify link claims the user first. The view has a query limit, so the
+    // magic link answers 409.
     const view = d1Like(auth.config);
     view.storage.queryLimitPerInvocation = true;
     const original = view.storage.transaction.bind(view.storage);
@@ -1352,8 +1353,12 @@ describe("the claim line (plan 12o)", () => {
       original((tx) =>
         fn({
           ...tx,
-          update: async (m, where, d) => {
-            if (armed && m === "user" && (d as { emailVerified?: unknown }).emailVerified) {
+          create: async (m, d) => {
+            if (
+              armed &&
+              m === "verification" &&
+              (d as { purpose?: unknown }).purpose === "claim-lease"
+            ) {
               armed = false;
               const won = await verifyPasswordEmail(view, {
                 token: confirm,
@@ -1362,7 +1367,7 @@ describe("the claim line (plan 12o)", () => {
               });
               if (!won.ok) throw new Error(won.code);
             }
-            return tx.update(m, where, d);
+            return tx.create(m, d);
           },
         }),
       );

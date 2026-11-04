@@ -70,13 +70,13 @@ import {
   ClaimRacedError,
   claimEmail,
   claimedUser,
+  claimNotStarted,
   claimRetry,
   createIdentity,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
   undoSessionIfIdentityGone,
-  userStillUnverified,
   validImageUrl,
   validUserName,
 } from "./users.js";
@@ -1200,14 +1200,15 @@ export async function resolveSocialUser<T extends AfterWrite>(
             // and the owner could not sign in again (final review I-1).
             // The guard is on the user row, not on the identity row: a claim
             // that ran before this transaction created its identity did not
-            // delete that identity (re-review R-1). claimEmail flips the flag
-            // in its first statement, so any claim since the user create
-            // makes this match zero rows. Then delete the own session and the
-            // own identity by id, and commit, so no undo runs. When it
-            // matches one row it is the last statement, so no undo runs after
-            // it, and a later claim deletes the identity and the session.
+            // delete that identity (re-review R-1). A claim deletes the
+            // identities before its flip (ruling 16 of plan 12p), so the
+            // check sees the claim's first statement, the hold or the lease:
+            // any claim since the user create makes it false. Then delete the
+            // own session and the own identity by id, and commit, so no undo
+            // runs. When it passes it is the last statement, so no undo runs
+            // after it, and a later claim deletes the identity and the session.
             // Checked 2026-10-10.
-            if (!(await userStillUnverified(tx, user.id, now))) {
+            if (!(await claimNotStarted(tx, user, now))) {
               // The row that `after` wrote. A created user has no factor, so
               // it is a session; the challenge branch keeps the rule whole.
               if (value.kind === "session")
@@ -1217,7 +1218,7 @@ export async function resolveSocialUser<T extends AfterWrite>(
               return fail<never>("email_taken_unverified");
             }
           } else if (trustedIdentityId) {
-            // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+            // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's delete of the identity, which comes before its flip and its session delete, and undoes the insert.
             await undoSessionIfIdentityGone(tx, trustedIdentityId, now);
           }
           return ok({ user, after: value });

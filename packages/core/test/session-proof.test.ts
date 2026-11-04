@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { type AuthConfig, type MailMessage, resolveConfig } from "../src/config.js";
+import {
+  type AuthConfig,
+  type MailMessage,
+  type ResolvedConfig,
+  resolveConfig,
+} from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import {
   handleProved,
@@ -9,22 +14,40 @@ import {
   sessionProved,
 } from "../src/engine/address.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
+import { verifyMagicLink } from "../src/engine/magic-link.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { verified } from "../src/engine/organizations.js";
 import { requestPhone, verifyPhone } from "../src/engine/phone.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { completeSocial, startSocial } from "../src/engine/social.js";
+import { sweepExpired } from "../src/engine/sweep.js";
+import { CLAIM_LEASE_MS, claimLeaseId } from "../src/engine/users.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { base32Decode, totpCode } from "../src/primitives/totp.js";
-import type { SessionRow, UserRow } from "../src/schema.js";
+import {
+  type ModelName,
+  type SessionRow,
+  schema,
+  type UserRow,
+  type VerificationRow,
+} from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
-import type { StorageAdapter } from "../src/storage/port.js";
+import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
+import { d1Like } from "./d1-like.js";
 import { APP_ORIGIN, BASE_URL, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
+import {
+  type FakeIdToken,
+  fakeJwt,
+  GOOGLE,
+  googleClaims,
+  tokenEndpoint,
+} from "./social-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
 // Plan 12p Task 2: the proof flag of a session and the rule at every
@@ -43,6 +66,11 @@ const PHONE = "+14155550100";
 const REDIRECT = "https://client.example.com/callback";
 const RESOURCE = `${BASE_URL}/mcp`;
 const COOKIE = "__Host-tempo_session";
+
+/** True for the claim's lease: its first statement on a store with no isolation (plan 12p). */
+function isLease(model: string, data: unknown): boolean {
+  return model === "verification" && (data as { purpose?: unknown }).purpose === "claim-lease";
+}
 
 /** True for the claim's flip: the update of an unverified user row to verified. */
 function isFlip(model: string, where: { field: string; value: unknown }[], data: unknown): boolean {
@@ -74,26 +102,56 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
   const ended: string[] = [];
   const created: SessionRow[] = [];
   /**
-   * The claimant's requests to run inside the owner's flow: at the flip, or
-   * right after the claim's delete of the handoff codes.
+   * The claimant's requests to run inside the owner's flow: right after the
+   * claim's lease, its delete of the identities, of the passwords, or of the
+   * handoff codes, or its flip (plan 12p).
    */
-  const armed: { run: (() => Promise<void>) | null; at: "flip" | "handoff-delete" } = {
+  const armed: {
+    run: (() => Promise<void>) | null;
+    at: "lease" | "identity-delete" | "password-delete" | "handoff-delete" | "flip";
+  } = {
     run: null,
     at: "flip",
+  };
+  /**
+   * The query cap of a D1 invocation (plan 12p): while on, each call of the
+   * owner's store throws as D1 does at query 51. An undo that runs then
+   * fails too, as on D1.
+   */
+  const cap = { on: false };
+  const capped = () => {
+    if (cap.on) throw new Error("Too many API requests by single worker invocation.");
   };
   /** Each write of the owner's flows as `op:model`, in order, while a test sets it. */
   const log: { writes: string[] | null } = { writes: null };
   const wrote = (op: string, model: string) => log.writes?.push(`${op}:${model}`);
   const wrap = (a: StorageAdapter): StorageAdapter => ({
-    createMany: (m, r) => a.createMany(m, r),
-    rowsPerInsert: (m) => a.rowsPerInsert(m),
-    create: (m, d) => {
-      wrote("create", m);
-      return a.create(m, d);
+    createMany: (m, r) => {
+      capped();
+      return a.createMany(m, r);
     },
-    findOne: (m, w) => a.findOne(m, w),
-    findMany: (m, w, o) => a.findMany(m, w, o),
+    rowsPerInsert: (m) => a.rowsPerInsert(m),
+    create: async (m, d) => {
+      capped();
+      wrote("create", m);
+      const row = await a.create(m, d);
+      const run = armed.run;
+      if (run && armed.at === "lease" && isLease(m, d)) {
+        armed.run = null;
+        await run();
+      }
+      return row;
+    },
+    findOne: (m, w) => {
+      capped();
+      return a.findOne(m, w);
+    },
+    findMany: (m, w, o) => {
+      capped();
+      return a.findMany(m, w, o);
+    },
     update: async (m, w, d) => {
+      capped();
       const flip = isFlip(m, w as { field: string; value: unknown }[], d);
       wrote(flip ? "flip" : "update", m);
       const n = await a.update(m, w, d);
@@ -105,18 +163,27 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
       return n;
     },
     delete: async (m, w) => {
+      capped();
       wrote("delete", m);
       const n = await a.delete(m, w);
       const run = armed.run;
       const codes =
         m === "verification" && w.some((x) => x.field === "purpose" && x.value === "handoff-code");
-      if (run && armed.at === "handoff-delete" && codes) {
+      const at = codes
+        ? "handoff-delete"
+        : m === "password"
+          ? "password-delete"
+          : m === "identity"
+            ? "identity-delete"
+            : null;
+      if (run && at !== null && armed.at === at) {
         armed.run = null;
         await run();
       }
       return n;
     },
     deleteRows: (m, w) => {
+      capped();
       wrote("deleteRows", m);
       return a.deleteRows(m, w);
     },
@@ -124,15 +191,21 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
     keep: () => a.keep(),
     transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
   });
-  /** A wait before the next session insert of the claimant's store, while a test sets it. */
-  const gate: { session: (() => Promise<void>) | null } = { session: null };
+  /** A wait before the next insert of a model of the claimant's store, while a test sets it. */
+  const gate: Record<"session" | "password" | "identity", (() => Promise<void>) | null> = {
+    session: null,
+    password: null,
+    identity: null,
+  };
   const open: StorageAdapter = {
     createMany: (m, r) => inner.createMany(m, r),
     rowsPerInsert: (m) => inner.rowsPerInsert(m),
     create: async (m, d) => {
-      const wait = gate.session;
-      if (m === "session" && wait) {
-        gate.session = null;
+      const key: keyof typeof gate | null =
+        m === "session" || m === "password" || m === "identity" ? m : null;
+      const wait = key ? gate[key] : null;
+      if (key && wait) {
+        gate[key] = null;
         await wait();
       }
       return inner.create(m, d);
@@ -212,6 +285,7 @@ function world(opts: { hook?: boolean; extra?: Partial<AuthConfig> } = {}) {
     gate,
     log,
     clock,
+    cap,
   };
 }
 type World = ReturnType<typeof world>;
@@ -410,9 +484,10 @@ function gateRequests(cookie: string, ctx: { clientId: string; userCode: string 
       "403 email_unverified",
     ],
     [
+      // The claim deleted the password before the flip (ruling 16), so the password check refuses first.
       "the TOTP setup",
       req("POST", "/totp/setup", { password: PW }, cookie),
-      "403 email_unverified",
+      "401 invalid_credentials",
     ],
     [
       "the TOTP enable",
@@ -492,7 +567,8 @@ async function waysIn(w: World, userId: string) {
     await w.storage.findMany("verification", [{ field: "identifier", op: "eq", value: userId }])
   )
     .map((r) => r.purpose)
-    .filter((p) => p !== "magic-link");
+    // The claim's lease is no way in: it stays until the sweep (plan 12p).
+    .filter((p) => p !== "magic-link" && p !== "claim-lease");
   return {
     apiTokens: (await w.storage.findMany("apiToken", [of])).length,
     passkeys: (await w.storage.findMany("passkey", [of])).length,
@@ -833,9 +909,9 @@ describe("the rule of the helpers (plan 12p decision 3)", () => {
   });
 });
 
-describe("the claim's order (plan 12p decision 5)", () => {
+describe("the claim's order (ruling 16 of plan 12p)", () => {
   for (const hook of [false, true])
-    it(`deletes every row a sign-in trusts after the flip and before the sessions (afterEnd hook ${hook})`, async () => {
+    it(`takes the lease, deletes every row a sign-in trusts, flips the flag, and ends the sessions last (afterEnd hook ${hook})`, async () => {
       const w = world({ hook });
       await claimant(w);
       const verify = await ownerLink(w);
@@ -843,19 +919,26 @@ describe("the claim's order (plan 12p decision 5)", () => {
       expect(await answer(await w.owner.handle(verify))).toBe("200 ok");
       const writes = w.log.writes;
       w.log.writes = null;
-      const flip = writes.indexOf("flip:user");
-      expect(flip).toBeGreaterThanOrEqual(0);
+      // The memory store has no isolation, so the first write of the claim is the lease.
+      const lease = writes.indexOf("create:verification");
+      expect(lease).toBeGreaterThanOrEqual(0);
       // The sessions last: a chunk delete of the read ids with the hook, then the delete by user id.
       const sessions = hook ? ["deleteRows:session", "delete:session"] : ["delete:session"];
-      expect(writes.slice(flip, flip + 6 + sessions.length)).toEqual([
-        "flip:user",
+      expect(writes.slice(lease, lease + 7 + sessions.length)).toEqual([
+        "create:verification",
         "delete:identity",
         "delete:password",
         "delete:passkey",
         "delete:verification",
         "delete:verification",
+        "flip:user",
         ...sessions,
       ]);
+      const user = await userAt(w, CLAIMED);
+      const row = await w.storage.findOne("verification", [
+        { field: "id", op: "eq", value: claimLeaseId(user.id) },
+      ]);
+      expect(row).toMatchObject({ purpose: "claim-lease", identifier: user.id });
     });
 });
 
@@ -868,17 +951,74 @@ function latch() {
   return { wait, open };
 }
 
-describe("the password sign-in guard on the verified path (plan 12p decision 6)", () => {
-  it("undoes the session of a claimant sign-in that read the user after the flip and inserts after the claim", async () => {
+/** The ids of the sessions of the claimed user. */
+async function sessionIds(w: World): Promise<string[]> {
+  const user = await userAt(w, CLAIMED);
+  const rows = await w.storage.findMany("session", [{ field: "userId", op: "eq", value: user.id }]);
+  return rows.map((x) => x.id).sort();
+}
+
+/** The answer of a token create by the session of `token`. */
+async function tokenCreate(w: World, token: string): Promise<string> {
+  return answer(await w.claimant.handle(req("POST", "/tokens", { name: "ci" }, cookieOf(token))));
+}
+
+describe("a password sign-in that straddles the claim (ruling 16 of plan 12p)", () => {
+  it("(a) reads the user after the flip, finds no password row, and opens no session", async () => {
+    const w = world();
+    const token = await claimant(w);
+    const verify = await ownerLink(w);
+    let late: string | null = null;
+    w.armed.run = async () => {
+      const res = await w.claimant.handle(
+        req("POST", "/password/sign-in", { email: CLAIMED, password: PW }),
+      );
+      late = `${await answer(res)} ${setToken(res) === null ? "no session" : "a session"}`;
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(w.armed.run).toBeNull();
+    expect(late).toBe("401 invalid_credentials no session");
+    expect(await rowOf(w, token)).toBeNull();
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("(b) reads the user before the flip, commits an unproved session, and the claim's session delete removes it", async () => {
+    const w = world();
+    await claimant(w);
+    const verify = await ownerLink(w);
+    let inside: { signIn: string; proved: boolean | undefined; token: string } | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      // The claim took its lease and deleted nothing yet: the sign-in reads the user unverified.
+      const res = await w.claimant.handle(
+        req("POST", "/password/sign-in", { email: CLAIMED, password: PW }),
+      );
+      const made = setToken(res) ?? "";
+      inside = {
+        signIn: await answer(res),
+        proved: (await rowOf(w, made))?.proved,
+        token: await tokenCreate(w, made),
+      };
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(inside).toEqual({ signIn: "200 ok", proved: false, token: "403 email_unverified" });
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+    expect(await w.storage.findMany("apiToken", [])).toEqual([]);
+  });
+
+  it("undoes the session of a sign-in that read its password before the claim's delete and inserts after the claim (decision 6)", async () => {
     const w = world();
     const token = await claimant(w);
     const verify = await ownerLink(w);
     const atInsert = latch();
     const release = latch();
     let signIn: Promise<Response> | null = null;
+    w.armed.at = "lease";
     w.armed.run = async () => {
-      // The claimant's sign-in reads the user verified, checks the password,
-      // and stops before its session insert, while the claim goes on.
+      // The claimant's sign-in reads the user and the password row, checks the
+      // password, and stops before its session insert, while the claim goes on.
       w.gate.session = async () => {
         atInsert.open();
         await release.wait;
@@ -901,11 +1041,321 @@ describe("the password sign-in guard on the verified path (plan 12p decision 6)"
     expect(await answer(late)).toBe("401 invalid_credentials");
     expect(setToken(late)).toBeNull();
     // Only the owner's session of the proof is left.
-    const sessions = await w.storage.findMany("session", [
-      { field: "userId", op: "eq", value: user.id },
-    ]);
-    expect(sessions.map((x) => x.id)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
     expect(await rowOf(w, token)).toBeNull();
+  });
+});
+
+/**
+ * A world with Google sign-in. `callback` runs one Google sign-in on
+ * `config`: the subject `g-claimant`, the claimed address, and the address
+ * unverified, as some providers report it.
+ */
+function socialWorld() {
+  const tokens: Record<string, FakeIdToken> = {};
+  const { fetchFn } = tokenEndpoint("idtok-default");
+  const w = world({ extra: { social: { google: GOOGLE, fetch: fetchFn }, jwt: fakeJwt(tokens) } });
+  const callback = async (config: ResolvedConfig = w.config) => {
+    const started = await startSocial(config, { provider: "google", next: "/home", ip: "1.1.1.1" });
+    if (!started.ok) throw new Error(started.code);
+    const url = new URL(started.value.location);
+    tokens["idtok-default"] = googleClaims(url.searchParams.get("nonce") ?? "", {
+      sub: "g-claimant",
+      email: CLAIMED,
+      email_verified: false,
+    });
+    const done = await completeSocial(config, {
+      provider: "google",
+      state: url.searchParams.get("state") ?? "",
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) return { code: done.code, token: null };
+    if (!("token" in done.value)) throw new Error("the sign-in answered a challenge");
+    return { code: "ok", token: recordCredential(done.value.token) };
+  };
+  return { w, callback };
+}
+
+describe("a social sign-in that straddles the claim (ruling 16 of plan 12p)", () => {
+  it("(a) reads the user after the flip, finds no identity, and opens no session", async () => {
+    const { w, callback } = socialWorld();
+    const first = await callback();
+    expect(first.code).toBe("ok");
+    const verify = await ownerLink(w);
+    let late: { code: string; token: string | null } | null = null;
+    w.armed.run = async () => {
+      late = await callback();
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(w.armed.run).toBeNull();
+    expect(late).toEqual({ code: "email_taken_unverified", token: null });
+    expect(await rowOf(w, first.token ?? "")).toBeNull();
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+    const user = await userAt(w, CLAIMED);
+    expect(
+      (await w.storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }])).map(
+        (i) => i.provider,
+      ),
+    ).toEqual(["email"]);
+  });
+
+  it("(b) reads the user before the flip, commits an unproved session, and the claim's session delete removes it", async () => {
+    const { w, callback } = socialWorld();
+    expect((await callback()).code).toBe("ok");
+    const verify = await ownerLink(w);
+    let inside: { code: string; proved: boolean | undefined; token: string } | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      const signed = await callback();
+      inside = {
+        code: signed.code,
+        proved: (await rowOf(w, signed.token ?? ""))?.proved,
+        token: await tokenCreate(w, signed.token ?? ""),
+      };
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(inside).toEqual({ code: "ok", proved: false, token: "403 email_unverified" });
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+    expect(await w.storage.findMany("apiToken", [])).toEqual([]);
+  });
+});
+
+/**
+ * A flow that creates a row of a new user that the claim deletes: the claim
+ * runs between the user create and that row's create (deviation of Task
+ * 2b). The claim's delete then finds no row, and its flip comes after the
+ * flow's guard. The guard reads the lease, so the row goes.
+ */
+describe("a sign-up that straddles the claim (ruling 16 of plan 12p, the lease read)", () => {
+  it("the password sign-up: its password row does not outlive the claim", async () => {
+    const w = world();
+    // The owner asks for a magic link before any user holds the address.
+    const verify = await ownerLink(w);
+    const atPassword = latch();
+    const release = latch();
+    w.gate.password = async () => {
+      atPassword.open();
+      await release.wait;
+    };
+    const up = w.claimant.handle(
+      req("POST", "/password/sign-up", { email: CLAIMED, password: PW }),
+    );
+    // The sign-up created its user and waits before its password create.
+    await atPassword.wait;
+    let signUp: string | null = null;
+    w.armed.at = "password-delete";
+    w.armed.run = async () => {
+      release.open();
+      const res = await up;
+      signUp = `${await answer(res)} ${setToken(res) === null ? "no session" : "a session"}`;
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(signUp).toBe("409 email_taken_unverified no session");
+    const user = await userAt(w, CLAIMED);
+    expect(user.emailVerified).toBe(true);
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
+    const again = await w.claimant.handle(
+      req("POST", "/password/sign-in", { email: CLAIMED, password: PW }),
+    );
+    expect(await answer(again)).toBe("401 invalid_credentials");
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("the uniform sign-up: its password row does not outlive the claim", async () => {
+    const w = world({ extra: { password: { hash: FAST, uniformSignUp: true } } });
+    const verify = await ownerLink(w);
+    const atPassword = latch();
+    const release = latch();
+    w.gate.password = async () => {
+      atPassword.open();
+      await release.wait;
+    };
+    const up = w.claimant.handle(
+      req("POST", "/password/sign-up", { email: CLAIMED, password: PW }),
+    );
+    await atPassword.wait;
+    let signUp: string | null = null;
+    w.armed.at = "password-delete";
+    w.armed.run = async () => {
+      release.open();
+      signUp = await answer(await up);
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    // The uniform answer tells nothing.
+    expect(signUp).toBe("200 ok");
+    const user = await userAt(w, CLAIMED);
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
+    const again = await w.claimant.handle(
+      req("POST", "/password/sign-in", { email: CLAIMED, password: PW }),
+    );
+    expect(await answer(again)).toBe("401 invalid_credentials");
+  });
+
+  it("the social sign-up of a new user: its identity does not outlive the claim", async () => {
+    const { w, callback } = socialWorld();
+    const verify = await ownerLink(w);
+    const atIdentity = latch();
+    const release = latch();
+    w.gate.identity = async () => {
+      atIdentity.open();
+      await release.wait;
+    };
+    const up = callback();
+    await atIdentity.wait;
+    let signUp: { code: string; token: string | null } | null = null;
+    w.armed.at = "identity-delete";
+    w.armed.run = async () => {
+      release.open();
+      signUp = await up;
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(signUp).toEqual({ code: "email_taken_unverified", token: null });
+    const user = await userAt(w, CLAIMED);
+    expect(
+      (await w.storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }])).map(
+        (i) => i.provider,
+      ),
+    ).toEqual(["email"]);
+    // The claimant's Google account signs in to nothing.
+    expect(await callback()).toEqual({ code: "email_taken_unverified", token: null });
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+});
+
+/** Every row of every table, but the magic links: a flow that answers 409 mails a new one. */
+async function tables(w: World) {
+  const out: Record<string, unknown[]> = {};
+  for (const model of Object.keys(schema) as ModelName[]) {
+    const rows = await w.storage.findMany(model, []);
+    out[model] =
+      model === "verification"
+        ? rows.filter((r) => (r as VerificationRow).purpose !== "magic-link")
+        : rows;
+  }
+  return out;
+}
+
+/** The token of a new magic link of the owner's address. */
+async function ownerLinkToken(w: World): Promise<string> {
+  const sent = await w.owner.handle(req("POST", "/magic-link/request", { email: CLAIMED }));
+  expect(sent.status).toBe(200);
+  return tokenFromMail(w.mail.findLast((m) => m.to === CLAIMED)?.text ?? "");
+}
+
+describe("the lease of a claim (ruling 16 of plan 12p)", () => {
+  it("answers 409 conflict to a second claim while the lease is held, and the second claim writes nothing", async () => {
+    const w = world();
+    await claimant(w);
+    const first = await ownerLink(w);
+    const second = await ownerLink(w);
+    let before: Record<string, unknown[]> | null = null;
+    let after: Record<string, unknown[]> | null = null;
+    let rival: string | null = null;
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      before = await tables(w);
+      rival = await answer(await w.claimant.handle(second));
+      after = await tables(w);
+    };
+    const owner = await w.owner.handle(first);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(rival).toBe("409 conflict");
+    expect(before).not.toBeNull();
+    expect(after).toEqual(before);
+    // The first claim completed.
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("takes a stale lease: a claim that ran out of queries after its lease left it, and a claim 60 seconds later claims", async () => {
+    const w = world();
+    const token = await claimant(w);
+    const user = await userAt(w, CLAIMED);
+    const link = await ownerLinkToken(w);
+    // The owner's first proof runs out of queries right after its lease, as a
+    // D1 request at query 51 does. Its undo runs out too, so the lease stays.
+    w.armed.at = "lease";
+    w.armed.run = async () => {
+      w.cap.on = true;
+    };
+    const failed = await verifyMagicLink(d1Like(w.ownerConfig), {
+      token: link,
+      ip: null,
+      userAgent: null,
+    }).then(
+      (r) => (r.ok ? "ok" : r.code),
+      (e: unknown) => (e instanceof StorageError ? e.code : String(e)),
+    );
+    w.cap.on = false;
+    expect(failed).toBe("rollback_failed");
+    const lease = () =>
+      w.storage.findOne("verification", [{ field: "id", op: "eq", value: claimLeaseId(user.id) }]);
+    const left = await lease();
+    expect(left?.expiresAt).toEqual(new Date(w.clock.now().getTime() + CLAIM_LEASE_MS));
+    // The claim wrote nothing else: the claimant keeps its password and session.
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(false);
+    expect((await rowOf(w, token))?.userId).toBe(user.id);
+    // Inside the 60 seconds a proof meets the live lease.
+    expect(await answer(await w.owner.handle(await ownerLink(w)))).toBe("409 conflict");
+    w.clock.advance(CLAIM_LEASE_MS + 1);
+    const owner = await w.owner.handle(await ownerLink(w));
+    expect(await answer(owner)).toBe("200 ok");
+    expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
+    expect((await lease())?.expiresAt).toEqual(new Date(w.clock.now().getTime() + CLAIM_LEASE_MS));
+    expect(await rowOf(w, token)).toBeNull();
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
+    expect(await sessionIds(w)).toEqual([(await rowOf(w, setToken(owner) ?? ""))?.id]);
+  });
+
+  it("stays after the claim, and the sweep deletes it after 60 seconds", async () => {
+    const w = world();
+    await claimant(w);
+    expect(await answer(await w.owner.handle(await ownerLink(w)))).toBe("200 ok");
+    const user = await userAt(w, CLAIMED);
+    const id = claimLeaseId(user.id);
+    const lease = () => w.storage.findOne("verification", [{ field: "id", op: "eq", value: id }]);
+    expect(await lease()).toEqual({
+      id,
+      purpose: "claim-lease",
+      identifier: user.id,
+      valueHash: await sha256Hex(id),
+      expiresAt: new Date(w.clock.now().getTime() + CLAIM_LEASE_MS),
+      consumedAt: null,
+      data: null,
+      secretVersion: 1,
+      createdAt: w.clock.now(),
+      updatedAt: w.clock.now(),
+    });
+    await sweepExpired(w.config);
+    expect(await lease()).not.toBeNull();
+    w.clock.advance(CLAIM_LEASE_MS + 1);
+    const swept = await sweepExpired(w.config);
+    expect(await lease()).toBeNull();
+    expect(swept.verificationExpired).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("the port flag on the memory store (plan 12p)", () => {
+  it("is false on the store and on its transaction, where keep answers true", async () => {
+    const storage = createMemoryAdapter();
+    expect(storage.isolated).toBe(false);
+    const seen = await storage.transaction(async (tx) => [tx.isolated, await tx.keep()]);
+    expect(seen).toEqual([false, true]);
   });
 });
 
@@ -922,26 +1372,61 @@ async function phoneUser(w: World): Promise<string> {
   return token;
 }
 
+/** A first password of the user of `cookie`, by the password change. */
+async function firstPassword(w: World, cookie: string): Promise<void> {
+  const set = await w.claimant.handle(req("POST", "/password/change", { newPassword: PW }, cookie));
+  expect(await answer(set)).toBe("200 ok");
+}
+
+/**
+ * A user with a username and a password and no address, phone, or passkey:
+ * a phone user who set both and then removed the phone. Answers the phone
+ * session, which is proved, and the session of a sign-in by the username.
+ */
+async function usernameUser(w: World) {
+  const first = await phoneUser(w);
+  await firstPassword(w, cookieOf(first));
+  const named = await w.claimant.handle(
+    req("POST", "/user/username", { username: "pat" }, cookieOf(first)),
+  );
+  expect(await answer(named)).toBe("200 ok");
+  const removed = await w.claimant.handle(req("POST", "/phone/remove", {}, cookieOf(first)));
+  expect(await answer(removed)).toBe("200 ok");
+  const signIn = await w.claimant.handle(
+    req("POST", "/password/sign-in", { username: "pat", password: PW }),
+  );
+  expect(await answer(signIn)).toBe("200 ok");
+  const second = setToken(signIn);
+  if (!second) throw new Error("no session");
+  return { first, second };
+}
+
 describe("the confirm of a change of address (plan 12p decision 7)", () => {
   it("sets proved on the session that the confirm keeps, for a user who had no address", async () => {
     const w = world();
-    const first = await phoneUser(w);
-    // A first password, then a sign-in by the phone and the password: no handle proved, so not proved.
-    const set = await w.claimant.handle(
-      req("POST", "/password/change", { newPassword: PW }, cookieOf(first)),
-    );
-    expect(await answer(set)).toBe("200 ok");
-    const signIn = await w.claimant.handle(
-      req("POST", "/password/sign-in", { phone: PHONE, password: PW }),
-    );
-    expect(await answer(signIn)).toBe("200 ok");
-    const second = setToken(signIn);
-    if (!second) throw new Error("no session");
+    // A username-only user: its sign-in by the username proved no handle.
+    const { first, second } = await usernameUser(w);
     expect((await rowOf(w, second))?.proved).toBe(false);
-    const refused = await w.claimant.handle(
-      req("POST", "/tokens", { name: "ci" }, cookieOf(second)),
+    expect(await tokenCreate(w, second)).toBe("403 email_unverified");
+    // The proved phone session registers a passkey, a verified handle.
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
+    const options = await w.claimant.handle(
+      req("POST", "/passkey/register/options", {}, cookieOf(first)),
     );
-    expect(await answer(refused)).toBe("403 email_unverified");
+    expect(await answer(options)).toBe("200 ok");
+    const o = (await options.json()) as { challenge: string; user: { id: string } };
+    const userId = Uint8Array.from(atob(o.user.id.replaceAll("-", "+").replaceAll("_", "/")), (c) =>
+      c.charCodeAt(0),
+    );
+    const registered = await w.claimant.handle(
+      req(
+        "POST",
+        "/passkey/register/verify",
+        { response: await soft.register(o.challenge, userId) },
+        cookieOf(first),
+      ),
+    );
+    expect(await answer(registered)).toBe("200 ok");
     // The proved session asks for the address; the second session confirms the code and stays.
     const asked = await w.claimant.handle(
       req(
@@ -966,8 +1451,7 @@ describe("the confirm of a change of address (plan 12p decision 7)", () => {
     expect(await answer(confirmed)).toBe("200 ok");
     expect(await rowOf(w, first)).toBeNull();
     expect((await rowOf(w, second))?.proved).toBe(true);
-    const made = await w.claimant.handle(req("POST", "/tokens", { name: "ci" }, cookieOf(second)));
-    expect(await answer(made)).toBe("200 ok");
+    expect(await tokenCreate(w, second)).toBe("200 ok");
   });
 });
 

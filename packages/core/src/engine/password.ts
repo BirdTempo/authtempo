@@ -62,12 +62,12 @@ import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
   claimEmail,
   claimedUser,
+  claimNotStarted,
   claimRetry,
   draftUserRow,
   ensureEmailIdentity,
   mayCreateUser,
   normalizeEmail,
-  userStillUnverified,
   validUserName,
 } from "./users.js";
 import { consumeVerification } from "./verification.js";
@@ -505,8 +505,10 @@ function insertSignUp(
     const dropSession = async () => {
       if (s) await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
     };
-    // claimEmail flips the flag in its first statement, so any claim since
-    // the user create makes this match zero rows. The user row is the
+    // A claim deletes the password rows before its flip (ruling 16 of plan
+    // 12p), so its delete can come before the create above. So the check
+    // sees the claim's first statement, the hold or the lease: any claim
+    // since the user create makes it false. The user row is the
     // owner's now. A throw would undo the password create, and the D1 undo
     // deletes that row by id: after an owner's reset it holds the owner's
     // hash. So delete the own session and the own password row by id and
@@ -514,7 +516,7 @@ function insertSignUp(
     // The password delete matches the pending string this sign-up wrote. An
     // owner's reset keeps this row id and writes the owner's hash into it,
     // and that row must stay.
-    if (!(await userStillUnverified(tx, user.id, now))) {
+    if (!(await claimNotStarted(tx, user, now))) {
       await dropSession();
       await tx.delete("password", [
         { field: "id", op: "eq", value: password.id },
@@ -681,7 +683,8 @@ function insertUniform(
       { field: "id" as const, op: "eq" as const, value: password.id },
       { field: "hash" as const, op: "eq" as const, value: pending },
     ];
-    if (!(await userStillUnverified(tx, user.id, now))) {
+    // The claim check of `insertSignUp`: the claim deletes the passwords before its flip.
+    if (!(await claimNotStarted(tx, user, now))) {
       await tx.delete("password", own);
       return ok({ outcome: "quiet" });
     }
@@ -878,7 +881,7 @@ export async function mailVerifyAgain(
 
 /**
  * The `detail` of the 409 `conflict` of a sign-up confirm that lost its
- * flip (ruling 23 of plan 12o). Another proof verified the address first.
+ * claim (ruling 23 of plan 12o). Another proof verified the address first.
  * So the confirm sends no new mail, and the person signs in.
  */
 export const CONFIRM_LOST_DETAIL = "Another proof verified this address first. Sign in.";

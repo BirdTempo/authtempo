@@ -179,11 +179,12 @@ export interface VerifySteps {
    */
   kept(): UserRow | null;
   /**
-   * Called by a claim loop when it answers 409 `conflict` to a lost flip
-   * (`claimRetry`): another proof claimed the user first (plan 12o).
+   * Called by a claim loop when it answers 409 `conflict` to a lost claim
+   * (`claimRetry`): another proof claimed the user first (plan 12o). Since
+   * plan 12p a claim loses at the hold, at the lease, or at the flip.
    */
   flipLost(): void;
-  /** True when the flow answers `conflict` to a lost flip. `begin` keeps it. */
+  /** True when the flow answers `conflict` to a lost claim. `begin` keeps it. */
   lostFlip(): boolean;
   /**
    * The stop rows of the impersonation sessions that the claim ends (ruling

@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
@@ -156,17 +157,53 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
 }
 
 /**
+ * The life of the lease of a claim on a store with no isolation (ruling 16
+ * of plan 12p). A claim sends a few statements and runs no hook between
+ * them, so it ends long before. A lease past this life is stale: a claim
+ * whose throw left its row behind. The next claim of the user takes it.
+ * The sweep deletes it, as it deletes each verification row past
+ * `expiresAt`. The flows that create a row of a user that a claim deletes
+ * read a live lease (`claimNotStarted`).
+ */
+export const CLAIM_LEASE_MS = 60_000;
+
+/** The id of the claim lease of a user: one row per user, so a second create fails on the key. */
+export function claimLeaseId(userId: string): string {
+  return `claim-lease:${userId}`;
+}
+
+/**
  * A user created through an unverified email is a claim, not proof. When a
- * sign-in proves the address, every identity that came in before (except
- * the one that carries the proof, and the `email` identity), every password
- * row (except the one `keep.passwordId` names), every passkey, every
- * pending passkey challenge, every unredeemed handoff code, and every
- * session are deleted, in that order. The username is cleared, except
+ * sign-in proves the address, the claim first takes the hold or the lease.
+ * Then it deletes every identity that came in before (except the one that
+ * carries the proof, and the `email` identity), every password row (except
+ * the one `keep.passwordId` names), every passkey, every pending passkey
+ * challenge, and every unredeemed handoff code. Then it flips the flag to
+ * verified. Last it deletes every session. The username is cleared, except
  * where `keep.username` says so. The phone is always cleared.
+ *
+ * The order (ruling 16 of plan 12p). The old order flipped the flag first.
+ * Then a sign-in that read the user after the flip got a proved session.
+ * Its guard could pass before the delete of its row, so that session lived
+ * until the session delete. So the rows that a sign-in trusts go before the
+ * flip. A sign-in that reads the user after the flip finds its row gone,
+ * and its guard fails. A sign-in that read the user before the flip has an
+ * unproved session, and the session delete at the end removes it.
+ *
+ * The first statement decides a race of two claims of one user. A lost
+ * claim throws there, so it writes nothing (plan 12o). On Postgres and
+ * MySQL it is the hold: a conditional update of the user row. It takes the
+ * lock of the user row first, the lock order of user-hold.ts. On a store
+ * with no isolation it is the lease: a verification row of the user. The
+ * claim does not delete the lease: the sweep removes it after 60 seconds.
+ * A flip that matches zero rows after a lease means that a rival claim
+ * ended before this lease. The throw then undoes this attempt's deletes,
+ * and so it restores the rows that the rival kept.
+ *
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
  * flag, so such a session makes no token, grant, factor, or address change
- * between the flip and its delete. So the claimant keeps no way in.
+ * before its delete. So the claimant keeps no way in.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -182,8 +219,36 @@ export async function claimEmail(
   ended?: SessionRow[],
 ): Promise<void> {
   verified.claimed(userId);
-  // First, so a concurrent session insert for this user sees the verified flag and undoes itself (see the conditional update after each session insert).
-  // Only an unverified row: of two proofs of one user at once, one claims (plan 12a Task 18, review M1).
+  // The first statement decides the race: a lost claim throws before any write of its own.
+  await takeClaim(tx, userId, now);
+  const where: Where<"identity">[] = [
+    { field: "userId", op: "eq", value: userId },
+    { field: "provider", op: "ne", value: "email" },
+  ];
+  if (keep?.identityId) where.push({ field: "id", op: "ne", value: keep.identityId });
+  // Every row that a sign-in trusts goes before the flip (ruling 16 of plan
+  // 12p). A sign-in that trusts a row ends its transaction with a
+  // conditional update on that row: the identity, the password, the
+  // passkey, or the handoff code. A sign-in that read the user after the
+  // flip finds that row gone, so its guard undoes its session.
+  await tx.delete("identity", where);
+  const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
+  if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
+  await tx.delete("password", passwords);
+  // A claimant's passkeys would keep the account open after the claim.
+  // Registration already needs a proved session; this closes any other path.
+  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "passkey-challenge" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+  // A handoff code minted for the claimant would trade for a session after the claim.
+  await tx.delete("verification", [
+    { field: "purpose", op: "eq", value: "handoff-code" },
+    { field: "identifier", op: "eq", value: userId },
+  ]);
+  // The flip, after the trusted rows. Only an unverified row: of two proofs
+  // of one user at once, one claims (plan 12a Task 18, review M1).
   const flipped = await tx.update(
     "user",
     [
@@ -202,45 +267,18 @@ export async function claimEmail(
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
     if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }])))
       stopWith("conflict");
+    // A rival claim ended before the lease. The throw undoes the deletes above.
     throw new ClaimLostError();
   }
-  const where: Where<"identity">[] = [
-    { field: "userId", op: "eq", value: userId },
-    { field: "provider", op: "ne", value: "email" },
-  ];
-  if (keep?.identityId) where.push({ field: "id", op: "ne", value: keep.identityId });
-  // Every row that a sign-in trusts goes before the sessions (plan 12p).
-  // The flip comes first for the guards of the sign-ins that read the user.
-  // A sign-in that trusts a row ends its transaction with a conditional
-  // update on that row: the identity, the password, the passkey, or the
-  // handoff code. When that update still finds the row, its delete below
-  // has not run, so the session delete after it still removes the session.
-  await tx.delete("identity", where);
-  const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
-  if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
-  await tx.delete("password", passwords);
-  // A claimant's passkeys would keep the account open after the claim.
-  // Registration already needs a proved session; this closes any other path.
-  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "passkey-challenge" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
-  // A handoff code minted for the claimant would trade for a session after the claim.
-  await tx.delete("verification", [
-    { field: "purpose", op: "eq", value: "handoff-code" },
-    { field: "identifier", op: "eq", value: userId },
-  ]);
-  // The sessions last (plan 12p), so a sign-in whose guard passed above has
-  // its session removed here.
-  // With an `afterEnd` hook, one read and one `deleteRows` of the read ids
-  // per chunk; with none, one statement (plan 9h). So the claimant's session
-  // count adds no query (final review B M of plan 12i). The ended list holds
-  // the rows that each chunk removed (plan 12o). A session that another flow
-  // ended after the read is not in it, and no race throws. The last
-  // delete is by user id, so a session that another request adds after the
-  // read goes too. The count goes to the event `session.end` of the claim
-  // (plan 12h Task 5).
+  // The sessions last, so the session of a sign-in whose guard passed above
+  // goes here. With an `afterEnd` hook, one read and one `deleteRows` of the
+  // read ids per chunk; with none, one statement (plan 9h). So the
+  // claimant's session count adds no query (final review B M of plan 12i).
+  // The ended list holds the rows that each chunk removed (plan 12o). A
+  // session that another flow ended after the read is not in it, and no race
+  // throws. The last delete is by user id, so a session that another request
+  // adds after the read goes too. The count goes to the event `session.end`
+  // of the claim (plan 12h Task 5).
   verified.sessionsEnded(
     await endSessions(
       tx,
@@ -251,6 +289,61 @@ export async function claimEmail(
       true,
     ),
   );
+}
+
+/**
+ * The first statement of a claim, which decides a race of two claims of one
+ * user (ruling 16 of plan 12p). On an isolated store it is the hold: a
+ * conditional update of the user row while it is unverified. A rival waits
+ * for its lock, then matches zero rows. On a store with no isolation it is
+ * the lease, a `claim-lease` verification row with a fixed id. A rival's
+ * create then fails on the key, and only a stale lease can be taken.
+ */
+async function takeClaim(tx: StorageAdapter, userId: string, now: Date): Promise<void> {
+  if (tx.isolated) {
+    if (await userStillUnverified(tx, userId, now)) return;
+    // An account delete took the row: `conflict`, as at the flip.
+    if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }])))
+      stopWith("conflict");
+    throw new ClaimLostError();
+  }
+  const id = claimLeaseId(userId);
+  const expiresAt = new Date(now.getTime() + CLAIM_LEASE_MS);
+  try {
+    await tx.create("verification", {
+      id,
+      purpose: "claim-lease",
+      identifier: userId,
+      // The key of `valueHash` is unique, so each user's lease has its own hash.
+      valueHash: await sha256Hex(id),
+      expiresAt,
+      consumedAt: null,
+      data: null,
+      secretVersion: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return;
+  } catch (err) {
+    if (
+      !(
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        err.model === "verification"
+      )
+    )
+      throw err;
+  }
+  // Another claim holds the lease, or a stale lease stays. One row takes a stale lease.
+  const taken = await tx.update(
+    "verification",
+    [
+      { field: "id", op: "eq", value: id },
+      { field: "expiresAt", op: "lt", value: now },
+    ],
+    { expiresAt, createdAt: now, updatedAt: now },
+  );
+  if (taken === 0) throw new ClaimLostError("held");
 }
 
 /**
@@ -277,8 +370,9 @@ export type BeforeResolveWrite = (
 /**
  * The claim retries of one flow (ruling 46 of plan 12i). A flow retries a
  * `ClaimLostError` while its count of claim retries is below this count.
- * Since plan 12o a claim throws it on a lost flip only: no session race
- * throws. A flow counts its claim retries apart from a unique-key retry
+ * Since plan 12o a claim throws it on a lost race only: no session race
+ * throws. Since plan 12p the race is lost at the hold, at the lease, or at
+ * the flip. A flow counts its claim retries apart from a unique-key retry
  * (decision 13 of plan 12n). On a store with a query limit per invocation,
  * a flow runs none (`claimRetry`).
  */
@@ -294,11 +388,22 @@ export const CLAIM_RUNS = 3;
  * It is the one race that a claim throws on (plan 12o). Another flow can
  * end a session between the claim's read and its delete. Then `deleteRows`
  * does not answer that row, and the claim goes on (`endSessions`).
+ *
+ * `held` is true when another claim of the user holds a live lease (plan
+ * 12p). The lease stays after that claim ends, so a retry reads the user
+ * again. A verified user then signs in with no claim. A retry that still
+ * meets the lease answers `conflict` after the last run (`claimRetry`).
  */
 export class ClaimLostError extends Error {
-  constructor() {
-    super("authtempo: another flow claimed this user first");
+  readonly held: boolean;
+  constructor(cause?: "held") {
+    super(
+      cause === "held"
+        ? "authtempo: another claim of this user holds the lease"
+        : "authtempo: another flow claimed this user first",
+    );
     this.name = "ClaimLostError";
+    this.held = cause === "held";
   }
 }
 
@@ -313,16 +418,22 @@ export class ClaimLostError extends Error {
  * of one invocation. The D1 measure of 2026-11-03 used the worst claim join:
  * an ID-token claim with a full bag, 11 claimant sessions, and every hook.
  * It sent 39 queries with no race, 58 with one race, and 85 with two.
- * Since plan 12o only a lost flip throws `ClaimLostError`, and a lost flip
- * writes nothing. So the answer `conflict` comes after the undo of the
- * writes before the flip, and no claim write stays. A session race ends no
- * claim: on 2026-11-04 that join signed in through one race in 39 queries
+ * Since plan 12o only a lost race throws `ClaimLostError`. Since plan 12p a
+ * claim loses at its first statement, the hold or the lease, and writes
+ * nothing then. A flip that matches zero rows after a lease throws too, and
+ * the undo takes the deletes before it. So no claim write stays when the
+ * answer is `conflict`. A session race ends no claim: on 2026-11-04 that join signed in through one race in 39 queries
  * (adapter-d1 test anonymous-upgrade-budget.test.ts). The magic link and the
  * email code spent their proof before the claim, so each mails a new one of
  * its kind. The sign-up confirm mails nothing: the address is verified, so
  * its answer says to sign in. A provider token needs a new sign-in. The
  * reset and the invitation confirm keep their link, so the same request
  * works again.
+ *
+ * A claim that meets the live lease of another claim retries as above (plan
+ * 12p). The retry finds a verified user when the rival ended. On a store
+ * with no query limit, a lease that holds through the last retry answers
+ * `conflict`, not the error: the rival claim still runs.
  *
  * The unique-key retry of a flow is no claim retry, and it runs on every
  * store. The same D1 join after one unique-key retry sent 46 queries on
@@ -336,7 +447,9 @@ export function claimRetry(
 ): "retry" | "conflict" | null {
   if (!(err instanceof ClaimLostError)) return null;
   if (storage.queryLimitPerInvocation === true) return "conflict";
-  return lost < CLAIM_RUNS ? "retry" : null;
+  if (lost < CLAIM_RUNS) return "retry";
+  // A live lease after the last retry: the rival claim still runs (plan 12p).
+  return err.held ? "conflict" : null;
 }
 
 /**
@@ -367,7 +480,10 @@ export async function undoSessionIfClaimed(
 /**
  * Runs inside the caller's transaction. False when a claim verified the
  * user since this transaction read or created it. `claimEmail` flips the
- * flag in its first statement, so a conditional update sees any claim.
+ * flag before its session delete (ruling 16 of plan 12p). So a session that
+ * the caller inserted before this check goes in that delete, or this check
+ * sees the flip. A row that the claim deletes before the flip needs
+ * `claimNotStarted`.
  */
 export async function userStillUnverified(
   tx: StorageAdapter,
@@ -383,6 +499,36 @@ export async function userStillUnverified(
     { updatedAt: now },
   );
   return n > 0;
+}
+
+/**
+ * Runs inside the caller's transaction, after the caller created a row of
+ * the user that a claim deletes before its flip: a password row or an
+ * identity row (ruling 16 of plan 12p). False when a claim of the user
+ * started since the caller read or created the user. A claim deletes that
+ * row before its flip, so a check of the flip alone can miss it. Then the
+ * row would outlive the claim, a way in of the claimant.
+ *
+ * On Postgres and MySQL the update of the user row is enough. A claim's
+ * hold of that row waits for this transaction, or this update waits for the
+ * claim's commit and then sees the flip. On a store with no isolation the
+ * check also reads the live lease. A lease that came before this read means
+ * a claim that may have deleted before the caller's create. A lease after
+ * this read comes after the create, so the claim's delete takes the row.
+ * A user with no address has no claim, so it gets no read.
+ */
+export async function claimNotStarted(
+  tx: StorageAdapter,
+  user: Pick<UserRow, "id" | "email">,
+  now: Date,
+): Promise<boolean> {
+  if (!(await userStillUnverified(tx, user.id, now))) return false;
+  if (tx.isolated || user.email === null) return true;
+  const lease = await tx.findOne("verification", [
+    { field: "id", op: "eq", value: claimLeaseId(user.id) },
+    { field: "expiresAt", op: "gt", value: now },
+  ]);
+  return lease === null;
 }
 
 /**
@@ -403,7 +549,8 @@ export async function undoSessionIfIdentityGone(
 /**
  * Runs inside the caller's transaction. False when a claim deleted the
  * identity row since the identity read. A conditional update, not a read,
- * so that it sees the claim's first statement on D1.
+ * so that it sees the claim's delete of the identity on D1. The claim
+ * deletes it before its flip and its session delete (ruling 16 of plan 12p).
  */
 async function identityStillLinked(
   tx: StorageAdapter,

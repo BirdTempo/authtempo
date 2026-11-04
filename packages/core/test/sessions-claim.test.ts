@@ -153,12 +153,12 @@ function interleaveAfterCreate(
 
 /**
  * Wraps the next `storage.transaction` call so that `after` runs inside
- * that transaction, just after its first update of `model` and before any
- * later statement. Later transactions run unchanged.
+ * that transaction, just after its read of a claim lease (`claimNotStarted`,
+ * plan 12p). That read ends the claim guard of a sign-up on a store with no
+ * isolation. Later transactions run unchanged.
  */
-function interleaveAfterUpdate(
+function interleaveAfterLeaseRead(
   storage: StorageAdapter,
-  model: ModelName,
   after: () => Promise<void>,
 ): { fired: () => boolean } {
   const original = storage.transaction.bind(storage);
@@ -170,13 +170,16 @@ function interleaveAfterUpdate(
     return original((tx) =>
       fn({
         ...tx,
-        update: async (m, w, d) => {
-          const n = await tx.update(m, w, d);
-          if (m === model && !fired) {
+        findOne: async (m, w) => {
+          const row = await tx.findOne(m, w);
+          const lease = w.some(
+            (x) => x.field === "id" && String(x.value).startsWith("claim-lease:"),
+          );
+          if (m === "verification" && lease && !fired) {
             fired = true;
             await after();
           }
-          return n;
+          return row;
         },
       }),
     );
@@ -1565,8 +1568,8 @@ describe("the sign-up password row stays pending until the guard (plan 9 Task 4 
     const link = await magicLinkToken(auth);
     const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
-    // The sign-up's first user update is the guard.
-    const gate = interleaveAfterUpdate(claimantConfig.storage, "user", async () => {
+    // The sign-up's first user update and its lease read are the guard (plan 12p).
+    const gate = interleaveAfterLeaseRead(claimantConfig.storage, async () => {
       owner = await verifyMagicLink(d1Like(auth.config), {
         token: link,
         ip: null,
@@ -1593,9 +1596,10 @@ describe("an update undo restores only the columns the update set (plan 9 final 
     const link = await magicLinkToken(auth);
     const claimantConfig = d1Like(auth.config);
     let owner: Awaited<ReturnType<typeof verifyMagicLink>> | null = null;
-    // The sign-up's first user update is the guard. Its undo entry holds the
-    // user row with `emailVerified` false. The owner's claim runs just after it.
-    const gate = interleaveAfterUpdate(claimantConfig.storage, "user", async () => {
+    // The sign-up's first user update and its lease read are the guard
+    // (plan 12p). The undo entry of the update holds the user row with
+    // `emailVerified` false. The owner's claim runs just after the guard.
+    const gate = interleaveAfterLeaseRead(claimantConfig.storage, async () => {
       owner = await verifyMagicLink(d1Like(auth.config), {
         token: link,
         ip: null,

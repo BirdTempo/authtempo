@@ -248,7 +248,16 @@ export type VerificationPurpose =
    * identifier is the normalized address. The data is { passwordId,
    * attempts, anonymousUserId }, and the hash is as for `email-otp`.
    */
-  | "password-verify-otp";
+  | "password-verify-otp"
+  /**
+   * The lease of a claim on a store with no isolation (ruling 16 of plan
+   * 12p): D1, the SQLite drivers, and the memory store. The id is
+   * `claim-lease:<userId>`, so one user has one lease. The identifier is
+   * the user id. The valueHash is the SHA-256 hex of the id, and the data
+   * is null. It lives `CLAIM_LEASE_MS` (users.ts). The claim does not
+   * delete it; the sweep deletes it after its expiry.
+   */
+  | "claim-lease";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

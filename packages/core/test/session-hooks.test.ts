@@ -24,9 +24,15 @@ import { sweepExpired } from "../src/engine/sweep.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
+import { d1Like } from "./d1-like.js";
 import { makeAuth, sessionFor, tokenFromMail } from "./helpers.js";
 import { FAST, sessionOnly, signUpAndVerify, upSession } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
+
+/** True for the create of a claim's lease, its first statement on a store with no isolation (plan 12p). */
+function isLease(model: string, data: unknown): boolean {
+  return model === "verification" && (data as { purpose?: unknown }).purpose === "claim-lease";
+}
 
 const PASSWORD = "correct horse battery";
 
@@ -856,10 +862,12 @@ describe("session end hooks (plan 9d)", () => {
   // write the row and undo it. Then the retry meets an unverified user and
   // claims. On D1 a lost claim of that retry answers 409. With no query
   // limit, the counter holds (adapter-d1 invite-claim-race.test.ts).
-  // Since plan 12o a session race throws nothing, so only a lost flip uses
-  // a claim retry.
+  // Since plan 12o a session race throws nothing, so only a lost claim uses
+  // a claim retry. Since plan 12p a claim loses at its first statement, the
+  // lease on this store: the rival's lease stays, so the loser's create
+  // meets its key.
   it.each(["magic link", "social", "reset"] as const)(
-    "signs in after a unique-key retry and a lost flip (decision 13 of plan 12n, %s)",
+    "signs in after a unique-key retry and a lost claim (decision 13 of plan 12n, %s)",
     async (proof) => {
       const google = googleConfig();
       const { auth } = recorded({}, google.extra);
@@ -868,17 +876,22 @@ describe("session end hooks (plan 9d)", () => {
       // its transaction on the store at once, as a commit of another request does.
       const free: StorageAdapter = { ...auth.storage, transaction: (fn) => fn(free) };
       const side = { ...auth.config, storage: free };
-      let stage: "create" | "flip" | "done" = "create";
+      // The flow runs on the D1 view with no query limit, as on the SQLite
+      // adapter (plan 12p). Its undo writes back only the fields it set, so
+      // the claim of the parallel flow stays, and the retry finds it.
+      const on = { ...auth, config: d1Like(auth.config) };
+      const view = on.config.storage;
+      let stage: "create" | "claim" | "done" = "create";
       let runs = 0;
-      const original = auth.storage.transaction.bind(auth.storage);
-      auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      const original = view.transaction.bind(view);
+      view.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
         original((tx) => {
           runs++;
           return fn({
             ...tx,
             create: async (m, d) => {
               if (stage === "create" && m === "user") {
-                stage = "flip";
+                stage = "claim";
                 // 1. A sign-up of the address commits first: this create meets its unique key.
                 const up = await passwordSignUp(side, {
                   email,
@@ -888,12 +901,9 @@ describe("session end hooks (plan 9d)", () => {
                 });
                 if (!up.ok) throw new Error(up.code);
               }
-              return tx.create(m, d);
-            },
-            update: async (m, w, d) => {
-              if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
+              if (stage === "claim" && isLease(m, d)) {
                 stage = "done";
-                // 2. The verify link of the sign-up commits first: the flip of this claim matches no row.
+                // 2. The verify link of the sign-up claims first: the lease of this claim meets its key.
                 const confirm = auth.mail.findLast((x) => x.subject.startsWith("Confirm"));
                 const v = await verifyPasswordEmail(side, {
                   token: tokenFromMail(confirm?.text ?? ""),
@@ -902,16 +912,16 @@ describe("session end hooks (plan 9d)", () => {
                 });
                 if (!v.ok) throw new Error(v.code);
               }
-              return tx.update(m, w, d);
+              return tx.create(m, d);
             },
           });
         });
       const signedIn =
         proof === "magic link"
-          ? await magicSignIn(auth, email)
+          ? await magicSignIn(on, email)
           : proof === "social"
-            ? await googleSignIn(auth, google.jwtTokens, email)
-            : await reset(auth, email);
+            ? await googleSignIn(on, google.jwtTokens, email)
+            : await reset(on, email);
       expect(signedIn.ok).toBe(true);
       expect(stage).toBe("done");
       const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
@@ -922,10 +932,10 @@ describe("session end hooks (plan 9d)", () => {
   );
 
   // The sign-up confirm has no unique-key retry, so each attempt after the
-  // first is a claim retry (password.ts). A reset by the owner wins the
-  // flip. The memory undo of that run puts back the user row as it was
-  // before the run. So the next run claims and signs in.
-  it("signs in after a lost flip on the verify link (decision 13 of plan 12n)", async () => {
+  // first is a claim retry (password.ts). A reset by the owner claims first,
+  // at the lease of this claim (plan 12p). The retry reads the user again,
+  // and finds it verified.
+  it("answers after a lost claim on the verify link: the retry finds the verified user (decision 13 of plan 12n)", async () => {
     const { auth } = recorded();
     const email = "fay@example.com";
     // Memory runs one transaction at a time. So each parallel flow runs
@@ -944,18 +954,22 @@ describe("session end hooks (plan 9d)", () => {
     const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
     const passwords = (await auth.storage.findMany("password", [...byUser])).map((r) => r.id);
     expect(passwords).toHaveLength(1);
-    let stage: "flip" | "done" = "flip";
+    // The confirm runs on the D1 view with no query limit, as on the SQLite
+    // adapter (plan 12p). Its undo writes back only the fields it set.
+    const on = d1Like(auth.config);
+    const view = on.storage;
+    let stage: "claim" | "done" = "claim";
     let runs = 0;
-    const original = auth.storage.transaction.bind(auth.storage);
-    auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+    const original = view.transaction.bind(view);
+    view.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
       original((tx) => {
         runs++;
         return fn({
           ...tx,
-          update: async (m, w, d) => {
-            if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
+          create: async (m, d) => {
+            if (stage === "claim" && isLease(m, d)) {
               stage = "done";
-              // A reset by the owner commits first: the flip of this claim matches no row.
+              // A reset by the owner claims first: the lease of this claim meets its key.
               const asked = await requestPasswordReset(side, { email, ip: null });
               if (!asked.ok) throw new Error(asked.code);
               const r = await resetPassword(side, {
@@ -966,16 +980,17 @@ describe("session end hooks (plan 9d)", () => {
               });
               if (!r.ok) throw new Error(r.code);
             }
-            return tx.update(m, w, d);
+            return tx.create(m, d);
           },
         });
       });
-    const v = await verifyPasswordEmail(auth.config, {
+    const v = await verifyPasswordEmail(on, {
       token: tokenFromMail(confirm?.text ?? ""),
       ip: null,
       userAgent: null,
     });
-    expect(v.ok && v.value.signedIn !== null).toBe(true);
+    // A verified user gets no session from the confirm: the person signs in (ruling 23 of plan 12o).
+    expect(v.ok && v.value.signedIn).toBeNull();
     expect(stage).toBe("done");
     const owner = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
     expect(owner?.emailVerified).toBe(true);
@@ -983,7 +998,7 @@ describe("session end hooks (plan 9d)", () => {
     expect((await auth.storage.findMany("password", [...byUser])).map((r) => r.id)).toEqual(
       passwords,
     );
-    // One claim retry, and the run that signs in.
+    // One claim retry, and the run that finds the verified user.
     expect(runs).toBeGreaterThanOrEqual(2);
   });
 

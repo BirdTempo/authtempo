@@ -205,9 +205,10 @@ export async function continueHandoff(
       if (!data || typeof data.challenge !== "string" || typeof data.redirect !== "string")
         return fail("invalid_token");
       // Read before the code row is written. A claim deletes the codes before
-      // the sessions (plan 12p), so a code written after that delete can pass
-      // the session check below. A claimant's browser session has `proved`
-      // false, so its code runs the redeem guard, which sees the claim's flip.
+      // its flip and its sessions (plan 12p), so a code written after that
+      // delete can pass the session check below. A claimant's browser session
+      // has `proved` false, so its code runs the redeem guard. That guard sees
+      // the claim's flip, and the claim's session delete comes after the flip.
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
       // The same where as the check below: a session of another user gives no time.
       const browser = await tx.findOne("session", [
@@ -307,7 +308,7 @@ export async function redeemHandoff(
           // The flag from the mint, not this read: a claim can commit between
           // the consume and this read, and this read then sees the user verified.
           if (data.emailVerified !== true) {
-            // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's first statement and undoes the insert.
+            // A claim can land between this insert and the commit; on D1 and on Postgres read committed the delete in claimEmail may miss this row. The conditional update sees the claim's flip, which comes before its session delete (plan 12p), and undoes the insert.
             await undoSessionIfClaimed(tx, user.id, now);
           }
           // The code row, as the last statement, for a verified user too
