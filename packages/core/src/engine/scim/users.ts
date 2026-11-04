@@ -31,7 +31,7 @@ import type {
 import { findManyIn } from "../../storage/batch.js";
 import { type Meter, meterOf } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../../storage/port.js";
-import { createSteps, verifySteps } from "../create-steps.js";
+import { claimAnswer, createSteps, verifySteps } from "../create-steps.js";
 import { OLD_ADDRESS_PROOFS } from "../email-change.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
 import { endFamilies, familyEnds } from "../oauth-family.js";
@@ -114,7 +114,15 @@ export type ScimUserCaller = ScimCaller | ScimAppCaller;
  */
 export const SCIM_ROUTE_CALLS_BEFORE = 3;
 
-/** The SCIM error of an answer, in the shape of RFC 7644 section 3.12. */
+/**
+ * The SCIM error of an answer, in the shape of RFC 7644 section 3.12.
+ *
+ * RFC 7644, read 2026-11-04: section 3.12 makes `scimType` optional. Table 9
+ * ties `uniqueness` to a value that is in use or reserved. So a value in use
+ * answers 409 `uniqueness`, as section 3.3 says for a duplicate `userName`.
+ * A race that a resend passes is no value in use. It answers 409 with no
+ * `scimType` (decision 1 of plan 12o).
+ */
 export function scimFail(status: number, detail: string, scimType?: ScimType): ScimResult {
   return {
     status,
@@ -810,8 +818,28 @@ async function fillName(tx: StorageAdapter, user: UserRow, doc: UserDoc, now: Da
   );
 }
 
-/** A refusal of a hook or a rule of core, as a SCIM error: the status of the code, and the code. */
+/**
+ * The detail of the code `conflict`: a resend can pass (decision 1 of plan
+ * 12o). It says "this resource", because the Group writes answer it too
+ * (ruling 15 of plan 12o).
+ */
+const RACE_DETAIL =
+  "Another request changed this resource at the same time. Send the request again.";
+
+/** The detail of the code `member_limit` (decision 1 of plan 12o). */
+const MEMBER_LIMIT_DETAIL = "The organization is at its member limit.";
+
+/**
+ * A refusal of a hook or a rule of core, as a SCIM error with the status of
+ * the code. The code `conflict` is a lost race, such as a lost claim, a user
+ * that an account delete took, or a lost hold. A resend can pass, so the
+ * detail says to send the request again, with no `scimType`. The code
+ * `member_limit` answers a sentence too. Each other code answers its message,
+ * or the code.
+ */
 export function failAnswer(r: { status: number; code: string; message?: string }): ScimResult {
+  if (r.code === "conflict") return scimFail(r.status, RACE_DETAIL);
+  if (r.code === "member_limit") return scimFail(r.status, MEMBER_LIMIT_DETAIL);
   return scimFail(r.status, r.message ?? r.code);
 }
 
@@ -1025,27 +1053,30 @@ export async function scimCreateUser(
       );
       return true;
     };
-    const resolved = await hookGuard(async () => {
-      const r = await findOrCreateUserByEmail(
-        config.storage,
-        doc.address,
-        now,
-        verified,
-        after,
-        ended,
-        before,
-        {
-          ...made,
-          async user(tx, user) {
-            // A SCIM create is an act of the organization, as an invitation is:
-            // `open` and `invited` let it make a user, and `false` does not.
-            if (config.signUp === false) stopWith("sign_up_closed");
-            return made.user(tx, user);
+    // An error answer after a kept claim fires the claim's after points (plan 12o).
+    const resolved = await claimAnswer(config, verified, ended, () =>
+      hookGuard(async () => {
+        const r = await findOrCreateUserByEmail(
+          config.storage,
+          doc.address,
+          now,
+          verified,
+          after,
+          ended,
+          before,
+          {
+            ...made,
+            async user(tx, user) {
+              // A SCIM create is an act of the organization, as an invitation is:
+              // `open` and `invited` let it make a user, and `false` does not.
+              if (config.signUp === false) stopWith("sign_up_closed");
+              return made.user(tx, user);
+            },
           },
-        },
-      );
-      return { ok: true as const, value: r };
-    });
+        );
+        return { ok: true as const, value: r };
+      }),
+    );
     if (!resolved.ok) return failAnswer(resolved);
     const { user } = resolved.value;
     await made.after(user);

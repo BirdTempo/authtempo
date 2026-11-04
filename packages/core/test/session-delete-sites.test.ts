@@ -39,13 +39,15 @@ type Kind =
   /** A call of `destroySession`, which is a "by id" site; the caller delivers after it. */
   | "sign-out"
   /** Sessions that a sign-in wrote after the read of the flow: a later step makes each link with no session a logout (ruling 49). */
-  | "late";
+  | "late"
+  /** The conformance kit of the port: test rows of no client, in no flow. */
+  | "kit";
 
 interface Site {
   file: string;
   /** The nearest `function` name before the site. */
   fn: string;
-  call: "endSessions" | "destroySession" | 'delete("session"';
+  call: "endSessions" | "destroySession" | 'delete("session"' | 'deleteRows("session"';
   count: number;
   kind: Kind;
   reason: string;
@@ -148,10 +150,19 @@ const SITES: Site[] = [
     file: "engine/sessions.ts",
     fn: "endSessions",
     call: 'delete("session"',
-    count: 4,
+    count: 3,
     kind: "endSessions",
     reason:
-      "the deletes of endSessions itself, after its outbox write; the first deletes each impersonation session by id with its stop row (ruling 43 of plan 12f); a claim deletes the read rows by one statement per chunk of ids (final review B M of plan 12i)",
+      "the deletes of endSessions itself, after its outbox write; the first deletes each impersonation session by id with its stop row (ruling 43 of plan 12f)",
+  },
+  {
+    file: "engine/sessions.ts",
+    fn: "endSessions",
+    call: 'deleteRows("session"',
+    count: 1,
+    kind: "endSessions",
+    reason:
+      "a claim deletes the read rows by one statement per chunk of ids (final review B M of plan 12i), after the outbox write; the answer is the ended list (plan 12o)",
   },
   {
     file: "engine/oauth-outbox.ts",
@@ -249,9 +260,30 @@ const SITES: Site[] = [
     kind: "undo",
     reason: "the second-factor verify drops its own new session after a spent challenge",
   },
+  // The scanner names the last word after "function" before a site. In the
+  // kit that word comes from a test name, "the function throws".
+  {
+    file: "storage/conformance.ts",
+    fn: "throws",
+    call: 'delete("session"',
+    count: 3,
+    kind: "kit",
+    reason:
+      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep",
+  },
+  {
+    file: "storage/conformance.ts",
+    fn: "throws",
+    call: 'deleteRows("session"',
+    count: 11,
+    kind: "kit",
+    reason:
+      "the cases of deleteRows and keep (plan 12o): the answer, the rules, the count, the rival, and the undo",
+  },
 ];
 
-const CALL_RE = /\b(endSessions|destroySession)\(|\.delete\(\s*"session"/g;
+// A delete that answers its rows (`deleteRows`, plan 12o) is a site too.
+const CALL_RE = /\b(endSessions|destroySession)\(|\.(delete|deleteRows)\(\s*"session"/g;
 
 /** Comments become spaces, so a line number stays and a comment names no site. */
 function code(text: string): string {
@@ -283,7 +315,7 @@ async function foundSites(): Promise<Map<string, number>> {
       const name = file.href.startsWith(COMPAT.href)
         ? `compat-better-auth/${file.href.slice(COMPAT.href.length)}`
         : file.href.slice(SRC.href.length);
-      const key = `${name}|${fn}|${m[1] ?? 'delete("session"'}`;
+      const key = `${name}|${fn}|${m[1] ?? `${m[2]}("session"`}`;
       found.set(key, (found.get(key) ?? 0) + 1);
     }
   }

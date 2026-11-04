@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, UserRow } from "../schema.js";
+import type { IdentityRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
@@ -214,11 +214,14 @@ export async function claimEmail(
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
   await tx.delete("password", passwords);
-  // With an `afterEnd` hook, one read and one delete of the read ids; with
-  // none, one statement (plan 9h). So the claimant's session count adds no
-  // query (final review B M of plan 12i). The last delete is by user id, so
-  // a session that another request adds after the read goes too.
-  // The count goes to the event `session.end` of the claim (plan 12h Task 5).
+  // With an `afterEnd` hook, one read and one `deleteRows` of the read ids
+  // per chunk; with none, one statement (plan 9h). So the claimant's session
+  // count adds no query (final review B M of plan 12i). The ended list holds
+  // the rows that each chunk removed (plan 12o). A session that another flow
+  // ended after the read is not in it, and no race throws. The last
+  // delete is by user id, so a session that another request adds after the
+  // read goes too. The count goes to the event `session.end` of the claim
+  // (plan 12h Task 5).
   verified.sessionsEnded(
     await endSessions(
       tx,
@@ -226,17 +229,7 @@ export async function claimEmail(
       ended ?? null,
       now,
       verified.stops,
-      // A session that another flow ended after the read: run the claim
-      // again. The last run deletes each row by its id, which no race undoes,
-      // so the owner's claim holds (ruling 46 of plan 12i).
-      verified.races() < CLAIM_RUNS - 1
-        ? {
-            raced: () => {
-              verified.raced();
-              throw new ClaimLostError();
-            },
-          }
-        : null,
+      true,
     ),
   );
   // A claimant's passkeys would keep the account open after the claim.
@@ -275,12 +268,12 @@ export type BeforeResolveWrite = (
 ) => Promise<void>;
 
 /**
- * The runs of one claim that a session race can undo (ruling 46 of plan
- * 12i). A flow retries a `ClaimLostError` while its count of claim retries
- * is below this count. A claim throws on at most `CLAIM_RUNS - 1` races and
- * on one lost flip. A flow counts its claim retries apart from a unique-key
- * retry, so the retries never run out (decision 13 of plan 12n). On a
- * store with a query limit per invocation, a flow runs none (`claimRetry`).
+ * The claim retries of one flow (ruling 46 of plan 12i). A flow retries a
+ * `ClaimLostError` while its count of claim retries is below this count.
+ * Since plan 12o a claim throws it on a lost flip only: no session race
+ * throws. A flow counts its claim retries apart from a unique-key retry
+ * (decision 13 of plan 12n). On a store with a query limit per invocation,
+ * a flow runs none (`claimRetry`).
  */
 export const CLAIM_RUNS = 3;
 
@@ -291,11 +284,9 @@ export const CLAIM_RUNS = 3;
  * The retry finds a verified user and claims nothing. So the verify pair
  * fires once, for the flow that claimed.
  *
- * `claimEmail` also throws it when another flow ended a claimant session
- * between the claim's read and its delete (final review B M of plan 12i).
- * The retry then reads the sessions again and claims. The run after
- * `CLAIM_RUNS - 1` races ends each session by its own delete and does not
- * throw.
+ * It is the one race that a claim throws on (plan 12o). Another flow can
+ * end a session between the claim's read and its delete. Then `deleteRows`
+ * does not answer that row, and the claim goes on (`endSessions`).
  */
 export class ClaimLostError extends Error {
   constructor() {
@@ -314,17 +305,22 @@ export class ClaimLostError extends Error {
  * (ruling 32 of plan 12n). There a second run does not fit the 50 queries
  * of one invocation. The D1 measure of 2026-11-03 used the worst claim join:
  * an ID-token claim with a full bag, 11 claimant sessions, and every hook.
- * It sent 39 queries with no race, 58 with one race, and 85 with two. At the
- * cap of 50, one race answered 500 and kept writes of the claim. The answer
- * `conflict` comes after the undo of the first run, so no claim write stays.
- * With this rule that race answers in 24 queries (adapter-d1 test
- * anonymous-upgrade-budget.test.ts). A flow that spent its link, code, or
- * provider token before the claim needs a new one. The reset and the
- * invitation confirm keep their link, so the same request works again.
+ * It sent 39 queries with no race, 58 with one race, and 85 with two.
+ * Since plan 12o only a lost flip throws `ClaimLostError`, and a lost flip
+ * writes nothing. So the answer `conflict` comes after the undo of the
+ * writes before the flip, and no claim write stays. A session race ends no
+ * claim: on 2026-11-04 that join signed in through one race in 39 queries
+ * (adapter-d1 test anonymous-upgrade-budget.test.ts). The magic link and the
+ * email code spent their proof before the claim, so each mails a new one of
+ * its kind. The sign-up confirm mails nothing: the address is verified, so
+ * its answer says to sign in. A provider token needs a new sign-in. The
+ * reset and the invitation confirm keep their link, so the same request
+ * works again.
  *
  * The unique-key retry of a flow is no claim retry, and it runs on every
  * store. The same D1 join after one unique-key retry sent 46 queries on
- * 2026-11-03, inside the cap (the same adapter-d1 test file).
+ * 2026-11-03, inside the cap (the same adapter-d1 test file). After a claim
+ * that `keep` made final, a flow runs no retry of any kind.
  */
 export function claimRetry(
   storage: StorageAdapter,
@@ -458,6 +454,8 @@ export async function findOrCreateUserByEmail<T>(
       // Run the resolution once more, outside the failed transaction, so it
       // finds the winner's row, claims it when it is unverified, and runs
       // `after` inside a transaction. Any other failure is a real error.
+      // A kept claim cannot run again (plan 12o): the error passes on.
+      if (verified.kept()) throw err;
       if (
         attempt === 0 &&
         err instanceof StorageError &&
@@ -467,11 +465,14 @@ export async function findOrCreateUserByEmail<T>(
         continue;
       }
       // Another proof claimed the user first (review M1): the retry signs in
-      // the verified user. Or a session race undid the claim: the retry claims again.
+      // the verified user.
       const next = claimRetry(storage, err, lost++);
       if (next === "retry") continue;
       // The callers run this resolution inside `hookGuard`.
-      if (next === "conflict") stopWith("conflict");
+      if (next === "conflict") {
+        verified.flipLost();
+        stopWith("conflict");
+      }
       throw err;
     }
   }
@@ -527,9 +528,12 @@ async function resolveInTransaction(
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
     // outside this transaction.
-    await ensureEmailIdentity(tx, existing.id, email, now);
+    await ensureEmailIdentity(tx, existing.id, email, now, verified);
     if (!existing.emailVerified) {
       await claimEmail(tx, existing.id, null, now, verified, ended);
+      // The claim's last write: a later throw keeps the claim (plan 12o).
+      // The `email` identity came before the claim, so it stays too.
+      await verified.keep(tx, resolved);
     }
     return { user: resolved, created: false };
   }
@@ -780,26 +784,65 @@ export async function signUpRule(
   await mayCreateUser(config, tx, user.email);
 }
 
-/** The `email` identity means "this address signs in by magic link". It exists once the address is proved. */
+/**
+ * The `email` identity means "this address signs in by magic link". It
+ * exists once the address is proved. A claim flow passes `verified`: after
+ * a claim that `keep` made final, a parallel proof can write the row first
+ * (`createIdentity`).
+ */
 export async function ensureEmailIdentity(
   tx: StorageAdapter,
   userId: string,
   email: string,
   now: Date,
+  verified?: VerifySteps,
 ): Promise<void> {
   const found = await tx.findOne("identity", [
     { field: "provider", op: "eq", value: "email" },
     { field: "subject", op: "eq", value: email },
   ]);
   if (!found) {
-    await tx.create("identity", {
-      id: newId(now),
-      userId,
-      provider: "email",
-      subject: email,
-      linkedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await createIdentity(
+      tx,
+      {
+        id: newId(now),
+        userId,
+        provider: "email",
+        subject: email,
+        linkedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      verified,
+    );
+  }
+}
+
+/**
+ * Creates the identity `row`. After a claim that `keep` made final, the flow
+ * runs no retry (plan 12o). So there a unique-key error counts as present
+ * when one read finds a row of the same user, provider, and subject. A
+ * parallel proof wrote that row first, and the flow goes on to its session.
+ * Any other error passes on. Before a kept claim, the error passes on, and the
+ * flow's unique-key retry reads the winner's row. Only D1, SQLite, and
+ * memory keep a claim. So the read never runs in a Postgres transaction
+ * that the error aborted.
+ */
+export async function createIdentity(
+  tx: StorageAdapter,
+  row: IdentityRow,
+  verified?: VerifySteps,
+): Promise<void> {
+  try {
+    await tx.create("identity", row);
+  } catch (err) {
+    if (!verified?.kept() || !(err instanceof StorageError) || err.code !== "unique_violation")
+      throw err;
+    const present = await tx.findOne("identity", [
+      { field: "userId", op: "eq", value: row.userId },
+      { field: "provider", op: "eq", value: row.provider },
+      { field: "subject", op: "eq", value: row.subject },
+    ]);
+    if (!present) throw err;
   }
 }

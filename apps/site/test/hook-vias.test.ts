@@ -76,7 +76,26 @@ const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
 const guideWords = (n: string) =>
   `On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to ${n} of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook.`;
 const compatWords = (n: string) =>
-  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook and no \`impersonation_stop\` row.`;
+  `On the D1 storage, a delete ends one page of the user's sessions with \`session.afterEnd\`, such as 8 of 60. On the Postgres and SQLite storages, a delete ends up to ${n} of the user's own sessions with \`session.afterEnd\`. In both cases, the cascade of the user row deletes the rest with no hook.`;
+
+// On a cascading store the delete reads the user's live impersonation
+// sessions before its page, at most STOPS_LIMIT of access-end.ts. The
+// pending-end row names those that the page does not end, and the sweep
+// writes their stop rows (decisions 3 to 5 of plan 12o). Each place of the
+// residual names the rule, with the limit of the code. The limit counts each
+// live impersonation session of the user, also those that the page ends.
+// Minor 2 of the Task 2 review of plan 12o set these words.
+const stopsWords = (limit: string) =>
+  `With the impersonation tool on, the delete records the impersonation sessions that the cascade ends. The sweep writes their \`impersonation_stop\` rows from its next run. A delete of a user with more than ${limit} live impersonation sessions answers \`delete_too_large\` and changes nothing.`;
+const AUDIT = readFileSync(`${REPO}packages/core/src/engine/operator/audit.ts`, "utf8");
+const ACCOUNT_DELETE = readFileSync(`${REPO}packages/core/src/engine/account-delete.ts`, "utf8");
+
+/** STOPS_LIMIT of access-end.ts. */
+function stopsLimit(): string {
+  const limit = /export const STOPS_LIMIT = (\d+);/.exec(ACCESS_END)?.[1];
+  if (limit === undefined) throw new Error("no STOPS_LIMIT in access-end.ts");
+  return limit;
+}
 
 describe("the delete residual of the compatibility package", () => {
   it("claims the query limit on the D1 storage only", () => {
@@ -90,9 +109,96 @@ describe("the delete residual of the compatibility package", () => {
     ["the core README", `${REPO}packages/core/README.md`, guideWords],
     ["the compat page", `${DOCS}docs/reference/compat-better-auth.md`, compatWords],
     ["the compat README", `${REPO}packages/compat-better-auth/README.md`, compatWords],
-  ])("%s names both cases, with the page size of sessions.ts", (_, path, words) => {
-    const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
-    if (size === undefined) throw new Error("no END_ALL_LIMIT in sessions.ts");
-    expect(flat(path)).toContain(words(size));
+  ])(
+    "%s names both cases, with the page size of sessions.ts, and the stop rows of the sweep",
+    (_, path, words) => {
+      const size = /export const END_ALL_LIMIT = \{ default: (\d+),/.exec(SESSIONS)?.[1];
+      if (size === undefined) throw new Error("no END_ALL_LIMIT in sessions.ts");
+      expect(flat(path)).toContain(`${words(size)} ${stopsWords(stopsLimit())}`);
+    },
+  );
+
+  it("the operator tools guide and the API page name the stop rows of the sweep, with endedAt of writeStopRow", () => {
+    const writer = /export async function writeStopRow\([\s\S]*?\n\}/.exec(AUDIT)?.[0] ?? "";
+    expect(writer).toMatch(/\{ endedAt \}/);
+    expect(flat(`${DOCS}docs/guides/operator-tools.mdx`)).toContain(
+      `On a storage whose user delete cascades, an account delete records the impersonation sessions that the cascade ends. The sweep writes their stop rows from its next run. Such a row also holds \`endedAt\` in \`data\`, the time of the delete. A delete of a user with more than ${stopsLimit()} live impersonation sessions answers \`delete_too_large\`.`,
+    );
+    expect(flat(`${DOCS}docs/reference/api.md`)).toContain(
+      "Its `data` is `{ sessionId, cause }`, and `operator.afterAction` gets it after the commit. A row that the sweep writes after an account delete also holds `endedAt`, the time of the delete.",
+    );
+  });
+
+  it("the operator tools guide names the one read of the audit table by the sweep, with its bound", () => {
+    // Ruling 19 of plan 12o. The sweep step of a pending-end row with stops
+    // reads the user's stop rows. It skips a session that another flow ended.
+    // audit.ts stays the one reader of the table. Ruling 24 of plan 12o: the
+    // guide names the bound of the read, the skew before the delete and the
+    // newest rows of the limit.
+    const reader = /export async function stoppedSessions\([\s\S]*?\n\}/.exec(AUDIT)?.[0] ?? "";
+    expect(reader).toContain('{ field: "targetUserId", op: "eq", value: userId }');
+    expect(reader).toContain('{ field: "action", op: "eq", value: "impersonation_stop" }');
+    expect(reader).toContain('{ field: "createdAt", op: "gte", value: since }');
+    expect(reader).toContain('{ sort: { field: "id", dir: "desc" }, limit }');
+    const step = /export async function endPendingRows\([\s\S]*?\n\}/.exec(ACCESS_END)?.[0] ?? "";
+    expect(step).toMatch(/owed\.length > 0 &&[\s\S]*await stoppedSessions\(/);
+    expect(step).toContain("const since = new Date(at - ACCESS_END_SKEW_MS);");
+    expect(step).toContain(
+      "const stopped = await stoppedSessions(tx, row.identifier, since, STOPPED_READ_LIMIT);",
+    );
+    expect(step).toContain("due = owed.filter((x) => !stopped.has(x.sessionId));");
+    expect(ACCESS_END.split('"operatorAudit"').length - 1).toBe(0);
+    const skew = /export const ACCESS_END_SKEW_MS = (\d+)_000;/.exec(ACCESS_END)?.[1];
+    if (skew === undefined) throw new Error("no ACCESS_END_SKEW_MS in access-end.ts");
+    expect(ACCESS_END).toContain("const STOPPED_READ_LIMIT = 2 * STOPS_LIMIT;");
+    const newest = 2 * Number(stopsLimit());
+    expect(flat(`${DOCS}docs/guides/operator-tools.mdx`)).toContain(
+      `Core never updates or deletes a row. The sweep reads the table only for a user whose delete recorded impersonation sessions. It reads the stop rows of that user from ${skew} s before the delete, at most the newest ${newest}. It writes no second stop row for a session that one of these rows names.`,
+    );
+  });
+
+  it("the errors page names the second cause of delete_too_large, with STOPS_LIMIT", () => {
+    expect(flat(`${DOCS}docs/reference/errors.md`)).toContain(
+      `There an account delete answers it when the user has more than ${stopsLimit()} live impersonation sessions, with the impersonation tool on.`,
+    );
+  });
+
+  it("the errors page names each compat storage as one whose user delete cascades", () => {
+    // Low 3 of the Task 2 review of plan 12o. Each storage of the compat
+    // package goes through cascading(), which sets userDeleteCascades. Only
+    // such a store reads the impersonation sessions and refuses past the limit.
+    const kinds = COMPAT_STORAGE.split('kind: "authtempo-compat-database"').length - 1;
+    expect(kinds).toBeGreaterThan(2);
+    expect(COMPAT_STORAGE.split("storage: cascading(").length - 1).toBe(kinds);
+    expect(COMPAT_STORAGE).toContain("storage.userDeleteCascades = true;");
+    expect(ACCOUNT_DELETE).toContain(
+      "const cascades = config.storage.userDeleteCascades === true;",
+    );
+    expect(ACCOUNT_DELETE).toContain("const readsStops = cascades && proof.stops !== null;");
+    expect(ACCOUNT_DELETE).toContain(
+      'if (impersonated.length > STOPS_LIMIT) stopWith("delete_too_large");',
+    );
+    expect(flat(`${DOCS}docs/reference/errors.md`)).toContain(
+      "A storage whose user delete cascades, such as each storage of the compatibility package, has a second cause.",
+    );
+  });
+
+  it("the errors page names the remedy past the limit with the endUser call of the operator API", () => {
+    // Low 3 of the Task 2 review of plan 12o. api.operator is operatorApi of
+    // create-auth.ts, and its sessions.endUser answers `more` until no session stays.
+    const CREATE_AUTH = readFileSync(`${REPO}packages/core/src/create-auth.ts`, "utf8");
+    const OPERATOR_INDEX = readFileSync(
+      `${REPO}packages/core/src/engine/operator/index.ts`,
+      "utf8",
+    );
+    expect(CREATE_AUTH).toContain("operator: operatorApi(config),");
+    expect(OPERATOR_INDEX).toMatch(
+      /sessions: \{\s*endUser: entry\(\(i\) => endUserSessions\(config, i\)\),/,
+    );
+    const answer = /export interface EndUserSessionsAnswer \{[^}]*\}/.exec(SESSIONS)?.[0] ?? "";
+    expect(answer).toContain("more: boolean;");
+    expect(flat(`${DOCS}docs/reference/errors.md`)).toContain(
+      `For an account with more than ${stopsLimit()} live impersonation sessions, call \`api.operator.sessions.endUser\` until \`more\` is false, or wait until those sessions expire.`,
+    );
   });
 });

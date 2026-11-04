@@ -35,7 +35,13 @@ import {
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hasAddress } from "./address.js";
 import { type AnonymousCaller, type UpgradeSteps, upgradeSteps } from "./anonymous.js";
-import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
+import {
+  type CreateSteps,
+  claimAnswer,
+  createSteps,
+  type VerifySteps,
+  verifySteps,
+} from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import {
   HookStop,
@@ -65,6 +71,7 @@ import {
   claimEmail,
   claimedUser,
   claimRetry,
+  createIdentity,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
@@ -583,24 +590,27 @@ export async function signInByProfile(
   });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "social");
-  const resolved = await hookGuard(() =>
-    resolveSocialUser(
-      config.storage,
-      input.provider,
-      bounded,
-      now,
-      verified,
-      (tx) => steps.write(tx),
-      ended,
-      async (tx, user, created) => {
-        // A known identity can carry another address than its user's (plan 12d): that user's address decides too.
-        const held =
-          created || user.email === address ? null : await enforcedAnswer(config, user.email, tx);
-        if (held) throw new HookStop(held);
-        await steps.before(tx, user);
-      },
-      made,
-      input.addressless,
+  // An error answer after a kept claim fires the claim's after points (plan 12o).
+  const resolved = await claimAnswer(config, verified, ended, () =>
+    hookGuard(() =>
+      resolveSocialUser(
+        config.storage,
+        input.provider,
+        bounded,
+        now,
+        verified,
+        (tx) => steps.write(tx),
+        ended,
+        async (tx, user, created) => {
+          // A known identity can carry another address than its user's (plan 12d): that user's address decides too.
+          const held =
+            created || user.email === address ? null : await enforcedAnswer(config, user.email, tx);
+          if (held) throw new HookStop(held);
+          await steps.before(tx, user);
+        },
+        made,
+        input.addressless,
+      ),
     ),
   );
   if (!resolved.ok) return resolved;
@@ -1213,14 +1223,20 @@ export async function resolveSocialUser<T extends AfterWrite>(
         },
       );
     } catch (err) {
+      // A kept claim cannot run again (plan 12o): the error passes on.
+      if (verified.kept()) throw err;
       // The claim won. The address is proved by its owner now.
       if (err instanceof ClaimRacedError) return fail<never>("email_taken_unverified");
       if (attempt === 0 && err instanceof StorageError && err.code === "unique_violation") continue;
       // Another proof claimed the user first (review M1): the retry signs in
-      // the verified user. Or a session race undid the claim: the retry claims again.
+      // the verified user.
       const next = claimRetry(storage, err, lost++);
       if (next === "retry") continue;
-      if (next === "conflict") return fail<never>("conflict");
+      if (next === "conflict") {
+        // The provider's proof is not a mail, so no new mail goes (plan 12o).
+        verified.flipLost();
+        return fail<never>("conflict");
+      }
       throw err;
     }
   }
@@ -1276,7 +1292,11 @@ async function linkInTransaction(
       await verified.before(user);
       if (before) await before(filled, false);
       await claimEmail(tx, user.id, { identityId: identity.id }, now, verified, ended);
-      await ensureEmailIdentity(tx, user.id, user.email, now);
+      // A mailbox proof is final (plan 12o): a later throw keeps the claim.
+      await verified.keep(tx, claimed);
+      await ensureEmailIdentity(tx, user.id, user.email, now, verified);
+      // The `email` identity comes after the claim here, so it is kept too.
+      await verified.keep(tx, claimed);
       await writeFill(tx, claimed, filled);
       return ok({ user: filled, trustedIdentityId: null, created: false });
     }
@@ -1312,8 +1332,14 @@ async function linkInTransaction(
     if (steps) await steps.identity(filled, linking);
     if (before) await before(filled, false);
     if (!existing.emailVerified) await claimEmail(tx, existing.id, null, now, verified, ended);
-    await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
-    await ensureEmailIdentity(tx, existing.id, email, now);
+    // A mailbox proof is final (plan 12o): a later throw keeps the claim.
+    // With no claim in this attempt, `keep` does nothing.
+    await verified.keep(tx, current);
+    // After a kept claim, a parallel link of the same identity counts as present (plan 12o).
+    await createIdentity(tx, identityRow(existing.id, provider, profile.subject, now), verified);
+    await ensureEmailIdentity(tx, existing.id, email, now, verified);
+    // The new identity and the `email` identity come after the claim, so they are kept too.
+    await verified.keep(tx, current);
     await writeFill(tx, current, filled);
     return ok({ user: filled, trustedIdentityId: null, created: false });
   }

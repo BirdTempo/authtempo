@@ -158,6 +158,11 @@ export function recordNextTransaction(storage: StorageAdapter): string[] {
           writes.push(`delete:${m}`);
           return tx.delete(m, w);
         },
+        // A delete that answers its rows (plan 12o) is a delete of the model too.
+        deleteRows: (m, w) => {
+          writes.push(`delete:${m}`);
+          return tx.deleteRows(m, w);
+        },
       }),
     );
   };

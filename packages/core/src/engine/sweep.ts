@@ -503,6 +503,13 @@ export async function sweepExpired(
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
   // check for a revoke. So a logout, which reaches another party, comes first.
+  // A row of a cascading account delete owes the stop rows of the
+  // impersonation sessions that the cascade took. The step writes them in
+  // the same calls, one call each (decision 5 of plan 12o). One read of the
+  // user's stop rows comes first: the rows from `ACCESS_END_SKEW_MS` (5 s)
+  // before the delete, at most the newest `STOPPED_READ_LIMIT` (200). The step
+  // writes no second row for a session that one of them names (ruling 19 of
+  // plan 12o).
   const pendingSessions = await softStep(
     config.observe,
     "pending end",

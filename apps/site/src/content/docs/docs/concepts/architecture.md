@@ -28,7 +28,7 @@ A small library may supply a primitive, such as a signature check. No library ma
 | Part | Package | What it does |
 | --- | --- | --- |
 | The engine | `@authtempo/core` | Runs every flow, owns the routes under `basePath`, and answers `handle`, `session`, `caller`, and `api`. |
-| The storage port | `@authtempo/core` | Six storage methods on model and field names. |
+| The storage port | `@authtempo/core` | Ten storage methods on model and field names. |
 | The adapters | `@authtempo/adapter-d1`, `@authtempo/adapter-postgres` | Map the storage port to SQL, ship the migrations, and ship an owned limiter. |
 | The client | `@authtempo/client` | Calls the routes from a browser, Expo, or Electron, and answers typed results. |
 | The handoff | `@authtempo/handoff` | Signs a native or desktop app in through the system browser. |

@@ -345,9 +345,10 @@ when the address is in use. A profile with no email answers
 
 An account created through an unverified email is a claim. When a sign-in
 proves the address (a magic link, or a provider that reports the email
-verified), core deletes that user's other identities and every session,
-then marks the email verified. The claimant loses access; the owner keeps
-the account.
+verified), core marks the email verified first. Then it deletes that user's
+other identities and every session. The claimant loses those ways in, and
+the owner keeps the account. A request of the claimant between those writes
+acts as a verified user, as "The window" of the claim-rule page tells.
 
 GitHub and LinkedIn are presets: `social.github` and `social.linkedin` each
 take `{ clientId, clientSecret }`. GitHub issues no ID token, so core reads
@@ -1251,7 +1252,7 @@ The delete holds the user row by a compare-and-set, the rule of the profile upda
 
 Five more writers hold the user row. They are the organization create, the member add, the accept of an invitation, the password change, and a reset that answers a second-factor challenge. Each also reads the user row after its insert. So a member row or an `email` identity of a deleted user never commits. A writer that loses the race answers 409 `conflict`. An organization that goes loses its invitations first. An accept that comes later finds no invitation. An accept that commits first makes the delete answer `conflict`, and the organization stays.
 
-`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
+`organization.beforeDelete` runs for each organization that goes, then `user.beforeDelete` with `organizations`, the ids of those organizations. Both run inside the transaction, after core's checks and the lock, before the first delete. After the commit, `session.afterEnd` fires with `account_deleted` for the sessions that the delete ended. On the D1 storage of the compatibility package, that is one page of sessions. On the Postgres and SQLite storages of that package, that is up to 500 of the user's own sessions. In both cases, the cascade of the Better Auth tables deletes the rest with no hook. With the impersonation tool on, the delete records the impersonation sessions that the cascade ends. The sweep writes their `impersonation_stop` rows from its next run. A delete of a user with more than 100 live impersonation sessions answers `delete_too_large` and changes nothing. Then `organization.afterDelete` fires for each organization, and `user.afterDelete` with the row as the delete held it. The member rows and the identities fire no member or identity hook.
 
 A notice mail goes to the user's address after each change of a way in (ASVS 5.0.0 6.3.7). These changes send one:
 
@@ -1894,8 +1895,9 @@ and no file under `src/` imports it. The test
 
 ## The storage port
 
-Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
-`transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte
+Ten methods: `create`, `createMany`, `rowsPerInsert`, `findOne`,
+`findMany`, `update`, `delete`, `deleteRows`, `keep`, `transaction`.
+Clauses join with AND. Operators: `eq ne in lt lte gt gte
 startsWith`. One sort field. No joins. Run `runAdapterConformance` from
 `@authtempo/core/conformance` against a new adapter; it is the contract.
 

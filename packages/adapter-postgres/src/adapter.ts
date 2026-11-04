@@ -1,6 +1,7 @@
 import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
 import {
   assertModel,
+  returnedParts,
   rowsPerInsertOf,
   type SqlStatements,
   type Statement,
@@ -115,6 +116,27 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       const s = ctx.statements.delete(model, where);
       if (!s) return 0;
       return (await query(ctx, s)).count;
+    },
+    async deleteRows(model, where) {
+      await ctx.ready();
+      // One DELETE … RETURNING (plan 12o). Under read committed it waits for
+      // the lock of a row that another transaction writes. When that
+      // transaction deleted the row, the statement skips it. So the answer is
+      // the rows that this statement removed.
+      const st = ctx.statements;
+      const s = st.deleteReturningRead
+        ? st.deleteReturningRead(model, where)
+        : st.deleteReturning(model, where);
+      if (!s) return [];
+      return (await query(ctx, s)).rows.map((r) => st.decode(model, returnedParts(r).read));
+    },
+    async keep() {
+      // Nothing to do (plan 12o). Postgres isolates the open transaction, so
+      // no other caller reads its writes before the commit. A parallel proof
+      // of the same user writes the user row too, so it waits for this row
+      // lock. So a throw here may reverse the whole transaction. Outside a
+      // transaction each write is final: true.
+      return !ctx.inTransaction;
     },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       await ctx.ready();

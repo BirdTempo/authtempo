@@ -56,7 +56,7 @@ sources:
 | hook | The app's code at a named point of a core flow. | |
 | sweep | The scheduled delete of the rows that no flow can use. | |
 | limiter | The counter of attempts per key and window. | |
-| storage port | The six storage methods that core calls. | |
+| storage port | The ten storage methods that core calls. | |
 | adapter | An implementation of the storage port for one database. | |
 | seam | A named module around a supplier library, so that a replacement plugs into the same calls. | |
 | compatibility package | A package that runs code written for another auth library on authtempo. | |

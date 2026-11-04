@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import type { Observer } from "../observe/observer.js";
-import type { UserRow } from "../schema.js";
+import type { Result } from "../result.js";
+import type { SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import {
   type IdentitySummary,
@@ -14,6 +15,7 @@ import {
   type UserVerifyVia,
 } from "./hooks.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
+import { sessionsEnded } from "./sessions.js";
 import { signUpRule, validImageUrl, validUserName } from "./users.js";
 
 /**
@@ -164,12 +166,25 @@ export interface VerifySteps {
   /** The count of the sessions that this attempt's claim deleted (plan 12h Task 5). */
   endedCount(): number;
   /**
-   * Counts a session race that undid an attempt of the claim. `begin` keeps
-   * the count, so `claimEmail` can bound the runs (ruling 46 of plan 12i).
+   * Called by the flow after the last write of its claim, inside the
+   * transaction (plan 12o). When this attempt claimed, it calls `tx.keep()`.
+   * A store that then keeps the claim on a later throw records `user`: the
+   * row as the claim left it. A flow may call it more than once.
    */
-  raced(): void;
-  /** The count of the session races of this flow. */
-  races(): number;
+  keep(tx: StorageAdapter, user: UserRow): Promise<void>;
+  /**
+   * The user of a claim that `keep` made final, or null. A throw after
+   * `keep` leaves that claim, so the flow fires its after points on its
+   * error answer too (`keptClaimEnded`), and runs no retry.
+   */
+  kept(): UserRow | null;
+  /**
+   * Called by a claim loop when it answers 409 `conflict` to a lost flip
+   * (`claimRetry`): another proof claimed the user first (plan 12o).
+   */
+  flipLost(): void;
+  /** True when the flow answers `conflict` to a lost flip. `begin` keeps it. */
+  lostFlip(): boolean;
   /**
    * The stop rows of the impersonation sessions that the claim ends (ruling
    * 43 of plan 12f), or null while the tool is off. `begin` empties it, so
@@ -186,7 +201,8 @@ export function verifySteps(
   let checked: string | null = null;
   let claimed: string | null = null;
   let ended = 0;
-  let races = 0;
+  let kept: UserRow | null = null;
+  let lost = false;
   const stops = impersonationStops(config, "claim");
   return {
     stops,
@@ -226,9 +242,56 @@ export function verifySteps(
       ended = n;
     },
     endedCount: () => ended,
-    raced() {
-      races++;
+    async keep(tx, user) {
+      if (claimed !== user.id) return;
+      // Postgres and MySQL answer false: a throw there still reverses the claim.
+      if (await tx.keep()) kept = user;
     },
-    races: () => races,
+    kept: () => kept,
+    flipLost() {
+      lost = true;
+    },
+    lostFlip: () => lost,
   };
+}
+
+/**
+ * The after points of a claim that `keep` made final, for a flow that
+ * answers an error or throws after it (plan 12o, spec 8.9). They are
+ * `email.verify` and `user.afterVerify`, then `session.end`,
+ * `session.afterEnd` with reason `claim`, and `operator.afterAction` per
+ * stop row. With no kept claim, nothing runs. `ended` is the list that the
+ * claim filled.
+ */
+export async function keptClaimEnded(
+  config: ResolvedConfig,
+  verified: VerifySteps,
+  ended: readonly SessionRow[] | undefined,
+): Promise<void> {
+  const user = verified.kept();
+  if (!user) return;
+  await verified.after(user);
+  await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
+}
+
+/**
+ * Runs `work`, the claim of a flow that answers a `Result` (plan 12o). On an
+ * error answer or a throw, it first fires the after points of a claim that
+ * `keep` made final (`keptClaimEnded`).
+ */
+export async function claimAnswer<T>(
+  config: ResolvedConfig,
+  verified: VerifySteps,
+  ended: readonly SessionRow[] | undefined,
+  work: () => Promise<Result<T>>,
+): Promise<Result<T>> {
+  let answer: Result<T>;
+  try {
+    answer = await work();
+  } catch (e) {
+    await keptClaimEnded(config, verified, ended);
+    throw e;
+  }
+  if (!answer.ok) await keptClaimEnded(config, verified, ended);
+  return answer;
 }

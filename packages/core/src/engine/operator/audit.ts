@@ -371,12 +371,18 @@ export function impersonationStops(
  * ended, on the flow's handle (ruling 43 of plan 12f). The actor is the
  * operator of the session, the target is its user, and `data` holds
  * `{ sessionId, cause }`. A session with no `actorId` writes nothing.
+ *
+ * The row's time is `now`, the time of the writer. The sweep writes the
+ * rows of the sessions that the cascade of a user delete took (decision 5
+ * of plan 12o). It passes `endedAt`, the time of the delete, and `data`
+ * holds it too.
  */
 export async function writeStopRow(
   tx: StorageAdapter,
   stops: ImpersonationStops,
   session: Pick<SessionRow, "id" | "userId" | "actorId">,
   now: Date,
+  endedAt?: string,
 ): Promise<void> {
   if (session.actorId === null) return;
   const row = await writeAuditIn(
@@ -387,13 +393,47 @@ export async function writeStopRow(
       action: "impersonation_stop",
       targetUserId: session.userId,
       reason: STOP_REASONS[stops.cause],
-      data: { sessionId: session.id, cause: stops.cause },
+      data: {
+        sessionId: session.id,
+        cause: stops.cause,
+        ...(endedAt === undefined ? {} : { endedAt }),
+      },
       ip: null,
       userAgent: null,
     },
     now,
   );
   stops.rows.push(row);
+}
+
+/**
+ * The ids of the sessions of `userId` that an `impersonation_stop` row
+ * names, of the rows written at or after `since` (ruling 19 of plan 12o).
+ * One read by the index on `targetUserId` takes the newest `limit` rows. The
+ * sweep reads them for a pending-end row that owes stop rows. So it writes no
+ * second row for a session that another flow ended after the delete's read.
+ */
+export async function stoppedSessions(
+  storage: StorageAdapter,
+  userId: string,
+  since: Date,
+  limit: number,
+): Promise<Set<string>> {
+  const rows = await storage.findMany(
+    "operatorAudit",
+    [
+      { field: "targetUserId", op: "eq", value: userId },
+      { field: "action", op: "eq", value: "impersonation_stop" },
+      { field: "createdAt", op: "gte", value: since },
+    ],
+    { sort: { field: "id", dir: "desc" }, limit },
+  );
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row.data?.sessionId;
+    if (typeof id === "string") ids.add(id);
+  }
+  return ids;
 }
 
 /**

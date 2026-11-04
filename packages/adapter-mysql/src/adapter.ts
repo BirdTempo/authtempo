@@ -197,6 +197,48 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       if (!s) return 0;
       return countOf(await query(ctx, s));
     },
+    async deleteRows(model, where) {
+      await ctx.ready();
+      const w = guardWhere(model, where);
+      // The checks of `delete`: an empty where throws, and a where that
+      // matches no row answers at once.
+      if (!w || !ctx.statements.delete(model, w)) return [];
+      // MySQL has no DELETE … RETURNING (plan 12o). The read, the lock, and
+      // the delete must be one unit, so a call outside a transaction opens one.
+      if (!ctx.conn) return self.transaction((tx) => tx.deleteRows(model, where));
+      const byId = { sort: { field: "id", dir: "asc" } } as FindManyOptions<typeof model>;
+      const s = ctx.statements.select(model, w, byId);
+      if (!s) return [];
+      // The ids first, then the rows under their locks by id, as `lockInOrder`
+      // takes them (ruling 2 of plan 12g). The locking read waits for the
+      // lock of a row that another transaction writes. When that transaction
+      // deleted the row, the read does not find it. The where comes again, so
+      // a row that changed since the first read is left out.
+      const ids = rowsOf(await query(ctx, s)).map((r) => r.id);
+      if (ids.length === 0) return [];
+      const lock = ctx.statements.select(
+        model,
+        [...w, { field: "id", op: "in", value: ids }],
+        byId,
+      );
+      if (!lock) return [];
+      const rows = rowsOf(await query(ctx, { sql: `${lock.sql} FOR UPDATE`, params: lock.params }));
+      if (rows.length === 0) return [];
+      // This transaction holds the lock of each row, so the delete by id removes each one.
+      const del = ctx.statements.delete(model, [
+        { field: "id", op: "in", value: rows.map((r) => r.id) },
+      ]);
+      if (del) await query(ctx, del);
+      return rows.map((r) => ctx.statements.decode(model, r));
+    },
+    async keep() {
+      // Nothing to do (plan 12o). InnoDB isolates the open transaction, so no
+      // other caller reads its writes before the commit. A parallel proof of
+      // the same user writes the user row too, so it waits for this row lock.
+      // So a throw here may reverse the whole transaction. Outside a
+      // transaction each write is final: true.
+      return ctx.conn === null;
+    },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       // The checks run on the pool. So they run before the transaction takes
       // its connection: on a pool of one, a check after it would wait forever.

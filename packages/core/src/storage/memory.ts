@@ -272,6 +272,24 @@ function adapterOn(
       }
       return rows.length;
     },
+    async deleteRows<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M][]> {
+      sent.statements++;
+      const t = table(model);
+      if (where.length === 0) throw new StorageError("invalid_argument", model, ["where"]);
+      const rows = select(model, where);
+      for (const r of rows) {
+        t.delete(r.id as string);
+        log?.push(() => t.set(r.id as string, r));
+      }
+      return rows.map((r) => clone(r) as unknown as Models[M]);
+    },
+    async keep() {
+      // The steps so far go, so a later throw reverses only the later writes.
+      // A nested call holds its own list, so it drops only its own steps.
+      // Outside a transaction no write is reversed.
+      if (log) log.length = 0;
+      return true;
+    },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       const run = async (): Promise<T> => {
         const own: Undo[] = [];

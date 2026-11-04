@@ -14,7 +14,8 @@ import { FIELD_KINDS } from "../src/redact.js";
  * again. The Task 5 fix round adds the line of an SMS
  * after the answer (ruling 23). The second fix round adds the line of a
  * Worker with no waitUntil (ruling 29). Task 7 adds the line of the
- * upgrade clean-up (ruling 36 L2). A call that builds a text for each
+ * upgrade clean-up (ruling 36 L2). The Task 3 fix round of plan 12o adds
+ * the line of a new proof mail that failed. A call that builds a text for each
  * value gives one text for each value. These are the email code and
  * second-factor counts, and the three sweep steps. A part that a field
  * fills is written `<field>`.
@@ -38,6 +39,7 @@ const START_LIST: readonly string[] = [
   "authtempo: jwtMint.claims answered a value that is not an object",
   "authtempo: jwtMint.claims threw",
   "authtempo: notice mail failed",
+  "authtempo: claim mail failed",
   "authtempo: client metadata document refused",
   "authtempo: client metadata member dropped",
   "authtempo: client key set refused",
@@ -139,9 +141,9 @@ describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
     // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, 3 + 1 + 3 + 1 + 1 + 1 of
     // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1), and 1 + 1 of
-    // plan 12f2 (Task 4: 1, Task 2: 1).
-    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1);
-    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1);
+    // plan 12f2 (Task 4: 1, Task 2: 1). Plan 12o Task 3 adds 1.
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

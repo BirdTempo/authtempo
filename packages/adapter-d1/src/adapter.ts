@@ -4,6 +4,7 @@ import {
   assertModel,
   D1_BOUND_PARAMS,
   insertChunks,
+  returnedParts,
   rowsPerInsertOf,
   type SqlStatements,
   type Statement,
@@ -262,6 +263,36 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
           : rows.map((row) => st.reinsertRow(model, row));
       for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
       return rows.length;
+    },
+    async deleteRows(model, where) {
+      await ctx.ready();
+      // One statement, inside a transaction and outside one (plan 12o). Its
+      // RETURNING lists only the rows that this statement removed, so a row
+      // that another request deleted first is not in the answer. A cascade
+      // of a foreign key logs no child row, as in `delete`.
+      const s = st.deleteReturningRead
+        ? st.deleteReturningRead(model, where)
+        : st.deleteReturning(model, where);
+      if (!s) return [];
+      const parts = (await all(db, s, ctx.sent)).map(returnedParts);
+      if (ctx.undo) {
+        const raws = parts.map((p) => p.raw);
+        // The list form for more than one row, as for `delete` (ruling 84 of plan 12d).
+        const reinserts =
+          raws.length > 1 && st.reinsertRows
+            ? st.reinsertRows(model, raws)
+            : raws.map((row) => st.reinsertRow(model, row));
+        for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
+      }
+      return parts.map((p) => st.decode(model, p.read));
+    },
+    async keep() {
+      // The entries of this transaction level so far go (plan 12o). So a later
+      // throw reverses only the later writes. A nested call owns the entries
+      // from its mark (`floor`), so it drops only its own. Outside a
+      // transaction no write is reversed.
+      ctx.undo?.splice(ctx.floor);
+      return true;
     },
     async transaction(fn) {
       await ctx.ready();

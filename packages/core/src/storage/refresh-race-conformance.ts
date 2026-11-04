@@ -194,6 +194,8 @@ function gated(base: StorageAdapter) {
         return n;
       });
     },
+    deleteRows: (model, where) => base.deleteRows(model, where),
+    keep: () => base.keep(),
     transaction: (fn) => base.transaction(fn),
   };
   return {
@@ -234,6 +236,8 @@ function revokeGated(base: StorageAdapter) {
       }
       return n;
     },
+    deleteRows: (model, where) => tx.deleteRows(model, where),
+    keep: () => tx.keep(),
     transaction: (fn) => tx.transaction((inner) => fn(inTx(inner))),
   });
   const storage: StorageAdapter = {
@@ -251,6 +255,8 @@ function revokeGated(base: StorageAdapter) {
       return n;
     },
     delete: (model, where) => base.delete(model, where),
+    deleteRows: (model, where) => base.deleteRows(model, where),
+    keep: () => base.keep(),
     transaction: (fn) => base.transaction((tx) => fn(inTx(tx))),
   };
   return {

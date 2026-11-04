@@ -13,7 +13,7 @@ import {
   recordedAnonymous,
   upgradeSteps,
 } from "./anonymous.js";
-import { createSteps, verifySteps } from "./create-steps.js";
+import { claimAnswer, createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
@@ -69,9 +69,19 @@ export async function requestMagicLink(
   if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return fail("rate_limited");
   // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
   if (await ssoRequiredFor(config, email)) return ok({ sent: true });
+  await mailMagicLink(config, email, safeNext(input.next), anonymousData(input.anonymous));
+  return ok({ sent: true });
+}
+
+/** One `magic-link` row and one mail. The mail goes after the row, never inside a transaction. */
+async function mailMagicLink(
+  config: ResolvedConfig,
+  email: string,
+  next: string,
+  anonymous: { anonymousUserId?: string },
+): Promise<void> {
   const now = config.clock.now();
   const token = randomToken(MAGIC_LINK_PREFIX);
-  const next = safeNext(input.next);
   await config.storage.create("verification", {
     id: newId(now),
     purpose: "magic-link",
@@ -79,7 +89,7 @@ export async function requestMagicLink(
     valueHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + config.magicLink.ttlMinutes * 60_000),
     consumedAt: null,
-    data: { next, ...anonymousData(input.anonymous) },
+    data: { next, ...anonymous },
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
@@ -90,7 +100,27 @@ export async function requestMagicLink(
     subject: `Sign in to ${config.appName}`,
     text: `Open this link to sign in. It is valid for ${config.magicLink.ttlMinutes} minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message.`,
   });
-  return ok({ sent: true });
+}
+
+/**
+ * The fallback mail of a magic link that answers 409 `conflict` to a lost
+ * flip (plan 12o, spec 8.9). The link was spent before the transaction, so
+ * a new link goes to the address, with the same landing path. It counts
+ * under the per-address limit of the request. A full limit sends nothing.
+ * The new link records no anonymous user. A throw of this step emits
+ * `claim.mail_failed`, and the answer stays 409 (ruling 23 of plan 12o).
+ */
+async function resendProofAfterLostClaim(
+  config: ResolvedConfig,
+  email: string,
+  next: string,
+): Promise<void> {
+  try {
+    if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return;
+    await mailMagicLink(config, email, next, {});
+  } catch (e) {
+    config.observe.emit({ name: "claim.mail_failed", method: "magic_link", errorName: e });
+  }
 }
 
 /**
@@ -118,7 +148,8 @@ export async function verifyMagicLink(
   if (enforced) return enforced;
   const next = safeNext((row.data as { next?: unknown } | null)?.next);
   // A failure after this point burns the link by design. The person
-  // requests a new one.
+  // requests a new one. A 409 `conflict` to a lost flip mails a new link
+  // (plan 12o).
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
@@ -147,21 +178,27 @@ export async function verifyMagicLink(
   const made = createSteps(config, "magic_link", { signUpRule: true });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "magic_link");
-  const resolved = await hookGuard(async () =>
-    ok(
-      await findOrCreateUserByEmail(
-        config.storage,
-        row.identifier,
-        now,
-        verified,
-        (tx) => steps.write(tx),
-        ended,
-        steps.before,
-        made,
+  // An error answer after a kept claim fires the claim's after points (plan 12o).
+  const resolved = await claimAnswer(config, verified, ended, () =>
+    hookGuard(async () =>
+      ok(
+        await findOrCreateUserByEmail(
+          config.storage,
+          row.identifier,
+          now,
+          verified,
+          (tx) => steps.write(tx),
+          ended,
+          steps.before,
+          made,
+        ),
       ),
     ),
   );
-  if (!resolved.ok) return resolved;
+  if (!resolved.ok) {
+    if (verified.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, next);
+    return resolved;
+  }
   const { user, after } = resolved.value;
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);

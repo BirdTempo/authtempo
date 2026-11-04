@@ -23,7 +23,12 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { changePassword, passwordSignIn, passwordSignUp } from "../src/engine/password.js";
+import {
+  changePassword,
+  passwordSignIn,
+  passwordSignUp,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { effectiveIn } from "../src/engine/permissions.js";
 import { addPhone, requestPhone, sendPhoneCode, verifyAddPhone } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
@@ -51,6 +56,7 @@ import { type StorageAdapter, StorageError } from "../src/storage/port.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
+import { d1Like } from "./d1-like.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { codeFor, exchange, oauthHandle, REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
@@ -1316,6 +1322,61 @@ describe("the notice line (plan 12a)", () => {
     expect(log.mock.calls).toEqual([
       ["authtempo: notice mail failed", "password_changed", "TypeError"],
     ]);
+  });
+});
+
+describe("the claim line (plan 12o)", () => {
+  it("claim.mail_failed", async () => {
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
+    const up = await passwordSignUp(auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const confirm = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    const asked = await requestMagicLink(auth.config, { email: EMAIL, ip: null });
+    if (!asked.ok) throw new Error(asked.code);
+    const link = tokenFromMail(auth.mail.at(-1)?.text ?? "");
+    // The D1 view: at the flip of the magic link, the verify link claims the
+    // user first. The view has a query limit, so the magic link answers 409.
+    const view = d1Like(auth.config);
+    view.storage.queryLimitPerInvocation = true;
+    const original = view.storage.transaction.bind(view.storage);
+    let armed = true;
+    view.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, where, d) => {
+            if (armed && m === "user" && (d as { emailVerified?: unknown }).emailVerified) {
+              armed = false;
+              const won = await verifyPasswordEmail(view, {
+                token: confirm,
+                ip: null,
+                userAgent: null,
+              });
+              if (!won.ok) throw new Error(won.code);
+            }
+            return tx.update(m, where, d);
+          },
+        }),
+      );
+    const log = errors();
+    const failing = {
+      ...view,
+      mail: {
+        ...view.mail,
+        send: async () => {
+          throw new TypeError("mail down");
+        },
+      },
+    };
+    const lost = await verifyMagicLink(failing, { token: link, ip: null, userAgent: null });
+    expect(lost).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(armed).toBe(false);
+    expect(log.mock.calls).toEqual([["authtempo: claim mail failed", "magic_link", "TypeError"]]);
   });
 });
 

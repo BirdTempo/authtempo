@@ -616,7 +616,15 @@ describe("the late conflicts of the SCIM Groups on D1 at the member cap (ruling 
         409,
         expect.any(String),
       ]);
-      expect([res.status, text], path).toEqual([409, expect.stringContaining("conflict")]);
+      // A late conflict answers the race detail with no scimType (decision 1 of plan 12o).
+      expect([res.status, JSON.parse(text)], path).toStrictEqual([
+        409,
+        {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
+          status: "409",
+          detail: "Another request changed this resource at the same time. Send the request again.",
+        },
+      ]);
       await undo();
       expect(await state()).toEqual(before);
       return c.n;

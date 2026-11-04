@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
+import { deleteAccount } from "../../src/engine/account-delete.js";
 import { mintSessionJwt, sessionLive } from "../../src/engine/jwt.js";
 import { createClient } from "../../src/engine/oauth-client-store.js";
 import { markAllAccessEnd } from "../../src/engine/operator/access-end.js";
@@ -24,6 +25,8 @@ import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { meterOf } from "../../src/storage/meter.js";
+import type { StorageAdapter } from "../../src/storage/port.js";
+import { d1Like } from "../d1-like.js";
 import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
 import {
   approvedDevice,
@@ -47,6 +50,8 @@ const ENTERPRISE_URN = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:Us
 const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const ERROR_URN = "urn:ietf:params:scim:api:messages:2.0:Error";
 const ADA = "ada@acme.example";
+/** The detail of a lost race of a SCIM write (decision 1 of plan 12o). */
+const RACE = "Another request changed this resource at the same time. Send the request again.";
 
 beforeEach(() => {
   // A refused sign-in writes one log line.
@@ -738,6 +743,97 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
       id,
       "Error",
     );
+  });
+});
+
+describe("the 409 answers of a SCIM create (decision 1 and Review Focus 4 of plan 12o)", () => {
+  it("answers 409 uniqueness to a userName in use", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    await created(w, token, ADA);
+    // Another address, with the userName of the User of Ada.
+    const body = userBody("bob@acme.example", { userName: ADA });
+    const r = await read(await scim(w, token, "POST", "/Users", body));
+    expect([r.status, r.body]).toEqual([
+      409,
+      {
+        schemas: [ERROR_URN],
+        status: "409",
+        scimType: "uniqueness",
+        detail: "another User of this organization has the userName",
+      },
+    ]);
+    expect((await w.storage.findMany("scimUser", [])).length).toBe(1);
+  });
+
+  it("answers the race sentence with no scimType when an account delete takes the user during the claim", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    // A claimant signs up at an address of the domain, and stays unverified.
+    const up = await passwordSignUp(w.config, {
+      email: "uma@acme.example",
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    const session = await resolveSession(w.config, up.value.token);
+    if (!session) throw new Error("no session");
+    // The claimant deletes the account after the create read the user and
+    // before its flip. The delete runs on a view with no transaction lock,
+    // so it lands inside the open transaction of the create (d1-like.ts).
+    const storage = w.config.storage;
+    const original = storage.transaction.bind(storage);
+    let deleted: Awaited<ReturnType<typeof deleteAccount>> | null = null;
+    storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+      original((tx) =>
+        fn({
+          ...tx,
+          update: async (m, where, d) => {
+            const flip = m === "user" && (d as { emailVerified?: unknown }).emailVerified === true;
+            if (flip && deleted === null)
+              deleted = await deleteAccount(d1Like(w.config), {
+                session,
+                ip: null,
+                userAgent: null,
+              });
+            return tx.update(m, where, d);
+          },
+        }),
+      );
+    const r = await read(await scim(w, token, "POST", "/Users", userBody("uma@acme.example")));
+    expect(deleted).toEqual({ ok: true, value: { ok: true } });
+    // The flip matched no row, and the read after it found no user: the code
+    // `conflict` (engine/users.ts), as the SCIM sentence.
+    expect([r.status, r.body]).toEqual([
+      409,
+      { schemas: [ERROR_URN], status: "409", detail: RACE },
+    ]);
+    expect(Object.keys(r.body).sort()).toEqual(["detail", "schemas", "status"]);
+    expect(await userAt(w, "uma@acme.example")).toBeNull();
+    expect(await w.storage.findMany("scimUser", [])).toEqual([]);
+    expect(
+      await w.storage.findMany("operatorAudit", [
+        { field: "action", op: "eq", value: "scim_user_create" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("answers the member limit as a sentence with no scimType", async () => {
+    // The owner holds the one member row of the limit.
+    const w = await world({ organizations: { limits: { membersPerOrganization: 1 } } });
+    const token = await tokenOf(w, w.organizationId);
+    const r = await read(await scim(w, token, "POST", "/Users", userBody(ADA)));
+    expect([r.status, r.body]).toEqual([
+      409,
+      {
+        schemas: [ERROR_URN],
+        status: "409",
+        detail: "The organization is at its member limit.",
+      },
+    ]);
+    expect(await userAt(w, ADA)).toBeNull();
+    expect(await w.storage.findMany("scimUser", [])).toEqual([]);
   });
 });
 

@@ -25,6 +25,9 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
   accountDeleteCascadeSuite(async () => ({
     database,
     removeSolo: "too_large",
+    ownPage: 14,
+    // Run of 2026-11-04: one sweep of 50 calls writes 25 of the 40 owed stop rows.
+    sweepStops: 25,
     act() {
       const { db, count } = counting(env.DB);
       return {
@@ -36,8 +39,11 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
 
   it("ends a page of 60 sessions with the hook in 50 queries; the cascade takes the rest", async () => {
     // The page keeps the calls of the user and organization deletes free.
-    // The sessions that do not fit go by the cascade with no hook: on
-    // these tables the sweep finds none of them (a residual of ruling 13).
+    // The sessions that do not fit go by the cascade with no hook. On these
+    // tables the sweep finds none of them (a residual of ruling 13). The
+    // impersonation tool is off here, so the delete reads no impersonation
+    // session (decision 3 of plan 12o). delete-stops-sweep-d1.test.ts runs
+    // the delete with the tool on.
     const store = {
       database,
       act() {
@@ -48,6 +54,8 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
         };
       },
       removeSolo: "too_large" as const,
+      ownPage: 14,
+      sweepStops: 25,
     };
     const { me, organizationId } = await soloOwner(store, 60);
     expect((await rowsOf(database.storage, me.user.id, organizationId)).sessions).toBe(60);
@@ -62,7 +70,7 @@ describe("the account delete on the compat D1 storage (ruling 13 of plan 12f2)",
     });
     expect(answer.ok, JSON.stringify(answer)).toBe(true);
     expect(act.queries()).toBeLessThanOrEqual(50);
-    // Run of 2026-10-25.
+    // Run of 2026-10-25. The run of 2026-11-04 with plan 12o gave the same counts.
     expect([act.queries(), ends.length]).toEqual([47, 8]);
     expect(await rowsOf(database.storage, me.user.id, organizationId)).toMatchObject({
       user: false,

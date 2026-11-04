@@ -7,7 +7,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { sendAccountMail } from "./account-mail.js";
-import { verifySteps } from "./create-steps.js";
+import { keptClaimEnded, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
@@ -163,13 +163,23 @@ export async function confirmUserInvite(
           // before the identity and the claim: the D1 undo (`BeforeResolveWrite` of users.ts).
           if (!user.emailVerified) await verified.before(user);
           await steps.before(tx, resolved);
-          await ensureEmailIdentity(tx, user.id, email, now);
-          if (!user.emailVerified) await claimEmail(tx, user.id, null, now, verified, ended);
+          await ensureEmailIdentity(tx, user.id, email, now, verified);
+          if (!user.emailVerified) {
+            await claimEmail(tx, user.id, null, now, verified, ended);
+            // A mailbox proof is final (plan 12o): a later throw keeps the claim.
+            // The spend and the `email` identity came before it, so they stay too.
+            await verified.keep(tx, resolved);
+          }
           opened = await steps.write(tx);
           return ok(resolved);
         }),
       );
     } catch (err) {
+      // A kept claim cannot run again (plan 12o): its after points fire, and the error passes on.
+      if (verified.kept()) {
+        await keptClaimEnded(config, verified, ended);
+        throw err;
+      }
       // A parallel repair of the `email` identity: the retry finds its row.
       if (
         attempt === 0 &&
@@ -178,15 +188,22 @@ export async function confirmUserInvite(
         err.model === "identity"
       )
         continue;
-      // Another proof claimed the user first, or a session race undid the
-      // claim. The rollback undid the spend, so the retry spends the link again.
+      // Another proof claimed the user first. The rollback undid the spend,
+      // so the retry spends the link again.
       const next = claimRetry(config.storage, err, lost++);
       if (next === "retry") continue;
-      if (next === "conflict") answer = fail("conflict");
-      else throw err;
+      if (next === "conflict") {
+        // The link stays usable, so no new mail goes (plan 12o).
+        verified.flipLost();
+        answer = fail("conflict");
+      } else throw err;
     }
   }
-  if (!answer.ok) return answer;
+  if (!answer.ok) {
+    // An error answer after a kept claim: the claim's after points (plan 12o).
+    await keptClaimEnded(config, verified, ended);
+    return answer;
+  }
   const user = answer.value;
   const after = opened as Awaited<ReturnType<typeof steps.write>> | null;
   if (!after) throw new Error("authtempo: the invitation opened no session");

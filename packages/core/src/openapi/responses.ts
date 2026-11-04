@@ -32,7 +32,7 @@ export const ERROR_SCHEMAS = {
       detail: {
         type: "string",
         description:
-          "The SSO start URL of the address, absolute, on the origin of `baseURL`. Present only on `sso_required`.",
+          "On `sso_required`, the SSO start URL of the address, absolute, on the origin of `baseURL`. On the `conflict` of a sign-up confirm that lost its claim, a sentence that says to sign in. Present only on these two.",
       },
     },
     required: ["error"],

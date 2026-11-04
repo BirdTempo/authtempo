@@ -479,15 +479,14 @@ export function challengeOpened(
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
  *
- * With `oneDelete` (a claim, final review B M of plan 12i), the read rows go
- * by one delete of their ids per `IN_CHUNK`, not one per row. So the count of
- * the claimant's sessions adds no query on D1. A delete count equal to the
- * count of the chunk's rows puts those rows in `ended`. A smaller count
- * means another flow ended a row of the chunk after the read, and fired its
- * hook. This flow cannot tell which row, so it calls `oneDelete.raced`,
- * which throws: the flow undoes its transaction and runs once more, and the
- * new read no longer holds that row. Postgres and MySQL lock the rows before
- * the read (`lockInOrder`), so there the counts always match.
+ * With `byChunks` (a claim, final review B M of plan 12i), the read rows go
+ * by chunks of `IN_CHUNK` ids. Each chunk is one `deleteRows`, not one delete
+ * per row. So the count of the claimant's sessions adds no query on D1. Each chunk
+ * puts in `ended` the rows that its delete answered (plan 12o). A row that
+ * another flow ended after the read is not in the answer. That flow fired
+ * its hook, and this flow fires nothing more for it (spec 8.9, plan 9d).
+ * Postgres and MySQL lock the rows before the read (`lockInOrder`), so there
+ * no other flow ends a read row.
  *
  * The back-channel outbox (plan 12e Task 16): first the user's client links.
  * With none, nothing more runs. With some, each linked session that `where`
@@ -501,7 +500,7 @@ export async function endSessions(
   ended: SessionRow[] | null,
   now: Date,
   stops: ImpersonationStops | null,
-  oneDelete: { raced(): never } | null = null,
+  byChunks = false,
 ): Promise<number> {
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
@@ -553,14 +552,19 @@ export async function endSessions(
         await writeStopRow(tx, stops, row, now);
       }
   const plain = rows.filter((row) => !(stops && row.actorId !== null));
-  if (ended && oneDelete)
+  if (ended && byChunks)
     for (let i = 0; i < plain.length; i += IN_CHUNK) {
       const chunk = plain.slice(i, i + IN_CHUNK);
       const ids = { field: "id", op: "in", value: chunk.map((row) => row.id) } as const;
-      const gone = await tx.delete("session", [...where, ids]);
-      if (gone !== chunk.length) oneDelete.raced();
-      ended.push(...chunk);
-      n += gone;
+      const gone = new Map(
+        (await tx.deleteRows("session", [...where, ids])).map((row) => [row.id, row]),
+      );
+      // The answered rows, in the id order of the read.
+      for (const row of chunk) {
+        const removed = gone.get(row.id);
+        if (removed) ended.push(removed);
+      }
+      n += gone.size;
     }
   else if (ended)
     for (const row of plain)

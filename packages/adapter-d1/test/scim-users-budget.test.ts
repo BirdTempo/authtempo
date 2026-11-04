@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import {
   type AuthConfig,
   createAuth,
+  createPbkdf2PasswordHash,
   type MailMessage,
   type StorageAdapter,
 } from "@authtempo/core";
@@ -300,6 +301,54 @@ const MEASURED = {
   list: 5,
   delete: 13,
 };
+
+/** A password sign-up that stays unverified, so a SCIM create claims it (plan 12o). */
+const CLAIMANT: Partial<AuthConfig> = {
+  password: {
+    hash: createPbkdf2PasswordHash({ iterations: 1000 }),
+    requireVerified: false,
+    uniformSignUp: false,
+  },
+};
+
+/**
+ * The count of a SCIM create that claims an unverified user with no race,
+ * on the binding, 2026-11-04 (decision 2 of plan 12o). The claimant signed
+ * up by password and holds one session. The claim reads the sessions when
+ * its flow collects the ended sessions. `scimCreateUser` always collects
+ * them, with or without the session.afterEnd hook. So the claim reads that
+ * session and deletes it by id. The create also writes the email identity,
+ * the member row, the scimUser row, and the audit row. It sent 32 queries.
+ * The create of the first case links a verified user and claims nothing: 20
+ * queries (`MEASURED`).
+ */
+const MEASURED_CLAIM = { create: 32 };
+
+describe("the SCIM create that claims an unverified user on D1 (decision 2 of plan 12o)", () => {
+  it("claims the user inside 50 queries", async () => {
+    const setup = make(env.DB, false, CLAIMANT);
+    const { token } = await acme(setup);
+    const up = await setup.api.password?.signUp({
+      email: ADA,
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up?.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    expect(await sessions()).toBe(1);
+    const create = await counted(token, "POST", "/Users", { schemas: [USER_URN], userName: ADA });
+    expect(create.status).toBe(201);
+    // The claim verified the user and ended the claimant's session.
+    expect(
+      await env.DB.prepare("SELECT email_verified AS v FROM ta_user WHERE email = ?")
+        .bind(ADA)
+        .first("v"),
+    ).toBe(1);
+    expect(await sessions()).toBe(0);
+    expect({ create: create.queries }).toEqual(MEASURED_CLAIM);
+    expect(create.queries).toBeLessThanOrEqual(50);
+  });
+});
 
 const APP_ORIGIN = "https://app.example.com";
 const REDIRECT = "https://client.example.com/callback";

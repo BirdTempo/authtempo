@@ -21,7 +21,6 @@ import {
 import { createSession, destroySession, resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
 import { sweepExpired } from "../src/engine/sweep.js";
-import { CLAIM_RUNS } from "../src/engine/users.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -684,6 +683,11 @@ describe("session end hooks (plan 9d)", () => {
             if (m === "session") deletes.push(w.map((x) => `${x.field} ${x.op}`).join(", "));
             return tx.delete(m, w);
           },
+          deleteRows: async (m, w) => {
+            if (m === "session")
+              deletes.push(`rows: ${w.map((x) => `${x.field} ${x.op}`).join(", ")}`);
+            return tx.deleteRows(m, w);
+          },
         }),
       );
 
@@ -691,8 +695,9 @@ describe("session end hooks (plan 9d)", () => {
     const ada = await auth.storage.findMany("session", []);
     calls.length = 0;
     expect((await magicSignIn(auth, "ada@example.com")).ok).toBe(true);
-    // One delete of the read ids, and the last one by user id: none per row.
-    expect(deletes).toEqual(["userId eq, id in", "userId eq"]);
+    // One delete of the read ids that answers the rows (plan 12o), and the
+    // last one by user id: none per row.
+    expect(deletes).toEqual(["rows: userId eq, id in", "userId eq"]);
     expect(
       ended()
         .map((e) => [e.session.id, e.reason])
@@ -710,11 +715,16 @@ describe("session end hooks (plan 9d)", () => {
     expect(bea).toHaveLength(3);
     const tokenHashes = await Promise.all(tokens.map((t) => sha256Hex(t)));
     let armed = true;
+    let claims = 0;
     const inner = auth.storage.transaction;
     auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
       inner((tx) =>
         fn({
           ...tx,
+          update: (m, w, d) => {
+            if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true) claims++;
+            return tx.update(m, w, d);
+          },
           findMany: async (m, w, o) => {
             const rows = await tx.findMany(m, w, o);
             if (armed && m === "session") {
@@ -727,8 +737,10 @@ describe("session end hooks (plan 9d)", () => {
       );
     calls.length = 0;
     expect((await magicSignIn(auth, "bea@example.com")).ok).toBe(true);
-    // The claim ran once more after the race: each row fires exactly once,
-    // the signed-out row with sign_out and the other two with claim.
+    // The claim runs once (plan 12o): each row fires exactly once, the
+    // signed-out row with sign_out and the other two with claim. The delete
+    // of the chunk answers only the two rows that it removed.
+    expect(claims).toBe(1);
     const out = bea.find((r) => r.tokenHash === tokenHashes[0]);
     expect(
       ended()
@@ -745,7 +757,7 @@ describe("session end hooks (plan 9d)", () => {
   });
 
   it.each(["magic link", "verify link", "social", "reset"] as const)(
-    "keeps the owner's claim when a session race undoes each run, and fires afterEnd once for each row (ruling 46 of plan 12i, %s)",
+    "keeps the owner's claim through a session race in one run, and fires afterEnd once for each row (plan 12o, %s)",
     async (proof) => {
       const google = googleConfig();
       const { auth, calls } = recorded({}, google.extra);
@@ -769,19 +781,25 @@ describe("session end hooks (plan 9d)", () => {
       const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
       const rows = await auth.storage.findMany("session", [...byUser]);
       expect(rows).toHaveLength(5);
-      // A sign-out of the next claimant session between each read of the
-      // claim and its delete: every run of the claim meets a race.
+      // A sign-out of a claimant session between the read of the claim and
+      // its delete. Before plan 12o the race undid the run (ruling 46 of plan 12i).
       const outs: string[] = [];
       let busy = false;
+      let claims = 0;
       const original = auth.storage.transaction.bind(auth.storage);
       auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
         original((tx) =>
           fn({
             ...tx,
+            update: (m, w, d) => {
+              if (m === "user" && (d as { emailVerified?: unknown }).emailVerified === true)
+                claims++;
+              return tx.update(m, w, d);
+            },
             findMany: async (m, w, o) => {
               const found = await tx.findMany(m, w, o);
               const next = tokens[outs.length];
-              if (!busy && m === "session" && next !== undefined && outs.length < 4) {
+              if (!busy && m === "session" && next !== undefined && outs.length < 1) {
                 busy = true;
                 outs.push(await sha256Hex(next));
                 await destroySession(auth.config, next);
@@ -806,9 +824,10 @@ describe("session end hooks (plan 9d)", () => {
                   userAgent: null,
                 });
       expect(signedIn.ok).toBe(true);
-      // Two races undo a run each. The third run deletes each row by its id,
-      // so its race ends one row and keeps the claim.
-      expect(outs).toHaveLength(CLAIM_RUNS);
+      // One run: the race ends one row, and the claim goes on. Its chunk
+      // delete answers the other rows, so each row fires once.
+      expect(outs).toHaveLength(1);
+      expect(claims).toBe(1);
       expect(
         calls
           .filter(([name]) => name === "afterEnd")
@@ -834,19 +853,19 @@ describe("session end hooks (plan 9d)", () => {
   // write the row and undo it. Then the retry meets an unverified user and
   // claims. On D1 a lost claim of that retry answers 409. With no query
   // limit, the counter holds (adapter-d1 invite-claim-race.test.ts).
+  // Since plan 12o a session race throws nothing, so only a lost flip uses
+  // a claim retry.
   it.each(["magic link", "social", "reset"] as const)(
-    "signs in after a unique-key retry, two session races, and a lost flip (decision 13 of plan 12n, %s)",
+    "signs in after a unique-key retry and a lost flip (decision 13 of plan 12n, %s)",
     async (proof) => {
       const google = googleConfig();
-      const { auth, calls } = recorded({}, google.extra);
+      const { auth } = recorded({}, google.extra);
       const email = "dee@example.com";
       // Memory runs one transaction at a time. So each parallel flow runs
       // its transaction on the store at once, as a commit of another request does.
       const free: StorageAdapter = { ...auth.storage, transaction: (fn) => fn(free) };
       const side = { ...auth.config, storage: free };
-      const tokens: string[] = [];
-      const outs: string[] = [];
-      let stage: "create" | "race" | "flip" | "done" = "create";
+      let stage: "create" | "flip" | "done" = "create";
       let runs = 0;
       const original = auth.storage.transaction.bind(auth.storage);
       auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
@@ -856,7 +875,7 @@ describe("session end hooks (plan 9d)", () => {
             ...tx,
             create: async (m, d) => {
               if (stage === "create" && m === "user") {
-                stage = "race";
+                stage = "flip";
                 // 1. A sign-up of the address commits first: this create meets its unique key.
                 const up = await passwordSignUp(side, {
                   email,
@@ -865,30 +884,13 @@ describe("session end hooks (plan 9d)", () => {
                   userAgent: null,
                 });
                 if (!up.ok) throw new Error(up.code);
-                tokens.push(upSession(up.value).token);
-                const s = await sessionOnly(
-                  passwordSignIn(side, { email, password: PASSWORD, ip: null, userAgent: null }),
-                );
-                if (!s.ok) throw new Error(s.code);
-                tokens.push(s.value.token);
               }
               return tx.create(m, d);
-            },
-            findMany: async (m, w, o) => {
-              const found = await tx.findMany(m, w, o);
-              const next = tokens[outs.length];
-              if (stage === "race" && m === "session" && next !== undefined) {
-                // 2 and 3. A sign-out of a claimant session between the read and the delete of the claim.
-                outs.push(await sha256Hex(next));
-                if (outs.length === 2) stage = "flip";
-                await destroySession(side, next);
-              }
-              return found;
             },
             update: async (m, w, d) => {
               if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
                 stage = "done";
-                // 4. The verify link of the sign-up commits first: the flip of this claim matches no row.
+                // 2. The verify link of the sign-up commits first: the flip of this claim matches no row.
                 const confirm = auth.mail.findLast((x) => x.subject.startsWith("Confirm"));
                 const v = await verifyPasswordEmail(side, {
                   token: tokenFromMail(confirm?.text ?? ""),
@@ -901,7 +903,6 @@ describe("session end hooks (plan 9d)", () => {
             },
           });
         });
-      calls.length = 0;
       const signedIn =
         proof === "magic link"
           ? await magicSignIn(auth, email)
@@ -910,28 +911,19 @@ describe("session end hooks (plan 9d)", () => {
             : await reset(auth, email);
       expect(signedIn.ok).toBe(true);
       expect(stage).toBe("done");
-      expect(outs).toHaveLength(2);
       const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
       expect(user?.emailVerified).toBe(true);
-      // Each signed-out row ends once, with sign_out: the undone runs ended nothing.
-      expect(
-        calls
-          .filter(([name]) => name === "afterEnd")
-          .map(([, e]) => (e as { reason: string }).reason)
-          .filter((r) => r === "sign_out"),
-      ).toHaveLength(2);
-      // The unique-key retry, three claim retries, and the run that signs in.
-      expect(runs).toBeGreaterThanOrEqual(5);
+      // The unique-key retry, one claim retry, and the run that signs in.
+      expect(runs).toBeGreaterThanOrEqual(3);
     },
   );
 
   // The sign-up confirm has no unique-key retry, so each attempt after the
-  // first is a claim retry (password.ts). Two session races and a lost flip
-  // take all three (rr-final L-1 of plan 12n). A reset by the owner wins the
-  // flip. The undo of that run puts back the user row as it was before the
-  // run. So the last run claims and signs in, as in the cases above.
-  it("signs in after two session races and a lost flip on the verify link (decision 13 of plan 12n)", async () => {
-    const { auth, calls } = recorded();
+  // first is a claim retry (password.ts). A reset by the owner wins the
+  // flip. The memory undo of that run puts back the user row as it was
+  // before the run. So the next run claims and signs in.
+  it("signs in after a lost flip on the verify link (decision 13 of plan 12n)", async () => {
+    const { auth } = recorded();
     const email = "fay@example.com";
     // Memory runs one transaction at a time. So each parallel flow runs
     // its transaction on the store at once, as a commit of another request does.
@@ -944,19 +936,12 @@ describe("session end hooks (plan 9d)", () => {
       userAgent: null,
     });
     if (!up.ok) throw new Error(up.code);
-    const tokens = [upSession(up.value).token];
-    const s = await sessionOnly(
-      passwordSignIn(auth.config, { email, password: PASSWORD, ip: null, userAgent: null }),
-    );
-    if (!s.ok) throw new Error(s.code);
-    tokens.push(s.value.token);
     const confirm = auth.mail.findLast((x) => x.subject.startsWith("Confirm"));
     const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
     const byUser = [{ field: "userId", op: "eq", value: user?.id }] as const;
     const passwords = (await auth.storage.findMany("password", [...byUser])).map((r) => r.id);
     expect(passwords).toHaveLength(1);
-    const outs: string[] = [];
-    let stage: "race" | "flip" | "done" = "race";
+    let stage: "flip" | "done" = "flip";
     let runs = 0;
     const original = auth.storage.transaction.bind(auth.storage);
     auth.storage.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
@@ -964,21 +949,10 @@ describe("session end hooks (plan 9d)", () => {
         runs++;
         return fn({
           ...tx,
-          findMany: async (m, w, o) => {
-            const found = await tx.findMany(m, w, o);
-            const next = tokens[outs.length];
-            if (stage === "race" && m === "session" && next !== undefined) {
-              // 1 and 2. A sign-out of a claimant session between the read and the delete of the claim.
-              outs.push(await sha256Hex(next));
-              if (outs.length === 2) stage = "flip";
-              await destroySession(side, next);
-            }
-            return found;
-          },
           update: async (m, w, d) => {
             if (stage === "flip" && m === "user" && w.some((x) => x.field === "emailVerified")) {
               stage = "done";
-              // 3. A reset by the owner commits first: the flip of this claim matches no row.
+              // A reset by the owner commits first: the flip of this claim matches no row.
               const asked = await requestPasswordReset(side, { email, ip: null });
               if (!asked.ok) throw new Error(asked.code);
               const r = await resetPassword(side, {
@@ -993,7 +967,6 @@ describe("session end hooks (plan 9d)", () => {
           },
         });
       });
-    calls.length = 0;
     const v = await verifyPasswordEmail(auth.config, {
       token: tokenFromMail(confirm?.text ?? ""),
       ip: null,
@@ -1001,29 +974,21 @@ describe("session end hooks (plan 9d)", () => {
     });
     expect(v.ok && v.value.signedIn !== null).toBe(true);
     expect(stage).toBe("done");
-    expect(outs).toHaveLength(2);
     const owner = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
     expect(owner?.emailVerified).toBe(true);
     // The claim keeps the row of the password that the link confirms.
     expect((await auth.storage.findMany("password", [...byUser])).map((r) => r.id)).toEqual(
       passwords,
     );
-    // Each signed-out row ends once, with sign_out: the undone runs ended nothing.
-    expect(
-      calls
-        .filter(([name]) => name === "afterEnd")
-        .map(([, e]) => (e as { reason: string }).reason)
-        .filter((r) => r === "sign_out"),
-    ).toHaveLength(2);
-    // Three claim retries, and the run that signs in.
-    expect(runs).toBeGreaterThanOrEqual(CLAIM_RUNS + 1);
+    // One claim retry, and the run that signs in.
+    expect(runs).toBeGreaterThanOrEqual(2);
   });
 
   // A store with a query limit per invocation, such as D1, runs each claim
-  // once (ruling 32 of plan 12n). On D1 the worst claim join sent 58 queries
-  // with one race on 2026-11-03, past the cap of 50 (`claimRetry`).
+  // once (ruling 32 of plan 12n). Since plan 12o a session race there ends
+  // the rows that the claim's delete answers, and the claim goes on.
   it.each(["magic link", "verify link", "social", "reset"] as const)(
-    "answers conflict to a session race on a store with a query limit per invocation, and keeps the claimant's rows (ruling 32 of plan 12n, %s)",
+    "keeps the claim through a session race on a store with a query limit per invocation, and ends each claimant row once (plan 12o, %s)",
     async (proof) => {
       const google = googleConfig();
       const { auth, calls } = recorded({}, google.extra);
@@ -1094,25 +1059,26 @@ describe("session end hooks (plan 9d)", () => {
                   ip: null,
                   userAgent: null,
                 });
-      expect(answer).toEqual({ ok: false, code: "conflict", status: 409 });
+      expect(answer.ok).toBe(true);
       // One run of the claim, and no retry.
       expect(claims).toBe(1);
       expect(outs).toHaveLength(1);
-      // The run undid: the user stays unverified, and each claimant row stays but the signed-out session.
+      // The claim stays: the user is verified, and no claimant row is left.
       const owner = await auth.storage.findOne("user", [
         { field: "id", op: "eq", value: user?.id },
       ]);
-      expect(owner?.emailVerified).toBe(false);
-      expect(await rowsOf()).toEqual({
-        ...before,
-        sessions: before.sessions.filter((id) => id !== gone?.id),
-      });
-      // The sign-out fired its hook; the claim fired none.
+      expect(owner?.emailVerified).toBe(true);
+      const after = await rowsOf();
+      expect(after.sessions.filter((id) => before.sessions.includes(id))).toEqual([]);
+      // Each claimant row fires once: the signed-out row with sign_out, the other rows with claim.
       expect(
         calls
           .filter(([name]) => name === "afterEnd")
-          .map(([, e]) => (e as { reason: string }).reason),
-      ).toEqual(["sign_out"]);
+          .map(([, e]) => e as { session: { id: string }; reason: string })
+          .filter((e) => before.sessions.includes(e.session.id))
+          .map((e) => [e.session.id, e.reason])
+          .sort(),
+      ).toEqual(before.sessions.map((id) => [id, id === gone?.id ? "sign_out" : "claim"]).sort());
     },
   );
 

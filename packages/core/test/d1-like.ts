@@ -17,7 +17,9 @@ function same(a: unknown, b: unknown): boolean {
  * unverified. The undo of an update writes back only the fields the update
  * set, each one only while it holds the written value: the D1 adapter's rule
  * too. A nested call shares the log, and a throw reverses only its own
- * entries. A failed entry does not stop the rest.
+ * entries. A failed entry does not stop the rest. `keep` drops the entries of
+ * its level so far, and `deleteRows` logs the rows that it answered, as the
+ * D1 adapter does (plan 12o).
  * When any entry fails, the throw is one rollback_failed error. Its cause is
  * `{ original, failures }`, and it names `<model>:<op>` for each failed
  * entry, as the D1 adapter's `rethrowAfterUndo` throws. So a core test sees
@@ -47,6 +49,8 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
     ...raw,
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       const log: Undo[] = [];
+      // The first entry that the open nested call owns, as in the D1 adapter.
+      let floor = 0;
       const tx: StorageAdapter = {
         ...raw,
         async create(model, data) {
@@ -97,12 +101,28 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
             log.push({ model, op: "delete", run: () => raw.create(model, row) });
           return n;
         },
+        async deleteRows(model, where) {
+          // The rows that the delete removed, each with its undo (plan 12o).
+          const rows = await raw.deleteRows(model, where);
+          for (const row of rows)
+            log.push({ model, op: "delete", run: () => raw.create(model, row) });
+          return rows;
+        },
+        async keep() {
+          // The D1 adapter's rule (plan 12o): the entries of this level so far go.
+          log.splice(floor);
+          return true;
+        },
         async transaction<U>(inner: (t: StorageAdapter) => Promise<U>): Promise<U> {
           const mark = log.length;
+          const outer = floor;
+          floor = mark;
           try {
             return await inner(tx);
           } catch (e) {
             return rollback(log.splice(mark), e);
+          } finally {
+            floor = outer;
           }
         },
       };

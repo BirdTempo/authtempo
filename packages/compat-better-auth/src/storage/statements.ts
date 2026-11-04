@@ -20,6 +20,7 @@ import {
   jsonSafeRows,
   listChunks,
   POSTGRES,
+  READ_ALIAS,
   SQLITE,
   type SqlStatements,
   type Statement,
@@ -98,6 +99,8 @@ const SQLITE_UNIQUE_RE = /UNIQUE constraint failed: ((?:[\w"]+\.[\w"]+)(?:, [\w"
 
 export interface CompatStatements extends SqlStatements {
   toStorageError(model: ModelName, err: unknown): StorageError | null;
+  /** Required here: a raw column of the Better Auth tables is not a field of core (plan 12o). */
+  deleteReturningRead<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
 }
 
 /**
@@ -176,6 +179,9 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     },
     deleteReturning(model, where) {
       return none(model) ? null : st.deleteReturning(model, where);
+    },
+    deleteReturningRead(model, where) {
+      return none(model) ? null : st.deleteReturningRead(model, where);
     },
   };
 }
@@ -274,6 +280,10 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
     deleteReturning(model, where) {
       return own(model) ? core.deleteReturning(model, where) : st.deleteReturning(model, where);
     },
+    deleteReturningRead(model, where) {
+      // Core's tables: each raw column is a field, so the raw row is the read row (`returnedParts`).
+      return own(model) ? core.deleteReturning(model, where) : st.deleteReturningRead(model, where);
+    },
     toStorageError(model, err) {
       return own(model) ? coreError(model, err) : st.toStorageError(model, err);
     },
@@ -338,6 +348,18 @@ export function compatStatements(
     const filled = FILLED_DATES.find((a) => a.table === t && a.field === baField);
     return filled ? `COALESCE(${c}, ${sqliteIsoText(names.column(t, filled.from))})` : c;
   };
+  /**
+   * The read form of each field of `model`, as `select` reads it, under the
+   * alias `prefix` and the field name. `decode` takes the row. One list, so a
+   * select and the RETURNING of `deleteReturningRead` read each field the same way.
+   */
+  const readList = (model: ModelName, prefix: string) =>
+    Object.keys(MAP[model].fields)
+      .map(
+        (f) =>
+          `${pg && def(model, f).type === "date" ? pgDate(value(model, f)) : value(model, f)} AS "${prefix}${f}"`,
+      )
+      .join(", ");
   /**
    * The Better Auth field of a column name that SQLite reports. SQLite
    * matches names without case, so a configured name and the DDL can differ
@@ -715,13 +737,7 @@ export function compatStatements(
       const p = new Params();
       const w = compileWhere(model, where as Where<ModelName>[], p);
       if (w.impossible) return null;
-      const list = Object.keys(MAP[model].fields)
-        .map(
-          (f) =>
-            `${pg && def(model, f).type === "date" ? pgDate(value(model, f)) : value(model, f)} AS "${f}"`,
-        )
-        .join(", ");
-      let sql = `SELECT ${list} FROM ${table(model)}${w.clause}`;
+      let sql = `SELECT ${readList(model, "")} FROM ${table(model)}${w.clause}`;
       if (sorts.length > 0) {
         const terms = sorts.map((s) => {
           // Qualified, so Postgres sorts by the column and not by the output alias of the same name.
@@ -842,6 +858,11 @@ export function compatStatements(
     deleteReturning(model, where) {
       const s = st.delete(model, where);
       return s && { sql: `${s.sql} RETURNING *`, params: s.params };
+    },
+    deleteReturningRead(model, where) {
+      // The raw row for the undo, then the read form of `select` for `decode` (plan 12o).
+      const s = st.delete(model, where);
+      return s && { sql: `${s.sql} RETURNING *, ${readList(model, READ_ALIAS)}`, params: s.params };
     },
     reinsertRows(model, rows) {
       const first = rows[0];

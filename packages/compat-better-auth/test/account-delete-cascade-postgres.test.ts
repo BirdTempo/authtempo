@@ -22,6 +22,8 @@ describe("the account delete on the compat Postgres storage (ruling 13 of plan 1
       database,
       act: () => ({ storage: database.storage, queries: () => null }),
       removeSolo: "removed",
+      // Run of 2026-11-04: one sweep of 50 calls writes 28 of the 40 owed stop rows.
+      sweepStops: 28,
     };
   });
 });

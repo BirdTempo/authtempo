@@ -239,15 +239,14 @@ async function tables(w: World, skip: ModelName[] = []) {
 
 /**
  * A world whose next identity create of `provider` meets a parallel flow on
- * another connection. That flow links the same identity and claims the
- * user. Its identity lands just before this attempt's create, so the create
- * fails on the unique key. Its flag lands after this attempt rolled back.
- * The rows at the end are the rows that the parallel flow commits.
+ * another connection. That flow reads the kept claim and links the same
+ * identity of the same user. Its row lands just before this attempt's
+ * create, so the create fails on the unique key. Every row comes from a
+ * flow: the parallel row is the row that the flow would write.
  */
 function winnerRace(provider: string) {
   const inner = createMemoryAdapter();
   const armed = { on: false };
-  let winner: string | null = null;
   const wrap = (a: StorageAdapter): StorageAdapter => ({
     createMany: (m, r) => a.createMany(m, r),
     rowsPerInsert: (m) => a.rowsPerInsert(m),
@@ -255,7 +254,6 @@ function winnerRace(provider: string) {
       const row = d as unknown as IdentityRow;
       if (m === "identity" && armed.on && row.provider === provider) {
         armed.on = false;
-        winner = row.userId;
         await inner.create("identity", { ...row, id: newId(new Date()) });
       }
       return a.create(m, d);
@@ -264,22 +262,83 @@ function winnerRace(provider: string) {
     findMany: (m, w, o) => a.findMany(m, w, o),
     update: (m, w, d) => a.update(m, w, d),
     delete: (m, w) => a.delete(m, w),
-    transaction: (fn) =>
-      a
-        .transaction((tx) => fn(wrap(tx)))
-        .catch(async (e: unknown) => {
-          if (winner) {
-            await inner.update("user", [{ field: "id", op: "eq", value: winner }], {
-              emailVerified: true,
-            });
-            winner = null;
-          }
-          throw e;
-        }),
+    deleteRows: (m, w) => a.deleteRows(m, w),
+    keep: () => a.keep(),
+    transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
   });
   const made = world({ storage: wrap(inner) });
   const w: World = { ...made, auth: { ...made.auth, storage: inner } };
   return { w, armed };
+}
+
+/**
+ * A world whose next identity create of `provider` first runs `armed.run`,
+ * a whole flow of `other` (ruling 26 of plan 12o). `other` uses the same
+ * store with no transaction lock, as a parallel connection on D1 does. So
+ * the rows of its flow land between this attempt's read of the identity and
+ * its create.
+ */
+function parallelRace(provider: string) {
+  const inner = createMemoryAdapter();
+  const armed: { run: (() => Promise<void>) | null } = { run: null };
+  const wrap = (a: StorageAdapter): StorageAdapter => ({
+    createMany: (m, r) => a.createMany(m, r),
+    rowsPerInsert: (m) => a.rowsPerInsert(m),
+    create: async (m, d) => {
+      const run = armed.run;
+      if (m === "identity" && run && (d as unknown as IdentityRow).provider === provider) {
+        armed.run = null;
+        await run();
+      }
+      return a.create(m, d);
+    },
+    findOne: (m, w) => a.findOne(m, w),
+    findMany: (m, w, o) => a.findMany(m, w, o),
+    update: (m, w, d) => a.update(m, w, d),
+    delete: (m, w) => a.delete(m, w),
+    deleteRows: (m, w) => a.deleteRows(m, w),
+    keep: () => a.keep(),
+    transaction: (fn) => a.transaction((tx) => fn(wrap(tx))),
+  });
+  // Each call of `open` goes to the store at once, also in a transaction.
+  const open: StorageAdapter = {
+    createMany: (m, r) => inner.createMany(m, r),
+    rowsPerInsert: (m) => inner.rowsPerInsert(m),
+    create: (m, d) => inner.create(m, d),
+    findOne: (m, w) => inner.findOne(m, w),
+    findMany: (m, w, o) => inner.findMany(m, w, o),
+    update: (m, w, d) => inner.update(m, w, d),
+    delete: (m, w) => inner.delete(m, w),
+    deleteRows: (m, w) => inner.deleteRows(m, w),
+    keep: () => inner.keep(),
+    transaction: (fn) => fn(open),
+  };
+  const made = world({ storage: wrap(inner) });
+  const w: World = { ...made, auth: { ...made.auth, storage: inner } };
+  const beside = world({ storage: open });
+  const other: World = { ...beside, auth: { ...beside.auth, storage: inner } };
+  return { w, other, armed };
+}
+
+/** A verified user of `email`: a detailed password sign-up and its verify link. */
+async function provedUser(w: World, email: string): Promise<UserRow> {
+  const up = await passwordSignUp(w.auth.config, {
+    email,
+    password: "correct horse battery",
+    ip: null,
+    userAgent: null,
+  });
+  if (!up.ok) throw new Error(up.code);
+  const mail = w.auth.mail.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
+  const done = await verifyPasswordEmail(w.auth.config, {
+    token: tokenFromMail(mail?.text ?? ""),
+    ip: null,
+    userAgent: null,
+  });
+  if (!done.ok) throw new Error(done.code);
+  const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user?.emailVerified) throw new Error("no verified user");
+  return user;
 }
 
 describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
@@ -475,26 +534,78 @@ describe("user.beforeVerify and user.afterVerify (plan 12a, Task 18)", () => {
     ]);
   });
 
-  it("fires no afterVerify when a social retry after a unique-key race finds the user verified by the winner", async () => {
-    // A parallel Google sign-in of the same account links it and claims the user.
+  /** The user's identities of `provider`, and the user's sessions, read on the store. */
+  async function heldBy(w: World, provider: string) {
+    const user = await userRow(w);
+    const byUser = [{ field: "userId" as const, op: "eq" as const, value: user.id }];
+    return {
+      identities: (await w.auth.storage.findMany("identity", byUser)).filter(
+        (i) => i.provider === provider,
+      ).length,
+      sessions: (await w.auth.storage.findMany("session", byUser)).map((r) => r.id),
+    };
+  }
+
+  // Since plan 12o the memory store keeps a claim after `keep`, so no retry
+  // runs. A parallel flow can take a unique key after the claim. When its
+  // row is of the same user, the row counts as present (ruling 23 of plan
+  // 12o). So the flow signs in. On Postgres and MySQL `keep` does nothing, and the
+  // retry of review M1 runs.
+  it("signs in when a social link after a kept claim meets a parallel link of the same identity (ruling 23 of plan 12o)", async () => {
+    // A parallel Google sign-in of the same account links it.
     const race = winnerRace("google");
     await signUp(race.w);
     race.armed.on = true;
-    expect((await google(race.w)).ok).toBe(true);
+    const r = await google(race.w);
     expect(race.armed.on).toBe(false);
-    expect(race.w.verify).toEqual(["before:social:false"]);
+    if (!r.ok) throw new Error(r.code);
+    expect(race.w.verify).toEqual(["before:social:false", "after:social:true"]);
     expect((await userRow(race.w)).emailVerified).toBe(true);
+    // The parallel row is the one Google identity, and the sign-in's session is the one session.
+    const held = await heldBy(race.w, "google");
+    expect(held.identities).toBe(1);
+    expect(held.sessions).toHaveLength(1);
+    expect((await heldBy(race.w, "email")).identities).toBe(1);
   });
 
-  it("fires no afterVerify when a reset retry after a unique-key race finds the user verified by the winner", async () => {
-    // A parallel magic link of the address writes the email identity and claims the user.
+  it("signs in when the email identity of a reset after a kept claim meets a parallel one (ruling 23 of plan 12o)", async () => {
+    // A parallel magic link of the address writes the email identity.
     const race = winnerRace("email");
     await signUp(race.w);
     race.armed.on = true;
-    expect((await resetLink(race.w)).ok).toBe(true);
+    const r = await resetLink(race.w);
     expect(race.armed.on).toBe(false);
-    expect(race.w.verify).toEqual(["before:password_reset:false"]);
+    if (!r.ok) throw new Error(r.code);
+    expect(race.w.verify).toEqual(["before:password_reset:false", "after:password_reset:true"]);
     expect((await userRow(race.w)).emailVerified).toBe(true);
+    const held = await heldBy(race.w, "email");
+    expect(held.identities).toBe(1);
+    expect(held.sessions).toHaveLength(1);
+  });
+
+  it("does not sign in when a social link after a kept claim meets a parallel link of another user (ruling 26 of plan 12o)", async () => {
+    const race = parallelRace("google");
+    await signUp(race.w);
+    // Bea proves her own address. Then the Google account g-1 carries her
+    // address, and her Google sign-in links g-1 to her in parallel.
+    const bea = await provedUser(race.other, "bea@example.com");
+    race.armed.run = async () => {
+      const linked = await google(race.other, { email: bea.email });
+      if (!linked.ok) throw new Error(linked.code);
+    };
+    // The claim of Ada's address stays. Its create of g-1 meets the row of
+    // Bea. A row of another user does not count as present, so the error
+    // passes on, and Ada gets no session.
+    await expect(google(race.w)).rejects.toMatchObject({ code: "unique_violation" });
+    expect(race.armed.run).toBeNull();
+    expect((await userRow(race.w)).emailVerified).toBe(true);
+    const held = await heldBy(race.w, "google");
+    expect(held.identities).toBe(0);
+    expect(held.sessions).toEqual([]);
+    const linked = await race.w.auth.storage.findMany("identity", [
+      { field: "provider", op: "eq", value: "google" },
+    ]);
+    expect(linked.map((i) => i.userId)).toEqual([bea.id]);
   });
 
   it("logs a throw of user.afterVerify in one line, and the verify stands", async () => {
