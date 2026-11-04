@@ -209,12 +209,12 @@ export interface ImportOptions {
 /**
  * Why `repair: true` left a `partial` record as it is (plan 9b2):
  * - `verified_since_import`: the user's `emailVerified` differs from the
- *   record's, in either direction: the user is verified and the record is
+ *   record's, in either direction. The user is verified and the record is
  *   not, or the record is verified and the user is not. A claim verifies an
  *   unverified user and deletes the claimant's credentials (core
- *   `claimEmail`); a repair would give them back. A record that states a
- *   user verified who is not verified in the app would write an `email`
- *   identity that core makes only after a proof.
+ *   `claimEmail`); a repair would give them back. A record can state a user
+ *   verified who is not verified in the app. Its repair would write an
+ *   `email` identity that core makes only after a proof.
  * - `email_changed`: the user's address differs from the record's, and the
  *   repair would write an `email` identity for the old address.
  * - `credential_exists`: the record is unverified and the user holds a
@@ -223,11 +223,12 @@ export interface ImportOptions {
  * - `claimed`: the user is verified and holds its `email` identity, and the
  *   repair would write a password, a passkey, or a social identity. A claim
  *   always writes that identity, and the importer cannot tell a claim from a
- *   newer export, so a verified user's missing credential is an operator
+ *   newer export. So a verified user's missing credential is an operator
  *   action. The same reason also comes from the repair's checks after its
- *   writes. They are a conditional update of the user row by the `email` and
- *   `emailVerified` that the guards read, and core's claim check for an
- *   unverified user. The last is the activation of its pending password row.
+ *   writes. The first is a conditional update of the user row by the `email`
+ *   and `emailVerified` that the guards read. The second is core's claim
+ *   check, for an unverified user. The last is the activation of its pending
+ *   password row.
  *   A failed check means a claim or an address change landed after the
  *   guards. The repair then deletes the rows it wrote and keeps the record
  *   here. The write of a new unverified user runs the same claim check. When
@@ -269,9 +270,9 @@ export interface ImportReport {
    *   not roll back, spec 6).
    * - A claim since the first run: it deletes the claimant's password, social
    *   identities, and passkeys.
-   * - Another app change since the first run (a removed password or passkey),
-   *   or a newer export or other options (for example a row the source now
-   *   states as verified, so the record maps to an `email` identity).
+   * - Another app change since the first run, such as a removed password or
+   *   passkey. Or a newer export or other options: for example, the source
+   *   now states a row as verified, so the record maps to an `email` identity.
    * The fourth is a claim during the write of a new unverified user. The
    * entry then holds `repairRefused: "claimed"`, with or without `repair`.
    * Without `repair` the importer never writes an entry's rows and never

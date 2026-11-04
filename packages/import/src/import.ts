@@ -646,17 +646,17 @@ async function deleteWritten(tx: StorageAdapter, written: Written): Promise<void
 
 /**
  * Writes the missing rows of a user. Then a conditional update of the user
- * row by its id and by the `email` and `emailVerified` that the guards read
- * (I-3 of the plan 9b2 final review). For an unverified user, then core's
- * claim check (`claimNotStarted`). Last, the activation of the password
- * row. This is the pattern of core's sign-up (`engine/password.ts`,
- * `insertSignUp`).
+ * row, by its id and by the `email` and `emailVerified` that the guards
+ * read. It comes from I-3 of the plan 9b2 final review. For an unverified
+ * user, then core's claim check (`claimNotStarted`). Last, the activation
+ * of the password row. This is the pattern of core's sign-up
+ * (`engine/password.ts`, `insertSignUp`).
  * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
- *   refuses a pending row. On D1 the writes are visible at once, so a row
- *   with the real hash could sign a claimant in before the checks ran (fix
- *   round 2). A passkey and a social identity go in active: a passkey needs
- *   the authenticator and a social identity needs the provider's login, and
- *   the window is a few D1 round trips (spec 17.1).
+ *   refuses a pending row. On D1 the writes are visible at once. So a row
+ *   with the real hash could sign a claimant in before the checks (fix round
+ *   2). A passkey and a social identity go in active. A passkey needs the
+ *   authenticator, and a social identity needs the provider's login. The
+ *   window is a few D1 round trips (spec 17.1).
  * - A claim (core `claimEmail`) runs in the order of ruling 16 of plan 12p.
  *   Its first statement is the hold, or the lease on D1. Then it deletes the
  *   claimant's credentials, flips `emailVerified`, and deletes the sessions.
