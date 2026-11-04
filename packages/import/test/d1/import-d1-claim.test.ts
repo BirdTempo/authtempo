@@ -1,6 +1,11 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { createD1Adapter } from "@authtempo/adapter-d1";
-import { createAuth, createPbkdf2PasswordHash, type MailMessage } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type MailMessage,
+} from "@authtempo/core";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 import { describe, expect, it } from "vitest";
 import { importUsers } from "../../src/import.js";
@@ -12,7 +17,8 @@ import { BCRYPT, listSource, user } from "../source.js";
 // flag last (ruling 16). So a claim can delete before the import's writes
 // and flip after its check of the user row. The import then runs core's
 // claim check, which reads the lease. The scenes come from probes I1 and I2
-// of review-12p-fix34. Each step of the owner is a real magic link.
+// of review-12p-fix34, and S1 of review-12p-fix5w. Each step of the owner is
+// a real magic link.
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
@@ -110,8 +116,11 @@ function pauseBeforeFlip() {
 }
 
 const mail: MailMessage[] = [];
-/** The app on the binding, or on a view of it. It verifies bcrypt, as an app that imported such hashes does. */
-function app(db: D1Database = env.DB) {
+/**
+ * The app on the binding, or on a view of it. It verifies bcrypt, as an app
+ * that imported such hashes does. `extra` adds a clock or hooks.
+ */
+function app(db: D1Database = env.DB, extra: Partial<AuthConfig> = {}) {
   return createAuth({
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
@@ -126,7 +135,19 @@ function app(db: D1Database = env.DB) {
       uniformSignUp: false,
     },
     mail: { send: async (m) => void mail.push(m) },
+    ...extra,
   });
+}
+
+/** A clock that a test moves ahead of the host clock; the test does not sleep. */
+function movedClock() {
+  let ahead = 0;
+  return {
+    now: () => new Date(Date.now() + ahead),
+    move(ms: number) {
+      ahead += ms;
+    },
+  };
 }
 
 /** A magic link of `email`, mailed now: its token. */
@@ -349,6 +370,68 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
     expect(second.repaired).toEqual([]);
     expect(second.partial).toEqual([
       { kind: "user", sourceId: "eve", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(await rowsOf(email)).toEqual({
+      verified: 1,
+      passwords: 0,
+      identities: ["email"],
+      sessions: 1,
+    });
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+  });
+
+  it("writes nothing when a sweep runs inside a claim whose flow waited 61 s, between its deletes and its flip (S1)", async () => {
+    const email = "hal@example.com";
+    const record = () => [user("hal", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    // The first run refuses the hash, so the user comes in with no password (spec 17.1).
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    const inHook = latch();
+    const goHook = latch();
+    // The owner's magic link fixes its time, then waits in user.beforeVerify,
+    // as a slow hook does. It takes its lease and deletes, then waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db, {
+      clock,
+      hooks: {
+        user: {
+          beforeVerify: async () => {
+            inHook.open();
+            await goHook.wait;
+          },
+        },
+      },
+    }).api.verifyMagicLink({ token: await linkOf(email), ip: null, userAgent: null });
+    await inHook.wait;
+    clock.move(61_000);
+    goHook.open();
+    await claim.reached;
+    const found = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+      .bind(email)
+      .first<{ id: string }>();
+    // The tests of this file share the binding, so the read names this user's lease.
+    const lease = () =>
+      env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
+        .bind(`claim-lease:${found?.id ?? ""}`)
+        .all<{ e: number | string }>();
+    const atLease = (await lease()).results;
+    expect(atLease).toHaveLength(1);
+    // The claim's time is 61 s old at its lease, and the lease is live at the moved time.
+    expect(new Date(atLease[0]?.e ?? 0).getTime()).toBeGreaterThan(clock.now().getTime());
+    // The sweep runs at the moved time. The lease lives 60 s from its write, so it stays.
+    await app(env.DB, { clock }).api.sweepExpired();
+    expect((await lease()).results).toEqual(atLease);
+    // The second run accepts the format and repairs the missing password in that wait.
+    const second = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    claim.go();
+    expect(ownerOf(await won)).toBe("ok a session");
+    expect(second.repaired).toEqual([]);
+    expect(second.partial).toEqual([
+      { kind: "user", sourceId: "hal", missing: ["password"], repairRefused: "claimed" },
     ]);
     expect(await rowsOf(email)).toEqual({
       verified: 1,

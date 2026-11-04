@@ -21,10 +21,12 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // query 51, as D1 Free does. The source is the D1 limits page, updated 21
 // April 2026 and read 2026-10-24 (anonymous-upgrade-budget.test.ts).
 //
-// A flow fixes its time at its start, and a claim writes its lease with that
-// time (ruling 26 of plan 12p). So the owner's Google callback that waits 61
-// seconds in its provider call writes a lease that is stale at its birth. A
-// password sign-up of the address in that wait must keep no password.
+// A flow fixes its time at its start. A claim writes the expiry of its lease
+// from the clock at its write, not from that time (ruling 35 of plan 12p).
+// So the owner's Google callback that waits 61 seconds in its provider call
+// writes a live lease. A password sign-up in that wait keeps no password
+// (ruling 26). A sweep inside a claim whose flow waited 61 seconds keeps the
+// lease too, so the sign-up's lease read still finds the claim.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -367,11 +369,11 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
         .bind(email)
         .first<{ id: string }>();
       if (!user) throw new Error("no user");
-      // The claim wrote its lease with the time of its start: stale at 61 s, live at 0 s.
+      // The claim wrote its lease from the clock at its write: live at 61 s and at 0 s.
       const lease = await env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
         .bind(`claim-lease:${user.id}`)
         .first<{ e: number | string }>();
-      expect(new Date(lease?.e ?? 0).getTime() < current.getTime()).toBe(late > 0);
+      expect(new Date(lease?.e ?? 0).getTime()).toBe(current.getTime() + LEASE_MS);
       goUser.open();
       const up = await signUp;
       goDelete.open();
@@ -403,6 +405,95 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
       expect(await answer(signIn.res)).toBe("401 invalid_credentials");
       expect(Math.max(up.queries, done.queries)).toBeLessThanOrEqual(BUDGET);
     });
+
+  it("keeps the lease through a sweep inside a claim whose flow waited 61 s, so a sign-up beside it keeps no password (ruling 35 of plan 12p)", async () => {
+    const email = "dee@example.com";
+    // The owner asks for the link before any user holds the address.
+    const verify = await link(email);
+    const inHook = latch();
+    const goHook = latch();
+    const atDelete = latch();
+    const goDelete = latch();
+    const atUser = latch();
+    const goUser = latch();
+    let deleted = false;
+    // The owner's magic link fixes its time, then waits in user.beforeVerify,
+    // as a slow hook does. After the claim's delete of the passwords, it waits
+    // before its flip.
+    const owner = make(
+      true,
+      async (sql) => {
+        if (!deleted && /^DELETE FROM ta_password\b/.test(sql)) {
+          deleted = true;
+          atDelete.open();
+          await goDelete.wait;
+        }
+      },
+      {
+        hooks: {
+          session: { afterEnd: () => {} },
+          user: {
+            beforeVerify: async () => {
+              inHook.open();
+              await goHook.wait;
+            },
+          },
+        },
+      },
+    );
+    let created = false;
+    // The claimant's sign-up waits after its user create, before its password create.
+    const signer = make(true, async (sql) => {
+      if (!created && /^INSERT INTO ta_user\b/.test(sql)) {
+        created = true;
+        atUser.open();
+        await goUser.wait;
+      }
+    });
+    const signUp = measure(signer, post("/password/sign-up", { email, password: PASSWORD }));
+    await atUser.wait;
+    // The claim reads the user that the sign-up created.
+    const claim = measure(owner, verify);
+    await inHook.wait;
+    // The clock moves while the owner waits; the test does not sleep.
+    current = new Date(current.getTime() + LEASE_MS + 1_000);
+    goHook.open();
+    await atDelete.wait;
+    const user = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+      .bind(email)
+      .first<{ id: string }>();
+    if (!user) throw new Error("no user");
+    const expiry = async () =>
+      (
+        await env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
+          .bind(`claim-lease:${user.id}`)
+          .first<{ e: number | string }>()
+      )?.e;
+    // The claim's time is 61 s old at its lease. The expiry counts from the clock there.
+    const atLease = await expiry();
+    expect(new Date(atLease ?? 0).getTime()).toBe(current.getTime() + LEASE_MS);
+    await make(false).auth.api.sweepExpired();
+    expect(await expiry()).toEqual(atLease);
+    // The sign-up writes its password and runs its claim check, which reads the lease.
+    goUser.open();
+    const up = await signUp;
+    goDelete.open();
+    const done = await claim;
+    expect(await answer(up.res)).toBe("409 email_taken_unverified");
+    expect(await answer(done.res)).toBe("200 ok");
+    expect(await rowsOf(user.id)).toEqual({
+      verified: true,
+      passwords: 0,
+      sessions: 1,
+      lease: { purpose: "claim-lease", identifier: user.id },
+    });
+    const signIn = await measure(
+      make(false),
+      post("/password/sign-in", { email, password: PASSWORD }),
+    );
+    expect(await answer(signIn.res)).toBe("401 invalid_credentials");
+    expect(Math.max(up.queries, done.queries)).toBeLessThanOrEqual(BUDGET);
+  });
 });
 
 function latch() {
