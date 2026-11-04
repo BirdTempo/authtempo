@@ -66,6 +66,7 @@ The delete runs one transaction with its audit row. A refusal writes nothing and
 - On D1, one invocation sends at most 50 queries on Workers Free. Each organization that the user owns with another owner costs 3 queries, and a plain membership costs none.
 - On D1, a secret deletes a user with 1 solo organization and at most 3 organizations that the user owns with another owner.
 - On D1, a platform operator deletes a user with 1 solo organization and none of those, or with no solo organization and at most 2.
+- On the D1 storage of the compatibility package with the impersonation tool on, the delete reads the user's impersonation sessions in one more query. There a secret deletes a user with no solo organization and at most 3 organizations that the user owns with another owner. With the tool off, 4 such organizations fit.
 - Postgres, MySQL, SQLite, and memory have no query limit per invocation. There only the count of solo organizations refuses.
 
 ## If it fails
