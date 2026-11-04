@@ -499,6 +499,11 @@ export const EVENTS = {
     event: { kind: "identifier" },
     errorName: ERROR_NAME,
   }),
+  // The new proof mail after a lost claim threw; the answer stays 409 `conflict` (plan 12o). No address.
+  "claim.mail_failed": fault("error", "authtempo: claim mail failed", {
+    method: enumOf(["magic_link", "email_otp"]),
+    errorName: ERROR_NAME,
+  }),
   "email_code.count_gave_up": fault("error", "authtempo: email code count gave up", {
     rowId: ROW_ID,
   }),

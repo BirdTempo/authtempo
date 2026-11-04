@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { SessionRow, UserRow } from "../schema.js";
+import type { IdentityRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
@@ -310,10 +310,12 @@ export class ClaimLostError extends Error {
  * writes nothing. So the answer `conflict` comes after the undo of the
  * writes before the flip, and no claim write stays. A session race ends no
  * claim: on 2026-11-04 that join signed in through one race in 39 queries
- * (adapter-d1 test anonymous-upgrade-budget.test.ts). A flow that spent its
- * link or code before the claim mails a new one of its kind. A provider
- * token needs a new sign-in. The reset and the invitation confirm keep
- * their link, so the same request works again.
+ * (adapter-d1 test anonymous-upgrade-budget.test.ts). The magic link and the
+ * email code spent their proof before the claim, so each mails a new one of
+ * its kind. The sign-up confirm mails nothing: the address is verified, so
+ * its answer says to sign in. A provider token needs a new sign-in. The
+ * reset and the invitation confirm keep their link, so the same request
+ * works again.
  *
  * The unique-key retry of a flow is no claim retry, and it runs on every
  * store. The same D1 join after one unique-key retry sent 46 queries on
@@ -526,7 +528,7 @@ async function resolveInTransaction(
     // create left a user with no email identity. Repair it here. A
     // concurrent repair fails unique_violation, which the caller catches
     // outside this transaction.
-    await ensureEmailIdentity(tx, existing.id, email, now);
+    await ensureEmailIdentity(tx, existing.id, email, now, verified);
     if (!existing.emailVerified) {
       await claimEmail(tx, existing.id, null, now, verified, ended);
       // The claim's last write: a later throw keeps the claim (plan 12o).
@@ -782,26 +784,65 @@ export async function signUpRule(
   await mayCreateUser(config, tx, user.email);
 }
 
-/** The `email` identity means "this address signs in by magic link". It exists once the address is proved. */
+/**
+ * The `email` identity means "this address signs in by magic link". It
+ * exists once the address is proved. A claim flow passes `verified`: after
+ * a claim that `keep` made final, a parallel proof can write the row first
+ * (`createIdentity`).
+ */
 export async function ensureEmailIdentity(
   tx: StorageAdapter,
   userId: string,
   email: string,
   now: Date,
+  verified?: VerifySteps,
 ): Promise<void> {
   const found = await tx.findOne("identity", [
     { field: "provider", op: "eq", value: "email" },
     { field: "subject", op: "eq", value: email },
   ]);
   if (!found) {
-    await tx.create("identity", {
-      id: newId(now),
-      userId,
-      provider: "email",
-      subject: email,
-      linkedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await createIdentity(
+      tx,
+      {
+        id: newId(now),
+        userId,
+        provider: "email",
+        subject: email,
+        linkedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      verified,
+    );
+  }
+}
+
+/**
+ * Creates the identity `row`. After a claim that `keep` made final, the flow
+ * runs no retry (plan 12o). So there a unique-key error counts as present
+ * when one read finds a row of the same user, provider, and subject. A
+ * parallel proof wrote that row first, and the flow goes on to its session.
+ * Any other error passes on. Before a kept claim, the error passes on, and the
+ * flow's unique-key retry reads the winner's row. Only D1, SQLite, and
+ * memory keep a claim. So the read never runs in a Postgres transaction
+ * that the error aborted.
+ */
+export async function createIdentity(
+  tx: StorageAdapter,
+  row: IdentityRow,
+  verified?: VerifySteps,
+): Promise<void> {
+  try {
+    await tx.create("identity", row);
+  } catch (err) {
+    if (!verified?.kept() || !(err instanceof StorageError) || err.code !== "unique_violation")
+      throw err;
+    const present = await tx.findOne("identity", [
+      { field: "userId", op: "eq", value: row.userId },
+      { field: "provider", op: "eq", value: row.provider },
+      { field: "subject", op: "eq", value: row.subject },
+    ]);
+    if (!present) throw err;
   }
 }

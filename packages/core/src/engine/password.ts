@@ -1,6 +1,6 @@
 import { checkCaptcha } from "../captcha.js";
 import type { MailMessage, ResolvedConfig } from "../config.js";
-import type { ErrorCode } from "../errors.js";
+import { ERRORS, type ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
@@ -877,19 +877,11 @@ export async function mailVerifyAgain(
 }
 
 /**
- * The fallback mail of a sign-up confirm that answers 409 `conflict` to a
- * lost flip (plan 12o, spec 8.9). The link or the code was spent before the
- * transaction, so a new one of the same kind goes to the address. It counts
- * under the per-address limit of the resend route (`mailVerifyAgain`). A
- * full limit sends nothing. The new proof records no anonymous user.
+ * The `detail` of the 409 `conflict` of a sign-up confirm that lost its
+ * flip (ruling 23 of plan 12o). Another proof verified the address first.
+ * So the confirm sends no new mail, and the person signs in.
  */
-async function resendProofAfterLostClaim(
-  config: ResolvedConfig,
-  email: string,
-  passwordId: string,
-): Promise<void> {
-  await mailVerifyAgain(config, email, passwordId);
-}
+export const CONFIRM_LOST_DETAIL = "Another proof verified this address first. Sign in.";
 
 /**
  * Every failure after the limits answers `invalid_credentials` after one
@@ -1341,7 +1333,7 @@ async function confirmSignUp(
         await claimEmail(tx, user.id, { passwordId, username: true }, now, verify, ended);
         // A mailbox proof is final (plan 12o): a later throw keeps the claim.
         await verify.keep(tx, claimed);
-        await ensureEmailIdentity(tx, user.id, row.identifier, now);
+        await ensureEmailIdentity(tx, user.id, row.identifier, now, verify);
         // The `email` identity comes after the claim here, so it is kept too.
         await verify.keep(tx, claimed);
         await upgrade.claim(tx);
@@ -1366,15 +1358,17 @@ async function confirmSignUp(
       const next = claimRetry(config.storage, err, attempt);
       if (next === "conflict") {
         verify.flipLost();
-        verified = fail("conflict");
+        // No new mail: the address is verified, so the person signs in (ruling 23 of plan 12o).
+        verified = {
+          ok: false,
+          code: "conflict",
+          status: ERRORS.conflict,
+          detail: CONFIRM_LOST_DETAIL,
+        };
       } else if (next !== "retry") throw err;
     }
   }
-  if (!verified.ok) {
-    await keptClaimEnded(config, verify, ended);
-    // The link or the code was spent before the transaction (plan 12o).
-    if (verify.lostFlip()) await resendProofAfterLostClaim(config, row.identifier, passwordId);
-  }
+  if (!verified.ok) await keptClaimEnded(config, verify, ended);
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);
@@ -1863,7 +1857,7 @@ function applyReset(
       { field: "identifier", op: "eq", value: email },
       { field: "consumedAt", op: "eq", value: null },
     ]);
-    await ensureEmailIdentity(tx, user.id, email, now);
+    await ensureEmailIdentity(tx, user.id, email, now, verify);
     // The `email` identity comes after the claim here, so it is kept too.
     await verify.keep(tx, user);
     if (gatedRow) {

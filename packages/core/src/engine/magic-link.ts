@@ -107,15 +107,20 @@ async function mailMagicLink(
  * flip (plan 12o, spec 8.9). The link was spent before the transaction, so
  * a new link goes to the address, with the same landing path. It counts
  * under the per-address limit of the request. A full limit sends nothing.
- * The new link records no anonymous user.
+ * The new link records no anonymous user. A throw of this step emits
+ * `claim.mail_failed`, and the answer stays 409 (ruling 23 of plan 12o).
  */
 async function resendProofAfterLostClaim(
   config: ResolvedConfig,
   email: string,
   next: string,
 ): Promise<void> {
-  if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return;
-  await mailMagicLink(config, email, next, {});
+  try {
+    if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return;
+    await mailMagicLink(config, email, next, {});
+  } catch (e) {
+    config.observe.emit({ name: "claim.mail_failed", method: "magic_link", errorName: e });
+  }
 }
 
 /**

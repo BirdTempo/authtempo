@@ -234,14 +234,19 @@ async function mailCode(
  * flip (plan 12o, spec 8.9). The code was spent before the transaction, so
  * a new code goes to the address. It counts under the per-address limits of
  * the request, the 15-minute key and the day key. A full limit sends
- * nothing. The new code records no anonymous user.
+ * nothing. The new code records no anonymous user. A throw of this step
+ * emits `claim.mail_failed`, and the answer stays 409 (ruling 23 of plan 12o).
  */
 async function resendProofAfterLostClaim(config: ResolvedConfig, email: string): Promise<void> {
   const otp = config.emailOtp;
   if (!otp) return;
-  if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return;
-  if (!(await limit(config, "otp:email-day", email, MAILED_CODES_PER_EMAIL_DAY))) return;
-  await mailCode(config, otp, "email-otp", email, {});
+  try {
+    if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return;
+    if (!(await limit(config, "otp:email-day", email, MAILED_CODES_PER_EMAIL_DAY))) return;
+    await mailCode(config, otp, "email-otp", email, {});
+  } catch (e) {
+    config.observe.emit({ name: "claim.mail_failed", method: "email_otp", errorName: e });
+  }
 }
 
 /** A sign-in code (plan 9e). */

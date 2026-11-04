@@ -5,7 +5,9 @@ import { requestEmailOtp, verifyEmailOtp } from "../src/engine/email-otp.js";
 import { continueHandoff, startHandoff } from "../src/engine/handoff.js";
 import type { HooksConfig } from "../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
+import { operatorApi } from "../src/engine/operator/index.js";
 import {
+  CONFIRM_LOST_DETAIL,
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
@@ -14,6 +16,9 @@ import {
 } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial } from "../src/engine/social.js";
+import { confirmUserInvite } from "../src/engine/user-invite.js";
+import { MAILED_CODES_PER_EMAIL_DAY } from "../src/engine/verification.js";
+import type { AuthEvent } from "../src/observe/port.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { Result } from "../src/result.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -116,9 +121,9 @@ async function google(w: World, claims: Record<string, unknown> = {}) {
   });
 }
 
-async function resetLink(w: World) {
-  await requestPasswordReset(w.auth.config, { email: EMAIL, ip: null });
-  return resetPassword(w.auth.config, {
+async function resetLink(w: World, config: ResolvedConfig = w.auth.config) {
+  await requestPasswordReset(config, { email: EMAIL, ip: null });
+  return resetPassword(config, {
     token: tokenFromMail(w.auth.mail.at(-1)?.text ?? ""),
     password: "a new long password",
     ip: null,
@@ -167,6 +172,28 @@ async function socialClaimant(w: World) {
   await handoffCode(w, (g.value as { token: string }).token);
 }
 
+/** The operator tool, for an invitation and a ban (plans 12f and 12f2). */
+const OPERATOR: Partial<AuthConfig> = {
+  operator: {
+    users: true,
+    secrets: [{ name: "support", secretHash: "e".repeat(64), scopes: ["users"] }],
+  },
+};
+const APP_ACTOR = { kind: "app", name: "support-tool" } as const;
+
+/** An invited user: the operator creates the address, and the link goes out. Answers its token. */
+async function invited(w: World): Promise<string> {
+  const made = await operatorApi(w.auth.config).users.create({
+    actor: APP_ACTOR,
+    email: EMAIL,
+    reason: "Ticket 1",
+    ip: null,
+    userAgent: null,
+  });
+  if (!made.ok) throw new Error(made.code);
+  return tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+}
+
 /** The rows of the user that a claim must remove, read on the store. */
 async function rowsOf(w: World) {
   const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
@@ -186,6 +213,9 @@ async function rowsOf(w: World) {
       .filter((r) => r.provider !== "email")
       .map((r) => r.id)
       .sort(),
+    emailIdentities: (await w.auth.storage.findMany("identity", byUser)).filter(
+      (r) => r.provider === "email",
+    ).length,
     passwords: (await w.auth.storage.findMany("password", byUser)).map((r) => r.id).sort(),
     passkeys: (await w.auth.storage.findMany("passkey", byUser)).length,
     challenges: (await codes("passkey-challenge")).length,
@@ -231,6 +261,8 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
     run: (w: World) => Promise<Result<unknown>>;
     /** The password row that the proof keeps: the confirmed one, the reset's, or none. */
     password: "confirmed" | "reset" | "none";
+    /** True when the proof is the claimant's own identity: the claim keeps that identity. */
+    ownIdentity?: true;
   }[] = [
     {
       name: "the verify link",
@@ -274,6 +306,15 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
       run: (w) => magicLink(w.auth.config, w),
       password: "none",
     },
+    {
+      // The branch of a known identity: the claim, `keep`, the `email` identity, `keep` (L2 of the 12o review).
+      name: "a Google sign-in through the claimant's own identity, now with a verified address",
+      via: "social",
+      claimant: socialClaimant,
+      run: (w) => google(w, { sub: "g-claimant" }),
+      password: "none",
+      ownIdentity: true,
+    },
   ];
 
   for (const proof of PROOFS)
@@ -292,7 +333,13 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
       // The flag stays true, and the claimant holds nothing.
       expect(after.user.emailVerified).toBe(true);
       expect(after.sessions).toEqual([]);
-      expect(after.identities.filter((id) => before.identities.includes(id))).toEqual([]);
+      // The proving identity stays. Every other identity of the claimant goes.
+      expect(after.identities.filter((id) => before.identities.includes(id))).toEqual(
+        proof.ownIdentity ? before.identities : [],
+      );
+      // The `email` identity comes before the last `keep`, so it stays once (L2 of the 12o review).
+      expect(before.emailIdentities).toBe(0);
+      expect(after.emailIdentities).toBe(1);
       expect(after.passkeys).toBe(0);
       expect(after.challenges).toBe(0);
       expect(after.handoffCodes).toBe(0);
@@ -310,6 +357,142 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
       }
       // The claim committed, so its after points fired on the error answer (decision 10).
       expect(w.verify).toEqual([`before:${proof.via}`, `after:${proof.via}`]);
+      expect(w.ended.filter((e) => before.sessions.includes(e.id))).toEqual(
+        before.sessions.map((id) => ({ id, reason: "claim" })),
+      );
+    });
+
+  // An invited user holds no session, so this row has a case of its own (L2 of the 12o review).
+  it("keeps the claim of an invitation link, with its spend and its email identity, and fires the after points on the error", async () => {
+    const w = world(OPERATOR);
+    const token = await invited(w);
+    const before = await rowsOf(w);
+    expect(before.user.emailVerified).toBe(false);
+    expect(before.emailIdentities).toBe(0);
+    const seen = throwAfterKeep(w.auth.storage);
+    const confirm = () => confirmUserInvite(w.auth.config, { token, ip: null, userAgent: null });
+    await expect(confirm()).rejects.toThrow(D1_REFUSAL);
+    expect(seen).toEqual({ kept: 1, thrown: 1 });
+    const after = await rowsOf(w);
+    expect(after.user.emailVerified).toBe(true);
+    expect(after.sessions).toEqual([]);
+    // The `email` identity and the spend come before the claim's `keep`, so both stay.
+    expect(after.emailIdentities).toBe(1);
+    expect(await confirm()).toMatchObject({ ok: false, code: "invalid_token" });
+    expect(w.verify).toEqual(["before:invite", "after:invite"]);
+  });
+});
+
+/**
+ * The claim runs on the D1 view of the memory store (`d1Like`). The view has
+ * no transaction lock. So an operator ban of the user runs on the store
+ * between the claim's `keep` and its session insert, as another invocation
+ * does. `writeSession` then reads the ban and stops the flow with
+ * `account_banned`. That is an error answer after a kept claim, not a throw.
+ */
+function banAfterKeep(w: World) {
+  const cfg = d1Like(w.auth.config);
+  const view = cfg.storage;
+  const original = view.transaction.bind(view);
+  const seen = { kept: 0, banned: 0 };
+  view.transaction = <T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> =>
+    original((tx) => {
+      let kept = false;
+      return fn({
+        ...tx,
+        keep: async () => {
+          kept = true;
+          seen.kept++;
+          return tx.keep();
+        },
+        create: async (m, d) => {
+          if (kept && seen.banned === 0 && m === "session") {
+            seen.banned++;
+            const user = await w.auth.storage.findOne("user", [
+              { field: "email", op: "eq", value: EMAIL },
+            ]);
+            if (!user) throw new Error("no user");
+            const r = await operatorApi(w.auth.config).users.ban({
+              actor: APP_ACTOR,
+              userId: user.id,
+              reason: "Abuse report 1",
+              ip: null,
+              userAgent: null,
+            });
+            if (!r.ok) throw new Error(r.code);
+          }
+          return tx.create(m, d);
+        },
+      });
+    });
+  return { cfg, seen };
+}
+
+describe("an error answer after keep fires the claim's after points once (L1 of the 12o review)", () => {
+  const FLOWS: {
+    name: string;
+    via: string;
+    /** Makes the claimant. Answers the invitation token, or null. */
+    claimant: (w: World) => Promise<string | null>;
+    run: (cfg: ResolvedConfig, w: World, token: string | null) => Promise<Result<unknown>>;
+  }[] = [
+    {
+      name: "the verify link",
+      via: "password_verify",
+      claimant: async (w) => {
+        await passwordClaimant(w);
+        return null;
+      },
+      run: (cfg, w) => verifyLink(cfg, w),
+    },
+    {
+      name: "a magic link",
+      via: "magic_link",
+      claimant: async (w) => {
+        await passwordClaimant(w);
+        return null;
+      },
+      run: (cfg, w) => magicLink(cfg, w),
+    },
+    {
+      name: "a reset",
+      via: "password_reset",
+      claimant: async (w) => {
+        await passwordClaimant(w);
+        return null;
+      },
+      run: (cfg, w) => resetLink(w, cfg),
+    },
+    {
+      name: "an invitation link",
+      via: "invite",
+      claimant: invited,
+      run: (cfg, _w, token) =>
+        confirmUserInvite(cfg, { token: token ?? "", ip: null, userAgent: null }),
+    },
+  ];
+
+  for (const f of FLOWS)
+    it(`${f.name}: a ban between keep and the session write answers account_banned, and the kept claim fires each after point once`, async () => {
+      const w = world(OPERATOR);
+      const token = await f.claimant(w);
+      const before = await rowsOf(w);
+      expect(before.user.emailVerified).toBe(false);
+      const race = banAfterKeep(w);
+      expect(await f.run(race.cfg, w, token)).toEqual({
+        ok: false,
+        code: "account_banned",
+        status: 403,
+      });
+      expect(race.seen.banned).toBe(1);
+      expect(race.seen.kept).toBeGreaterThan(0);
+      const after = await rowsOf(w);
+      // The claim stays, and the stop undid the session insert.
+      expect(after.user.emailVerified).toBe(true);
+      expect(after.sessions).toEqual([]);
+      expect(after.emailIdentities).toBe(1);
+      // The claim committed, so its after points fired once on the error answer (decision 10).
+      expect(w.verify).toEqual([`before:${f.via}`, `after:${f.via}`]);
       expect(w.ended.filter((e) => before.sessions.includes(e.id))).toEqual(
         before.sessions.map((id) => ({ id, reason: "claim" })),
       );
@@ -388,16 +571,6 @@ const FALLBACKS: {
   win: (cfg: ResolvedConfig, w: World) => Promise<Result<unknown>>;
 }[] = [
   {
-    name: "the sign-up confirm",
-    subject: CONFIRM,
-    // RESEND_PER_EMAIL of password.ts: the key of the resend route. A sign-up mail does not count on it.
-    limit: 3,
-    races: 5,
-    ask: async () => {},
-    lose: (cfg, w) => verifyLink(cfg, w),
-    win: (cfg, w) => magicLink(cfg, w),
-  },
-  {
     name: "the magic link",
     subject: MAGIC,
     // PER_EMAIL of magic-link.ts: the request and the new link count on it.
@@ -465,10 +638,101 @@ describe("a lost flip mails a new proof of its kind (decision 11 of plan 12o)", 
       }
       expect(races).toBe(f.races);
       // The mails of the kind in the window are the limit, never more. They
-      // are the new proofs of the races, and the requests of the magic link
-      // and the code.
-      const total = f.subject === CONFIRM ? byRaces : mailsOf(w, f.subject);
-      expect(total).toBe(f.limit);
+      // are the new proofs of the races, and the requests of the kind.
+      expect(byRaces).toBeGreaterThan(0);
+      expect(mailsOf(w, f.subject)).toBe(f.limit);
     });
   }
+
+  it("the sign-up confirm: answers 409 conflict with a detail that says to sign in, and mails nothing (ruling 23 of plan 12o)", async () => {
+    const w = world();
+    await passwordClaimant(w);
+    const race = loseNextFlip(w, (cfg) => magicLink(cfg, w));
+    const mails = w.auth.mail.length;
+    expect(await verifyLink(race.cfg, w)).toEqual({
+      ok: false,
+      code: "conflict",
+      status: 409,
+      detail: CONFIRM_LOST_DETAIL,
+    });
+    expect(race.state.won?.ok).toBe(true);
+    // The magic link of the winner is the one new mail: no confirm mail goes.
+    expect(w.auth.mail.slice(mails).map((m) => m.subject.startsWith(MAGIC))).toEqual([true]);
+    expect(mailsOf(w, CONFIRM)).toBe(1);
+    expect((await rowsOf(w)).user.emailVerified).toBe(true);
+  });
+});
+
+describe("the limits and the failure of the new proof (ruling 23 of plan 12o)", () => {
+  it("the email code: a full day key sends no new code, while the 15-minute key has room", async () => {
+    const w = world();
+    await passwordClaimant(w);
+    // The day key allows MAILED_CODES_PER_EMAIL_DAY codes. The 15-minute key
+    // allows 3, so the clock moves on after each 3 requests.
+    const day = MAILED_CODES_PER_EMAIL_DAY.max;
+    for (let i = 0; i < day; i++) {
+      if (i > 0 && i % 3 === 0) w.auth.clock.advance(15 * 60_000 + 1);
+      expect((await requestEmailOtp(w.auth.config, { email: EMAIL, ip: null })).ok).toBe(true);
+    }
+    expect(mailsOf(w, CODE)).toBe(day);
+    // No more request here: the last window holds 2 of 3 requests, so the
+    // 15-minute key has room for the new code.
+    expect(day % 3).toBe(2);
+    const race = loseNextFlip(w, (cfg) => magicLink(cfg, w));
+    expect(await emailCode(race.cfg, w, false)).toEqual({
+      ok: false,
+      code: "conflict",
+      status: 409,
+    });
+    expect(race.state.won?.ok).toBe(true);
+    // The 15-minute key held 2 of 3, so only the day key refuses the new code.
+    expect(mailsOf(w, CODE)).toBe(day);
+  });
+
+  const FAILS: {
+    name: string;
+    method: string;
+    ask: (w: World) => Promise<unknown>;
+    lose: (cfg: ResolvedConfig, w: World) => Promise<Result<unknown>>;
+  }[] = [
+    {
+      name: "the magic link",
+      method: "magic_link",
+      ask: (w) => requestMagicLink(w.auth.config, { email: EMAIL, ip: null }),
+      lose: (cfg, w) => magicLink(cfg, w, false),
+    },
+    {
+      name: "the email code",
+      method: "email_otp",
+      ask: (w) => requestEmailOtp(w.auth.config, { email: EMAIL, ip: null }),
+      lose: (cfg, w) => emailCode(cfg, w, false),
+    },
+  ];
+
+  for (const f of FAILS)
+    it(`${f.name}: a throw of the mail port at the new proof emits claim.mail_failed, and the answer stays 409`, async () => {
+      const batches: AuthEvent[] = [];
+      const w = world({ observe: { sink: { write: (b) => void batches.push(...b) } } });
+      await passwordClaimant(w);
+      await f.ask(w);
+      const race = loseNextFlip(w, (cfg) => verifyLink(cfg, w));
+      // Only the loser's config has the failing port: the winner's flow mails as usual.
+      const failing: ResolvedConfig = {
+        ...race.cfg,
+        mail: {
+          ...race.cfg.mail,
+          send: async () => {
+            throw new TypeError("mail down");
+          },
+        },
+      };
+      expect(await f.lose(failing, w)).toEqual({ ok: false, code: "conflict", status: 409 });
+      expect(race.state.won?.ok).toBe(true);
+      await w.auth.config.observe.flush();
+      const failed = batches.filter((e) => e.name === "claim.mail_failed");
+      expect(failed.map((e) => ({ method: e.method, errorName: e.errorName }))).toEqual([
+        { method: f.method, errorName: "TypeError" },
+      ]);
+      expect(JSON.stringify(failed)).not.toContain(EMAIL);
+    });
 });

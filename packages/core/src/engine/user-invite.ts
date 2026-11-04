@@ -163,7 +163,7 @@ export async function confirmUserInvite(
           // before the identity and the claim: the D1 undo (`BeforeResolveWrite` of users.ts).
           if (!user.emailVerified) await verified.before(user);
           await steps.before(tx, resolved);
-          await ensureEmailIdentity(tx, user.id, email, now);
+          await ensureEmailIdentity(tx, user.id, email, now, verified);
           if (!user.emailVerified) {
             await claimEmail(tx, user.id, null, now, verified, ended);
             // A mailbox proof is final (plan 12o): a later throw keeps the claim.

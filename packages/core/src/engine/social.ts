@@ -71,6 +71,7 @@ import {
   claimEmail,
   claimedUser,
   claimRetry,
+  createIdentity,
   draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
@@ -1293,7 +1294,7 @@ async function linkInTransaction(
       await claimEmail(tx, user.id, { identityId: identity.id }, now, verified, ended);
       // A mailbox proof is final (plan 12o): a later throw keeps the claim.
       await verified.keep(tx, claimed);
-      await ensureEmailIdentity(tx, user.id, user.email, now);
+      await ensureEmailIdentity(tx, user.id, user.email, now, verified);
       // The `email` identity comes after the claim here, so it is kept too.
       await verified.keep(tx, claimed);
       await writeFill(tx, claimed, filled);
@@ -1334,8 +1335,9 @@ async function linkInTransaction(
     // A mailbox proof is final (plan 12o): a later throw keeps the claim.
     // With no claim in this attempt, `keep` does nothing.
     await verified.keep(tx, current);
-    await tx.create("identity", identityRow(existing.id, provider, profile.subject, now));
-    await ensureEmailIdentity(tx, existing.id, email, now);
+    // After a kept claim, a parallel link of the same identity counts as present (plan 12o).
+    await createIdentity(tx, identityRow(existing.id, provider, profile.subject, now), verified);
+    await ensureEmailIdentity(tx, existing.id, email, now, verified);
     // The new identity and the `email` identity come after the claim, so they are kept too.
     await verified.keep(tx, current);
     await writeFill(tx, current, filled);
