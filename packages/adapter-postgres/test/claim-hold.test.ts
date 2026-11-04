@@ -31,11 +31,31 @@ afterEach(async () => {
   await db.close();
 });
 
+/** The waits of `recording`, each run once and then cleared. */
+interface Pause {
+  hold: (() => Promise<void>) | null;
+  read: (() => Promise<void>) | null;
+}
+
+/** The claim's hold as `recording` writes it: the conditional update of an unverified user row. */
+const HOLD = "update user [id,emailVerified] [updatedAt]";
+
+function latch() {
+  let open = () => {};
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
+
 /**
  * A store that records each write of each transaction as
- * `<call> <model> [<where fields>] [<written fields>]`, in order.
+ * `<call> <model> [<where fields>] [<written fields>]`, in order. While
+ * `pause.hold` is set, the next hold runs it once with the row lock held.
+ * While `pause.read` is set, the next read of a user by address in a
+ * transaction runs it once first.
  */
-function recording(storage: StorageAdapter) {
+function recording(storage: StorageAdapter, pause: Pause) {
   const runs: string[][] = [];
   const store: StorageAdapter = {
     ...storage,
@@ -46,13 +66,28 @@ function recording(storage: StorageAdapter) {
         const fields = (w: { field: string }[]) => w.map((x) => x.field).join(",");
         return fn({
           ...tx,
+          findOne: async (m, w) => {
+            const wait = pause.read;
+            if (wait && m === "user" && w.some((x) => x.field === "email")) {
+              pause.read = null;
+              await wait();
+            }
+            return tx.findOne(m, w);
+          },
           create: (m, d) => {
             calls.push(`create ${m} [] [${Object.keys(d).length}]`);
             return tx.create(m, d);
           },
-          update: (m, w, d) => {
-            calls.push(`update ${m} [${fields(w)}] [${Object.keys(d).join(",")}]`);
-            return tx.update(m, w, d);
+          update: async (m, w, d) => {
+            const call = `update ${m} [${fields(w)}] [${Object.keys(d).join(",")}]`;
+            calls.push(call);
+            const n = await tx.update(m, w, d);
+            const wait = pause.hold;
+            if (wait && call === HOLD) {
+              pause.hold = null;
+              await wait();
+            }
+            return n;
           },
           delete: (m, w) => {
             calls.push(`delete ${m} [${fields(w)}]`);
@@ -68,12 +103,19 @@ function recording(storage: StorageAdapter) {
   return { store, runs };
 }
 
-/** The engine on Postgres, with a barrier in `user.beforeVerify` while `gate.wait` is set. */
+/**
+ * The engine on Postgres, with a barrier in `user.beforeVerify` while
+ * `gate.wait` is set. `gate.hold` and `gate.read` are the waits of `recording`.
+ */
 function world() {
   const sent: MailMessage[] = [];
   const after: string[] = [];
-  const gate: { wait: (() => Promise<void>) | null } = { wait: null };
-  const { store, runs } = recording(createPostgresAdapter(db.sql));
+  const gate: Pause & { wait: (() => Promise<void>) | null } = {
+    wait: null,
+    hold: null,
+    read: null,
+  };
+  const { store, runs } = recording(createPostgresAdapter(db.sql), gate);
   const auth = createAuth({
     baseURL: BASE,
     secret: SECRET,
@@ -237,13 +279,108 @@ describe("the hold of a claim on Postgres (ruling 16 of plan 12p)", () => {
       if (gone.ok) {
         // The delete took the user row first. The claim found no user: 409,
         // or a new user of the address when it read after the commit.
-        expect(rows.users).toBe(0);
+        // Either way no row of the claimant stays.
+        expect(rows).toEqual({
+          users: 0,
+          verified: null,
+          passwords: 0,
+          sessions: [],
+          emailIdentities: 0,
+          leases: 0,
+        });
         expect(claim.ok || claim.code === "conflict").toBe(true);
+        if (claim.ok) {
+          // The claim's user is a new one, so the claimant holds nothing of it.
+          if (!("token" in claim.value)) throw new Error("the claim opened no session");
+          const mine = await w.auth.api.getSession(claim.value.token);
+          expect(mine?.user.email).toBe(email);
+          expect(mine?.user.emailVerified).toBe(true);
+          expect(mine?.user.id).not.toBe(userId);
+          expect(mine?.session.userId).not.toBe(userId);
+        }
       } else {
         // The claim took the row first and ended the claimant's session, so the delete has no session.
         expect(claim.ok).toBe(true);
         expect(rows).toMatchObject({ users: 1, verified: true, passwords: 0 });
       }
+    }
+  }, 60_000);
+
+  it("serves a claim that reads the user after an account delete ended: a new user, and no row of the claimant", async () => {
+    // The race above met this order in no round: the delete won each one,
+    // and the claim answered conflict. So here the claim starts first and
+    // waits before its user read. The delete runs to its commit in that
+    // wait. Then the claim finds no user, and the proof makes a new one.
+    const w = world();
+    const email = "after@example.com";
+    const { userId, token } = await w.claimant(email);
+    const session = await w.auth.api.getSession(token);
+    if (!session) throw new Error("no session");
+    const link = await w.link(email);
+    const atRead = latch();
+    const goRead = latch();
+    w.gate.read = async () => {
+      atRead.open();
+      await goRead.wait;
+    };
+    const claim = w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+    await atRead.wait;
+    const gone = await w.auth.api.user.delete({ session, ip: null, userAgent: null });
+    expect(gone.ok).toBe(true);
+    goRead.open();
+    const won = await claim;
+    if (!won.ok || !("token" in won.value)) throw new Error("the claim opened no session");
+    const mine = await w.auth.api.getSession(won.value.token);
+    expect(mine?.user.email).toBe(email);
+    expect(mine?.user.emailVerified).toBe(true);
+    expect(mine?.user.id).not.toBe(userId);
+    expect(mine?.session.userId).not.toBe(userId);
+    expect(await rowsOf(userId)).toEqual({
+      users: 0,
+      verified: null,
+      passwords: 0,
+      sessions: [],
+      emailIdentities: 0,
+      leases: 0,
+    });
+  });
+
+  it("serves a claim that holds the user row and an account delete that starts in the hold: the delete refuses, with no deadlock", async () => {
+    // The order of probe H3 of the Task 2b review. The claim takes its hold,
+    // then waits 150 ms with the row lock. The delete starts in that wait
+    // and waits for the lock. After the claim's commit the delete reads its
+    // proof session, which the claim ended, and answers unauthorized.
+    for (let round = 0; round < ROUNDS; round++) {
+      const w = world();
+      const email = `held-${round}@example.com`;
+      const { userId, token } = await w.claimant(email);
+      const session = await w.auth.api.getSession(token);
+      if (!session) throw new Error("no session");
+      const link = await w.link(email);
+      const held = latch();
+      w.gate.hold = async () => {
+        held.open();
+        await new Promise((r) => setTimeout(r, 150));
+      };
+      const claim = w.auth.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+      await held.wait;
+      const [won, gone] = await Promise.all([
+        claim,
+        w.auth.api.user.delete({ session, ip: null, userAgent: null }),
+      ]);
+      expect(won.ok).toBe(true);
+      expect(gone.ok ? "ok" : gone.code).toBe("unauthorized");
+      if (!won.ok || !("token" in won.value)) throw new Error("the claim opened no session");
+      const mine = await w.auth.api.getSession(won.value.token);
+      expect(mine?.user.id).toBe(userId);
+      expect(await rowsOf(userId)).toEqual({
+        users: 1,
+        verified: true,
+        passwords: 0,
+        sessions: [mine?.session.id],
+        emailIdentities: 1,
+        leases: 0,
+      });
     }
   }, 60_000);
 });
