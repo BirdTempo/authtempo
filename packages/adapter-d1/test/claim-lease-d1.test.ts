@@ -469,16 +469,15 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
           .bind(`claim-lease:${user.id}`)
           .first<{ e: number | string }>()
       )?.e;
-    // The claim's time is 61 s old at its lease. The expiry counts from the clock there.
     const atLease = await expiry();
-    expect(new Date(atLease ?? 0).getTime()).toBe(current.getTime() + LEASE_MS);
     await make(false).auth.api.sweepExpired();
-    expect(await expiry()).toEqual(atLease);
+    const afterSweep = await expiry();
     // The sign-up writes its password and runs its claim check, which reads the lease.
     goUser.open();
     const up = await signUp;
     goDelete.open();
     const done = await claim;
+    // The answers first. After a sweep that took the lease, the sign-up would keep its password.
     expect(await answer(up.res)).toBe("409 email_taken_unverified");
     expect(await answer(done.res)).toBe("200 ok");
     expect(await rowsOf(user.id)).toEqual({
@@ -492,6 +491,9 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
       post("/password/sign-in", { email, password: PASSWORD }),
     );
     expect(await answer(signIn.res)).toBe("401 invalid_credentials");
+    // The claim's time is 61 s old at its lease. The expiry counts from the clock there.
+    expect(new Date(atLease ?? 0).getTime()).toBe(current.getTime() + LEASE_MS);
+    expect(afterSweep).toEqual(atLease);
     expect(Math.max(up.queries, done.queries)).toBeLessThanOrEqual(BUDGET);
   });
 });

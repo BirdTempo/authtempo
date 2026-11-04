@@ -1554,12 +1554,13 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     const owner = await w.owner.handle(first);
     expect(await answer(owner)).toBe("200 ok");
     expect(waited).toBe(true);
+    // The answers first. After a sweep that took the lease, the second claim would claim.
+    expect(seen.rival).toBe("409 conflict");
+    expect(seen.afterSweep).toEqual(seen.atLease);
     // The flow's time is 61 seconds old at the lease. The expiry counts from the clock there.
     expect((seen.atLease as VerificationRow | null)?.expiresAt).toEqual(
       new Date(start.getTime() + CLAIM_LEASE_MS + 1_000 + CLAIM_LEASE_MS),
     );
-    expect(seen.afterSweep).toEqual(seen.atLease);
-    expect(seen.rival).toBe("409 conflict");
     // The first claim completed: the claimant keeps no session and no password.
     expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
     expect(await rowOf(w, token)).toBeNull();

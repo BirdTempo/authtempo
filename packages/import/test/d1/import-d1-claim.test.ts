@@ -418,12 +418,10 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
         .bind(`claim-lease:${found?.id ?? ""}`)
         .all<{ e: number | string }>();
     const atLease = (await lease()).results;
-    expect(atLease).toHaveLength(1);
-    // The claim's time is 61 s old at its lease, and the lease is live at the moved time.
-    expect(new Date(atLease[0]?.e ?? 0).getTime()).toBeGreaterThan(clock.now().getTime());
-    // The sweep runs at the moved time. The lease lives 60 s from its write, so it stays.
+    // The sweep runs at the moved time.
+    const swept = clock.now().getTime();
     await app(env.DB, { clock }).api.sweepExpired();
-    expect((await lease()).results).toEqual(atLease);
+    const afterSweep = (await lease()).results;
     // The second run accepts the format and repairs the missing password in that wait.
     const second = await importUsers(createD1Adapter(env.DB), listSource(record()), {
       formats: ["bcrypt"],
@@ -431,6 +429,7 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
       now: () => clock.now(),
     });
     claim.go();
+    // The answers first. After a sweep that took the lease, the repair would keep its password.
     expect(ownerOf(await won)).toBe("ok a session");
     expect(second.repaired).toEqual([]);
     expect(second.partial).toEqual([
@@ -443,6 +442,10 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
       sessions: 1,
     });
     expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    // The claim's time is 61 s old at its lease. The lease lives 60 s from its write, so the sweep kept it.
+    expect(atLease).toHaveLength(1);
+    expect(new Date(atLease[0]?.e ?? 0).getTime()).toBeGreaterThan(swept);
+    expect(afterSweep).toEqual(atLease);
   });
 
   it("the control: a repair after the claim writes nothing", async () => {
