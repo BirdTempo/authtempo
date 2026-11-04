@@ -9,7 +9,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import { hasAddress, provedAccount } from "./address.js";
+import { hasAddress, provedAccount, verifiedHandle } from "./address.js";
 import {
   type AnonymousCaller,
   anonymousData,
@@ -1001,6 +1001,12 @@ export async function passwordSignIn(
   }
   // The sign-in completes in this request: bound (plan 12i Task 7).
   const upgrade = upgradeSteps(config, input.anonymous ?? null, null, "bound");
+  // The hint of a user with no address (ruling 17 of plan 12p): its verified
+  // handle, a phone that signs in or a passkey. A session that proved that
+  // handle set the password, and no claim of a phone exists. So a phone
+  // user's session is proved, and a username-only user's is not. An address
+  // gives its own flag (`provedAtOpen`), so a user with one gets no read.
+  const handleProved = !hasAddress(user) && (await verifiedHandle(config, config.storage, user));
   // The second factor (plan 9f, owner decision 1b): a user with the factor on
   // gets a challenge in place of the session. The gate keeps the guard below
   // for its challenge, so a reset, a change, or a claim since the check
@@ -1031,7 +1037,13 @@ export async function passwordSignIn(
       await upgrade.before(tx, user, upgradeProof(user), "password");
       const prepared = await prepareSession(
         config,
-        { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
+        {
+          user,
+          ip: input.ip,
+          userAgent: input.userAgent,
+          via: "password",
+          ...(handleProved ? { handleProved: true } : {}),
+        },
         tx,
       );
       const s = await writeSession(config, prepared, tx);

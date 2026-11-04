@@ -1401,6 +1401,55 @@ async function usernameUser(w: World) {
   return { first, second };
 }
 
+describe("the hint of a password sign-in with no address (ruling 17 of plan 12p)", () => {
+  it("proves the session of a phone user's password sign-in: a token create passes", async () => {
+    const w = world();
+    await firstPassword(w, cookieOf(await phoneUser(w)));
+    const signIn = await w.claimant.handle(
+      req("POST", "/password/sign-in", { phone: PHONE, password: PW }),
+    );
+    expect(await answer(signIn)).toBe("200 ok");
+    const token = setToken(signIn) ?? "";
+    expect((await rowOf(w, token))?.proved).toBe(true);
+    expect(await tokenCreate(w, token)).toBe("200 ok");
+  });
+
+  it("does not prove the session of a username-only user's password sign-in: a token create answers email_unverified", async () => {
+    const w = world();
+    const { second } = await usernameUser(w);
+    expect((await rowOf(w, second))?.proved).toBe(false);
+    expect(await tokenCreate(w, second)).toBe("403 email_unverified");
+  });
+
+  it("proves the session of a challenge after a phone user's password sign-in", async () => {
+    const w = world();
+    const first = await phoneUser(w);
+    const cookie = cookieOf(first);
+    await firstPassword(w, cookie);
+    const setup = await w.claimant.handle(req("POST", "/totp/setup", { password: PW }, cookie));
+    expect(await answer(setup)).toBe("200 ok");
+    const secret = base32Decode(((await setup.json()) as { secret: string }).secret);
+    const on = await w.claimant.handle(
+      req("POST", "/totp/enable", { code: await totpCode(secret, w.clock.now()) }, cookie),
+    );
+    expect(await answer(on)).toBe("200 ok");
+    w.clock.advance(90_000);
+    const gated = await w.claimant.handle(
+      req("POST", "/password/sign-in", { phone: PHONE, password: PW }),
+    );
+    expect(gated.status).toBe(200);
+    const challenge = ((await gated.json()) as { twoFactor: { challenge: string } }).twoFactor
+      .challenge;
+    const done = await w.claimant.handle(
+      req("POST", "/totp/verify", { challenge, code: await totpCode(secret, w.clock.now()) }),
+    );
+    expect(await answer(done)).toBe("200 ok");
+    const token = setToken(done) ?? "";
+    expect((await rowOf(w, token))?.proved).toBe(true);
+    expect(await tokenCreate(w, token)).toBe("200 ok");
+  });
+});
+
 describe("the confirm of a change of address (plan 12p decision 7)", () => {
   it("sets proved on the session that the confirm keeps, for a user who had no address", async () => {
     const w = world();

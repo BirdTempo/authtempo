@@ -372,13 +372,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
       expect(set.status).toBe(200);
       const signIn = await call(w, post("/auth/password/sign-in", { phone, password: PASSWORD }));
       expect(signIn.status).toBe(200);
-      // A password proves no handle, so that session holds no verified power (plan 12p).
-      // The session of the phone code does.
-      return {
-        ...up,
-        proved: up.cookie,
-        cookie: `${w.config.cookieName}=${signIn.body.token as string}`,
-      };
+      return { ...up, cookie: `${w.config.cookieName}=${signIn.body.token as string}` };
     }
     // The phone is the only identifier: with it gone no sign-in reaches the password.
     const lone = await withPassword(A);
@@ -391,7 +385,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     const named = await withPassword(B);
     const username = await call(
       w,
-      post("/auth/user/username", { username: "bea" }, { cookie: named.proved }),
+      post("/auth/user/username", { username: "bea" }, { cookie: named.cookie }),
     );
     expect(username.status).toBe(200);
     expect(await remove(named.cookie)).toMatchObject({ status: 200, body: { ok: true } });
@@ -404,7 +398,7 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     const cia = await withPassword("+14155550102");
     const named2 = await call(
       w,
-      post("/auth/user/username", { username: "cia" }, { cookie: cia.proved }),
+      post("/auth/user/username", { username: "cia" }, { cookie: cia.cookie }),
     );
     expect(named2.status).toBe(200);
     const off = { ...w.config, username: null };

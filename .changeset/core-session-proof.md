@@ -14,6 +14,6 @@ A claim now deletes the identities, the passwords, the passkeys, the passkey cha
 
 The `email_verified` claim of a session JWT reads the session flag with the user's flag. `publicUser`, the ID token, and userinfo keep the user's flag. The confirm of a change of address sets the flag on the session that it keeps.
 
-A password sign-in of a user with no address proves no handle, so its session holds no verified power. That user signs in by the phone code or a passkey before a verified action.
+A password sign-in of a user with no address gets the flag when that user holds a verified handle: a phone that signs in, or a passkey. So a phone user's password session holds the verified powers, and a username-only user's does not.
 
 The compat entry of core exports `createApiTokenAs` and `createOrganizationTokenAs` for a server call that names its user and has no session. They keep the rule of the user row.
