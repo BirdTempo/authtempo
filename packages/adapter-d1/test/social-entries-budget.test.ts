@@ -18,9 +18,12 @@ const RAW = Symbol("raw");
 // sign-in makes the user, and the second finds it by the identity. The
 // second sign-in of a user with an unverified address (a Better Auth-era
 // placeholder, or none) keeps the guard on its identity row: two queries.
+// Update 2026-11-05 by plan 12q: each sign-in opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
 const START_QUERIES = 3;
-const FIRST_QUERIES = 7;
-const AGAIN_QUERIES = 8;
+const FIRST_QUERIES = 8;
+const AGAIN_QUERIES = 9;
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {

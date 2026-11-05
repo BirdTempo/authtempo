@@ -305,6 +305,14 @@ export interface AuthConfig {
      * at its old expiry. The default keeps today's refresh for every client.
      */
     deferRefresh?: boolean;
+    /**
+     * The most sessions of one user, 1 to 1000 (plan 12q). Default 100. A
+     * session create ends the oldest sessions of the user beyond the cap,
+     * before its insert, with the reason `capped`. An impersonation session
+     * neither counts nor ends a session. The cap bounds the sessions that a
+     * claimant can make before the owner's claim.
+     */
+    maxPerUser?: number;
   };
   magicLink?: {
     ttlMinutes?: number;
@@ -1418,6 +1426,7 @@ export interface ResolvedConfig {
     absoluteDays: number | null;
     freshMinutes: number;
     deferRefresh: boolean;
+    maxPerUser: number;
   };
   magicLink: {
     ttlMinutes: number;
@@ -2540,19 +2549,21 @@ const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, tr
   absoluteDays: true,
   freshMinutes: true,
   deferRefresh: true,
+  maxPerUser: true,
 };
 
 /**
  * `session`. ttlDays and slidingRefreshDays keep the defaults of version 1.
  * absoluteDays is off by default (plan 12b). freshMinutes is 1440 by default
  * (plan 12a). deferRefresh is off by default (plan 12a, see `AuthConfig.session.deferRefresh`).
+ * maxPerUser is 100 by default (plan 12q, the lead's choice of 2026-11-05).
  */
 function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["session"] {
   const o = input ?? {};
   for (const [key, value] of Object.entries(o))
     if (value !== undefined && !Object.hasOwn(SESSION_KEYS, key))
       throw new ConfigError(
-        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, freshMinutes, and deferRefresh`,
+        `session.${key} is not an option; core has ttlDays, slidingRefreshDays, absoluteDays, freshMinutes, deferRefresh, and maxPerUser`,
       );
   const { absoluteDays } = o;
   if (
@@ -2571,6 +2582,7 @@ function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["ses
     absoluteDays: absoluteDays ?? null,
     freshMinutes: integerIn("session.freshMinutes", o.freshMinutes ?? 1440, 1, 1440),
     deferRefresh: o.deferRefresh ?? false,
+    maxPerUser: integerIn("session.maxPerUser", o.maxPerUser ?? 100, 1, 1000),
   };
 }
 

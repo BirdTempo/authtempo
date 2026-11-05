@@ -27,9 +27,12 @@ const PASSWORD = "correct horse battery";
 // Update 2026-11-04 by plan 12p: the sign-up of a new address reads the
 // claim lease after the answer (+1). The confirm's claim writes it (+1).
 // The queries before the answer stay the same. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+// Update 2026-11-05 by plan 12q: the confirm opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
 const SIGN_UP_NEW_QUERIES = 15;
 const SIGN_UP_KNOWN_QUERIES = 4;
-const CONFIRM_QUERIES = 24;
+const CONFIRM_QUERIES = 25;
 const WRONG_QUERIES = 4;
 const UNKNOWN_QUERIES = 4;
 const RESEND_QUERIES = 8;

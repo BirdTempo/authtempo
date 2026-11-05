@@ -179,7 +179,10 @@ describe("the queries of one SAML ACS post on D1 (plan 12d Task 8)", () => {
     // Measured on the binding on 2026-10-22 (load 12.1): a just-in-time create 23, and a known
     // identity 15 after it. A capped session adds the create of its session-cap row (ruling 38
     // Q1 of plan 12d): 16.
-    expect({ created, known, capped }).toEqual({ created: 23, known: 15, capped: 16 });
+    // Update 2026-11-05 by plan 12q: each post opens a session, and its cap read adds one
+    // query (+1).
+    // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+    expect({ created, known, capped }).toEqual({ created: 24, known: 16, capped: 17 });
     for (const n of [created, known, capped]) expect(n).toBeLessThanOrEqual(50);
   }, 120_000);
 

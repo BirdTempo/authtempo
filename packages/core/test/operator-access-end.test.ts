@@ -33,6 +33,8 @@ async function world() {
   const endings: { id: string; reason: SessionEndReason }[] = [];
   const fx = await operatorFixture({
     config: {
+      // The scenes open up to 150 sessions of one user: the default cap is 100 (plan 12q).
+      session: { maxPerUser: 1000 },
       limiter: {
         allow: async () => {
           limited.calls++;

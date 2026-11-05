@@ -36,6 +36,8 @@ function world(extra: Partial<AuthConfig> = {}) {
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true },
+    // 505 sessions of one user: the default cap is 100 (plan 12q), and the largest 1000.
+    session: { maxPerUser: 1000 },
     hooks: {
       session: { afterEnd: ({ session, reason }) => void ended.push({ id: session.id, reason }) },
     },

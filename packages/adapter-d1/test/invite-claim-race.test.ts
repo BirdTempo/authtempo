@@ -307,7 +307,10 @@ function gate() {
 // 12o). The first is the request of the race. The second is the request
 // that the client sends again. Each is one invocation with the D1 limiter on
 // the same view. On 2026-11-03 the race took 36 and the request again 27.
-const PINS = { race: 28, again: 15 };
+// Update 2026-11-05 by plan 12q: the request again opens a session, and its
+// cap read adds one query (+1). The race answers 409 before its session.
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const PINS = { race: 28, again: 16 };
 
 describe("the invitation confirm beside a magic link of the address on D1 (rulings 38 and 42 of plan 12n, plan 12o)", () => {
   beforeEach(async () => {

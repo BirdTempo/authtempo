@@ -145,6 +145,8 @@ describe("the callers of createUserIn", () => {
   // Measured on the memory adapter at a107e164, before the move (2026-10-25):
   // createAdmin on a fresh database 8, a magic-link sign-up 9.
   // Each caller read the address itself, so the shared create adds no read.
+  // Plan 12q adds the cap read to each session create: the sign-up sends 10
+  // (measured on the memory adapter on 2026-11-05).
   it("send the statements of before the move", async () => {
     const auth = await operatorAuth();
     const sent = () => auth.storage.statementsSent?.() ?? 0;
@@ -163,6 +165,6 @@ describe("the callers of createUserIn", () => {
     start = sent();
     const link = await verifyMagicLink(auth.config, { token, ip: null, userAgent: null });
     if (!link.ok) throw new Error(link.code);
-    expect({ adminSent, signUpSent: sent() - start }).toEqual({ adminSent: 8, signUpSent: 9 });
+    expect({ adminSent, signUpSent: sent() - start }).toEqual({ adminSent: 8, signUpSent: 10 });
   });
 });

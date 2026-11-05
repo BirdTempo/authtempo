@@ -192,21 +192,26 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
     // the phone verify over an anonymous session hold the two session reads
     // of onLinkAccount. Each count holds one revokedFor read per session
     // that the path checks, as every session ties (see the top).
+    // Update 2026-11-05 by plan 12q: each path that opens a session reads the
+    // cap of the user's sessions (+1): the anonymous sign-in, the sign-up over
+    // it, the username sign-in, the phone sign-in, and the two phone verifies
+    // that sign in. Measured 2026-11-05 09:32 CST on the owner's Mac Studio,
+    // load 16.55 20.87 17.39.
     const exact: Record<string, number> = {
-      "/sign-in/anonymous": 10,
+      "/sign-in/anonymous": 11,
       // Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1).
       // Run of 20:42 CST on the owner's Mac Studio, load 10.8 7.4 6.1.
-      "sign-up over anonymous": 32,
+      "sign-up over anonymous": 33,
       "/delete-anonymous-user": 13,
       "/is-username-available": 6,
-      "/sign-in/username": 12,
+      "/sign-in/username": 13,
       "/phone-number/send-otp": 12,
-      "/phone-number/verify": 14,
+      "/phone-number/verify": 15,
       "/phone-number/send-otp (add)": 18,
       "/phone-number/verify (add)": 18,
-      "/sign-in/phone-number": 15,
+      "/sign-in/phone-number": 16,
       "/phone-number/send-otp (anonymous)": 17,
-      "/phone-number/verify (anonymous)": 31,
+      "/phone-number/verify (anonymous)": 32,
       "/multi-session/list-device-sessions": 22,
       "/multi-session/set-active": 25,
       "/multi-session/revoke": 24,

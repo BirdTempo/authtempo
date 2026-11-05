@@ -27,18 +27,25 @@ export const cookieOf = (res: Response) =>
  * operator then signs in, after the grant (ruling 50), and turns TOTP on
  * through Better Auth's two paths unless `factor` is false. `slug` is
  * the platform organization as the app writes it. `extra` adds plugins.
+ * `sessionMaxPerUser` sets core's cap of the sessions of one user (plan 12q):
+ * a worst page needs more than the default of 100.
  */
 export function adminShim(
   database: CompatDatabase,
   links: string[] = [],
   slug = "platform-co",
   extra: readonly BetterAuthPlugin[] = [],
+  sessionMaxPerUser?: number,
 ) {
   return betterAuth({
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
     database,
-    authtempo: { passwordHash: fast, platformOrganization: slug },
+    authtempo: {
+      passwordHash: fast,
+      platformOrganization: slug,
+      ...(sessionMaxPerUser === undefined ? {} : { sessionMaxPerUser }),
+    },
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: {
       sendVerificationEmail: async ({ token }) => {
@@ -68,10 +75,15 @@ export function plainShim(database: CompatDatabase) {
 
 export async function adminApp(
   database: CompatDatabase,
-  opts: { factor?: boolean; slug?: string; plugins?: readonly BetterAuthPlugin[] } = {},
+  opts: {
+    factor?: boolean;
+    slug?: string;
+    plugins?: readonly BetterAuthPlugin[];
+    sessionMaxPerUser?: number;
+  } = {},
 ) {
   const links: string[] = [];
-  const auth = adminShim(database, links, opts.slug, opts.plugins);
+  const auth = adminShim(database, links, opts.slug, opts.plugins, opts.sessionMaxPerUser);
   const send = (method: string, path: string, body: unknown, cookie: string) =>
     auth.handler(
       new Request(`${BASE}/api/auth${path}`, {

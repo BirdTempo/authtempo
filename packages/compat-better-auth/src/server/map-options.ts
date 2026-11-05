@@ -727,6 +727,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       ...(options.session?.deferSessionRefresh !== undefined
         ? { deferRefresh: options.session.deferSessionRefresh }
         : {}),
+      // Core's cap of the sessions of one user (plan 12q). Better Auth has none; core's default is 100.
+      ...(options.authtempo?.sessionMaxPerUser !== undefined
+        ? { maxPerUser: options.authtempo.sessionMaxPerUser }
+        : {}),
     },
     account: {
       // Better Auth's deleteUser is off by default; core's is on. The shim keeps Better Auth's default.

@@ -33,15 +33,18 @@ const PHONE = "+14155550100";
 // Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1), and
 // the confirm's claim writes it (+1). The passkey sign-in gained its guard
 // in Task 2 (+2). Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
+// Update 2026-11-05 by plan 12q: each `done` opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
 const PINS = {
-  signUpConfirm: { start: 13, done: 36 },
-  signIn: { start: 0, done: 25 },
-  magicLink: { start: 5, done: 24 },
-  emailCode: { start: 8, done: 24 },
-  social: { start: 4, done: 24 },
-  phone: { start: 10, done: 23 },
-  passkey: { start: 4, done: 26 },
-  challenge: { start: 10, done: 28 },
+  signUpConfirm: { start: 13, done: 37 },
+  signIn: { start: 0, done: 26 },
+  magicLink: { start: 5, done: 25 },
+  emailCode: { start: 8, done: 25 },
+  social: { start: 4, done: 25 },
+  phone: { start: 10, done: 24 },
+  passkey: { start: 4, done: 27 },
+  challenge: { start: 10, done: 29 },
 };
 // The completing request of an upgrade in a browser with a full bag
 // (multiSession max 10, nine bag tokens), the join of plan 12i Tasks 7 and
@@ -50,7 +53,9 @@ const PINS = {
 // no bag session. Counts of the run of 2026-10-25.
 // Update 2026-11-04 by plan 12p: the confirm's claim writes the lease (+1).
 // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const FULL_BAG_PINS = { signIn: 26, signUpConfirm: 37 };
+// Update 2026-11-05 by plan 12q: the cap read of the session (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const FULL_BAG_PINS = { signIn: 27, signUpConfirm: 38 };
 // The two worst joins of final review B M of plan 12i, with every hook of
 // the flows set. An ID-token sign-in that claims an unverified account with
 // 1 or 10 sessions, and the sign-up confirm by code. Before the claim ended
@@ -59,7 +64,9 @@ const FULL_BAG_PINS = { signIn: 26, signUpConfirm: 37 };
 // 2026-10-25.
 // Update 2026-11-04 by plan 12p: each claim writes the lease (+1).
 // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const WORST_JOIN_PINS = { idTokenClaim: 40, codeConfirm: 28, codeConfirmUniform: 39 };
+// Update 2026-11-05 by plan 12q: the cap read of the session (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const WORST_JOIN_PINS = { idTokenClaim: 41, codeConfirm: 29, codeConfirmUniform: 40 };
 /** Every hook that the two worst joins can run. */
 const ALL_HOOKS: AuthConfig["hooks"] = {
   anonymous: { beforeLink: () => {}, afterLink: () => {} },
@@ -556,7 +563,9 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
   // race answered 409 in 24 queries, and the request again took 39.
   // Update 2026-11-04 by plan 12p: the claim writes the lease (+1).
   // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-  const RACE_PINS = { race: 40 };
+  // Update 2026-11-05 by plan 12q: the cap read of the session (+1).
+  // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+  const RACE_PINS = { race: 41 };
 
   it("signs in through a session race on the worst claim join in one run, within the D1 Free budget (plan 12o)", async () => {
     // The sign-out runs on the binding with no count, as a request in another invocation.
@@ -666,7 +675,10 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
   // of the sign-up with 11 claimant sessions.
   // Update 2026-11-04 by plan 12p (ruling 16): the claim writes the lease
   // (+1), 3 under the cap. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-  const UNIQUE_PINS = { retry: 47 };
+  // Update 2026-11-05 by plan 12q: the cap read of the session (+1), 2 under
+  // the 50 queries of D1: the tightest pin of a session create.
+  // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+  const UNIQUE_PINS = { retry: 48 };
 
   it("signs in after a unique-key retry on the worst claim join within the D1 Free budget (rr-final L-7 of plan 12n)", async () => {
     // The sign-up and the sign-ins run on the binding with no count, as requests in other invocations.

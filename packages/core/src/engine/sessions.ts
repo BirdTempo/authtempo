@@ -444,12 +444,20 @@ export async function prepareSession(
  * The same read stops an active ban with `account_banned` (ruling 3 of plan
  * 12f). The ban writes the user row before it deletes the sessions. So a
  * ban that commits after the flow read the user still stops this session.
+ *
+ * Before the insert, the cap ends the oldest sessions of the user past
+ * `session.maxPerUser` (`capSessions`, decision 4 of plan 12q). An
+ * impersonation session skips it. `sessionOpened` fires their end after the
+ * commit, with the reason `capped`.
  */
 export async function writeSession(
   config: ResolvedConfig,
   prepared: PreparedSession,
   storage: StorageAdapter = config.storage,
 ): Promise<{ token: string; session: SessionRow }> {
+  const capped = prepared.input.impersonation
+    ? null
+    : await capSessions(config, storage, prepared.input.userId);
   const written = await createSession(config, prepared.input, storage);
   const user = await storage.findOne("user", [
     { field: "id", op: "eq", value: prepared.input.userId },
@@ -458,7 +466,70 @@ export async function writeSession(
   if (activeBan(user, config.clock.now())) stopWith("account_banned");
   // This read follows the hold, so a change of address since the flow's check shows here.
   if (prepared.address !== undefined && user.email !== prepared.address) stopWith("conflict");
+  if (capped) CAPPED.set(written.session, capped);
   return written;
+}
+
+/** The sessions that the cap of one session create ended: the rows with a hook, and the count. */
+interface CappedEnd {
+  rows: SessionRow[] | undefined;
+  count: number;
+}
+
+/**
+ * The end of the cap of each written session, until `sessionOpened` fires
+ * it after the commit. A weak map, so the entry of a session whose
+ * transaction rolled back goes with its row. Every flow passes the row of
+ * `writeSession` to `sessionOpened`.
+ */
+const CAPPED = new WeakMap<SessionRow, CappedEnd>();
+
+/**
+ * The cap of the sessions of one user (decision 4 of plan 12q), in the
+ * flow's transaction, before the insert of its session. One read takes the
+ * newest `session.maxPerUser` live sessions of the user by id. Fewer rows
+ * mean room, and nothing more runs: one query. At the cap, one delete ends
+ * the oldest row of the read and every older row. The new session then
+ * makes the count the cap again: two queries. The port has no offset, so the
+ * read of one row at an offset is not open to it (`FindManyOptions`, read
+ * 2026-11-05).
+ *
+ * Only the user's own sessions count. An impersonation session is the act
+ * of an operator, so it neither counts nor ends here. The ids of `newId`
+ * sort by the time of their creation, so the oldest goes first. With an
+ * `afterEnd` hook, `deleteRows` answers the ended rows. With none, a delete
+ * answers the count, for the event `session.end`. An expired row is not
+ * live: it does not count, and the sweep deletes it.
+ *
+ * Two creates at once can read the same rows, and each can end the same
+ * oldest row. The count is then one past the cap, and the next create ends
+ * the rest. On Postgres and MySQL `prepareSession` holds the row of a
+ * verified user, so its creates wait on each other. The links of an ended
+ * session go to the outbox at the sweep, as for an expiry (`sweepLinks`).
+ */
+async function capSessions(
+  config: ResolvedConfig,
+  storage: StorageAdapter,
+  userId: string,
+): Promise<CappedEnd | null> {
+  const max = config.session.maxPerUser;
+  const own: Where<"session">[] = [
+    ...liveSessionWhere(config, userId, config.clock.now()),
+    { field: "actorId", op: "eq", value: null },
+  ];
+  const newest = await storage.findMany("session", own, {
+    sort: { field: "id", dir: "desc" },
+    limit: max,
+  });
+  const edge = newest[max - 1];
+  if (!edge) return null;
+  const past: Where<"session">[] = [...own, { field: "id", op: "lte", value: edge.id }];
+  // The row locks first, by id (ruling 36 of plan 12f): no cost on D1.
+  await storage.lockInOrder?.("session", past);
+  if (!config.hooks.session.afterEnd)
+    return { rows: undefined, count: await storage.delete("session", past) };
+  const rows = await storage.deleteRows("session", past);
+  return { rows, count: rows.length };
 }
 
 /**
@@ -477,7 +548,8 @@ export async function openSession(
 /**
  * `session.afterCreate` for a sign-in that committed (plan 9d), and the
  * event `sign_in` with the outcome success (plan 12h Task 5). A social
- * sign-in names its provider.
+ * sign-in names its provider. First the end of the sessions that the cap of
+ * this session ended, with the reason `capped` (plan 12q).
  */
 export async function sessionOpened(
   config: ResolvedConfig,
@@ -488,6 +560,12 @@ export async function sessionOpened(
   // The app payload of a social sign-in (plan 12i Task 19): the hook event only, never the line.
   stateData?: Record<string, unknown> | null,
 ): Promise<void> {
+  // The sessions that the cap ended before this one (decision 4 of plan 12q): first, as they ended first.
+  const capped = CAPPED.get(session);
+  if (capped) {
+    CAPPED.delete(session);
+    await sessionsEnded(config, capped.rows, "capped", null, capped.count);
+  }
   config.observe.emit({
     name: "sign_in",
     method: via,

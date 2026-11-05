@@ -22,14 +22,20 @@ const SET_QUERIES = 6;
 const CHECK_QUERIES = 2;
 // Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1).
 // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const SIGN_UP_QUERIES = 15;
+// Update 2026-11-05 by plan 12q: the sign-up opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const SIGN_UP_QUERIES = 16;
 const TAKEN_QUERIES = 3;
 // The uniform sign-up with a name stops before any read of a user (ruling 16
 // M1): one query, the per-IP limit.
 const UNIFORM_REFUSED_QUERIES = 1;
 // Plan 12i Task 3: the password sign-in by username, run of 2026-10-24.
 // A right password, an unknown name, and a wrong password.
-const NAME_SIGN_IN_QUERIES = 12;
+// Update 2026-11-05 by plan 12q: the right password opens a session, and its
+// cap read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const NAME_SIGN_IN_QUERIES = 13;
 const UNKNOWN_NAME_QUERIES = 3;
 const WRONG_PASSWORD_QUERIES = 4;
 

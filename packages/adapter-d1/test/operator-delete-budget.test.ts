@@ -931,7 +931,10 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
    */
   // Update 2026-11-04 by plan 12p: the claim of the confirm writes the lease
   // (+1), so 28. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-  const INVITE_COUNTS = { create: 9, confirm: [28, 16] };
+  // Update 2026-11-05 by plan 12q: each confirm opens a session, and its cap
+  // read adds one query (+1), so 29 and 17.
+  // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+  const INVITE_COUNTS = { create: 9, confirm: [29, 17] };
 
   it("creates a user with an invitation in 50 calls (plan 12f2 Task 3)", async () => {
     const sent: MailMessage[] = [];

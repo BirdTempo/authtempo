@@ -112,6 +112,7 @@ export const CONFIG_KEYS = {
     absoluteDays: true,
     freshMinutes: true,
     deferRefresh: true,
+    maxPerUser: true,
   } satisfies Keys<Part<"session">>,
   magicLink: {
     ttlMinutes: true,

@@ -369,6 +369,8 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
       const PW = "correct horse battery";
       const signIns = TIMING_RUN ? 5000 : 500;
       const flushTimeoutMs = 100;
+      /** The default `session.maxPerUser`: the sign-up and the sign-ins are one user's sessions. */
+      const MAX_PER_USER = 100;
       /** The time of each sign-in after a warm-up of 20, and the most events that the buffer held. */
       async function run(observe: ObserveConfig | null) {
         made.length = 0;
@@ -402,8 +404,9 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
           );
           const took = performance.now() - start;
           expect(res.status).toBe(200);
-          // The request event and the sign_in event (Task 5).
-          emitted += 2;
+          // The request event and the sign_in event (Task 5). From the 100th
+          // session on, the cap ends the oldest with one session.end (plan 12q).
+          emitted += i + 1 >= MAX_PER_USER ? 3 : 2;
           if (i >= 20) times.push(took);
           if (inner) flushes.push(h.auth.observe.flush());
         }

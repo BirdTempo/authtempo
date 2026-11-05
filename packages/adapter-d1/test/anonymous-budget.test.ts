@@ -20,8 +20,10 @@ const RAW = Symbol("raw");
 // route of ANONYMOUS_REFUSED: the router step reads the session and the
 // user, and answers before the handler.
 // The sign-in counts the daily cap of the deployment too (ruling 25 M4).
+// Plan 12q: the cap read of the new session adds one query to the sign-in
+// (measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94).
 const PINS = {
-  signIn: 6,
+  signIn: 7,
   signInAgain: 3,
   refused: 2,
   delete: 9,

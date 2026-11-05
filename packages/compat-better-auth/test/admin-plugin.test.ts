@@ -532,7 +532,11 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
 
   it("answers success false with more while sessions stay, and success at the last page", async () => {
     // A limiter that allows each call: 501 sign-ins of one user, past the page of 500.
-    const a = await adminApp({ ...memoryDatabase(), limiter: { allow: async () => true } });
+    // The default cap of the sessions of one user is 100 (plan 12q).
+    const a = await adminApp(
+      { ...memoryDatabase(), limiter: { allow: async () => true } },
+      { sessionMaxPerUser: 1000 },
+    );
     const ann = await a.user("ann@example.com");
     for (let i = 0; i < 500; i++)
       await a.call("/password/sign-in", { email: "ann@example.com", password: PASSWORD });

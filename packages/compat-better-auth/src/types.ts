@@ -1119,6 +1119,13 @@ export interface BetterAuthOptions {
      * 100000 (plan 12i Task 16). Default 1000. Better Auth has no cap.
      */
     anonymousDailyCap?: number;
+    /**
+     * The most live sessions of one user, 1 to 1000: core's
+     * `session.maxPerUser` (plan 12q). Default 100. Better Auth has no cap. A
+     * sign-in past the cap ends the oldest session of the user, with the
+     * reason `capped`.
+     */
+    sessionMaxPerUser?: number;
   };
 }
 

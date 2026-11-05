@@ -551,6 +551,11 @@ const dailyCap: Rule = (v, p, out) => {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 100_000)
     refuse(out, p, "core takes 1 to 100000 a day");
 };
+/** Core's session.maxPerUser takes 1 to 1000 (plan 12q). */
+const sessionCap: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 1000)
+    refuse(out, p, "core takes 1 to 1000");
+};
 /** Core's username.minLength and maxLength take 3 to 30. */
 const usernameLength: Rule = (v, p, out) => {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 3 || v > 30)
@@ -1293,6 +1298,8 @@ const TOP: Record<string, Rule> = {
     // each region; checkOptions ties the block to plugins[phone-number].
     phone: object({ regions: stringList, dailyCap: dailyCap }),
     anonymousDailyCap: dailyCap,
+    // Plan 12q: core's session.maxPerUser, the cap of the sessions of one user.
+    sessionMaxPerUser: sessionCap,
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),

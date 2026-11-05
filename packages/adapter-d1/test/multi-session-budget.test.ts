@@ -34,8 +34,11 @@ const now = () => new Date(NOW.getTime() + shift);
 // sign-out ends ten sessions.
 // Update 2026-11-04 by plan 12p: each sign-up reads the claim lease (+1).
 // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const SIGN_UP_EMPTY_QUERIES = 14;
-const SIGN_UP_FULL_QUERIES = 18;
+// Update 2026-11-05 by plan 12q: each sign-up opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const SIGN_UP_EMPTY_QUERIES = 15;
+const SIGN_UP_FULL_QUERIES = 19;
 const LIST_QUERIES = 31;
 const SWITCH_QUERIES = 34;
 const SESSION_READ_QUERIES = 3;

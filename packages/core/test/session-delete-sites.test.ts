@@ -41,7 +41,9 @@ type Kind =
   /** Sessions that a sign-in wrote after the read of the flow: a later step makes each link with no session a logout (ruling 49). */
   | "late"
   /** The conformance kit of the port: test rows of no client, in no flow. */
-  | "kit";
+  | "kit"
+  /** The oldest sessions past `session.maxPerUser` (plan 12q): a later step makes each link with no session a logout (ruling 49). */
+  | "capped";
 
 interface Site {
   file: string;
@@ -178,6 +180,24 @@ const SITES: Site[] = [
     kind: "by id",
     reason:
       "the sign-out, the revoke of one session, an expired row or a row of a banned user that a request presents, and RP-initiated logout",
+  },
+  {
+    file: "engine/sessions.ts",
+    fn: "capSessions",
+    call: 'delete("session"',
+    count: 1,
+    kind: "capped",
+    reason:
+      "a session create past session.maxPerUser with no afterEnd hook (plan 12q): the oldest live rows of the user; the link step of the sweep makes each link with no session a logout, as for an expiry",
+  },
+  {
+    file: "engine/sessions.ts",
+    fn: "capSessions",
+    call: 'deleteRows("session"',
+    count: 1,
+    kind: "capped",
+    reason:
+      "the same cap with an afterEnd hook (plan 12q): the answer is the ended list, which sessionOpened fires after the commit",
   },
   {
     file: "engine/sessions.ts",

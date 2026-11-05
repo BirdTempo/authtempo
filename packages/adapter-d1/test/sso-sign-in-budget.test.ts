@@ -243,11 +243,14 @@ describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
     // the member row; the claim also ends the claimant's rows. With the second
     // factor on, each callback writes a challenge. Measured on 2026-10-22 (load
     // 4.1 to 15.2): a link of a verified user 21, and the known identity 11 after it.
+    // Update 2026-11-05 by plan 12q: each callback that opens a session reads the
+    // cap (+1). A callback of the factor writes a challenge: no session.
+    // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
     expect({ created, claimed, factor }).toEqual({
-      created: [23, 15],
+      created: [24, 16],
       // Update 2026-11-04 by plan 12p: the claim writes the lease (+1).
       // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-      claimed: [36, 15],
+      claimed: [37, 16],
       factor: [21, 11],
     });
     for (const n of [...created, ...claimed, ...factor]) expect(n).toBeLessThanOrEqual(50);

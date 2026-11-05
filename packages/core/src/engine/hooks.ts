@@ -110,7 +110,9 @@ export type SessionEndReason =
   // with a verified address, the claimant's, and ended it. The sweep also
   // ends with it the sessions that a claim left past its two chunks
   // (decision 3).
-  | "claimed";
+  | "claimed"
+  // plan 12q: a session create ended the oldest session past `session.maxPerUser`.
+  | "capped";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event
  * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
@@ -133,6 +135,7 @@ export const SESSION_END_REASONS = {
   displaced: true,
   anonymous_upgrade: true,
   claimed: true,
+  capped: true,
 } as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */

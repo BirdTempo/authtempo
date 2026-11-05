@@ -50,7 +50,10 @@ const LEASE_INSERT = /^INSERT INTO ta_verification\b/;
 // The `email` identity of the first request stayed, so `stale` writes no
 // identity (-1). So the stale path sends two more queries than `plain`, and
 // three more than a claim before plan 12p.
-const PINS = { plain: 27, held: 15, stale: 28 };
+// Update 2026-11-05 by plan 12q: `plain` and `stale` open the owner's
+// session, and its cap read adds one query (+1). `held` opens none. Measured
+// 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const PINS = { plain: 28, held: 15, stale: 29 };
 
 type Watch = (sql: string) => Promise<void>;
 

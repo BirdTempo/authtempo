@@ -41,6 +41,7 @@ describe("resolveConfig", () => {
       absoluteDays: null,
       freshMinutes: 1440,
       deferRefresh: false,
+      maxPerUser: 100,
     });
     expect(c.magicLink.ttlMinutes).toBe(15);
     expect(c.magicLink.linkBuilder("tok", "/x")).toBe(

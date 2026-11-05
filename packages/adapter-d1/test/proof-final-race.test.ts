@@ -274,7 +274,10 @@ async function expectFinal(other: World, email: string, claimantSessions: string
 // the answer 500). `other` is the Google sign-in of the race of ruling 26.
 // Update 2026-11-04 by plan 12p: each claim that runs writes the lease (+1).
 // Scene A loses its claim and writes nothing. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const PINS = { a: 14, b: 24, c: 24, identity: 26, mirror: 38, other: 24 };
+// Update 2026-11-05 by plan 12q: a scene that signs in opens a session, and
+// its cap read adds one query (+1). Scene A and `other` open none. Measured
+// 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const PINS = { a: 14, b: 25, c: 25, identity: 27, mirror: 39, other: 24 };
 
 describe("a mailbox proof is final on D1 (decision 12 of plan 12o)", () => {
   beforeEach(async () => {

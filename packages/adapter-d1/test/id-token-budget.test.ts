@@ -26,7 +26,10 @@ const PASSWORD = "correct horse battery";
 // B M of plan 12i, so `claim` went from 26 to 25 (run of 2026-10-25).
 // Update 2026-11-04 by plan 12p: the claim writes the lease, so `claim` went
 // from 25 to 26. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-const PINS = { nonce: 3, create: 25, claim: 26, challenge: 9, replay: 3 };
+// Update 2026-11-05 by plan 12q: `create` and `claim` open a session, and
+// its cap read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const PINS = { nonce: 3, create: 26, claim: 27, challenge: 9, replay: 3 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {

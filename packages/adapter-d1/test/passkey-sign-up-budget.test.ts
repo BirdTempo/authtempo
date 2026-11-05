@@ -21,7 +21,10 @@ const RAW = Symbol("raw");
 // replaces an anonymous user: the claim, the session end, and the delete.
 // `taken` is the verify of a credential id that exists. The daily cap of
 // ruling 38 M3 adds one limiter query to each options call.
-const PINS = { options: 4, verify: 7, upgradeOptions: 5, upgrade: 20, taken: 4 };
+// Update 2026-11-05 by plan 12q: `verify` and `upgrade` open a session, and
+// its cap read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+const PINS = { options: 4, verify: 8, upgradeOptions: 5, upgrade: 21, taken: 4 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {

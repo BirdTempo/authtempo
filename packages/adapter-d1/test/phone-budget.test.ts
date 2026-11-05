@@ -24,11 +24,14 @@ const C = "+14155550102";
 // request of the run makes one query more than a later one. So the test
 // also measures a later request to a new number: it counts the same as the
 // request to a known number.
+// Update 2026-11-05 by plan 12q: each verify opens a session, and its cap
+// read adds one query (+1).
+// Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
 const PINS = {
   requestKnown: 8,
   requestNew: 9,
-  verifySignUp: 9,
-  verifySignIn: 8,
+  verifySignUp: 10,
+  verifySignIn: 9,
   // The Task 5 fix round: the add counts one key per number, not two. The
   // note writes a decoy row of 3 queries (ruling 23, m1 and L5). The one
   // query between the add and the note is outside the phone work, as before.

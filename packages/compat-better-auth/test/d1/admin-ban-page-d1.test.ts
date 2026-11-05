@@ -22,10 +22,14 @@ describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
   it("bans a user with 501 sessions in 50 queries or fewer", { timeout: 300_000 }, async () => {
     // The setup allows each call: 501 sessions of one user pass the sign-in limits.
     // The verify and the first sign-in of `user` open two of them.
-    const setup = await adminApp({
-      ...betterAuthSchemaStorage({ dialect: "d1", db: env.DB }),
-      limiter: { allow: async () => true },
-    });
+    // 501 sessions of one user: the default cap is 100 (plan 12q).
+    const setup = await adminApp(
+      {
+        ...betterAuthSchemaStorage({ dialect: "d1", db: env.DB }),
+        limiter: { allow: async () => true },
+      },
+      { sessionMaxPerUser: 1000 },
+    );
     const ann = await setup.user("ann@example.com");
     for (let i = 0; i < 499; i++)
       await setup.call("/password/sign-in", { email: "ann@example.com", password: PASSWORD });

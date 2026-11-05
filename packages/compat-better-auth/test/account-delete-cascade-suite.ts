@@ -86,6 +86,8 @@ export function engine(
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true },
+    // The scenes open up to 501 sessions of one user: the default cap is 100 (plan 12q).
+    session: { maxPerUser: 1000 },
     ...extra,
     hooks: { ...extra.hooks, session: { afterEnd: (e) => void ends.push(e.session.id) } },
   });
@@ -136,8 +138,10 @@ type Setup = Awaited<ReturnType<typeof adminApp>>;
  */
 const setups = new WeakMap<CompatDatabase, Promise<Setup>>();
 export function setupOf(database: CompatDatabase): Promise<Setup> {
+  // The scenes open up to 501 own sessions of one user: the default cap is 100 (plan 12q).
   const made =
-    setups.get(database) ?? adminApp({ ...database, limiter: { allow: async () => true } });
+    setups.get(database) ??
+    adminApp({ ...database, limiter: { allow: async () => true } }, { sessionMaxPerUser: 1000 });
   setups.set(database, made);
   return made;
 }
