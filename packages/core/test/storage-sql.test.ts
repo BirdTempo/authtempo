@@ -635,6 +635,30 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     expect(s.params).toHaveLength(18);
   });
 
+  it("deletes a created claim lease only while it holds the expiry that the create wrote", () => {
+    // Ruling 32 of plan 12q: the undo must keep a lease of the same id that a claim wrote.
+    const lease = (purpose: "claim-lease" | "magic-link") => ({
+      id: "claim-lease:u1",
+      purpose,
+      identifier: "u1",
+      valueHash: "h",
+      expiresAt: t0,
+      consumedAt: null,
+      data: null,
+      secretVersion: 1,
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    expect(coreStatements(SQLITE).undoCreate("verification", lease("claim-lease"))).toEqual({
+      sql: "DELETE FROM ta_verification WHERE id = ? AND expires_at = ?",
+      params: ["claim-lease:u1", t0.getTime()],
+    });
+    expect(coreStatements(SQLITE).undoCreate("verification", lease("magic-link"))).toEqual({
+      sql: "DELETE FROM ta_verification WHERE id = ?",
+      params: ["claim-lease:u1"],
+    });
+  });
+
   it("keeps the undo of any other model a delete by id", () => {
     const s = coreStatements(SQLITE).undoCreate("session", {
       id: "s1",

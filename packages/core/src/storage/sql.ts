@@ -903,11 +903,22 @@ export function schemaVersionGate(read: () => Promise<string | null>): () => Pro
  * `whileNoChildRow` (plan 8b). The memory adapter runs one transaction at a
  * time and Postgres isolates it, so neither runs this. Plan 9 Task 4,
  * 2026-10-10.
+ *
+ * A claim lease is deleted only while it holds the expiry that the create
+ * wrote (ruling 32 of plan 12q). The importer releases its lease before its
+ * last statements. A claim can then create a new lease of the same id.
+ * A D1 error after that runs this undo. A delete by id would take the
+ * claim's lease, and a second import write would land inside that claim.
+ * A claim that took a stale lease wrote a new expiry, so it keeps it too.
  */
 export function undoCreateWhere<M extends ModelName>(model: M, data: Models[M]): Where<M>[] {
   const byId = { field: "id", op: "eq", value: (data as { id: string }).id } as Where<M>;
   if (model === "user" && (data as Models["user"]).emailVerified === false)
     return [byId, { field: "emailVerified", op: "eq", value: false } as Where<M>];
+  if (model === "verification" && (data as Models["verification"]).purpose === "claim-lease") {
+    const expiresAt = (data as Models["verification"]).expiresAt;
+    return [byId, { field: "expiresAt", op: "eq", value: expiresAt } as Where<M>];
+  }
   return [byId];
 }
 

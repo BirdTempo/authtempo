@@ -764,6 +764,115 @@ describe("the guards after the writes of a repair on D1 (ruling 20 of plan 12q)"
   });
 });
 
+/** The release of the hold: the first delete of a verification row in a repair. */
+const RELEASE = /^DELETE FROM ta_verification\b/;
+
+/**
+ * The undo of the lease create after a claim took the lease (ruling 32 of
+ * plan 12q, probes G1 and G2 of rr-fix3). The import releases its lease
+ * before its check and its activation. The owner's claim then creates a new
+ * lease of the same id, deletes, and waits before its flip. A D1 error at
+ * the next statement of the import runs its undo log. The undo of the lease
+ * create deletes only the lease of the import's expiry. Before ruling 32 it
+ * deleted by id, so it took the claim's lease. A second run then wrote
+ * inside the claim, and the claimant kept a proved session.
+ */
+describe("the undo of the hold's lease create after a claim took the lease on D1 (ruling 32)", () => {
+  it("keeps the claim's lease when a D1 error follows the release, so a second run writes nothing (G1)", async () => {
+    const email = "gwen@example.com";
+    const record = () => [
+      user("gwen", { email, emailVerified: false, password: { hash: BCRYPT } }),
+    ];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    // The first run waits after its release. Then its next statement throws once, as a D1 error does.
+    let armed = false;
+    let thrown = false;
+    const throwing = view(env.DB, async (sql) => {
+      if (armed && !thrown && !RELEASE.test(sql)) {
+        thrown = true;
+        throw new Error("D1_ERROR: a network error");
+      }
+    });
+    const run = pauseAfter(RELEASE, throwing);
+    const first = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+    });
+    await run.reached;
+    // The owner's claim creates a new lease, deletes the pending password, and waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    const claims = await leaseExpiry(email);
+    expect(claims).not.toBeNull();
+    armed = true;
+    run.go();
+    // The undo cannot put the released lease back: the claim's lease holds its key.
+    await expect(first).rejects.toThrow(/rollback_failed/);
+    expect(thrown).toBe(true);
+    // The undo of the lease create deleted no lease of the claim.
+    expect(await leaseExpiry(email)).toBe(claims);
+    // The operator runs the repair again while the claim still waits. Its hold meets the claim's lease.
+    const second = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+    });
+    expect(second.repaired).toEqual([]);
+    expect(second.partial).toEqual([
+      { kind: "user", sourceId: "gwen", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    // No claimant credential or session stays on the owner's account.
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+
+  it("keeps the claim's lease with no D1 error, and both runs answer claimed (G2, the control)", async () => {
+    const email = "hank@example.com";
+    const record = () => [
+      user("hank", { email, emailVerified: false, password: { hash: BCRYPT } }),
+    ];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const run = pauseAfter(RELEASE);
+    const first = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+    });
+    await run.reached;
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    const claims = await leaseExpiry(email);
+    run.go();
+    // The claim deleted the pending password, so the activation finds no row.
+    const refused = [
+      { kind: "user", sourceId: "hank", missing: ["password"], repairRefused: "claimed" },
+    ];
+    expect((await first).partial).toEqual(refused);
+    expect(await leaseExpiry(email)).toBe(claims);
+    const second = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+    });
+    expect(second.partial).toEqual(refused);
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+});
+
 /**
  * The window of open point 2 of fix round 1 (ruling 24 of plan 12q). The
  * import waits 61 s after the flag read of its hold. The owner's whole claim

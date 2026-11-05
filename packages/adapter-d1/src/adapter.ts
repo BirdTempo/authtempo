@@ -217,7 +217,9 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         // only while `emailVerified` is false. Another request can claim the
         // user or add a child row inside this open transaction, and the undo
         // must keep that user (plan 9 Task 4, plan 8b). The rule lives in
-        // `whileNoChildRow` in core's `sql.ts`.
+        // `whileNoChildRow` in core's `sql.ts`. The undo of a claim lease
+        // matches its expiry too, so it keeps a lease that a claim wrote
+        // (`undoCreateWhere`, ruling 32 of plan 12q).
         ctx.undo.push({ model, op: "create", ...st.undoCreate(model, data) });
       }
       return structuredClone(data);
