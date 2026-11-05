@@ -101,6 +101,8 @@ export interface CompatStatements extends SqlStatements {
   toStorageError(model: ModelName, err: unknown): StorageError | null;
   /** Required here: a raw column of the Better Auth tables is not a field of core (plan 12o). */
   deleteReturningRead<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+  /** Required here: the D1 and SQLite storages run the undo guard of a claim (plan 12q). */
+  reinsertWhile(model: ModelName, rows: readonly Row[], guard: Statement): Statement[];
 }
 
 /**
@@ -129,6 +131,17 @@ function restoreEach<M extends ModelName>(
   return st.restoreRows
     ? st.restoreRows(model, rows, data)
     : rows.map((r) => st.restoreRow(model, r, data));
+}
+
+/** `reinsertWhile` of core's statements on SQLite. They always have it. */
+function reinsertWhileOf(
+  st: SqlStatements,
+  model: ModelName,
+  rows: readonly Row[],
+  guard: Statement,
+): Statement[] {
+  if (!st.reinsertWhile) throw new Error("reinsertWhile: core's statements have none");
+  return st.reinsertWhile(model, rows, guard);
 }
 
 function withoutUnmapped(st: CompatStatements): CompatStatements {
@@ -173,6 +186,9 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     },
     reinsertRows(model, rows) {
       return none(model) ? refuse(model) : reinsertEach(st, model, rows);
+    },
+    reinsertWhile(model, rows, guard) {
+      return none(model) ? refuse(model) : st.reinsertWhile(model, rows, guard);
     },
     restoreRows(model, rows, data) {
       return none(model) ? refuse(model) : restoreEach(st, model, rows, data);
@@ -273,6 +289,12 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
     },
     reinsertRows(model, rows) {
       return reinsertEach(own(model) ? core : st, model, rows);
+    },
+    // The guard is a select of this whole set, so it names the right table of its model.
+    reinsertWhile(model, rows, guard) {
+      return own(model)
+        ? reinsertWhileOf(core, model, rows, guard)
+        : st.reinsertWhile(model, rows, guard);
     },
     restoreRows(model, rows, data) {
       return restoreEach(own(model) ? core : st, model, rows, data);
@@ -873,6 +895,29 @@ export function compatStatements(
         sql: `INSERT INTO ${table(model)} (${cols.map(quoteRaw).join(", ")}) ${jsonRows(cols.length)}`,
         params: [JSON.stringify(chunk)],
       }));
+    },
+    reinsertWhile(model, rows, guard) {
+      // Core's rule (`SqlStatements.reinsertWhile`, plan 12q): the reinsert
+      // of reinsertRow and reinsertRows, with the check of `guard` in each
+      // statement. Only the D1 and SQLite storages run the D1 undo.
+      if (pg) throw new Error("reinsertWhile: the D1 undo runs on SQLite only");
+      const exists = ` WHERE EXISTS (${guard.sql})`;
+      const first = rows[0];
+      if (first === undefined) return [];
+      if (rows.length > 1 && jsonSafeRows(rows)) {
+        const cols = Object.keys(first);
+        return listChunks(rows.map((r) => cols.map((c) => r[c]))).map((chunk) => ({
+          sql: `INSERT INTO ${table(model)} (${cols.map(quoteRaw).join(", ")}) ${jsonRows(cols.length)}${exists}`,
+          params: [JSON.stringify(chunk), ...guard.params],
+        }));
+      }
+      return rows.map((r) => {
+        const cols = Object.keys(r);
+        return {
+          sql: `INSERT INTO ${table(model)} (${cols.map(quoteRaw).join(", ")}) SELECT ${cols.map((_, i) => d.placeholder(i + 1)).join(", ")}${exists}`,
+          params: [...cols.map((c) => r[c]), ...guard.params],
+        };
+      });
     },
     restoreRows(model, rows, data) {
       const first = rows[0];

@@ -119,10 +119,12 @@ export function runSqliteSuites(
   }
 
   // SQLite sends an update in a transaction as 2 statements: the read for the undo and the write.
-  // The adapter must have its ping (ruling 26 of the 12g lane).
+  // The adapter must have its ping (ruling 26 of the 12g lane), and the
+  // undo guard of the D1 code (decision 6 of plan 12q).
   runAdapterConformance(run, storageTarget, {
     updateInTransaction: 2,
     ping: true,
+    undoGuard: true,
     ...(shared ? {} : { oldStore }),
   });
   runSecretRotationConformance(run, storageTarget);

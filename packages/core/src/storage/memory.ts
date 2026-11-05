@@ -104,6 +104,16 @@ function checkUnique(
  */
 type Undo = () => void;
 
+/**
+ * The condition of `undoOnlyWhile` at one transaction level (decision 6 of
+ * plan 12q). Each undo step of a delete under it reads it when the step
+ * runs, so a second call at the level changes it for each of them.
+ */
+interface UndoGuard {
+  model: ModelName;
+  where: Where<ModelName>[];
+}
+
 /** The tail of the transaction queue. One per store. */
 interface Lock {
   tail: Promise<void>;
@@ -128,13 +138,16 @@ function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void 
 /**
  * `log` is null outside a transaction. Inside one, every write pushes the
  * step that reverses it, so a rollback touches only this transaction's rows
- * and keeps rows that other callers wrote in the meantime.
+ * and keeps rows that other callers wrote in the meantime. `inherited` is
+ * the condition of `undoOnlyWhile` that this level starts with: its
+ * parent's, or null at the top level.
  */
 function adapterOn(
   store: Store,
   lock: Lock,
   log: Undo[] | null,
   sent: { statements: number },
+  inherited: UndoGuard | null = null,
 ): StorageAdapter {
   const table = (model: ModelName) => {
     if (!Object.hasOwn(schema, model)) throw new StorageError("unknown_model", model);
@@ -160,6 +173,20 @@ function adapterOn(
 
   // The statements of D1, so a call counts as a D1 call does (rulings 57 and 84 of plan 12d).
   const d1 = coreStatements(SQLITE);
+
+  /** The condition of `undoOnlyWhile` for the next delete of this level, or null (plan 12q). */
+  let guard: UndoGuard | null = inherited;
+  /**
+   * The undo step of a deleted row: it puts the row back. Under a
+   * condition, only while a row matches it when the step runs.
+   */
+  const putBack = (t: Map<string, Record<string, unknown>>, r: Record<string, unknown>): Undo => {
+    const g = guard;
+    return () => {
+      if (g && select(g.model, g.where).length === 0) return;
+      t.set(r.id as string, r);
+    };
+  };
 
   return {
     // An undo log, and each write is seen at once (plan 12p): the claim takes a lease.
@@ -270,7 +297,7 @@ function adapterOn(
       const rows = select(model, where);
       for (const r of rows) {
         t.delete(r.id as string);
-        log?.push(() => t.set(r.id as string, r));
+        log?.push(putBack(t, r));
       }
       return rows.length;
     },
@@ -281,22 +308,36 @@ function adapterOn(
       const rows = select(model, where);
       for (const r of rows) {
         t.delete(r.id as string);
-        log?.push(() => t.set(r.id as string, r));
+        log?.push(putBack(t, r));
       }
       return rows.map((r) => clone(r) as unknown as Models[M]);
     },
     async keep() {
       // The steps so far go, so a later throw reverses only the later writes.
       // A nested call holds its own list, so it drops only its own steps.
-      // Outside a transaction no write is reversed.
+      // Outside a transaction no write is reversed. The condition of
+      // `undoOnlyWhile` that this level set ends too (plan 12q).
       if (log) log.length = 0;
+      guard = inherited;
       return true;
+    },
+    async undoOnlyWhile<M extends ModelName>(model: M, where: Where<M>[]): Promise<void> {
+      // The checks of a read: the model, each field, and each value. No call counts.
+      select(model, where);
+      const terms = where as Where<ModelName>[];
+      // A second call at this level changes the condition of its deletes so far.
+      // Outside a transaction no delete has an undo, and `transaction` starts with none.
+      if (guard && guard !== inherited) {
+        guard.model = model;
+        guard.where = terms;
+      } else guard = { model, where: terms };
     },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       const run = async (): Promise<T> => {
         const own: Undo[] = [];
         try {
-          const value = await fn(adapterOn(store, lock, own, sent));
+          // A nested call starts with the condition of its parent (plan 12q).
+          const value = await fn(adapterOn(store, lock, own, sent, log ? guard : null));
           // A nested transaction hands its steps to the outer one, so an
           // outer rollback also reverses them.
           log?.push(...own);

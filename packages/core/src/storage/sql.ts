@@ -1015,6 +1015,22 @@ export interface SqlStatements {
    */
   reinsertRows?(model: ModelName, rows: readonly Record<string, unknown>[]): Statement[];
   /**
+   * Optional. D1 undo of a delete under `undoOnlyWhile` (decision 6 of
+   * plan 12q): the raw rows inserted again only while `guard` reads a row.
+   * `guard` is a `select` of this statement set. Each statement is an
+   * `INSERT ... SELECT ... WHERE EXISTS (guard)`, so the check and the
+   * insert are one statement. One row takes one statement, and more rows
+   * take the lists of `reinsertRows`, so the count of statements does not
+   * change. The parameters of `guard` follow those of the rows. So the
+   * dialect needs positional placeholders: the SQLite form of the D1 undo.
+   * Without it, the D1 adapter has no `undoOnlyWhile`.
+   */
+  reinsertWhile?(
+    model: ModelName,
+    rows: readonly Record<string, unknown>[],
+    guard: Statement,
+  ): Statement[];
+  /**
    * Optional. D1 undo of an update of many rows: `restoreRow` of each row,
    * one statement per list of `listChunks` (ruling 84 of plan 12d). It
    * keeps every rule of `restoreRow`. Without it, the D1 adapter sends
@@ -1145,6 +1161,29 @@ export function coreStatements(d: Dialect): SqlStatements {
         sql: `INSERT INTO ${d.quote(TABLES[model])} (${cols.map(d.quote).join(", ")}) ${jsonRows(cols.length)}`,
         params: [JSON.stringify(chunk)],
       }));
+    },
+    reinsertWhile(model, rows, guard) {
+      // The rule of reinsertRow and reinsertRows, with the check of `guard` in each statement.
+      if (d.placeholder(1) !== d.placeholder(2))
+        throw new Error("reinsertWhile: the dialect needs positional placeholders");
+      const table = d.quote(TABLES[model]);
+      const exists = ` WHERE EXISTS (${guard.sql})`;
+      const first = rows[0];
+      if (first === undefined) return [];
+      if (rows.length > 1 && d.lists === "json" && jsonSafeRows(rows)) {
+        const cols = Object.keys(first);
+        return listChunks(rows.map((r) => cols.map((c) => r[c]))).map((chunk) => ({
+          sql: `INSERT INTO ${table} (${cols.map(d.quote).join(", ")}) ${jsonRows(cols.length)}${exists}`,
+          params: [JSON.stringify(chunk), ...guard.params],
+        }));
+      }
+      return rows.map((row) => {
+        const cols = Object.keys(row);
+        return {
+          sql: `INSERT INTO ${table} (${cols.map(d.quote).join(", ")}) SELECT ${cols.map((_, i) => d.placeholder(i + 1)).join(", ")}${exists}`,
+          params: [...cols.map((c) => row[c]), ...guard.params],
+        };
+      });
     },
     restoreRows(model, rows, data) {
       if (d.lists !== "json" || rows.length < 2 || !jsonSafeRows(rows))

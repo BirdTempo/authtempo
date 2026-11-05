@@ -48,6 +48,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     env.DB,
     () => betterAuthSchemaStorage({ dialect: "d1", db: env.DB, ...naming }).storage,
     // A ping sends the 2 version reads, the index list, and the read of the one unique index (plan 12h).
-    { pingStatements: 4, oldStore, ping: true },
+    // The D1 code has the undo guard of a claim (decision 6 of plan 12q).
+    { pingStatements: 4, oldStore, ping: true, undoGuard: true },
   );
 }

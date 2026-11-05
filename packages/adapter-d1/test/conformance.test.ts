@@ -24,13 +24,14 @@ async function oldStore() {
 }
 
 // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
+// A claim on D1 needs the undo guard (decision 6 of plan 12q).
 runAdapterConformance(
   "d1",
   async () => {
     await truncateAll();
     return { adapter: createD1Adapter(env.DB), close: truncateAll };
   },
-  { updateInTransaction: 2, oldStore, ping: true },
+  { updateInTransaction: 2, oldStore, ping: true, undoGuard: true },
 );
 
 runStoredFormConformance("d1", async () => {

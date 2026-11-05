@@ -96,10 +96,15 @@ function manualClock(): ManualClock {
   };
 }
 
-runAdapterConformance("demo sqlite shim", async () => {
-  const name = await newSandbox();
-  return { adapter: forwardedAdapter(name), close: () => stubOf(name).destroy() };
-});
+// Each transaction runs in the object with the D1 adapter, so it has the undo guard (plan 12q).
+runAdapterConformance(
+  "demo sqlite shim",
+  async () => {
+    const name = await newSandbox();
+    return { adapter: forwardedAdapter(name), close: () => stubOf(name).destroy() };
+  },
+  { undoGuard: true },
+);
 
 runLimiterConformance("demo sqlite shim", async () => {
   const name = await newSandbox();

@@ -207,6 +207,32 @@ export interface StorageAdapter {
    */
   readonly isolated: boolean;
   /**
+   * Optional. Inside a transaction, from this call on, the undo of each
+   * delete puts its rows back only while a row of `model` matches `where`
+   * (decision 6 of plan 12q). The undo reads the condition when it runs,
+   * as a term of its own statement, so the call adds no query.
+   *
+   * The reason. D1 can apply a write and lose its answer. An update that
+   * throws has no undo entry, so a claim's flip can stand while the undo
+   * puts back the claimant's rows (rr-fix6 Minor 1 of plan 12p). A claim
+   * calls it after its lease: the rows come back only while the user is
+   * unverified.
+   *
+   * The scope. A second call at the same transaction level replaces the
+   * condition, also for the deletes after the first call. A nested
+   * transaction starts with the condition of its parent, and a call in it
+   * ends with it. `keep` ends the condition of its level for later deletes,
+   * and so does the end of the transaction. A delete keeps its condition
+   * until the undo or the commit. Outside a transaction the call does
+   * nothing. An unknown field throws `unknown_field`, as a read does.
+   *
+   * D1, the SQLite drivers, and memory have it on each transaction. Postgres
+   * and MySQL leave it out: a throw there reverses the whole transaction.
+   * The conformance kit holds the call on each store that has it. Its
+   * option `undoGuard` holds the call to an adapter.
+   */
+  undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
+  /**
    * Optional. True when a delete of a user row also deletes, by a foreign
    * key, the rows that name the user: the sessions, the accounts, the
    * member rows, and the invitations that the user sent. The Better Auth

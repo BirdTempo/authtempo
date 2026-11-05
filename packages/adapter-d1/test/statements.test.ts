@@ -100,6 +100,33 @@ describe("the D1 statements seam", () => {
     ]);
   });
 
+  it("routes the undo of each delete under undoOnlyWhile through reinsertWhile, with the select of the condition (decision 6 of plan 12q)", async () => {
+    const { statements, counts } = counting();
+    const db = createD1AdapterOn(env.DB, { statements, toStorageError, ready: async () => {} });
+    await db.createMany("user", [
+      user("u1", "a@example.com"),
+      user("u2", "b@example.com"),
+      user("u3", "c@example.com"),
+      user("u4", "d@example.com"),
+    ]);
+    const unverified = [
+      { field: "id" as const, op: "eq" as const, value: "u4" },
+      { field: "emailVerified" as const, op: "eq" as const, value: false },
+    ];
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.undoOnlyWhile?.("user", unverified);
+        await tx.delete("user", [{ field: "id", op: "in", value: ["u1", "u2"] }]);
+        await tx.deleteRows("user", [{ field: "id", op: "eq", value: "u3" }]);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(counts).toMatchObject({ select: 1, reinsertWhile: 2, reinsertRows: 0, reinsertRow: 0 });
+    // u4 is still unverified at the undo, so every row comes back.
+    const back = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+    expect(back.map((u) => u.id)).toEqual(["u1", "u2", "u3", "u4"]);
+  });
+
   it("maps a unique violation through the given toStorageError", async () => {
     const seen: unknown[] = [];
     const db = createD1AdapterOn(env.DB, {

@@ -34,6 +34,30 @@ interface Undo extends Statement {
   many?: { rows: readonly Row[]; entries: number };
 }
 
+/**
+ * The condition of `undoOnlyWhile` at one transaction level (decision 6 of
+ * plan 12q): the `select` of its model and its where. It is null when the
+ * where matches no row, as an empty `in` list. Each delete under it holds
+ * this object, so a second call at the level changes it for each of them.
+ */
+interface UndoGuard {
+  exists: Statement | null;
+}
+
+/**
+ * The undo of one delete under `undoOnlyWhile`: its raw rows and its
+ * condition. Its statements come from `reinsertWhile` when the undo runs,
+ * so they check the condition as it is then.
+ */
+interface GuardedUndo {
+  model: ModelName;
+  op: "delete";
+  rows: readonly Row[];
+  guard: UndoGuard;
+}
+
+type Entry = Undo | GuardedUndo;
+
 /** What the adapter runs. `createD1Adapter` passes core's statements; plan 9's compatibility storage passes its own. */
 export interface D1AdapterOptions {
   statements: SqlStatements;
@@ -71,10 +95,14 @@ export interface D1AdapterOptions {
 }
 
 interface Ctx extends D1AdapterOptions {
-  undo: Undo[] | null;
+  undo: Entry[] | null;
   sent: { statements: number; ready?: number };
   /** The first entry of the log that the open nested transaction owns: a run of `many` never joins an entry below it. */
   floor: number;
+  /** The condition of `undoOnlyWhile` for the next delete of the open level, or null (plan 12q). */
+  guard: UndoGuard | null;
+  /** The condition that the open level started with: its parent's, or null at the top level. */
+  inherited: UndoGuard | null;
 }
 
 async function run(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<D1SubsetResult> {
@@ -95,6 +123,17 @@ async function all(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<Row[]
 }
 
 /**
+ * The statements of a delete's undo under `undoOnlyWhile`: none when the
+ * condition matches no row by its where, else those of `reinsertWhile`.
+ */
+function guardedReinserts(st: SqlStatements, u: GuardedUndo): Statement[] {
+  const exists = u.guard.exists;
+  if (!exists) return [];
+  if (!st.reinsertWhile) throw new Error("undoOnlyWhile: the statements have no reinsertWhile");
+  return st.reinsertWhile(u.model, u.rows, exists);
+}
+
+/**
  * Runs every undo entry in reverse. A failed entry does not stop the rest.
  * When every entry succeeds, rethrows the original error unchanged. When any
  * entry fails, throws one rollback_failed error with `{ original, failures }`
@@ -106,18 +145,32 @@ async function all(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<Row[]
  */
 async function rethrowAfterUndo(
   db: D1Subset,
-  entries: Undo[],
+  st: SqlStatements,
+  entries: Entry[],
   original: unknown,
   sent: Ctx["sent"],
 ): Promise<never> {
   const failures: unknown[] = [];
   const fields: string[] = [];
   for (const u of [...entries].reverse()) {
-    try {
-      await run(db, u, sent);
-    } catch (f) {
+    const failed = (f: unknown) => {
       failures.push(f);
       fields.push(`${u.model}:${u.op}`);
+    };
+    // A delete under `undoOnlyWhile` builds its statements now, with its condition as it is now.
+    let statements: Statement[];
+    try {
+      statements = "guard" in u ? guardedReinserts(st, u) : [u];
+    } catch (f) {
+      failed(f);
+      continue;
+    }
+    for (const s of statements) {
+      try {
+        await run(db, s, sent);
+      } catch (f) {
+        failed(f);
+      }
     }
   }
   if (failures.length === 0) throw original;
@@ -127,6 +180,24 @@ async function rethrowAfterUndo(
 
 function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
   const st = ctx.statements;
+  /**
+   * The undo entries of a delete of `rows` inside a transaction. Under
+   * `undoOnlyWhile` one entry holds the rows and the condition. Else each
+   * statement of the reinsert is an entry, the list form for more than one
+   * row, as for an update (ruling 84 of plan 12d).
+   */
+  const logDelete = (model: ModelName, rows: readonly Row[]) => {
+    if (!ctx.undo || rows.length === 0) return;
+    if (ctx.guard) {
+      ctx.undo.push({ model, op: "delete", rows, guard: ctx.guard });
+      return;
+    }
+    const reinserts =
+      rows.length > 1 && st.reinsertRows
+        ? st.reinsertRows(model, rows)
+        : rows.map((row) => st.reinsertRow(model, row));
+    for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
+  };
   const self: StorageAdapter = {
     // An undo log, and each write is seen at once (plan 12p). The SQLite
     // adapter and the Better Auth storage run this code, so they get it too.
@@ -175,7 +246,8 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         // inside the D1 budget (ruling 85 of plan 12d). Only an entry just before this one
         // joins, so the reverse order of the log does not change.
         const log = ctx.undo;
-        const last = log.at(-1);
+        const at = log.at(-1);
+        const last = at && !("guard" in at) ? at : undefined;
         let all: readonly Row[] = rows as unknown as Row[];
         if (last?.many && last.model === model && log.length - last.many.entries >= ctx.floor) {
           all = [...last.many.rows, ...all];
@@ -259,12 +331,7 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       const returning = st.deleteReturning(model, where);
       if (!returning) return 0;
       const rows = await all(db, returning, ctx.sent);
-      // The list form for more than one row, as for an update (ruling 84 of plan 12d).
-      const reinserts =
-        rows.length > 1 && st.reinsertRows
-          ? st.reinsertRows(model, rows)
-          : rows.map((row) => st.reinsertRow(model, row));
-      for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
+      logDelete(model, rows);
       return rows.length;
     },
     async deleteRows(model, where) {
@@ -278,54 +345,69 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         : st.deleteReturning(model, where);
       if (!s) return [];
       const parts = (await all(db, s, ctx.sent)).map(returnedParts);
-      if (ctx.undo) {
-        const raws = parts.map((p) => p.raw);
-        // The list form for more than one row, as for `delete` (ruling 84 of plan 12d).
-        const reinserts =
-          raws.length > 1 && st.reinsertRows
-            ? st.reinsertRows(model, raws)
-            : raws.map((row) => st.reinsertRow(model, row));
-        for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
-      }
+      logDelete(
+        model,
+        parts.map((p) => p.raw),
+      );
       return parts.map((p) => st.decode(model, p.read));
     },
     async keep() {
       // The entries of this transaction level so far go (plan 12o). So a later
       // throw reverses only the later writes. A nested call owns the entries
       // from its mark (`floor`), so it drops only its own. Outside a
-      // transaction no write is reversed.
+      // transaction no write is reversed. The condition of `undoOnlyWhile`
+      // that this level set ends too: its deletes are final (plan 12q).
       ctx.undo?.splice(ctx.floor);
+      ctx.guard = ctx.inherited;
       return true;
     },
     async transaction(fn) {
       await ctx.ready();
       if (ctx.undo) {
         // A nested call shares the log. A throw reverses only its own entries.
+        // It starts with the condition of its parent, and a condition that it
+        // sets ends with it (plan 12q). Its deletes keep theirs.
         const log = ctx.undo;
         const mark = log.length;
         const floor = ctx.floor;
+        const { guard, inherited } = ctx;
         ctx.floor = mark;
+        ctx.inherited = guard;
         try {
           return await fn(self);
         } catch (e) {
           const own = log.splice(mark);
-          return rethrowAfterUndo(db, own, e, ctx.sent);
+          return rethrowAfterUndo(db, st, own, e, ctx.sent);
         } finally {
           ctx.floor = floor;
+          ctx.guard = guard;
+          ctx.inherited = inherited;
         }
       }
-      const inner: Ctx = { ...ctx, undo: [], floor: 0 };
+      const inner: Ctx = { ...ctx, undo: [], floor: 0, guard: null, inherited: null };
       const tx = adapterOn(db, inner);
       try {
         return await fn(tx);
       } catch (e) {
-        return rethrowAfterUndo(db, inner.undo ?? [], e, ctx.sent);
+        return rethrowAfterUndo(db, st, inner.undo ?? [], e, ctx.sent);
       }
     },
     statementsSent() {
       return ctx.sent.statements;
     },
   };
+  // The undo guard of a claim (decision 6 of plan 12q). The statement set
+  // must build the guarded reinsert. Core's and the Better Auth storage's do.
+  if (st.reinsertWhile)
+    self.undoOnlyWhile = async (model, where) => {
+      // The select checks the model and each field, as a read does. It sends nothing here.
+      assertModel(model);
+      const exists = st.select(model, where);
+      // A second call at this level changes the condition of its deletes so far.
+      // Outside a transaction no delete has an undo, and `transaction` starts with none.
+      if (ctx.guard && ctx.guard !== ctx.inherited) ctx.guard.exists = exists;
+      else ctx.guard = { exists };
+    };
   if (ctx.queryLimitPerInvocation) self.queryLimitPerInvocation = true;
   if (ctx.ping) self.ping = ctx.ping;
   if (ctx.sent.ready !== undefined) {
@@ -344,6 +426,8 @@ export function createD1AdapterOn(db: D1Subset, options: D1AdapterOptions): Stor
     undo: null,
     sent: options.sent ?? { statements: 0 },
     floor: 0,
+    guard: null,
+    inherited: null,
   });
 }
 
