@@ -1053,8 +1053,8 @@ describe("the D1 queries of one record", () => {
   // hold (2), the check after the writes (2), and the release (1) came in. A repair kept its own update as that check. The
   // first form of the hold, before ruling 20, sent 9, 8, 12, and 7.
   // The activation of the pending identity (2) came in by ruling 24, so the
-  // Google count went from 12 to 14. Measured on 2026-11-05 on
-  // <local-host>, load 9 to 10.
+  // Google count went from 12 to 14. Measured on 2026-11-05 at 10:54 CST
+  // on the owner's Mac Studio, load 3.3.
   const PINS = { password: 13, google: 14, repair: 16, verified: 7 };
 
   it("sends the pinned count for a new unverified user with a password", async () => {
