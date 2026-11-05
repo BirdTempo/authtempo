@@ -102,25 +102,28 @@ that lease. After the release the import checks the user row again, by its
 address and flag, for a new user and for a repair. A verified user gets the
 same check. When the release or the check fails, the import deletes the rows
 it wrote, and the record stays `partial` with `not repaired: claimed`. So a
-claim that verified the user before that check leaves no imported row. After
-a stall of 60 seconds inside the hold, an imported social identity can be
-active from its write until that delete. The password row of a repair or of
-a new unverified user is pending until the import activates it, after its
-other writes. So a sign-in
-with it fails until then. A run that stops before that activation, as at
-the D1 cap, leaves the pending row. A later run counts that row as missing,
-so the record is `partial` with `password` missing. A repair deletes the
-pending row and writes the password again. A run that stops inside the hold
+claim that verified the user before that check leaves no imported row. The
+password row of a repair or of a new unverified user is pending until the
+import activates it, after the check. Under the hold a social identity is
+pending too. Its provider is then `pending$<provider>`, a name that no
+sign-in finds. So a sign-in with either fails until the activation, and no
+imported credential is live before the check passes. When another user takes
+the identity on D1 before the activation, the import deletes its rows. The
+record is then `partial` with `not repaired: identity_taken`. A run that
+stops before the activation, as at the D1 cap, leaves the pending row. A
+later run counts that row as missing, so the record is `partial` with
+`password` or `identity:<provider>` missing. A repair deletes the pending
+row and writes it again. A run that stops inside the hold
 leaves the lease on D1 too. A claim of that user answers 409 `conflict` for
 60 seconds, and then it takes the lease. A repair reports `not repaired:
 claimed` until the sweep deletes the lease. The app's scheduled sweep
 deletes the lease at its first run 60 seconds or more after its write. The
 hold takes no stale lease, because a claim can run past the life of its
-lease. A repaired passkey or
-social identity is active at once, and so is the social identity of a new
-unverified user. A claimant who also holds the authenticator or the provider
-account can sign in with it during or after the import. While the address is
-unverified, that session is unproved, and the owner's claim ends it.
+lease. A repaired passkey, and a repaired social identity of a verified
+user, are active at once. A claimant who also holds the provider account of
+an imported social identity can sign in with it after its activation. While
+the address is unverified, that session is unproved, and the owner's claim
+ends it.
 Without `--repair` the importer writes nothing for a `partial` record.
 
 A repair also gives back a credential that the user removed in the app
@@ -159,8 +162,8 @@ It refuses `--repair`, `--dry-run`, `--on-email-taken`, and `--target
 memory`. Run it after each real run: on a copy of the database before
 the cutover, and on the real database at the cutover. It reads that each
 row exists, not its text. So it does not see a change in the old system
-that a second import did not carry. A pending password row is the one
-exception: it counts as missing. On D1, write a
+that a second import did not carry. A pending password row or identity row
+is the one exception: it counts as missing. On D1, write a
 verify bundle with `--target d1-bundle --out <file>` and run the Worker
 again (`worker/README.md`). `verifyReport` of this package is the one rule,
 and the D1 Worker reads it too.

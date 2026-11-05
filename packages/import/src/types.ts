@@ -219,7 +219,10 @@ export interface ImportOptions {
  *   repair would write an `email` identity for the old address.
  * - `credential_exists`: the record is unverified and the user holds a
  *   credential now. Core reaches no unverified user with two (spec 17.1).
- * - `identity_taken`: another user holds an identity the record maps to.
+ * - `identity_taken`: another user holds an identity the record maps to. On
+ *   D1 it also comes from the activation of a pending identity row, when
+ *   another user took the identity since the plan read it. The write then
+ *   deletes its rows, as for `claimed` below.
  * - `claimed`: the user is verified and holds its `email` identity, and the
  *   repair would write a password, a passkey, or a social identity. A claim
  *   always writes that identity, and the importer cannot tell a claim from a
@@ -231,7 +234,8 @@ export interface ImportOptions {
  *   writes, the release of the hold fails when a claim took its lease. Then
  *   a conditional update of the user row checks the `email` and
  *   `emailVerified` that the guards read. The last check is the activation
- *   of the pending password row. A failed release, update, or activation
+ *   of the pending rows: the password row, or the identity row under the
+ *   hold. A failed release, update, or activation
  *   means that a claim, an address change, or another flow landed after the
  *   guards. The repair then deletes the rows it wrote and keeps the record
  *   here. So a claim that verified the user before the update leaves no row
@@ -272,8 +276,8 @@ export interface ImportReport {
    * `identity:email`, `passkey`, or `member`. Three causes give the same entry,
    * and the importer cannot tell them apart. A fourth gives `claimed` (below).
    * - A run that stopped inside the record on D1 (an isolate that dies does
-   *   not roll back, spec 6). The pending password row that such a run
-   *   leaves counts as missing: no sign-in takes it.
+   *   not roll back, spec 6). The pending password row or identity row
+   *   that such a run leaves counts as missing: no sign-in takes it.
    * - A claim since the first run: it deletes the claimant's password, social
    *   identities, and passkeys.
    * - Another app change since the first run, such as a removed password or
@@ -282,7 +286,9 @@ export interface ImportReport {
    * The fourth is a claim of a new unverified user during the import. It
    * holds the user when the import comes to its credential writes, or it
    * verifies the user before the checks after them. The entry then holds
-   * `repairRefused: "claimed"`, with or without `repair`.
+   * `repairRefused: "claimed"`, with or without `repair`. On D1 the
+   * activation of a pending identity row can give `identity_taken` the same
+   * way.
    * Without `repair` the importer never writes an entry's rows and never
    * counts it as `exists`. The operator checks that user in the app before a
    * repair. With `repair`, an entry stays here only with `repairRefused`. The
