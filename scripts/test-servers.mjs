@@ -174,10 +174,11 @@ function checkOwner(slot, worktree) {
  * table.
  * `-a` also lists a stopped set, because checkOwner refuses a stopped set of
  * another worktree too. A failed read throws: a take with no read could give
- * a slot that another worktree uses.
+ * a slot that another worktree uses. A site test runs this read against real
+ * docker (apps/site/test/test-servers.test.ts).
  * @returns {import("./test-slots.mjs").SetUp[]}
  */
-function setsUp() {
+export function setsUp() {
   const ps = spawnSync(
     "docker",
     [

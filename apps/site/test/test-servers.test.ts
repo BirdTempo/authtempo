@@ -13,8 +13,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { envFileText, portOf, SERVICES } from "../../../scripts/test-ports.mjs";
-import { checkPortsFree } from "../../../scripts/test-servers.mjs";
+import { envFileText, MAX_SLOT, portOf, SERVICES } from "../../../scripts/test-ports.mjs";
+import { checkPortsFree, setsUp } from "../../../scripts/test-servers.mjs";
 import { type SlotTable, tablePath } from "../../../scripts/test-slots.mjs";
 import { REPO } from "../scripts/lib/paths.ts";
 
@@ -25,8 +25,9 @@ import { REPO } from "../scripts/lib/paths.ts";
 // set. The fake writes each call to a log, after "held" or "free" for the
 // lock of the slot table. A compose down passes, and every other compose
 // call fails. The read of the sets (a ps call with the filter of the label
-// authtempo.worktree) prints FAKE_DOCKER_SETS. Every other ps call prints
-// FAKE_DOCKER_PS.
+// authtempo.worktree) prints FAKE_DOCKER_SETS only for SETS_FORMAT. A read
+// with another format fails, so a wrong format in the script fails these
+// tests. Every other ps call prints FAKE_DOCKER_PS.
 //
 // A fake lsof is first on the PATH too. It shows a listener only on a port
 // of FAKE_LSOF_PORTS. A real set on this machine can hold a port of a slot
@@ -34,6 +35,12 @@ import { REPO } from "../scripts/lib/paths.ts";
 // first, and that refusal hid the refusal that the test reads.
 
 const SCRIPT = `${REPO}scripts/test-servers.mjs`;
+/**
+ * The format of the read of the sets in setsUp of the script. This is a copy,
+ * not an import, so a change of the format in the script fails these tests.
+ * The real docker read below holds this copy.
+ */
+const SETS_FORMAT = '{{.Label "authtempo.worktree"}}\t{{.Label "com.docker.compose.project"}}';
 const temp = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-servers-")));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
@@ -48,7 +55,11 @@ writeFileSync(
     'case "$1 $*" in',
     '  "compose "*" down "*) exit 0 ;;',
     "  compose*) exit 1 ;;",
-    '  "ps "*" label=authtempo.worktree "*) printf "%s" "$FAKE_DOCKER_SETS" ;;',
+    '  "ps "*" label=authtempo.worktree "*)',
+    `    if [ $# -eq 6 ] && [ "$2 $3 $4 $5" = "-a --filter label=authtempo.worktree --format" ] && [ "$6" = '${SETS_FORMAT}' ]; then`,
+    '      printf "%s" "$FAKE_DOCKER_SETS"; exit 0',
+    "    fi",
+    '    echo "fake docker: no answer for this read of the sets: $*" >&2; exit 1 ;;',
     '  ps*) printf "%s" "$FAKE_DOCKER_PS" ;;',
     "esac",
     "exit 0",
@@ -351,8 +362,82 @@ describe("the test-servers command", () => {
     // The fake fails each compose call but down, so up stops after the take.
     expect(run.stderr).toContain("docker compose up failed for slot 2");
     expect(rowsOf(home)).toEqual([[LANE, 2]]);
-    // The take read the sets while it held the lock of the table.
-    expect(run.docker).toMatch(/^held ps -a --filter label=authtempo\.worktree /m);
+    // The take read the sets in the format of SETS_FORMAT while it held the lock of the table.
+    expect(run.docker).toContain(
+      `held ps -a --filter label=authtempo.worktree --format ${SETS_FORMAT}\n`,
+    );
+  });
+
+  it("takes no slot when the read of the sets gives a line that it cannot read", () => {
+    const home = newHome();
+    // A space for the tab: the form that a wrong format string gives.
+    const run = serversWith(
+      { FAKE_DOCKER_SETS: "/elsewhere/clone authtempo-s1\n" },
+      home,
+      LANE,
+      "up",
+      "--only",
+      "libsql",
+    );
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(
+      'docker ps gave the line "/elsewhere/clone authtempo-s1", not <worktree label><tab><compose project>.',
+    );
+    expect(existsSync(tablePath(home))).toBe(false);
+    expect(run.docker).not.toMatch(/^\w+ compose /m);
+  });
+
+  // The fake docker answers only SETS_FORMAT. This test holds that format
+  // against real docker. It makes two containers and starts none of them.
+  it("lists the sets under their worktree labels in a real docker read", (ctx) => {
+    const daemon = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    ctx.skip(
+      daemon.status !== 0,
+      `docker does not answer on this machine: ${(daemon.stderr ?? "").trim() || daemon.error?.message}`,
+    );
+    // The libSQL image of the test servers. This test pulls no image.
+    const image =
+      /image: (ghcr\.io\/tursodatabase\/libsql-server\S+)/.exec(
+        readFileSync(`${REPO}docker-compose.yml`, "utf8"),
+      )?.[1] ?? "no libSQL image in docker-compose.yml";
+    ctx.skip(
+      spawnSync("docker", ["image", "inspect", image]).status !== 0,
+      `the image ${image} is not on this machine, and this test pulls no image`,
+    );
+    // No take gives a slot above MAX_SLOT, and no owner check reads one.
+    const sets = [MAX_SLOT + 1, MAX_SLOT + 2].map((slot) => ({
+      slot,
+      worktree: join(temp, `real-read-${slot}`),
+    }));
+    const names = sets.map((s) => `authtempo-read-test-${process.pid}-${s.slot}`);
+    try {
+      sets.forEach((s, i) => {
+        const create = spawnSync(
+          "docker",
+          [
+            "create",
+            "--pull",
+            "never",
+            "--name",
+            names[i] as string,
+            "--label",
+            `authtempo.worktree=${s.worktree}`,
+            "--label",
+            `com.docker.compose.project=authtempo-s${s.slot}`,
+            image,
+          ],
+          { encoding: "utf8" },
+        );
+        expect(create.status, create.stderr).toBe(0);
+      });
+      const mine = setsUp().filter((s) => s.worktree.startsWith(join(temp, "real-read-")));
+      expect(mine.sort((a, b) => a.slot - b.slot)).toEqual(sets);
+    } finally {
+      spawnSync("docker", ["rm", "-f", ...names]);
+    }
   });
 
   it("keeps the row when the set is not gone after compose down", () => {

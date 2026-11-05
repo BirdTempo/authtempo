@@ -56,22 +56,36 @@ const LOCK_WAIT_MS = 2 * 60 * 1000;
 /** The compose project of a slot of 1 or more, as projectOf writes it. */
 const PROJECT_RE = /^authtempo-s(\d+)$/;
 
+/** A compose project name: lower-case letters, digits, "-", and "_", with a letter or a digit first. */
+const COMPOSE_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
 /**
  * The sets in the lines of `docker ps -a --filter label=authtempo.worktree`
  * with the format `<worktree label>\t<compose project>`, one line for each
  * container. A project that projectOf did not name is not a slot. An empty
  * label names no worktree, so its slot is not free for any worktree.
+ *
+ * A line of another form throws, so the take stops and gives no slot. Before,
+ * the parse skipped such a line. A wrong format string then read no set, and
+ * the take could give a slot in use (review of Task 0 of 12q, Low 2).
  * @param {string} text
  * @returns {SetUp[]}
  */
 export function setsOf(text) {
   /** @type {Map<string, SetUp>} */
   const sets = new Map();
-  for (const line of text.split("\n")) {
+  if (text === "") return [];
+  // docker ends each line with a newline, so only the last line is empty.
+  for (const line of text.replace(/\n$/, "").split("\n")) {
     const cut = line.lastIndexOf("\t");
-    if (cut === -1) continue;
+    const project = line.slice(cut + 1);
+    if (cut === -1 || !COMPOSE_NAME_RE.test(project))
+      throw new Error(
+        `docker ps gave the line ${JSON.stringify(line)}, not <worktree label><tab><compose project>. ` +
+          "The read of the sets has a wrong format, so no slot is taken",
+      );
     const worktree = line.slice(0, cut);
-    const slot = Number(PROJECT_RE.exec(line.slice(cut + 1))?.[1] ?? Number.NaN);
+    const slot = Number(PROJECT_RE.exec(project)?.[1] ?? Number.NaN);
     if (!Number.isInteger(slot) || slot < 1) continue;
     sets.set(`${slot}\t${worktree}`, { slot, worktree });
   }

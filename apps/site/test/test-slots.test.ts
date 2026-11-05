@@ -268,6 +268,22 @@ describe("the slot table of the test servers", () => {
     ]);
   });
 
+  it("stops the read of the sets on a line that is not a label, a tab, and a compose project", () => {
+    expect(setsOf("")).toEqual([]);
+    // Each form comes from a wrong format string. Before, the read skipped each line.
+    const lines = [
+      ["/repo/lane-a authtempo-s1\n", "/repo/lane-a authtempo-s1"],
+      ["authtempo-s1\t/repo/lane-a\n", "authtempo-s1\t/repo/lane-a"],
+      ["/repo/lane-a\t\n", "/repo/lane-a\t"],
+      ["/repo/lane-a\tauthtempo-s1\n\n", ""],
+    ];
+    for (const [text, line] of lines)
+      expect(() => setsOf(text as string)).toThrow(
+        `docker ps gave the line ${JSON.stringify(line)}, not <worktree label><tab><compose project>. ` +
+          "The read of the sets has a wrong format, so no slot is taken",
+      );
+  });
+
   it("names no compose project for slot 0", () => {
     expect(projectOf(1)).toBe("authtempo-s1");
     expect(projectOf(42)).toBe("authtempo-s42");
