@@ -349,7 +349,7 @@ describe("a new link or code keeps the proof hash only with the proof (plan 12q 
 
   it("copies nothing for the proof of another sign-up of the same address", async () => {
     // The claimant signs up first. The owner then tries a sign-up of the same
-    // address, which gives the owner's browser a proof of its own, and asks
+    // address, so the owner's browser gets a proof of its own. The owner asks
     // for a new link there. That proof must not keep the claimant's password.
     const w = world({ hash: FAST, uniformSignUp: true });
     const claimant = new Browser(w);
@@ -386,6 +386,86 @@ describe("a new link or code keeps the proof hash only with the proof (plan 12q 
     await new Browser(w).post("/auth/password/sign-in", { email: EMAIL, password: PW });
     const res = await a.post("/auth/password/verify", { token: linkToken(w) });
     expect(await res.json()).toEqual({ verified: true, passwordKept: false });
+  });
+});
+
+describe("a bearer app's sign-in before its confirm (fix round 1 of plan 12q Task 1)", () => {
+  // Under requireVerified, a right password of an unverified user mails a new
+  // code and spends the old one. A bearer app has no cookie jar, so its
+  // sign-in sends the proof in the body. The new code keeps the proof hash.
+  const BEARER = { hash: FAST, requireVerified: true, verifyBy: "code" } as const;
+
+  /** A bearer sign-up: no cookie jar, and the proof from the body. */
+  async function bearerSignUp(w: ReturnType<typeof world>, password = PW): Promise<string> {
+    const up = await w.handle(post("/auth/password/sign-up", { email: EMAIL, password }));
+    return recordCredential(((await up.json()) as { signUpProof: string }).signUpProof);
+  }
+
+  it("keeps the password through the code with the proof after a bearer sign-in", async () => {
+    const w = world(BEARER);
+    const proof = await bearerSignUp(w);
+    const first = mailCode(w);
+    const signIn = await w.handle(
+      post("/auth/password/sign-in", { email: EMAIL, password: PW, signUpProof: proof }),
+    );
+    expect(signIn.status).toBe(403);
+    expect(await signIn.json()).toEqual({ error: "email_unverified" });
+    expect(w.mails.filter((m) => m.to === EMAIL)).toHaveLength(2);
+    const code = mailCode(w);
+    const res = await w.handle(
+      post("/auth/password/verify/code", { email: EMAIL, code, signUpProof: proof }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ passwordKept: true });
+    expect(await passwordRow(w)).not.toBeNull();
+    expect(await signInStatus(w, PW)).toBe(200);
+    // The sign-in spent the first code.
+    expect(code).not.toBe(first);
+  });
+
+  it("reads the cookie first at the sign-in: a cookie of another sign-up beside the right body proof", async () => {
+    const w = world(BEARER);
+    const proof = await bearerSignUp(w);
+    const c = new Browser(w);
+    await c.post("/auth/password/sign-up", { email: "cy@example.com", password: PW });
+    await c.post("/auth/password/sign-in", { email: EMAIL, password: PW, signUpProof: proof });
+    const res = await w.handle(
+      post("/auth/password/verify/code", { email: EMAIL, code: mailCode(w), signUpProof: proof }),
+    );
+    expect(await res.json()).toMatchObject({ passwordKept: false });
+    expect(await passwordRow(w)).toBeNull();
+  });
+
+  it("copies nothing for a body proof of another sign-up of the same address at a sign-in", async () => {
+    // The uniform sign-up of a known address gives a proof of its own. It is
+    // the proof of another sign-up, so the new code keeps nothing with it.
+    const w = world({ ...BEARER, uniformSignUp: true });
+    await bearerSignUp(w);
+    const other = await bearerSignUp(w, FIRST);
+    await w.handle(
+      post("/auth/password/sign-in", { email: EMAIL, password: PW, signUpProof: other }),
+    );
+    const res = await w.handle(
+      post("/auth/password/verify/code", { email: EMAIL, code: mailCode(w), signUpProof: other }),
+    );
+    expect(await res.json()).toMatchObject({ passwordKept: false });
+    expect(await passwordRow(w)).toBeNull();
+    expect(await signInStatus(w, PW)).toBe(401);
+  });
+
+  it("copies nothing for a body proof of another sign-up of the same address at a resend", async () => {
+    // The claimant signs up first. The owner's native app then tries a sign-up
+    // of the same address and asks for a new code with its own proof.
+    const w = world({ ...BEARER, uniformSignUp: true });
+    await bearerSignUp(w);
+    const owner = await bearerSignUp(w, FIRST);
+    await w.handle(post("/auth/password/verify/resend", { email: EMAIL, signUpProof: owner }));
+    const res = await w.handle(
+      post("/auth/password/verify/code", { email: EMAIL, code: mailCode(w), signUpProof: owner }),
+    );
+    expect(await res.json()).toMatchObject({ passwordKept: false });
+    expect(await passwordRow(w)).toBeNull();
+    expect(await signInStatus(w, PW)).toBe(401);
   });
 });
 

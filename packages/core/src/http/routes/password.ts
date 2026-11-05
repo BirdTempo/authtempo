@@ -75,6 +75,16 @@ function proofCookie(request: Request): string | null {
   return readCookie(request, SIGN_UP_PROOF_COOKIE);
 }
 
+/**
+ * The sign-up proof of a request (ruling 11 of plan 12q): the cookie, else
+ * the body member of a bearer client. The cookie wins when both come. The
+ * auth origin set it in this browser as HttpOnly, so no page script reads or
+ * changes it. A body member that a script wrote cannot replace it.
+ */
+function carriedProof(request: Request, member: string | undefined): string | null {
+  return proofCookie(request) ?? member ?? null;
+}
+
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
   if (!config.password) return [];
@@ -154,8 +164,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           next: body.value.next,
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
-          // For the new verify link of an unverified user (ruling 11 of plan 12q).
-          signUpProof: proofCookie(ctx.request),
+          // For the new verify link or code of an unverified user (ruling 11 of plan 12q).
+          signUpProof: carriedProof(ctx.request, v.signUpProof),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
@@ -224,9 +234,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
-          // The cookie of the sign-up's browser, else the copy of a bearer
-          // client (ruling 11 of plan 12q).
-          signUpProof: proofCookie(ctx.request) ?? body.value.signUpProof ?? null,
+          // The cookie of the sign-up's browser, else the copy of a bearer client.
+          signUpProof: carriedProof(ctx.request, body.value.signUpProof),
         });
         if (!r.ok) return respond(r);
         const s = r.value.signedIn;
@@ -261,7 +270,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
               ip: ctx.ip,
               anonymous: await anonymousCaller(ctx.config, ctx.request),
               // The new row keeps the proof hash (ruling 11 of plan 12q).
-              signUpProof: carried ?? body.value.signUpProof ?? null,
+              signUpProof: carriedProof(ctx.request, body.value.signUpProof),
             },
             ctx.waitUntil,
           ),

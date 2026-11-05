@@ -368,6 +368,8 @@ export interface Client {
         next?: string | undefined;
         /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
         captchaToken?: string | undefined;
+        /** The `signUpProof` of a bearer app's sign-up, as for `password.signIn` (plan 12q). */
+        signUpProof?: string | undefined;
       },
     ): Promise<ClientResult<PasswordSignIn>>;
   };
@@ -520,6 +522,11 @@ export interface Client {
         next?: string | undefined;
         /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
         captchaToken?: string | undefined;
+        /**
+         * A bearer app passes the `signUpProof` of its sign-up (plan 12q). An
+         * unverified user then gets a new link or code that keeps the password.
+         */
+        signUpProof?: string | undefined;
       },
     ): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
     /**

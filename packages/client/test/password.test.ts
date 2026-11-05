@@ -155,6 +155,28 @@ describe("password", () => {
     });
   });
 
+  it("passes signUpProof at a bearer sign-in, so the new code keeps the password (plan 12q)", async () => {
+    const server = makeServer({
+      password: { hash: FAST, requireVerified: true, verifyBy: "code" },
+    });
+    const { fetch, jar } = inProcessFetch(server.auth);
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    const up = await client.password.signUp({ email: EMAIL, password: PW });
+    if (!up.ok) throw new Error(up.code);
+    const signUpProof = up.value.signUpProof;
+    // A native app has no cookie jar: it keeps only the answer's proof.
+    jar.clear();
+    expect(await client.password.signIn({ email: EMAIL, password: PW, signUpProof })).toEqual({
+      ok: false,
+      code: "email_unverified",
+      status: 403,
+    });
+    expect(server.mail).toHaveLength(2);
+    const code = /^(\d{6}) is your /.exec(server.mail.at(-1)?.text ?? "")?.[1] ?? "";
+    const v = await client.password.verifyCode({ email: EMAIL, code, signUpProof });
+    expect(v.ok && v.value.passwordKept).toBe(true);
+  });
+
   it("sends captchaToken in the x-captcha-response header and never in the body (plan 12b)", async () => {
     const seen: Array<{ url: string; header: string | null; body: Record<string, unknown> }> = [];
     const fetch: typeof globalThis.fetch = async (input, init) => {

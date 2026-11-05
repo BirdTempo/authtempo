@@ -14,11 +14,11 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // cookie `__Host-tempo_signup`, and `signUpProof` in the body. A confirm
 // with the proof keeps the sign-up's password. Any other confirm is a
 // claim: the password goes, and the clicker gets a proved session. Every
-// step is a real request through `auth.handle`, on a view of the binding
-// that counts each query and refuses query 51, as D1 Free does (D1 limits
-// page updated 21 April 2026, read 2026-10-24). The proof rides in the data
-// of the verify row, and the claim deletes the password rows in one
-// statement with or without the kept row. So a confirm with the proof and
+// step is a real request through `auth.handle`. The view of the binding
+// counts each query and refuses query 51, as D1 Free does. The D1 limits
+// page was updated 21 April 2026 and read 2026-10-24. The proof rides in
+// the data of the verify row. The claim deletes the password rows in one
+// statement, with or without the kept row. So a confirm with the proof and
 // one without it send the same queries.
 
 const BASE = "https://api.example.com";

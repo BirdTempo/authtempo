@@ -22,6 +22,13 @@ export const signUpBody = z.object({
 });
 
 /**
+ * The sign-up proof of a bearer client with no cookie jar (ruling 11 of plan
+ * 12q). A browser sends the cookie `__Host-tempo_signup`, and the cookie
+ * wins. The engine reads only the `sp_` form, so another string keeps nothing.
+ */
+const signUpProofField = z.string().max(64).optional();
+
+/**
  * Plan 12i Task 3: exactly one of `email`, `username`, or `phone`. The
  * route holds the body to one, as the reauth body holds its proofs, so the
  * document keeps one object. The engine reads the form of a username and a
@@ -36,6 +43,8 @@ export const signInBody = z.object({
   // Plan 9f: a native app's trust token (a browser sends the cookie), and the landing path after a challenge.
   trustDevice: z.string().max(64).optional(),
   next: z.string().max(2048).optional(),
+  // The proof for a new verify link or code of an unverified user (plan 12q).
+  signUpProof: signUpProofField,
 });
 
 export const tokenBody = z.object({ token: z.string().max(64) });
@@ -44,13 +53,6 @@ export const resetRequestBody = z.object({
   email: z.string().max(320),
   next: z.string().max(2048).optional(),
 });
-
-/**
- * The sign-up proof of a bearer client with no cookie jar (ruling 11 of plan
- * 12q). A browser sends the cookie `__Host-tempo_signup`, and the cookie
- * wins. The engine reads only the `sp_` form, so another string keeps nothing.
- */
-const signUpProofField = z.string().max(64).optional();
 
 export const resendBody = z.object({ email: z.string().max(320), signUpProof: signUpProofField });
 

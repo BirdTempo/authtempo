@@ -305,8 +305,8 @@ export interface PasswordSignInFields {
   anonymous?: AnonymousCaller | null | undefined;
   /**
    * The sign-up proof of the request (ruling 11 of plan 12q). It counts only
-   * when this sign-in mails a new verify link: the new row keeps the proof
-   * hash, as at a resend (`resendPasswordVerification`).
+   * when this sign-in mails a new verify link or code. The new row keeps the
+   * proof hash on the same match rule as a resend (`resendPasswordVerification`).
    */
   signUpProof?: string | null | undefined;
 }
@@ -951,9 +951,9 @@ async function replaceVerifyMail(
 
 /**
  * The proof hash of the row of a new link or code (ruling 11 of plan 12q).
- * It is the hash of the proof that the request carries, when an earlier
- * sign-up row of the address holds it for the same password row. Else
- * null, and every confirm of the new row is a claim. A proof of another
+ * It is the hash of the proof that the request carries. It counts only when
+ * an earlier sign-up row of the address holds it for the same password row.
+ * Else it is null, and every confirm of the new row is a claim. A proof of another
  * sign-up keeps nothing: a person who tried a sign-up of the same address
  * holds such a proof. With no proof there is no read, so no query moves.
  */
@@ -1432,8 +1432,8 @@ async function confirmSignUp(
   if (typeof passwordId !== "string") return fail(refused);
   // The sign-up's own browser or app carries the proof whose hash the row
   // holds (ruling 11 of plan 12q). Only it keeps the sign-up's password. A
-  // confirm from any other place is a claim: the password goes, and the
-  // person sets a first password on the proved session that this confirm opens.
+  // confirm from any other place is a claim, and the password goes. The
+  // person then sets a first password on the proved session that this confirm opens.
   const own = holdsProof(row.data, await proofHashOf(input.signUpProof));
   const keep: ClaimKeep = own ? { passwordId, username: true } : { username: true };
   const ended = endedList(config);
