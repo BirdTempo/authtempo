@@ -177,6 +177,12 @@ needs no step. A native app keeps it and passes it to `verifyCode`, to
 password and answers `passwordKept: false`. The app then asks for a first
 password and calls `change({ newPassword })` with no `currentPassword`.
 
+So a native app confirms by the code, with `signUpProof`. A native app that
+calls `verifyEmail` with the link token keeps no session and no password.
+The link form reads the proof from the cookie only, and its answer holds no
+token. That is the safe side, but the person must prove the address again,
+by a magic link or a reset.
+
 ## Email codes
 
 Every operation answers `not_found` when the server sets `emailOtp: false`.

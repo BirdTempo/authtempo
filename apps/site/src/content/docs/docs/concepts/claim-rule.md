@@ -74,6 +74,8 @@ The person then sets a first password through `POST /password/change`, with no c
 
 An app on another site than the auth origin uses the code form, and sends `signUpProof` with the code. Its proof cookie is a third-party cookie, and many browsers drop it. Then the link is a claim, and the password goes.
 
+A native app uses the code form with `signUpProof` too. A bearer client that posts the link token itself keeps no session and no password. The link form reads the proof from the cookie only, so that confirm is a claim. Its answer holds no token. The person then proves the address again, by a magic link or a reset. That is the safe side: the confirm leaves no way in.
+
 So a claimant who signs up with the owner's address keeps no way in. The owner opens the link in another browser, which holds no proof of that sign-up.
 
 The default config opens no session at a sign-up, so the proof is the only signal of the sign-up's browser. A session of the user does not count.
