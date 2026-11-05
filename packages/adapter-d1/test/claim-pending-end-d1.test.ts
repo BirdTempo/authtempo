@@ -16,8 +16,8 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // pushed the owner's claim past the 50 queries of one invocation. Now a
 // claim ends at most two chunks. It writes the pending-end row of a ban for
 // the rest, with the reason `claimed`, and the sweep ends them with the hook.
-// The rest are unproved until then. The owner's session after the claim is
-// proved, so the sweep keeps it.
+// The rest are unproved, so each ends at its next use (ruling 13). The owner's
+// session after the claim is proved, so the sweep keeps it.
 //
 // Every step is a real request through `auth.handle`. The counted request
 // runs on a view of the binding that counts each query and refuses query
@@ -120,31 +120,61 @@ async function measure(w: World, request: Request) {
 }
 
 let ip = 0;
-const post = (path: string, body: unknown) =>
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   new Request(`${BASE}/auth${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: APP_ORIGIN,
       "cf-connecting-ip": `198.51.100.${(++ip % 250) + 1}`,
+      ...headers,
     },
     body: JSON.stringify(body),
   });
 
-/** The claimant: a sign-up of the address and `sessions - 1` sign-ins, 1 ms apart. */
+/** A GET of the routes with the headers of one session. */
+const get = (path: string, headers: Record<string, string>) =>
+  new Request(`${BASE}/auth${path}`, {
+    headers: {
+      origin: APP_ORIGIN,
+      "cf-connecting-ip": `198.51.100.${(++ip % 250) + 1}`,
+      ...headers,
+    },
+  });
+
+/** The bearer header of a session token. */
+const bearer = (token: string | undefined) => {
+  expect(token).toBeTruthy();
+  return { authorization: `Bearer ${token}` };
+};
+
+/** The session cookie that an answer sets. */
+function cookieOf(res: Response): Record<string, string> {
+  const line = res.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_session="));
+  const token = line?.slice("__Host-tempo_session=".length).split(";")[0] ?? "";
+  expect(token).not.toBe("");
+  return { cookie: `__Host-tempo_session=${token}` };
+}
+
+/**
+ * The claimant: a sign-up of the address and `sessions - 1` sign-ins, 1 ms apart.
+ * `tokens` gets the token of each session, oldest first.
+ */
 async function claimant(
   email: string,
   sessions: number,
   extra: Partial<AuthConfig> = {},
+  tokens: string[] = [],
 ): Promise<string> {
   const other = make(false, extra);
-  expect(
-    (await measure(other, post("/password/sign-up", { email, password: PASSWORD }))).res.status,
-  ).toBe(200);
+  const up = await measure(other, post("/password/sign-up", { email, password: PASSWORD }));
+  expect(up.res.status).toBe(200);
+  tokens.push(((await up.res.json()) as { token: string }).token);
   for (let i = 1; i < sessions; i++) {
     current = new Date(current.getTime() + 1);
     const s = await measure(other, post("/password/sign-in", { email, password: PASSWORD }));
     expect(s.res.status).toBe(200);
+    tokens.push(((await s.res.json()) as { token: string }).token);
   }
   const user = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
     .bind(email)
@@ -264,6 +294,59 @@ describe("the claim's bounded session delete on D1 (decision 3 of plan 12q)", ()
     // 160 claimant sessions ended, each once.
     expect(ends.length).toBe(160);
     expect(new Set(ends.map((e) => e.id)).size).toBe(160);
+  });
+
+  // Probe R3 of the Task 2 review (Major 1, ruling 23 of plan 12q). Before the
+  // door of ruling 13, a leftover session listed the owner's sessions. It ended
+  // them and deleted the owner's account. Now each act meets the door: 401, and
+  // the session ends with the reason `claimed`. Each act uses its own leftover
+  // session, so each one reaches the door and not an empty session.
+  it("refuses the session list, the revoke of the others, and the account delete of a leftover session at the door", {
+    timeout: 120_000,
+  }, async () => {
+    const tokens: string[] = [];
+    const userId = await claimant("dee@example.com", 120, {}, tokens);
+    expect(tokens).toHaveLength(120);
+    const claim = await measure(make(true), await link("dee@example.com"));
+    expect(claim.res.status).toBe(200);
+    expect(claim.queries).toBe(PINS.link);
+    const owner = cookieOf(claim.res);
+    const mid = await stateOf(userId);
+    expect(mid.proved.length).toBe(1);
+    expect(mid.unproved.length).toBe(20);
+    expect(mid.pending).toEqual(["claimed"]);
+    expect(ends.length).toBe(100);
+    // The claim ends the newest 100, so the three oldest sessions are leftovers.
+    const acts = [
+      get("/sessions", bearer(tokens[0])),
+      post("/sessions/revoke-others", {}, bearer(tokens[1])),
+      post("/user/delete", {}, bearer(tokens[2])),
+    ];
+    for (const [i, act] of acts.entries()) {
+      const { res } = await measure(make(false), act);
+      expect(res.status).toBe(401);
+      expect(ends.slice(100).map((e) => e.reason)).toEqual(Array(i + 1).fill("claimed"));
+    }
+    const door = ends.slice(100).map((e) => e.id);
+    expect(door.every((id) => mid.unproved.includes(id))).toBe(true);
+    // The owner keeps the verified account and its proved session.
+    const after = await stateOf(userId);
+    expect(after.proved).toEqual(mid.proved);
+    expect(after.unproved).toEqual(mid.unproved.filter((id) => !door.includes(id)));
+    expect(after.pending).toEqual(["claimed"]);
+    const user = await env.DB.prepare("SELECT email_verified AS v FROM ta_user WHERE id = ?")
+      .bind(userId)
+      .first<{ v: number }>();
+    expect(user).toEqual({ v: 1 });
+    expect((await measure(make(false), get("/session", owner))).res.status).toBe(200);
+    // The sweep ends the other 17. The hook sees each claimant session once, and never the owner's.
+    current = new Date(current.getTime() + 1000);
+    const result = await make(true).auth.api.sweepExpired();
+    expect(result.pendingSessions).toBe(17);
+    expect(ends).toHaveLength(120);
+    expect(new Set(ends.map((e) => e.id)).size).toBe(120);
+    expect(ends.some((e) => mid.proved.includes(e.id))).toBe(false);
+    expect(await stateOf(userId)).toEqual({ proved: mid.proved, unproved: [], pending: [] });
   });
 
   it("answers the owner's reset link over 1000 claimant sessions inside 50 queries", {

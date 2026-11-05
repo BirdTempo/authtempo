@@ -223,7 +223,7 @@ export function claimLeaseId(userId: string): string {
  * flag is false (plan 12p). Each check of a verified address reads that
  * flag, so such a session makes no token, grant, factor, or address change
  * before its delete. So the claimant keeps no way in. That holds for a
- * session that waits for the sweep too.
+ * session that waits for the sweep too, and its next use ends it.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -312,8 +312,9 @@ export async function claimEmail(
   // adds queries (open point 4 of the 12p close). On a store with no
   // isolation, at most `CLAIM_SESSION_CHUNKS` chunks run (decision 3 of plan
   // 12q). The rest stay with the pending-end row of a ban, of the reason
-  // `claimed`, and the sweep ends them with the hook. They are unproved until
-  // then. An isolated store has no cap of queries, so there every session goes.
+  // `claimed`, and the sweep ends them with the hook. Each is unproved, so it
+  // ends at its next use (ruling 13). An isolated store has no cap of
+  // queries, so there every session goes.
   const end = await endSessionChunks(
     tx,
     [{ field: "userId", op: "eq", value: userId }],

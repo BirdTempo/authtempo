@@ -99,7 +99,7 @@ A claimant can open many sessions before the owner's proof. `session.maxPerUser`
 
 With a `session.afterEnd` hook, the claim reads the sessions and ends them in chunks of 50, one query per chunk. D1 allows 50 queries in one request. So on D1, SQLite, and the memory store the claim ends at most two chunks. It writes a pending-end row for the rest, as a ban does, with the reason `claimed`.
 
-The sweep ends those sessions over its runs and fires `session.afterEnd` with `claimed`. The row ends only unproved sessions, so the owner's sessions stay. Until the sweep the claimant's sessions are unproved, and core refuses their verified-only requests. An app that reads `auth.session` for its own data still sees them until then. With no hook, or on Postgres and MySQL, the claim ends every session at once.
+Each of those sessions is unproved on a verified address, so it ends at its next use, as [the session proof](#the-session-proof) tells. The request gets 401, and an app that reads `auth.session` gets no session. The sweep removes the rest over its runs and fires `session.afterEnd` with `claimed`. The row ends only unproved sessions, so the owner's sessions stay. With no hook, or on Postgres and MySQL, the claim ends every session at once.
 
 ## Why in one transaction
 

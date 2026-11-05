@@ -1833,8 +1833,8 @@ writes each value under version 1.
   verified user there wait on each other and stay at the cap.
 - With a `session.afterEnd` hook, a claim on D1, SQLite, or the memory
   store ends at most two chunks of 50 sessions (plan 12q). A pending-end
-  row of the reason `claimed` names the rest, and the sweep ends them
-  with the hook. They stay unproved until then.
+  row of the reason `claimed` names the rest. Each of them ends at its
+  next use, and the sweep removes the rest over its runs with the hook.
 - A passkey challenge is valid for five minutes and for one use. Passkey
   sign-in options are limited to 30 per IP, and verifies to 20 per IP,
   per 15 minutes, in the same per-isolate limiter.
