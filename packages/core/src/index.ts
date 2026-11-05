@@ -279,8 +279,20 @@ export type {
 /** The shape of a `tf_` challenge token (plan 9f): the compat shim checks a cookie against it before core's verify. */
 export { TWO_FACTOR_TOKEN_RE } from "./engine/totp.js";
 export { USERNAME_RE, type Username, type UsernameSet } from "./engine/username.js";
-/** `claimNotStarted`: the claim check of a credential write. The importer runs it (ruling 31 of plan 12p). */
-export { claimNotStarted, normalizeEmail, validImageUrl, validUserName } from "./engine/users.js";
+/**
+ * `claimNotStarted`: the claim check of a credential write (ruling 31 of plan 12p).
+ * `holdClaim` and `releaseClaim`: the hold of the claim of a user around the writes of a
+ * writer that is no claim. The importer takes it (plan 12q). A held lease throws `ClaimLostError`.
+ */
+export {
+  ClaimLostError,
+  claimNotStarted,
+  holdClaim,
+  normalizeEmail,
+  releaseClaim,
+  validImageUrl,
+  validUserName,
+} from "./engine/users.js";
 export { ERRORS, type ErrorCode, OAUTH_ERRORS, type OAuthErrorCode } from "./errors.js";
 export {
   type AccountDeletePageInput,

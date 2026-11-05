@@ -171,8 +171,8 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
  * behind. The next claim of the user takes it. The sweep deletes it, as it
  * deletes each verification row past `expiresAt`. The flows that create a
  * row of a user that a claim deletes read the lease, live or stale
- * (`claimNotStarted`). They are the three sign-ups of a new user and the
- * importer, for a new user and for a repair.
+ * (`claimNotStarted`). They are the three sign-ups of a new user. The
+ * importer holds the lease for its writes instead (`holdClaim`, plan 12q).
  */
 export const CLAIM_LEASE_MS = 60_000;
 
@@ -405,6 +405,43 @@ async function takeClaim(
 }
 
 /**
+ * Holds the claim of a user for a writer that is no claim, such as the
+ * importer (decision 5 of plan 12q). It is the first statement of a claim
+ * (`takeClaim`). So no claim of the user deletes or flips until the release
+ * or the commit.
+ *
+ * The contract: the caller runs it in its transaction, after the user row
+ * exists there. It writes the user's rows, then calls `releaseClaim` in the
+ * same transaction. It runs no hook between the two calls. A hook can wait
+ * longer than `CLAIM_LEASE_MS`, and a claim can then take the stale lease.
+ *
+ * On an isolated store it is the hold: an update of the user row while it
+ * is unverified. That update takes the row lock until the commit, so a
+ * claim's hold waits. On a store with no isolation it creates the lease, or takes a
+ * stale one. Its expiry comes from a read of `clock`. A claim that meets the
+ * lease answers 409 `conflict` on D1 and retries after a wait elsewhere.
+ *
+ * It throws `ClaimLostError` with `held` when another claim holds a live
+ * lease. On an isolated store it throws `ClaimLostError` when the user is
+ * verified, and it stops with `conflict` when the user row is gone. A caller
+ * that stops before `releaseClaim` leaves the lease. The sweep deletes it
+ * after 60 seconds, or the next claim takes it.
+ */
+export async function holdClaim(tx: StorageAdapter, userId: string, clock: Clock): Promise<void> {
+  await takeClaim(tx, userId, clock.now(), clock);
+}
+
+/**
+ * Ends the hold of `holdClaim`, in the same transaction. On an isolated
+ * store it sends nothing: the commit ends the row lock. On a store with no
+ * isolation it deletes the lease by its id.
+ */
+export async function releaseClaim(tx: StorageAdapter, userId: string): Promise<void> {
+  if (tx.isolated) return;
+  await tx.delete("verification", [{ field: "id", op: "eq", value: claimLeaseId(userId) }]);
+}
+
+/**
  * Work that runs inside the resolution transaction after the user is
  * resolved, such as the sign-in's session. It commits with the claim, so a
  * claimant's write cannot land between the claim and this work.
@@ -589,8 +626,10 @@ export async function userStillUnverified(
  * since the create or the read. The caller then deletes its own rows by id
  * and commits, with no throw. A claim deletes those rows before its flip,
  * so a check of the flip alone can miss it. Then the row would outlive the
- * claim, a way in of the claimant. The three sign-ups of core and the
- * importer call it (ruling 31 of plan 12p).
+ * claim, a way in of the claimant. The three sign-ups of core call it
+ * (ruling 31 of plan 12p). Since plan 12q the importer holds the claim
+ * instead (`holdClaim`). This check would read the importer's own lease as
+ * a claim.
  *
  * On Postgres and MySQL the update of the user row is enough. A claim
  * cannot read the user that this open transaction created, so it never

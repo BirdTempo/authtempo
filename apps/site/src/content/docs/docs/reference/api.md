@@ -116,6 +116,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |
 | `claimNotStarted` | The claim check of a credential write. It runs in the caller's transaction, after a password or identity write of an unverified user that this transaction created or read. It answers false when a claim of the user started since then. The caller then deletes its own rows by id and commits. On a store with no isolation it also reads the lease of the claim. The importer calls it. |
+| `holdClaim`, `releaseClaim` | The hold of the claim of a user, for a writer that is no claim, such as the importer. `holdClaim` takes a transaction, a user id, and a clock. It is the first statement of a claim. On Postgres and MySQL it is an update of the unverified user row. On a store with no isolation it is the claim lease. Call it after the user row exists in the transaction. Then write, then call `releaseClaim` in the same transaction, with no hook between the two calls. A claim of the user meanwhile waits, or answers 409 `conflict` on D1. A held lease throws `ClaimLostError` with `held`. A writer that stops leaves the lease, and the sweep deletes it after 60 seconds. |
 | `validTokenName`, `validMetadata` | The create rules of a token. A name holds 1 to 80 characters and no control character. Metadata is a plain object whose JSON is at most 4096 bytes. The Better Auth key move reads them. |
 | `checkCaptcha` | The captcha check of one flow, after its per-IP limit and before its per-email limits. It answers null when the flow goes on. An `api` call with no `captchaToken` skips it, so an app that proxies a browser request through `api` must pass the browser's token. |
 
@@ -126,6 +127,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `ConfigError` | The error of a config that breaks a rule. Its message names the key. |
 | `StorageError` | The error of an adapter, with a code such as `unique_violation` or `schema_mismatch`. |
 | `HookRefusal` | The class of the error that `hookRefusal` makes. |
+| `ClaimLostError` | The error of `holdClaim` when a claim holds the user. `held` is true when another claim holds a live lease. On Postgres and MySQL it is false: a claim verified the user first. |
 | `ERRORS`, `OAUTH_ERRORS` | The error tables: each code with its status. [Error codes](/docs/reference/errors/) lists them. |
 | `VERSION` | The version of core. |
 | `SCHEMA_VERSION` | The schema version that this core needs. |
