@@ -203,8 +203,9 @@ describe("the slot table of the test servers", () => {
   });
 
   // Plan 12q decision 7. The table cannot see a set whose row is in no table
-  // that it reads: a second HOME, a hand edit, or a row dropped while its set
-  // runs. So the take of a new row also reads the sets that docker runs.
+  // that it reads. That happens with a second HOME, a hand edit, or a row
+  // dropped while its set runs. So the take of a new row also reads the sets
+  // that docker runs.
   it("gives slot 2 to a second table when slot 1 is up under another worktree's label", () => {
     const up: SetUp[] = [];
     const take = (table: string, worktree: string) =>

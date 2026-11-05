@@ -11,7 +11,7 @@
 // each container names its worktree in a label. A row can be missing while
 // its set runs. That happens with a second table (another HOME), a hand edit,
 // or a down beside an up of the same worktree. So the take of a new row also
-// reads the sets that docker runs, and skips each slot that another worktree
+// reads the sets that docker runs. It skips each slot that another worktree
 // uses (plan 12q, decision 7).
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -262,7 +262,7 @@ export function checkSlot0(row, isMain) {
  * A slot is free when no row has it and no set of another worktree runs on
  * it. `setsUp` reads the sets from docker. The caller holds the lock of the
  * table, so a second take waits for this read. A worktree with a row keeps
- * its slot, and the take reads no set: the owner check of the caller refuses
+ * its slot, and the take reads no set. The owner check of the caller refuses
  * a set of another worktree on that slot.
  * @param {SlotTable} table
  * @param {{ worktree: string, isMain: boolean, services: readonly string[], now: number, setsUp: () => readonly SetUp[] }} claim

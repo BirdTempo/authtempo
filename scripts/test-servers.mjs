@@ -169,8 +169,9 @@ function checkOwner(slot, worktree) {
 }
 
 /**
- * The sets that docker has on the machine, with the worktree of each label:
- * the sets of every clone, also of a clone whose row is in another table.
+ * The sets that docker has on the machine, with the worktree of each label.
+ * These are the sets of every clone, also of a clone whose row is in another
+ * table.
  * `-a` also lists a stopped set, because checkOwner refuses a stopped set of
  * another worktree too. A failed read throws: a take with no read could give
  * a slot that another worktree uses.

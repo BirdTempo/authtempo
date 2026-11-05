@@ -359,7 +359,7 @@ describe("the test-servers command", () => {
     const home = newHome();
     servers(home, LANE, "up", "--only", "libsql");
     expect(rowsOf(home)).toEqual([[LANE, 1]]);
-    // A run of the same worktree starts the set again while down runs: compose
+    // A run of the same worktree starts the set again while down runs. Compose
     // down exits 0, and a container of the set is up after it.
     const left = serversWith(
       { FAKE_DOCKER_PS: `authtempo-s1-libsql-1\t${LANE}\n` },
