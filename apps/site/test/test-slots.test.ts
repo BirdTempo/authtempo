@@ -15,7 +15,9 @@ import {
   reapRows,
   registerMain,
   removeRun,
+  type SetUp,
   type SlotTable,
+  setsOf,
   withTable,
 } from "../../../scripts/test-slots.mjs";
 import { SITE } from "../scripts/lib/paths.ts";
@@ -33,14 +35,18 @@ const MAIN = "/repo/main";
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 const empty = (): SlotTable => ({ version: 1, rows: [] });
-/** A claim of a linked worktree, or of a main worktree with `isMain`. */
+/**
+ * A claim of a linked worktree, or of a main worktree with `isMain`. `up` is
+ * the double of the docker read: the sets that run, with their labels.
+ */
 const claim = (
   t: SlotTable,
   worktree: string,
   now = NOW,
   services = ["postgres"],
   isMain = worktree === MAIN,
-) => claimSlot(t, { worktree, isMain, services, now });
+  up: readonly SetUp[] = [],
+) => claimSlot(t, { worktree, isMain, services, now, setsUp: () => up });
 /** register-main in the main worktree MAIN. */
 const register = (t: SlotTable, now = NOW) =>
   registerMain(t, { worktree: MAIN, isMain: true, now });
@@ -194,6 +200,71 @@ describe("the slot table of the test servers", () => {
     );
     // A worktree that holds a set already is not a new set.
     expect(claim(t, "/repo/lane-3").slot).toBe(3);
+  });
+
+  // Plan 12q decision 7. The table cannot see a set whose row is in no table
+  // that it reads: a second HOME, a hand edit, or a row dropped while its set
+  // runs. So the take of a new row also reads the sets that docker runs.
+  it("gives slot 2 to a second table when slot 1 is up under another worktree's label", () => {
+    const up: SetUp[] = [];
+    const take = (table: string, worktree: string) =>
+      withTable(table, (t) =>
+        claimSlot(t, {
+          worktree,
+          isMain: false,
+          services: ["postgres"],
+          now: NOW,
+          setsUp: () => up,
+        }),
+      );
+    // The first worktree takes slot 1 in its table, and its set comes up.
+    expect(take(tablePath(), "/repo/lane-a").slot).toBe(1);
+    up.push({ slot: 1, worktree: "/repo/lane-a" });
+    // The second worktree reads another table, which has no row for slot 1.
+    expect(take(tablePath(), "/repo/lane-b").slot).toBe(2);
+  });
+
+  it("takes the slot of its own set when its row is gone, and a row reads no set", () => {
+    const t = empty();
+    const up = [
+      { slot: 1, worktree: "/repo/lane-a" },
+      { slot: 2, worktree: "/elsewhere/clone" },
+    ];
+    // The set of lane-a runs on slot 1 under its own label: the take reuses it.
+    expect(claim(t, "/repo/lane-a", NOW, ["postgres"], false, up).slot).toBe(1);
+    // Slot 2 runs under another label, so the next new row skips it.
+    expect(claim(t, "/repo/lane-b", NOW, ["postgres"], false, up).slot).toBe(3);
+    // A worktree with a row keeps its slot, so the lock waits for no docker read.
+    const read = () => {
+      throw new Error("a claim with a row read the sets");
+    };
+    expect(
+      claimSlot(t, {
+        worktree: "/repo/lane-a",
+        isMain: false,
+        services: ["postgres"],
+        now: NOW,
+        setsUp: read,
+      }).slot,
+    ).toBe(1);
+  });
+
+  it("reads the slot and the worktree of each set from the lines of docker ps", () => {
+    // One line for each container: the label of the worktree, a tab, the compose project.
+    const lines = [
+      "/repo/lane-a\tauthtempo-s1",
+      "/repo/lane-a\tauthtempo-s1",
+      "/elsewhere/clone\tauthtempo-s12",
+      // A label with no value names no worktree, so its slot is not free.
+      "\tauthtempo-s4",
+      "/repo/lane-c\tsome-other-project",
+      "",
+    ].join("\n");
+    expect(setsOf(lines)).toEqual([
+      { slot: 1, worktree: "/repo/lane-a" },
+      { slot: 12, worktree: "/elsewhere/clone" },
+      { slot: 4, worktree: "" },
+    ]);
   });
 
   it("names no compose project for slot 0", () => {

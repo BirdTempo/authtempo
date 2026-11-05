@@ -6,6 +6,13 @@
 // set (review of 2026-10-22, M1). A lock guards each change, so
 // two worktrees cannot take one slot. scripts/test-servers.mjs is the only
 // caller in the repo.
+//
+// The table is not the only record of a set: docker runs the containers, and
+// each container names its worktree in a label. A row can be missing while
+// its set runs. That happens with a second table (another HOME), a hand edit,
+// or a down beside an up of the same worktree. So the take of a new row also
+// reads the sets that docker runs, and skips each slot that another worktree
+// uses (plan 12q, decision 7).
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -43,7 +50,33 @@ const LOCK_WAIT_MS = 2 * 60 * 1000;
 /**
  * @typedef {{ worktree: string, slot: number, lastUse: number, services: string[], runs: number[] }} SlotRow
  * @typedef {{ version: 1, rows: SlotRow[] }} SlotTable
+ * @typedef {{ slot: number, worktree: string }} SetUp a set of containers that docker has, and the worktree of its label
  */
+
+/** The compose project of a slot of 1 or more, as projectOf writes it. */
+const PROJECT_RE = /^authtempo-s(\d+)$/;
+
+/**
+ * The sets in the lines of `docker ps -a --filter label=authtempo.worktree`
+ * with the format `<worktree label>\t<compose project>`, one line for each
+ * container. A project that projectOf did not name is not a slot. An empty
+ * label names no worktree, so its slot is not free for any worktree.
+ * @param {string} text
+ * @returns {SetUp[]}
+ */
+export function setsOf(text) {
+  /** @type {Map<string, SetUp>} */
+  const sets = new Map();
+  for (const line of text.split("\n")) {
+    const cut = line.lastIndexOf("\t");
+    if (cut === -1) continue;
+    const worktree = line.slice(0, cut);
+    const slot = Number(PROJECT_RE.exec(line.slice(cut + 1))?.[1] ?? Number.NaN);
+    if (!Number.isInteger(slot) || slot < 1) continue;
+    sets.set(`${slot}\t${worktree}`, { slot, worktree });
+  }
+  return [...sets.values()];
+}
 
 /**
  * The compose project of a slot. Slot 0 is the running set of main, which
@@ -225,11 +258,17 @@ export function checkSlot0(row, isMain) {
  * Takes or reuses the slot of a worktree, and adds the services to its row.
  * A new row takes the lowest free slot from 1, also in a main worktree: slot 0
  * comes only from registerMain. A new set above MAX_ACTIVE_SETS is refused.
+ *
+ * A slot is free when no row has it and no set of another worktree runs on
+ * it. `setsUp` reads the sets from docker. The caller holds the lock of the
+ * table, so a second take waits for this read. A worktree with a row keeps
+ * its slot, and the take reads no set: the owner check of the caller refuses
+ * a set of another worktree on that slot.
  * @param {SlotTable} table
- * @param {{ worktree: string, isMain: boolean, services: readonly string[], now: number }} claim
+ * @param {{ worktree: string, isMain: boolean, services: readonly string[], now: number, setsUp: () => readonly SetUp[] }} claim
  * @returns {SlotRow}
  */
-export function claimSlot(table, { worktree, isMain, services, now }) {
+export function claimSlot(table, { worktree, isMain, services, now, setsUp }) {
   let row = rowOf(table, worktree);
   if (row === undefined) {
     const active = table.rows.filter((r) => r.slot !== 0);
@@ -243,6 +282,7 @@ export function claimSlot(table, { worktree, isMain, services, now }) {
       );
     }
     const taken = new Set(table.rows.map((r) => r.slot));
+    for (const set of setsUp()) if (set.worktree !== worktree) taken.add(set.slot);
     let slot = 1;
     while (taken.has(slot)) slot++;
     if (slot > MAX_SLOT) throw new Error(`no free slot from 1 to ${MAX_SLOT}`);

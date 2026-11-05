@@ -18,7 +18,14 @@ const row = withTable(
   table,
   (t) => {
     if (gate !== undefined) writeFileSync(`${gate}/held`, worktree);
-    return claimSlot(t, { worktree, isMain: false, services: ["postgres"], now: Date.now() });
+    // No set runs: these tests hold the lock, not the docker read.
+    return claimSlot(t, {
+      worktree,
+      isMain: false,
+      services: ["postgres"],
+      now: Date.now(),
+      setsUp: () => [],
+    });
   },
   {
     holdMs: Number(holdMs),

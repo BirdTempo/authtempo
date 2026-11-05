@@ -24,7 +24,9 @@ import { REPO } from "../scripts/lib/paths.ts";
 // It also gets a fake docker first on its PATH, so no call can reach a real
 // set. The fake writes each call to a log, after "held" or "free" for the
 // lock of the slot table. A compose down passes, and every other compose
-// call fails. A ps call prints FAKE_DOCKER_PS.
+// call fails. The read of the sets (a ps call with the filter of the label
+// authtempo.worktree) prints FAKE_DOCKER_SETS. Every other ps call prints
+// FAKE_DOCKER_PS.
 //
 // A fake lsof is first on the PATH too. It shows a listener only on a port
 // of FAKE_LSOF_PORTS. A real set on this machine can hold a port of a slot
@@ -46,6 +48,7 @@ writeFileSync(
     'case "$1 $*" in',
     '  "compose "*" down "*) exit 0 ;;',
     "  compose*) exit 1 ;;",
+    '  "ps "*" label=authtempo.worktree "*) printf "%s" "$FAKE_DOCKER_SETS" ;;',
     '  ps*) printf "%s" "$FAKE_DOCKER_PS" ;;',
     "esac",
     "exit 0",
@@ -120,6 +123,7 @@ function serversWith(env: Record<string, string>, home: string, cwd: string, ...
       HOME: home,
       PATH: `${BIN}:${process.env.PATH ?? ""}`,
       FAKE_DOCKER_LOG: log,
+      FAKE_DOCKER_SETS: "",
       FAKE_DOCKER_PS: "",
       FAKE_LSOF_PORTS: "",
       ...env,
@@ -330,6 +334,47 @@ describe("the test-servers command", () => {
     );
     expect(run.docker).toMatch(new RegExp(` ps --filter publish=${port} `));
     expect(run.docker).not.toMatch(/^\w+ compose /m);
+  });
+
+  // Plan 12q decision 7. A second table (another HOME) or a lost row gives
+  // the table no row for slot 1 while its set runs.
+  it("takes slot 2 when the set of slot 1 runs under another worktree's label and no row names it", () => {
+    const home = newHome();
+    const run = serversWith(
+      { FAKE_DOCKER_SETS: "/elsewhere/clone\tauthtempo-s1\n" },
+      home,
+      LANE,
+      "up",
+      "--only",
+      "libsql",
+    );
+    // The fake fails each compose call but down, so up stops after the take.
+    expect(run.stderr).toContain("docker compose up failed for slot 2");
+    expect(rowsOf(home)).toEqual([[LANE, 2]]);
+    // The take read the sets while it held the lock of the table.
+    expect(run.docker).toMatch(/^held ps -a --filter label=authtempo\.worktree /m);
+  });
+
+  it("keeps the row when the set is not gone after compose down", () => {
+    const home = newHome();
+    servers(home, LANE, "up", "--only", "libsql");
+    expect(rowsOf(home)).toEqual([[LANE, 1]]);
+    // A run of the same worktree starts the set again while down runs: compose
+    // down exits 0, and a container of the set is up after it.
+    const left = serversWith(
+      { FAKE_DOCKER_PS: `authtempo-s1-libsql-1\t${LANE}\n` },
+      home,
+      LANE,
+      "down",
+    );
+    expect(left.status).toBe(1);
+    expect(left.stderr).toContain(
+      "docker compose down left authtempo-s1-libsql-1 of authtempo-s1; the row of slot 1 stays",
+    );
+    expect(rowsOf(home)).toEqual([[LANE, 1]]);
+    const gone = servers(home, LANE, "down");
+    expect(gone.status).toBe(0);
+    expect(rowsOf(home)).toEqual([]);
   });
 
   it("removes the set of a removed worktree after it frees the lock", () => {

@@ -35,6 +35,7 @@ import {
   registerMain,
   removeRun,
   rowOf,
+  setsOf,
   tablePath,
   withTable,
 } from "./test-slots.mjs";
@@ -168,13 +169,68 @@ function checkOwner(slot, worktree) {
 }
 
 /**
- * Removes the set of a slot of 1 or more, after the owner check.
+ * The sets that docker has on the machine, with the worktree of each label:
+ * the sets of every clone, also of a clone whose row is in another table.
+ * `-a` also lists a stopped set, because checkOwner refuses a stopped set of
+ * another worktree too. A failed read throws: a take with no read could give
+ * a slot that another worktree uses.
+ * @returns {import("./test-slots.mjs").SetUp[]}
+ */
+function setsUp() {
+  const ps = spawnSync(
+    "docker",
+    [
+      "ps",
+      "-a",
+      "--filter",
+      `label=${WORKTREE_LABEL}`,
+      "--format",
+      `{{.Label "${WORKTREE_LABEL}"}}\t{{.Label "com.docker.compose.project"}}`,
+    ],
+    { encoding: "utf8" },
+  );
+  if (ps.status !== 0)
+    throw new Error(
+      `docker ps failed, so no slot is taken: ${(ps.stderr ?? "").trim() || `exit ${ps.status}`}`,
+    );
+  return setsOf(ps.stdout ?? "");
+}
+
+/**
+ * Removes the set of a slot of 1 or more, after the owner check. Answers true
+ * only when compose down passed and no container of the project is left. The
+ * caller drops the row after that, so the row lives as long as the set. A run
+ * of the same worktree can start the set again while down runs.
  * @param {number} slot
  * @param {string} worktree
  */
 function composeDown(slot, worktree) {
   checkOwner(slot, worktree);
-  return compose(slot, worktree, ["down", "-v", "--remove-orphans"]).status === 0;
+  if (compose(slot, worktree, ["down", "-v", "--remove-orphans"]).status !== 0) return false;
+  const project = projectOf(slot);
+  const ps = spawnSync(
+    "docker",
+    [
+      "ps",
+      "-a",
+      "--filter",
+      `label=com.docker.compose.project=${project}`,
+      "--format",
+      "{{.Names}}",
+    ],
+    { encoding: "utf8" },
+  );
+  const left = (ps.stdout ?? "")
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => l.split("\t")[0]);
+  if (ps.status === 0 && left.length === 0) return true;
+  console.error(
+    ps.status === 0
+      ? `test-servers: docker compose down left ${left.join(", ")} of ${project}; the row of slot ${slot} stays`
+      : `test-servers: docker ps failed after the down of ${project}; the row of slot ${slot} stays`,
+  );
+  return false;
 }
 
 /**
@@ -331,6 +387,7 @@ export async function up(cwd, names) {
         isMain: ctx.isMain,
         services: names,
         now: Date.now(),
+        setsUp,
       }),
     },
   }));
