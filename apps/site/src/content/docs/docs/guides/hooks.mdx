@@ -8,6 +8,7 @@ sources:
   - packages/compat-better-auth/README.md "Hooks"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
+  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -54,7 +55,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username`, `phone`, `operator` |
 | `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim`, `invite` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed`, `capped` |
 
 ## How it behaves
 
@@ -85,7 +86,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - The rows that the delete removes fire no member or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
-- The sweep fires two hooks. `session.afterEnd` fires for each session that an act left for it, with the reason of that act: `banned`, `operator`, `account_deleted`, `impersonation_end`, or `revoked`. `user.afterDelete` fires once for each anonymous user that it deletes. `expired` fires only when a request presents a token after its expiry.
+- The sweep fires two hooks. `session.afterEnd` fires for each session that an act left for it, with the reason of that act: `banned`, `operator`, `account_deleted`, `impersonation_end`, `revoked`, or `claimed`. `user.afterDelete` fires once for each anonymous user that it deletes. `expired` fires only when a request presents a token after its expiry.
 - Core has no request hooks. Wrap `auth.handle`, and read `auth.caller(request)`.
 
 :::caution
@@ -116,7 +117,8 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 - `displaced`: with `multiSession` on, a sign-in in a browser whose bag is full ends the oldest session of the bag. A sign-in of a user who has a session in the browser ends that session with `sign_out`.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 - `anonymous_upgrade`: a sign-in replaced the anonymous user of the session. See [The anonymous upgrade](#the-anonymous-upgrade).
-- `claimed`: a session read found a session from before the proof of its user's address, after the proof, and ended it. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells why.
+- `claimed`: a session read found a session from before the proof of its user's address, after the proof, and ended it. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells why. The sweep also ends with it a session that a claim left. With this hook on D1 and SQLite, a claim ends at most 100 sessions in its own request, with `claim`. [The sessions of a claimant](/docs/concepts/claim-rule/#the-sessions-of-a-claimant) tells why.
+- `capped`: a session create ended the oldest session of the user past `session.maxPerUser`. It fires after the commit, before `afterCreate` of the new session.
 
 ## The anonymous upgrade
 

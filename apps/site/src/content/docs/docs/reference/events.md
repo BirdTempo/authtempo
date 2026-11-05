@@ -8,6 +8,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
+  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** an operator who reads the events of authtempo in a sink, or a developer who writes a sink.
@@ -193,7 +194,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `sign_up.method` | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `sso`, `phone`, `anonymous`, `password_reset`, `operator`, `scim` |
 | `sign_up.outcome` | `success`, `failure` |
 | `sign_out.outcome` | `success`, `failure` |
-| `session.end.reason` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed` |
+| `session.end.reason` | 17 values, the reason of each end. `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed`, `capped` |
 | `second_factor.challenge.method` | `totp`, `passkey`, `email`, `backup_code`, `trusted_device` |
 | `second_factor.challenge.outcome` | `success`, `failure` |
 | `second_factor.enable.method` | `totp`, `passkey`, `email` |

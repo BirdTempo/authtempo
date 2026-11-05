@@ -41,6 +41,8 @@ describe("the via rows of the hooks guide", () => {
 // (12f2 follow-up 3 of plan 12n). The keys of PENDING_STOP_CAUSE in
 // access-end.ts are those reasons, so the sweep bullet names each key.
 const ACCESS_END = readFileSync(`${REPO}packages/core/src/engine/operator/access-end.ts`, "utf8");
+/** The row of a pending end and its two bounds (plan 12q). */
+const PENDING_ROW = readFileSync(`${REPO}packages/core/src/engine/operator/pending-row.ts`, "utf8");
 
 describe("the sweep bullet of the hooks guide", () => {
   it("names each reason of a pending end that access-end.ts holds", () => {
@@ -148,8 +150,12 @@ describe("the delete residual of the compatibility package", () => {
     );
     expect(step).toContain("due = owed.filter((x) => !stopped.has(x.sessionId));");
     expect(ACCESS_END.split('"operatorAudit"').length - 1).toBe(0);
-    const skew = /export const ACCESS_END_SKEW_MS = (\d+)_000;/.exec(ACCESS_END)?.[1];
-    if (skew === undefined) throw new Error("no ACCESS_END_SKEW_MS in access-end.ts");
+    // The bound moved with the row to pending-row.ts (plan 12q), and access-end.ts sends it on.
+    expect(ACCESS_END).toContain(
+      'export { ACCESS_END_SKEW_MS, PENDING_END_MS } from "./pending-row.js";',
+    );
+    const skew = /export const ACCESS_END_SKEW_MS = (\d+)_000;/.exec(PENDING_ROW)?.[1];
+    if (skew === undefined) throw new Error("no ACCESS_END_SKEW_MS in pending-row.ts");
     expect(ACCESS_END).toContain("const STOPPED_READ_LIMIT = 2 * STOPS_LIMIT;");
     const newest = 2 * Number(stopsLimit());
     expect(flat(`${DOCS}docs/guides/operator-tools.mdx`)).toContain(

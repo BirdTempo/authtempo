@@ -17,6 +17,7 @@ sources:
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
   - docs/superpowers/plans/2026-10-14-12j-release-program.md
   - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
+  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -180,6 +181,7 @@ These counts live in their rows, so they hold under every limiter.
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
+| Live sessions of one user | `session.maxPerUser`, 100 by default | No refusal. A session create past it ends the oldest session of the user, with the reason `capped`. An impersonation session does not count |
 | Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try. A lost try tries again while another call spent, 20 tries at most, then `conflict` |
 | The `metadata` of one API token | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |

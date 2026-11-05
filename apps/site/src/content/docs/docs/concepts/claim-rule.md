@@ -9,6 +9,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
   - README.md "Rules that the code enforces"
+  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** a developer who must know why core deletes credentials at a sign-in, and when.
@@ -46,7 +47,7 @@ When a proof arrives for an unverified user, core runs the claim in the same tra
 3. It deletes the password row, except the row that a verify link confirms.
 4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 5. It marks the address verified. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it.
-6. It deletes every session, as its last step.
+6. It deletes every session, as its last step. [The sessions of a claimant](#the-sessions-of-a-claimant) tells the bound of this step.
 
 The proof then opens a session for the person who proved the address. The claimant keeps none of the rows that the claim deletes. The owner holds the account. [The session proof](#the-session-proof) tells why no session of the claimant gains a power from the claim.
 
@@ -91,6 +92,14 @@ A session that came before the proof ends at its next use once the proof lands. 
 Such a session stays after a claim in the gap above, and after a lost D1 answer at the mark. A sign-in by a credential that the claim kept can also read the user before the claim and write its session after it. That session ends at its next use too, and the person signs in again. The confirm of a change of address proves the session that it keeps, so that session lives.
 
 The claim deletes every row that a sign-in trusts before it marks the address verified. A sign-in that reads the user after that mark finds its row gone, and its guard deletes its own session. A sign-in that read the user before the mark has an unproved session. The session delete at the end of the claim removes it. The first step decides a race of two claims of one user, so a claim that loses there writes nothing. A claim that loses at the mark undoes its deletes.
+
+## The sessions of a claimant
+
+A claimant can open many sessions before the owner's proof. `session.maxPerUser` bounds the live sessions of one user, 100 by default. A session create past it ends the oldest session, with the reason `capped`.
+
+With a `session.afterEnd` hook, the claim reads the sessions and ends them in chunks of 50, one query per chunk. D1 allows 50 queries in one request. So on D1 and SQLite the claim ends at most two chunks. It writes a pending-end row for the rest, as a ban does, with the reason `claimed`.
+
+The next sweep ends those sessions and fires `session.afterEnd` with `claimed`. The row ends only unproved sessions, so the owner's sessions stay. Until the sweep the claimant's sessions are unproved, and core refuses their verified-only requests. An app that reads `auth.session` for its own data still sees them until then. With no hook, or on Postgres and MySQL, the claim ends every session at once.
 
 ## Why in one transaction
 

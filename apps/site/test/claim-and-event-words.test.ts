@@ -229,7 +229,8 @@ describe("the final claim of the hooks guide and the claim-rule page (decisions 
   });
 
   it("states the exact session end of a claim, as endSessions ends each chunk by deleteRows", () => {
-    const end = body(source("sessions.ts"), "endSessions");
+    // The work of endSessions and of the claim's endSessionChunks is endSessionRows (plan 12q).
+    const end = body(source("sessions.ts"), "endSessionRows");
     expect(end).toContain('await tx.deleteRows("session", [...where, ids])');
     expect(end).not.toContain("raced");
     // A claim throws ClaimLostError at its first statement or at a lost flip (ruling 24 of plan 12p).
@@ -373,7 +374,8 @@ describe("the session proof of the claim-rule page (plan 12p)", () => {
       '{ field: "purpose", op: "eq", value: "passkey-challenge" },',
       '{ field: "purpose", op: "eq", value: "handoff-code" },',
       "? { emailVerified: true, phone: null, updatedAt: now }",
-      "await endSessions(",
+      // The bounded form of plan 12q: two chunks on a store with no isolation.
+      "await endSessionChunks(",
     ];
     const at = steps.map((step) => {
       expect(claim.split(step), `${PROOF_PAGE}: claimEmail holds ${step} once`).toHaveLength(2);
@@ -572,6 +574,6 @@ describe("the door of a claimed session on the claim-rule, races, and hooks page
     expect(page("concepts/races.md")).toContain(
       "So a lost answer leaves the claimant no credential and no way in.",
     );
-    expect(page("guides/hooks.mdx")).toContain("`displaced`, `anonymous_upgrade`, `claimed` |");
+    expect(page("guides/hooks.mdx")).toContain("`anonymous_upgrade`, `claimed`, `capped` |");
   });
 });
