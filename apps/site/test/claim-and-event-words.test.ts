@@ -611,6 +611,39 @@ describe("the door of a claimed session on the claim-rule, races, and hooks page
   });
 });
 
+// The claim is final at its mark on a store with no isolation (ruling 38 of
+// plan 12q). A throw in the session chunks keeps the mark, so the undo puts
+// back no row of the claimant. A move of the call fails here.
+describe("the claim final at its mark on the claim-rule, races, and hooks pages (ruling 38 of plan 12q)", () => {
+  it("holds the keep after the flip and before the session chunks, and the words", () => {
+    const claim = body(source("users.ts"), "claimEmail");
+    const steps = [
+      "throw new ClaimLostError();",
+      "if (!tx.isolated) await tx.keep();",
+      "const end = await endSessionChunks(",
+    ];
+    const at = steps.map((step) => {
+      expect(claim.split(step), `claimEmail holds ${step} once`).toHaveLength(2);
+      return claim.indexOf(step);
+    });
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    const rule = page("concepts/claim-rule.md");
+    expect(rule).toContain(
+      "On D1 and SQLite the claim is final already at its mark of the address. When a later step of the claim fails, the address stays verified, and the rows that the claim deleted stay deleted.",
+    );
+    expect(rule).toContain(
+      "No undo reverses the mark, because the claim is final at its mark on D1.",
+    );
+    expect(rule).not.toContain("as before the claim");
+    expect(page("concepts/races.md")).toContain(
+      "So a failure after the mark, such as at the session delete, also leaves the user verified.",
+    );
+    expect(page("guides/hooks.mdx")).toContain(
+      "When a later step of the claim fails, the claim stays, and none of these after points run.",
+    );
+  });
+});
+
 /** The facts of the section "The confirm of a sign-up" (plan 12q Task 1, ruling 11). */
 const CONFIRM_WORDS = [
   "A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.",

@@ -153,7 +153,9 @@ In a transaction, the undo log inserts those rows again on a rollback.
 `keep()` drops the undo entries of the transaction so far. A later throw
 then rolls back only the writes after the call. In a nested transaction it
 drops only the entries of the nested call. A claim calls it after its last
-write, so a failure after the claim keeps the claim.
+write, so a failure after the claim keeps the claim. A claim also calls it
+right after its mark of the address. So a failure in its session delete
+keeps the mark and the deletes of the claimant's rows.
 
 `undoOnlyWhile(model, where)` guards the undo of the later deletes of the
 open transaction. The rows of each such delete come back only while a row
