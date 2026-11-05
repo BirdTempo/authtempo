@@ -1186,7 +1186,8 @@ The settings that Better Auth does not have:
   limiter is refused.
 - `authtempo.sessionMaxPerUser` is core's `session.maxPerUser`: the live
   sessions of one user, 1 to 1000, default 100. Better Auth has no cap. A
-  sign-in past it ends the oldest session of the user (plan 12q).
+  sign-in past it ends the oldest session of the user (plan 12q). Sign-ins
+  at once can leave more until the next sign-in, as in core.
 
 Behavior that differs from Better Auth:
 

@@ -117,7 +117,7 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 - `displaced`: with `multiSession` on, a sign-in in a browser whose bag is full ends the oldest session of the bag. A sign-in of a user who has a session in the browser ends that session with `sign_out`.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 - `anonymous_upgrade`: a sign-in replaced the anonymous user of the session. See [The anonymous upgrade](#the-anonymous-upgrade).
-- `claimed`: a session read found a session from before the proof of its user's address, after the proof, and ended it. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells why. The sweep also ends with it a session that a claim left. With this hook on D1 and SQLite, a claim ends at most 100 sessions in its own request, with `claim`. [The sessions of a claimant](/docs/concepts/claim-rule/#the-sessions-of-a-claimant) tells why.
+- `claimed`: a session read found a session from before the proof of its user's address, after the proof, and ended it. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells why. The sweep also ends with it a session that a claim left. With this hook on D1, SQLite, and the memory store, a claim ends at most 100 sessions in its own request, with `claim`. [The sessions of a claimant](/docs/concepts/claim-rule/#the-sessions-of-a-claimant) tells why.
 - `capped`: a session create ended the oldest session of the user past `session.maxPerUser`. It fires after the commit, before `afterCreate` of the new session.
 
 ## The anonymous upgrade

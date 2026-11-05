@@ -79,7 +79,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `session.slidingRefreshDays` | number | 7 | A session older than this moves its expiry forward when it is used. |
 | `session.absoluteDays` | number | none | 1 to 365. A session ends this many days after it opened, whatever its sliding refresh. |
 | `session.freshMinutes` | number | 1440 | The fresh window in minutes, 1 to 1440. A sensitive change needs a sign-in or a re-authentication within it. [Fresh sessions](/docs/concepts/fresh-sessions/) tells which changes. |
-| `session.maxPerUser` | number | 100 | 1 to 1000. The most live sessions of one user. A session create past it ends the oldest session of the user, with the reason `capped`. An impersonation session neither counts nor ends a session. |
+| `session.maxPerUser` | number | 100 | 1 to 1000. The cap of the live sessions of one user. A session create past it ends the oldest session of the user, with the reason `capped`. Creates at once can leave more until the next create, as [the limits](/docs/reference/limits/) say. An impersonation session neither counts nor ends a session. |
 | `session.deferRefresh` | boolean | `false` | With `true`, a GET request writes no session row, and `POST /session/refresh` slides the expiry. `GET /session` answers `needsRefresh`. Use it when a GET reads from a replica. Off by default: a client that never posts the refresh lets an active session end at its old expiry. |
 
 ## Magic link

@@ -190,8 +190,8 @@ export function claimLeaseId(userId: string): string {
  * pending passkey challenge, and every unredeemed handoff code. Then it
  * flips the flag to verified. Last it deletes every session. With an
  * `afterEnd` hook on a store with no isolation, it deletes at most two
- * chunks of 50, and a pending-end row names the rest for the sweep (plan
- * 12q). The username is cleared, except where `keep.username` says so. The
+ * chunks of 50 (plan 12q). A pending-end row names the rest for the sweep.
+ * The username is cleared, except where `keep.username` says so. The
  * phone is always cleared.
  *
  * The order (ruling 16 of plan 12p). The old order flipped the flag first.
@@ -331,7 +331,8 @@ export async function claimEmail(
  * `afterEnd` hook on a store with no isolation (decision 3 of plan 12q). Two
  * chunks keep a magic link claim with the hook inside 50 D1 queries, with
  * room for the pending-end row. At the default `session.maxPerUser` of 100,
- * two chunks end every session of the claimant.
+ * two chunks end the claimant's sessions up to the cap. Creates at once can
+ * leave more past the cap (`capSessions`), and the pending-end row names them.
  */
 export const CLAIM_SESSION_CHUNKS = 2;
 

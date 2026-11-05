@@ -1823,16 +1823,18 @@ writes each value under version 1.
 - `session.absoluteDays` (1 to 365, off by default) ends a session that
   many days after it opened, whatever its sliding refresh (ASVS 5.0.0
   7.3.2). The person then signs in again.
-- `session.maxPerUser` (1 to 1000, default 100) bounds the live sessions
-  of one user (plan 12q). Before its insert, a session create ends the
+- `session.maxPerUser` (1 to 1000, default 100) caps the live sessions of
+  one user (plan 12q). Before its insert, a session create ends the
   oldest sessions past it, with the reason `capped`. It reads once, and
   deletes once at the cap. An impersonation session neither counts nor
-  ends a session. Two creates at once can leave one session past the cap
-  on D1, and the next create ends it.
-- With a `session.afterEnd` hook, a claim on D1 or SQLite ends at most
-  two chunks of 50 sessions (plan 12q). A pending-end row of the reason
-  `claimed` names the rest, and the sweep ends them with the hook. They
-  stay unproved until then.
+  ends a session. On D1 and SQLite, n creates at once can leave n minus 1
+  sessions past the cap until the next create. So can the creates of a
+  user with an unverified address on Postgres and MySQL. The creates of a
+  verified user there wait on each other and stay at the cap.
+- With a `session.afterEnd` hook, a claim on D1, SQLite, or the memory
+  store ends at most two chunks of 50 sessions (plan 12q). A pending-end
+  row of the reason `claimed` names the rest, and the sweep ends them
+  with the hook. They stay unproved until then.
 - A passkey challenge is valid for five minutes and for one use. Passkey
   sign-in options are limited to 30 per IP, and verifies to 20 per IP,
   per 15 minutes, in the same per-isolate limiter.

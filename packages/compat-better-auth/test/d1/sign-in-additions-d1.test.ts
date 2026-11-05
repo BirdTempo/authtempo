@@ -193,10 +193,10 @@ describe("the paths of the sign-in plugins on D1 (plan 12i Task 16)", () => {
     // of onLinkAccount. Each count holds one revokedFor read per session
     // that the path checks, as every session ties (see the top).
     // Update 2026-11-05 by plan 12q: each path that opens a session reads the
-    // cap of the user's sessions (+1): the anonymous sign-in, the sign-up over
-    // it, the username sign-in, the phone sign-in, and the two phone verifies
-    // that sign in. Measured 2026-11-05 09:32 CST on the owner's Mac Studio,
-    // load 16.55 20.87 17.39.
+    // cap of the user's sessions (+1). These are the anonymous sign-in, the
+    // sign-up over it, the username sign-in, and the phone sign-in. The two
+    // phone verifies that sign in read it too. Measured 2026-11-05 09:32 CST
+    // on the owner's Mac Studio, load 16.55 20.87 17.39.
     const exact: Record<string, number> = {
       "/sign-in/anonymous": 11,
       // Update 2026-11-04 by plan 12p: the sign-up reads the claim lease (+1).

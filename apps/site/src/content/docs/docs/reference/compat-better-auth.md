@@ -96,7 +96,7 @@ Better Auth's defaults apply. A session lives 7 days and refreshes after 1 day. 
 | The client IP comes from `x-forwarded-for` | It comes from `cf-connecting-ip`. Off Workers, set `advanced.ipAddress.ipAddressHeaders`. |
 | An absolute `callbackURL` on any trusted origin | Only the origin of `authtempo.appURL` keeps its path. Any other answers 403. |
 | A reset keeps the other sessions | A reset ends every session. |
-| A user holds any count of sessions | A user holds at most 100 live sessions, core's `session.maxPerUser`. A sign-in past it ends the oldest session of the user. `authtempo.sessionMaxPerUser` takes 1 to 1000. |
+| A user holds any count of sessions | Core's `session.maxPerUser` caps the live sessions of a user at 100. A sign-in past it ends the oldest session of the user. Sign-ins at once can leave more until the next sign-in, as [the limits](/docs/reference/limits/) say. `authtempo.sessionMaxPerUser` takes 1 to 1000. |
 | The verify link lives 1 hour | It lives as long as the magic link. |
 | `requireEmailVerification: true` mails a new link at an unverified sign-in only with `sendOnSignIn: true` | It maps to `password.requireVerified`. The sign-in answers `EMAIL_NOT_VERIFIED` and always mails a new link, at most 3 per 15 minutes. `sendOnSignIn: false` is refused at start. |
 | `trustedOrigins` takes a function and wildcards | Each entry is an exact origin or an app scheme. |

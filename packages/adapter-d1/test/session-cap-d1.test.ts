@@ -13,14 +13,14 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // its insert, a session create reads the newest `session.maxPerUser` live
 // sessions of the user: one query more for every create. At the cap, one
 // `deleteRows` ends the oldest past it, with the reason `capped`: two
-// queries more. D1 has no row lock, so two sign-ins at once can read the
-// same rows and end the same oldest row. The count is then one past the
+// queries more. D1 has no row lock, so n sign-ins at once can read the same
+// rows and end the same oldest row. The count is then up to n - 1 past the
 // cap, and the next sign-in ends the rest.
 //
-// Every step is a real request through `auth.handle` on a view of the
-// binding that counts each query and refuses query 51, as D1 Free does. The
-// source is the D1 limits page, updated 21 April 2026 and read 2026-10-24
-// (anonymous-upgrade-budget.test.ts).
+// Every step is a real request through `auth.handle`. It runs on a view of
+// the binding that counts each query and refuses query 51, as D1 Free does.
+// The source is the D1 limits page, updated 21 April 2026 and read
+// 2026-10-24 (anonymous-upgrade-budget.test.ts).
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -171,24 +171,28 @@ describe("the session cap on D1 (decision 4 of plan 12q)", () => {
     expect(now.slice(0, 2)).toEqual(rest);
   });
 
-  it("keeps the count within one of the cap for two sign-ins at once, and the next sign-in restores it", async () => {
-    await signIn();
-    await signIn();
-    expect((await sessionIds()).length).toBe(3);
-    current = new Date(current.getTime() + 1);
-    const both = await Promise.all([
-      measure(make(), post("/password/sign-in", { email: EMAIL, password: PASSWORD })),
-      measure(make(), post("/password/sign-in", { email: EMAIL, password: PASSWORD })),
-    ]);
-    for (const r of both) {
-      expect(r.res.status).toBe(200);
-      expect(r.queries).toBeLessThanOrEqual(BUDGET);
-    }
-    const count = (await sessionIds()).length;
-    expect(count).toBeGreaterThanOrEqual(3);
-    expect(count).toBeLessThanOrEqual(4);
-    expect(new Set(ends.map((e) => e.reason))).toEqual(new Set(["capped"]));
-    await signIn();
-    expect((await sessionIds()).length).toBe(3);
-  });
+  // The D1 limiter allows 10 password sign-ins of one address per 15
+  // minutes. The most here is 2, then 5 at once, then 1.
+  for (const n of [2, 3, 5])
+    it(`keeps the count within ${n - 1} of the cap for ${n} sign-ins at once, and the next sign-in restores it`, async () => {
+      await signIn();
+      await signIn();
+      expect((await sessionIds()).length).toBe(3);
+      current = new Date(current.getTime() + 1);
+      const all = await Promise.all(
+        Array.from({ length: n }, () =>
+          measure(make(), post("/password/sign-in", { email: EMAIL, password: PASSWORD })),
+        ),
+      );
+      for (const r of all) {
+        expect(r.res.status).toBe(200);
+        expect(r.queries).toBeLessThanOrEqual(BUDGET);
+      }
+      const count = (await sessionIds()).length;
+      expect(count).toBeGreaterThanOrEqual(3);
+      expect(count).toBeLessThanOrEqual(3 + n - 1);
+      expect(new Set(ends.map((e) => e.reason))).toEqual(new Set(["capped"]));
+      await signIn();
+      expect((await sessionIds()).length).toBe(3);
+    });
 });

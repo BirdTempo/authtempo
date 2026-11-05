@@ -1123,7 +1123,8 @@ export interface BetterAuthOptions {
      * The most live sessions of one user, 1 to 1000: core's
      * `session.maxPerUser` (plan 12q). Default 100. Better Auth has no cap. A
      * sign-in past the cap ends the oldest session of the user, with the
-     * reason `capped`.
+     * reason `capped`. Sign-ins at once can leave more until the next
+     * sign-in, as in core.
      */
     sessionMaxPerUser?: number;
   };

@@ -12,8 +12,8 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // The claim's bounded session delete on D1 (decision 3 of plan 12q). With an
 // `afterEnd` hook a claim reads the claimant's sessions and ends them by
 // chunks of 50, one query each. Before plan 12q the count of chunks had no
-// bound, so a claimant with enough sessions pushed the owner's claim past
-// the 50 queries of one invocation (open point 4 of the 12p close). Now a
+// bound (open point 4 of the 12p close). So a claimant with enough sessions
+// pushed the owner's claim past the 50 queries of one invocation. Now a
 // claim ends at most two chunks. It writes the pending-end row of a ban for
 // the rest, with the reason `claimed`, and the sweep ends them with the hook.
 // The rest are unproved until then. The owner's session after the claim is

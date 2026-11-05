@@ -95,11 +95,11 @@ The claim deletes every row that a sign-in trusts before it marks the address ve
 
 ## The sessions of a claimant
 
-A claimant can open many sessions before the owner's proof. `session.maxPerUser` bounds the live sessions of one user, 100 by default. A session create past it ends the oldest session, with the reason `capped`.
+A claimant can open many sessions before the owner's proof. `session.maxPerUser` caps the live sessions of one user, 100 by default. A session create past it ends the oldest session, with the reason `capped`. Creates at once can leave more until the next create, as [the limits](/docs/reference/limits/) say.
 
-With a `session.afterEnd` hook, the claim reads the sessions and ends them in chunks of 50, one query per chunk. D1 allows 50 queries in one request. So on D1 and SQLite the claim ends at most two chunks. It writes a pending-end row for the rest, as a ban does, with the reason `claimed`.
+With a `session.afterEnd` hook, the claim reads the sessions and ends them in chunks of 50, one query per chunk. D1 allows 50 queries in one request. So on D1, SQLite, and the memory store the claim ends at most two chunks. It writes a pending-end row for the rest, as a ban does, with the reason `claimed`.
 
-The next sweep ends those sessions and fires `session.afterEnd` with `claimed`. The row ends only unproved sessions, so the owner's sessions stay. Until the sweep the claimant's sessions are unproved, and core refuses their verified-only requests. An app that reads `auth.session` for its own data still sees them until then. With no hook, or on Postgres and MySQL, the claim ends every session at once.
+The sweep ends those sessions over its runs and fires `session.afterEnd` with `claimed`. The row ends only unproved sessions, so the owner's sessions stay. Until the sweep the claimant's sessions are unproved, and core refuses their verified-only requests. An app that reads `auth.session` for its own data still sees them until then. With no hook, or on Postgres and MySQL, the claim ends every session at once.
 
 ## Why in one transaction
 

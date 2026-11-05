@@ -34,9 +34,9 @@ export const ACCESS_END_SKEW_MS = 5_000;
 /**
  * Writes one pending-end row of `userId` in the act's transaction: a
  * verification row with the purpose `session-end`. `data.before` is the
- * later of `now` plus `ACCESS_END_SKEW_MS` and one ms past `newest`, the
- * newest `createdAt` that the act read (rulings 55 and 58 of plan 12d). An
- * act that read no row passes `-Infinity`. `data` holds the names of the
+ * later of `now` plus `ACCESS_END_SKEW_MS` and one ms past `newest` (rulings
+ * 55 and 58 of plan 12d). `newest` is the newest `createdAt` that the act
+ * read. An act that read no row passes `-Infinity`. `data` holds the names of the
  * row after `reason` and `before`. The answer is `data.before`.
  */
 export async function createPendingEnd(

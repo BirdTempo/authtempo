@@ -87,7 +87,7 @@ type World = Awaited<ReturnType<typeof world>>;
 
 /**
  * A claimant: the password sign-up of the owner's address, then more
- * sessions of that unverified user, each with the flag that the engine sets
+ * sessions of that unverified user. Each has the flag that the engine sets
  * for it (false). Answers the user.
  */
 async function claimant(w: World, sessions: number): Promise<UserRow> {

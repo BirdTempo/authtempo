@@ -181,7 +181,7 @@ These counts live in their rows, so they hold under every limiter.
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
-| Live sessions of one user | `session.maxPerUser`, 100 by default | No refusal. A session create past it ends the oldest session of the user, with the reason `capped`. An impersonation session does not count |
+| Live sessions of one user | `session.maxPerUser`, 100 by default | No refusal. A session create past it ends the oldest session of the user, with the reason `capped`. An impersonation session does not count. On D1 and SQLite, n creates at once can leave n minus 1 sessions past the cap until the next create. So can the creates of a user with an unverified address on Postgres and MySQL. The creates of a verified user there wait on each other and stay at the cap |
 | Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try. A lost try tries again while another call spent, 20 tries at most, then `conflict` |
 | The `metadata` of one API token | 4096 bytes as JSON, and 14 levels of `[` and `{` in its values, under the nesting limit of a request body | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |

@@ -501,10 +501,13 @@ const CAPPED = new WeakMap<SessionRow, CappedEnd>();
  * answers the count, for the event `session.end`. An expired row is not
  * live: it does not count, and the sweep deletes it.
  *
- * Two creates at once can read the same rows, and each can end the same
- * oldest row. The count is then one past the cap, and the next create ends
- * the rest. On Postgres and MySQL `prepareSession` holds the row of a
- * verified user, so its creates wait on each other. The links of an ended
+ * Creates at once can read the same rows, and each can end the same oldest
+ * row. So n creates at once can leave n minus 1 sessions past the cap, and
+ * the next create ends the rest. That holds on D1 and SQLite, and for an
+ * unverified user on Postgres and MySQL. There `prepareSession` holds the
+ * row of a verified user, so the creates of a verified user wait on each
+ * other and stay at the cap. The memory store runs one transaction at a
+ * time, so it stays at the cap too. The links of an ended
  * session go to the outbox at the sweep, as for an expiry (`sweepLinks`).
  */
 async function capSessions(

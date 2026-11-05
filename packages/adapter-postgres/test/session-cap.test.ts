@@ -5,7 +5,7 @@ import { freshDatabase } from "./db.js";
 
 // The cap of the sessions of one user on Postgres (decision 4 of plan 12q).
 // A session create reads the newest `session.maxPerUser` live sessions of
-// the user and ends the oldest past the cap before its insert, with the
+// the user. Before its insert it ends the oldest past the cap, with the
 // reason `capped`. `prepareSession` holds the row of a verified user first,
 // so two sign-ins of that user wait on each other. The second reads the
 // rows after the first commits, and ends the next oldest. So each ends one
