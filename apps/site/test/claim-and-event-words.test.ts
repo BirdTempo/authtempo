@@ -569,7 +569,9 @@ describe("the door of a claimed session on the claim-rule, races, and hooks page
     expect(page("concepts/claim-rule.md")).toContain(
       "A session that came before the proof ends at its next use once the proof lands.",
     );
-    expect(page("concepts/races.md")).toContain("So a lost answer leaves nothing of the claimant.");
+    expect(page("concepts/races.md")).toContain(
+      "So a lost answer leaves the claimant no credential and no way in.",
+    );
     expect(page("guides/hooks.mdx")).toContain("`displaced`, `anonymous_upgrade`, `claimed` |");
   });
 });

@@ -161,9 +161,10 @@ of `model` matches `where`. The reinsert is one
 `INSERT ... SELECT ... WHERE EXISTS` statement, so the check sends no query
 of its own. D1 can apply a write and lose its answer, and an update that
 throws has no undo entry. A claim calls it after its lease. So a lost answer
-at the claim's mark of the address leaves no row of the claimant. A second
-call at the same level replaces the condition, also for the deletes since
-the first call. `keep()` and the end of the level end it.
+at the claim's mark of the address leaves no credential of the claimant.
+The claimant's sessions stay, and each ends at its next use. A second call
+at the same level replaces the condition, also for the deletes since the
+first call. `keep()` and the end of the level end it.
 
 A nested transaction adds its entries to the same undo log. If the nested
 function throws, the rollback affects only the entries of the nested
