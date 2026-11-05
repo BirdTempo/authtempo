@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createAuth,
   createMemoryAdapter,
@@ -889,15 +890,30 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
   /**
    * The memory adapter with a claim that lands inside the next transaction,
    * after the guard reads and before the first write. The claim runs outside
-   * that transaction, as on D1 (no isolation) or as a second connection on
-   * Postgres: the memory adapter does not make a write outside a transaction
-   * wait. It writes what core's `claimEmail` leaves: the flag set, the
-   * claimant's credentials gone, the owner's email identity made. Core
-   * deletes before it flips since plan 12p; all three land before the write.
+   * that transaction, as on D1 (no isolation): the memory adapter does not
+   * make a write outside a transaction wait. It writes what core's
+   * `claimEmail` leaves on a store with no isolation. That is the claim
+   * lease, the flag set, the claimant's credentials gone, and the owner's
+   * email identity made. Core deletes before it flips since plan 12p; all of
+   * it lands before the write. The lease lives 60 seconds from the clock of
+   * the claim, here the import's time.
    */
   function claimBeforeFirstWrite(db: StorageAdapter, userId: string, email: string) {
     let fired = false;
     const claim = async () => {
+      const lease = `claim-lease:${userId}`;
+      await db.create("verification", {
+        id: lease,
+        purpose: "claim-lease",
+        identifier: userId,
+        valueHash: createHash("sha256").update(lease).digest("hex"),
+        expiresAt: new Date(AT.getTime() + 60_000),
+        consumedAt: null,
+        data: null,
+        secretVersion: 1,
+        createdAt: AT,
+        updatedAt: AT,
+      });
       await db.update("user", [{ field: "id", op: "eq", value: userId }], {
         emailVerified: true,
         updatedAt: AT,
@@ -957,11 +973,9 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     );
   });
 
-  it("refuses a sign-in with the repaired password before the repair's conditional update (fix round 2)", async () => {
+  it("refuses a sign-in with the repaired password before its activation (fix round 2)", async () => {
     const db = createMemoryAdapter();
     await halfUser(db, false);
-    const u1 = await importId("user", "supabase", "u1");
-    const race = claimBeforeFirstWrite(db, u1, "u1@example.com");
     // The app signs in on a view with no isolation, as on D1: its writes do
     // not wait for the repair's open transaction.
     const open: StorageAdapter = { ...db, transaction: (fn) => fn(open) };
@@ -980,13 +994,14 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     });
     const pw = auth.api.password;
     if (!pw) throw new Error("the password api is missing");
-    // The claimant signs in after the password row is written and before
-    // the conditional update of the user row.
+    // The user signs in after the pending password row is written and
+    // before the activation. A claim cannot land there since plan 12q: the
+    // repair holds the claim of the user (the D1 scenes of import-d1-hold).
     let signIn: Awaited<ReturnType<typeof pw.signIn>> | null = null;
     const view: StorageAdapter = {
-      ...race.view,
+      ...db,
       transaction: (fn) =>
-        race.view.transaction((tx) =>
+        db.transaction((tx) =>
           fn({
             ...tx,
             create: async (model, data) => {
@@ -1008,13 +1023,88 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
       { formats: LEGACY_FORMATS, now, repair: true },
     );
-    expect(race.fired()).toBe(true);
     expect(signIn).toMatchObject({ ok: false, code: "invalid_credentials" });
     expect(await db.findMany("session", [])).toEqual([]);
-    expect(r.partial).toEqual([
-      { kind: "user", sourceId: "u1", missing: ["password"], repairRefused: "claimed" },
-    ]);
-    expect(await db.findMany("password", [])).toEqual([]);
+    expect(r.repaired).toEqual([{ kind: "user", sourceId: "u1", rows: ["password"] }]);
+    // After the activation the same sign-in passes.
+    expect(
+      await pw.signIn({ email: "u1@example.com", password: "allmine", ip: null, userAgent: null }),
+    ).toMatchObject({ ok: true });
+  });
+
+  /** A view of `db` whose transactions record each call of the port, as "<call> <model>". */
+  function recorded(db: StorageAdapter) {
+    const calls: string[] = [];
+    const view: StorageAdapter = {
+      ...db,
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn(
+            new Proxy(tx, {
+              get(target, key) {
+                const value = Reflect.get(target, key);
+                if (typeof value !== "function") return value;
+                return (...args: unknown[]) => {
+                  calls.push(`${String(key)} ${String(args[0])}`);
+                  return (value as (...a: unknown[]) => unknown).apply(target, args);
+                };
+              },
+            }),
+          ),
+        ),
+    };
+    return { view, calls };
+  }
+  const WRITE = /^(create|update|delete)/;
+
+  it("holds the claim of an unverified user for a repair: the hold, the writes, the activation, the release (plan 12q)", async () => {
+    const db = createMemoryAdapter();
+    await halfUser(db, false);
+    const u1 = await importId("user", "supabase", "u1");
+    const rec = recorded(db);
+    const r = await importUsers(
+      rec.view,
+      listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now, repair: true },
+    );
+    expect(r.repaired).toEqual([{ kind: "user", sourceId: "u1", rows: ["password"] }]);
+    // No update of the user row: the hold covers the address and the flag.
+    // The calls of the port, reads too, were 11 before plan 12q. Two updates
+    // of the user row and the lease read went. The lease create and delete came.
+    expect({ calls: rec.calls.length, writes: rec.calls.filter((c) => WRITE.test(c)) }).toEqual({
+      calls: 10,
+      writes: ["create verification", "create password", "update password", "delete verification"],
+    });
+    expect(
+      await db.findOne("verification", [{ field: "id", op: "eq", value: `claim-lease:${u1}` }]),
+    ).toBeNull();
+  });
+
+  it("holds the claim of a new unverified user: the user create, the hold, the writes, the activation, the release (plan 12q)", async () => {
+    const db = createMemoryAdapter();
+    const rec = recorded(db);
+    const r = await importUsers(
+      rec.view,
+      listSource([user("u1", { emailVerified: false, password: { hash: BCRYPT } })]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    expect(r.created).toMatchObject({ user: 1, password: 1 });
+    // The calls of the port, reads too, are 7, as before plan 12q. The hold and
+    // the release replace the update of the user row and the lease read.
+    expect({ calls: rec.calls.length, writes: rec.calls.filter((c) => WRITE.test(c)) }).toEqual({
+      calls: 7,
+      writes: [
+        "create user",
+        "create verification",
+        "create password",
+        "update password",
+        "delete verification",
+      ],
+    });
+    const u1 = await importId("user", "supabase", "u1");
+    expect(
+      await db.findOne("verification", [{ field: "id", op: "eq", value: `claim-lease:${u1}` }]),
+    ).toBeNull();
   });
 
   it("deletes its own rows when the pending password row is gone before the activation (round 3)", async () => {

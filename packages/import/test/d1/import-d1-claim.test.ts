@@ -16,12 +16,14 @@ import { BCRYPT, listSource, user } from "../source.js";
 // The importer beside an owner's claim on D1 (ruling 31 of plan 12p). D1
 // does not isolate a transaction, so each statement of the import lands at
 // once. A claim takes its lease, deletes the claimant's rows, and flips the
-// flag last (ruling 16). So a claim can delete before the import's writes
-// and flip after its check of the user row. The import then runs core's
-// claim check, which reads the lease. The scenes come from probes I1 and I2
-// of review-12p-fix34, and S1 of review-12p-fix5w. Each step of the owner is
-// a real magic link. The last scene is a run that stops after its pending
-// password create, from probe K of review-12p-fix5w.
+// flag last (ruling 16). So a claim could delete before the import's writes
+// and flip after its check of the user row. Since plan 12q the import holds
+// the lease of the user for its writes (decision 5). So it meets the lease
+// of such a claim and writes nothing. The scenes come from probes I1 and I2 of
+// review-12p-fix34, and S1 of review-12p-fix5w. Each step of the owner is a
+// real magic link. The last scene is a run that stops after its pending
+// password create, from probe K of review-12p-fix5w. The scenes of the hold
+// itself are in import-d1-hold.test.ts.
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
@@ -204,7 +206,7 @@ function ownerOf(answer: Awaited<ReturnType<ReturnType<typeof app>["api"]["verif
 const NONE = { user: 0, identity: 0, password: 0, passkey: 0, organization: 0, member: 0 };
 
 describe("the import of a new unverified user beside an owner's claim on D1", () => {
-  it("keeps no password when the claim reads the user, deletes, and flips after the import's check (I1)", async () => {
+  it("keeps no password when the claim reads the user, deletes, and flips after the import's hold (I1)", async () => {
     const email = "ana@example.com";
     // The import waits after its user create, so the claim reads that user.
     const run = pauseAfter(USER_INSERT);
@@ -222,7 +224,7 @@ describe("the import of a new unverified user beside an owner's claim on D1", ()
       userAgent: null,
     });
     await claim.reached;
-    // The import's writes and its check run in that wait.
+    // The import's hold runs in that wait. It meets the claim's lease, so the import writes nothing more.
     run.go();
     const r = await report;
     claim.go();
@@ -278,10 +280,10 @@ describe("the import of a new unverified user beside an owner's claim on D1", ()
     });
   });
 
-  it("keeps no password, and signs no claimant in, when the whole claim lands between the user create and the password create", async () => {
+  it("keeps no password, and signs no claimant in, when the whole claim lands between the user create and the import's hold", async () => {
     const email = "cyd@example.com";
     const run = pauseAfter(USER_INSERT);
-    // The claimant signs in right after the import's password create, before its check.
+    // The claimant would sign in right after an import's password create.
     let early: string | undefined;
     let tried = false;
     const watched = view(run.db, undefined, async (sql) => {
@@ -304,9 +306,9 @@ describe("the import of a new unverified user beside an owner's claim on D1", ()
     expect(ownerOf(won)).toBe("ok a session");
     run.go();
     const r = await report;
-    expect(tried).toBe(true);
-    // The row is pending until the check passed, so the user that the owner holds refuses it.
-    expect(early).toBe("invalid_credentials");
+    // The hold met the claim's lease before any password create (plan 12q).
+    expect(tried).toBe(false);
+    expect(early).toBeUndefined();
     expect(r.partial).toEqual([
       { kind: "user", sourceId: "cyd", missing: ["password"], repairRefused: "claimed" },
     ]);
@@ -494,11 +496,11 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
 });
 
 describe("a run that stops after the pending password create of a new unverified user on D1", () => {
-  it("lists the user as partial with the password missing, and a repair writes the password, which signs in", async () => {
+  it("lists the user as partial with the password missing, and a repair after the lease writes the password, which signs in", async () => {
     const email = "ivy@example.com";
     const record = () => [user("ivy", { email, emailVerified: false, password: { hash: BCRYPT } })];
     // The isolate dies right after the pending create, as at the D1 cap.
-    // Every later statement throws, so the undo fails too.
+    // Every later statement throws, so the undo and the release fail too.
     let dead = false;
     const dying = view(
       env.DB,
@@ -529,10 +531,12 @@ describe("a run that stops after the pending password create of a new unverified
     expect(dry.exists.user).toBe(0);
     expect(dry.partial).toEqual([{ kind: "user", sourceId: "ivy", missing: ["password"] }]);
     expect(verifyReport(dry)).toMatchObject({ held: false, partial: 1, code: 1 });
-    // A run with --repair deletes the pending row, then writes the password.
+    // The stopped run left its lease (plan 12q). A run with --repair 61 s
+    // later takes the stale lease. It deletes the pending row, then writes the password.
     const repair = await importUsers(createD1Adapter(env.DB), listSource(record()), {
       formats: ["bcrypt"],
       repair: true,
+      now: () => new Date(Date.now() + 61_000),
     });
     expect(repair.partial).toEqual([]);
     expect(repair.repaired).toEqual([{ kind: "user", sourceId: "ivy", rows: ["password"] }]);
