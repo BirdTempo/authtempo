@@ -572,7 +572,7 @@ A known address gets a proof too, so the answer tells no account.
 The confirm keeps the sign-up's password only when the request carries
 the proof whose hash the row holds. The cookie wins over the body member of
 the code form. Any other confirm, by link or by code, is a claim: the
-password goes, and the person who opened the link gets a proved session.
+password goes, and the person who confirmed gets a proved session.
 The answer says `passwordKept: false`, and the link's redirect adds
 `password=set`. The person then sets a first password through
 `POST /password/change` with no current password, on the fresh session

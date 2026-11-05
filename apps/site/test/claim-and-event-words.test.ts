@@ -602,7 +602,7 @@ describe("the door of a claimed session on the claim-rule, races, and hooks page
 /** The facts of the section "The confirm of a sign-up" (plan 12q Task 1, ruling 11). */
 const CONFIRM_WORDS = [
   "A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.",
-  "Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who opened the link gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.",
+  "Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who confirmed gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.",
   "The person then sets a first password through `POST /password/change`, with no current password.",
   "A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link or code do this. Each takes the cookie, else the body member `signUpProof`. A proof of another sign-up of the same address keeps nothing.",
   "An app on another site than the auth origin uses the code form, and sends `signUpProof` with the code. Its proof cookie is a third-party cookie, and many browsers drop it. Then the link is a claim, and the password goes.",

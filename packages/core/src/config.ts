@@ -308,11 +308,11 @@ export interface AuthConfig {
      */
     deferRefresh?: boolean;
     /**
-     * The most sessions of one user, 1 to 1000 (plan 12q). Default 100. A
-     * session create ends the oldest sessions of the user beyond the cap,
-     * before its insert, with the reason `capped`. An impersonation session
-     * neither counts nor ends a session. The cap bounds the sessions that a
-     * claimant can make before the owner's claim.
+     * The cap of the live sessions of one user, 1 to 1000 (plan 12q).
+     * Default 100. A session create ends the oldest sessions of the user
+     * beyond the cap, before its insert, with the reason `capped`. Creates
+     * at once can leave more until the next create. An impersonation
+     * session neither counts nor ends a session.
      */
     maxPerUser?: number;
   };

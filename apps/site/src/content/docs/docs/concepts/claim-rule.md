@@ -68,7 +68,7 @@ A password sign-up gives a sign-up proof: 32 random bytes behind `sp_`. The veri
 
 A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.
 
-Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who opened the link gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.
+Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who confirmed gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.
 
 The person then sets a first password through `POST /password/change`, with no current password. The session that the confirm opened is proved and fresh, so the change takes it.
 
