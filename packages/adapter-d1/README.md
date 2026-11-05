@@ -162,9 +162,13 @@ of `model` matches `where`. The reinsert is one
 of its own. D1 can apply a write and lose its answer, and an update that
 throws has no undo entry. A claim calls it after its lease. So a lost answer
 at the claim's mark of the address leaves no credential of the claimant.
-The claimant's sessions stay, and each ends at its next use. A second call
-at the same level replaces the condition, also for the deletes since the
-first call. `keep()` and the end of the level end it.
+The claimant's sessions stay, and each ends at its next use. An optional
+third argument names a second model and where, and a row must match it too.
+The two checks are one `SELECT 1 WHERE EXISTS (...) AND EXISTS (...)` in
+the reinsert. A claim passes its own lease, by its id and its expiry. So a
+claim past its lease that throws puts back nothing once a rival took the
+lease. A second call at the same level replaces the condition, also for the
+deletes since the first call. `keep()` and the end of the level end it.
 
 `deleteOnlyWhile(model, where, whileModel, whileWhere)` deletes the rows
 that `where` matches only while a row of `whileModel` matches `whileWhere`.

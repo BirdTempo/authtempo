@@ -526,14 +526,18 @@ describe("the two port calls of the storage-port page (decisions 7 and 9 of plan
 // must not put back the claimant's rows. The claim calls the guard right
 // after its lease, and the pages say so. Each delete before the mark runs
 // only while the user is unverified, and no undo widens the condition
-// (ruling 33 of plan 12q). A change of the calls fails here.
+// (ruling 33 of plan 12q). The undo also needs the claim's own lease
+// (ruling 36). A change of the calls fails here.
 describe("the undo guard of a claim on the claim-rule, races, and storage-port pages (plan 12q)", () => {
   it("holds the call after the lease, the conditional deletes, no wider condition at a lost flip, and the words", () => {
     const claim = body(source("users.ts"), "claimEmail");
     const steps = [
       "await takeClaim(tx, userId, now, verified.clock);",
       'const unverified: Where<"user">[] = [byId, { field: "emailVerified", op: "eq", value: false }];',
-      'await tx.undoOnlyWhile?.("user", unverified);',
+      '{ field: "id", op: "eq", value: claimLeaseId(userId) },',
+      '{ field: "expiresAt", op: "eq", value: until },',
+      "await tx.undoOnlyWhile?.(",
+      'until ? { model: "verification", where: lease } : undefined,',
       '? tx.deleteOnlyWhile(model, where, "user", unverified)',
       'await remove("identity", where);',
       'await remove("password", passwords);',
@@ -548,8 +552,16 @@ describe("the undo guard of a claim on the claim-rule, races, and storage-port p
     expect(claim.split("undoOnlyWhile").length - 1).toBe(1);
     for (const model of ["identity", "password", "passkey", "verification"])
       expect(claim).not.toContain(`tx.delete("${model}"`);
+    // The claim keeps the expiry of its own lease for the second term (ruling 36 of plan 12q).
+    expect(claim).toContain("const until = await takeClaim(tx, userId, now, verified.clock);");
     expect(flat(`${STORAGE}port.ts`)).toContain(
-      "undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;",
+      "undoOnlyWhile?<M extends ModelName, G extends ModelName = M>( model: M, where: Where<M>[], also?: { model: G; where: Where<G>[] }, ): Promise<void>;",
+    );
+    expect(page("concepts/claim-rule.md")).toContain(
+      "The undo of a claim's deletes also needs the claim's own lease, by its id and the expiry that it wrote.",
+    );
+    expect(page("concepts/races.md")).toContain(
+      "The undo of a claim's deletes also needs the claim's own lease, as the claim wrote it.",
     );
     expect(flat(`${STORAGE}port.ts`)).toContain(
       "deleteOnlyWhile?<M extends ModelName, G extends ModelName>(",
