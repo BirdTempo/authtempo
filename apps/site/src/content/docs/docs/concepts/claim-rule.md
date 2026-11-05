@@ -44,7 +44,7 @@ When a proof arrives for an unverified user, core runs the claim in the same tra
 
 1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.
 2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
-3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries the proof of that sign-up, keeps the row. See [The confirm of a sign-up](#the-confirm-of-a-sign-up).
+3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries its proof keeps the row. See [The confirm of a sign-up](#the-confirm-of-a-sign-up).
 4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 5. It marks the address verified. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it.
 6. It deletes every session, as its last step. [The sessions of a claimant](#the-sessions-of-a-claimant) tells the bound of this step.

@@ -259,7 +259,7 @@ const SESSION_PROOF_CHANGESET = `${REPO}.changeset/core-session-proof.md`;
 const ORDER_WORDS = [
   "1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.",
   "2. It deletes the other identities of the user.",
-  "3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries the proof of that sign-up, keeps the row.",
+  "3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries its proof keeps the row.",
   "4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.",
   "5. It marks the address verified.",
   "6. It deletes every session, as its last step.",
