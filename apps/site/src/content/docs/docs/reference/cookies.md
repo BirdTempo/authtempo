@@ -44,7 +44,6 @@ The `__Host-` prefix makes a browser refuse the session cookie unless it is `Sec
 - `totp.trustCookieName` renames the trust cookie.
 - `lastMethod.cookieName` renames the last method cookie. Core refuses a name of another cookie of core.
 - The bag cookie of multi-session is the session cookie name with `s` at the end, so `cookieName` renames it too. It holds the other `ts_` tokens of the browser, joined by `.`, at most `multiSession.max` minus one. It has the attributes of the session cookie. Core reads it only on the multi-session routes and at a browser sign-in, never as the credential of a request. `POST /sign-out` ends each of its sessions and clears it.
-- The sign-up proof cookie holds the `sp_` proof of one password sign-up. Its name is fixed. Core refuses it as `cookieName` and as `lastMethod.cookieName`. The confirm of the sign-up clears it.
 - The actor cookie is the session cookie name with `_actor` at the end, so `cookieName` renames it too. During an impersonation it holds the operator's own `ts_` token, and the session cookie holds the token of the impersonation session. The stop clears it and puts the operator's token back in the session cookie.
 - A sign-out clears the cookie. A sign-out with the old cookie clears both names. After a reset or a claim, the next `GET /session` clears it.
 
@@ -59,7 +58,7 @@ The move lasts one release. Row 12j removes it in the next release.
 ## The rules
 
 - The session cookie holds a `ts_` token. The bag cookie holds `ts_` tokens in clear, as the session cookie does, and a token of it signs no request in. The binding cookie holds the binding token of one social flow. The trust cookie holds a `td_` token. The actor cookie holds a `ts_` token.
-- The sign-up proof cookie holds an `sp_` value. A confirm that carries it keeps the password of its sign-up. Any other confirm deletes that password. See [the claim rule](/docs/concepts/claim-rule/#the-confirm-of-a-sign-up).
+- The sign-up proof cookie holds the `sp_` proof of one password sign-up. Its name is fixed, and core refuses it as `cookieName` and as `lastMethod.cookieName`. A confirm that carries it keeps the password of its sign-up. Any other confirm deletes that password. A confirm clears it. For an app on another site, it is a third-party cookie, and many browsers drop it. See [the claim rule](/docs/concepts/claim-rule/#the-confirm-of-a-sign-up).
 - The last method cookie holds one value of a closed set, such as `password` or `social:google`. It is not `HttpOnly`, because the sign-in page reads it to show the method of the last sign-in first. It signs no one in and names no account. Core never reads it. A bearer client gets no last method cookie.
 - A provider's `redirectURI` moves its callback to that path. The binding cookie then has that path, so the browser sends it to the callback.
 - With a `baseURL` list, no cookie has a `Domain`, so each host keeps its own cookies. The start sends the callback on its own host, and the sign-in ends where it started.

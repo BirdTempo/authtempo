@@ -47,7 +47,7 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/passkeys/delete` | session (fresh), `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
 | POST | `/passkeys/rename` | session, `{ id, name }` | `{ passkey }` in the shape of `GET /passkeys` (plan 12a). No fresh rule: a name is no way in. 400 `invalid_body` (a `name` that breaks the passkey name rule, or any other field); 401; 404 `not_found` (an unknown id, or an id of another user); 429 `rate_limited` |
 | POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true, signUpProof }` with no session cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session, signUpProof }` with the cookie, or `{ user, verifyRequired: true, signUpProof }` with no session cookie under `requireVerified` or `signUp: "invited"`. Every answer sets the proof cookie `__Host-tempo_signup` (see "The confirm of a sign-up"); 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
-| POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
+| POST | `/password/sign-in` | `{ email, password, signUpProof? }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token`, the proof cookie | form body: 302 to `appURL` with the cookie, to `appURL` plus `/?password=set` when the password went, or to `/?auth_error=<code>`; JSON body: `{ verified: true, passwordKept }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
 | POST | `/password/verify/code` | `{ email, code, signUpProof? }`, the proof cookie | `{ token, user, session, passwordKept }` with the cookie when the address was unverified, or `{ verified: true, passwordKept }`; 400 `invalid_code`, `too_many_attempts`; 429 `rate_limited`. The code of `password.verifyBy: "code"` (see "The sign-up code") |
@@ -565,7 +565,8 @@ A password sign-up gives a sign-up proof (plan 12q): `sp_` and 32 random
 bytes. The verify row holds its SHA-256 in `data.proofHash`. The route
 sets it as the HttpOnly cookie `__Host-tempo_signup` (`SIGN_UP_PROOF_COOKIE`)
 for every caller. The cookie lives as long as the link or the code. The
-JSON answer holds it as `signUpProof`, for a native app with no cookie jar.
+JSON answer holds it as `signUpProof`, for an app that the cookie does not
+reach. That is a native app with no cookie jar, or an app on another site.
 A known address gets a proof too, so the answer tells no account.
 
 The confirm keeps the sign-up's password only when the request carries
@@ -582,11 +583,14 @@ So a claimant who signs up with the owner's address keeps no way in. The
 default config opens no session at a sign-up, so the proof is the only
 signal of the sign-up's own browser. A native app whose link opens in the
 system browser loses the password at the confirm. It uses the code form
-and sends `signUpProof`.
+and sends `signUpProof`. An app on another site than the auth origin does
+the same. Its proof cookie is a third-party cookie, and many browsers drop
+it.
 
-A resend copies the proof hash to the new row only when the request
-carries the proof of an earlier row of the same password row. A password
-sign-in that mails a new link does the same. The resend answer then sets
+A resend copies the proof hash to the new row. It does so only when the
+request carries the proof of an earlier row of the same password row. A
+password sign-in that mails a new link or code does the same. Each reads
+the cookie, else the body member `signUpProof`. The resend answer then sets
 the cookie again, for the life of the new link or code. A proof of another
 sign-up of the same address keeps nothing.
 

@@ -9,3 +9,5 @@ The verify-email path of the email code plugin passes the request's cookie to co
 `api.signUpEmail` answers the proof as `signUpProof`, a member that Better Auth does not have. A server call has no cookie jar, so the app sets the cookie from it. The answer for a taken address holds a proof of the same form. `api.signInEmail` and `api.sendVerificationEmail` read the cookie from `headers`, so a new verify link keeps the proof.
 
 Breaking: an app that signs up on the server and does not set the cookie loses the password at the confirm.
+
+Breaking: a compat native app, such as an Expo app, loses the sign-up's password at the confirm. The compat client keeps no proof, because its sign-up answer is Better Auth's `{ token, user }`. It has no code confirm either. The person then sets a first password through `/password/change`.

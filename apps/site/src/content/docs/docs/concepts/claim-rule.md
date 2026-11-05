@@ -44,7 +44,7 @@ When a proof arrives for an unverified user, core runs the claim in the same tra
 
 1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.
 2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
-3. It deletes the password row. Only the verify link of a sign-up, opened with the proof of that sign-up, keeps the row that it confirms. See [The confirm of a sign-up](#the-confirm-of-a-sign-up).
+3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries the proof of that sign-up, keeps the row. See [The confirm of a sign-up](#the-confirm-of-a-sign-up).
 4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 5. It marks the address verified. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it.
 6. It deletes every session, as its last step. [The sessions of a claimant](#the-sessions-of-a-claimant) tells the bound of this step.
@@ -62,7 +62,7 @@ Two proofs of one address can arrive at the same time. One claims the user. On D
 A password sign-up gives a sign-up proof: 32 random bytes behind `sp_`. The verify row holds their SHA-256. The proof travels two ways:
 
 - The route sets it as the HttpOnly cookie `__Host-tempo_signup`, for every caller. It lives as long as the link or the code.
-- The JSON answer holds it as `signUpProof`, for a native app with no cookie jar.
+- The JSON answer holds it as `signUpProof`, for an app that the cookie does not reach. That is a native app with no cookie jar, or an app on another site.
 
 A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.
 
@@ -70,11 +70,13 @@ Any other confirm, by link or by code, is a claim. The claim deletes that passwo
 
 The person then sets a first password through `POST /password/change`, with no current password. The session that the confirm opened is proved and fresh, so the change takes it.
 
+An app on another site than the auth origin uses the code form, and sends `signUpProof` with the code. Its proof cookie is a third-party cookie, and many browsers drop it. Then the link is a claim, and the password goes.
+
 So a claimant who signs up with the owner's address keeps no way in. The owner opens the link in another browser, which holds no proof of that sign-up.
 
 The default config opens no session at a sign-up, so the proof is the only signal of the sign-up's browser. A session of the user does not count.
 
-A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link do this. A proof of another sign-up of the same address keeps nothing.
+A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link or code do this. Each takes the cookie, else the body member `signUpProof`. A proof of another sign-up of the same address keeps nothing.
 
 The username that the sign-up named stays after both kinds of confirm.
 

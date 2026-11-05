@@ -154,7 +154,7 @@ without the `password` config.
 | Operation | Route | Answer type |
 | --- | --- | --- |
 | `client.password.signUp({ email, password, name? })` | `POST /password/sign-up` | `ClientResult<({ token } & PublicSession) \| { user, verifyRequired: true } \| { sent: true }>`, each with `signUpProof` |
-| `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
+| `client.password.signIn({ email, password, trustDevice?, next?, signUpProof? })` | `POST /password/sign-in` | `ClientResult<({ token } & PublicSession) \| TwoFactorChallengeJSON>` |
 | `client.password.resendVerification({ email, signUpProof? })` | `POST /password/verify/resend` | `ClientResult<{ sent: true }>` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `ClientResult<{ verified: true, passwordKept }>`; the cookie is set when the address was unverified |
 | `client.password.verifyCode({ email, code, signUpProof? })` | `POST /password/verify/code` | `ClientResult<(SignInJSON \| { verified: true }) & { passwordKept }>`: the sign-up code of `password.verifyBy: "code"`; a session and its cookie when the address was unverified |
@@ -172,8 +172,8 @@ The password goes in the request body only. It never goes in a URL.
 
 Each `signUp` answer holds `signUpProof`, the sign-up proof of the server
 (plan 12q). A browser also gets it as an HttpOnly cookie, so a browser app
-needs no step. A native app keeps it and passes it to `verifyCode` and to
-`resendVerification`. A confirm without the proof deletes the sign-up's
+needs no step. A native app keeps it and passes it to `verifyCode`, to
+`resendVerification`, and to `signIn`. A confirm without the proof deletes the sign-up's
 password and answers `passwordKept: false`. The app then asks for a first
 password and calls `change({ newPassword })` with no `currentPassword`.
 

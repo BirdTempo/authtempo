@@ -355,6 +355,10 @@ These rules come from plan 12b.
   cookie from it. The answer for a taken address holds a proof of the same
   form. `api.signInEmail` and `api.sendVerificationEmail` read the cookie
   from `headers`, so a new verify link keeps the proof.
+- A compat native app, such as an Expo app, loses the sign-up's password at
+  the confirm. The compat client keeps no proof, because its sign-up answer
+  is Better Auth's `{ token, user }`. It has no code confirm either. The
+  person then sets a first password with `/password/change`.
 - `disableSignUp` is accepted on `emailAndPassword`, `magicLink`, `emailOTP`,
   and each social provider. Core has one sign-up rule for every method.
   `true` on every configured method and provider that creates a user maps to

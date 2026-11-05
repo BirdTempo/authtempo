@@ -259,7 +259,7 @@ const SESSION_PROOF_CHANGESET = `${REPO}.changeset/core-session-proof.md`;
 const ORDER_WORDS = [
   "1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.",
   "2. It deletes the other identities of the user.",
-  "3. It deletes the password row. Only the verify link of a sign-up, opened with the proof of that sign-up, keeps the row that it confirms.",
+  "3. It deletes the password row. Only the confirm of a sign-up, by link or by code, that carries the proof of that sign-up, keeps the row.",
   "4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.",
   "5. It marks the address verified.",
   "6. It deletes every session, as its last step.",
@@ -583,7 +583,8 @@ const CONFIRM_WORDS = [
   "A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.",
   "Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who opened the link gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.",
   "The person then sets a first password through `POST /password/change`, with no current password.",
-  "A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link do this. A proof of another sign-up of the same address keeps nothing.",
+  "A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link or code do this. Each takes the cookie, else the body member `signUpProof`. A proof of another sign-up of the same address keeps nothing.",
+  "An app on another site than the auth origin uses the code form, and sends `signUpProof` with the code. Its proof cookie is a third-party cookie, and many browsers drop it. Then the link is a claim, and the password goes.",
 ];
 
 describe("the confirm of a sign-up on the claim-rule page (plan 12q Task 1)", () => {
@@ -601,10 +602,12 @@ describe("the confirm of a sign-up on the claim-rule page (plan 12q Task 1)", ()
       "rows.some((r) => r.data?.passwordId === passwordId && holdsProof(r.data, carried))",
     );
     const routes = flat(`${REPO}packages/core/src/http/routes/password.ts`);
-    // The cookie first, then the body member of the code form.
-    expect(routes).toContain(
-      "signUpProof: proofCookie(ctx.request) ?? body.value.signUpProof ?? null,",
-    );
+    // The cookie first, then the body member, at the sign-in, the code, and the resend.
+    expect(routes).toContain("return proofCookie(request) ?? member ?? null;");
+    expect(routes).toContain("signUpProof: carriedProof(ctx.request, v.signUpProof),");
+    expect(
+      routes.split("signUpProof: carriedProof(ctx.request, body.value.signUpProof),"),
+    ).toHaveLength(3);
     expect(routes).toContain('export const PASSWORD_SET_QUERY = "password=set";');
     expect(flat(`${REPO}packages/core/src/http/cookies.ts`)).toContain(
       'export const SIGN_UP_PROOF_COOKIE = "__Host-tempo_signup";',

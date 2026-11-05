@@ -25,10 +25,11 @@ import test from "../../../../../samples/guides/verify-by-code.test.ts?raw";
 ## Steps
 
 1. Set `password.verifyBy` to `"code"`. Set `password.verifyCodeMail` for your own text, or keep the default. Set `password.verifyCode` for another length, life, or count of tries.
-2. Show a code field after the sign-up answers `{ sent: true, signUpProof }`. A browser keeps the proof as a cookie. A native app keeps `signUpProof`.
-3. Post `{ email, code }` to `POST /password/verify/code`. A native app adds `signUpProof`. A browser gets the session cookie. A native app reads `token` from the answer.
+2. Show a code field after the sign-up answers `{ sent: true, signUpProof }`. A browser keeps the proof as a cookie. A native app keeps `signUpProof`. So does an app on another site than the auth origin, because many browsers drop its third-party cookie.
+3. Post `{ email, code }` to `POST /password/verify/code`. A native app adds `signUpProof`, and so does an app on another site. A browser gets the session cookie. A native app reads `token` from the answer.
 4. When the answer says `passwordKept: false`, show a first-password form. It posts `{ newPassword }` to `POST /password/change` with the new session.
-5. Offer "Send a new code": it posts `{ email }` to `POST /password/verify/resend`. A native app adds `signUpProof`.
+5. Offer "Send a new code": it posts `{ email }` to `POST /password/verify/resend`. An app that keeps `signUpProof` adds it.
+6. With `password.requireVerified` on, a sign-in before the confirm mails a new code. An app that keeps `signUpProof` adds it to the sign-in body, so the new code keeps the password.
 
 <Code code={config} lang="ts" title="The code in place of the link" />
 
