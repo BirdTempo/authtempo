@@ -84,26 +84,33 @@ now), `identity_taken` (another user holds the identity), `claimed` (a
 verified user that holds its `email` identity lacks a password, a passkey,
 or a social identity), or `no_owner` (an organization whose members map to
 no owner). A verified user's missing credential is an operator action,
-because the importer cannot tell a claim from a newer export. Each user
-repair checks the user row again after its writes. For an unverified user
-it then runs core's claim check (`claimNotStarted`), which reads the lease
-of a claim on D1. A claim takes its hold or its lease, deletes the
-claimant's rows, and marks the address verified. Then it ends the sessions.
-The deletes come before the mark, so on D1 the user row alone can miss a
-claim. When a claim or an address change lands during the repair, the
-repair deletes the rows it wrote. The record then stays `partial` with `not
-repaired: claimed`. The import of a new unverified user runs the same claim
-check after its password or identity write. When it finds a claim, it
-deletes those rows, and the record is `partial` with `not repaired:
+because the importer cannot tell a claim from a newer export. The writes of
+an unverified user, new or repaired, go under the hold of its claim (core
+`holdClaim`). A claim takes the same hold first. On Postgres and MySQL it is
+the row lock of the user. On a store with no isolation, such as D1, it is
+the claim lease, a row of the user.
+Then the claim deletes the claimant's rows, marks the address verified, and
+ends the sessions. While the import holds the user, a claim of the address
+waits for the commit, or answers 409 `conflict` on D1. So no claim deletes
+or marks the address in the middle of the writes. The import releases the
+hold after its writes. When a claim holds the user first, the import writes
+no credential for it, and the record is `partial` with `not repaired:
+claimed`. The repair of a verified user checks the user row again after its
+writes. When an address change lands during that repair, the repair deletes
+the rows it wrote, and the record stays `partial` with `not repaired:
 claimed`. The password row of a repair or of a new unverified user is
-pending until the last statement activates it, after the checks. So a
-sign-in with it fails until then. A run that stops before that statement,
-as at the D1 cap, leaves the pending row. A later run counts that row as
-missing, so the record is `partial` with `password` missing. A repair
-deletes the pending row and writes the password again. A repaired passkey
-or social identity is active at once, and so is the social identity of a
-new unverified user. On D1, for a few round trips before the check, it can
-sign in a claimant who also holds the authenticator or the provider login.
+pending until the import activates it, after its other writes. So a sign-in
+with it fails until then. A run that stops before that activation, as at
+the D1 cap, leaves the pending row. A later run counts that row as missing,
+so the record is `partial` with `password` missing. A repair deletes the
+pending row and writes the password again. A run that stops inside the hold
+leaves the lease on D1 too. Until the sweep deletes it after 60 seconds, a
+claim of that user answers 409 `conflict`, and a repair reports `not
+repaired: claimed`. A repaired passkey or social identity is active at
+once, and so is the social identity of a new unverified user. A claimant
+who also holds the authenticator or the provider login can sign in with it
+after the import. While the address is unverified, that session is
+unproved, and the owner's claim ends it.
 Without `--repair` the importer writes nothing for a `partial` record.
 
 A repair also gives back a credential that the user removed in the app

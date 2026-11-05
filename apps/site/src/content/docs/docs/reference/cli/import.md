@@ -163,7 +163,8 @@ The conflicts are `unmatched_row`, `duplicate_row`, `status_compromised`, `statu
 - The import never merges two accounts. A taken address or identity skips the record.
 - A second run of the same export writes nothing.
 - A repair writes nothing for a user that a claim verified since the import. The record then stays `partial` with `not repaired: verified_since_import`.
-- A first run can list a new unverified user as `partial` with `not repaired: claimed`. A claim of the address landed beside its writes, and the import deleted its own rows. The owner of the address now holds the account, and the record stays `partial`. A second run writes nothing for it, with or without `--repair`. After a claim that threw before its flip, the user stays unverified, and a run with `--repair` writes the rows. When that run still reports `not repaired: claimed`, a lease of a claim stays, as after a claim at the D1 query cap. The run then works after the sweep.
+- The import holds the claim of each unverified user while it writes the rows of that user. A claim of the address in that time waits for the import's commit, or answers 409 `conflict` on D1. A claim after the import works.
+- A first run can list a new unverified user as `partial` with `not repaired: claimed`. A claim of the address held the user when the import came to its writes, so the import wrote no credential. The owner of the address now holds the account, and the record stays `partial`. A second run writes nothing for it, with or without `--repair`. After a claim that threw before its flip, the user stays unverified, and a run with `--repair` writes the rows. When that run still reports `not repaired: claimed`, a lease stays on D1. A claim at the D1 query cap leaves one, and so does an import run that stopped. The run then works after the sweep, 60 seconds after the lease.
 
 Each conflict below has its remedy. The reason in the report is the anchor of its section.
 
