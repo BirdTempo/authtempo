@@ -587,9 +587,11 @@ export class ClaimLostError extends Error {
  * It sent 39 queries with no race, 58 with one race, and 85 with two.
  * Since plan 12o only a lost race throws `ClaimLostError`. Since plan 12p a
  * claim loses at its first statement, the hold or the lease, and writes
- * nothing then. A flip that matches zero rows after a lease throws too, and
- * the undo takes the deletes before it. So no claim write stays when the
- * answer is `conflict`. A session race ends no claim: on 2026-11-04 that join signed in through one race in 39 queries
+ * nothing then. A flip that matches zero rows after a lease throws too. The
+ * undo then takes back each write of that claim except its deletes. With
+ * `deleteOnlyWhile` each delete ran only while the user was unverified. So
+ * its rows were the claimant's, and they stay gone (ruling 33 of plan 12q).
+ * So no write that gives a way in stays when the answer is `conflict`. A session race ends no claim: on 2026-11-04 that join signed in through one race in 39 queries
  * (adapter-d1 test anonymous-upgrade-budget.test.ts). The magic link and the
  * email code spent their proof before the claim, so each mails a new one of
  * its kind. The sign-up confirm mails nothing: the address is verified, so
