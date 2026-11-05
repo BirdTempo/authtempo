@@ -1,5 +1,10 @@
 import { env } from "cloudflare:test";
-import { type AuthConfig, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  SIGN_UP_PROOF_COOKIE,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter, createD1Limiter } from "../src/index.js";
@@ -197,5 +202,102 @@ describe("the sign-up code on D1 (plan 12i Task 20)", () => {
     expect([fresh.before, known.before]).toEqual([BEFORE_ANSWER_QUERIES, BEFORE_ANSWER_QUERIES]);
     expect([fresh.total, known.total]).toEqual([SIGN_UP_NEW_QUERIES, SIGN_UP_KNOWN_QUERIES]);
     expect(w.mail.map((m) => m.to)).toEqual(["ada@example.com", "ada@example.com"]);
+  });
+});
+
+// A resend and a sign-in that carry the sign-up proof (Low 4 of the 12q
+// review). Each reads the earlier rows of the sign-up to match the proof
+// (ruling 14 of plan 12q). So each sends one query more than with no proof.
+// The proof travels in the body, as a bearer client sends it. The confirm
+// after each act keeps the password, so the new row holds the hash. Each
+// act runs on a new adapter, as a new invocation does. So each count holds
+// the read of the schema version, unlike the pins above.
+// Measured 2026-11-05 13:19 CST on the owner's Mac Studio, load 1.64 2.25 2.88.
+const PROOF_PINS = { linkResend: 8, codeResend: 10, signIn: 9 };
+
+describe("the resend and the sign-in that carry the sign-up proof on D1 (plan 12q)", () => {
+  /** The proof of a sign-up answer: the body member of a JSON caller. */
+  const proofOf = (body: unknown) => (body as { signUpProof: string }).signUpProof;
+  /** The token of the last verify link to `email`. */
+  const linkOf = (w: ReturnType<typeof make>, email: string) => {
+    const text = w.mail.findLast((m) => m.to === email)?.text ?? "";
+    return decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+  };
+  const hash = createPbkdf2PasswordHash({ iterations: 1000 });
+
+  for (const form of ["link", "code"] as const)
+    it(`pins a resend of the ${form} with the proof in the body, and the confirm keeps the password`, async () => {
+      const config = { password: { hash, verifyBy: form } };
+      const email = "bo@example.com";
+      const up = await measure(
+        make(config),
+        post("/password/sign-up", { email, password: PASSWORD }),
+      );
+      const w = make(config);
+      expect(up.body).toEqual(SENT_WITH_PROOF);
+      const proof = proofOf(up.body);
+      const resend = await measure(
+        w,
+        post("/password/verify/resend", { email, signUpProof: proof }),
+      );
+      expect(resend.body).toEqual({ sent: true });
+      // The pin first, so a lost read of the proof fails here.
+      expect(resend.queries).toBe(form === "code" ? PROOF_PINS.codeResend : PROOF_PINS.linkResend);
+      const confirm =
+        form === "code"
+          ? await measure(
+              w,
+              post("/password/verify/code", {
+                email,
+                code: lastCode(w, email),
+                signUpProof: proof,
+              }),
+            )
+          : await measure(
+              w,
+              new Request(`${BASE}/auth/password/verify`, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  origin: APP_ORIGIN,
+                  cookie: `${SIGN_UP_PROOF_COOKIE}=${proof}`,
+                },
+                body: JSON.stringify({ token: linkOf(w, email) }),
+              }),
+            );
+      expect(confirm.body).toMatchObject({ passwordKept: true });
+      expect(resend.queries).toBeLessThanOrEqual(BUDGET);
+    });
+
+  it("pins a sign-in under requireVerified with the proof in the body, and the confirm keeps the password", async () => {
+    const config = { password: { hash, uniformSignUp: false, requireVerified: true } };
+    const email = "cy@example.com";
+    const up = await measure(
+      make(config),
+      post("/password/sign-up", { email, password: PASSWORD }),
+    );
+    const w = make(config);
+    const proof = proofOf(up.body);
+    expect(proof).toMatch(/^sp_/);
+    const signIn = await measure(
+      w,
+      post("/password/sign-in", { email, password: PASSWORD, signUpProof: proof }),
+    );
+    expect(signIn.body).toMatchObject({ error: "email_unverified" });
+    expect(signIn.queries).toBe(PROOF_PINS.signIn);
+    const confirm = await measure(
+      w,
+      new Request(`${BASE}/auth/password/verify`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: APP_ORIGIN,
+          cookie: `${SIGN_UP_PROOF_COOKIE}=${proof}`,
+        },
+        body: JSON.stringify({ token: linkOf(w, email) }),
+      }),
+    );
+    expect(confirm.body).toMatchObject({ passwordKept: true });
+    expect(signIn.queries).toBeLessThanOrEqual(BUDGET);
   });
 });
