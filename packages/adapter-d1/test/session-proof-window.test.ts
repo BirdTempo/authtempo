@@ -69,9 +69,15 @@ async function claimant(w: World) {
   expect(await answer(signIn)).toBe("200 ok");
   const sessions = (await sessionsOf(id)).map((s) => s.id);
   expect(sessions).toHaveLength(2);
+  // The sign-up proof of the claimant's browser (ruling 11 of plan 12q).
+  const proof =
+    up.headers
+      .getSetCookie()
+      .find((line) => line.startsWith("__Host-tempo_signup="))
+      ?.split(";")[0] ?? "";
   // The sign-in's session is fresh: it is the one that acts.
   const actor = sessions.find((s) => !first.includes(s)) ?? "";
-  return { id, sessions, actor, token: setToken(signIn), confirm };
+  return { id, sessions, actor, token: setToken(signIn), confirm, proof };
 }
 type Claimant = Awaited<ReturnType<typeof claimant>>;
 
@@ -93,10 +99,28 @@ const RESET_LINK: Proof = {
     return post("/password/reset", { token: tokenIn(lastTo(CLAIMED)), password: NEW });
   },
 };
-/** The verify link of the claimant's sign-up, in the owner's mailbox. The claim keeps that password. */
+/**
+ * The verify link of the claimant's sign-up, in the owner's mailbox. The
+ * owner holds no sign-up proof, so the claim deletes that password too
+ * (ruling 11 of plan 12q).
+ */
 const VERIFY_LINK: Proof = {
   name: "the verify link",
   prepare: async (_w, c) => post("/password/verify", { token: c.confirm }),
+};
+/**
+ * The same link from a browser that holds the sign-up proof: the person of
+ * the sign-up holds the mailbox too. The claim keeps that password, and the
+ * sessions made before the proof stay unproved (ruling 11 of plan 12q).
+ */
+const VERIFY_LINK_KEPT: Proof = {
+  name: "the verify link with the sign-up proof",
+  prepare: async (_w, c) => {
+    const request = post("/password/verify", { token: c.confirm });
+    return new Request(request, {
+      headers: { ...Object.fromEntries(request.headers), cookie: c.proof },
+    });
+  },
 };
 
 /**
@@ -291,7 +315,8 @@ const SECOND_FACTOR: Flow = {
         post("/second-factor/passkey/enable", { password: OLD, response: { id: "x" } }, c.token),
       ],
     ]),
-  // The door comes before the password check, also after the verify link that keeps the password.
+  // The door comes before the password check (ruling 13 of plan 12q). So the answer is the same
+  // after the verify link with the sign-up proof, which keeps the password, and with none.
   want: () => ({
     "totp setup": DEAD,
     "totp enable": DEAD,
@@ -521,7 +546,11 @@ describe("a claimant's session at the claim's flip on D1: the six flows by readi
         await holds(flow, MAGIC_LINK, hook);
       });
   for (const hook of HOOKS)
-    it(`the TOTP setup at the flip of the verify link, which keeps the password, answers its refusal and leaves no row (afterEnd hook ${hook})`, async () => {
+    it(`the TOTP setup at the flip of the verify link with the sign-up proof, which keeps the password, answers its refusal and leaves no row (afterEnd hook ${hook})`, async () => {
+      await holds(SECOND_FACTOR, VERIFY_LINK_KEPT, hook);
+    });
+  for (const hook of HOOKS)
+    it(`the TOTP setup at the flip of the verify link with no proof, which deletes the password, answers its refusal and leaves no row (afterEnd hook ${hook})`, async () => {
       await holds(SECOND_FACTOR, VERIFY_LINK, hook);
     });
 });

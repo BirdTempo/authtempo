@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -57,18 +57,25 @@ describe("password verify routes", () => {
 
   it("POST /password/verify signs in by form and by JSON, and refuses a replay", async () => {
     const h = pwHandle({ hash: FAST });
-    await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
+    // Each confirm comes from the browser of its sign-up, with its proof (plan 12q).
+    const up = await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
     const first = lastToken(h, "Confirm");
-    const res = await h.auth.handle(form("/auth/password/verify", `token=${first}`));
+    const res = await h.auth.handle(
+      form("/auth/password/verify", `token=${first}`, proofCookie(up)),
+    );
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://api.example.com/");
     expect(res.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
 
-    await h.auth.handle(post("/auth/password/sign-up", { email: "b@example.com", password: PW }));
+    const up2 = await h.auth.handle(
+      post("/auth/password/sign-up", { email: "b@example.com", password: PW }),
+    );
     const second = lastToken(h, "Confirm");
-    const js = await h.auth.handle(post("/auth/password/verify", { token: second }));
+    const js = await h.auth.handle(
+      post("/auth/password/verify", { token: second }, proofCookie(up2)),
+    );
     expect(js.status).toBe(200);
-    expect(await js.json()).toEqual({ verified: true });
+    expect(await js.json()).toEqual({ verified: true, passwordKept: true });
     expect(js.headers.get("set-cookie")).toMatch(/^__Host-tempo_session=ts_/);
 
     const replay = await h.auth.handle(post("/auth/password/verify", { token: second }));

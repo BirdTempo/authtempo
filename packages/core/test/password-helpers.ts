@@ -1,3 +1,4 @@
+import { expect } from "vitest";
 import type { AuthConfig, MailMessage, PasswordConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
@@ -8,6 +9,7 @@ import {
   passwordSignUp,
   verifyPasswordEmail,
 } from "../src/engine/password.js";
+import { SIGN_UP_PROOF_COOKIE } from "../src/http/cookies.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import type { Result } from "../src/result.js";
 import type { PasswordRow } from "../src/schema.js";
@@ -80,7 +82,9 @@ export function pwHandle(password: PasswordConfig | undefined, extra: Partial<Au
 
 /**
  * A reachable verified user with a password: the sign-up, then the real
- * verify link from the mail. Returns the password row the link kept.
+ * verify link from the mail. Returns the password row the link kept. The
+ * confirm carries the sign-up's proof, as the sign-up's own browser does
+ * (ruling 11 of plan 12q). Without it the confirm would delete the password.
  */
 export async function signUpAndVerify(
   auth: ReturnType<typeof makeAuth>,
@@ -96,6 +100,7 @@ export async function signUpAndVerify(
     token: tokenFromMail(mail?.text ?? ""),
     ip: null,
     userAgent: null,
+    signUpProof: recordCredential(up.value.signUpProof),
   });
   if (!v.ok || !v.value.signedIn) throw new Error("the verify link did not sign in");
   // By the address: the uniform answer (plan 12b) carries no user.
@@ -105,6 +110,28 @@ export async function signUpAndVerify(
   ]);
   if (!row) throw new Error("no password row");
   return row;
+}
+
+/**
+ * The uniform sign-up answer (plan 12b) with its sign-up proof (ruling 11
+ * of plan 12q): 32 random bytes as base64url behind `sp_`.
+ */
+export const SENT_WITH_PROOF = {
+  sent: true,
+  signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+};
+
+/**
+ * The cookie header of the sign-up's own browser, for its confirm (ruling 11
+ * of plan 12q): the proof cookie that `res`, a sign-up answer, set. A confirm
+ * without it is a claim, and the sign-up's password goes.
+ */
+export function proofCookie(res: Response): { cookie: string } {
+  const line = res.headers.getSetCookie().find((c) => c.startsWith(`${SIGN_UP_PROOF_COOKIE}=`));
+  const pair = line?.split(";")[0];
+  if (!pair) throw new Error(`the sign-up answered ${res.status} with no proof cookie`);
+  recordCredential(pair.slice(SIGN_UP_PROOF_COOKIE.length + 1));
+  return { cookie: pair };
 }
 
 /**

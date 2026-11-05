@@ -546,7 +546,8 @@ const ROWS: GateRow[] = [
         200,
       );
       const res = await b.post("/password/verify", { token: mailToken(w) });
-      expect(await res.json()).toEqual({ verified: true });
+      // The browser of the sign-up holds its proof, so the password stays (plan 12q).
+      expect(await res.json()).toEqual({ verified: true, passwordKept: true });
       return cookieOutcome(w, b);
     },
   },

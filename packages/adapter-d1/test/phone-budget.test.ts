@@ -206,7 +206,13 @@ describe("the phone routes on D1 (plan 12i Task 5)", () => {
     });
     if (!up?.ok) throw new Error("no sign-up");
     const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(mail.at(-1) ?? "")?.[1] ?? "");
-    const v = await api.password?.verifyEmail({ token, ip: null, userAgent: null });
+    // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
+    const v = await api.password?.verifyEmail({
+      token,
+      ip: null,
+      userAgent: null,
+      signUpProof: up.value.signUpProof,
+    });
     if (!v?.ok || v.value.signedIn === null) throw new Error("the verify link did not sign in");
     const bearer = { authorization: `Bearer ${v.value.signedIn.token}` };
     // The phone comes from a real code (ruling 20), before the factor is on.

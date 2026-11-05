@@ -140,7 +140,13 @@ function seamWorld(extra: Partial<AuthConfig> = {}) {
     const up = await password.signUp({ email, password: PASSWORD, ip: null, userAgent: null });
     if (!up.ok) throw new Error(up.code);
     const token = tokenFromMail(sent.at(-1) ?? "");
-    const proved = await password.verifyEmail({ token, ip: null, userAgent: null });
+    // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
+    const proved = await password.verifyEmail({
+      token,
+      ip: null,
+      userAgent: null,
+      signUpProof: up.value.signUpProof,
+    });
     if (!proved.ok) throw new Error(proved.code);
   };
   /** The session of a password sign-in now, with its token. The sign-in makes it fresh. */

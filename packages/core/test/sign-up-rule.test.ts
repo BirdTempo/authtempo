@@ -12,7 +12,7 @@ import { completeSocial, startSocial } from "../src/engine/social.js";
 import type { Clock } from "../src/primitives/clock.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle, SENT_WITH_PROOF } from "./password-helpers.js";
 import { fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 
 type Rule = "open" | "invited" | false;
@@ -191,13 +191,13 @@ describe("the sign-up rule (plan 12b)", () => {
         userAgent: null,
       });
     // No invitation: the same answer for a known and a new address, no row, and no mail.
-    expect(await up("ada@example.com")).toEqual({ ok: true, value: { sent: true } });
-    expect(await up(NEW)).toEqual({ ok: true, value: { sent: true } });
+    expect(await up("ada@example.com")).toEqual({ ok: true, value: SENT_WITH_PROOF });
+    expect(await up(NEW)).toEqual({ ok: true, value: SENT_WITH_PROOF });
     expect(await users(auth)).toEqual(["ada@example.com"]);
     expect(auth.mail).toEqual([]);
     // An invitation: the same answer, the new user, and the verify mail.
     await invite(auth, NEW, DAY);
-    expect(await up(NEW)).toEqual({ ok: true, value: { sent: true } });
+    expect(await up(NEW)).toEqual({ ok: true, value: SENT_WITH_PROOF });
     expect(await users(auth)).toEqual(["ada@example.com", NEW]);
     expect(auth.mail.map((m) => m.to)).toEqual([NEW]);
   });
@@ -208,18 +208,29 @@ describe("the sign-up rule (plan 12b)", () => {
     const res = await h.auth.handle(
       post("/auth/password/sign-up", { email: NEW, password: "correct horse battery" }),
     );
-    const body = (await res.json()) as { verifyRequired?: unknown; token?: unknown };
+    const body = (await res.json()) as {
+      verifyRequired?: unknown;
+      token?: unknown;
+      signUpProof: string;
+    };
+    // No session cookie: the one cookie is the sign-up proof (ruling 11 of plan 12q).
     expect({
       status: res.status,
       verifyRequired: body.verifyRequired,
       token: body.token,
-      cookie: res.headers.get("set-cookie"),
-    }).toEqual({ status: 200, verifyRequired: true, token: undefined, cookie: null });
+      cookies: res.headers.getSetCookie().map((c) => c.split("=")[0]),
+    }).toEqual({
+      status: 200,
+      verifyRequired: true,
+      token: undefined,
+      cookies: ["__Host-tempo_signup"],
+    });
     expect(await h.storage.findMany("session", [])).toHaveLength(0);
     const v = await verifyPasswordEmail(h.config, {
       token: h.mails.at(-1)?.token ?? "",
       ip: null,
       userAgent: null,
+      signUpProof: body.signUpProof,
     });
     expect(v.ok && v.value.signedIn !== null).toBe(true);
   });
@@ -229,22 +240,28 @@ describe("the sign-up rule (plan 12b)", () => {
       const h = pwHandle({ hash: FAST, uniformSignUp }, { signUp: "invited", organizations: {} });
       await invite(h, NEW, DAY);
       const creds = { email: NEW, password: "correct horse battery" };
-      expect((await h.auth.handle(post("/auth/password/sign-up", creds))).status).toBe(200);
+      const up = await h.auth.handle(post("/auth/password/sign-up", creds));
+      expect(up.status).toBe(200);
+      const { signUpProof } = (await up.json()) as { signUpProof: string };
       // A stranger who knows the invited address signs up with a password of their own.
-      const early = await h.auth.handle(post("/auth/password/sign-in", creds));
+      // The sign-in comes from the same browser, so its new link keeps the proof (plan 12q).
+      const early = await h.auth.handle(post("/auth/password/sign-in", creds, proofCookie(up)));
       expect({ status: early.status, body: await early.json() }).toEqual({
         status: 403,
         body: { error: "email_unverified" },
       });
       expect(early.headers.get("set-cookie")).toBeNull();
       expect(await h.storage.findMany("session", [])).toHaveLength(0);
-      // The owner of the address opens the link, and then the sign-in opens a session.
+      // The link opens in the browser of the sign-up, with its proof, and then
+      // the sign-in opens a session. Opened anywhere else, the link would claim
+      // the address and delete this password (ruling 11 of plan 12q).
       const v = await verifyPasswordEmail(h.config, {
         token: h.mails.at(-1)?.token ?? "",
         ip: null,
         userAgent: null,
+        signUpProof,
       });
-      expect(v.ok).toBe(true);
+      expect(v.ok && v.value.passwordKept).toBe(true);
       const late = await h.auth.handle(post("/auth/password/sign-in", creds));
       expect(late.status).toBe(200);
       expect(late.headers.get("set-cookie")).toMatch(/__Host-tempo_session=ts_/);

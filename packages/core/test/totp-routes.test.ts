@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { totpRoutes } from "../src/http/routes/totp.js";
 import { base32Decode, totpCode } from "../src/primitives/totp.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -34,10 +34,11 @@ async function signedIn(h: Handle, email = EMAIL): Promise<string> {
 
 /** A verified user with a password, and the session cookie of a sign-in. */
 async function verifiedUser(h: Handle, email = EMAIL): Promise<string> {
-  await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const up = await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
   const token = h.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"))?.token;
   if (!token) throw new Error("no confirm mail");
-  await h.auth.handle(post("/auth/password/verify", { token }));
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await h.auth.handle(post("/auth/password/verify", { token }, proofCookie(up)));
   return signedIn(h, email);
 }
 

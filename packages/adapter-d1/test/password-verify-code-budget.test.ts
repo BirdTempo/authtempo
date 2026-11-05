@@ -41,6 +41,11 @@ const RESEND_UNKNOWN_QUERIES = 4;
 // first read of the job. The job starts in the route, and the answer does
 // not wait for that read.
 const BEFORE_ANSWER_QUERIES = 4;
+/** The uniform answer with its sign-up proof (ruling 11 of plan 12q). */
+const SENT_WITH_PROOF = {
+  sent: true,
+  signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+};
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -129,10 +134,11 @@ describe("the sign-up code on D1 (plan 12i Task 20)", () => {
   it("keeps each request of the sign-up code within the D1 Free budget", async () => {
     const w = make();
     const email = "ada@example.com";
+    // Each sign-up answer carries a sign-up proof (ruling 11 of plan 12q).
     const fresh = await measure(w, post("/password/sign-up", { email, password: PASSWORD }));
-    expect(fresh.body).toEqual({ sent: true });
+    expect(fresh.body).toEqual(SENT_WITH_PROOF);
     const known = await measure(w, post("/password/sign-up", { email, password: PASSWORD }));
-    expect(known.body).toEqual({ sent: true });
+    expect(known.body).toEqual(SENT_WITH_PROOF);
     const resend = await measure(w, post("/password/verify/resend", { email }));
     expect(resend.body).toEqual({ sent: true });
     const unknownResend = await measure(
@@ -182,7 +188,7 @@ describe("the sign-up code on D1 (plan 12i Task 20)", () => {
         waitUntil: (p) => void after.push(p),
       });
       const before = w.count.queries;
-      expect(await res.json()).toEqual({ sent: true });
+      expect(await res.json()).toEqual(SENT_WITH_PROOF);
       await Promise.all(after.splice(0));
       return { before, total: w.count.queries };
     };

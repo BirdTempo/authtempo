@@ -150,10 +150,12 @@ async function sixtyRows() {
     const up = await password.signUp({ email, password: PW, ip: null, userAgent: null });
     if (!up.ok || !("user" in up.value)) throw new Error("no user");
     const token = /token=([A-Za-z0-9_%-]+)/.exec(mail.findLast((m) => m.to === email)?.text ?? "");
+    // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
     const verified = await password.verifyEmail({
       token: decodeURIComponent(token?.[1] ?? ""),
       ip: null,
       userAgent: null,
+      signUpProof: up.value.signUpProof,
     });
     if (!verified.ok || verified.value.signedIn === null) throw new Error("no verify session");
     owner ??= verified.value.user;

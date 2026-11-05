@@ -74,13 +74,20 @@ describe("password.requireVerified (plan 12b, Better Auth docs audit gap 1)", ()
   });
 
   it("signs in through the new link, and the next sign-in opens a session", async () => {
-    const auth = await unverified(true);
-    await passwordSignIn(auth.config, { email: EMAIL, password: PW, ...call });
+    const auth = pwAuth({ requireVerified: true });
+    const up = await passwordSignUp(auth.config, { email: EMAIL, password: PW, ...call });
+    if (!up.ok) throw new Error(up.code);
+    // The sign-up's own browser: its proof goes with the sign-in and the
+    // confirm, so the new link keeps the password (ruling 11 of plan 12q).
+    const signUpProof = up.value.signUpProof;
+    await passwordSignIn(auth.config, { email: EMAIL, password: PW, ...call, signUpProof });
     const v = await verifyPasswordEmail(auth.config, {
       token: tokenFromMail(confirms(auth).at(-1)?.text ?? ""),
       ...call,
+      signUpProof,
     });
     expect(v.ok && v.value.signedIn !== null).toBe(true);
+    expect(v.ok && v.value.passwordKept).toBe(true);
     const r = await passwordSignIn(auth.config, { email: EMAIL, password: PW, ...call });
     expect(r.ok && "token" in r.value).toBe(true);
   });
@@ -115,18 +122,19 @@ describe("password.requireVerified (plan 12b, Better Auth docs audit gap 1)", ()
     const h = pwHandle({ hash: FAST, requireVerified: true });
     const res = await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
     const body = (await res.json()) as { token?: unknown; user?: { email?: unknown } };
+    // No session cookie: the one cookie is the sign-up proof (ruling 11 of plan 12q).
     expect({
       status: res.status,
       verifyRequired: (body as { verifyRequired?: unknown }).verifyRequired,
       token: body.token,
       email: body.user?.email,
-      cookie: res.headers.get("set-cookie"),
+      cookies: res.headers.getSetCookie().map((c) => c.split("=")[0]),
     }).toEqual({
       status: 200,
       verifyRequired: true,
       token: undefined,
       email: EMAIL,
-      cookie: null,
+      cookies: ["__Host-tempo_signup"],
     });
   });
 

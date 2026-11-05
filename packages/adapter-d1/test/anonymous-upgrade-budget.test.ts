@@ -236,11 +236,24 @@ async function anonymousJar(w: World): Promise<string> {
 const tokenIn = (text: string) =>
   decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
 
-/** A verified user with a password: the sign-up and the real confirm link. */
+/**
+ * The sign-up proof cookie that a sign-up answer set (ruling 11 of plan 12q),
+ * beside the other cookies of `jar`. A confirm with it keeps the password.
+ */
+function withProof(res: Response, jar: string | null = null): string {
+  const proof = res.headers
+    .getSetCookie()
+    .find((c) => c.startsWith("__Host-tempo_signup="))
+    ?.split(";")[0];
+  if (!proof) throw new Error(`the sign-up answered ${res.status} with no proof`);
+  return jar ? `${jar}; ${proof}` : proof;
+}
+
+/** A verified user with a password: the sign-up and the real confirm link, in one browser. */
 async function verifiedUser(w: World, email: string) {
-  await call(w, post("/password/sign-up", { email, password: PASSWORD }));
+  const up = await call(w, post("/password/sign-up", { email, password: PASSWORD }));
   const link = w.mail.findLast((m) => m.to === email)?.text ?? "";
-  const res = await call(w, post("/password/verify", { token: tokenIn(link) }));
+  const res = await call(w, post("/password/verify", { token: tokenIn(link) }, withProof(up)));
   expect(res.status).toBe(200);
 }
 
@@ -299,7 +312,11 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
         post("/password/sign-up", { email: "cy@example.com", password: PASSWORD }, jar),
       );
       const link = uniform.mail.findLast((m) => m.to === "cy@example.com")?.text ?? "";
-      const done = await measure(uniform, post("/password/verify", { token: tokenIn(link) }, jar));
+      // The browser of the sign-up holds its proof too (ruling 11 of plan 12q).
+      const done = await measure(
+        uniform,
+        post("/password/verify", { token: tokenIn(link) }, withProof(start.res, jar)),
+      );
       expect(done.res.status).toBe(200);
       return { start: start.queries, done: done.queries };
     });
@@ -467,12 +484,16 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       const before = w.links.length;
       let done: Awaited<ReturnType<typeof measure>>;
       if (uniform) {
-        await call(
+        const up = await call(
           w,
           post("/password/sign-up", { email: "new@example.com", password: PASSWORD }, b.jar()),
         );
         const link = w.mail.findLast((m) => m.to === "new@example.com")?.text ?? "";
-        done = await measure(w, post("/password/verify", { token: tokenIn(link) }, b.jar()));
+        // The browser of the sign-up holds its proof too (ruling 11 of plan 12q).
+        done = await measure(
+          w,
+          post("/password/verify", { token: tokenIn(link) }, withProof(up, b.jar())),
+        );
       } else {
         await verifiedUser(w, "new@example.com");
         done = await measure(
@@ -821,15 +842,19 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       const codeOf = (email: string) =>
         /\b(\d{6})\b/.exec(w.mail.findLast((m) => m.to === email)?.text ?? "")?.[1];
       const b = await fullBagAnonymous(w, async (email) => {
-        await call(w, post("/password/sign-up", { email, password: PASSWORD }));
-        const res = await call(w, post("/password/verify/code", { email, code: codeOf(email) }));
+        const up = await call(w, post("/password/sign-up", { email, password: PASSWORD }));
+        const res = await call(
+          w,
+          post("/password/verify/code", { email, code: codeOf(email) }, withProof(up)),
+        );
         expect(res.status).toBe(200);
       });
       const email = "new@example.com";
-      await call(w, post("/password/sign-up", { email, password: PASSWORD }, b.jar()));
+      const up = await call(w, post("/password/sign-up", { email, password: PASSWORD }, b.jar()));
+      // The browser of the sign-up holds its proof too (ruling 11 of plan 12q).
       const done = await measure(
         w,
-        post("/password/verify/code", { email, code: codeOf(email) }, b.jar()),
+        post("/password/verify/code", { email, code: codeOf(email) }, withProof(up, b.jar())),
       );
       expect(b.take(done.res).status).toBe(200);
       const pin = uniformSignUp ? WORST_JOIN_PINS.codeConfirmUniform : WORST_JOIN_PINS.codeConfirm;

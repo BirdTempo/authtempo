@@ -202,7 +202,9 @@ describe("multi-session on D1 (plan 12i Task 11)", () => {
     expect(read.status).toBe(200);
     const out = await measure(w, b, post("/sign-out", {}, b.header()));
     expect(out.status).toBe(200);
-    expect(b.cookies.size).toBe(0);
+    // No session cookie stays. The proof of the last sign-up stays until its confirm or its
+    // Max-Age, the life of the link (ruling 11 of plan 12q).
+    expect([...b.cookies.keys()]).toEqual(["__Host-tempo_signup"]);
     expect(
       (await env.DB.prepare("SELECT count(*) AS n FROM ta_session").first<{ n: number }>())?.n,
     ).toBe(0);

@@ -18,7 +18,7 @@ import type { IdentityRow, UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { DEFAULT_OBSERVE, emailOf, makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, pwHandle, SENT_WITH_PROOF } from "./password-helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
@@ -185,7 +185,7 @@ const PATHS: {
     extra: {},
     run: (w, email) => signUp(w.auth, email),
     events: (email) => [`user.beforeCreate:password:${email}`, "user.afterCreate:password:-"],
-    refused: { ok: true, value: { sent: true } },
+    refused: { ok: true, value: SENT_WITH_PROOF },
   },
   {
     name: "the password sign-up with uniformSignUp off",
@@ -847,7 +847,7 @@ describe("the create steps on every path (review-12a-task5)", () => {
     const uniform = world(r.hooks, closed);
     expect(await signUp(uniform.auth, "up@example.com")).toEqual({
       ok: true,
-      value: { sent: true },
+      value: SENT_WITH_PROOF,
     });
     expect(await resetCode(uniform.auth, "code@example.com")).toMatchObject({
       ok: false,
@@ -983,9 +983,15 @@ describe("the uniform sign-up hides a user.beforeCreate stop (plan 12a, lead rul
     );
   }
 
+  /** The answer with its random sign-up proof masked (ruling 11 of plan 12q). */
   async function answer(h: ReturnType<typeof pwHandle>, email: string) {
     const res = await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
-    return { status: res.status, body: await res.json(), cookie: res.headers.get("set-cookie") };
+    const mask = (text: string | null) => text?.replace(/sp_[A-Za-z0-9_-]{43}/g, "sp_<proof>");
+    return {
+      status: res.status,
+      body: JSON.parse(mask(await res.text()) ?? "null") as unknown,
+      cookie: mask(res.headers.get("set-cookie")),
+    };
   }
 
   async function check(h: ReturnType<typeof pwHandle>) {
@@ -994,7 +1000,11 @@ describe("the uniform sign-up hides a user.beforeCreate stop (plan 12a, lead rul
     const known = await answer(h, "old@example.com");
     const refused = await answer(h, "no@example.com");
     expect(refused).toEqual(known);
-    expect(refused).toEqual({ status: 200, body: { sent: true }, cookie: null });
+    expect(refused).toEqual({
+      status: 200,
+      body: { sent: true, signUpProof: "sp_<proof>" },
+      cookie: "__Host-tempo_signup=sp_<proof>; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax",
+    });
     const users = await h.storage.findMany("user", []);
     expect(users.map((u) => u.email)).toEqual(["old@example.com"]);
     expect(

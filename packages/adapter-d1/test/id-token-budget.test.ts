@@ -184,10 +184,18 @@ describe("the ID-token route on D1 (plan 12i Task 10)", () => {
     got.claim = claimed.queries;
 
     // A user with the second factor on: the challenge in place of the session.
-    await call(w, post("/password/sign-up", { email: "cy@example.com", password: PASSWORD }));
+    const up = await call(
+      w,
+      post("/password/sign-up", { email: "cy@example.com", password: PASSWORD }),
+    );
     const link = w.mail.findLast((m) => m.to === "cy@example.com")?.text ?? "";
     const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(link)?.[1] ?? "");
-    expect((await call(w, post("/password/verify", { token }))).status).toBe(200);
+    // The sign-up's own browser holds its proof, so the password stays (ruling 11 of plan 12q).
+    const proof = up.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("__Host-tempo_signup="))
+      ?.split(";")[0];
+    expect((await call(w, post("/password/verify", { token }, proof ?? null))).status).toBe(200);
     const cy = await call(
       w,
       post("/password/sign-in", { email: "cy@example.com", password: PASSWORD }),

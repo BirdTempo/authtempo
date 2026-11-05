@@ -199,7 +199,13 @@ async function withFactor(w: World): Promise<void> {
   });
   if (!up?.ok) throw new Error("no sign-up");
   const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(w.mail.at(-1) ?? "")?.[1] ?? "");
-  const v = await w.auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+  // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
+  const v = await w.auth.api.password?.verifyEmail({
+    token,
+    ip: null,
+    userAgent: null,
+    signUpProof: up.value.signUpProof,
+  });
   if (!v?.ok || v.value.signedIn === null) throw new Error("the verify link did not sign in");
   const session = await w.auth.api.getSession(v.value.signedIn.token);
   const totp = w.auth.api.totp;

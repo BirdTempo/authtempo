@@ -189,10 +189,18 @@ describe("the username on D1 (plan 12i Task 2)", () => {
     const up = await w.auth.handle(
       post("/password/sign-up", { email: "ada@example.com", password: "correct horse battery" }),
     );
-    expect(await up.json()).toEqual({ sent: true });
+    // The answer carries the sign-up proof, and the confirm passes it, so the
+    // password stays (ruling 11 of plan 12q).
+    const { signUpProof } = (await up.json()) as { signUpProof: string };
+    expect(signUpProof).toMatch(/^sp_[A-Za-z0-9_-]{43}$/);
     const text = w.mail.findLast((m) => m.to === "ada@example.com")?.text ?? "";
     const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
-    const verified = await w.auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+    const verified = await w.auth.api.password?.verifyEmail({
+      token,
+      ip: null,
+      userAgent: null,
+      signUpProof,
+    });
     if (!verified?.ok || !verified.value.signedIn) throw new Error("no session");
     const bearer = { authorization: `Bearer ${verified.value.signedIn.token}` };
     expect((await w.auth.handle(post("/user/username", { username: "Ada" }, bearer))).status).toBe(

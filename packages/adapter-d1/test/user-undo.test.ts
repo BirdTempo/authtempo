@@ -527,7 +527,11 @@ describe("a password sign-up on D1 while the owner resets the password (plan 8 I
       userAgent: null,
     });
     expect(h.fired()).toBe(true);
-    expect(claimant).toEqual({ ok: true, value: { sent: true } });
+    // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+    expect(claimant).toEqual({
+      ok: true,
+      value: { sent: true, signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/) },
+    });
     const proved = owner as Awaited<ReturnType<typeof h.owner.reset>> | null;
     if (!proved?.ok) throw new Error("the owner's reset failed");
     const userId = proved.value.user.id;

@@ -38,8 +38,15 @@ export {
  * cannot drift.
  */
 export { ID_TOKEN_PROVIDERS } from "./engine/id-token.js";
-/** The inputs of `createOrganizationTokenAs` and `createApiTokenAs` (plan 12p). */
+/** The input of `createOrganizationTokenAs` (plan 12p). */
 export type { OrganizationTokenCreateFor } from "./engine/organization-tokens.js";
+/**
+ * A new sign-up proof (ruling 11 of plan 12q). A compat package answers a
+ * taken address with a made-up user, as Better Auth does. It gives that
+ * answer a proof of the same form, so the answer tells no account.
+ */
+export { newSignUpProof } from "./engine/password.js";
+/** The input of `createApiTokenAs` (plan 12p). */
 export type { ApiTokenCreateFor } from "./engine/tokens.js";
 /**
  * The capped body read of core (ruling 46 of the 12j lane). A compat

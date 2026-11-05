@@ -289,7 +289,11 @@ export {
 export { isJsonRequest } from "./http/body.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
-export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
+export {
+  DEFAULT_SESSION_COOKIE,
+  LEGACY_SESSION_COOKIE,
+  SIGN_UP_PROOF_COOKIE,
+} from "./http/cookies.js";
 export { DEVICE_WARNING, type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 export { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
 export {

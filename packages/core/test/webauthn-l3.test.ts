@@ -14,7 +14,7 @@ import { onDomainTree } from "../src/primitives/host.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, get, makeAuth, post, sessionFor } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle } from "./password-helpers.js";
 
 /**
  * WebAuthn Level 3 (plan 12i Task 9, spec 32 item 3): the related origins
@@ -438,10 +438,11 @@ function sessionPair(res: Response): string {
 async function factorWorld() {
   const h = pwHandle({ hash: FAST }, { passkey: SF_RP });
   const email = "ada@example.com";
-  await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const up = await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
   const token = h.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"))?.token;
   if (!token) throw new Error("no confirm mail");
-  await h.auth.handle(post("/auth/password/verify", { token }));
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await h.auth.handle(post("/auth/password/verify", { token }, proofCookie(up)));
   const signedIn = await h.auth.handle(post("/auth/password/sign-in", { email, password: PW }));
   const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
   if (!user) throw new Error("no user");

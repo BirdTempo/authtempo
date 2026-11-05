@@ -23,7 +23,7 @@ import {
   recordCredential,
   tokenFromMail,
 } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, SENT_WITH_PROOF } from "./password-helpers.js";
 import { type Auth, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
 
 const DAY = 86_400_000;
@@ -233,7 +233,7 @@ describe("the username (plan 12i Task 2)", () => {
         handle,
         post("/auth/password/sign-up", { email: "new@example.com", password: PASSWORD }),
       ),
-    ).toEqual({ status: 200, body: { sent: true } });
+    ).toEqual({ status: 200, body: SENT_WITH_PROOF });
   });
 
   it("keeps the name of a sign-up at its own confirm, and clears it at every other claim", async () => {

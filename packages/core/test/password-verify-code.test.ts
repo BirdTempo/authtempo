@@ -4,6 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import { type AnonymousLinkEvent, hookRefusal } from "../src/engine/hooks.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { sha256Hex } from "../src/primitives/crypto.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import {
@@ -14,7 +15,7 @@ import {
   settled,
   tokenFromMail,
 } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, SENT_WITH_PROOF } from "./password-helpers.js";
 import { enrolled } from "./totp-helpers.js";
 
 // The address proof at sign-up by an email code (plan 12i Task 20). With
@@ -80,7 +81,8 @@ describe("the sign-up code (plan 12i Task 20)", () => {
   it("mails a code in place of a link with verifyBy code", async () => {
     const w = world();
     const res = await signUp(w);
-    expect(await res.json()).toEqual({ sent: true });
+    const body = (await res.json()) as { signUpProof: string };
+    expect(body).toEqual(SENT_WITH_PROOF);
     expect(w.mail).toHaveLength(1);
     const mail = w.mail[0] as MailMessage;
     expect(mail.to).toBe(EMAIL);
@@ -97,7 +99,12 @@ describe("the sign-up code (plan 12i Task 20)", () => {
       { field: "userId", op: "eq", value: user?.id ?? "" },
     ]);
     expect(row?.identifier).toBe(EMAIL);
-    expect(row?.data).toEqual({ passwordId: password?.id, attempts: 0 });
+    // The row holds the hash of the answer's sign-up proof (ruling 11 of plan 12q).
+    expect(row?.data).toEqual({
+      passwordId: password?.id,
+      attempts: 0,
+      proofHash: await sha256Hex(body.signUpProof),
+    });
     expect(row?.valueHash).not.toContain(lastCode(w));
     expect((row?.expiresAt.getTime() ?? 0) - (row?.createdAt.getTime() ?? 0)).toBe(600_000);
     // The link stays the default.
@@ -208,8 +215,11 @@ describe("the sign-up code (plan 12i Task 20)", () => {
     const before = await w.storage.findMany("session", []);
     const res = await confirm(w, code);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ verified: true });
-    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(await res.json()).toEqual({ verified: true, passwordKept: true });
+    // No session cookie: the one line clears the spent sign-up proof (plan 12q).
+    expect(res.headers.getSetCookie()).toEqual([
+      "__Host-tempo_signup=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    ]);
     expect(await w.storage.findMany("session", [])).toEqual(before);
     // No challenge row either: nothing waits for a second factor.
     expect(
@@ -393,9 +403,12 @@ describe("the sign-up code (plan 12i Task 20)", () => {
         await call("/auth/password/verify/resend", { email: EMAIL }),
         await call("/auth/password/verify/resend", { email: recordAddress("fay@example.com") }),
       );
+      // The first two answers are the sign-ups, which carry the proof (plan 12q).
+      let signUps = 2;
       for (const a of answers) {
         expect(a).not.toBe("held");
-        if (a !== "held") expect(await a.json()).toEqual({ sent: true });
+        if (a !== "held")
+          expect(await a.json()).toEqual(signUps-- > 0 ? SENT_WITH_PROOF : { sent: true });
       }
       expect(sent).toEqual([]);
       release();
@@ -433,7 +446,7 @@ describe("the sign-up code (plan 12i Task 20)", () => {
     const nobody = recordAddress("nobody@example.com");
     const resend = (email: string) =>
       w.handle(post("/auth/password/verify/resend", { email }, ip()));
-    expect(await (await signUp(w)).json()).toEqual({ sent: true });
+    expect(await (await signUp(w)).json()).toEqual(SENT_WITH_PROOF);
     // 9 resends in 3 windows of 15 minutes: the resend limit is 3 a window.
     for (let i = 0; i < 9; i++) {
       if (i > 0 && i % 3 === 0) w.clock.advance(900_000);
@@ -541,7 +554,7 @@ describe("the answer time of the uniform sign-up (ruling 39 M1, final fix wave i
         const t0 = performance.now();
         const res = await auth.handle(request, { waitUntil: (p) => void after.push(p) });
         const ms = performance.now() - t0;
-        expect(await res.json()).toEqual({ sent: true });
+        expect(await res.json()).toEqual(SENT_WITH_PROOF);
         await Promise.all(after.splice(0));
         return ms;
       };
@@ -584,7 +597,9 @@ describe("the answer time of the uniform sign-up (ruling 39 M1, final fix wave i
           waitUntil: (p) => void after.push(p),
         });
         const ms = performance.now() - t0;
-        expect(await res.json()).toEqual({ sent: true });
+        expect(await res.json()).toEqual(
+          path.endsWith("/sign-up") ? SENT_WITH_PROOF : { sent: true },
+        );
         await Promise.all(after.splice(0));
         return ms;
       };

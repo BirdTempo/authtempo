@@ -259,8 +259,8 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
     via: string;
     claimant: (w: World) => Promise<void>;
     run: (w: World) => Promise<Result<unknown>>;
-    /** The password row that the proof keeps: the confirmed one, the reset's, or none. */
-    password: "confirmed" | "reset" | "none";
+    /** The password row that the proof keeps: the reset's, or none. */
+    password: "reset" | "none";
     /** True when the proof is the claimant's own identity: the claim keeps that identity. */
     ownIdentity?: true;
   }[] = [
@@ -269,7 +269,9 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
       via: "password_verify",
       claimant: passwordClaimant,
       run: (w) => verifyLink(w.auth.config, w),
-      password: "confirmed",
+      // The owner opens the link with no sign-up proof: the claim deletes the
+      // claimant's password too (ruling 11 of plan 12q).
+      password: "none",
     },
     {
       name: "a magic link",
@@ -346,14 +348,14 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
       if (proof.password === "none") expect(after.passwords).toEqual([]);
       else expect(after.passwords).toEqual(before.passwords);
       if (proof.password !== "none") {
-        // The confirm keeps the sign-up's password; the reset's hash replaced the claimant's.
+        // The reset's hash replaced the claimant's.
         const old = await passwordSignIn(w.auth.config, {
           email: EMAIL,
           password: PASSWORD,
           ip: null,
           userAgent: null,
         });
-        expect(old.ok).toBe(proof.password === "confirmed");
+        expect(old.ok).toBe(false);
       }
       // The claim committed, so its after points fired on the error answer (decision 10).
       expect(w.verify).toEqual([`before:${proof.via}`, `after:${proof.via}`]);

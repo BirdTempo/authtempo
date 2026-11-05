@@ -45,7 +45,7 @@ import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { d1Like } from "./d1-like.js";
 import { APP_ORIGIN, BASE_URL, recordAddress, recordCredential, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, proofCookie } from "./password-helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
@@ -379,8 +379,14 @@ async function verifiedUser(w: World, email: string): Promise<string> {
   const up = await w.claimant.handle(req("POST", "/password/sign-up", { email, password: PW }));
   expect(up.status).toBe(200);
   const mail = w.mail.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
   const v = await w.claimant.handle(
-    req("POST", "/password/verify", { token: tokenFromMail(mail?.text ?? "") }),
+    req(
+      "POST",
+      "/password/verify",
+      { token: tokenFromMail(mail?.text ?? "") },
+      proofCookie(up).cookie,
+    ),
   );
   expect(await answer(v)).toBe("200 ok");
   const token = setToken(v);

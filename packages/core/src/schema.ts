@@ -88,7 +88,10 @@ export type VerificationPurpose =
   | "oauth-link-state"
   | "handoff-code"
   | "passkey-challenge"
-  /** data: { passwordId: string } */
+  /**
+   * data: { passwordId: string, anonymousUserId?: string, proofHash?: string }.
+   * `proofHash` is the SHA-256 hex of the sign-up proof (ruling 11 of plan 12q).
+   */
   | "password-verify"
   /** data: { next: string } */
   | "password-reset"
@@ -247,7 +250,8 @@ export type VerificationPurpose =
   /**
    * The address proof at sign-up by an email code (plan 12i). The
    * identifier is the normalized address. The data is { passwordId,
-   * attempts, anonymousUserId }, and the hash is as for `email-otp`.
+   * attempts, anonymousUserId, proofHash }, and the hash is as for
+   * `email-otp`. `proofHash` is as for `password-verify` (plan 12q).
    */
   | "password-verify-otp"
   /**

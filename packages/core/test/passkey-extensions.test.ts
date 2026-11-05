@@ -12,7 +12,7 @@ import { fromBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webauthn.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, get, makeAuth, post, sessionFor } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle } from "./password-helpers.js";
 
 /**
  * The passkey extensions PRF, `largeBlob`, and `credProps` (plan 12i Task
@@ -483,10 +483,11 @@ describe("the passkey extensions (plan 12i Task 21)", () => {
       (res.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_session=")) ?? "").split(
         ";",
       )[0] ?? "";
-    await h.auth.handle(post("/auth/password/sign-up", { email, password: pw }));
+    const up = await h.auth.handle(post("/auth/password/sign-up", { email, password: pw }));
     const token = h.mails.findLast((m) => m.to === email)?.token;
     if (!token) throw new Error("no confirm mail");
-    await h.auth.handle(post("/auth/password/verify", { token }));
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await h.auth.handle(post("/auth/password/verify", { token }, proofCookie(up)));
     const signedIn = await h.auth.handle(post("/auth/password/sign-in", { email, password: pw }));
     const cookie = cookieOf(signedIn);
     const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);

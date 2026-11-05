@@ -4,7 +4,7 @@ import { ERRORS, type ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
-import { randomToken, sha256Hex } from "../primitives/crypto.js";
+import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
@@ -60,6 +60,7 @@ import {
 import { holdUser, userStays } from "./user-hold.js";
 import { byUsername, normalizeUsername, type Username } from "./username.js";
 import {
+  type ClaimKeep,
   claimEmail,
   claimedUser,
   claimNotStarted,
@@ -77,6 +78,19 @@ export const PASSWORD_VERIFY_PREFIX = "pv_";
 export const PASSWORD_VERIFY_TOKEN_RE = /^pv_[A-Za-z0-9_-]{43}$/;
 export const PASSWORD_RESET_PREFIX = "pr_";
 export const PASSWORD_RESET_TOKEN_RE = /^pr_[A-Za-z0-9_-]{43}$/;
+/**
+ * The sign-up proof (ruling 11 of plan 12q): 32 random bytes that a
+ * password sign-up gives to its caller. The verify row holds their SHA-256
+ * hex in `data.proofHash`. A confirm that carries the proof keeps the
+ * sign-up's password. Any other confirm is a claim, so the password goes.
+ */
+export const SIGN_UP_PROOF_PREFIX = "sp_";
+export const SIGN_UP_PROOF_RE = /^sp_[A-Za-z0-9_-]{43}$/;
+
+/** A new sign-up proof: `sp_` and 32 random bytes as base64url. */
+export function newSignUpProof(): string {
+  return randomToken(SIGN_UP_PROOF_PREFIX);
+}
 // 10 per hour per IP: a person makes one account; a script that makes many is slowed.
 const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
 // Per hour, per address, in both answers (plan 12b). A uniform sign-up of a
@@ -106,6 +120,8 @@ const CHANGE_PER_USER = { seconds: 900, max: 10 };
 // reset of either kind and a password change spend the live ones of both.
 // Typed, so a renamed purpose fails the typecheck.
 const RESET_PURPOSES: readonly VerificationPurpose[] = ["password-reset", "password-reset-otp"];
+// The proofs of a sign-up: the mailed link and the mailed code (plan 12i Task 20).
+const SIGN_UP_PURPOSES: readonly VerificationPurpose[] = ["password-verify", "password-verify-otp"];
 // Per 15 minutes. Each resend sends one mail from the app's sender, so the
 // product owns this limit (plan 8b).
 const RESEND_PER_IP = { seconds: 900, max: 20 };
@@ -157,6 +173,33 @@ async function deliver(work: () => Promise<void>, after: AfterAnswer | undefined
   else await work();
 }
 
+/** The SHA-256 hex of a sign-up proof that a request carries, or null for none or a malformed value. */
+async function proofHashOf(proof: string | null | undefined): Promise<string | null> {
+  return typeof proof === "string" && SIGN_UP_PROOF_RE.test(proof) ? sha256Hex(proof) : null;
+}
+
+/** The `data` member of a sign-up row for a proof hash: empty for no hash. */
+function proofData(hash: string | null): { proofHash?: string } {
+  return hash === null ? {} : { proofHash: hash };
+}
+
+/** True when a sign-up row's `data` holds the hash `carried`. The compare runs in constant time. */
+function holdsProof(data: Record<string, unknown> | null, carried: string | null): boolean {
+  const recorded = data?.proofHash;
+  return typeof recorded === "string" && carried !== null && constantTimeEqual(recorded, carried);
+}
+
+/**
+ * The life of the sign-up proof cookie in seconds (ruling 11 of plan 12q).
+ * It is the life of the verify link (`magicLink.ttlMinutes`), or of the
+ * sign-up code (`password.verifyCode.ttlMinutes`).
+ */
+export function signUpProofMaxAge(config: ResolvedConfig): number {
+  const pw = config.password;
+  const minutes = pw?.verifyBy === "code" ? pw.verifyCode.ttlMinutes : config.magicLink.ttlMinutes;
+  return minutes * 60;
+}
+
 export interface PasswordSession {
   token: string;
   user: UserRow;
@@ -177,8 +220,14 @@ export interface PasswordSignUpPending {
  * `{ sent: true }` for every address while `password.uniformSignUp` is on
  * (the default, plan 12b). With it off: a session, or the user with no
  * session while `password.requireVerified` is on or `signUp` is `"invited"`.
+ * Each form carries `signUpProof`, the sign-up proof (ruling 11 of plan
+ * 12q). The route sets it as the cookie `__Host-tempo_signup`. A bearer
+ * client keeps it and sends it with the sign-up code. A known address gets
+ * one too, so the answer tells nothing.
  */
-export type PasswordSignUpResult = PasswordSession | PasswordSignUpPending | { sent: true };
+export type PasswordSignUpResult = (PasswordSession | PasswordSignUpPending | { sent: true }) & {
+  signUpProof: string;
+};
 
 /** What the mail to a known address gets (plan 12b). */
 export interface ExistingAccountMailInput {
@@ -254,6 +303,12 @@ export interface PasswordSignInFields {
    * anonymous user.
    */
   anonymous?: AnonymousCaller | null | undefined;
+  /**
+   * The sign-up proof of the request (ruling 11 of plan 12q). It counts only
+   * when this sign-in mails a new verify link: the new row keeps the proof
+   * hash, as at a resend (`resendPasswordVerification`).
+   */
+  signUpProof?: string | null | undefined;
 }
 
 /** A session, or a second-factor challenge for a user with the factor on (plan 9f). */
@@ -361,16 +416,24 @@ export async function passwordSignUp(
   const now = config.clock.now();
   // The user hooks of the new user (plan 12a). The transaction runs the sign-up rule itself.
   const made = createSteps(config, "password", { signUpRule: false });
-  if (pw.uniformSignUp)
-    return uniformSignUp(
+  // The sign-up proof (ruling 11 of plan 12q). Every answer carries one, a
+  // known address too, so the answer tells nothing. The verify row holds its
+  // hash, and only a confirm that carries it keeps the password.
+  const signUpProof = newSignUpProof();
+  const proofHash = await sha256Hex(signUpProof);
+  if (pw.uniformSignUp) {
+    const sent = await uniformSignUp(
       config,
       pw,
       { email, name: name ?? null, hash },
       now,
       made,
       input.anonymous ?? null,
+      proofHash,
       after,
     );
+    return sent.ok ? ok({ ...sent.value, signUpProof }) : sent;
+  }
   // A sign-up that opens its session completes in this request: bound (plan 12i Task 7).
   const upgrade = upgradeSteps(config, input.anonymous ?? null, null, "bound");
   let created: Result<Created> | null = null;
@@ -417,8 +480,8 @@ export async function passwordSignUp(
   }
   // A link with no session yet records the anonymous user for its confirm.
   const recorded = "session" in answer ? null : (input.anonymous ?? null);
-  await sendVerifyMail(config, email, created.value.passwordId, now, recorded);
-  return ok(answer);
+  await sendVerifyMail(config, email, created.value.passwordId, now, recorded, proofHash);
+  return ok({ ...answer, signUpProof });
 }
 
 /**
@@ -544,7 +607,7 @@ function insertSignUp(
     }
     // The claim of the anonymous upgrade, after the guards: no path commits it without the session.
     if (s) await upgrade.claim(tx);
-    const answer: PasswordSignUpResult = s
+    const answer: Created["answer"] = s
       ? { token: s.token, user, session: s.session }
       : { user, verifyRequired: true };
     return ok({ answer, passwordId: password.id });
@@ -572,9 +635,10 @@ async function uniformSignUp(
   now: Date,
   made: CreateSteps,
   anonymous: AnonymousCaller | null,
+  proofHash: string,
   after: AfterAnswer | undefined,
 ): Promise<Result<{ sent: true }>> {
-  const job = () => uniformJob(config, pw, row, now, made, anonymous);
+  const job = () => uniformJob(config, pw, row, now, made, anonymous, proofHash);
   if (after) {
     // Each refusal of the job is quiet, so the answer is true whatever the
     // job does. A throw, or a fail result that no caller reads, becomes the
@@ -608,6 +672,7 @@ async function uniformJob(
   now: Date,
   made: CreateSteps,
   anonymous: AnonymousCaller | null,
+  proofHash: string,
 ): Promise<Result<{ sent: true }>> {
   let done: UniformOutcome | null = null;
   for (let attempt = 0; done === null; attempt++) {
@@ -637,7 +702,7 @@ async function uniformJob(
   if (done.outcome === "created") {
     // Right after the commit, before the mail (plan 12a).
     await made.after(done.user);
-    await sendVerifyMail(config, row.email, done.passwordId, now, anonymous);
+    await sendVerifyMail(config, row.email, done.passwordId, now, anonymous, proofHash);
   }
   if (done.outcome === "existing") await sendExistingAccountMail(config, pw, row.email);
   return ok({ sent: true });
@@ -715,8 +780,10 @@ async function sendExistingAccountMail(
 /**
  * One `password-verify` row and one mail. The link opens a confirm page with
  * no side effect. The row records the anonymous user of the request that
- * asked for the link (plan 12i Task 7): the confirm is a mailed proof. With
- * `password.verifyBy: "code"`, a code in place of the link (plan 12i Task 20).
+ * asked for the link (plan 12i Task 7): the confirm is a mailed proof. It
+ * records the hash of the sign-up proof too, or none (ruling 11 of plan
+ * 12q). With `password.verifyBy: "code"`, a code in place of the link (plan
+ * 12i Task 20).
  */
 async function sendVerifyMail(
   config: ResolvedConfig,
@@ -724,9 +791,10 @@ async function sendVerifyMail(
   passwordId: string,
   now: Date,
   anonymous: AnonymousCaller | null,
+  proofHash: string | null,
 ): Promise<void> {
   if (config.password?.verifyBy === "code")
-    return sendVerifyCode(config, email, passwordId, anonymous);
+    return sendVerifyCode(config, email, passwordId, anonymous, proofHash);
   const token = randomToken(PASSWORD_VERIFY_PREFIX);
   await config.storage.create("verification", {
     id: newId(now),
@@ -735,7 +803,7 @@ async function sendVerifyMail(
     valueHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + config.magicLink.ttlMinutes * 60_000),
     consumedAt: null,
-    data: { passwordId, ...anonymousData(anonymous) },
+    data: { passwordId, ...anonymousData(anonymous), ...proofData(proofHash) },
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
@@ -760,12 +828,14 @@ async function sendVerifyCode(
   email: string,
   passwordId: string,
   anonymous: AnonymousCaller | null,
+  proofHash: string | null,
 ): Promise<void> {
   const pw = config.password;
   if (!pw) return;
   const code = await issueCode(config, pw.verifyCode, "password-verify-otp", email, {
     passwordId,
     ...anonymousData(anonymous),
+    ...proofData(proofHash),
   });
   const message = pw.verifyCodeMail({
     email,
@@ -782,6 +852,13 @@ export interface PasswordResend {
   ip: string | null;
   /** The live anonymous session of the request (plan 12i Task 7): the new link records its user. */
   anonymous?: AnonymousCaller | null | undefined;
+  /**
+   * The sign-up proof that the request carries (ruling 11 of plan 12q). The
+   * new row holds its hash only when an earlier sign-up row of the address
+   * and of the same password row holds it. Else the new row holds none, and
+   * every confirm of it is a claim.
+   */
+  signUpProof?: string | null | undefined;
 }
 
 /**
@@ -822,7 +899,13 @@ export async function resendPasswordVerification(
       { field: "userId", op: "eq", value: user.id },
     ]);
     if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return;
-    await replaceVerifyMail(config, email, row.id, input.anonymous ?? null);
+    await replaceVerifyMail(
+      config,
+      email,
+      row.id,
+      input.anonymous ?? null,
+      input.signUpProof ?? null,
+    );
   };
   // With the code or the uniform sign-up, the reads and the send go after
   // the answer (ruling 23 and ruling 46 of plan 12i). Then the time of the
@@ -846,20 +929,49 @@ async function allowCodeMail(config: ResolvedConfig, email: string): Promise<boo
 /**
  * Deletes the pending `password-verify` rows of the address, then mails one
  * new link. A code spends the live codes of the address itself (`issueCode`).
+ * The new row keeps the proof hash of an earlier row (`keptProofHash`).
  */
 async function replaceVerifyMail(
   config: ResolvedConfig,
   email: string,
   passwordId: string,
   anonymous: AnonymousCaller | null,
+  proof: string | null,
 ): Promise<void> {
+  // Before the delete, which takes the earlier link rows.
+  const kept = await keptProofHash(config, email, passwordId, proof);
   if (config.password?.verifyBy !== "code")
     await config.storage.delete("verification", [
       { field: "purpose", op: "eq", value: "password-verify" },
       { field: "identifier", op: "eq", value: email },
       { field: "consumedAt", op: "eq", value: null },
     ]);
-  await sendVerifyMail(config, email, passwordId, config.clock.now(), anonymous);
+  await sendVerifyMail(config, email, passwordId, config.clock.now(), anonymous, kept);
+}
+
+/**
+ * The proof hash of the row of a new link or code (ruling 11 of plan 12q).
+ * It is the hash of the proof that the request carries, when an earlier
+ * sign-up row of the address holds it for the same password row. Else
+ * null, and every confirm of the new row is a claim. A proof of another
+ * sign-up keeps nothing: a person who tried a sign-up of the same address
+ * holds such a proof. With no proof there is no read, so no query moves.
+ */
+async function keptProofHash(
+  config: ResolvedConfig,
+  email: string,
+  passwordId: string,
+  proof: string | null,
+): Promise<string | null> {
+  const carried = await proofHashOf(proof);
+  if (carried === null) return null;
+  const rows = await config.storage.findMany("verification", [
+    { field: "purpose", op: "in", value: SIGN_UP_PURPOSES },
+    { field: "identifier", op: "eq", value: email },
+  ]);
+  return rows.some((r) => r.data?.passwordId === passwordId && holdsProof(r.data, carried))
+    ? carried
+    : null;
 }
 
 /**
@@ -874,9 +986,10 @@ export async function mailVerifyAgain(
   email: string,
   passwordId: string,
   anonymous: AnonymousCaller | null = null,
+  proof: string | null = null,
 ): Promise<boolean> {
   if (!(await allowResendMail(config, email))) return false;
-  await replaceVerifyMail(config, email, passwordId, anonymous);
+  await replaceVerifyMail(config, email, passwordId, anonymous, proof);
   return true;
 }
 
@@ -997,7 +1110,13 @@ export async function passwordSignIn(
   // A user with no address is proved by the proof that made it (`provedAccount`), and gets no mail.
   if ((pw.requireVerified || config.signUp === "invited") && !provedAccount({ user })) {
     if (hasAddress(user))
-      await mailVerifyAgain(config, user.email, row.id, input.anonymous ?? null);
+      await mailVerifyAgain(
+        config,
+        user.email,
+        row.id,
+        input.anonymous ?? null,
+        input.signUpProof ?? null,
+      );
     return fail("email_unverified");
   }
   // The sign-in completes in this request: bound (plan 12i Task 7).
@@ -1181,11 +1300,25 @@ export interface PasswordVerify {
   userAgent: string | null;
   /** The live anonymous session of the confirm: a mailed proof (plan 12i Task 7). */
   anonymous?: AnonymousCaller | null | undefined;
+  /**
+   * The sign-up proof that the request carries (ruling 11 of plan 12q): the
+   * cookie `__Host-tempo_signup`, or a bearer client's own copy. A proof
+   * whose hash the row holds keeps the sign-up's password. Without it the
+   * confirm is a claim, and the password goes.
+   */
+  signUpProof?: string | null | undefined;
 }
 
 export interface PasswordVerified {
   user: UserRow;
   signedIn: { token: string; session: SessionRow } | null;
+  /**
+   * True when the password row of the sign-up stays (ruling 11 of plan
+   * 12q). False after a confirm with no sign-up proof: the claim deleted the
+   * password. The person then sets a first password through the password
+   * change, with no current password, on the session that the confirm opened.
+   */
+  passwordKept: boolean;
 }
 
 /**
@@ -1215,6 +1348,13 @@ export interface PasswordVerifyCode {
   userAgent: string | null;
   /** The live anonymous session of the confirm: a mailed proof (plan 12i Task 7). */
   anonymous?: AnonymousCaller | null | undefined;
+  /**
+   * The sign-up proof that the request carries (ruling 11 of plan 12q): the
+   * cookie `__Host-tempo_signup`, or a bearer client's own copy. A proof
+   * whose hash the row holds keeps the sign-up's password. Without it the
+   * confirm is a claim, and the password goes.
+   */
+  signUpProof?: string | null | undefined;
 }
 
 /**
@@ -1261,9 +1401,13 @@ export async function verifyPasswordCode(
 
 /**
  * The confirm of a sign-up, after the spend of its proof: the link's row or
- * the code's row. The claim keeps the password this proof confirms and
- * deletes every other credential of the user, then signs the person in,
- * maybe on another device. A claim or a reset can delete the password row.
+ * the code's row. The claim deletes every other credential of the user,
+ * then signs the person in, maybe on another device. It keeps the password
+ * this proof confirms only when the request carries the sign-up proof whose
+ * hash the row holds (ruling 11 of plan 12q). That is the browser or the app
+ * of the sign-up. Any other confirm is a claim with no kept password. The
+ * username of the sign-up stays in both cases. A claim or a reset can delete
+ * the password row.
  * Then the proof confirms nothing: it answers `refused`, and the user does
  * not change. A reset by the owner keeps the row id and verifies the user.
  * A user already verified gets no session and no change to the user or the
@@ -1276,6 +1420,7 @@ async function confirmSignUp(
     ip: string | null;
     userAgent: string | null;
     anonymous?: AnonymousCaller | null | undefined;
+    signUpProof?: string | null | undefined;
   },
   now: Date,
   refused: "invalid_token" | "invalid_code",
@@ -1285,6 +1430,12 @@ async function confirmSignUp(
   if (enforced) return enforced;
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail(refused);
+  // The sign-up's own browser or app carries the proof whose hash the row
+  // holds (ruling 11 of plan 12q). Only it keeps the sign-up's password. A
+  // confirm from any other place is a claim: the password goes, and the
+  // person sets a first password on the proved session that this confirm opens.
+  const own = holdsProof(row.data, await proofHashOf(input.signUpProof));
+  const keep: ClaimKeep = own ? { passwordId, username: true } : { username: true };
   const ended = endedList(config);
   const upgrade = upgradeSteps(
     config,
@@ -1333,8 +1484,9 @@ async function confirmSignUp(
           { updatedAt: now },
         );
         if (kept === 0) return fail(refused);
-        if (prepared === null) return ok({ user, signedIn: null });
-        await claimEmail(tx, user.id, { passwordId, username: true }, now, verify, ended);
+        // A verified user: no change, so the row stays.
+        if (prepared === null) return ok({ user, signedIn: null, passwordKept: true });
+        await claimEmail(tx, user.id, keep, now, verify, ended);
         // A mailbox proof is final (plan 12o): a later throw keeps the claim.
         await verify.keep(tx, claimed);
         await ensureEmailIdentity(tx, user.id, row.identifier, now, verify);
@@ -1342,7 +1494,7 @@ async function confirmSignUp(
         await verify.keep(tx, claimed);
         await upgrade.claim(tx);
         const s = await writeSession(config, prepared, tx);
-        return ok({ user: claimed, signedIn: s });
+        return ok({ user: claimed, signedIn: s, passwordKept: own });
       }),
     );
   let verified: Result<PasswordVerified> | null = null;

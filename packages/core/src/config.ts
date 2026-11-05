@@ -67,6 +67,7 @@ import {
   bindingCookieName,
   DEFAULT_LAST_METHOD_COOKIE,
   LEGACY_SESSION_COOKIE,
+  SIGN_UP_PROOF_COOKIE,
 } from "./http/cookies.js";
 import { type DevicePageInput, defaultDevicePage } from "./http/device-page.js";
 import { defaultEmailChangePage, type EmailChangePageInput } from "./http/email-change-page.js";
@@ -275,7 +276,8 @@ export interface AuthConfig {
   /**
    * The session cookie. Default `__Host-tempo_session` (plan 12b). With that
    * name, core also reads the old `tempo_session` for one release and moves
-   * it. Another name gets no such read.
+   * it. Another name gets no such read. `__Host-tempo_signup` is refused: it
+   * is the sign-up proof cookie (plan 12q).
    */
   cookieName?: string;
   session?: {
@@ -1998,6 +2000,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
   const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
+  // A sign-up would set its proof over the session cookie (ruling 11 of plan 12q).
+  if (cookieName === SIGN_UP_PROOF_COOKIE)
+    throw new ConfigError(
+      `cookieName must not be ${SIGN_UP_PROOF_COOKIE}: it is the sign-up proof cookie of core`,
+    );
   const jwtMint = resolveJwtMint(input.jwtMint, baseURL);
   // A default audience follows the picked entry, so a session JWT of each entry has its own (plan 12i Task 18).
   const baseDefaults: BaseDefaults = {
@@ -2315,6 +2322,8 @@ function resolveLastMethod(
     // The actor cookie of an impersonation (`actorCookieName`, plan 12f).
     `${sessionCookie}_actor`,
     trustCookie ?? "tempo_totp_trust",
+    // A readable cookie must not overwrite the HttpOnly proof (ruling 11 of plan 12q).
+    SIGN_UP_PROOF_COOKIE,
   ]);
   if (
     typeof cookieName !== "string" ||

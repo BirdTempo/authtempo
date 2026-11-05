@@ -4,7 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, SENT_WITH_PROOF } from "./password-helpers.js";
 
 const BASE = "https://api.example.com";
 const PW = "correct horse battery";
@@ -94,13 +94,29 @@ async function seedInvitation(storage: StorageAdapter, email: string) {
   });
 }
 
+/** The sign-up proof of plan 12q: 32 random bytes as base64url behind `sp_`. */
+const PROOF = /sp_[A-Za-z0-9_-]{43}/g;
+
+/**
+ * The cookies that an answer sets, by name. A uniform sign-up sets only the
+ * sign-up proof (ruling 11 of plan 12q), never a session cookie.
+ */
+const cookieNames = (res: Response) => res.headers.getSetCookie().map((c) => c.split("=")[0]);
+
 /** Status, every header but the date, and the body text. */
 async function bytes(res: Response) {
   // The trace header is random for each answer (plan 12h Task 4). Each answer
   // carries one, and the compare leaves it out.
   expect(res.headers.get("x-authtempo-trace")).toMatch(/^[0-9a-f]{32}$/);
-  const headers = [...res.headers.entries()].filter(([k]) => k !== "x-authtempo-trace");
-  return { status: res.status, headers, body: await res.text() };
+  // The sign-up proof is random for each answer too (ruling 11 of plan 12q).
+  // Each answer carries one of the same form in the body and in its cookie,
+  // and the compare masks its value.
+  const body = await res.text();
+  expect(body.match(PROOF)).toHaveLength(1);
+  const headers = [...res.headers.entries()]
+    .filter(([k]) => k !== "x-authtempo-trace")
+    .map(([k, v]) => [k, v.replace(PROOF, "sp_<proof>")]);
+  return { status: res.status, headers, body: body.replace(PROOF, "sp_<proof>") };
 }
 
 describe("the uniform sign-up (plan 12b)", () => {
@@ -108,8 +124,8 @@ describe("the uniform sign-up (plan 12b)", () => {
     const { auth, storage, mail } = setup();
     const res = await signUp(auth, "new@example.com");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ sent: true });
-    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(await res.json()).toEqual(SENT_WITH_PROOF);
+    expect(cookieNames(res)).toEqual(["__Host-tempo_signup"]);
     expect(await storage.findMany("session", [])).toEqual([]);
     const [user] = await storage.findMany("user", []);
     expect(user?.emailVerified).toBe(false);
@@ -133,8 +149,8 @@ describe("the uniform sign-up (plan 12b)", () => {
       const { auth, storage, mail } = setup();
       await seedUser(storage, "ada@example.com", verified);
       const res = await signUp(auth, "ada@example.com");
-      expect(await res.json()).toEqual({ sent: true });
-      expect(res.headers.getSetCookie()).toEqual([]);
+      expect(await res.json()).toEqual(SENT_WITH_PROOF);
+      expect(cookieNames(res)).toEqual(["__Host-tempo_signup"]);
       expect(await storage.findMany("password", [])).toEqual([]);
       expect(mail.map((m) => [m.to, m.subject])).toEqual([
         ["ada@example.com", "Your account at api.example.com"],
@@ -174,7 +190,7 @@ describe("the uniform sign-up (plan 12b)", () => {
         ),
     };
     const { auth, mail } = setup({ hash: FAST }, { storage: racing });
-    expect(await (await signUp(auth, "new@example.com")).json()).toEqual({ sent: true });
+    expect(await (await signUp(auth, "new@example.com")).json()).toEqual(SENT_WITH_PROOF);
     expect(await base.findMany("password", [])).toEqual([]);
     expect(mail).toEqual([]);
   });
@@ -186,8 +202,8 @@ describe("the uniform sign-up (plan 12b)", () => {
       signUp(auth, "new@example.com"),
     ]);
     expect(await Promise.all(answers.map((r) => r.json()))).toEqual([
-      { sent: true },
-      { sent: true },
+      SENT_WITH_PROOF,
+      SENT_WITH_PROOF,
     ]);
     expect(await storage.findMany("user", [])).toHaveLength(1);
   });
@@ -227,7 +243,7 @@ describe("the uniform sign-up (plan 12b)", () => {
 
   it("sends nothing for an address that the invited rule refuses", async () => {
     const { auth, storage, mail } = setup({ hash: FAST }, { signUp: "invited", organizations: {} });
-    expect(await (await signUp(auth, "new@example.com")).json()).toEqual({ sent: true });
+    expect(await (await signUp(auth, "new@example.com")).json()).toEqual(SENT_WITH_PROOF);
     expect(await storage.findMany("user", [])).toEqual([]);
     expect(mail).toEqual([]);
   });
@@ -236,19 +252,19 @@ describe("the uniform sign-up (plan 12b)", () => {
     const { auth, storage, mail } = setup({ hash: FAST }, { signUp: "invited", organizations: {} });
     await seedUser(storage, "ada@example.com", true);
     // No invitation: the rule refuses before the existence read, so no mail, as for a new address.
-    expect(await (await signUp(auth, "ada@example.com", "203.0.113.1")).json()).toEqual({
-      sent: true,
-    });
+    expect(await (await signUp(auth, "ada@example.com", "203.0.113.1")).json()).toEqual(
+      SENT_WITH_PROOF,
+    );
     expect(mail).toEqual([]);
     // An invitation for each: the known address gets the account mail, the new one the verify mail.
     await seedInvitation(storage, "ada@example.com");
     await seedInvitation(storage, "new@example.com");
-    expect(await (await signUp(auth, "ada@example.com", "203.0.113.2")).json()).toEqual({
-      sent: true,
-    });
-    expect(await (await signUp(auth, "new@example.com", "203.0.113.3")).json()).toEqual({
-      sent: true,
-    });
+    expect(await (await signUp(auth, "ada@example.com", "203.0.113.2")).json()).toEqual(
+      SENT_WITH_PROOF,
+    );
+    expect(await (await signUp(auth, "new@example.com", "203.0.113.3")).json()).toEqual(
+      SENT_WITH_PROOF,
+    );
     expect(mail.map((m) => [m.to, m.subject])).toEqual([
       ["ada@example.com", "Your account at api.example.com"],
       ["new@example.com", "Confirm your email for api.example.com"],
@@ -264,8 +280,8 @@ describe("the uniform sign-up (plan 12b)", () => {
     const knownBytes = await bytes(known);
     expect(knownBytes).toEqual(await bytes(fresh));
     expect(knownBytes.status).toBe(200);
-    expect(knownBytes.body).toBe(JSON.stringify({ sent: true }));
-    expect(known.headers.getSetCookie()).toEqual([]);
+    expect(knownBytes.body).toBe(JSON.stringify({ sent: true, signUpProof: "sp_<proof>" }));
+    expect(cookieNames(known)).toEqual(["__Host-tempo_signup"]);
     expect(mail.map((m) => m.to)).toEqual(["ada@example.com", "new@example.com"]);
   });
 

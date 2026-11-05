@@ -11,7 +11,7 @@ import { SCHEMA_VERSION } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { VERSION } from "../src/version.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
+import { FAST, proofCookie } from "./password-helpers.js";
 
 const SECRET = "operator-secret-0123456789abcdef-0123456789";
 /** A wrong secret of the right form, so that only the hash refuses it. */
@@ -104,10 +104,13 @@ type Handle = ReturnType<Fixture["on"]>;
 
 /** A verified user with a password through the routes, and the session cookie of a sign-in. */
 async function signedIn(f: Fixture, auth: Handle, email: string): Promise<string> {
-  await auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const up = await auth.handle(post("/auth/password/sign-up", { email, password: PW }));
   const confirm = f.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
   if (!confirm) throw new Error("no confirm mail");
-  await auth.handle(post("/auth/password/verify", { token: tokenFromMail(confirm.text) }));
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await auth.handle(
+    post("/auth/password/verify", { token: tokenFromMail(confirm.text) }, proofCookie(up)),
+  );
   const signIn = await auth.handle(post("/auth/password/sign-in", { email, password: PW }));
   const cookie = signIn.headers
     .getSetCookie()

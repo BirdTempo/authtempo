@@ -6,7 +6,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { post, sessionFor } from "./helpers.js";
-import { FAST, pwHandle } from "./password-helpers.js";
+import { FAST, proofCookie, pwHandle } from "./password-helpers.js";
 
 const EMAIL = "ada@example.com";
 const PW = "correct horse battery";
@@ -20,10 +20,11 @@ const cookieNamed = (res: Response, name: string) =>
 
 /** A verified user with a password, the session cookie of a sign-in, and one registered passkey. */
 async function withPasskey(h: Handle) {
-  await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
+  const up = await h.auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
   const token = h.mails.findLast((m) => m.to === EMAIL && m.subject.startsWith("Confirm"))?.token;
   if (!token) throw new Error("no confirm mail");
-  await h.auth.handle(post("/auth/password/verify", { token }));
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await h.auth.handle(post("/auth/password/verify", { token }, proofCookie(up)));
   const res = await h.auth.handle(post("/auth/password/sign-in", { email: EMAIL, password: PW }));
   const c = cookieNamed(res, "__Host-tempo_session");
   if (!c) throw new Error(`the sign-in answered ${res.status} with no session cookie`);

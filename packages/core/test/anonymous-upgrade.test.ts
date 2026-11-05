@@ -21,7 +21,7 @@ import {
   tokenFromMail,
 } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
-import { FAST, signUpAndVerify } from "./password-helpers.js";
+import { FAST, proofCookie, signUpAndVerify } from "./password-helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
@@ -568,10 +568,12 @@ describe("the anonymous upgrade (plan 12i Task 7)", () => {
               jarHeaders(jar),
             ),
           );
-          expect(await up.json()).toEqual({ sent: true });
+          expect(await up.json()).toEqual({ sent: true, signUpProof: expect.any(String) });
           const mail = w.mail.findLast((m) => m.subject.startsWith("Confirm"));
           const token = tokenFromMail(mail?.text ?? "");
-          return w.handle(post("/auth/password/verify", { token }, jarHeaders(jar)));
+          // The same browser: its jar holds the sign-up proof too (ruling 11 of plan 12q).
+          const both = `${jar}; ${proofCookie(up).cookie}`;
+          return w.handle(post("/auth/password/verify", { token }, jarHeaders(both)));
         },
         "password",
       ],

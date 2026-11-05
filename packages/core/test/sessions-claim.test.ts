@@ -1099,10 +1099,12 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     if (!up.ok) throw new Error(up.code);
     const token = tokenFromMail(auth.mail.at(-1)?.text ?? "");
     const gate = interleaveBeforeSessionInsert(auth.storage, async () => {
+      // The owner's own sign-up proof keeps the password (ruling 11 of plan 12q).
       const v = await verifyPasswordEmail(d1Like(auth.config), {
         token,
         ip: null,
         userAgent: null,
+        signUpProof: up.value.signUpProof,
       });
       if (!v.ok) throw new Error(v.code);
     });

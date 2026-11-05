@@ -24,7 +24,8 @@ export const SCIM_TOKEN_PREFIX = "sk_";
  * plan 12d Task 8) included. A moved key prefix (`tokens.movedPrefixes`)
  * may not shadow one of them (ruling 12 of plan 12k). A test reads each
  * `randomToken` call of core against this list. `ui_` is the invitation
- * link of a created user (plan 12f2 Task 3).
+ * link of a created user (plan 12f2 Task 3). `sp_` is the sign-up proof
+ * (ruling 11 of plan 12q).
  */
 export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "ts_",
@@ -51,6 +52,7 @@ export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "sk_",
   "rs_",
   "ui_",
+  "sp_",
 ]);
 
 /** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */

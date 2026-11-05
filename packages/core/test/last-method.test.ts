@@ -341,7 +341,8 @@ const MORE: [
       const { token } = await signedUp(w);
       const res = await w.handle(post("/auth/password/verify", { token }));
       // The answer is { verified: true }: a confirm, not a sign-in answer, so no `via`.
-      expect(await res.clone().json()).toEqual({ verified: true });
+      // The request carries no sign-up proof, so the claim took the password (plan 12q).
+      expect(await res.clone().json()).toEqual({ verified: true, passwordKept: false });
       return { res, json: false };
     },
   ],

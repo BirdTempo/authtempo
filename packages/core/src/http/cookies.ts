@@ -24,6 +24,26 @@ export function bindingCookieName(cookieName: string): string {
   return `__Secure-${cookieName.replace(/^__(Host|Secure)-/, "")}_oauth`;
 }
 
+/**
+ * The sign-up proof cookie (ruling 11 of plan 12q). A password sign-up sets
+ * it, and the confirm of that sign-up reads it. A confirm with the proof
+ * keeps the sign-up's password. Any other confirm is a claim, so the
+ * password goes. It is a `__Host-` cookie, so a sibling subdomain cannot
+ * set it. `Lax`: the person's own post of the confirm page sends it. Its
+ * name does not follow `cookieName`.
+ */
+export const SIGN_UP_PROOF_COOKIE = "__Host-tempo_signup";
+
+/** The sign-up proof cookie: the `sp_` value, for the life of the link or the code. */
+export function signUpProofCookie(value: string, maxAgeSeconds: number): string {
+  return `${SIGN_UP_PROOF_COOKIE}=${value}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/** The clear of the sign-up proof cookie, after a confirm spent its row. */
+export function clearSignUpProofCookie(): string {
+  return `${SIGN_UP_PROOF_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
 export type SameSite = "Lax" | "None";
 
 /** The default name of the last method cookie (plan 12i Task 12). */

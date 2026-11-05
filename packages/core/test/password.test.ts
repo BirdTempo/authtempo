@@ -82,7 +82,12 @@ describe("passwordSignUp", () => {
     ]);
     expect(v).toHaveLength(1);
     expect(v[0]?.identifier).toBe(EMAIL);
-    expect(v[0]?.data).toEqual({ passwordId: rows[0]?.id });
+    // The row holds the hash of the answer's sign-up proof (ruling 11 of plan 12q).
+    expect(r.value.signUpProof).toMatch(/^sp_[A-Za-z0-9_-]{43}$/);
+    expect(v[0]?.data).toEqual({
+      passwordId: rows[0]?.id,
+      proofHash: await sha256Hex(r.value.signUpProof),
+    });
     expect(v[0]?.expiresAt.getTime()).toBe(auth.clock.now().getTime() + 15 * 60_000);
   });
 
@@ -749,8 +754,14 @@ describe("verifyPasswordEmail", () => {
     const up = await signUp(auth);
     if (!up.ok) throw new Error(up.code);
     const [row] = await auth.storage.findMany("password", []);
-    const r = await verifyPasswordEmail(auth.config, { token: verifyToken(auth), ...req });
+    // The sign-up's own proof keeps its password (ruling 11 of plan 12q).
+    const r = await verifyPasswordEmail(auth.config, {
+      token: verifyToken(auth),
+      ...req,
+      signUpProof: up.value.signUpProof,
+    });
     if (!r.ok || !r.value.signedIn) throw new Error("no session");
+    expect(r.value.passwordKept).toBe(true);
     expect(r.value.user.emailVerified).toBe(true);
     expect(
       await auth.storage.findOne("password", [{ field: "id", op: "eq", value: row?.id ?? "" }]),
