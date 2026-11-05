@@ -91,7 +91,7 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
 - Every other path takes slot 1 or higher: a linked worktree, a second clone, and a git-init copy. A slot 0 row of a linked worktree is refused. Until `register-main` runs, the main worktree also takes slot 1 or higher.
 - A worktree of slot 1 or higher has the project `authtempo-s<slot>` and the compose file `docker-compose.slots.yml`. Each container has the label `authtempo.worktree`. The script refuses to start or remove a set whose containers name another worktree.
 - A new row takes the lowest slot that no row holds and no set of another worktree uses. Under the lock of the table, `up` reads the sets through `docker ps` and that label. So a second table, a hand edit, or a lost row cannot give a slot in use.
-- `down` drops the row only when no container of the set is left. When a container stays, the row stays and `down` exits 1.
+- `down` drops the row only when no container of the set is left and no start or test run of the worktree is alive. It reads both under the lock of the table, after compose down. A start marks its pid in the row when it takes the slot. When a container or a start stays, the row stays and `down` exits 1.
 - Its data lives on tmpfs with a size limit, and each container has a memory limit. So `down` leaves nothing behind, and a leak in one set cannot take the memory of Docker.
 - At most 8 sets of slot 1 or higher run at one time: one for each agent lane. `up` refuses a ninth set and names the idle sets that `reap` can remove.
 - `git worktree remove` frees the slot at the next `up` or `reap`.

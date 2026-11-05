@@ -14,6 +14,7 @@ import {
   projectOf,
   reapRows,
   registerMain,
+  releaseRow,
   removeRun,
   type SetUp,
   type SlotTable,
@@ -203,9 +204,9 @@ describe("the slot table of the test servers", () => {
   });
 
   // Plan 12q decision 7. The table cannot see a set whose row is in no table
-  // that it reads. That happens with a second HOME, a hand edit, or a row
-  // dropped while its set runs. So the take of a new row also reads the sets
-  // that docker runs.
+  // that it reads. That happens with a second HOME, a hand edit, or a start
+  // that died while its compose up went on. So the take of a new row also
+  // reads the sets that docker runs.
   it("gives slot 2 to a second table when slot 1 is up under another worktree's label", () => {
     const up: SetUp[] = [];
     const take = (table: string, worktree: string) =>
@@ -282,6 +283,40 @@ describe("the slot table of the test servers", () => {
         `docker ps gave the line ${JSON.stringify(line)}, not <worktree label><tab><compose project>. ` +
           "The read of the sets has a wrong format, so no slot is taken",
       );
+  });
+
+  // Review of Task 0 of 12q, Low 3. down drops the row under the lock of the
+  // table, after compose down. A start of the same worktree can take the slot
+  // in that gap, and its take marks its pid in the row.
+  it("drops a row after a down only when no start or run holds it and no container is left", () => {
+    const t = empty();
+    claim(t, "/repo/lane-a");
+    const noRead = () => {
+      throw new Error("the drop read the containers");
+    };
+    const drop = (left: () => readonly string[]) =>
+      releaseRow(t, { worktree: "/repo/lane-a", slot: 1, alive, left });
+    addRun(t, "/repo/lane-a", process.pid);
+    expect(drop(noRead)).toBe(
+      `a start or a test run of /repo/lane-a (pid ${process.pid}) is alive; the row of slot 1 stays`,
+    );
+    // The start ends, and a container of its set is left.
+    removeRun(t, "/repo/lane-a", process.pid);
+    expect(drop(() => ["authtempo-s1-postgres-1"])).toBe(
+      "docker compose down left authtempo-s1-postgres-1 of authtempo-s1; the row of slot 1 stays",
+    );
+    // The pid of a start that died holds no row.
+    addRun(t, "/repo/lane-a", 4_000_000);
+    expect(drop(() => [])).toBe(null);
+    expect(t.rows).toEqual([]);
+    // A later take gave lane-a slot 2. The row of slot 1 is gone, and the new row stays.
+    claim(t, "/repo/lane-b");
+    claim(t, "/repo/lane-a");
+    expect(drop(noRead)).toBe(null);
+    expect(t.rows.map((r) => [r.worktree, r.slot])).toEqual([
+      ["/repo/lane-b", 1],
+      ["/repo/lane-a", 2],
+    ]);
   });
 
   it("names no compose project for slot 0", () => {

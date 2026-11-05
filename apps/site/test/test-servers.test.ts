@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +28,10 @@ import { REPO } from "../scripts/lib/paths.ts";
 // call fails. The read of the sets (a ps call with the filter of the label
 // authtempo.worktree) prints FAKE_DOCKER_SETS only for SETS_FORMAT. A read
 // with another format fails, so a wrong format in the script fails these
-// tests. Every other ps call prints FAKE_DOCKER_PS.
+// tests. Every other ps call prints FAKE_DOCKER_PS. A compose up passes only
+// with FAKE_DOCKER_UP=pass. With FAKE_DOCKER_GATE, the
+// compose call FAKE_DOCKER_GATE_ON (down or up) writes a file of that name
+// there. It then waits for the file go-<call>, so a test can order two calls.
 //
 // A fake lsof is first on the PATH too. It shows a listener only on a port
 // of FAKE_LSOF_PORTS. A real set on this machine can hold a port of a slot
@@ -52,8 +56,17 @@ writeFileSync(
     "#!/bin/sh",
     'if [ -d "$HOME/.cache/authtempo/test-slots.json.lock" ]; then s=held; else s=free; fi',
     'echo "$s $*" >> "$FAKE_DOCKER_LOG"',
+    'if [ "$1" = compose ] && [ -n "$FAKE_DOCKER_GATE" ]; then',
+    '  case " $* " in',
+    '    *" $FAKE_DOCKER_GATE_ON "*)',
+    '      : > "$FAKE_DOCKER_GATE/$FAKE_DOCKER_GATE_ON"',
+    "      i=0",
+    '      while [ ! -e "$FAKE_DOCKER_GATE/go-$FAKE_DOCKER_GATE_ON" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done ;;',
+    "  esac",
+    "fi",
     'case "$1 $*" in',
     '  "compose "*" down "*) exit 0 ;;',
+    '  "compose "*" up "*) [ "$FAKE_DOCKER_UP" = pass ] && exit 0; exit 1 ;;',
     "  compose*) exit 1 ;;",
     '  "ps "*" label=authtempo.worktree "*)',
     `    if [ $# -eq 6 ] && [ "$2 $3 $4 $5" = "-a --filter label=authtempo.worktree --format" ] && [ "$6" = '${SETS_FORMAT}' ]; then`,
@@ -124,30 +137,50 @@ function newHome() {
 function servers(home: string, cwd: string, ...args: string[]) {
   return serversWith({}, home, cwd, ...args);
 }
+/** The environment of one spawn of the script: its HOME, the fakes, and their answers. */
+const scriptEnv = (env: Record<string, string>, home: string) => ({
+  ...process.env,
+  HOME: home,
+  PATH: `${BIN}:${process.env.PATH ?? ""}`,
+  FAKE_DOCKER_LOG: join(home, "docker.log"),
+  FAKE_DOCKER_SETS: "",
+  FAKE_DOCKER_PS: "",
+  FAKE_LSOF_PORTS: "",
+  ...env,
+});
 function serversWith(env: Record<string, string>, home: string, cwd: string, ...args: string[]) {
   const log = join(home, "docker.log");
   const run = spawnSync(process.execPath, [SCRIPT, ...args], {
     cwd,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      HOME: home,
-      PATH: `${BIN}:${process.env.PATH ?? ""}`,
-      FAKE_DOCKER_LOG: log,
-      FAKE_DOCKER_SETS: "",
-      FAKE_DOCKER_PS: "",
-      FAKE_LSOF_PORTS: "",
-      ...env,
-    },
+    env: scriptEnv(env, home),
   });
   const docker = existsSync(log) ? readFileSync(log, "utf8") : "";
   return { status: run.status, stdout: run.stdout, stderr: run.stderr, docker };
 }
-const rowsOf = (home: string) =>
-  (JSON.parse(readFileSync(tablePath(home), "utf8")) as SlotTable).rows.map((r) => [
-    r.worktree,
-    r.slot,
-  ]);
+/** Starts the script and does not wait. Answers its pid and the promise of its end. */
+function serversLater(env: Record<string, string>, home: string, cwd: string, ...args: string[]) {
+  const child = spawn(process.execPath, [SCRIPT, ...args], {
+    cwd,
+    env: scriptEnv(env, home),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d) => {
+    stdout += d;
+  });
+  child.stderr.on("data", (d) => {
+    stderr += d;
+  });
+  const end = new Promise<{ status: number | null; stdout: string; stderr: string }>((done) =>
+    child.on("close", (status) => done({ status, stdout, stderr })),
+  );
+  return { pid: child.pid, end };
+}
+const tableOf = (home: string) =>
+  (JSON.parse(readFileSync(tablePath(home), "utf8")) as SlotTable).rows;
+const rowsOf = (home: string) => tableOf(home).map((r) => [r.worktree, r.slot]);
 
 describe("the test-servers command", () => {
   it("refuses down in the registered main worktree, because slot 0 is the running set of main", () => {
@@ -444,8 +477,8 @@ describe("the test-servers command", () => {
     const home = newHome();
     servers(home, LANE, "up", "--only", "libsql");
     expect(rowsOf(home)).toEqual([[LANE, 1]]);
-    // A run of the same worktree starts the set again while down runs. Compose
-    // down exits 0, and a container of the set is up after it.
+    // Compose down exits 0, but a container of the set is left. An up of the
+    // same worktree that ends in the gap of a down gives this.
     const left = serversWith(
       { FAKE_DOCKER_PS: `authtempo-s1-libsql-1\t${LANE}\n` },
       home,
@@ -456,10 +489,108 @@ describe("the test-servers command", () => {
     expect(left.stderr).toContain(
       "docker compose down left authtempo-s1-libsql-1 of authtempo-s1; the row of slot 1 stays",
     );
+    // The read of the containers runs under the lock of the drop, after compose down.
+    expect(left.docker).toMatch(
+      /^held ps -a --filter label=com\.docker\.compose\.project=authtempo-s1 --format \{\{\.Names\}\}$/m,
+    );
     expect(rowsOf(home)).toEqual([[LANE, 1]]);
     const gone = servers(home, LANE, "down");
     expect(gone.status).toBe(0);
     expect(rowsOf(home)).toEqual([]);
+  });
+
+  // Review of Task 0 of 12q, Low 3. down drops the row under a second lock,
+  // after compose down. A start of the same worktree in that gap kept its row
+  // and started the set after the drop. A take of another worktree then got
+  // the slot. The fake stops down in compose down and the start in compose up.
+  for (const [who, start] of [
+    ["a run", ["run", "--only", "libsql", "--", "true"]],
+    ["an up", ["up", "--only", "libsql"]],
+  ] as const)
+    it(`keeps the row while ${who} of its worktree starts the set in the gap of a down`, async () => {
+      const home = newHome();
+      servers(home, LANE, "up", "--only", "libsql");
+      expect(rowsOf(home)).toEqual([[LANE, 1]]);
+      const gate = join(home, "gate");
+      mkdirSync(gate);
+      const until = (file: string) =>
+        expect
+          .poll(() => existsSync(join(gate, file)), { timeout: 10_000, interval: 20 })
+          .toBe(true);
+      try {
+        const down = serversLater(
+          { FAKE_DOCKER_GATE: gate, FAKE_DOCKER_GATE_ON: "down" },
+          home,
+          LANE,
+          "down",
+        );
+        await until("down");
+        // The start takes the slot of its row. No container of the set exists yet.
+        const begun = serversLater(
+          { FAKE_DOCKER_GATE: gate, FAKE_DOCKER_GATE_ON: "up" },
+          home,
+          LANE,
+          ...start,
+        );
+        await until("up");
+        writeFileSync(join(gate, "go-down"), "");
+        const downEnd = await down.end;
+        expect(downEnd.stderr).toContain(
+          `a start or a test run of ${LANE} (pid ${begun.pid}) is alive; the row of slot 1 stays`,
+        );
+        expect(downEnd.status).toBe(1);
+        // A take of another worktree while the start holds slot 1.
+        servers(home, CLONE, "up", "--only", "libsql");
+        expect(rowsOf(home)).toEqual([
+          [LANE, 1],
+          [CLONE, 2],
+        ]);
+        writeFileSync(join(gate, "go-up"), "");
+        expect((await begun.end).stderr).toContain("docker compose up failed for slot 1");
+        // Each start that ended took its pid out of its row, so the next down drops the row.
+        expect(tableOf(home).map((r) => r.runs)).toEqual([[], []]);
+        expect(servers(home, LANE, "down").status).toBe(0);
+        expect(rowsOf(home)).toEqual([[CLONE, 2]]);
+      } finally {
+        writeFileSync(join(gate, "go-down"), "");
+        writeFileSync(join(gate, "go-up"), "");
+      }
+    }, 30_000);
+
+  it("keeps the mark of a run in its row until its command ends", async () => {
+    const home = newHome();
+    // Sets of another worktree on slots 1 to 89 send the take to slot 90.
+    // This test serves the health check of its libSQL port.
+    const sets = Array.from({ length: 89 }, (_, i) => `/elsewhere/clone\tauthtempo-s${i + 1}\n`);
+    const health = createHttpServer((_, res) => res.end("ok"));
+    await new Promise<void>((done) => health.listen(portOf(90, "libsql"), "127.0.0.1", done));
+    try {
+      // The command prints its parent, the run, and the marks of the table.
+      const show =
+        "const t = JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.cache/authtempo/test-slots.json', 'utf8'));" +
+        "console.log(JSON.stringify({ parent: process.ppid, runs: t.rows.map((r) => r.runs) }));";
+      const run = serversLater(
+        { FAKE_DOCKER_SETS: sets.join(""), FAKE_DOCKER_UP: "pass" },
+        home,
+        LANE,
+        "run",
+        "--only",
+        "libsql",
+        "--",
+        process.execPath,
+        "-e",
+        show,
+      );
+      const end = await run.end;
+      expect(end.stderr).toBe("");
+      expect(end.status).toBe(0);
+      expect(JSON.parse(end.stdout)).toEqual({ parent: run.pid, runs: [[run.pid]] });
+      expect(tableOf(home).map((r) => [r.worktree, r.slot, r.runs])).toEqual([[LANE, 90, []]]);
+    } finally {
+      await new Promise((done) => health.close(done));
+      servers(home, LANE, "down");
+    }
+    expect(existsSync(join(LANE, ".test-servers.env"))).toBe(false);
   });
 
   it("removes the set of a removed worktree after it frees the lock", () => {

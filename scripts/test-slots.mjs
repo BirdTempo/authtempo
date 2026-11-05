@@ -10,9 +10,9 @@
 // The table is not the only record of a set: docker runs the containers, and
 // each container names its worktree in a label. A row can be missing while
 // its set runs. That happens with a second table (another HOME), a hand edit,
-// or a down beside an up of the same worktree. So the take of a new row also
-// reads the sets that docker runs. It skips each slot that another worktree
-// uses (plan 12q, decision 7).
+// or a start that died while its compose up went on. So the take of a new
+// row also reads the sets that docker runs. It skips each slot that another
+// worktree uses (plan 12q, decision 7).
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -371,6 +371,34 @@ export function reapRows(table, { worktrees, now, idleMs, alive }) {
  */
 export function dropRow(table, worktree) {
   table.rows = table.rows.filter((r) => r.worktree !== worktree);
+}
+
+/**
+ * Drops the row of a worktree after compose down removed the set of `slot`.
+ * The caller holds the lock of the table, so no take runs in the meantime.
+ *
+ * Compose down runs outside the lock. A start of the same worktree can take
+ * the slot of its row in that gap. The take marks the pid of the start in the
+ * row (`up`). So the row stays while a start or a test run is alive. Else a
+ * take of another worktree could get the slot before the start makes its
+ * containers (review of Task 0 of 12q, Low 3). A container that docker still
+ * has keeps the row too. `left` reads them only when no run holds the row.
+ * @param {SlotTable} table
+ * @param {{ worktree: string, slot: number, alive: (pid: number) => boolean, left: () => readonly string[] }} drop
+ * @returns {string | null} why the row stays, or null when the row of the slot is gone
+ */
+export function releaseRow(table, { worktree, slot, alive, left }) {
+  const row = rowOf(table, worktree);
+  // A later take gave the worktree a new row. The row of this slot is gone.
+  if (row === undefined || row.slot !== slot) return null;
+  const runs = row.runs.filter(alive);
+  if (runs.length > 0)
+    return `a start or a test run of ${worktree} (pid ${runs.join(", ")}) is alive; the row of slot ${slot} stays`;
+  const names = left();
+  if (names.length > 0)
+    return `docker compose down left ${names.join(", ")} of ${projectOf(slot)}; the row of slot ${slot} stays`;
+  dropRow(table, worktree);
+  return null;
 }
 
 /**

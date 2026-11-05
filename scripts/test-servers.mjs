@@ -26,13 +26,13 @@ import {
   addRun,
   checkSlot0,
   claimSlot,
-  dropRow,
   goneRows,
   IDLE_MS,
   pidAlive,
   projectOf,
   reapRows,
   registerMain,
+  releaseRow,
   removeRun,
   rowOf,
   setsOf,
@@ -200,15 +200,23 @@ export function setsUp() {
 
 /**
  * Removes the set of a slot of 1 or more, after the owner check. Answers true
- * only when compose down passed and no container of the project is left. The
- * caller drops the row after that, so the row lives as long as the set. A run
- * of the same worktree can start the set again while down runs.
+ * when compose down passed. The caller then drops the row with releaseRow,
+ * under the lock of the table. So the row lives as long as the set.
  * @param {number} slot
  * @param {string} worktree
  */
 function composeDown(slot, worktree) {
   checkOwner(slot, worktree);
-  if (compose(slot, worktree, ["down", "-v", "--remove-orphans"]).status !== 0) return false;
+  return compose(slot, worktree, ["down", "-v", "--remove-orphans"]).status === 0;
+}
+
+/**
+ * The containers that docker still has in the project of a slot. releaseRow
+ * reads them under the lock of the drop. A failed read throws, so the row
+ * stays.
+ * @param {number} slot
+ */
+function leftOf(slot) {
   const project = projectOf(slot);
   const ps = spawnSync(
     "docker",
@@ -222,17 +230,12 @@ function composeDown(slot, worktree) {
     ],
     { encoding: "utf8" },
   );
-  const left = (ps.stdout ?? "")
+  if (ps.status !== 0)
+    throw new Error(`docker ps failed after the down of ${project}; the row of slot ${slot} stays`);
+  return (ps.stdout ?? "")
     .split("\n")
     .filter((l) => l !== "")
-    .map((l) => l.split("\t")[0]);
-  if (ps.status === 0 && left.length === 0) return true;
-  console.error(
-    ps.status === 0
-      ? `test-servers: docker compose down left ${left.join(", ")} of ${project}; the row of slot ${slot} stays`
-      : `test-servers: docker ps failed after the down of ${project}; the row of slot ${slot} stays`,
-  );
-  return false;
+    .map((l) => l.split("\t")[0] ?? l);
 }
 
 /**
@@ -376,46 +379,72 @@ function writeEnvFile(worktree, slot, names) {
 /**
  * Takes the slot of the worktree, starts its services, waits for each, and
  * writes the env file. Answers the row.
+ *
+ * The take marks the pid of this process in the row, under the lock. So a
+ * down of this worktree keeps the row while the start makes the set
+ * (releaseRow). The mark goes when the start ends. With `keepRun`, a run that
+ * started keeps it until its command ends.
  * @param {string} cwd
  * @param {readonly string[]} names
+ * @param {{ keepRun?: boolean }} [opts]
  */
-export async function up(cwd, names) {
+export async function up(cwd, names, opts = {}) {
   const ctx = contextOf(cwd);
-  const { row, gone } = withTable(ctx.table, (table) => ({
-    gone: goneRows(table, liveOf(table)).map((r) => ({ ...r })),
-    row: {
-      ...claimSlot(table, {
-        worktree: ctx.worktree,
-        isMain: ctx.isMain,
-        services: names,
-        now: Date.now(),
-        setsUp,
-      }),
-    },
-  }));
-  // The sets of removed worktrees go after the lock is free: a down of many
-  // sets can take longer than the lock wait of other calls (review m6).
-  removeGone(ctx.table, gone);
-  if (row.slot === 0) {
-    for (const name of names)
-      if (!(await tcpOpen(portOf(0, name))))
-        throw new Refusal(
-          `slot 0 is the running set of docker-compose.yml, and ${name} on port ${portOf(0, name)} does not answer. ` +
-            `Start it in the main worktree: docker compose up -d ${name}`,
-        );
-  } else {
-    checkPortsFree(
-      row.services.map((n) => portOf(row.slot, n)),
-      projectOf(row.slot),
-      ctx.worktree,
-    );
-    checkOwner(row.slot, ctx.worktree);
-    const started = compose(row.slot, ctx.worktree, ["up", "-d", "--wait", ...row.services]);
-    if (started.status !== 0) throw new Error(`docker compose up failed for slot ${row.slot}`);
-    await waitReady(row.slot, ctx.worktree, row.services);
+  const { row, gone } = withTable(ctx.table, (table) => {
+    const gone = goneRows(table, liveOf(table)).map((r) => ({ ...r }));
+    const taken = claimSlot(table, {
+      worktree: ctx.worktree,
+      isMain: ctx.isMain,
+      services: names,
+      now: Date.now(),
+      setsUp,
+    });
+    addRun(table, ctx.worktree, process.pid);
+    return { gone, row: { ...taken } };
+  });
+  let ready = false;
+  try {
+    // The sets of removed worktrees go after the lock is free. A down of many
+    // sets can take longer than the lock wait of other calls (review m6).
+    removeGone(ctx.table, gone);
+    if (row.slot === 0) {
+      for (const name of names)
+        if (!(await tcpOpen(portOf(0, name))))
+          throw new Refusal(
+            `slot 0 is the running set of docker-compose.yml, and ${name} on port ${portOf(0, name)} does not answer. ` +
+              `Start it in the main worktree: docker compose up -d ${name}`,
+          );
+    } else {
+      checkPortsFree(
+        row.services.map((n) => portOf(row.slot, n)),
+        projectOf(row.slot),
+        ctx.worktree,
+      );
+      checkOwner(row.slot, ctx.worktree);
+      const started = compose(row.slot, ctx.worktree, ["up", "-d", "--wait", ...row.services]);
+      if (started.status !== 0) throw new Error(`docker compose up failed for slot ${row.slot}`);
+      await waitReady(row.slot, ctx.worktree, row.services);
+    }
+    writeEnvFile(ctx.worktree, row.slot, row.services);
+    ready = true;
+    return row;
+  } finally {
+    if (!ready || opts.keepRun !== true) unmark(ctx.table, ctx.worktree);
   }
-  writeEnvFile(ctx.worktree, row.slot, row.services);
-  return row;
+}
+
+/**
+ * Takes the pid of this process out of the row of the worktree. A failure
+ * prints a note only: releaseRow and reap hold no row for a dead pid.
+ * @param {string} tableFile
+ * @param {string} worktree
+ */
+function unmark(tableFile, worktree) {
+  try {
+    withTable(tableFile, (table) => removeRun(table, worktree, process.pid));
+  } catch (e) {
+    console.error(`test-servers: ${/** @type {Error} */ (e).message}`);
+  }
 }
 
 /**
@@ -438,8 +467,19 @@ function removeGone(tableFile, gone) {
   withTable(tableFile, (table) => {
     for (const r of removed) {
       const now = rowOf(table, r.worktree);
-      if (now !== undefined && now.slot === r.slot && now.lastUse === r.lastUse)
-        dropRow(table, r.worktree);
+      if (now === undefined || now.slot !== r.slot || now.lastUse !== r.lastUse) continue;
+      try {
+        const left = () => leftOf(r.slot);
+        const kept = releaseRow(table, {
+          worktree: r.worktree,
+          slot: r.slot,
+          alive: pidAlive,
+          left,
+        });
+        if (kept !== null) console.error(`test-servers: ${kept}`);
+      } catch (e) {
+        console.error(`test-servers: ${/** @type {Error} */ (e).message}`);
+      }
     }
   });
 }
@@ -503,7 +543,13 @@ function down(cwd) {
     );
   if (!composeDown(row.slot, ctx.worktree))
     throw new Error(`docker compose down failed for slot ${row.slot}`);
-  withTable(ctx.table, (table) => dropRow(table, ctx.worktree));
+  // A start of this worktree can take the slot while compose down runs. So the
+  // drop reads the runs and the containers under its own lock.
+  const left = () => leftOf(row.slot);
+  const kept = withTable(ctx.table, (table) =>
+    releaseRow(table, { worktree: ctx.worktree, slot: row.slot, alive: pidAlive, left }),
+  );
+  if (kept !== null) throw new Error(kept);
   rmSync(join(ctx.worktree, ENV_FILE), { force: true });
   console.log(`removed the set of slot ${row.slot} (${projectOf(row.slot)})`);
 }
@@ -572,17 +618,19 @@ function reap(cwd, idleMs) {
     for (const row of rows) {
       // A failed down keeps the row, so no slot is given twice while its containers live.
       // reap keeps the lock for its downs: a run that starts meanwhile must not lose its set.
-      let ok = false;
+      let kept = null;
       try {
-        ok = composeDown(row.slot, row.worktree);
+        const left = () => leftOf(row.slot);
+        kept = composeDown(row.slot, row.worktree)
+          ? releaseRow(table, { worktree: row.worktree, slot: row.slot, alive: pidAlive, left })
+          : `docker compose down failed for slot ${row.slot}; its row stays`;
       } catch (e) {
-        console.error(`test-servers: ${/** @type {Error} */ (e).message}`);
+        kept = /** @type {Error} */ (e).message;
       }
-      if (!ok) {
-        console.error(`docker compose down failed for slot ${row.slot}; its row stays`);
+      if (kept !== null) {
+        console.error(`test-servers: ${kept}`);
         continue;
       }
-      dropRow(table, row.worktree);
       rmSync(join(row.worktree, ENV_FILE), { force: true });
       removed.push(row);
     }
@@ -593,8 +641,9 @@ function reap(cwd, idleMs) {
 }
 
 /**
- * Starts the set, then runs the command with its variables. The run marks
- * itself in the table, so reap leaves the set while the command runs.
+ * Starts the set, then runs the command with its variables. The take of up
+ * marks the run in the table. So reap leaves the set, and down keeps the row,
+ * while the command runs.
  * @param {string} cwd
  * @param {readonly string[]} names
  * @param {string[]} command
@@ -603,9 +652,8 @@ async function run(cwd, names, command) {
   const [bin, ...args] = command;
   if (bin === undefined) throw new Refusal("run needs a command after --");
   checkCommand(command);
-  const row = await up(cwd, names);
+  const row = await up(cwd, names, { keepRun: true });
   const ctx = contextOf(cwd);
-  withTable(ctx.table, (table) => addRun(table, ctx.worktree, process.pid));
   const child = spawn(bin, args, {
     cwd,
     stdio: "inherit",
