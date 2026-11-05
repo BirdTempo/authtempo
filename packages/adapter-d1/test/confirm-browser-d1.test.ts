@@ -30,10 +30,13 @@ const FIRST = "the owner's own first password";
 // The queries of the link's confirm, with the D1 limiter, with and without
 // the proof. Run of 2026-11-05 09:13 CST on the owner's Mac Studio, load
 // 8.5 13.1 11.4. A check at 21 failed with [22, 22].
-const LINK_CONFIRM_QUERIES = 22;
+// Update 2026-11-05 by the join of plan 12q: the confirm opens a session,
+// and the cap read of Task 2 adds one query (+1). Measured 2026-11-05 11:32
+// CST on the owner's Mac Studio, load 2.29 8.00 9.96: [23, 23] and [25, 25].
+const LINK_CONFIRM_QUERIES = 23;
 // The code's confirm: the pin CONFIRM_QUERIES of
 // password-verify-code-budget.test.ts, whose confirm carries no proof.
-const CODE_CONFIRM_QUERIES = 24;
+const CODE_CONFIRM_QUERIES = 25;
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {

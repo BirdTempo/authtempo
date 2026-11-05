@@ -4,7 +4,7 @@
 
 The confirm of a password sign-up keeps the sign-up's password only in the browser or the app of the sign-up. Any other confirm is a claim.
 
-A sign-up now gives a sign-up proof: `sp_` and 32 random bytes. Each answer holds it as `signUpProof`, and the route sets it as the HttpOnly cookie `__Host-tempo_signup`. The cookie lives as long as the link or the code. A known address gets a proof too, so the answer tells no account. The verify row holds the SHA-256 of the proof, so no query moves.
+A sign-up now gives a sign-up proof: `sp_` and 32 random bytes. Each answer holds it as `signUpProof`, and the route sets it as the HttpOnly cookie `__Host-tempo_signup`. The cookie lives as long as the link or the code. A known address gets a proof too, so the answer tells no account. The verify row holds the SHA-256 of the proof, so the proof adds no query to the sign-up or the confirm. A resend or a sign-in that carries a proof reads the earlier sign-up rows of the address, one query more.
 
 A confirm by link or by code that carries the proof keeps the password. The cookie wins over the `signUpProof` member of the code form. Any other confirm deletes that password, and the person who opened the link gets a proved session. The JSON answers of `POST /password/verify` and `POST /password/verify/code` gain `passwordKept`. The redirect of the link goes to `/?password=set` when the password went. The person then sets a first password through `POST /password/change` with no current password. The confirm clears the cookie.
 

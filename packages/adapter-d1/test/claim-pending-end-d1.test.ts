@@ -37,7 +37,11 @@ const PASSWORD = "correct horse battery";
 // stayed. `reset` is the owner's reset link over 1000 claimant sessions, the
 // most that the largest cap allows. Before plan 12q that reset ended all 1000
 // in 20 chunks and answered 500 at query 51; the magic link sent 46.
-const PINS = { link: 29, sweep: 42, reset: 40 };
+// `confirm` is the owner's verify link of the claimant's sign-up over 120
+// claimant sessions, from another browser (the join of Task 1, ruling 11).
+// Measured at the join, 2026-11-05 11:33 CST on the owner's Mac Studio
+// (load 2.00 6.39 9.14).
+const PINS = { link: 29, sweep: 42, reset: 40, confirm: 27 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query 51 throws. */
 function counting(db: D1Database) {
@@ -347,6 +351,72 @@ describe("the claim's bounded session delete on D1 (decision 3 of plan 12q)", ()
     expect(new Set(ends.map((e) => e.id)).size).toBe(120);
     expect(ends.some((e) => mid.proved.includes(e.id))).toBe(false);
     expect(await stateOf(userId)).toEqual({ proved: mid.proved, unproved: [], pending: [] });
+  });
+
+  // The claim by a confirm (the join of Task 1 of plan 12q, ruling 11). The
+  // owner opens the claimant's verify link in another browser, with no sign-up
+  // proof. That confirm is a claim: the password goes, and the bounded delete
+  // and the door take the claimant's sessions.
+  it("claims by the verify link from another browser over 120 sessions, and a leftover session answers 401", {
+    timeout: 120_000,
+  }, async () => {
+    const tokens: string[] = [];
+    const userId = await claimant("eve@example.com", 120, {}, tokens);
+    const text = mail.find((m) => m.to === "eve@example.com")?.text ?? "";
+    const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    expect(token).not.toBe("");
+    current = new Date(current.getTime() + 1000);
+    const claim = await measure(make(true), post("/password/verify", { token }));
+    expect(claim.res.status).toBe(200);
+    expect(await claim.res.clone().json()).toEqual({ verified: true, passwordKept: false });
+    expect(claim.queries).toBe(PINS.confirm);
+    expect(claim.queries).toBeLessThanOrEqual(BUDGET);
+    const owner = cookieOf(claim.res);
+    const mid = await stateOf(userId);
+    expect(mid.proved.length).toBe(1);
+    expect(mid.unproved.length).toBe(20);
+    expect(mid.pending).toEqual(["claimed"]);
+    expect(ends.length).toBe(100);
+    // The claimant's password is gone.
+    const passwords = await env.DB.prepare("SELECT id FROM ta_password WHERE user_id = ?")
+      .bind(userId)
+      .all();
+    expect(passwords.results).toEqual([]);
+    const old = await measure(
+      make(false),
+      post("/password/sign-in", { email: "eve@example.com", password: PASSWORD }),
+    );
+    expect(old.res.status).toBe(401);
+    expect(((await old.res.json()) as { error: string }).error).toBe("invalid_credentials");
+    // The oldest session is a leftover. It meets the door and ends with the reason claimed.
+    const left = await measure(make(false), get("/session", bearer(tokens[0])));
+    expect(left.res.status).toBe(401);
+    expect(ends.slice(100).map((e) => e.reason)).toEqual(["claimed"]);
+    expect(mid.unproved).toContain(ends[100]?.id);
+    // The sweep ends the other 19, and never the owner's session.
+    current = new Date(current.getTime() + 1000);
+    const result = await make(true).auth.api.sweepExpired();
+    expect(result.pendingSessions).toBe(19);
+    expect(ends).toHaveLength(120);
+    expect(new Set(ends.map((e) => e.id)).size).toBe(120);
+    expect(ends.some((e) => mid.proved.includes(e.id))).toBe(false);
+    expect(await stateOf(userId)).toEqual({ proved: mid.proved, unproved: [], pending: [] });
+    // The owner is signed in, sets a first password, and signs in with it.
+    expect((await measure(make(false), get("/session", owner))).res.status).toBe(200);
+    const set = await measure(
+      make(false),
+      post("/password/change", { newPassword: "the owner's own first password" }, owner),
+    );
+    expect(set.res.status).toBe(200);
+    const signIn = await measure(
+      make(false),
+      post("/password/sign-in", {
+        email: "eve@example.com",
+        password: "the owner's own first password",
+      }),
+    );
+    expect(signIn.res.status).toBe(200);
+    expect((await stateOf(userId)).unproved).toEqual([]);
   });
 
   it("answers the owner's reset link over 1000 claimant sessions inside 50 queries", {
