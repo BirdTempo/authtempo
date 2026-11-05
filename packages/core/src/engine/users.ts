@@ -228,7 +228,7 @@ export function claimLeaseId(userId: string): string {
  * its lease that throws puts back nothing once a rival took the lease.
  *
  * On a store with no isolation the claim is final at its flip (ruling 38 of
- * plan 12q): it calls `keep` right after a flip that matched a row. So a
+ * plan 12q). It calls `keep` right after a flip that matched a row. So a
  * throw in the session chunks keeps the flip and the deletes. The leftover
  * sessions are unproved and end at their next use.
  *
