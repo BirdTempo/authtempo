@@ -517,3 +517,37 @@ describe("the two port calls of the storage-port page (decisions 7 and 9 of plan
     );
   });
 });
+
+// The undo guard of a claim (decision 6 of plan 12q). D1 can apply the mark
+// of the address and lose its answer, so the undo of the claim's deletes
+// must not put back the claimant's rows. The claim calls the guard right
+// after its lease, and the pages say so. A change of the call fails here.
+describe("the undo guard of a claim on the claim-rule, races, and storage-port pages (plan 12q)", () => {
+  it("holds the call after the lease and before the deletes, the wider condition at a lost flip, and the words", () => {
+    const claim = body(source("users.ts"), "claimEmail");
+    const steps = [
+      "await takeClaim(tx, userId, now, verified.clock);",
+      'await tx.undoOnlyWhile?.("user", [byId, { field: "emailVerified", op: "eq", value: false }]);',
+      'await tx.delete("identity", where);',
+      'await tx.undoOnlyWhile?.("user", [byId]);',
+      "throw new ClaimLostError();",
+    ];
+    const at = steps.map((step) => {
+      expect(claim.split(step), `claimEmail holds ${step} once`).toHaveLength(2);
+      return claim.indexOf(step);
+    });
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    expect(flat(`${STORAGE}port.ts`)).toContain(
+      "undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;",
+    );
+    expect(page("concepts/claim-rule.md")).toContain(
+      "The undo of each delete of a claim puts the row back only while the user is unverified. When the mark stays, no row of the claimant comes back.",
+    );
+    expect(page("concepts/races.md")).toContain(
+      "A claim calls `undoOnlyWhile` after its lease, so the undo puts a deleted row back only while the user is unverified.",
+    );
+    expect(page("concepts/storage-port.md")).toContain(
+      "| `undoOnlyWhile` | Inside a transaction, the undo of each later delete puts its rows back only while a row of the model matches the where.",
+    );
+  });
+});

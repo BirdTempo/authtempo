@@ -155,6 +155,16 @@ then rolls back only the writes after the call. In a nested transaction it
 drops only the entries of the nested call. A claim calls it after its last
 write, so a failure after the claim keeps the claim.
 
+`undoOnlyWhile(model, where)` guards the undo of the later deletes of the
+open transaction. The rows of each such delete come back only while a row
+of `model` matches `where`. The reinsert is one
+`INSERT ... SELECT ... WHERE EXISTS` statement, so the check sends no query
+of its own. D1 can apply a write and lose its answer, and an update that
+throws has no undo entry. A claim calls it after its lease. So a lost answer
+at the claim's mark of the address leaves no row of the claimant. A second
+call at the same level replaces the condition, also for the deletes since
+the first call. `keep()` and the end of the level end it.
+
 A nested transaction adds its entries to the same undo log. If the nested
 function throws, the rollback affects only the entries of the nested
 transaction. The outer transaction can catch the error and continue.
