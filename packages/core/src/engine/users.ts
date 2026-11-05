@@ -350,12 +350,15 @@ export const CLAIM_SESSION_CHUNKS = 2;
  * the flow. A flow can wait 60 seconds or more before its lease. So no lease
  * is stale at its write, and the sweep keeps it while the claim runs. `now`
  * stays the time of the other writes of the claim and of the stale test.
+ * `takeStale` false refuses a stale lease too: the hold of a writer that is
+ * no claim (`holdClaim`).
  */
 async function takeClaim(
   tx: StorageAdapter,
   userId: string,
   now: Date,
   clock: Clock,
+  takeStale = true,
 ): Promise<void> {
   if (tx.isolated) {
     if (await userStillUnverified(tx, userId, now)) return;
@@ -364,35 +367,9 @@ async function takeClaim(
       stopWith("conflict");
     throw new ClaimLostError();
   }
-  if (await createLease(tx, userId, now, clock)) return;
-  // Another claim holds the lease, or a stale lease stays. One row takes a stale lease.
-  const taken = await tx.update(
-    "verification",
-    [
-      { field: "id", op: "eq", value: claimLeaseId(userId) },
-      { field: "expiresAt", op: "lt", value: now },
-    ],
-    { expiresAt: leaseExpiry(clock), createdAt: now, updatedAt: now },
-  );
-  if (taken === 0) throw new ClaimLostError("held");
-}
-
-/** The expiry of a lease, from a fresh read of the clock at each write: see `CLAIM_LEASE_MS`. */
-function leaseExpiry(clock: Clock): Date {
-  return new Date(clock.now().getTime() + CLAIM_LEASE_MS);
-}
-
-/**
- * Creates the claim lease of a user. False when a lease row of the user
- * exists, live or stale: the create fails on the key.
- */
-async function createLease(
-  tx: StorageAdapter,
-  userId: string,
-  now: Date,
-  clock: Clock,
-): Promise<boolean> {
   const id = claimLeaseId(userId);
+  // A fresh read at each write: see `CLAIM_LEASE_MS`.
+  const expiry = () => new Date(clock.now().getTime() + CLAIM_LEASE_MS);
   try {
     await tx.create("verification", {
       id,
@@ -400,23 +377,37 @@ async function createLease(
       identifier: userId,
       // The key of `valueHash` is unique, so each user's lease has its own hash.
       valueHash: await sha256Hex(id),
-      expiresAt: leaseExpiry(clock),
+      expiresAt: expiry(),
       consumedAt: null,
       data: null,
       secretVersion: 1,
       createdAt: now,
       updatedAt: now,
     });
-    return true;
+    return;
   } catch (err) {
     if (
-      err instanceof StorageError &&
-      err.code === "unique_violation" &&
-      err.model === "verification"
+      !(
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        err.model === "verification"
+      )
     )
-      return false;
-    throw err;
+      throw err;
   }
+  // Another claim holds the lease, or a stale lease stays. One row takes a
+  // stale lease. A writer that is no claim takes none (`holdClaim`).
+  const taken = takeStale
+    ? await tx.update(
+        "verification",
+        [
+          { field: "id", op: "eq", value: id },
+          { field: "expiresAt", op: "lt", value: now },
+        ],
+        { expiresAt: expiry(), createdAt: now, updatedAt: now },
+      )
+    : 0;
+  if (taken === 0) throw new ClaimLostError("held");
 }
 
 /**
@@ -429,11 +420,12 @@ async function createLease(
  * same transaction. It runs no hook between the two calls. A hook can wait
  * longer than `CLAIM_LEASE_MS`, and a claim can then take the stale lease.
  *
- * On an isolated store it is the hold of `takeClaim`: an update of the user
- * row while it is unverified. That update takes the row lock until the
- * commit, so a claim's hold waits. On a store with no isolation it creates
- * the lease. Its expiry comes from a read of `clock`. A claim that meets the
- * lease answers 409 `conflict` on D1 and retries after a wait elsewhere.
+ * It is `takeClaim` with no take of a stale lease. On an isolated store it
+ * is the hold: an update of the user row while it is unverified. That
+ * update takes the row lock until the commit, so a claim's hold waits. On a
+ * store with no isolation it creates the lease. Its expiry comes from a read
+ * of `clock`. A claim that meets the lease answers 409 `conflict` on D1 and
+ * retries after a wait elsewhere.
  *
  * It takes no stale lease, unlike a claim. A stale lease can belong to a
  * claim that still runs past its life. That claim can have deleted before
@@ -449,9 +441,7 @@ async function createLease(
  * hold of the user waits for the sweep.
  */
 export async function holdClaim(tx: StorageAdapter, userId: string, clock: Clock): Promise<void> {
-  const now = clock.now();
-  if (tx.isolated) return takeClaim(tx, userId, now, clock);
-  if (!(await createLease(tx, userId, now, clock))) throw new ClaimLostError("held");
+  await takeClaim(tx, userId, clock.now(), clock, false);
 }
 
 /**
