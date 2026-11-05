@@ -166,10 +166,10 @@ export function claimedUser(user: UserRow, now: Date): UserRow {
  * start (ruling 35 of plan 12p). A flow can wait 60 seconds before its
  * lease, in a hook or a provider call. A lease from the flow's time would
  * then be stale at its write. The sweep would delete it while its claim
- * runs, and the lease read of a sign-up or of the importer would miss that
- * claim. A lease past this life is stale: a claim whose throw left its row
- * behind. The next claim of the user takes it. The sweep deletes it, as it
- * deletes each verification row past `expiresAt`. The flows that create a
+ * runs, and the lease read of a sign-up would miss that claim. A lease past
+ * this life is stale: a claim whose throw left its row behind. The next
+ * claim of the user takes it. The sweep deletes it, as it deletes each
+ * verification row past `expiresAt`. The flows that create a
  * row of a user that a claim deletes read the lease, live or stale
  * (`claimNotStarted`). They are the three sign-ups of a new user. The
  * importer holds the lease for its writes instead (`holdClaim`, plan 12q).
