@@ -26,11 +26,11 @@ function same(a: unknown, b: unknown): boolean {
  * the error that real D1 answers (plan 9 Task 4 review M-1). A flow on this
  * view does not wait for the memory adapter's transaction lock, so it can
  * run inside another flow's open transaction.
- * `undoOnlyWhile` keeps the D1 adapter's rule (decision 6 of plan 12q): the
+ * `undoOnlyWhile` keeps the D1 adapter's rule (decision 6 of plan 12q). The
  * undo of each later delete puts its row back only while a row matches the
- * condition when the undo runs. A second call at a level replaces it, a
- * nested call starts with the condition of its parent, and `keep` and the
- * end of a level end the condition that the level set.
+ * condition then. A second call at a level replaces it. A nested call starts
+ * with the condition of its parent. `keep` and the end of a level end the
+ * condition that the level set.
  */
 export function d1Like(config: ResolvedConfig): ResolvedConfig {
   const raw = config.storage;

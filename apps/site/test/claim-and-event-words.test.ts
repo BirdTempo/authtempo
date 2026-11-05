@@ -519,7 +519,7 @@ describe("the two port calls of the storage-port page (decisions 7 and 9 of plan
 });
 
 // The undo guard of a claim (decision 6 of plan 12q). D1 can apply the mark
-// of the address and lose its answer, so the undo of the claim's deletes
+// of the address and lose its answer. Then the undo of the claim's deletes
 // must not put back the claimant's rows. The claim calls the guard right
 // after its lease, and the pages say so. A change of the call fails here.
 describe("the undo guard of a claim on the claim-rule, races, and storage-port pages (plan 12q)", () => {

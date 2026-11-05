@@ -207,13 +207,13 @@ export interface StorageAdapter {
    */
   readonly isolated: boolean;
   /**
-   * Optional. Inside a transaction, from this call on, the undo of each
-   * delete puts its rows back only while a row of `model` matches `where`
-   * (decision 6 of plan 12q). The undo reads the condition when it runs,
+   * Optional. Inside a transaction, the undo of each delete after this call
+   * puts its rows back only while a row of `model` matches `where`. The rule
+   * is decision 6 of plan 12q. The undo reads the condition when it runs,
    * as a term of its own statement, so the call adds no query.
    *
    * The reason. D1 can apply a write and lose its answer. An update that
-   * throws has no undo entry, so a claim's flip can stand while the undo
+   * throws has no undo entry. So a claim's flip can stand while the undo
    * puts back the claimant's rows (rr-fix6 Minor 1 of plan 12p). A claim
    * calls it after its lease: the rows come back only while the user is
    * unverified.

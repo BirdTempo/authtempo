@@ -110,8 +110,8 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
     main.driver.db,
     () => compat().storage,
     // The D1 ping over the seam (ruling 26 of the 12g lane): the 2 version
-    // reads, the index list, and the read of the one unique index. The D1
-    // code has the undo guard of a claim (decision 6 of plan 12q).
+    // reads, the index list, and the read of the one unique index.
+    // The D1 code has the undo guard of a claim (decision 6 of plan 12q).
     { pingStatements: 4, oldStore, ping: true, undoGuard: true },
   );
 

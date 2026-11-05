@@ -107,7 +107,7 @@ type Undo = () => void;
 /**
  * The condition of `undoOnlyWhile` at one transaction level (decision 6 of
  * plan 12q). Each undo step of a delete under it reads it when the step
- * runs, so a second call at the level changes it for each of them.
+ * runs. So a second call at the level changes it for each of them.
  */
 interface UndoGuard {
   model: ModelName;
@@ -138,9 +138,9 @@ function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void 
 /**
  * `log` is null outside a transaction. Inside one, every write pushes the
  * step that reverses it, so a rollback touches only this transaction's rows
- * and keeps rows that other callers wrote in the meantime. `inherited` is
- * the condition of `undoOnlyWhile` that this level starts with: its
- * parent's, or null at the top level.
+ * and keeps rows that other callers wrote in the meantime.
+ * `inherited` is the condition of `undoOnlyWhile` that this level starts
+ * with: its parent's, or null at the top level.
  */
 function adapterOn(
   store: Store,

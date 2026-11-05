@@ -50,7 +50,7 @@ describe("memory adapter transactions", () => {
 /**
  * The undo guard of a claim (decision 6 of plan 12q). The conformance suite
  * holds the call on every store. This holds the order of the undo on
- * memory: each step reads the condition when it runs, so the undo of the
+ * memory. Each step reads the condition when it runs. So the undo of the
  * flip, which runs first, makes the condition hold again.
  */
 describe("memory adapter undo guard", () => {

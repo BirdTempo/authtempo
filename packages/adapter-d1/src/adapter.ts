@@ -183,8 +183,8 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
   /**
    * The undo entries of a delete of `rows` inside a transaction. Under
    * `undoOnlyWhile` one entry holds the rows and the condition. Else each
-   * statement of the reinsert is an entry, the list form for more than one
-   * row, as for an update (ruling 84 of plan 12d).
+   * statement of the reinsert is an entry. The list form serves more than
+   * one row, as for an update (ruling 84 of plan 12d).
    */
   const logDelete = (model: ModelName, rows: readonly Row[]) => {
     if (!ctx.undo || rows.length === 0) return;
