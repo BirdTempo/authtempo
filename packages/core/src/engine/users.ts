@@ -209,6 +209,13 @@ export function claimLeaseId(userId: string): string {
  * ended before this lease. The throw then undoes this attempt's deletes,
  * and so it restores the rows that the rival kept.
  *
+ * On D1 a statement can land and lose its answer. So after the lease the
+ * claim calls `undoOnlyWhile` (decision 6 of plan 12q). The undo of each
+ * delete then puts its rows back only while the user is unverified. After
+ * a flip that lost its answer, every row of the claimant stays gone. A
+ * flip of zero rows widens the condition to the user row, so the rows that
+ * the rival kept still come back.
+ *
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
  * flag, so such a session makes no token, grant, factor, or address change
@@ -230,6 +237,13 @@ export async function claimEmail(
   verified.claimed(userId);
   // The first statement decides the race: a lost claim throws before any write of its own.
   await takeClaim(tx, userId, now, verified.clock);
+  // The undo guard (decision 6 of plan 12q). D1 can apply the flip and lose
+  // its answer. The flip then has no undo entry, and the undo of the
+  // deletes below would put back the claimant's rows on a verified user. So
+  // each delete below comes back only while the user is still unverified. A
+  // store that isolates the transaction leaves the call out.
+  const byId: Where<"user"> = { field: "id", op: "eq", value: userId };
+  await tx.undoOnlyWhile?.("user", [byId, { field: "emailVerified", op: "eq", value: false }]);
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -274,9 +288,11 @@ export async function claimEmail(
   );
   if (flipped === 0) {
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
-    if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }])))
-      stopWith("conflict");
-    // A rival claim ended before the lease. The throw undoes the deletes above.
+    if (!(await tx.findOne("user", [byId]))) stopWith("conflict");
+    // A rival claim ended before the lease. The throw undoes the deletes
+    // above, which took only the rows that the rival kept. This flip wrote
+    // nothing, so those rows come back while the user exists (plan 12q).
+    await tx.undoOnlyWhile?.("user", [byId]);
     throw new ClaimLostError();
   }
   // The sessions last, so the session of a sign-in whose guard passed above

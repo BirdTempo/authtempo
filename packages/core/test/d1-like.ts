@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../src/config.js";
 import type { ModelName } from "../src/schema.js";
-import { type StorageAdapter, StorageError } from "../src/storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../src/storage/port.js";
 import { undoCreateWhere } from "../src/storage/sql.js";
 
 /** A null-safe compare of a stored value and a written value. A date compares by its time. */
@@ -26,6 +26,11 @@ function same(a: unknown, b: unknown): boolean {
  * the error that real D1 answers (plan 9 Task 4 review M-1). A flow on this
  * view does not wait for the memory adapter's transaction lock, so it can
  * run inside another flow's open transaction.
+ * `undoOnlyWhile` keeps the D1 adapter's rule (decision 6 of plan 12q): the
+ * undo of each later delete puts its row back only while a row matches the
+ * condition when the undo runs. A second call at a level replaces it, a
+ * nested call starts with the condition of its parent, and `keep` and the
+ * end of a level end the condition that the level set.
  */
 export function d1Like(config: ResolvedConfig): ResolvedConfig {
   const raw = config.storage;
@@ -51,6 +56,22 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
       const log: Undo[] = [];
       // The first entry that the open nested call owns, as in the D1 adapter.
       let floor = 0;
+      // The condition of `undoOnlyWhile` for the next delete, and the one that the open level started with.
+      type Guard = { model: ModelName; where: Where<ModelName>[] };
+      let guard: Guard | null = null;
+      let inherited: Guard | null = null;
+      /** The undo of a deleted row: it puts the row back, under a condition only while a row matches it then. */
+      const putBack = (model: ModelName, row: never): Undo => {
+        const g = guard;
+        return {
+          model,
+          op: "delete",
+          run: async () => {
+            if (g && !(await raw.findOne(g.model, g.where))) return null;
+            return raw.create(model, row);
+          },
+        };
+      };
       const tx: StorageAdapter = {
         ...raw,
         async create(model, data) {
@@ -97,32 +118,44 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
         async delete(model, where) {
           const before = await raw.findMany(model, where);
           const n = await raw.delete(model, where);
-          for (const row of before)
-            log.push({ model, op: "delete", run: () => raw.create(model, row) });
+          for (const row of before) log.push(putBack(model, row as never));
           return n;
         },
         async deleteRows(model, where) {
           // The rows that the delete removed, each with its undo (plan 12o).
           const rows = await raw.deleteRows(model, where);
-          for (const row of rows)
-            log.push({ model, op: "delete", run: () => raw.create(model, row) });
+          for (const row of rows) log.push(putBack(model, row as never));
           return rows;
         },
         async keep() {
           // The D1 adapter's rule (plan 12o): the entries of this level so far go.
+          // The condition that this level set ends too (plan 12q).
           log.splice(floor);
+          guard = inherited;
           return true;
+        },
+        async undoOnlyWhile(model, where) {
+          // No read here: the call sends no statement on D1.
+          const terms = where as Where<ModelName>[];
+          if (guard && guard !== inherited) {
+            guard.model = model;
+            guard.where = terms;
+          } else guard = { model, where: terms };
         },
         async transaction<U>(inner: (t: StorageAdapter) => Promise<U>): Promise<U> {
           const mark = log.length;
           const outer = floor;
+          const before = { guard, inherited };
           floor = mark;
+          inherited = guard;
           try {
             return await inner(tx);
           } catch (e) {
             return rollback(log.splice(mark), e);
           } finally {
             floor = outer;
+            guard = before.guard;
+            inherited = before.inherited;
           }
         },
       };
