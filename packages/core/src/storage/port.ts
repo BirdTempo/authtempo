@@ -233,6 +233,31 @@ export interface StorageAdapter {
    */
   undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
   /**
+   * Optional. Deletes the rows that `where` matches, only while a row of
+   * `whileModel` matches `whileWhere`, and answers the count. The check is a
+   * term of the delete statement, so the call sends one statement, as
+   * `delete` does. It keeps the argument rules of `delete`. Inside a
+   * transaction a throw puts the rows back, as for `delete`.
+   *
+   * The reason (ruling 33 of plan 12q). On a store with no isolation a claim
+   * can run past the life of its lease. A rival claim can then take the
+   * lease, claim, and end. A late delete would then remove the rows that the
+   * rival kept for the owner. So each delete of a claim before its mark
+   * runs only while the user is unverified. After a rival's mark it deletes
+   * nothing, and no undo needs to put back a row on a verified user.
+   *
+   * D1, the SQLite drivers, and memory have it. Postgres and MySQL leave it
+   * out: the hold of a claim orders the claims there. The conformance kit
+   * holds the call on each store that has it. Its option `undoGuard` holds
+   * the call to an adapter.
+   */
+  deleteOnlyWhile?<M extends ModelName, G extends ModelName>(
+    model: M,
+    where: Where<M>[],
+    whileModel: G,
+    whileWhere: Where<G>[],
+  ): Promise<number>;
+  /**
    * Optional. True when a delete of a user row also deletes, by a foreign
    * key, the rows that name the user: the sessions, the accounts, the
    * member rows, and the invitations that the user sent. The Better Auth

@@ -166,6 +166,15 @@ The claimant's sessions stay, and each ends at its next use. A second call
 at the same level replaces the condition, also for the deletes since the
 first call. `keep()` and the end of the level end it.
 
+`deleteOnlyWhile(model, where, whileModel, whileWhere)` deletes the rows
+that `where` matches only while a row of `whileModel` matches `whileWhere`.
+It is one `DELETE ... AND EXISTS (...) RETURNING` statement, so the check
+sends no query of its own. In a transaction its rows go to the undo log, as
+for `delete`. A claim uses it for each delete before its mark of the
+address. A claim can run past the life of its lease, and a rival claim can
+then take the lease and end first. The late deletes then remove nothing,
+so the owner keeps the rows that the rival kept.
+
 A nested transaction adds its entries to the same undo log. If the nested
 function throws, the rollback affects only the entries of the nested
 transaction. The outer transaction can catch the error and continue.

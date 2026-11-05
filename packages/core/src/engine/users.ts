@@ -4,7 +4,7 @@ import { sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasRefusedChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { IdentityRow, SessionRow, UserRow } from "../schema.js";
+import type { IdentityRow, ModelName, SessionRow, UserRow } from "../schema.js";
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
@@ -209,15 +209,21 @@ export function claimLeaseId(userId: string): string {
  * with no isolation it is the lease: a verification row of the user. The
  * claim does not delete the lease: the sweep removes it after 60 seconds.
  * A flip that matches zero rows after a lease means that a rival claim
- * ended before this lease. The throw then undoes this attempt's deletes,
- * and so it restores the rows that the rival kept.
+ * verified the user first. The claim then throws `ClaimLostError`.
+ *
+ * On a store with no isolation each delete before the flip runs only while
+ * the user is unverified (`deleteOnlyWhile`, ruling 33 of plan 12q). A claim
+ * can run past the life of its lease, and a rival claim can then take the
+ * lease and end. The late deletes then remove nothing, so the owner keeps
+ * the rows that the rival kept. No undo needs to put back a row.
  *
  * On D1 a statement can land and lose its answer. So after the lease the
  * claim calls `undoOnlyWhile` (decision 6 of plan 12q). The undo of each
  * delete then puts its rows back only while the user is unverified. After
- * a flip that lost its answer, every row of the claimant stays gone. A
- * flip of zero rows widens the condition to the user row, so the rows that
- * the rival kept still come back.
+ * a flip that lost its answer, every row of the claimant stays gone. After
+ * a flip of zero rows, the rows that this claim deleted stay gone too. They
+ * went while the user was unverified, so they were the claimant's. No undo
+ * of a claim puts a row back onto a verified user.
  *
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
@@ -247,7 +253,18 @@ export async function claimEmail(
   // each delete below comes back only while the user is still unverified. A
   // store that isolates the transaction leaves the call out.
   const byId: Where<"user"> = { field: "id", op: "eq", value: userId };
-  await tx.undoOnlyWhile?.("user", [byId, { field: "emailVerified", op: "eq", value: false }]);
+  const unverified: Where<"user">[] = [byId, { field: "emailVerified", op: "eq", value: false }];
+  await tx.undoOnlyWhile?.("user", unverified);
+  // The deletes before the flip (ruling 33 of plan 12q). This claim can run
+  // past its lease, and a rival claim can take the lease and end first. So
+  // each delete runs only while the user is unverified, in its own
+  // statement. After a rival's flip it deletes nothing, and the owner keeps
+  // the rows that the rival kept. Postgres and MySQL leave the call out:
+  // there the hold above orders the claims.
+  const remove = <M extends ModelName>(model: M, where: Where<M>[]) =>
+    tx.deleteOnlyWhile
+      ? tx.deleteOnlyWhile(model, where, "user", unverified)
+      : tx.delete(model, where);
   const where: Where<"identity">[] = [
     { field: "userId", op: "eq", value: userId },
     { field: "provider", op: "ne", value: "email" },
@@ -258,19 +275,19 @@ export async function claimEmail(
   // conditional update on that row. The rows are the identity, the
   // password, the passkey, and the handoff code. A sign-in that read the
   // user after the flip finds that row gone, so its guard undoes its session.
-  await tx.delete("identity", where);
+  await remove("identity", where);
   const passwords: Where<"password">[] = [{ field: "userId", op: "eq", value: userId }];
   if (keep?.passwordId) passwords.push({ field: "id", op: "ne", value: keep.passwordId });
-  await tx.delete("password", passwords);
+  await remove("password", passwords);
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a proved session; this closes any other path.
-  await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);
-  await tx.delete("verification", [
+  await remove("passkey", [{ field: "userId", op: "eq", value: userId }]);
+  await remove("verification", [
     { field: "purpose", op: "eq", value: "passkey-challenge" },
     { field: "identifier", op: "eq", value: userId },
   ]);
   // A handoff code minted for the claimant would trade for a session after the claim.
-  await tx.delete("verification", [
+  await remove("verification", [
     { field: "purpose", op: "eq", value: "handoff-code" },
     { field: "identifier", op: "eq", value: userId },
   ]);
@@ -293,10 +310,12 @@ export async function claimEmail(
   if (flipped === 0) {
     // An account delete took the row: `conflict`, as the read after a session insert answers (user-hold.ts).
     if (!(await tx.findOne("user", [byId]))) stopWith("conflict");
-    // A rival claim ended before the lease. The throw undoes the deletes
-    // above, which took only the rows that the rival kept. This flip wrote
-    // nothing, so those rows come back while the user exists (plan 12q).
-    await tx.undoOnlyWhile?.("user", [byId]);
+    // A rival claim verified the user first. The undo keeps its condition,
+    // the unverified user (ruling 33 of plan 12q). With `deleteOnlyWhile`
+    // the deletes above ran only while the user was unverified. So each row
+    // that they took was the claimant's, and it stays gone. A store with no
+    // such call can lose the owner's rows here. The owner then proves the
+    // mailbox again: the safe side.
     throw new ClaimLostError();
   }
   // The sessions last, so the session of a sign-in whose guard passed above

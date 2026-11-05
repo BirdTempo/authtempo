@@ -312,6 +312,24 @@ function adapterOn(
       }
       return rows.map((r) => clone(r) as unknown as Models[M]);
     },
+    async deleteOnlyWhile<M extends ModelName, G extends ModelName>(
+      model: M,
+      where: Where<M>[],
+      whileModel: G,
+      whileWhere: Where<G>[],
+    ): Promise<number> {
+      // One statement, as on D1: the check of the condition is a term of the delete (plan 12q).
+      sent.statements++;
+      const t = table(model);
+      if (where.length === 0) throw new StorageError("invalid_argument", model, ["where"]);
+      const rows = select(model, where);
+      if (select(whileModel, whileWhere).length === 0) return 0;
+      for (const r of rows) {
+        t.delete(r.id as string);
+        log?.push(putBack(t, r));
+      }
+      return rows.length;
+    },
     async keep() {
       // The steps so far go, so a later throw reverses only the later writes.
       // A nested call holds its own list, so it drops only its own steps.

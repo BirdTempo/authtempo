@@ -366,11 +366,12 @@ describe("the session proof of the claim-rule page (plan 12p)", () => {
     expect(take).toContain("new Date(clock.now().getTime() + CLAIM_LEASE_MS)");
     expect(source("users.ts")).toContain("export const CLAIM_LEASE_MS = 60_000;");
     // Then the trusted rows, the flip, and the sessions, each once and in this order.
+    // Each delete of a trusted row runs only while the user is unverified (ruling 33 of plan 12q).
     const steps = [
       "await takeClaim(tx, userId, now, verified.clock);",
-      'await tx.delete("identity", where);',
-      'await tx.delete("password", passwords);',
-      'await tx.delete("passkey", [{ field: "userId", op: "eq", value: userId }]);',
+      'await remove("identity", where);',
+      'await remove("password", passwords);',
+      'await remove("passkey", [{ field: "userId", op: "eq", value: userId }]);',
       '{ field: "purpose", op: "eq", value: "passkey-challenge" },',
       '{ field: "purpose", op: "eq", value: "handoff-code" },',
       "? { emailVerified: true, phone: null, updatedAt: now }",
@@ -523,15 +524,19 @@ describe("the two port calls of the storage-port page (decisions 7 and 9 of plan
 // The undo guard of a claim (decision 6 of plan 12q). D1 can apply the mark
 // of the address and lose its answer. Then the undo of the claim's deletes
 // must not put back the claimant's rows. The claim calls the guard right
-// after its lease, and the pages say so. A change of the call fails here.
+// after its lease, and the pages say so. Each delete before the mark runs
+// only while the user is unverified, and no undo widens the condition
+// (ruling 33 of plan 12q). A change of the calls fails here.
 describe("the undo guard of a claim on the claim-rule, races, and storage-port pages (plan 12q)", () => {
-  it("holds the call after the lease and before the deletes, the wider condition at a lost flip, and the words", () => {
+  it("holds the call after the lease, the conditional deletes, no wider condition at a lost flip, and the words", () => {
     const claim = body(source("users.ts"), "claimEmail");
     const steps = [
       "await takeClaim(tx, userId, now, verified.clock);",
-      'await tx.undoOnlyWhile?.("user", [byId, { field: "emailVerified", op: "eq", value: false }]);',
-      'await tx.delete("identity", where);',
-      'await tx.undoOnlyWhile?.("user", [byId]);',
+      'const unverified: Where<"user">[] = [byId, { field: "emailVerified", op: "eq", value: false }];',
+      'await tx.undoOnlyWhile?.("user", unverified);',
+      '? tx.deleteOnlyWhile(model, where, "user", unverified)',
+      'await remove("identity", where);',
+      'await remove("password", passwords);',
       "throw new ClaimLostError();",
     ];
     const at = steps.map((step) => {
@@ -539,8 +544,15 @@ describe("the undo guard of a claim on the claim-rule, races, and storage-port p
       return claim.indexOf(step);
     });
     expect(at).toEqual([...at].sort((a, b) => a - b));
+    // One call of the undo guard, and no delete of a claim row outside the condition.
+    expect(claim.split("undoOnlyWhile").length - 1).toBe(1);
+    for (const model of ["identity", "password", "passkey", "verification"])
+      expect(claim).not.toContain(`tx.delete("${model}"`);
     expect(flat(`${STORAGE}port.ts`)).toContain(
       "undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;",
+    );
+    expect(flat(`${STORAGE}port.ts`)).toContain(
+      "deleteOnlyWhile?<M extends ModelName, G extends ModelName>(",
     );
     expect(page("concepts/claim-rule.md")).toContain(
       "The undo of each delete of a claim puts the row back only while the user is unverified. When the mark stays, no row of the claimant comes back.",
@@ -550,6 +562,15 @@ describe("the undo guard of a claim on the claim-rule, races, and storage-port p
     );
     expect(page("concepts/storage-port.md")).toContain(
       "| `undoOnlyWhile` | Inside a transaction, the undo of each later delete puts its rows back only while a row of the model matches the where.",
+    );
+    expect(page("concepts/claim-rule.md")).toContain(
+      "So each delete of a claim before its mark runs only while the user is unverified.",
+    );
+    expect(page("concepts/races.md")).toContain(
+      "Each delete of a claim calls `deleteOnlyWhile`, so it deletes only while the user is unverified.",
+    );
+    expect(page("concepts/storage-port.md")).toContain(
+      "| `deleteOnlyWhile` | Deletes the rows that the where matches, only while a row of a second model matches a second where, and answers the count.",
     );
   });
 });

@@ -1469,15 +1469,16 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     expect((await userAt(w, CLAIMED)).emailVerified).toBe(true);
   });
 
-  it("undoes the deletes of a late claim whose lease came after a rival claim ended: the rival's password is back", async () => {
+  it("deletes nothing in a late claim whose lease came after a rival claim ended: the rival's password stays (ruling 33 of plan 12q)", async () => {
     // The rival, the owner's reset, takes its lease. Then 61 seconds go by
     // before its deletes, so its lease is stale. A claim runs no hook after
     // its lease, so only slow statements make that wait. The test forces it.
     // The late claim, a magic link, starts in that wait and reads the user
-    // unverified. It lets the rival end, takes the stale lease, deletes, and
-    // its flip matches no row. The D1 view undoes only what the late claim
-    // wrote. A wait before the rival's lease makes no stale lease (ruling 35
-    // of plan 12p): the next test holds that scene.
+    // unverified. It lets the rival end and takes the stale lease. Each of
+    // its deletes runs only while the user is unverified, so it deletes
+    // nothing, and its flip matches no row. A wait before the rival's lease
+    // makes no stale lease (ruling 35 of plan 12p): the next test holds that
+    // scene.
     const rival = { done: latch() };
     const arrived = latch();
     const w = world({
@@ -1521,16 +1522,17 @@ describe("the lease of a claim (ruling 16 of plan 12p)", () => {
     const lateAnswer = await (late as ReturnType<typeof verifyMagicLink> | null);
     const writes = w.log.writes ?? [];
     w.log.writes = null;
-    // It took the stale lease and deleted. Its flip matched no row, so it
-    // threw and undid its deletes. Its retry found the verified user and signed in.
+    // It took the stale lease. Its deletes removed nothing, so no delete
+    // reached the store. Its flip matched no row, so it threw. Its retry
+    // found the verified user and signed in.
     const take = writes.indexOf("update:verification");
     expect(take).toBeGreaterThan(writes.indexOf("create:verification"));
-    expect(writes.indexOf("delete:password")).toBeGreaterThan(take);
-    expect(writes.indexOf("flip:user")).toBeGreaterThan(writes.indexOf("delete:password"));
+    expect(writes.filter((x) => x.startsWith("delete:"))).toEqual([]);
+    expect(writes.indexOf("flip:user")).toBeGreaterThan(take);
     expect(lateAnswer?.ok).toBe(true);
     const user = await userAt(w, CLAIMED);
     expect(user.emailVerified).toBe(true);
-    // The rival's kept rows are back: its password signs in, and its session lives.
+    // The rival's kept rows stay: its password signs in, and its session lives.
     expect((await rowOf(w, won.token ?? ""))?.userId).toBe(user.id);
     const signIn = await w.claimant.handle(
       req("POST", "/password/sign-in", { email: CLAIMED, password: NEW }),

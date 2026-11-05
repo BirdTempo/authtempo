@@ -125,11 +125,11 @@ export interface ConformanceOptions {
    */
   deleteRowsStatements?: number;
   /**
-   * True for an adapter that must have `undoOnlyWhile` on each transaction
-   * (decision 6 of plan 12q). The cases of the call run on each store that
-   * has it, so this option holds the method to the adapter. Each store of
-   * this repository with no isolation passes it: a claim there needs the
-   * guard. Default false.
+   * True for an adapter that must have `undoOnlyWhile` and `deleteOnlyWhile`
+   * on each transaction (decision 6 and ruling 33 of plan 12q). The cases of
+   * each call run on each store that has it, so this option holds the
+   * methods to the adapter. Each store of this repository with no isolation
+   * passes it: a claim there needs both. Default false.
    */
   undoGuard?: boolean;
 }
@@ -2378,8 +2378,8 @@ export function runAdapterConformance(
 
         it("takes the condition of a second call, also for the deletes after the first call", async () => {
           if (!(await guarded())) return;
-          // The claim widens it after a flip of zero rows: a rival claim
-          // verified the user, and this claim's deletes must come back.
+          // The port's rule of a second call at a level. A claim calls it
+          // once (ruling 33 of plan 12q), and the rule stays for any caller.
           await seed(["s1", "s2"]);
           await thrown(
             async (tx) => {
@@ -2505,6 +2505,135 @@ export function runAdapterConformance(
           });
         });
       }
+    });
+
+    describe("the conditional delete deleteOnlyWhile (ruling 33 of plan 12q)", () => {
+      const at = new Date("2026-11-05T00:00:00.000Z");
+      /** A session of user `u-d`, as the engine writes it for an unverified user. */
+      const session = (id: string): SessionRow => ({
+        id,
+        userId: "u-d",
+        tokenHash: `hash-${id}`,
+        expiresAt: new Date(at.getTime() + 60_000),
+        lastSeenAt: at,
+        ip: "203.0.113.9",
+        userAgent: `agent ${id}`,
+        activeOrganizationId: null,
+        freshAt: at,
+        actorId: null,
+        activeTeamId: null,
+        proved: false,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const byId = [{ field: "id" as const, op: "eq" as const, value: "u-d" }];
+      /** The condition of a claim: the user is still unverified. */
+      const unverified: Where<"user">[] = [
+        ...byId,
+        { field: "emailVerified", op: "eq", value: false },
+      ];
+      const byUser = [{ field: "userId" as const, op: "eq" as const, value: "u-d" }];
+      const some = (ids: string[]) => [{ field: "id" as const, op: "in" as const, value: ids }];
+      /** The user `u-d`, unverified, with the sessions `ids`. */
+      const seed = async (ids: string[]) => {
+        await db.create("user", user("u-d", "d@example.com", at));
+        for (const id of ids) await db.create("session", session(id));
+      };
+      const left = async () =>
+        (await db.findMany("session", byUser, { sort: { field: "id", dir: "asc" } })).map(
+          (r) => r.id,
+        );
+      const mark = (emailVerified: boolean) => db.update("user", byId, { emailVerified });
+      const call = (on: StorageAdapter) => {
+        if (!on.deleteOnlyWhile) throw new Error("no deleteOnlyWhile");
+        return on.deleteOnlyWhile.bind(on);
+      };
+      /** True when the transactions of the store have the call. */
+      const has = () => db.transaction(async (tx) => typeof tx.deleteOnlyWhile === "function");
+
+      it("is on each transaction when the target says it must", async () => {
+        // A claim calls it for each delete before its flip (`claimEmail`).
+        // Postgres and MySQL order the claims by the hold, so they leave it out.
+        if (options.undoGuard) expect(await has()).toBe(true);
+      });
+
+      it("deletes while the condition holds and answers the count; a throw puts the rows back", async () => {
+        if (!(await has())) return;
+        await seed(["s1", "s2", "s3"]);
+        await expect(
+          db.transaction(async (tx) => {
+            expect(await call(tx)("session", some(["s1", "s2"]), "user", unverified)).toBe(2);
+            expect(await left()).toEqual(["s3"]);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await left()).toEqual(["s1", "s2", "s3"]);
+        expect(
+          await db.transaction((tx) => call(tx)("session", some(["s1", "s3"]), "user", unverified)),
+        ).toBe(2);
+        expect(await left()).toEqual(["s2"]);
+      });
+
+      it("deletes nothing and answers 0 while the condition matches no row", async () => {
+        if (!(await has())) return;
+        await seed(["s1", "s2"]);
+        await mark(true);
+        expect(await db.transaction((tx) => call(tx)("session", byUser, "user", unverified))).toBe(
+          0,
+        );
+        // A condition that can match no row, such as an empty `in` list.
+        expect(
+          await db.transaction((tx) =>
+            call(tx)("session", byUser, "user", [{ field: "id", op: "in", value: [] }]),
+          ),
+        ).toBe(0);
+        expect(await left()).toEqual(["s1", "s2"]);
+        // Outside a transaction too, where the store has the call there.
+        if (db.deleteOnlyWhile) {
+          expect(await call(db)("session", byUser, "user", unverified)).toBe(0);
+          expect(await left()).toEqual(["s1", "s2"]);
+          await mark(false);
+          expect(await call(db)("session", byUser, "user", unverified)).toBe(2);
+          expect(await left()).toEqual([]);
+        }
+      });
+
+      it("sends one statement, as a delete in a transaction does", async () => {
+        if (!db.statementsSent || !(await has())) return;
+        await seed(["s1", "s2"]);
+        const sent = () => db.statementsSent?.() ?? 0;
+        const counts = await db.transaction(async (tx) => {
+          let before = sent();
+          await tx.delete("session", some(["s1"]));
+          const plain = sent() - before;
+          before = sent();
+          await call(tx)("session", some(["s2"]), "user", unverified);
+          return [plain, sent() - before];
+        });
+        expect(counts[1]).toBe(counts[0]);
+        expect(await left()).toEqual([]);
+      });
+
+      it("refuses an unknown field in the where and in the condition, as a read does", async () => {
+        if (!(await has())) return;
+        await seed(["s1"]);
+        await db.transaction(async (tx) => {
+          await expect(
+            call(tx)(
+              "session",
+              [{ field: "nope" as "id", op: "eq", value: "s1" }],
+              "user",
+              unverified,
+            ),
+          ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
+          await expect(
+            call(tx)("session", some(["s1"]), "user", [
+              { field: "nope" as "id", op: "eq", value: "u-d" },
+            ]),
+          ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
+        });
+        expect(await left()).toEqual(["s1"]);
+      });
     });
 
     describe("createMany (ruling 57 of plan 12d)", () => {

@@ -30,7 +30,8 @@ function same(a: unknown, b: unknown): boolean {
  * undo of each later delete puts its row back only while a row matches the
  * condition then. A second call at a level replaces it. A nested call starts
  * with the condition of its parent. `keep` and the end of a level end the
- * condition that the level set.
+ * condition that the level set. `deleteOnlyWhile` deletes only while its
+ * condition matches a row, and logs the undo as `delete` does (ruling 33).
  */
 export function d1Like(config: ResolvedConfig): ResolvedConfig {
   const raw = config.storage;
@@ -120,6 +121,11 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
           const n = await raw.delete(model, where);
           for (const row of before) log.push(putBack(model, row as never));
           return n;
+        },
+        async deleteOnlyWhile(model, where, whileModel, whileWhere) {
+          // The D1 adapter's rule (ruling 33 of plan 12q): the delete runs only while the condition matches a row.
+          if (!(await raw.findOne(whileModel, whileWhere))) return 0;
+          return tx.delete(model, where);
         },
         async deleteRows(model, where) {
           // The rows that the delete removed, each with its undo (plan 12o).

@@ -501,6 +501,239 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
   });
 });
 
+// A claim past the life of its lease (ruling 33 of plan 12q). D1 has no
+// lock. So a claim whose statements run past 60 s can meet a rival claim.
+// The rival took its lease, or a new lease after the sweep. Each delete of a
+// claim before its flip runs only while the user is unverified, and the
+// undo keeps that condition. So the owner keeps the rows that a rival
+// claim kept, and the claimant keeps no credential and no session.
+describe("a claim past the life of its lease on D1 (ruling 33 of plan 12q)", () => {
+  const NEW = "the owner's new password";
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    await env.DB.prepare("DELETE FROM ta_limit").run();
+    mail.length = 0;
+    current = new Date("2026-11-04T00:00:00.000Z");
+  });
+
+  /** The sessions of a user on the binding: all, and those that are proved. */
+  async function sessionsOf(userId: string) {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n, COALESCE(SUM(proved), 0) AS p FROM ta_session WHERE user_id = ?",
+    )
+      .bind(userId)
+      .first<{ n: number; p: number }>();
+    return { all: row?.n ?? 0, proved: row?.p ?? 0 };
+  }
+
+  /**
+   * The identities of a user other than `email`, in order. A claim that
+   * loses writes the `email` identity before its lease, and its undo
+   * removes that row. The next magic link writes it again. So these tests
+   * read the identities that are a way in.
+   */
+  async function providersOf(userId: string) {
+    const rows = await env.DB.prepare(
+      "SELECT provider, subject FROM ta_identity WHERE user_id = ? AND provider <> 'email' ORDER BY provider",
+    )
+      .bind(userId)
+      .all<{ provider: string; subject: string }>();
+    return rows.results.map((r) => `${r.provider}:${r.subject}`);
+  }
+
+  /** The expiry of the claim lease of a user, in ms, or null. */
+  async function leaseExpiry(userId: string) {
+    const row = await env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
+      .bind(`claim-lease:${userId}`)
+      .first<{ e: number | string }>();
+    return row ? new Date(row.e).getTime() : null;
+  }
+
+  /** The answer of a password sign-in of the address, with no count. */
+  async function signIn(email: string, password: string) {
+    return answer((await measure(make(false), post("/password/sign-in", { email, password }))).res);
+  }
+
+  /** The Google config of the owner: its token answer comes at once. */
+  const google: Partial<AuthConfig> = {
+    social: {
+      google: { clientId: "gid", clientSecret: "gsecret" },
+      fetch: async () =>
+        Response.json({ id_token: "idtok", access_token: "at", token_type: "Bearer" }),
+    },
+    jwt: { verifyIdToken: async () => idClaims.current, signES256: async () => "es256" },
+  };
+
+  /**
+   * The rival's request. The owner's Google callback with a verified
+   * address keeps the identity `g-owner`. The owner's reset with the
+   * password `NEW` keeps that password.
+   */
+  async function rivalRequest(rival: "reset" | "google", email: string): Promise<Request> {
+    if (rival === "reset") {
+      expect(
+        (await measure(make(false), post("/password/reset/request", { email }))).res.status,
+      ).toBe(200);
+      const text = mail.findLast((m) => m.to === email)?.text ?? "";
+      const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+      return post("/password/reset", { token, password: NEW });
+    }
+    const start = await measure(
+      make(false, undefined, google),
+      new Request(`${BASE}/auth/social/google/start`, { headers: { origin: APP_ORIGIN } }),
+    );
+    const location = new URL(start.res.headers.get("location") ?? "");
+    const bind = start.res.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+    const iat = Math.floor(current.getTime() / 1000);
+    idClaims.current = {
+      iss: "https://accounts.google.com",
+      aud: "gid",
+      sub: "g-owner",
+      email,
+      email_verified: true,
+      nonce: location.searchParams.get("nonce"),
+      iat,
+      exp: iat + 3600,
+    };
+    const state = location.searchParams.get("state") ?? "";
+    return new Request(`${BASE}/auth/social/google/callback?state=${state}&code=c`, {
+      headers: { origin: APP_ORIGIN, cookie: bind },
+    });
+  }
+
+  for (const form of ["stale", "sweep"] as const)
+    it(`leaves the claimant no credential and no session when a rival claims past a claim's lease, by the ${form} form`, async () => {
+      // The probe of open point 1 of join-task3-report.md. Claim A deletes the
+      // claimant's password, and its statements then run past its lease.
+      // Claim B takes the stale lease, or a new lease after the sweep, and
+      // claims. A's flip matches no row. Before, A's undo put the claimant's
+      // password back onto the verified user.
+      const email = `zed-${form}@example.com`;
+      const userId = await claimant(email);
+      const first = await link(email);
+      const second = await link(email);
+      const atDelete = latch();
+      const goDelete = latch();
+      let paused = false;
+      // A waits after its delete of the passwords, before its flip.
+      const a = make(true, async (sql) => {
+        if (!paused && /^DELETE FROM ta_password\b/.test(sql)) {
+          paused = true;
+          atDelete.open();
+          await goDelete.wait;
+        }
+      });
+      const claimA = measure(a, first);
+      await atDelete.wait;
+      expect((await rowsOf(userId)).passwords).toBe(0);
+      // The clock moves past A's lease; the test does not sleep.
+      current = new Date(current.getTime() + LEASE_MS + 1_000);
+      if (form === "sweep") await make(false).auth.api.sweepExpired();
+      const claimB = await measure(make(true), second);
+      expect(await answer(claimB.res)).toBe("200 ok");
+      goDelete.open();
+      const doneA = await claimA;
+      expect(await answer(doneA.res)).toBe("409 conflict");
+      expect(await rowsOf(userId)).toEqual({
+        verified: true,
+        passwords: 0,
+        sessions: 1,
+        lease: { purpose: "claim-lease", identifier: userId },
+      });
+      // The one session is the owner's, from B. The claimant's two sessions are gone.
+      expect(await sessionsOf(userId)).toEqual({ all: 1, proved: 1 });
+      expect(await providersOf(userId)).toEqual([]);
+      expect(await signIn(email, PASSWORD)).toBe("401 invalid_credentials");
+      expect(Math.max(claimB.queries, doneA.queries)).toBeLessThanOrEqual(BUDGET);
+    });
+
+  for (const rival of ["reset", "google"] as const)
+    it(`keeps the rows that a rival claim kept when a claim's lease comes after it ended: the ${rival}`, async () => {
+      // The common race, the scene of the late claim test of core. The rival
+      // takes its lease, and its statements then run past the life of that
+      // lease. Claim A starts in that wait and reads the user unverified,
+      // before the rival's flip. The rival ends and keeps the owner's new
+      // password or Google identity. A then takes the stale lease. Each
+      // delete of A runs only while the user is unverified, so it deletes
+      // nothing, and its flip matches no row.
+      const email = `ivy-${rival}@example.com`;
+      const userId = await claimant(email);
+      const late = await link(email);
+      const request = await rivalRequest(rival, email);
+      const atDelete = latch();
+      const goDelete = latch();
+      let paused = false;
+      // The rival waits after its first delete, the identities, so after its lease.
+      const owner = make(
+        true,
+        async (sql) => {
+          if (!paused && /^DELETE FROM ta_identity\b/.test(sql)) {
+            paused = true;
+            atDelete.open();
+            await goDelete.wait;
+          }
+        },
+        rival === "google" ? google : {},
+      );
+      const claimRival = measure(owner, request);
+      await atDelete.wait;
+      // The clock moves past the rival's lease; the test does not sleep.
+      current = new Date(current.getTime() + LEASE_MS + 1_000);
+      const inHook = latch();
+      const goHook = latch();
+      // A fixes its time now, reads the user unverified, and waits before its lease.
+      const sent: string[] = [];
+      const a = make(true, async (sql) => void sent.push(sql), {
+        hooks: {
+          session: { afterEnd: () => {} },
+          user: {
+            beforeVerify: async () => {
+              inHook.open();
+              await goHook.wait;
+            },
+          },
+        },
+      });
+      const claimA = measure(a, late);
+      await inHook.wait;
+      goDelete.open();
+      const won = await claimRival;
+      expect(won.res.status).toBe(rival === "reset" ? 200 : 302);
+      const kept = {
+        passwords: rival === "reset" ? 1 : 0,
+        providers: rival === "reset" ? [] : ["google:g-owner"],
+      };
+      expect((await rowsOf(userId)).passwords).toBe(kept.passwords);
+      expect(await providersOf(userId)).toEqual(kept.providers);
+      // The rival's lease is stale for A.
+      expect(await leaseExpiry(userId)).toBeLessThan(current.getTime());
+      goHook.open();
+      // A lost claim answers 409 on D1: a flow there runs no claim retry.
+      const doneA = await claimA;
+      expect(await answer(doneA.res)).toBe("409 conflict");
+      // A took the stale lease and sent its deletes and its flip. Its undo
+      // then wrote the rival's expiry back.
+      // The take is the update of the lease's expiry; the token spend sets `consumed_at`.
+      const of = (re: RegExp) => sent.findIndex((q) => re.test(q));
+      const take = of(/^UPDATE ta_verification SET expires_at = \?, created_at = \?/);
+      const remove = of(/^DELETE FROM ta_password\b.* AND EXISTS \(/);
+      expect(take).toBeGreaterThan(-1);
+      expect(remove).toBeGreaterThan(take);
+      expect(of(/^UPDATE ta_user SET email_verified = \?/)).toBeGreaterThan(remove);
+      expect(await rowsOf(userId)).toMatchObject({
+        verified: true,
+        passwords: kept.passwords,
+        lease: { purpose: "claim-lease", identifier: userId },
+      });
+      expect(await providersOf(userId)).toEqual(kept.providers);
+      // The rival's session lives, and it is proved. The claimant's are gone.
+      expect(await sessionsOf(userId)).toEqual({ all: 1, proved: 1 });
+      expect(await signIn(email, PASSWORD)).toBe("401 invalid_credentials");
+      if (rival === "reset") expect(await signIn(email, NEW)).toBe("200 ok");
+      expect(Math.max(won.queries, doneA.queries)).toBeLessThanOrEqual(BUDGET);
+    });
+});
+
 function latch() {
   let open = () => {};
   const wait = new Promise<void>((resolve) => {

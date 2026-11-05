@@ -410,6 +410,27 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       if (ctx.guard && ctx.guard !== ctx.inherited) ctx.guard.exists = exists;
       else ctx.guard = { exists };
     };
+  // The delete of a claim before its mark (ruling 33 of plan 12q). One
+  // `DELETE ... AND EXISTS (...) RETURNING` statement, so the check adds no
+  // query. Its rows go to the undo log, as for `delete`.
+  const deleteWhile = st.deleteReturningWhile?.bind(st);
+  if (deleteWhile)
+    self.deleteOnlyWhile = async (model, where, whileModel, whileWhere) => {
+      await ctx.ready();
+      assertModel(model);
+      assertModel(whileModel);
+      const exists = st.select(whileModel, whileWhere);
+      // A condition that can match no row: the delete removes nothing. Its where is still checked.
+      if (!exists) {
+        st.delete(model, where);
+        return 0;
+      }
+      const s = deleteWhile(model, where, exists);
+      if (!s) return 0;
+      const rows = await all(db, s, ctx.sent);
+      logDelete(model, rows);
+      return rows.length;
+    };
   if (ctx.queryLimitPerInvocation) self.queryLimitPerInvocation = true;
   if (ctx.ping) self.ping = ctx.ping;
   if (ctx.sent.ready !== undefined) {

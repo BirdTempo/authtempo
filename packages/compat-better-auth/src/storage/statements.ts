@@ -103,6 +103,12 @@ export interface CompatStatements extends SqlStatements {
   deleteReturningRead<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
   /** Required here: the D1 and SQLite storages run the undo guard of a claim (plan 12q). */
   reinsertWhile(model: ModelName, rows: readonly Row[], guard: Statement): Statement[];
+  /** Required here: the D1 and SQLite storages run the conditional delete of a claim (ruling 33 of plan 12q). */
+  deleteReturningWhile<M extends ModelName>(
+    model: M,
+    where: Where<M>[],
+    guard: Statement,
+  ): Statement | null;
 }
 
 /**
@@ -142,6 +148,18 @@ function reinsertWhileOf(
 ): Statement[] {
   if (!st.reinsertWhile) throw new Error("reinsertWhile: core's statements have none");
   return st.reinsertWhile(model, rows, guard);
+}
+
+/** `deleteReturningWhile` of core's statements on SQLite. They always have it. */
+function deleteReturningWhileOf<M extends ModelName>(
+  st: SqlStatements,
+  model: M,
+  where: Where<M>[],
+  guard: Statement,
+): Statement | null {
+  if (!st.deleteReturningWhile)
+    throw new Error("deleteReturningWhile: core's statements have none");
+  return st.deleteReturningWhile(model, where, guard);
 }
 
 function withoutUnmapped(st: CompatStatements): CompatStatements {
@@ -198,6 +216,9 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     },
     deleteReturningRead(model, where) {
       return none(model) ? null : st.deleteReturningRead(model, where);
+    },
+    deleteReturningWhile(model, where, guard) {
+      return none(model) ? null : st.deleteReturningWhile(model, where, guard);
     },
   };
 }
@@ -305,6 +326,12 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
     deleteReturningRead(model, where) {
       // Core's tables: each raw column is a field, so the raw row is the read row (`returnedParts`).
       return own(model) ? core.deleteReturning(model, where) : st.deleteReturningRead(model, where);
+    },
+    // The guard is a select of this whole set, as for reinsertWhile.
+    deleteReturningWhile(model, where, guard) {
+      return own(model)
+        ? deleteReturningWhileOf(core, model, where, guard)
+        : st.deleteReturningWhile(model, where, guard);
     },
     toStorageError(model, err) {
       return own(model) ? coreError(model, err) : st.toStorageError(model, err);
@@ -885,6 +912,18 @@ export function compatStatements(
       // The raw row for the undo, then the read form of `select` for `decode` (plan 12o).
       const s = st.delete(model, where);
       return s && { sql: `${s.sql} RETURNING *, ${readList(model, READ_ALIAS)}`, params: s.params };
+    },
+    deleteReturningWhile(model, where, guard) {
+      // Core's rule (`SqlStatements.deleteReturningWhile`, ruling 33 of plan 12q).
+      // The delete always holds a WHERE, so the check joins it with AND.
+      if (pg) throw new Error("deleteReturningWhile: the D1 undo runs on SQLite only");
+      const s = st.delete(model, where);
+      return (
+        s && {
+          sql: `${s.sql} AND EXISTS (${guard.sql}) RETURNING *`,
+          params: [...s.params, ...guard.params],
+        }
+      );
     },
     reinsertRows(model, rows) {
       const first = rows[0];

@@ -1067,6 +1067,20 @@ export interface SqlStatements {
    * `deleteReturning`.
    */
   deleteReturningRead?<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
+  /**
+   * Optional. The delete of `deleteOnlyWhile` (ruling 33 of plan 12q):
+   * `deleteReturning` with the term `AND EXISTS (guard)`. `guard` is a
+   * `select` of this statement set. So the check and the delete are one
+   * statement, and the call sends no more queries than `delete`. The
+   * parameters of `guard` follow those of the where. So the dialect needs
+   * positional placeholders, as for `reinsertWhile`. Without it, the D1
+   * adapter has no `deleteOnlyWhile`.
+   */
+  deleteReturningWhile?<M extends ModelName>(
+    model: M,
+    where: Where<M>[],
+    guard: Statement,
+  ): Statement | null;
 }
 
 /**
@@ -1226,6 +1240,19 @@ export function coreStatements(d: Dialect): SqlStatements {
         s && {
           sql: `${s.sql} RETURNING ${columnsOf(model).map(d.quote).join(", ")}`,
           params: s.params,
+        }
+      );
+    },
+    deleteReturningWhile(model, where, guard) {
+      if (d.placeholder(1) !== d.placeholder(2))
+        throw new Error("deleteReturningWhile: the dialect needs positional placeholders");
+      // A delete needs a where, and each term of a where that can match adds a clause part.
+      // So the statement always holds a WHERE, and the check joins it with AND.
+      const s = deleteStatement(d, model, where);
+      return (
+        s && {
+          sql: `${s.sql} AND EXISTS (${guard.sql}) RETURNING ${columnsOf(model).map(d.quote).join(", ")}`,
+          params: [...s.params, ...guard.params],
         }
       );
     },

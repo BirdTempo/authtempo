@@ -308,10 +308,10 @@ const SITES: Site[] = [
     file: "storage/conformance.ts",
     fn: "throws",
     call: 'delete("session"',
-    count: 17,
+    count: 18,
     kind: "kit",
     reason:
-      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep; the cases of undoOnlyWhile (plan 12q): the deletes under a condition",
+      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep; the cases of undoOnlyWhile (plan 12q): the deletes under a condition; the count of deleteOnlyWhile (ruling 33 of plan 12q): a delete beside it",
   },
   {
     file: "storage/conformance.ts",
@@ -324,9 +324,10 @@ const SITES: Site[] = [
   },
 ];
 
-// A delete that answers its rows (`deleteRows`, plan 12o) is a site too.
+// A delete that answers its rows (`deleteRows`, plan 12o) is a site too. So
+// is a delete under a condition (`deleteOnlyWhile`, ruling 33 of plan 12q).
 const CALL_RE =
-  /\b(endSessions|endSessionChunks|destroySession)\(|\.(delete|deleteRows)\(\s*"session"/g;
+  /\b(endSessions|endSessionChunks|destroySession)\(|\.(delete|deleteRows|deleteOnlyWhile)\(\s*"session"/g;
 
 /** Comments become spaces, so a line number stays and a comment names no site. */
 function code(text: string): string {
