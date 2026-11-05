@@ -195,4 +195,47 @@ describe("the import holds the claim of an unverified user on Postgres", () => {
       sessions: 1,
     });
   });
+
+  it("rolls back and skips the record when another import takes the identity before the activation (ruling 24)", async () => {
+    const email = "cy@example.com";
+    // The import waits after its pending identity write, inside its transaction.
+    const run = pauseAfterCreate(storage, "identity");
+    const report = importUsers(
+      run.db,
+      listSource([
+        user("cy", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-cy" }],
+        }),
+      ]),
+      { formats: ["bcrypt"] },
+    );
+    await run.reached;
+    // Another import writes a verified user with the same Google login and commits.
+    const other = await importUsers(
+      storage,
+      listSource([
+        user("dee", {
+          email: "dee@example.com",
+          identities: [{ provider: "google", subject: "g-cy" }],
+        }),
+      ]),
+      { formats: ["bcrypt"] },
+    );
+    expect(other.created).toMatchObject({ user: 1, identity: 2 });
+    run.go();
+    // The activation meets the key of the provider and the subject. Postgres
+    // aborts the transaction, so the import rolls back and plans the record again.
+    const r = await report;
+    expect(r.skipped).toEqual([{ kind: "user", sourceId: "cy", reason: "identity_taken" }]);
+    expect(r.partial).toEqual([]);
+    expect(await rowsOf(email)).toEqual({
+      verified: undefined,
+      passwords: 0,
+      identities: [],
+      sessions: 0,
+    });
+    expect(await rowsOf("dee@example.com")).toMatchObject({ identities: ["email", "google"] });
+  });
 });
