@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { FRAMEWORK_PAGES } from "./frameworks.mjs";
+import { searchIndex } from "./scripts/lib/search-index.ts";
 import { parseTokens } from "./scripts/lib/tokens.ts";
 import { findRoot } from "./src/data/repo.ts";
 import { SITE } from "./src/data/site.ts";
@@ -155,5 +156,9 @@ export default defineConfig({
         { tag: "meta", attrs: { property: "og:image", content: `${SITE.origin}/og.png` } },
       ],
     }),
+    // After starlight(): the hook of Starlight writes the search index, and
+    // this hook checks it. Pagefind can lose its last write, and this hook
+    // then writes the index again (scripts/lib/search-index.ts, plan 12q).
+    searchIndex(),
   ],
 });

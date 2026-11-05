@@ -36,6 +36,25 @@ const read = (href: string) => {
   const file = `${DIST}${href.slice(1)}`;
   return existsSync(file) ? readFileSync(file, "utf8") : null;
 };
+/**
+ * A JSON file of dist, read again until it parses, for at most `ms` (plan 12q
+ * decision 8). Pagefind writes its entry file at the end of astro build. The
+ * release rehearsal of 2026-11-05 04:01 CST read that file empty. The cause
+ * was a lost write of Pagefind, which the build now writes again
+ * (scripts/lib/search-index.ts). The retry guards a read beside a later writer.
+ */
+async function readJsonWhole<T>(path: string, ms = 5000): Promise<T> {
+  const until = Date.now() + ms;
+  for (;;) {
+    try {
+      return JSON.parse(readFileSync(path, "utf8")) as T;
+    } catch (e) {
+      const partial = e instanceof SyntaxError || (e as NodeJS.ErrnoException).code === "ENOENT";
+      if (!partial || Date.now() >= until) throw e;
+    }
+    await new Promise((done) => setTimeout(done, 100));
+  }
+}
 /** Each tag of a kind, as its source text. */
 const tags = (html: string, tag: string) =>
   [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>`, "g"))].map((m) => m[0]);
@@ -114,7 +133,8 @@ describe("the build layout (plan 11a)", () => {
     expect(html.some((p) => p.startsWith("docs/docs/"))).toBe(false);
   });
 
-  it("the search index holds docs pages and no landing page", () => {
+  // The read can wait 5 s for a whole entry file, so the test has 15 s.
+  it("the search index holds docs pages and no landing page", { timeout: 15_000 }, async () => {
     expect(readFileSync(`${DIST}index.html`, "utf8")).not.toContain("data-pagefind-body");
     for (const page of docsPages)
       expect({
@@ -122,9 +142,9 @@ describe("the build layout (plan 11a)", () => {
         marked: readFileSync(`${DIST}${page}`, "utf8").includes("data-pagefind-body"),
       }).toEqual({ page, marked: true });
     expect(existsSync(`${DIST}pagefind/pagefind.js`)).toBe(true);
-    const entry = JSON.parse(readFileSync(`${DIST}pagefind/pagefind-entry.json`, "utf8")) as {
-      languages: Record<string, { page_count: number }>;
-    };
+    const entry = await readJsonWhole<{ languages: Record<string, { page_count: number }> }>(
+      `${DIST}pagefind/pagefind-entry.json`,
+    );
     const indexed = Object.values(entry.languages).reduce((n, l) => n + l.page_count, 0);
     expect(indexed).toBe(docsPages.length);
   });
