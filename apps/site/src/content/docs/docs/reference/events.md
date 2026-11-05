@@ -193,7 +193,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `sign_up.method` | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `sso`, `phone`, `anonymous`, `password_reset`, `operator`, `scim` |
 | `sign_up.outcome` | `success`, `failure` |
 | `sign_out.outcome` | `success`, `failure` |
-| `session.end.reason` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade` |
+| `session.end.reason` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed` |
 | `second_factor.challenge.method` | `totp`, `passkey`, `email`, `backup_code`, `trusted_device` |
 | `second_factor.challenge.outcome` | `success`, `failure` |
 | `second_factor.enable.method` | `totp`, `passkey`, `email` |

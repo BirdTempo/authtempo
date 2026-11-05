@@ -28,8 +28,9 @@ import {
 //
 // Each sign-in, the password and the social one, has three scenes.
 // (a) The sign-in runs after the flip. Its row is gone, so no session opens.
-// (b) The sign-in runs after the lease. Its session is unproved, so it acts
-//     as unverified at the flip. The claim's session delete removes it.
+// (b) The sign-in runs after the lease. Its session is unproved, so at the
+//     flip the door of a claimed session refuses it and ends it (ruling 13
+//     of plan 12q).
 // (c) The sign-in reads its row before the claim. The whole claim runs
 //     before its session insert, and the guard finds no row and undoes it.
 // Each scene sends real requests through `auth.handle`. The other request
@@ -129,7 +130,7 @@ for (const signIn of [PASSWORD, SOCIAL])
         expect([...endings].sort()).toEqual(hook ? first.map((s) => `claim:${s}`).sort() : []);
       });
 
-      it(`(b) runs after the lease, opens an unproved session that the flip finds unverified, and the claim removes it (afterEnd hook ${hook})`, async () => {
+      it(`(b) runs after the lease, opens an unproved session, and the door ends it at the flip (afterEnd hook ${hook}, ruling 13 of plan 12q)`, async () => {
         const other = make({ counted: false, hook });
         await signIn.start(other);
         const id = await userId(CLAIMED);
@@ -137,7 +138,12 @@ for (const signIn of [PASSWORD, SOCIAL])
         const verify = await ownerLink(other);
         const request = await signIn.request(other);
         let stage: "armed" | "signed in" | "done" = "armed";
-        let straddle: { answer: string; token: string | null; proved: number[] } | null = null;
+        let straddle: {
+          answer: string;
+          token: string | null;
+          ids: string[];
+          proved: number[];
+        } | null = null;
         let atFlip: string | null = null;
         const owner = make({
           counted: true,
@@ -151,12 +157,12 @@ for (const signIn of [PASSWORD, SOCIAL])
               stage = "signed in";
               const res = await call(other, request);
               const token = tokenOf(res);
+              const made = (await sessionsOf(id)).filter((s) => !first.includes(s.id));
               straddle = {
                 answer: await answer(res),
                 token,
-                proved: (await sessionsOf(id))
-                  .filter((s) => !first.includes(s.id))
-                  .map((s) => s.proved),
+                ids: made.map((s) => s.id),
+                proved: made.map((s) => s.proved),
               };
             } else if (stage === "signed in" && FLIP.test(sql)) {
               stage = "done";
@@ -171,12 +177,15 @@ for (const signIn of [PASSWORD, SOCIAL])
         expect(stage).toBe("done");
         // The sign-in read the user before the flip: its session is live and unproved.
         expect(straddle).toMatchObject({ answer: "200 ok", proved: [0] });
-        expect(atFlip).toBe("403 email_unverified");
+        expect(atFlip).toBe("401 unauthorized");
         expect(await rowsOf(id)).toEqual(CLAIMED_STATE);
-        // The claim ends the straddle's session too, and the hook sees each end once.
-        expect(endings).toHaveLength(hook ? first.length + 1 : 0);
-        expect(new Set(endings).size).toBe(endings.length);
-        for (const end of endings) expect(end.startsWith("claim:")).toBe(true);
+        // The door ends the straddle's session with the reason claimed, and the
+        // claim ends the first ones with the reason claim. The hook sees each end once.
+        const ids = (straddle as { ids: string[] } | null)?.ids ?? [];
+        expect(ids).toHaveLength(1);
+        expect([...endings].sort()).toEqual(
+          hook ? [...first.map((s) => `claim:${s}`), ...ids.map((s) => `claimed:${s}`)].sort() : [],
+        );
       });
 
       it(`(c) reads its row before the claim, inserts after it, and its guard undoes the session (afterEnd hook ${hook})`, async () => {

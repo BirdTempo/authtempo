@@ -14,8 +14,10 @@ import { freshDatabase } from "./db.js";
 // outside any transaction: the session row by its token, then the user row.
 // A claim can commit between them. The request then holds the claimant's
 // deleted session and the verified user (open point 1 of the 12o wave B).
-// The session's `proved` flag is false, so the action is refused, and no
-// row of it stays. Every row comes from a real request through `auth.handle`.
+// The session's `proved` flag is false on a verified user. So the door of a
+// claimed session refuses the request with 401 (ruling 13 of plan 12q). Its
+// delete finds no row, so no hook fires, and no row of the action stays.
+// Every row comes from a real request through `auth.handle`.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -101,7 +103,7 @@ async function handle(auth: ReturnType<typeof createAuth>, request: Request): Pr
   return res;
 }
 
-/** The status and the error code of an answer: "200 ok", "403 email_unverified". */
+/** The status and the error code of an answer: "200 ok", "401 unauthorized". */
 async function answer(res: Response): Promise<string> {
   const body = (await res.clone().json()) as { error?: string };
   return `${res.status} ${body.error ?? "ok"}`;
@@ -172,7 +174,7 @@ describe("a session that a request resolved before the claim's commit, on Postgr
         // The claim committed between the session read and the user read of the request.
         expect(w.armed.run).toBeNull();
         expect(claimed).toBe("200 ok");
-        expect(await answer(acted)).toBe("403 email_unverified");
+        expect(await answer(acted)).toBe("401 unauthorized");
         // The claim deleted the claimant's session, and the owner holds one proved session.
         expect(await rowsOf(s.userId)).toEqual({
           verified: true,

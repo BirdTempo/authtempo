@@ -14,6 +14,7 @@ import {
   sessionProved,
 } from "../src/engine/address.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
+import { mintSessionJwt, sessionLive } from "../src/engine/jwt.js";
 import { verifyMagicLink } from "../src/engine/magic-link.js";
 import { hasPendingEnd, readPendingEnds } from "../src/engine/operator/access-end.js";
 import { revokedFor } from "../src/engine/operator/guards.js";
@@ -458,24 +459,22 @@ async function deviceCode(w: World, clientId: string): Promise<string> {
 /**
  * Each open flow and each reachable gate of a closed flow, as a request of the
  * claimant's session. Each comes with the answer that the rule gives at the
- * flip. The nine open flows come first (inventory-window.md section 1).
+ * flip. The nine open flows come first (inventory-window.md section 1). The
+ * first request meets the door of a claimed session, which ends the row
+ * (ruling 13 of plan 12q). So each request answers as with no session.
  */
 function gateRequests(cookie: string, ctx: { clientId: string; userCode: string }) {
   return [
-    [
-      "the API token create",
-      req("POST", "/tokens", { name: "ci" }, cookie),
-      "403 email_unverified",
-    ],
+    ["the API token create", req("POST", "/tokens", { name: "ci" }, cookie), "401 unauthorized"],
     [
       "the change of address",
       req("POST", "/user/change-email", { newEmail: "mallory@example.net" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the passkey registration options",
       req("POST", "/passkey/register/options", {}, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the passkey registration verify",
@@ -485,28 +484,23 @@ function gateRequests(cookie: string, ctx: { clientId: string; userCode: string 
         { response: { id: "x", response: { clientDataJSON: "e30" } } },
         cookie,
       ),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
-    [
-      // The claim deleted the password before the flip (ruling 16), so the password check refuses first.
-      "the TOTP setup",
-      req("POST", "/totp/setup", { password: PW }, cookie),
-      "401 invalid_credentials",
-    ],
+    ["the TOTP setup", req("POST", "/totp/setup", { password: PW }, cookie), "401 unauthorized"],
     [
       "the TOTP enable",
       req("POST", "/totp/enable", { code: "123456" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the email method enable",
       req("POST", "/second-factor/email/enable", { password: PW }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the passkey method enable",
       req("POST", "/second-factor/passkey/enable", { password: PW, response: { id: "x" } }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the organization token create",
@@ -516,24 +510,24 @@ function gateRequests(cookie: string, ctx: { clientId: string; userCode: string 
         { organizationId: "01JZZZZZZZZZZZZZZZZZZZZZZZ", name: "ci", permissions: {} },
         cookie,
       ),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the username set",
       req("POST", "/user/username", { username: "mallory" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
-    ["the phone add", req("POST", "/phone/add", { phone: PHONE }, cookie), "403 email_unverified"],
+    ["the phone add", req("POST", "/phone/add", { phone: PHONE }, cookie), "401 unauthorized"],
     [
       "the phone add verify",
       req("POST", "/phone/add/verify", { code: "123456" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
-    ["the token list", req("GET", "/tokens", undefined, cookie), "403 email_unverified"],
+    ["the token list", req("GET", "/tokens", undefined, cookie), "401 unauthorized"],
     [
       "the profile update",
       req("POST", "/user/update", { name: "Mallory" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the password change",
@@ -543,22 +537,22 @@ function gateRequests(cookie: string, ctx: { clientId: string; userCode: string 
         { currentPassword: PW, newPassword: "another long one" },
         cookie,
       ),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the organization create",
       req("POST", "/organizations/create", { slug: "mallory", name: "Mallory" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the slug check",
       req("POST", "/organizations/check-slug", { slug: "mallory" }, cookie),
-      "403 email_unverified",
+      "401 unauthorized",
     ],
     [
       "the OAuth device approval",
       formReq("/oauth/device", { user_code: ctx.userCode, decision: "allow" }, cookie),
-      "200 page",
+      "401 unauthorized",
     ],
   ] as const;
 }
@@ -592,7 +586,7 @@ async function waysIn(w: World, userId: string) {
 
 describe("a claimant's session at the claim's flip (plan 12p decision 3)", () => {
   for (const hook of [false, true])
-    it(`refuses every verified-only action, leaves no row of it, and the claim ends the session (afterEnd hook ${hook})`, async () => {
+    it(`refuses every verified-only action, leaves no row of it, and the first read ends the session (afterEnd hook ${hook}, ruling 13 of plan 12q)`, async () => {
       const w = world({ hook });
       const token = await claimant(w);
       const cookie = cookieOf(token);
@@ -601,16 +595,22 @@ describe("a claimant's session at the claim's flip (plan 12p decision 3)", () =>
       const verify = await ownerLink(w);
       const seen: Record<string, string> = {};
       let window: { verified: boolean; proved: boolean } | null = null;
-      let authorize: { status: number; error: string | null } | null = null;
+      let authorize: { status: number; client: boolean; code: boolean } | null = null;
       w.armed.run = async () => {
-        // The window: the user reads as verified, and the claimant's session is still live.
-        const live = await resolveSession(w.config, token);
-        window = live ? { verified: live.user.emailVerified, proved: live.session.proved } : null;
+        // The window: the user reads as verified, and the claimant's session row is still there.
+        const row = await rowOf(w, token);
+        const user = await userAt(w, CLAIMED);
+        window = row ? { verified: user.emailVerified, proved: row.proved } : null;
         for (const [name, request, _want] of gateRequests(cookie, { clientId, userCode }))
           seen[name] = await answer(await w.claimant.handle(request));
         const res = await w.claimant.handle(await authorizeGet(clientId, cookie));
         const location = new URL(res.headers.get("location") ?? `${REDIRECT}?none=1`);
-        authorize = { status: res.status, error: location.searchParams.get("error") };
+        // With no session, the authorize sends the person to sign in, not to the client.
+        authorize = {
+          status: res.status,
+          client: location.href.startsWith(REDIRECT),
+          code: location.searchParams.has("code"),
+        };
       };
       const owner = await w.owner.handle(verify);
       expect(await answer(owner)).toBe("200 ok");
@@ -621,7 +621,7 @@ describe("a claimant's session at the claim's flip (plan 12p decision 3)", () =>
           gateRequests(cookie, { clientId, userCode }).map(([name, , want]) => [name, want]),
         ),
       );
-      expect(authorize).toEqual({ status: 302, error: "access_denied" });
+      expect(authorize).toEqual({ status: 302, client: false, code: false });
       // The claim completed: the owner holds a proved session, and the claimant none.
       const user = await userAt(w, CLAIMED);
       expect(user.emailVerified).toBe(true);
@@ -641,7 +641,8 @@ describe("a claimant's session at the claim's flip (plan 12p decision 3)", () =>
         username: null,
         phone: null,
       });
-      expect(w.ended).toEqual(hook ? ["claim"] : []);
+      // The first gate request ended the session, so the claim's own delete found none.
+      expect(w.ended).toEqual(hook ? ["claimed"] : []);
       // The owner's own session passes the same gate.
       const made = await w.claimant.handle(
         req("POST", "/tokens", { name: "owner" }, cookieOf(ownerToken ?? "")),
@@ -649,19 +650,35 @@ describe("a claimant's session at the claim's flip (plan 12p decision 3)", () =>
       expect(await answer(made)).toBe("200 ok");
     });
 
-  it("mints a session JWT that says email_verified false at the flip", async () => {
+  it("mints no session JWT at the flip, and a JWT from before the claim is not live (ruling 13 of plan 12q)", async () => {
     const w = world();
     const token = await claimant(w);
+    // Before the claim: the claimant's JWT says email_verified false, and its session is live.
+    const before = await w.claimant.handle(req("GET", "/token", undefined, cookieOf(token)));
+    expect(before.status).toBe(200);
+    const jwt = ((await before.json()) as { token: string }).token;
+    expect(decodeJws(jwt)?.payload.email_verified).toBe(false);
+    const row = await rowOf(w, token);
+    if (!row) throw new Error("no session");
+    expect(await sessionLive(w.config, { sid: row.id })).toBe(true);
     const verify = await ownerLink(w);
-    let claim: unknown = "not minted";
+    const atFlip: Record<string, unknown> = {};
     w.armed.run = async () => {
-      const res = await w.claimant.handle(req("GET", "/token", undefined, cookieOf(token)));
-      expect(res.status).toBe(200);
-      const jwt = ((await res.json()) as { token: string }).token;
-      claim = decodeJws(jwt)?.payload.email_verified;
+      // The two reads first: they write nothing, so the row stays for the route.
+      atFlip.live = await sessionLive(w.config, { sid: row.id });
+      atFlip.mint = await mintSessionJwt(w.config, { userId: row.userId, sessionId: row.id });
+      atFlip.row = (await rowOf(w, token)) !== null;
+      atFlip.route = await answer(
+        await w.claimant.handle(req("GET", "/token", undefined, cookieOf(token))),
+      );
     };
     expect(await answer(await w.owner.handle(verify))).toBe("200 ok");
-    expect(claim).toBe(false);
+    expect(atFlip).toEqual({
+      live: false,
+      mint: { ok: false, code: "unauthorized", status: 401 },
+      row: true,
+      route: "401 unauthorized",
+    });
   });
 });
 
@@ -888,7 +905,10 @@ describe("the rule of the helpers (plan 12p decision 3)", () => {
     if (!unverified) throw new Error("no session");
     let atFlip: ProofCaller | null = null;
     w.armed.run = async () => {
-      atFlip = await resolveSession(w.config, token);
+      // The rows as the claim leaves them at its flip. A session read now ends
+      // the session (ruling 13 of plan 12q), so the rows come from the store.
+      const session = await rowOf(w, token);
+      if (session) atFlip = { user: await userAt(w, CLAIMED), session };
     };
     const ownerToken = setToken(await w.owner.handle(await ownerLink(w)));
     const owner = await resolveSession(w.config, ownerToken ?? "");
@@ -1920,4 +1940,100 @@ describe("the flag of a session that a second factor opens (plan 12p decision 2)
     const token = setToken(done);
     expect(token && (await rowOf(w, token))?.proved).toBe(true);
   });
+});
+
+describe("the door of a claimed session (ruling 13 of plan 12q)", () => {
+  // The claim's gap on the memory store: a verified user, and the claimant's
+  // session from before the proof, still there. The engine leaves this state
+  // between the flip and the session delete, as D1 does.
+  it("answers null to a read-only read and ends nothing, then GET /session answers 401 and ends the session once", async () => {
+    const w = world({ hook: true });
+    const token = await claimant(w);
+    const cookie = cookieOf(token);
+    const verify = await ownerLink(w);
+    const gap: Record<string, unknown> = {};
+    w.armed.run = async () => {
+      gap.verified = (await userAt(w, CLAIMED)).emailVerified;
+      gap.proved = (await rowOf(w, token))?.proved;
+      gap.readOnly = await resolveSession(w.config, token, "read-only");
+      gap.keptByReadOnly = (await rowOf(w, token)) !== null;
+      gap.endsByReadOnly = [...w.ended];
+      gap.read = await answer(await w.claimant.handle(req("GET", "/session", undefined, cookie)));
+      gap.keptByRead = (await rowOf(w, token)) !== null;
+      gap.endsByRead = [...w.ended];
+    };
+    const owner = await w.owner.handle(verify);
+    expect(await answer(owner)).toBe("200 ok");
+    expect(gap).toEqual({
+      verified: true,
+      proved: false,
+      readOnly: null,
+      keptByReadOnly: true,
+      endsByReadOnly: [],
+      read: "401 unauthorized",
+      keptByRead: false,
+      endsByRead: ["claimed"],
+    });
+    // The claim's own delete found no session of the claimant, so the hook fired once.
+    expect(w.ended).toEqual(["claimed"]);
+    // The owner's session came after the proof, so it passes the door.
+    const ownerToken = setToken(owner) ?? "";
+    expect((await resolveSession(w.config, ownerToken))?.session.proved).toBe(true);
+  });
+
+  it("ends the session at the claim's gap in the mode of a bag read too", async () => {
+    const w = world({ hook: true });
+    const token = await claimant(w);
+    const verify = await ownerLink(w);
+    const gap: Record<string, unknown> = {};
+    w.armed.run = async () => {
+      gap.bag = await resolveSession(w.config, token, "no-slide");
+      gap.kept = (await rowOf(w, token)) !== null;
+    };
+    expect(await answer(await w.owner.handle(verify))).toBe("200 ok");
+    expect(gap).toEqual({ bag: null, kept: false });
+    expect(w.ended).toEqual(["claimed"]);
+  });
+
+  // The confirm of a change of address proves the session that it keeps. A
+  // user with no address gains a verified one there, and the session passes.
+  const MOVED = recordAddress("pat@example.org");
+  for (const method of ["link", "code"] as const)
+    it(`keeps the session that the confirm of a change of address by ${method} proves`, async () => {
+      const w = world({ hook: true });
+      const token = await phoneUser(w);
+      const cookie = cookieOf(token);
+      const asked = await w.claimant.handle(
+        req(
+          "POST",
+          "/user/change-email",
+          method === "code" ? { newEmail: MOVED, method } : { newEmail: MOVED },
+          cookie,
+        ),
+      );
+      expect(await answer(asked)).toBe("200 ok");
+      const text = w.mail.findLast((m) => m.to === MOVED)?.text ?? "";
+      const confirmed =
+        method === "link"
+          ? await w.claimant.handle(
+              formReq("/user/change-email/confirm", { token: tokenFromMail(text) }),
+            )
+          : await w.claimant.handle(
+              req(
+                "POST",
+                "/user/change-email/verify",
+                { code: /\b(\d{6})\b/.exec(text)?.[1] ?? "" },
+                cookie,
+              ),
+            );
+      expect(confirmed.status).toBe(method === "link" ? 302 : 200);
+      const user = await userAt(w, MOVED);
+      expect(user.emailVerified).toBe(true);
+      expect((await rowOf(w, token))?.proved).toBe(true);
+      expect(await answer(await w.claimant.handle(req("GET", "/session", undefined, cookie)))).toBe(
+        "200 ok",
+      );
+      expect(await rowOf(w, token)).not.toBeNull();
+      expect(w.ended).toEqual([]);
+    });
 });

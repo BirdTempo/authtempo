@@ -219,6 +219,17 @@ export function provedAtOpen(input: SessionOpen): boolean {
   return hasAddress(input.user) ? input.user.emailVerified : true;
 }
 
+/**
+ * True for a claimed session (ruling 13 of plan 12q): an unproved session
+ * of a user with a verified address. Such a session is dead. Each door
+ * refuses it: `resolveSession`, the session JWT mint, and `sessionLive`.
+ * The door of `resolveSession` says why such a session is the claimant's.
+ * It reads no row, so a door that holds the user pays no query.
+ */
+export function claimedFor(user: UserRow, session: Pick<SessionRow, "proved">): boolean {
+  return !session.proved && hasAddress(user) && user.emailVerified;
+}
+
 export interface ResolvedSession {
   user: UserRow;
   session: SessionRow;
@@ -716,7 +727,9 @@ export function readModeOf(
  * ended after the unban and after `banUntil` (ruling 28). In `"write"` mode
  * the call deletes it by id; in `"read-only"` mode it writes nothing
  * (ruling 4). A session that a SCIM deactivate left for the sweep answers
- * null in the same way (`revokedFor`, ruling 50 of plan 12d).
+ * null in the same way (`revokedFor`, ruling 50 of plan 12d). So does
+ * a claimed session (`claimedFor`, ruling 13 of plan 12q). In `"write"` mode
+ * the call ends it with the reason `claimed`.
  */
 export async function resolveSession(
   config: ResolvedConfig,
@@ -760,6 +773,28 @@ export async function resolveSession(
     const stops = impersonationStops(config, "ban");
     const n = await endSessionById(config.storage, session, now, stops);
     if (n === 1) await sessionsEnded(config, [session], "banned", stops, n);
+    return null;
+  }
+  // The door of a claimed session (ruling 13 of plan 12q). Core proves each
+  // new session of a user with a verified address. So an unproved session of
+  // such a user read the user before a claim made it verified. The claim
+  // ends every session of the user in its transaction. Three ways keep the
+  // claimant's session past it. A store with no isolation shows the claim's
+  // gap between the flip and the session delete. A claim past its budget
+  // leaves the rest to the sweep (decision 3). On D1 the flip can land and
+  // lose its answer, so the claim throws before its session delete.
+  // One more way keeps a session of the prover. A sign-in by the credential
+  // that the claim kept reads the user before the claim and writes its
+  // session after it. The door ends that session too, so the person signs in
+  // again. A Worker of schema 15 that runs after the migration writes such
+  // sessions too. The confirm of a change of address proves the session that
+  // it keeps, so that session passes.
+  if (claimedFor(user, session)) {
+    if (!write) return null;
+    // The cause of the claim's own stop rows, for an impersonation session.
+    const stops = impersonationStops(config, "claim");
+    const n = await endSessionById(config.storage, session, now, stops);
+    if (n === 1) await sessionsEnded(config, [session], "claimed", stops, n);
     return null;
   }
   // A SCIM deactivate left this session for the sweep (ruling 50 of plan 12d).

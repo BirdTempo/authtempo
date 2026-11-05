@@ -23,6 +23,10 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 //   restores the flip, so the rows come back as one piece.
 // - U3 (probe U2 of rr-fix6): the session delete throws before it runs, and
 //   the undo's restore of the flip throws too.
+//
+// U1 and U3 leave the claimant's session from before the proof on a verified
+// user. The door of a claimed session refuses it and ends it at its first
+// read (ruling 13 of plan 12q). The last block holds that for four acts.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -92,6 +96,8 @@ function viewOf(db: D1Database, before: Gate, after: Gate): D1Database {
 let current = new Date("2026-11-05T00:00:00.000Z");
 const clock = { now: () => current };
 const mail: MailMessage[] = [];
+/** Each session end that the hook saw, as `reason:id`. */
+const ends: string[] = [];
 
 /** One invocation of the engine on `db`. An `afterEnd` hook, so the claim ends its sessions by `deleteRows`. */
 function make(db: D1Database = env.DB) {
@@ -104,7 +110,7 @@ function make(db: D1Database = env.DB) {
     clock,
     mail: { send: async (m) => void mail.push(m) },
     password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
-    hooks: { session: { afterEnd: () => {} } },
+    hooks: { session: { afterEnd: (e) => void ends.push(`${e.reason}:${e.session.id}`) } },
   });
 }
 
@@ -121,6 +127,14 @@ function post(path: string, body: unknown, cookie: string | null = null): Reques
       ...(cookie ? { cookie } : {}),
     },
     body: JSON.stringify(body),
+  });
+}
+
+/** A GET of the routes with the session of `cookie`. */
+function getWith(path: string, cookie: string): Request {
+  ip++;
+  return new Request(`${BASE}/auth${path}`, {
+    headers: { origin: APP_ORIGIN, "cf-connecting-ip": `198.51.100.${(ip % 250) + 1}`, cookie },
   });
 }
 
@@ -174,6 +188,17 @@ async function rows() {
   };
 }
 
+/** The sessions of the claimed user, by id, with their proof flag. */
+async function sessions() {
+  return (
+    await env.DB.prepare(
+      "SELECT id, proved FROM ta_session WHERE user_id = (SELECT id FROM ta_user WHERE email = ?) ORDER BY id",
+    )
+      .bind(EMAIL)
+      .all<{ id: string; proved: number }>()
+  ).results;
+}
+
 /** The claimant's sign-up with a password: one password row and one unproved session. */
 async function claimant(): Promise<string> {
   const up = await call(make(), post("/password/sign-up", { email: EMAIL, password: PASSWORD }));
@@ -203,6 +228,7 @@ beforeEach(async () => {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   await env.DB.prepare("DELETE FROM ta_limit").run();
   mail.length = 0;
+  ends.length = 0;
   current = new Date("2026-11-05T00:00:00.000Z");
 });
 
@@ -251,8 +277,10 @@ describe("the undo of a claim whose answer is lost on D1 (decision 6 of plan 12q
     // The session delete never ran, so the claimant's session stays.
     expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 0 });
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
-    // That session came before the proof, so it is not proved: no verified-only act.
-    expect(await tokenWith(session)).toBe("403 email_unverified");
+    // That session came before the proof, and the user is verified now. So the
+    // door of a claimed session refuses it and ends it (ruling 13 of plan 12q).
+    expect(await tokenWith(session)).toBe("401 unauthorized");
+    expect(await rows()).toMatchObject({ sessions: 0 });
     // The owner signs in with a new link. The user is verified, so no claim runs.
     expect(await ownerLink()).toBe("200 ok");
     expect(await rows()).toMatchObject({ verified: true, passwords: 0 });
@@ -307,8 +335,60 @@ describe("the undo of a claim whose answer is lost on D1 (decision 6 of plan 12q
     // The flip stands, so the guarded entries put back no password.
     expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 0 });
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
-    expect(await tokenWith(session)).toBe("403 email_unverified");
+    // The door of a claimed session refuses the claimant's session and ends it (ruling 13 of plan 12q).
+    expect(await tokenWith(session)).toBe("401 unauthorized");
+    expect(await rows()).toMatchObject({ sessions: 0 });
     expect(await ownerLink()).toBe("200 ok");
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
   });
+});
+
+describe("the claimant's session after a lost flip answer on D1 (ruling 13 of plan 12q)", () => {
+  // Scene U1 leaves the user verified with the claimant's sign-up session. It
+  // is unproved, and fresh for a day by default. Before the door it read the
+  // account, listed and ended the owner's sessions, and deleted the account
+  // (open point 1 of the Task 4 report). Now each act meets the door first.
+  const ACTS: [string, (cookie: string) => Request][] = [
+    ["GET /session", (c) => getWith("/session", c)],
+    ["GET /sessions", (c) => getWith("/sessions", c)],
+    ["POST /sessions/revoke-others", (c) => post("/sessions/revoke-others", {}, c)],
+    ["POST /user/delete", (c) => post("/user/delete", {}, c)],
+  ];
+  for (const [name, act] of ACTS)
+    it(`${name} answers 401, ends the claimant's session once with the reason claimed, and the owner's session lives`, async () => {
+      const session = await claimant();
+      let thrown = 0;
+      const view = viewOf(
+        env.DB,
+        async () => {},
+        async (sql) => {
+          if (thrown === 0 && FLIP.test(sql)) {
+            thrown++;
+            throw new Error(LOST);
+          }
+        },
+      );
+      expect(await ownerLink(view)).toBe("500 internal");
+      expect(thrown).toBe(1);
+      // The owner signs in with a new link. The user is verified, so no claim runs.
+      expect((await call(make(), post("/magic-link/request", { email: EMAIL }))).status).toBe(200);
+      const signedIn = await call(make(), post("/magic-link/verify", { token: linkToken() }));
+      expect(await answer(signedIn)).toBe("200 ok");
+      const owner = cookieOf(signedIn);
+      const before = await sessions();
+      expect(before.map((s) => s.proved).sort()).toEqual([0, 1]);
+      const claimed = before.find((s) => s.proved === 0)?.id;
+      expect(ends).toEqual([]);
+      // The act meets the door: 401, and the hook sees one end with the reason claimed.
+      expect(await answer(await call(make(), act(session)))).toBe("401 unauthorized");
+      expect(ends).toEqual([`claimed:${claimed}`]);
+      expect(await answer(await call(make(), getWith("/session", session)))).toBe(
+        "401 unauthorized",
+      );
+      expect(ends).toHaveLength(1);
+      // The owner keeps the verified account and its own proved session.
+      expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 0 });
+      expect((await sessions()).map((s) => s.proved)).toEqual([1]);
+      expect(await answer(await call(make(), getWith("/session", owner)))).toBe("200 ok");
+    });
 });

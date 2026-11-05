@@ -14,9 +14,10 @@ import { freshDatabase, MYSQL_SERVERS, type MysqlDatabase } from "./db.js";
 // so its flip and its session delete become visible at one commit. But a
 // request resolves its session in two reads outside any transaction: the
 // session row by its token, then the user row. A claim can commit between
-// them. The session's `proved` flag is false, so the action is refused,
-// and no row of it stays. Every row comes from a real request through
-// `auth.handle`.
+// them. The session's `proved` flag is false on a verified user. So the
+// door of a claimed session refuses the request with 401 (ruling 13 of plan
+// 12q). Its delete finds no row, so no hook fires, and no row of the action
+// stays. Every row comes from a real request through `auth.handle`.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -94,7 +95,7 @@ async function handle(auth: ReturnType<typeof createAuth>, request: Request): Pr
   return res;
 }
 
-/** The status and the error code of an answer: "200 ok", "403 email_unverified". */
+/** The status and the error code of an answer: "200 ok", "401 unauthorized". */
 async function answer(res: Response): Promise<string> {
   const body = (await res.clone().json()) as { error?: string };
   return `${res.status} ${body.error ?? "ok"}`;
@@ -177,7 +178,7 @@ for (const server of MYSQL_SERVERS)
           // The claim committed between the session read and the user read of the request.
           expect(w.armed.run).toBeNull();
           expect(claimed).toBe("200 ok");
-          expect(await answer(acted)).toBe("403 email_unverified");
+          expect(await answer(acted)).toBe("401 unauthorized");
           // The claim deleted the claimant's session, and the owner holds one proved session.
           expect(await rowsOf(db, s.userId)).toEqual({
             verified: true,

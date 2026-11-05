@@ -37,9 +37,10 @@ import {
 
 // The session proof on D1 (decision 12 of plan 12p). D1 does not isolate a
 // transaction, so each statement of a claim lands at once. A claimant's
-// session is still live between the claim's flip and its session delete.
-// In that gap the user reads as verified. The session flag `proved` stays
-// false, so each verified-only action of that session answers its refusal.
+// session is still there between the claim's flip and its session delete.
+// In that gap the user reads as verified, and the session flag `proved` is
+// false. The door of a claimed session refuses such a session and ends it
+// (ruling 13 of plan 12q). So each action of the claimant answers 401.
 //
 // Each scene runs twice from an empty database, with real requests through
 // `auth.handle`. The control run makes the claim alone. The other run sends
@@ -62,13 +63,15 @@ async function claimant(w: World) {
   const up = await call(w, post("/password/sign-up", { email: CLAIMED, password: OLD }));
   expect(await answer(up)).toBe("200 ok");
   const confirm = tokenIn(lastTo(CLAIMED));
+  const id = await userId(CLAIMED);
+  const first = (await sessionsOf(id)).map((s) => s.id);
   const signIn = await call(w, post("/password/sign-in", { email: CLAIMED, password: OLD }));
   expect(await answer(signIn)).toBe("200 ok");
-  const id = await userId(CLAIMED);
   const sessions = (await sessionsOf(id)).map((s) => s.id);
   expect(sessions).toHaveLength(2);
   // The sign-in's session is fresh: it is the one that acts.
-  return { id, sessions, token: setToken(signIn), confirm };
+  const actor = sessions.find((s) => !first.includes(s)) ?? "";
+  return { id, sessions, actor, token: setToken(signIn), confirm };
 }
 type Claimant = Awaited<ReturnType<typeof claimant>>;
 
@@ -95,6 +98,13 @@ const VERIFY_LINK: Proof = {
   name: "the verify link",
   prepare: async (_w, c) => post("/password/verify", { token: c.confirm }),
 };
+
+/**
+ * The answer of a request with the claimant's session at the flip. The first
+ * request meets the door of a claimed session, which ends the session (ruling
+ * 13 of plan 12q). Each later request finds no session.
+ */
+const DEAD = "401 unauthorized";
 
 /** A public client of the register route, with the device grant. */
 async function oauthClient(w: World): Promise<string> {
@@ -132,10 +142,15 @@ interface Flow {
   setup?: (w: World, c: Claimant) => Promise<Ctx>;
   /** The claimant's requests at the flip, each with its name. */
   act: (w: World, c: Claimant, ctx: Ctx) => Promise<Record<string, string>>;
-  /** The answer of each request, by the proof of the scene. */
-  want: (proof: Proof) => Record<string, string>;
+  /** The answer of each request. */
+  want: () => Record<string, string>;
   /** A request after the claim, in both runs, such as the poll of a device grant. */
   later?: (w: World, c: Claimant, ctx: Ctx) => Promise<string>;
+  /**
+   * The purpose of a verification row that the request with no session holds,
+   * as for any visitor. The row names no user, and the act checks that.
+   */
+  visitor?: string;
 }
 
 async function each(
@@ -153,7 +168,7 @@ async function each(
 const TOKEN: Flow = {
   name: "the API token create",
   act: (w, c) => each(w, [["create", post("/tokens", { name: "kept" }, c.token)]]),
-  want: () => ({ create: "403 email_unverified" }),
+  want: () => ({ create: DEAD }),
 };
 
 const CHANGE_OF_ADDRESS: Flow = {
@@ -170,7 +185,7 @@ const CHANGE_OF_ADDRESS: Flow = {
     seen.mailed = String(mail.filter((m) => m.to === "mallory@evil.example").length);
     return seen;
   },
-  want: () => ({ link: "403 email_unverified", code: "403 email_unverified", mailed: "0" }),
+  want: () => ({ link: DEAD, code: DEAD, mailed: "0" }),
 };
 
 const OAUTH_AUTHORIZE: Flow = {
@@ -190,12 +205,22 @@ const OAUTH_AUTHORIZE: Flow = {
     });
     const res = await call(w, get(`/oauth/authorize?${query}`, c.token));
     const location = new URL(res.headers.get("location") ?? `${REDIRECT}?none=1`);
+    const held = await env.DB.prepare(
+      "SELECT data FROM ta_verification WHERE purpose = 'oauth-request'",
+    ).all<{ data: string }>();
     return {
-      authorize: `${res.status} ${location.searchParams.get("error")}`,
+      authorize: String(res.status),
+      // With no session, the authorize sends the person to sign in, not to the client.
+      client: String(location.href.startsWith(REDIRECT)),
       code: String(location.searchParams.has("code")),
+      // It holds the request for the sign-in page, as for any visitor: the row names no user.
+      held: held.results
+        .map((r) => String((JSON.parse(r.data) as { userId?: unknown }).userId))
+        .join(),
     };
   },
-  want: () => ({ authorize: "302 access_denied", code: "false" }),
+  want: () => ({ authorize: "302", client: "false", code: "false", held: "null" }),
+  visitor: "oauth-request",
 };
 
 const DEVICE_APPROVAL: Flow = {
@@ -222,7 +247,7 @@ const DEVICE_APPROVAL: Flow = {
         form("/oauth/device", { user_code: ctx.userCode ?? "", decision: "allow" }, c.token),
       ],
     ]),
-  want: () => ({ page: "200 page", allow: "200 page" }),
+  want: () => ({ page: DEAD, allow: DEAD }),
   // The poll after the claim finds no approval.
   later: async (w, _c, ctx) =>
     answer(
@@ -251,7 +276,7 @@ const PASSKEY_REGISTRATION: Flow = {
         ),
       ],
     ]),
-  want: () => ({ options: "403 email_unverified", verify: "403 email_unverified" }),
+  want: () => ({ options: DEAD, verify: DEAD }),
 };
 
 const SECOND_FACTOR: Flow = {
@@ -266,13 +291,12 @@ const SECOND_FACTOR: Flow = {
         post("/second-factor/passkey/enable", { password: OLD, response: { id: "x" } }, c.token),
       ],
     ]),
-  // The claim deletes the password before the flip, so the setup's password check refuses first.
-  // The verify link keeps the claimant's password, so there the setup reaches the session rule.
-  want: (proof) => ({
-    "totp setup": proof === VERIFY_LINK ? "403 email_unverified" : "401 invalid_credentials",
-    "totp enable": "403 email_unverified",
-    "email method": "403 email_unverified",
-    "passkey method": "403 email_unverified",
+  // The door comes before the password check, also after the verify link that keeps the password.
+  want: () => ({
+    "totp setup": DEAD,
+    "totp enable": DEAD,
+    "email method": DEAD,
+    "passkey method": DEAD,
   }),
 };
 
@@ -290,13 +314,13 @@ const ORGANIZATION_TOKEN: Flow = {
         ),
       ],
     ]),
-  want: () => ({ create: "403 email_unverified" }),
+  want: () => ({ create: DEAD }),
 };
 
 const USERNAME: Flow = {
   name: "the username set",
   act: (w, c) => each(w, [["set", post("/user/username", { username: "mallory" }, c.token)]]),
-  want: () => ({ set: "403 email_unverified" }),
+  want: () => ({ set: DEAD }),
 };
 
 const PHONE_ADD: Flow = {
@@ -309,7 +333,7 @@ const PHONE_ADD: Flow = {
     seen.sent = String(sms.sent.length);
     return seen;
   },
-  want: () => ({ add: "403 email_unverified", verify: "403 email_unverified", sent: "0" }),
+  want: () => ({ add: DEAD, verify: DEAD, sent: "0" }),
 };
 
 const TEAM_CREATE: Flow = {
@@ -326,7 +350,7 @@ const TEAM_CREATE: Flow = {
         ),
       ],
     ]),
-  want: () => ({ create: "403 email_unverified" }),
+  want: () => ({ create: DEAD }),
 };
 
 const INVITATION_ACCEPT: Flow = {
@@ -353,7 +377,7 @@ const INVITATION_ACCEPT: Flow = {
     each(w, [
       ["accept", post("/organizations/invitations/accept", { token: ctx.invitation }, c.token)],
     ]),
-  want: () => ({ accept: "403 email_unverified" }),
+  want: () => ({ accept: DEAD }),
 };
 
 const MEMBER_ADD: Flow = {
@@ -370,7 +394,7 @@ const MEMBER_ADD: Flow = {
         ),
       ],
     ]),
-  want: () => ({ add: "403 email_unverified" }),
+  want: () => ({ add: DEAD }),
 };
 
 /**
@@ -419,6 +443,16 @@ async function run(flow: Flow, proof: Proof, hook: boolean, fire: boolean) {
   };
 }
 
+/** The tables with no verification row of the purpose `visitor`. */
+function withoutVisitor(tables: Awaited<ReturnType<typeof everyTable>>, visitor?: string) {
+  if (visitor === undefined) return tables;
+  const purposes = tables.purposes.filter((p) => p !== visitor);
+  const counts = { ...tables.counts };
+  counts.ta_verification =
+    (counts.ta_verification ?? 0) - (tables.purposes.length - purposes.length);
+  return { ...tables, counts, purposes };
+}
+
 /** The checks of one scene: the control run, then the run with the claimant's requests at the flip. */
 async function holds(flow: Flow, proof: Proof, hook: boolean) {
   const control = await run(flow, proof, hook, false);
@@ -426,8 +460,9 @@ async function holds(flow: Flow, proof: Proof, hook: boolean) {
   expect(control.answers).toBeNull();
   expect(raced.stage).toBe("done");
   // First the action: its refusal, and every table as the claim alone left it.
-  expect(raced.answers).toEqual(flow.want(proof));
-  expect(raced.tables).toEqual(control.tables);
+  // A row that any visitor's request holds, which names no user, stays out.
+  expect(raced.answers).toEqual(flow.want());
+  expect(withoutVisitor(raced.tables, flow.visitor)).toEqual(control.tables);
   expect(raced.later).toBe(control.later);
   // At the flip the user reads as verified, and both claimant sessions are live and unproved.
   expect(raced.window).toEqual({
@@ -443,9 +478,20 @@ async function holds(flow: Flow, proof: Proof, hook: boolean) {
     expect(r.queries).toBeLessThanOrEqual(BUDGET);
     expect(r.ownerSessions).toEqual([{ claimant: false, proved: 1 }]);
     expect(r.tables.user).toEqual({ verified: 1, username: null, phone: null });
-    // The hook fires afterEnd once for each claimant session, with the reason claim.
-    expect(r.endings).toEqual(hook ? r.claimant.sessions.map((id) => `claim:${id}`).sort() : []);
   }
+  // The hook fires afterEnd once for each claimant session. The claim ends each
+  // with the reason claim. In the raced run, the door ended the session that
+  // acted first, with the reason claimed (ruling 13 of plan 12q).
+  expect(control.endings).toEqual(
+    hook ? control.claimant.sessions.map((id) => `claim:${id}`).sort() : [],
+  );
+  expect(raced.endings).toEqual(
+    hook
+      ? raced.claimant.sessions
+          .map((id) => (id === raced.claimant.actor ? `claimed:${id}` : `claim:${id}`))
+          .sort()
+      : [],
+  );
 }
 
 const HOOKS = [true, false] as const;
@@ -475,7 +521,7 @@ describe("a claimant's session at the claim's flip on D1: the six flows by readi
         await holds(flow, MAGIC_LINK, hook);
       });
   for (const hook of HOOKS)
-    it(`the TOTP setup reaches the session rule at the flip of the verify link, which keeps the password (afterEnd hook ${hook})`, async () => {
+    it(`the TOTP setup at the flip of the verify link, which keeps the password, answers its refusal and leaves no row (afterEnd hook ${hook})`, async () => {
       await holds(SECOND_FACTOR, VERIFY_LINK, hook);
     });
 });

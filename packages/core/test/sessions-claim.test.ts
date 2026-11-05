@@ -1088,7 +1088,7 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     expect(auth.mail).toEqual([]);
   });
 
-  it("keeps a password sign-in when the verify link that confirms this password lands inside it (plan 8, Review Focus 2)", async () => {
+  it("ends a password sign-in at its first read when the verify link that keeps this password lands inside it (plan 8, Review Focus 2; ruling 13 of plan 12q)", async () => {
     const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
     const up = await passwordSignUp(auth.config, {
       email: EMAIL,
@@ -1116,7 +1116,17 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
     );
     expect(gate.fired()).toBe(true);
     if (!r.ok) throw new Error(r.code);
-    expect(await resolveSession(auth.config, r.value.token)).not.toBeNull();
+    // The sign-in read the user before the claim, so its session is unproved.
+    // The claim kept the password, so the sign-in's guard passed after it.
+    const byToken = [
+      { field: "tokenHash", op: "eq", value: await sha256Hex(r.value.token) },
+    ] as const;
+    expect((await auth.storage.findOne("session", [...byToken]))?.proved).toBe(false);
+    const user = await auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
+    expect(user?.emailVerified).toBe(true);
+    // The door of a claimed session ends it, and the person signs in again (ruling 13 of plan 12q).
+    expect(await resolveSession(auth.config, r.value.token)).toBeNull();
+    expect(await auth.storage.findOne("session", [...byToken])).toBeNull();
   });
 
   it("answers invalid_token and keeps the owner's session when a claim lands inside the verify link (plan 8, verify fails closed)", async () => {

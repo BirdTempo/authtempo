@@ -105,7 +105,11 @@ export type SessionEndReason =
   // oldest session of the bag (multi-session).
   | "displaced"
   // plan 12i: a sign-in replaced the anonymous user of the session.
-  | "anonymous_upgrade";
+  | "anonymous_upgrade"
+  // plan 12q, ruling 13: a session read found an unproved session of a user
+  // with a verified address, the claimant's, and ended it. The sweep ends
+  // the sessions that a claim left past its budget with it too (decision 3).
+  | "claimed";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event
  * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
@@ -127,6 +131,7 @@ export const SESSION_END_REASONS = {
   impersonation_end: true,
   displaced: true,
   anonymous_upgrade: true,
+  claimed: true,
 } as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */

@@ -25,7 +25,7 @@ import { StorageError } from "../storage/port.js";
 import { hasAddress } from "./address.js";
 import { bannedFor } from "./operator/ban-rule.js";
 import { impersonationLoss, revokedFor } from "./operator/guards.js";
-import { sessionIsLive } from "./sessions.js";
+import { claimedFor, sessionIsLive } from "./sessions.js";
 
 /**
  * JWT minting (plan 9g, spec 8.12). Core owns the keys: it writes the first
@@ -384,6 +384,8 @@ export async function mintSessionJwt(
   ]);
   // The ban rule of resolveSession (ruling 28): a race row of a ban mints nothing.
   if (!user || bannedFor(user, session.createdAt)) return fail("unauthorized");
+  // A claimed session mints nothing (`claimedFor`, ruling 13 of plan 12q).
+  if (claimedFor(user, session)) return fail("unauthorized");
   // A session that a SCIM deactivate left for the sweep mints nothing (ruling 50 of plan 12d).
   if (await revokedFor(config, user, session)) return fail("unauthorized");
   // An impersonation session whose operator lost the right mints nothing (plan 12f Task 11 fix).
@@ -455,7 +457,8 @@ export async function verifySessionJwt(
  * A session from before the end of the user's last ban is not live, as in
  * resolveSession (`bannedFor`, ruling 28). A session that a SCIM
  * deactivate left for the sweep is not live (`revokedFor`, ruling 50 of
- * plan 12d).
+ * plan 12d). A claimed session is not live (`claimedFor`, ruling 13 of plan
+ * 12q).
  */
 export async function sessionLive(
   config: ResolvedConfig,
@@ -470,6 +473,8 @@ export async function sessionLive(
   if (row === null || !sessionIsLive(config, row, now)) return false;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
   if (user === null || bannedFor(user, row.createdAt)) return false;
+  // A claimed session is not live (`claimedFor`, ruling 13 of plan 12q).
+  if (claimedFor(user, row)) return false;
   if (await revokedFor(config, user, row)) return false;
   // The door of the operator of an impersonation session (the plan 12f Task 11 fix).
   return (await impersonationLoss(config, row)) === null;

@@ -13,8 +13,9 @@ import { execD1 } from "./schema.js";
 
 // The session proof on the D1 storage of the Better Auth tables (plan 12p
 // Task 3). That storage has no isolation, as the core D1 adapter has none.
-// So a claimant's session is live between the claim's flip and its
-// session delete, and the user reads as verified there.
+// So a claimant's session is still there between the claim's flip and its
+// session delete, and the user reads as verified there. The door of a
+// claimed session refuses that session and ends it (ruling 13 of plan 12q).
 //
 // First, the token and the change of address at the flip. Each scene runs
 // twice from empty tables: the claim alone, then the claim with the
@@ -157,7 +158,7 @@ async function measure(w: World, request: Request) {
 }
 const call = async (w: World, request: Request) => (await measure(w, request)).res;
 
-/** The status and the error code of an answer: "200 ok", "403 email_unverified". */
+/** The status and the error code of an answer: "200 ok", "401 unauthorized". */
 async function answer(res: Response): Promise<string> {
   const body = (await res.clone().json()) as { error?: string };
   return `${res.status} ${body.error ?? "ok"}`;
@@ -227,6 +228,7 @@ const sessionsOf = async (id: string) =>
 async function claimant(w: World) {
   const up = await call(w, post("/password/sign-up", { email: CLAIMED, password: OLD }));
   expect(await answer(up)).toBe("200 ok");
+  const first = (await sessionsOf((await userOf(CLAIMED)).id)).map((s) => s.id);
   const signIn = await call(w, post("/password/sign-in", { email: CLAIMED, password: OLD }));
   expect(await answer(signIn)).toBe("200 ok");
   const { id } = await userOf(CLAIMED);
@@ -234,7 +236,9 @@ async function claimant(w: World) {
   expect(sessions).toHaveLength(2);
   const token = tokenOf(signIn);
   if (!token) throw new Error("the sign-in set no session cookie");
-  return { id, sessions, token };
+  // The sign-in's session acts.
+  const actor = sessions.find((s) => !first.includes(s)) ?? "";
+  return { id, sessions, actor, token };
 }
 
 /** The owner's magic link of the claimed address, mailed now: the request of its verify. */
@@ -290,9 +294,10 @@ describe("a claimant's session at the claim's flip on the D1 storage of the Bett
       const raced = await run(hook, true);
       expect(control.answers).toBeNull();
       // First the actions: their refusals, and every table as the claim alone left it.
+      // The first request meets the door, which ends the session; the second finds none.
       expect(raced.answers).toEqual({
-        token: "403 email_unverified",
-        change: "403 email_unverified",
+        token: "401 unauthorized",
+        change: "401 unauthorized",
       });
       expect(raced.tables).toEqual(control.tables);
       expect(mail.filter((m) => m.to === "mallory@evil.example")).toEqual([]);
@@ -308,10 +313,19 @@ describe("a claimant's session at the claim's flip on the D1 storage of the Bett
         expect(r.queries).toBeLessThanOrEqual(BUDGET);
         // The owner holds one proved session, and no claimant session stays.
         expect(r.sessions).toEqual([{ claimant: false, proved: 1 }]);
-        expect(r.endings).toEqual(
-          hook ? r.claimant.sessions.map((id) => `claim:${id}`).sort() : [],
-        );
       }
+      // The claim ends each claimant session with the reason claim. In the raced
+      // run the door ended the session that acted, with the reason claimed.
+      expect(control.endings).toEqual(
+        hook ? control.claimant.sessions.map((id) => `claim:${id}`).sort() : [],
+      );
+      expect(raced.endings).toEqual(
+        hook
+          ? raced.claimant.sessions
+              .map((id) => (id === raced.claimant.actor ? `claimed:${id}` : `claim:${id}`))
+              .sort()
+          : [],
+      );
     });
 });
 
