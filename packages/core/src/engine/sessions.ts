@@ -538,15 +538,6 @@ export function challengeOpened(
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
  *
- * With `byChunks` (a claim, final review B M of plan 12i), the read rows go
- * by chunks of `IN_CHUNK` ids. Each chunk is one `deleteRows`, not one delete
- * per row. So the count of the claimant's sessions adds no query on D1. Each chunk
- * puts in `ended` the rows that its delete answered (plan 12o). A row that
- * another flow ended after the read is not in the answer. That flow fired
- * its hook, and this flow fires nothing more for it (spec 8.9, plan 9d).
- * Postgres and MySQL lock the rows before the read (`lockInOrder`), so there
- * no other flow ends a read row.
- *
  * The back-channel outbox (plan 12e Task 16): first the user's client links.
  * With none, nothing more runs. With some, each linked session that `where`
  * matches gets one `oauthLogout` row per link, and its links go, in this
@@ -559,8 +550,58 @@ export async function endSessions(
   ended: SessionRow[] | null,
   now: Date,
   stops: ImpersonationStops | null,
-  byChunks = false,
 ): Promise<number> {
+  return (await endSessionRows(tx, where, ended, now, stops, null)).count;
+}
+
+/** The answer of `endSessionChunks` (decision 3 of plan 12q). */
+export interface ChunkedEnd {
+  /** The count of rows that the deletes answered. */
+  count: number;
+  /** True when rows stayed past the chunks. The last delete did not run then. */
+  left: boolean;
+  /** The newest `createdAt` of the read rows in ms, or `-Infinity` with none. */
+  newest: number;
+}
+
+/**
+ * The form of `endSessions` for a claim (final review B M of plan 12i). With
+ * a list, the read rows go by chunks of `IN_CHUNK` ids. Each chunk is one
+ * `deleteRows`, not one delete per row. Each chunk puts in `ended` the rows
+ * that its delete answered (plan 12o). A row that another flow ended after
+ * the read is not in the answer. That flow fired its hook, and this flow
+ * fires nothing more for it (spec 8.9, plan 9d). Postgres and MySQL lock the
+ * rows before the read (`lockInOrder`), so there no other flow ends a read row.
+ *
+ * With `most`, at most `most` chunks run (decision 3 of plan 12q). Each
+ * chunk is one query, and D1 allows 50 per invocation. So the read takes the
+ * newest `most * IN_CHUNK + 1` rows, by `createdAt`, and the chunks take them
+ * by id. When a row stays past them, the last delete does not run, and the
+ * answer says `left`. The caller then writes the pending-end row, and the
+ * sweep ends the rest with the hook. `newest` serves its `before`, as the
+ * read of a ban does (ruling 56 of plan 12d). With `most` null, or with no
+ * list, every row goes, as in `endSessions`.
+ */
+export function endSessionChunks(
+  tx: StorageAdapter,
+  where: Where<"session">[],
+  ended: SessionRow[] | null,
+  now: Date,
+  stops: ImpersonationStops | null,
+  most: number | null,
+): Promise<ChunkedEnd> {
+  return endSessionRows(tx, where, ended, now, stops, { most });
+}
+
+/** The work of `endSessions` and `endSessionChunks`. `chunks` null deletes each read row by id. */
+async function endSessionRows(
+  tx: StorageAdapter,
+  where: Where<"session">[],
+  ended: SessionRow[] | null,
+  now: Date,
+  stops: ImpersonationStops | null,
+  chunks: { most: number | null } | null,
+): Promise<ChunkedEnd> {
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
   if (typeof user !== "string") throw new Error("authtempo: endSessions needs a userId term");
@@ -588,16 +629,31 @@ export async function endSessions(
     now,
   );
   let n = 0;
+  // The bound of the chunks: only with a list, which the hook needs.
+  const bound = ended && chunks?.most != null ? chunks.most * IN_CHUNK : null;
   // One read serves the stop rows and the list (ruling 79 of plan 12d): on D1 each read is
   // a query of the 50 of one invocation. With neither, the tool is off and no hook listens.
-  const rows =
+  // A bounded read takes the newest rows, then sorts the page by id. It runs only on a
+  // store with no row lock (`claimEmail`), so the sort of the read takes no lock.
+  const read =
     stops || ended
       ? await tx.findMany(
           "session",
           ended ? where : [...where, { field: "actorId", op: "ne", value: null }],
-          { sort: { field: "id", dir: "asc" } },
+          bound === null
+            ? { sort: { field: "id", dir: "asc" } }
+            : {
+                sort: [
+                  { field: "createdAt", dir: "desc" },
+                  { field: "id", dir: "desc" },
+                ],
+                limit: bound + 1,
+              },
         )
       : [];
+  const left = bound !== null && read.length > bound;
+  const newest = Math.max(...read.map((row) => row.createdAt.getTime()));
+  const rows = bound === null ? read : read.slice(0, bound).sort((a, b) => (a.id < b.id ? -1 : 1));
   // Each impersonation session goes by id first, with its stop row in this
   // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off.
   if (stops)
@@ -611,7 +667,7 @@ export async function endSessions(
         await writeStopRow(tx, stops, row, now);
       }
   const plain = rows.filter((row) => !(stops && row.actorId !== null));
-  if (ended && byChunks)
+  if (ended && chunks)
     for (let i = 0; i < plain.length; i += IN_CHUNK) {
       const chunk = plain.slice(i, i + IN_CHUNK);
       const ids = { field: "id", op: "in", value: chunk.map((row) => row.id) } as const;
@@ -631,7 +687,9 @@ export async function endSessions(
         ended.push(row);
         n++;
       }
-  return n + (await tx.delete("session", where));
+  // Rows stay past the chunks: the pending-end row of the caller names them.
+  if (left) return { count: n, left, newest };
+  return { count: n + (await tx.delete("session", where)), left, newest };
 }
 
 /**

@@ -47,7 +47,12 @@ interface Site {
   file: string;
   /** The nearest `function` name before the site. */
   fn: string;
-  call: "endSessions" | "destroySession" | 'delete("session"' | 'deleteRows("session"';
+  call:
+    | "endSessions"
+    | "endSessionChunks"
+    | "destroySession"
+    | 'delete("session"'
+    | 'deleteRows("session"';
   count: number;
   kind: Kind;
   reason: string;
@@ -141,14 +146,15 @@ const SITES: Site[] = [
   {
     file: "engine/users.ts",
     fn: "claimEmail",
-    call: "endSessions",
+    call: "endSessionChunks",
     count: 1,
     kind: "endSessions",
-    reason: "a claim; authorize refuses an unverified user, so no link is reachable",
+    reason:
+      "a claim; authorize refuses an unverified user, so no link is reachable. Past two chunks the pending-end row names the rest, and the sweep ends them through endSessionPage (plan 12q)",
   },
   {
     file: "engine/sessions.ts",
-    fn: "endSessions",
+    fn: "endSessionRows",
     call: 'delete("session"',
     count: 3,
     kind: "endSessions",
@@ -157,7 +163,7 @@ const SITES: Site[] = [
   },
   {
     file: "engine/sessions.ts",
-    fn: "endSessions",
+    fn: "endSessionRows",
     call: 'deleteRows("session"',
     count: 1,
     kind: "endSessions",
@@ -299,7 +305,8 @@ const SITES: Site[] = [
 ];
 
 // A delete that answers its rows (`deleteRows`, plan 12o) is a site too.
-const CALL_RE = /\b(endSessions|destroySession)\(|\.(delete|deleteRows)\(\s*"session"/g;
+const CALL_RE =
+  /\b(endSessions|endSessionChunks|destroySession)\(|\.(delete|deleteRows)\(\s*"session"/g;
 
 /** Comments become spaces, so a line number stays and a comment names no site. */
 function code(text: string): string {

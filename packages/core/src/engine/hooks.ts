@@ -107,8 +107,9 @@ export type SessionEndReason =
   // plan 12i: a sign-in replaced the anonymous user of the session.
   | "anonymous_upgrade"
   // plan 12q, ruling 13: a session read found an unproved session of a user
-  // with a verified address, the claimant's, and ended it. The sweep ends
-  // the sessions that a claim left past its budget with it too (decision 3).
+  // with a verified address, the claimant's, and ended it. The sweep also
+  // ends with it the sessions that a claim left past its two chunks
+  // (decision 3).
   | "claimed";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event

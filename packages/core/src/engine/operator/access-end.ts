@@ -4,8 +4,6 @@ import {
   OAUTH_REFRESH_TTL_DAYS_MAX,
   type ResolvedConfig,
 } from "../../config.js";
-import { sha256Hex } from "../../primitives/crypto.js";
-import { newId } from "../../primitives/ids.js";
 import type { SessionRow, VerificationRow } from "../../schema.js";
 import { IN_CHUNK } from "../../storage/batch.js";
 import type { Meter } from "../../storage/meter.js";
@@ -13,7 +11,7 @@ import type { StorageAdapter, Where } from "../../storage/port.js";
 import type { SessionEndReason } from "../hooks.js";
 import { familyStart, revokeFamily } from "../oauth-family.js";
 import { deleteOAuthCodes } from "../oauth-grants.js";
-import { deleteTwoFactorChallenges, later } from "../second-factor.js";
+import { deleteTwoFactorChallenges } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, endedList, sessionsEnded } from "../sessions.js";
 import {
@@ -26,7 +24,12 @@ import {
 } from "./audit.js";
 import { ACCESS_END_RECORD } from "./guards.js";
 import type { ImpersonationHold } from "./impersonation.js";
+import { ACCESS_END_SKEW_MS, createPendingEnd } from "./pending-row.js";
 import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessions.js";
+
+// The row and its two bounds moved to pending-row.ts (plan 12q), so the claim
+// writes the row with no import of this module. Each importer keeps its path.
+export { ACCESS_END_SKEW_MS, PENDING_END_MS } from "./pending-row.js";
 
 /**
  * The end of all access of one user by a ban or a revoke of the platform
@@ -46,11 +49,13 @@ import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessi
  * `account_deleted` and `impersonation_end` come from an account delete
  * and a role loss of an operator (ruling 63 of plan 12f). Those two rows
  * name only impersonation sessions. `revoked` comes from a SCIM deactivate
- * (plan 12d Task 10).
+ * (plan 12d Task 10). `claimed` comes from a claim that left sessions past
+ * its two chunks (decision 3 of plan 12q). That row ends only the sessions
+ * whose `proved` flag is false.
  */
 export type PendingEndReason = Extract<
   SessionEndReason,
-  "banned" | "operator" | "account_deleted" | "impersonation_end" | "revoked"
+  "banned" | "operator" | "account_deleted" | "impersonation_end" | "revoked" | "claimed"
 >;
 
 /** The cause of the stop row of an impersonation session that a pending-end row ends. */
@@ -61,6 +66,8 @@ const PENDING_STOP_CAUSE: Readonly<Record<PendingEndReason, Exclude<StopCause, "
   impersonation_end: "role_loss",
   // A SCIM deactivate of plan 12d Task 10: an end by another party.
   revoked: "deprovision",
+  // The rest of a claim (plan 12q): the cause of the claim's own stop rows.
+  claimed: "claim",
 };
 
 /** The reason of a pending-end row. A row with no known reason is a ban, as before ruling 63. */
@@ -69,14 +76,6 @@ function pendingReason(value: unknown): PendingEndReason {
     ? (value as PendingEndReason)
     : "banned";
 }
-
-/**
- * The life of a pending-end row: 3650 days, far past the life of any
- * session. The sweep ends its work first, so the row never expires before
- * that. The first sweep step deletes the expired verification rows, so a
- * short life could drop a row with work left.
- */
-export const PENDING_END_MS = 3650 * 86_400_000;
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
@@ -88,21 +87,6 @@ const MINUTE_MS = 60_000;
  * row.
  */
 const RECORD_MARGIN_MS = DAY_MS;
-
-/**
- * The skew bound of `before` (ruling 58 of plan 12d): `before` is at least
- * the clock of the act plus 5 s. Another instance can write a session or a
- * family with a clock that runs ahead, also after the act read its rows.
- * On Workers, `Date.now()` returns the time of the last I/O, and it does
- * not advance while code runs (Cloudflare docs, Workers security model,
- * read 2026-10-24). So the clock of a request can lag, and does not run
- * ahead inside the request. That page says nothing of the skew between
- * hosts: 5 s is a margin that core chooses, not a fact of the page. The
- * cost: a session or a family that
- * starts in the 5 s after the act is refused too, as one from before it.
- * A longer bound refuses more such sign-ins, so the bound stays short.
- */
-export const ACCESS_END_SKEW_MS = 5_000;
 
 /**
  * The life of a record after its `before`: the longest life of anything
@@ -533,23 +517,15 @@ async function writePendingEnd(
     stops?: { owed: readonly PendingStop[]; endedAt: Date };
   },
 ): Promise<Date> {
-  const now = config.clock.now();
   // The clock plus the skew bound covers a row of an instance whose clock runs ahead,
   // also one that it writes after the read (ruling 58). An act that read no row has no newest time.
-  const bound = new Date(now.getTime() + ACCESS_END_SKEW_MS);
-  const before = Number.isFinite(newest) ? later(bound, new Date(newest)) : bound;
-  const id = newId(now);
-  await tx.create("verification", {
-    id,
-    purpose: "session-end",
-    identifier: userId,
-    // No code: the hash of the id fills the unique key.
-    valueHash: await sha256Hex(`session-end:${id}`),
-    expiresAt: new Date(now.getTime() + PENDING_END_MS),
-    consumedAt: null,
-    data: {
-      reason,
-      before: before.toISOString(),
+  return createPendingEnd(
+    tx,
+    config.clock.now(),
+    userId,
+    reason,
+    newest,
+    {
       ...(names.targets === undefined ? {} : { targets: [...names.targets] }),
       ...(names.families === undefined || names.families.length === 0
         ? {}
@@ -563,25 +539,24 @@ async function writePendingEnd(
       // The record life from the config of the act (ruling 58).
       ...(recordOf(reason, names.targets) ? { recordLife: recordLife(config) } : {}),
     },
-    secretVersion: config.keyring.current,
-    createdAt: now,
-    updatedAt: now,
-  });
-  return before;
+    config.keyring.current,
+  );
 }
 
 /**
  * True when a pending-end row of the user's own sessions exists: a revoke
  * after a revoke reads it (ruling 45). Only a ban or a revoke writes such
  * a row. A row with `data.targets` names the impersonation sessions of a
- * role loss, so it does not count (ruling 65 of plan 12f).
+ * role loss, so it does not count (ruling 65 of plan 12f). A row of a claim
+ * does not count either (plan 12q). It names only the claimant's unproved
+ * sessions, and a revoke must not end the owner's sessions for it.
  */
 export async function hasPendingEnd(tx: StorageAdapter, userId: string): Promise<boolean> {
   const rows = await tx.findMany("verification", [
     { field: "purpose", op: "eq", value: "session-end" },
     { field: "identifier", op: "eq", value: userId },
   ]);
-  return rows.some((row) => row.data?.targets === undefined);
+  return rows.some((row) => row.data?.targets === undefined && row.data?.reason !== "claimed");
 }
 
 /** The pending-end rows of one sweep, oldest first. */
@@ -674,7 +649,8 @@ export async function readPendingEnds(
  * that the row names end (`endPendingFamilies`). A row of a SCIM
  * deactivate is not deleted: it becomes the record of the act
  * (`ACCESS_END_RECORD`). A row that does not fit waits for the next sweep.
- * The answer is the count of ended sessions.
+ * The answer is the count of ended sessions. A row of a claim ends only the
+ * sessions whose `proved` flag is false (decision 3 of plan 12q).
  *
  * A row with `data.stops` owes the stop rows of the impersonation sessions
  * that a cascade took (decision 5 of plan 12o). After the page, one read
@@ -708,6 +684,11 @@ export async function endPendingRows(
         ? impersonationWhere(row.identifier, targets.map(String))
         : [{ field: "userId" as const, op: "eq" as const, value: row.identifier }]),
       { field: "createdAt", op: "lte", value: before },
+      // A claim's row ends the claimant's sessions only (decision 3 of plan 12q). Each
+      // was made before the proof, so its flag is false. The owner's sessions are proved.
+      ...(reason === "claimed"
+        ? [{ field: "proved" as const, op: "eq" as const, value: false }]
+        : []),
     ];
     const byId: Where<"verification">[] = [{ field: "id", op: "eq", value: row.id }];
     const ended = endedList(config);

@@ -9,7 +9,8 @@ import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
 import { stopWith } from "./hooks.js";
-import { endSessions } from "./sessions.js";
+import { writeClaimEnd } from "./operator/pending-row.js";
+import { endSessionChunks } from "./sessions.js";
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
@@ -187,9 +188,11 @@ export function claimLeaseId(userId: string): string {
  * carries the proof and the `email` identity. It deletes every password row
  * except the one `keep.passwordId` names. It deletes every passkey, every
  * pending passkey challenge, and every unredeemed handoff code. Then it
- * flips the flag to verified. Last it deletes every session. The username
- * is cleared, except where `keep.username` says so. The phone is always
- * cleared.
+ * flips the flag to verified. Last it deletes every session. With an
+ * `afterEnd` hook on a store with no isolation, it deletes at most two
+ * chunks of 50, and a pending-end row names the rest for the sweep (plan
+ * 12q). The username is cleared, except where `keep.username` says so. The
+ * phone is always cleared.
  *
  * The order (ruling 16 of plan 12p). The old order flipped the flag first.
  * Then a sign-in that read the user after the flip got a proved session.
@@ -219,7 +222,8 @@ export function claimLeaseId(userId: string): string {
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
  * flag, so such a session makes no token, grant, factor, or address change
- * before its delete. So the claimant keeps no way in.
+ * before its delete. So the claimant keeps no way in. That holds for a
+ * session that waits for the sweep too.
  * Runs inside the caller's transaction. When `ended` is given, the session
  * rows the claim deletes are pushed onto it, so the caller fires
  * session.afterEnd after the commit (plan 9d). `verified` is required, so
@@ -297,24 +301,39 @@ export async function claimEmail(
   }
   // The sessions last, so the session of a sign-in whose guard passed above
   // goes here. With an `afterEnd` hook, one read and one `deleteRows` of the
-  // read ids per chunk; with none, one statement (plan 9h). So the
-  // claimant's session count adds no query (final review B M of plan 12i).
-  // The ended list holds the rows that each chunk removed (plan 12o). A
-  // session that another flow ended after the read is not in it, and no race
-  // throws. The last delete is by user id, so a session that another request
-  // adds after the read goes too. The count goes to the event `session.end`
-  // of the claim (plan 12h Task 5).
-  verified.sessionsEnded(
-    await endSessions(
-      tx,
-      [{ field: "userId", op: "eq", value: userId }],
-      ended ?? null,
-      now,
-      verified.stops,
-      true,
-    ),
+  // read ids per chunk of 50; with none, one statement (plan 9h). The ended
+  // list holds the rows that each chunk removed (plan 12o). A session that
+  // another flow ended after the read is not in it, and no race throws. The
+  // last delete is by user id, so a session that another request adds after
+  // the read goes too. The count goes to the event `session.end` of the
+  // claim (plan 12h Task 5).
+  //
+  // Each chunk is one query, so with the hook the claimant's session count
+  // adds queries (open point 4 of the 12p close). On a store with no
+  // isolation, at most `CLAIM_SESSION_CHUNKS` chunks run (decision 3 of plan
+  // 12q). The rest stay with the pending-end row of a ban, of the reason
+  // `claimed`, and the sweep ends them with the hook. They are unproved until
+  // then. An isolated store has no cap of queries, so there every session goes.
+  const end = await endSessionChunks(
+    tx,
+    [{ field: "userId", op: "eq", value: userId }],
+    ended ?? null,
+    now,
+    verified.stops,
+    tx.isolated ? null : CLAIM_SESSION_CHUNKS,
   );
+  verified.sessionsEnded(end.count);
+  if (end.left) await writeClaimEnd(tx, verified.clock, userId, end.newest);
 }
+
+/**
+ * The most chunks of `IN_CHUNK` sessions that a claim ends with an
+ * `afterEnd` hook on a store with no isolation (decision 3 of plan 12q). Two
+ * chunks keep a magic link claim with the hook inside 50 D1 queries, with
+ * room for the pending-end row. At the default `session.maxPerUser` of 100,
+ * two chunks end every session of the claimant.
+ */
+export const CLAIM_SESSION_CHUNKS = 2;
 
 /**
  * The first statement of a claim, which decides a race of two claims of one
