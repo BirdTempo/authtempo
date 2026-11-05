@@ -21,8 +21,9 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
+import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { post, tokenFromMail } from "./helpers.js";
+import { get, post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
@@ -271,6 +272,64 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
         targetUserId: user.id,
       },
     ]);
+  });
+
+  // The door of a claimed session (ruling 13 of plan 12q) ends an
+  // impersonation session with its stop row, as the ban door does.
+  it("writes claim when the door ends the impersonation session of a claimant (ruling 13 of plan 12q)", async () => {
+    const w = await world();
+    const email = "eve@example.com";
+    const up = await passwordSignUp(w.auth.config, {
+      email,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+    if (!user) throw new Error("no user");
+    // The target is unverified, so the impersonation session is unproved.
+    const { token, sessionId } = await impersonate(w, user.id);
+    // Memory runs one transaction at a time. So the read in the claim's gap
+    // runs its transaction on the store at once, as a parallel request on D1 does.
+    const free: StorageAdapter = { ...w.auth.storage, transaction: (fn) => fn(free) };
+    const side = { ...w.auth.config, storage: free };
+    const reader = createRouter(side, coreRoutes(side));
+    const gap: Record<string, unknown> = {};
+    let armed = true;
+    // The claim's gap: right after the flip, before the claim's session delete.
+    const flipped = (a: StorageAdapter): StorageAdapter => ({
+      ...a,
+      update: async (m, where, data) => {
+        const n = await a.update(m, where, data);
+        if (armed && n > 0 && m === "user" && (data as Partial<UserRow>).emailVerified === true) {
+          armed = false;
+          const now = await free.findOne("user", [{ field: "id", op: "eq", value: user.id }]);
+          gap.verified = now?.emailVerified;
+          const read = await reader(get("/auth/session", { authorization: `Bearer ${token}` }));
+          gap.read = read.status;
+          gap.stops = await stops(w);
+        }
+        return n;
+      },
+      transaction: (fn) => a.transaction((tx) => fn(flipped(tx))),
+    });
+    const mail = w.auth.mail.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
+    const v = await verifyPasswordEmail(
+      { ...w.auth.config, storage: flipped(w.auth.storage) },
+      { token: tokenFromMail(mail?.text ?? ""), ip: null, userAgent: null },
+    );
+    expect(v.ok).toBe(true);
+    const stop = {
+      ...stopOf(w, sessionId, "claim", "A claim of the address ended the impersonation session."),
+      targetUserId: user.id,
+    };
+    expect(gap).toEqual({ verified: true, read: 401, stops: [stop] });
+    // The claim's own delete found no session, so it wrote no second stop row.
+    expect(await stops(w)).toEqual([stop]);
+    expect(
+      await w.auth.storage.findOne("session", [{ field: "id", op: "eq", value: sessionId }]),
+    ).toBeNull();
   });
 
   it("writes ban at a ban of the target and at a ban of the operator", async () => {
