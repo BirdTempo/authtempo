@@ -107,11 +107,13 @@ type Undo = () => void;
 /**
  * The condition of `undoOnlyWhile` at one transaction level (decision 6 of
  * plan 12q). Each undo step of a delete under it reads it when the step
- * runs. So a second call at the level changes it for each of them.
+ * runs. So a second call at the level changes it for each of them. `also`
+ * is the second condition of the call, or null (ruling 36 of plan 12q).
  */
 interface UndoGuard {
   model: ModelName;
   where: Where<ModelName>[];
+  also: { model: ModelName; where: Where<ModelName>[] } | null;
 }
 
 /** The tail of the transaction queue. One per store. */
@@ -184,6 +186,7 @@ function adapterOn(
     const g = guard;
     return () => {
       if (g && select(g.model, g.where).length === 0) return;
+      if (g?.also && select(g.also.model, g.also.where).length === 0) return;
       t.set(r.id as string, r);
     };
   };
@@ -339,16 +342,23 @@ function adapterOn(
       guard = inherited;
       return true;
     },
-    async undoOnlyWhile<M extends ModelName>(model: M, where: Where<M>[]): Promise<void> {
+    async undoOnlyWhile<M extends ModelName, G extends ModelName = M>(
+      model: M,
+      where: Where<M>[],
+      also?: { model: G; where: Where<G>[] },
+    ): Promise<void> {
       // The checks of a read: the model, each field, and each value. No call counts.
       select(model, where);
+      if (also) select(also.model, also.where);
       const terms = where as Where<ModelName>[];
+      const second = also ? { model: also.model, where: also.where as Where<ModelName>[] } : null;
       // A second call at this level changes the condition of its deletes so far.
       // Outside a transaction no delete has an undo, and `transaction` starts with none.
       if (guard && guard !== inherited) {
         guard.model = model;
         guard.where = terms;
-      } else guard = { model, where: terms };
+        guard.also = second;
+      } else guard = { model, where: terms, also: second };
     },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       const run = async (): Promise<T> => {

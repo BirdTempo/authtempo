@@ -218,6 +218,15 @@ export interface StorageAdapter {
    * calls it after its lease: the rows come back only while the user is
    * unverified.
    *
+   * The second condition `also` (ruling 36 of plan 12q). With it, the rows
+   * come back only while a row matches each of the two conditions. A claim
+   * passes its own lease, by its id and by the expiry that it wrote. A claim
+   * can run past its lease, and a rival claim can take the lease and delete
+   * first. A rival's take or the sweep changes that lease row. The late
+   * claim's undo then puts back nothing, so the rival's flip finds no row
+   * of the claimant. The second condition sends no query either. A second
+   * call of the level replaces both conditions.
+   *
    * The scope. A second call at the same transaction level replaces the
    * condition, also for the deletes after the first call. A nested
    * transaction starts with the condition of its parent, and a call in it
@@ -231,7 +240,11 @@ export interface StorageAdapter {
    * The conformance kit holds the call on each store that has it. Its
    * option `undoGuard` holds the call to an adapter.
    */
-  undoOnlyWhile?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
+  undoOnlyWhile?<M extends ModelName, G extends ModelName = M>(
+    model: M,
+    where: Where<M>[],
+    also?: { model: G; where: Where<G>[] },
+  ): Promise<void>;
   /**
    * Optional. Deletes the rows that `where` matches, only while a row of
    * `whileModel` matches `whileWhere`, and answers the count. The check is a

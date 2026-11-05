@@ -39,9 +39,22 @@ interface Undo extends Statement {
  * plan 12q): the `select` of its model and its where. It is null when the
  * where matches no row, as an empty `in` list. Each delete under it holds
  * this object, so a second call at the level changes it for each of them.
+ * With a second condition it is one `select` of both (ruling 36 of plan 12q).
  */
 interface UndoGuard {
   exists: Statement | null;
+}
+
+/**
+ * One `select` that reads a row only while each of `a` and `b` reads one
+ * (ruling 36 of plan 12q). It goes into the `WHERE EXISTS` of a reinsert,
+ * so the check of both conditions stays a term of that one statement.
+ */
+function bothRead(a: Statement, b: Statement): Statement {
+  return {
+    sql: `SELECT 1 WHERE EXISTS (${a.sql}) AND EXISTS (${b.sql})`,
+    params: [...a.params, ...b.params],
+  };
 }
 
 /**
@@ -401,10 +414,14 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
   // The undo guard of a claim (decision 6 of plan 12q). The statement set
   // must build the guarded reinsert. Core's and the Better Auth storage's do.
   if (st.reinsertWhile)
-    self.undoOnlyWhile = async (model, where) => {
+    self.undoOnlyWhile = async (model, where, also) => {
       // The select checks the model and each field, as a read does. It sends nothing here.
       assertModel(model);
-      const exists = st.select(model, where);
+      const first = st.select(model, where);
+      // The second condition (ruling 36 of plan 12q): the rows come back only while both read a row.
+      if (also) assertModel(also.model);
+      const second = also ? st.select(also.model, also.where) : null;
+      const exists = !also ? first : first && second && bothRead(first, second);
       // A second call at this level changes the condition of its deletes so far.
       // Outside a transaction no delete has an undo, and `transaction` starts with none.
       if (ctx.guard && ctx.guard !== ctx.inherited) ctx.guard.exists = exists;

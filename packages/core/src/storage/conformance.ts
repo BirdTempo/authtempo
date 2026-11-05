@@ -129,7 +129,8 @@ export interface ConformanceOptions {
    * on each transaction (decision 6 and ruling 33 of plan 12q). The cases of
    * each call run on each store that has it, so this option holds the
    * methods to the adapter. Each store of this repository with no isolation
-   * passes it: a claim there needs both. Default false.
+   * passes it: a claim there needs both. A store whose `isolated` is false
+   * must have both whatever this says (ruling 36 of plan 12q). Default false.
    */
   undoGuard?: boolean;
 }
@@ -2340,10 +2341,11 @@ export function runAdapterConformance(
       /** True when the transactions of the store have the call. */
       const guarded = () => db.transaction(async (tx) => typeof tx.undoOnlyWhile === "function");
 
-      it("is on each transaction when the target says it must", async () => {
+      it("is on each transaction when the target says it must, or has no isolation", async () => {
         // A claim calls it after its lease (`claimEmail`). Postgres and MySQL
-        // reverse the whole claim on a throw, so they leave it out.
-        if (options.undoGuard) expect(await guarded()).toBe(true);
+        // reverse the whole claim on a throw, so they leave it out. A store
+        // with no isolation needs it, whatever the option says (ruling 36 of plan 12q).
+        if (options.undoGuard || !db.isolated) expect(await guarded()).toBe(true);
       });
 
       if (!options.rowLocks) {
@@ -2502,7 +2504,116 @@ export function runAdapterConformance(
             await expect(
               guard(tx)("user", [{ field: "nope" as "id", op: "eq", value: "u-g" }]),
             ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
+            await expect(
+              guard(tx)("user", unverified, {
+                model: "verification",
+                where: [{ field: "nope" as "id", op: "eq", value: "lease-g" }],
+              }),
+            ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
           });
+        });
+
+        // The second condition (ruling 36 of plan 12q). A claim passes its
+        // own lease, by its id and by the expiry that it wrote. A rival's take
+        // of the lease changes the expiry, and the sweep deletes the row.
+        const leaseAt = new Date(at.getTime() + 60_000);
+        const lease: Where<"verification">[] = [
+          { field: "id", op: "eq", value: "lease-g" },
+          { field: "expiresAt", op: "eq", value: leaseAt },
+        ];
+        const both = { model: "verification" as const, where: lease };
+        const leaseById = [{ field: "id" as const, op: "eq" as const, value: "lease-g" }];
+        /** The user `u-g` with the sessions `ids`, and the lease row `lease-g`. */
+        const seedLease = async (ids: string[]) => {
+          await seed(ids);
+          await db.create("verification", verification("lease-g", at, null));
+        };
+
+        it("puts back the rows only while each of two conditions holds at the undo", async () => {
+          if (!(await guarded())) return;
+          await seedLease(["s1", "s2"]);
+          await thrown(async (tx) => {
+            await guard(tx)("user", unverified, both);
+            await tx.delete("session", one("s1"));
+            await tx.deleteRows("session", one("s2"));
+          });
+          expect(await left()).toEqual(["s1", "s2"]);
+          // The first condition fails at the undo: no row comes back.
+          await thrown(
+            async (tx) => {
+              await guard(tx)("user", unverified, both);
+              await tx.delete("session", one("s1"));
+            },
+            () => mark(true),
+          );
+          expect(await left()).toEqual(["s2"]);
+        });
+
+        it("puts back nothing when another caller changes or deletes the row of the second condition", async () => {
+          if (!(await guarded())) return;
+          await seedLease(["s1", "s2", "s3"]);
+          // A rival's take of a stale lease writes a new expiry.
+          await thrown(
+            async (tx) => {
+              await guard(tx)("user", unverified, both);
+              await tx.delete("session", one("s1"));
+            },
+            () =>
+              db.update("verification", leaseById, {
+                expiresAt: new Date(leaseAt.getTime() + 61_000),
+              }),
+          );
+          expect(await left()).toEqual(["s2", "s3"]);
+          await db.update("verification", leaseById, { expiresAt: leaseAt });
+          // The sweep deletes the lease.
+          await thrown(
+            async (tx) => {
+              await guard(tx)("user", unverified, both);
+              await tx.delete("session", [{ field: "id", op: "in", value: ["s2", "s3"] }]);
+            },
+            () => db.delete("verification", leaseById),
+          );
+          expect(await left()).toEqual([]);
+          expect(await db.findOne("user", unverified)).not.toBeNull();
+        });
+
+        it("drops the second condition at a second call with none", async () => {
+          if (!(await guarded())) return;
+          await seedLease(["s1"]);
+          await thrown(
+            async (tx) => {
+              await guard(tx)("user", unverified, both);
+              await tx.delete("session", one("s1"));
+            },
+            () => db.delete("verification", leaseById),
+            async (tx) => {
+              await guard(tx)("user", unverified);
+            },
+          );
+          expect(await left()).toEqual(["s1"]);
+        });
+
+        it("sends no statement with a second condition, and the undo sends as many statements as with none", async () => {
+          if (!db.statementsSent || !(await guarded())) return;
+          await seedLease(["s1", "s2", "s3"]);
+          const sent = () => db.statementsSent?.() ?? 0;
+          const deletes = async (tx: StorageAdapter) => {
+            await tx.delete("session", [{ field: "id", op: "in", value: ["s1", "s2"] }]);
+            await tx.delete("session", one("s3"));
+          };
+          const counts: number[] = [];
+          for (const also of [undefined, both]) {
+            const before = sent();
+            await thrown(async (tx) => {
+              const mark0 = sent();
+              await guard(tx)("user", unverified, also);
+              expect(sent() - mark0).toBe(0);
+              await deletes(tx);
+            });
+            counts.push(sent() - before);
+          }
+          expect(counts[1]).toBe(counts[0]);
+          expect(await left()).toEqual(["s1", "s2", "s3"]);
         });
       }
     });
@@ -2551,10 +2662,11 @@ export function runAdapterConformance(
       /** True when the transactions of the store have the call. */
       const has = () => db.transaction(async (tx) => typeof tx.deleteOnlyWhile === "function");
 
-      it("is on each transaction when the target says it must", async () => {
+      it("is on each transaction when the target says it must, or has no isolation", async () => {
         // A claim calls it for each delete before its flip (`claimEmail`).
         // Postgres and MySQL order the claims by the hold, so they leave it out.
-        if (options.undoGuard) expect(await has()).toBe(true);
+        // A store with no isolation needs it, whatever the option says (ruling 36 of plan 12q).
+        if (options.undoGuard || !db.isolated) expect(await has()).toBe(true);
       });
 
       it("deletes while the condition holds and answers the count; a throw puts the rows back", async () => {

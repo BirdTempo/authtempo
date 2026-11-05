@@ -36,6 +36,8 @@ const SQL = Symbol("sql");
 const PASSWORD = "correct horse battery";
 /** `CLAIM_LEASE_MS` of core: the life of a lease. */
 const LEASE_MS = 60_000;
+/** The text of a lost answer, as D1 names it. */
+const LOST = "D1_ERROR: Network connection lost.";
 /** The lease create, the first statement of a claim on D1. The magic link writes no other verification row before it. */
 const LEASE_INSERT = /^INSERT INTO ta_verification\b/;
 
@@ -505,8 +507,9 @@ describe("the lease of a claim on D1 (ruling 16 of plan 12p)", () => {
 // lock. So a claim whose statements run past 60 s can meet a rival claim.
 // The rival took its lease, or a new lease after the sweep. Each delete of a
 // claim before its flip runs only while the user is unverified, and the
-// undo keeps that condition. So the owner keeps the rows that a rival
-// claim kept, and the claimant keeps no credential and no session.
+// undo keeps that condition. The undo also needs the claim's own lease as
+// it wrote it (ruling 36). So the owner keeps the rows that a rival claim
+// kept, and the claimant keeps no credential and no session.
 describe("a claim past the life of its lease on D1 (ruling 33 of plan 12q)", () => {
   const NEW = "the owner's new password";
   beforeEach(async () => {
@@ -645,6 +648,74 @@ describe("a claim past the life of its lease on D1 (ruling 33 of plan 12q)", () 
       expect(await providersOf(userId)).toEqual([]);
       expect(await signIn(email, PASSWORD)).toBe("401 invalid_credentials");
       expect(Math.max(claimB.queries, doneA.queries)).toBeLessThanOrEqual(BUDGET);
+    });
+
+  for (const form of ["stale", "sweep"] as const)
+    it(`puts back no row of the claimant when a claim past its lease throws between a rival's deletes and its flip, by the ${form} form`, async () => {
+      // Probe R2 of rr-wave.md (ruling 36 of plan 12q). Claim A deletes the
+      // claimant's password and stalls past its lease. Claim B takes the
+      // stale lease, or a new lease after the sweep, and sends its deletes.
+      // They find no password. A then meets a D1 error, and its undo runs
+      // while the user is unverified. B then flips. Before, A's undo put the
+      // password back, and B's flip kept it. Now the undo also needs A's own
+      // lease as A wrote it, and B's take or the sweep changed that row.
+      const email = `kim-${form}@example.com`;
+      const userId = await claimant(email);
+      const first = await link(email);
+      const second = await link(email);
+      const aStalls = latch();
+      const goA = latch();
+      let aPaused = false;
+      // A waits after its delete of the passwords, then loses the answer of its passkey delete.
+      const a = make(true, async (sql) => {
+        if (!aPaused && /^DELETE FROM ta_password\b/.test(sql)) {
+          aPaused = true;
+          aStalls.open();
+          await goA.wait;
+        } else if (aPaused && /^DELETE FROM ta_passkey\b/.test(sql)) throw new Error(LOST);
+      });
+      const claimA = measure(a, first);
+      await aStalls.wait;
+      expect((await rowsOf(userId)).passwords).toBe(0);
+      // The clock moves past A's lease; the test does not sleep.
+      current = new Date(current.getTime() + LEASE_MS + 1_000);
+      if (form === "sweep") await make(false).auth.api.sweepExpired();
+      const bAtFlip = latch();
+      const goB = latch();
+      let bPaused = false;
+      const sentB: string[] = [];
+      // B waits after its passkey delete: its password delete ran and found no row.
+      const b = make(true, async (sql) => {
+        sentB.push(sql);
+        if (!bPaused && /^DELETE FROM ta_passkey\b/.test(sql)) {
+          bPaused = true;
+          bAtFlip.open();
+          await goB.wait;
+        }
+      });
+      const claimB = measure(b, second);
+      await bAtFlip.wait;
+      expect(sentB.filter((q) => /^DELETE FROM ta_password\b/.test(q))).toHaveLength(1);
+      expect(sentB.some((q) => /^UPDATE ta_user SET email_verified = \?/.test(q))).toBe(false);
+      goA.open();
+      const doneA = await claimA;
+      expect(doneA.res.status).toBe(500);
+      // A's undo ran while the user was unverified, and it put back no password.
+      expect(await rowsOf(userId)).toMatchObject({ verified: false, passwords: 0 });
+      goB.open();
+      const doneB = await claimB;
+      expect(await answer(doneB.res)).toBe("200 ok");
+      expect(await rowsOf(userId)).toEqual({
+        verified: true,
+        passwords: 0,
+        sessions: 1,
+        lease: { purpose: "claim-lease", identifier: userId },
+      });
+      // The one session is the owner's, from B. The claimant's two sessions are gone.
+      expect(await sessionsOf(userId)).toEqual({ all: 1, proved: 1 });
+      expect(await providersOf(userId)).toEqual([]);
+      expect(await signIn(email, PASSWORD)).toBe("401 invalid_credentials");
+      expect(Math.max(doneB.queries, doneA.queries)).toBeLessThanOrEqual(BUDGET);
     });
 
   for (const rival of ["reset", "google"] as const)

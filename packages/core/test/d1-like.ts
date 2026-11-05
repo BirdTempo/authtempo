@@ -28,8 +28,9 @@ function same(a: unknown, b: unknown): boolean {
  * run inside another flow's open transaction.
  * `undoOnlyWhile` keeps the D1 adapter's rule (decision 6 of plan 12q). The
  * undo of each later delete puts its row back only while a row matches the
- * condition then. A second call at a level replaces it. A nested call starts
- * with the condition of its parent. `keep` and the end of a level end the
+ * condition then, and a row matches its second condition too (ruling 36).
+ * A second call at a level replaces it. A nested call starts with the
+ * condition of its parent. `keep` and the end of a level end the
  * condition that the level set. `deleteOnlyWhile` deletes only while its
  * condition matches a row, and logs the undo as `delete` does (ruling 33).
  */
@@ -58,7 +59,8 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
       // The first entry that the open nested call owns, as in the D1 adapter.
       let floor = 0;
       // The condition of `undoOnlyWhile` for the next delete, and the one that the open level started with.
-      type Guard = { model: ModelName; where: Where<ModelName>[] };
+      type Term = { model: ModelName; where: Where<ModelName>[] };
+      type Guard = Term & { also: Term | null };
       let guard: Guard | null = null;
       let inherited: Guard | null = null;
       /** The undo of a deleted row: it puts the row back, under a condition only while a row matches it then. */
@@ -69,6 +71,7 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
           op: "delete",
           run: async () => {
             if (g && !(await raw.findOne(g.model, g.where))) return null;
+            if (g?.also && !(await raw.findOne(g.also.model, g.also.where))) return null;
             return raw.create(model, row);
           },
         };
@@ -140,13 +143,17 @@ export function d1Like(config: ResolvedConfig): ResolvedConfig {
           guard = inherited;
           return true;
         },
-        async undoOnlyWhile(model, where) {
+        async undoOnlyWhile(model, where, also) {
           // No read here: the call sends no statement on D1.
           const terms = where as Where<ModelName>[];
+          const second = also
+            ? { model: also.model, where: also.where as Where<ModelName>[] }
+            : null;
           if (guard && guard !== inherited) {
             guard.model = model;
             guard.where = terms;
-          } else guard = { model, where: terms };
+            guard.also = second;
+          } else guard = { model, where: terms, also: second };
         },
         async transaction<U>(inner: (t: StorageAdapter) => Promise<U>): Promise<U> {
           const mark = log.length;

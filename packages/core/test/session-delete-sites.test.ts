@@ -308,19 +308,19 @@ const SITES: Site[] = [
     file: "storage/conformance.ts",
     fn: "throws",
     call: 'delete("session"',
-    count: 18,
+    count: 25,
     kind: "kit",
     reason:
-      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep; the cases of undoOnlyWhile (plan 12q): the deletes under a condition; the count of deleteOnlyWhile (ruling 33 of plan 12q): a delete beside it",
+      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep; the cases of undoOnlyWhile (plan 12q): the deletes under a condition and under two (ruling 36); the count of deleteOnlyWhile (ruling 33 of plan 12q): a delete beside it",
   },
   {
     file: "storage/conformance.ts",
     fn: "throws",
     call: 'deleteRows("session"',
-    count: 13,
+    count: 14,
     kind: "kit",
     reason:
-      "the cases of deleteRows and keep (plan 12o): the answer, the rules, the count, the rival, and the undo; the cases of undoOnlyWhile (plan 12q): the deletes under a condition",
+      "the cases of deleteRows and keep (plan 12o): the answer, the rules, the count, the rival, and the undo; the cases of undoOnlyWhile (plan 12q): the deletes under a condition and under two (ruling 36)",
   },
 ];
 

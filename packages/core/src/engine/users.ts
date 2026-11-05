@@ -223,7 +223,9 @@ export function claimLeaseId(userId: string): string {
  * a flip that lost its answer, every row of the claimant stays gone. After
  * a flip of zero rows, the rows that this claim deleted stay gone too. They
  * went while the user was unverified, so they were the claimant's. No undo
- * of a claim puts a row back onto a verified user.
+ * of a claim puts a row back onto a verified user. The undo also needs this
+ * claim's own lease as it wrote it (ruling 36 of plan 12q). So a claim past
+ * its lease that throws puts back nothing once a rival took the lease.
  *
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
@@ -246,15 +248,33 @@ export async function claimEmail(
 ): Promise<void> {
   verified.claimed(userId);
   // The first statement decides the race: a lost claim throws before any write of its own.
-  await takeClaim(tx, userId, now, verified.clock);
-  // The undo guard (decision 6 of plan 12q). D1 can apply the flip and lose
-  // its answer. The flip then has no undo entry, and the undo of the
-  // deletes below would put back the claimant's rows on a verified user. So
-  // each delete below comes back only while the user is still unverified. A
-  // store that isolates the transaction leaves the call out.
+  const until = await takeClaim(tx, userId, now, verified.clock);
+  // The undo guard (decision 6 of plan 12q). Each delete below comes back
+  // only while both terms hold. A store that isolates the transaction
+  // leaves the call out, and `until` is null there.
+  //
+  // The first term: the user is still unverified. D1 can apply the flip and
+  // lose its answer. The flip then has no undo entry, and the undo would
+  // put back the claimant's rows on a verified user.
+  //
+  // The second term: this claim's own lease still exists, by its id and by
+  // the expiry that this claim wrote (ruling 36 of plan 12q). This claim
+  // can run past its lease. A rival claim can take the stale lease, or a
+  // new one after the sweep, and send its deletes before its flip. An undo
+  // then would put back the claimant's rows that the rival's deletes
+  // missed, and the rival's flip would keep them. The rival's take or the
+  // sweep changes that row, so the undo puts back nothing.
   const byId: Where<"user"> = { field: "id", op: "eq", value: userId };
   const unverified: Where<"user">[] = [byId, { field: "emailVerified", op: "eq", value: false }];
-  await tx.undoOnlyWhile?.("user", unverified);
+  const lease: Where<"verification">[] = [
+    { field: "id", op: "eq", value: claimLeaseId(userId) },
+    { field: "expiresAt", op: "eq", value: until },
+  ];
+  await tx.undoOnlyWhile?.(
+    "user",
+    unverified,
+    until ? { model: "verification", where: lease } : undefined,
+  );
   // The deletes before the flip (ruling 33 of plan 12q). This claim can run
   // past its lease, and a rival claim can take the lease and end first. So
   // each delete runs only while the user is unverified, in its own
