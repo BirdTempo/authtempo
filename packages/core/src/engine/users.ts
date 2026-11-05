@@ -418,6 +418,7 @@ async function takeClaim(
  * Holds the claim of a user for a writer that is no claim, such as the
  * importer (decision 5 of plan 12q). It is the first statement of a claim.
  * So no claim of the user deletes or flips until the release or the commit.
+ * On a store with no isolation that holds while the claim's lease lives.
  *
  * The contract: the caller runs it in its transaction, after the user row
  * exists there. It writes the user's rows, then calls `releaseClaim` in the

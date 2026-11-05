@@ -92,9 +92,10 @@ the claim lease, a row of the user.
 Then the claim deletes the claimant's rows, marks the address verified, and
 ends the sessions. While the import holds the user, a claim of the address
 waits for the commit, or answers 409 `conflict` on D1. So no claim deletes
-or marks the address in the middle of the writes. The import releases the
-hold after its writes. When a claim holds the user first, or verified it
-before the hold, the import writes no credential for it. The record is then
+or marks the address in the middle of the writes, while its lease lives on
+D1. The import releases the hold after its writes. When a claim holds the
+user first, or verified it before the hold, the import writes no credential
+for it. The record is then
 `partial` with `not repaired: claimed`. On D1 the lease guards only while it
 lives. So the hold reads the flag after its lease create, and the release
 deletes only the import's own lease. The release fails when a claim took
