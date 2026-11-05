@@ -4,6 +4,7 @@ import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
 import type { Where } from "../../storage/port.js";
+import { isPendingProvider } from "../password.js";
 import { sessionIsLive } from "../sessions.js";
 import { normalizeEmail, normalizeEmailPrefix } from "../users.js";
 import { activeBan } from "./ban-rule.js";
@@ -144,7 +145,10 @@ export async function operatorUsers(
     const member = members.find((m) => m.userId === user.id && m.organizationId === platformId);
     const factor = factors.find((f) => f.userId === user.id);
     const live = sessions.filter((s) => s.userId === user.id && sessionIsLive(config, s, now));
-    const providers = identities.filter((i) => i.userId === user.id).map((i) => i.provider);
+    // A pending identity row of an import is no way in (`PENDING_PROVIDER_PREFIX`).
+    const providers = identities
+      .filter((i) => i.userId === user.id && !isPendingProvider(i.provider))
+      .map((i) => i.provider);
     return {
       id: user.id,
       email: user.email,

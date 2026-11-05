@@ -1080,6 +1080,82 @@ describe("the pending identity of a new user on D1 (ruling 24 of plan 12q)", () 
   });
 });
 
+/**
+ * The pending identity in the lists (ruling 32 of plan 12q). Core owns the
+ * mark `PENDING_PROVIDER_PREFIX`. In the window of ruling 24 the import
+ * waits 61 s in its hold, and the owner's whole claim lands. The pending
+ * row then sits on the owner's verified account until `deleteWritten`. The
+ * owner's session reads each list there. Each list of core skips the row,
+ * and an unlink of it answers `not_found`.
+ */
+describe("a pending identity row in the lists of core on D1 (ruling 32)", () => {
+  it("skips the row in the identity list and the operator list, and refuses its unlink", async () => {
+    const email = "uma@example.com";
+    const clock = movedClock();
+    // The operator tools need a secret with the scope `users`. The test calls them in process as the app.
+    const operatorSecret = {
+      name: "support",
+      secretHash: "ab".repeat(32),
+      scopes: ["users" as const],
+    };
+    const auth = app(env.DB, { clock, operator: { users: true, secrets: [operatorSecret] } });
+    // The import waits after the flag read of its hold, and again after its pending identity write.
+    const atIdentity = pauseAfter(IDENTITY_INSERT);
+    const run = pauseAfterNth(USER_UPDATE, 1, atIdentity.db);
+    const report = importUsers(
+      createD1Adapter(run.db),
+      listSource([
+        user("uma", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-uma" }],
+        }),
+      ]),
+      { formats: ["bcrypt"], now: () => clock.now() },
+    );
+    await run.reached;
+    // The owner's whole claim takes the stale lease of the hold and flips.
+    clock.move(LEASE_MS + 1_000);
+    const won = await auth.api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    if (!won.ok || !("token" in won.value)) throw new Error("no session");
+    const session = await auth.api.getSession(won.value.token);
+    if (!session) throw new Error("no session");
+    run.go();
+    await atIdentity.reached;
+    const userId = await userIdOf(email);
+    const pending = await env.DB.prepare(
+      "SELECT id FROM ta_identity WHERE user_id = ? AND provider = ?",
+    )
+      .bind(userId, "pending$google")
+      .first<{ id: string }>();
+    if (!pending) throw new Error("no pending row");
+    const listed = await auth.api.identities.list({ session });
+    expect(listed.ok && listed.value.identities.map((i) => i.provider)).toEqual(["email"]);
+    const operator = await auth.api.operator.users.get({
+      actor: { kind: "app", name: "check" },
+      userId,
+    });
+    expect(operator.ok && operator.value.identities).toEqual(["email"]);
+    const unlink = await auth.api.identities.unlink({
+      session,
+      id: pending.id,
+      ip: null,
+      userAgent: null,
+    });
+    expect(unlink).toMatchObject({ ok: false, code: "not_found" });
+    // The release fails on the claim's lease, and the import deletes the pending row.
+    atIdentity.go();
+    expect((await report).partial).toEqual([
+      { kind: "user", sourceId: "uma", missing: ["identity:google"], repairRefused: "claimed" },
+    ]);
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+});
+
 describe("a run that stops inside its hold on D1", () => {
   it("leaves its lease: a link answers 409 for 60 s, and a repair answers claimed until the sweep deletes the lease", async () => {
     const email = "dax@example.com";

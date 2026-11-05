@@ -7,7 +7,7 @@ import { hasAddress } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
-import { PENDING_HASH_PREFIX } from "./password.js";
+import { isPendingProvider, PENDING_HASH_PREFIX } from "./password.js";
 import { phoneSignsIn } from "./phone.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
@@ -65,11 +65,16 @@ export async function credentialsOf(
   const password = row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX);
   const phone = phoneSignsIn(config, user);
   const named = hasAddress(user) || (config.username !== null && user.username !== null) || phone;
+  // A pending identity row of an import is no way in, as a pending password
+  // row is not (`PENDING_PROVIDER_PREFIX`). So no list shows it.
+  const identities = await storage.findMany("identity", [
+    { field: "userId", op: "eq", value: user.id },
+  ]);
   return {
     password,
     passwordReached: password && named,
     passkeys,
-    identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
+    identities: identities.filter((i) => !isPendingProvider(i.provider)),
     mailbox: hasAddress(user) && user.emailVerified,
     phone,
   };
@@ -217,7 +222,8 @@ export async function unlinkIdentity(
     { field: "userId", op: "eq", value: userId },
   ];
   const identity = await config.storage.findOne("identity", own);
-  if (!identity) return fail("not_found");
+  // A pending row of an import is not in the list, so it answers as an unknown id.
+  if (!identity || isPendingProvider(identity.provider)) return fail("not_found");
   // The mark of the proved address, not a provider link (`ensureEmailIdentity`).
   if (identity.provider === "email") return fail("invalid_body");
   const summary = { provider: identity.provider, subject: identity.subject };

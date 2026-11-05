@@ -199,8 +199,10 @@ export type {
 } from "./engine/password.js";
 export {
   defaultExistingAccountMail,
+  isPendingProvider,
   LEGACY_VERIFY_HASH,
   PENDING_HASH_PREFIX,
+  PENDING_PROVIDER_PREFIX,
 } from "./engine/password.js";
 export type { PermissionInput } from "./engine/permissions.js";
 export {

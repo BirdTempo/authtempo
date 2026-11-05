@@ -1,6 +1,7 @@
 import type { ClientCode } from "@authtempo/client";
 import {
   type Auth,
+  isPendingProvider,
   newId,
   normalizeEmail,
   PENDING_HASH_PREFIX,
@@ -151,7 +152,8 @@ export async function accountsOf(storage: StorageAdapter, userId: string): Promi
   const rows = await storage.findMany("identity", [{ field: "userId", op: "eq", value: userId }]);
   const accounts = rows
     // The `email` identity is core's marker of a proved mailbox: Better Auth has no such account.
-    .filter((r) => r.provider !== "email")
+    // A pending row of an import is no way in yet (core's `PENDING_PROVIDER_PREFIX`).
+    .filter((r) => r.provider !== "email" && !isPendingProvider(r.provider))
     .map(
       (r): Account => ({
         id: r.id,
@@ -565,7 +567,7 @@ export function createApi(
         { field: "id", op: "eq", value: body.accountId },
         { field: "userId", op: "eq", value: s.user.id },
       ]);
-      if (!identity || identity.provider === "email") {
+      if (!identity || identity.provider === "email" || isPendingProvider(identity.provider)) {
         if (await isCredential(storage, s.user.id, body.accountId))
           throw compatApiError("NOT_SUPPORTED", CREDENTIAL_UNLINK);
         throw compatApiError("ACCOUNT_NOT_FOUND");

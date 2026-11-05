@@ -151,6 +151,20 @@ const VERIFY_CODE_PER_EMAIL_DAY = { seconds: 86_400, max: 10 };
  */
 export const PENDING_HASH_PREFIX = "pending$";
 /**
+ * The mark on the provider of a pending identity row (ruling 32 of plan
+ * 12q). The importer writes the identity of a held user with the provider
+ * `pending$<provider>`. It writes the real provider at its activation,
+ * after its last check. A provider name never holds `$` (`PROVIDER_NAME_RE`),
+ * so no sign-in finds the row. The identity lists skip it, and an unlink
+ * answers `not_found`. A claim deletes it, as each identity but `email`.
+ */
+export const PENDING_PROVIDER_PREFIX = "pending$";
+
+/** True for the provider of a pending identity row (`PENDING_PROVIDER_PREFIX`). */
+export function isPendingProvider(provider: string): boolean {
+  return provider.startsWith(PENDING_PROVIDER_PREFIX);
+}
+/**
  * The stored hash string of a password row that an importer wrote for a
  * user whose old system exports no hash (Cognito; spec 17.4). No seam
  * parses it, so `verify` fails on it. The sign-in asks

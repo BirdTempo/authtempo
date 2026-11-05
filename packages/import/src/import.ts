@@ -4,11 +4,13 @@ import {
   DEFAULT_RESERVED_SLUGS,
   holdClaim,
   isGithubSubject,
+  isPendingProvider,
   LEGACY_VERIFY_HASH,
   newId,
   normalizeEmail,
   normalizeSlug,
   PENDING_HASH_PREFIX,
+  PENDING_PROVIDER_PREFIX,
   releaseClaim,
   type StorageAdapter,
   StorageError,
@@ -62,16 +64,16 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
  * The mark of a pending identity row (ruling 24 of plan 12q). The importer
  * writes the identity of a held user with the provider `pending$<provider>`.
  * It writes the real provider at the activation step, after the check.
- * - Core takes a provider name only in the form `PROVIDER_NAME_RE`, which
- *   has no `$`. So no sign-in finds a pending row, and core counts it as no
- *   way in (`signsIn` in core's `identities.ts`).
+ * - Core owns the mark (`PENDING_PROVIDER_PREFIX`, ruling 32). Core takes a
+ *   provider name only in the form `PROVIDER_NAME_RE`, which has no `$`. So
+ *   no sign-in finds a pending row, and core counts it as no way in.
+ * - Core's identity lists skip it, and an unlink answers `not_found`.
  * - A claim deletes it, as it deletes each identity other than `email`.
  * - So the identity is live only from its activation. A claim that verified
  *   the user before the check leaves no live row of the import.
+ *
+ * It answers the provider of the pending row of an identity of `provider`.
  */
-const PENDING_PROVIDER_PREFIX = "pending$";
-
-/** The provider of the pending row of an identity of `provider`. */
 function pendingProvider(provider: string): string {
   return `${PENDING_PROVIDER_PREFIX}${provider}`;
 }
@@ -571,7 +573,7 @@ async function repairRefusal(
     ]);
     const held =
       (active ? password : null) ??
-      identities.find((i) => !i.provider.startsWith(PENDING_PROVIDER_PREFIX)) ??
+      identities.find((i) => !isPendingProvider(i.provider)) ??
       (await db.findOne("passkey", [{ field: "userId", op: "eq", value: rows.id }]));
     if (held) return { refused: "credential_exists" };
   }

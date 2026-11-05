@@ -108,7 +108,9 @@ password row of a repair or of a new unverified user is pending until the
 import activates it, after the check. Under the hold a social identity is
 pending too. Its provider is then `pending$<provider>`, a name that no
 sign-in finds. So a sign-in with either fails until the activation, and no
-imported credential is live before the check passes. When another user takes
+imported credential is live before the check passes. Core owns the mark
+(`PENDING_PROVIDER_PREFIX`). The identity lists of core and compat skip a
+pending row, and an unlink of it fails. When another user takes
 the identity on D1 before the activation, the import deletes its rows. The
 record is then `partial` with `not repaired: identity_taken`. A run that
 stops before the activation, as at the D1 cap, leaves the pending row. A

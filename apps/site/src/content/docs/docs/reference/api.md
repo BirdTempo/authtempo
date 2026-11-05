@@ -149,6 +149,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `PBKDF2_ITERATIONS` | 100000. |
 | `PASSKEY_HINTS` | `security-key`, `client-device`, and `hybrid`: the hints of WebAuthn Level 3. |
 | `PENDING_HASH_PREFIX` | The prefix of a password row that an import holds back until it activates the row, after its other writes. |
+| `PENDING_PROVIDER_PREFIX`, `isPendingProvider` | The prefix of the provider of an identity row that an import holds back until its activation. No sign-in finds such a row. The identity lists skip it, and an unlink answers `not_found`. `isPendingProvider` tests a provider name. |
 | `CAPTCHA_FLOWS`, `DEFAULT_CAPTCHA_FLOWS` | The five flows that a captcha can check, and the four that it checks by default. |
 | `CAPTCHA_HEADER` | `x-captcha-response`, the header of the captcha token. |
 | `CAPTCHA_TOKEN_MAX` | 2048. A longer token answers `captcha_failed` with no call. |
