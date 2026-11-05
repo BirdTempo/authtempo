@@ -12,16 +12,18 @@ describe("password", () => {
     const server = makeServer({ password: { hash: FAST } });
     const { fetch, jar } = inProcessFetch(server.auth);
     const client = createClient({ baseURL: BASE_URL, fetch });
+    // The answer and the one cookie carry the sign-up proof, and no session (plan 12q).
     expect(await client.password.signUp({ email: EMAIL, password: PW })).toEqual({
       ok: true,
-      value: { sent: true },
+      value: { sent: true, signUpProof: expect.stringMatching(/^sp_/) },
     });
-    expect(jar.size).toBe(0);
+    expect([...jar.keys()]).toEqual(["__Host-tempo_signup"]);
     const v = await client.password.verifyEmail({
       token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
     });
-    expect(v.ok).toBe(true);
-    expect(jar.size).toBe(1);
+    expect(v.ok && v.value.passwordKept).toBe(true);
+    // The confirm cleared the proof and set the session cookie.
+    expect([...jar.keys()]).toEqual(["__Host-tempo_session"]);
   });
 
   it("answers the user, verifyRequired, and no cookie at sign-up with password.requireVerified (plan 12b)", async () => {
@@ -33,7 +35,8 @@ describe("password", () => {
     const up = await client.password.signUp({ email: EMAIL, password: PW });
     expect(up.ok && up.value).toMatchObject({ verifyRequired: true, user: { email: EMAIL } });
     expect(up.ok && "token" in up.value).toBe(false);
-    expect(jar.size).toBe(0);
+    // No session cookie: the one cookie is the sign-up proof (plan 12q).
+    expect([...jar.keys()]).toEqual(["__Host-tempo_signup"]);
   });
 
   it("signs up, signs in, resets, and changes, with the cookie and with the bearer token", async () => {
@@ -44,7 +47,8 @@ describe("password", () => {
     const up = await client.password.signUp({ email: EMAIL, password: PW });
     expect(up.ok && "token" in up.value && up.value.token).toMatch(/^ts_/);
     expect(up.ok && "token" in up.value && up.value.user.emailVerified).toBe(false);
-    expect(jar.size).toBe(1);
+    // The session cookie, and the sign-up proof (plan 12q).
+    expect([...jar.keys()].sort()).toEqual(["__Host-tempo_session", "__Host-tempo_signup"]);
     expect(await client.password.signIn({ email: EMAIL, password: "wrong password" })).toEqual({
       ok: false,
       code: "invalid_credentials",
@@ -137,9 +141,10 @@ describe("password", () => {
     });
     expect(server.mail).toHaveLength(2);
     const token = tokenFromMail(server.mail.at(-1)?.text ?? "");
+    // The jar holds the sign-up proof, and the resend kept its hash (plan 12q).
     expect(await client.password.verifyEmail({ token })).toEqual({
       ok: true,
-      value: { verified: true },
+      value: { verified: true, passwordKept: true },
     });
     const s = await client.session();
     expect(s.ok && s.value?.user.emailVerified).toBe(true);

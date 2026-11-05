@@ -13,6 +13,8 @@ import {
   requestPasswordReset,
   resendPasswordVerification,
   resetPassword,
+  SIGN_UP_PROOF_RE,
+  signUpProofMaxAge,
   verifyPasswordCode,
   verifyPasswordEmail,
 } from "../../engine/password.js";
@@ -31,6 +33,12 @@ import {
   tokenBody,
   verifyCodeBody,
 } from "../contract/password.js";
+import {
+  clearSignUpProofCookie,
+  readCookie,
+  SIGN_UP_PROOF_COOKIE,
+  signUpProofCookie,
+} from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
@@ -55,6 +63,18 @@ function isPageError(code: string | null): code is PageError {
   return code !== null && PAGE_ERRORS.has(code);
 }
 
+/**
+ * The query that the redirect of a verify link gains when the claim took the
+ * sign-up's password (ruling 11 of plan 12q). The app then shows its
+ * first-password form, which posts to `POST /password/change`.
+ */
+export const PASSWORD_SET_QUERY = "password=set";
+
+/** The sign-up proof cookie of a request (ruling 11 of plan 12q), or null. */
+function proofCookie(request: Request): string | null {
+  return readCookie(request, SIGN_UP_PROOF_COOKIE);
+}
+
 /** No route without a `password` config, so the router answers 404. */
 export function passwordRoutes(config: ResolvedConfig): Route[] {
   if (!config.password) return [];
@@ -66,8 +86,16 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
   const cookieFor = (token: string) => sessionCookieFor(config, token);
-  const signedIn = (v: PasswordSession, via?: LastMethod): Response =>
-    signedInResponse(config, v, via);
+  const signedIn = (
+    v: PasswordSession,
+    via?: LastMethod,
+    extra?: Parameters<typeof signedInResponse>[3],
+  ): Response => signedInResponse(config, v, via, extra);
+  // The sign-up proof cookie, for the life of the link or the code (ruling 11 of plan 12q).
+  const withProof = (res: Response, proof: string): Response => {
+    res.headers.append("set-cookie", signUpProofCookie(proof, signUpProofMaxAge(config)));
+    return res;
+  };
   return [
     {
       method: "POST",
@@ -91,12 +119,20 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ctx.waitUntil,
         );
         if (!r.ok) return respond(r);
-        // The uniform answer (plan 12b): the same bytes for every address, no cookie.
-        if ("sent" in r.value) return json({ sent: true });
-        // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no cookie.
+        // The sign-up proof (ruling 11 of plan 12q): the cookie for every
+        // caller, and the body member for a bearer client with no cookie jar.
+        const proof = r.value.signUpProof;
+        // The uniform answer (plan 12b): the same shape for every address and
+        // no session cookie. Only the random bytes of the proof differ.
+        if ("sent" in r.value) return withProof(json({ sent: true, signUpProof: proof }), proof);
+        // password.requireVerified with uniformSignUp off (plan 12b): the user, no session, and no session cookie.
         if ("verifyRequired" in r.value)
-          return json({ user: publicUser(r.value.user), verifyRequired: true });
-        return withLastMethod(ctx.config, ctx.request, signedIn(r.value, "password"), "password");
+          return withProof(
+            json({ user: publicUser(r.value.user), verifyRequired: true, signUpProof: proof }),
+            proof,
+          );
+        const res = withProof(signedIn(r.value, "password", { signUpProof: proof }), proof);
+        return withLastMethod(ctx.config, ctx.request, res, "password");
       },
     },
     {
@@ -118,6 +154,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           next: body.value.next,
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
+          // For the new verify link of an unverified user (ruling 11 of plan 12q).
+          signUpProof: proofCookie(ctx.request),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
@@ -155,12 +193,20 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
+          // The sign-up's own browser carries it (ruling 11 of plan 12q).
+          signUpProof: proofCookie(ctx.request),
         });
         if (!r.ok) return jsonCaller ? respond(r) : failed(ctx, r.code);
-        const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(ctx.config, "/"));
-        if (!r.value.signedIn) return res;
+        const kept = r.value.passwordKept;
+        // The claim took the password: the app shows its first-password form.
+        const res = jsonCaller
+          ? json({ verified: true, passwordKept: kept })
+          : redirect(resolveNext(ctx.config, kept ? "/" : `/?${PASSWORD_SET_QUERY}`));
         // The confirm of a password sign-up opens its session (plan 12b).
-        res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
+        if (r.value.signedIn) res.headers.set("set-cookie", cookieFor(r.value.signedIn.token));
+        // The confirm spent the row, so the proof has no use left.
+        res.headers.append("set-cookie", clearSignUpProofCookie());
+        if (!r.value.signedIn) return res;
         return withLastMethod(ctx.config, ctx.request, res, "password");
       },
     },
@@ -178,15 +224,22 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
+          // The cookie of the sign-up's browser, else the copy of a bearer
+          // client (ruling 11 of plan 12q).
+          signUpProof: proofCookie(ctx.request) ?? body.value.signUpProof ?? null,
         });
         if (!r.ok) return respond(r);
         const s = r.value.signedIn;
-        if (!s) return json({ verified: true });
+        const passwordKept = r.value.passwordKept;
         // The code opens the session of the sign-up, as the link's confirm does (plan 12b).
-        const res = signedIn(
-          { token: s.token, user: r.value.user, session: s.session },
-          "password",
-        );
+        const res = s
+          ? signedIn({ token: s.token, user: r.value.user, session: s.session }, "password", {
+              passwordKept,
+            })
+          : json({ verified: true, passwordKept });
+        // The confirm spent the row, so the proof has no use left.
+        res.headers.append("set-cookie", clearSignUpProofCookie());
+        if (!s) return res;
         return withLastMethod(ctx.config, ctx.request, res, "password");
       },
     },
@@ -198,18 +251,25 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, resendBody);
         if (!body.ok) return respond(body);
+        const carried = proofCookie(ctx.request);
         // With the code, the send runs after the answer (ruling 23 of plan 12i).
-        return respond(
+        const res = respond(
           await resendPasswordVerification(
             ctx.config,
             {
               email: body.value.email,
               ip: ctx.ip,
               anonymous: await anonymousCaller(ctx.config, ctx.request),
+              // The new row keeps the proof hash (ruling 11 of plan 12q).
+              signUpProof: carried ?? body.value.signUpProof ?? null,
             },
             ctx.waitUntil,
           ),
         );
+        // The new link or code lives a full life, so the proof cookie does
+        // too. It depends on the request alone, so it tells no account.
+        if (res.ok && carried !== null && SIGN_UP_PROOF_RE.test(carried)) withProof(res, carried);
+        return res;
       },
     },
     {

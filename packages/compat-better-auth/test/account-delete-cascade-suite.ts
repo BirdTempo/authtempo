@@ -10,6 +10,7 @@ import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { expect, it } from "vitest";
 import type { CompatDatabase } from "../src/types.js";
 import { adminApp, cookieOf, PASSWORD, APP as SETUP } from "./admin-helpers.js";
+import { proofOf } from "./proof-helpers.js";
 
 // Ruling 13 of plan 12f2 (final-12f2-B H1 and M1). On the Better Auth
 // tables a user delete cascades to the sessions, the accounts, and the
@@ -157,8 +158,9 @@ let operatorsMade = 0;
 export async function newOperator(a: Setup): Promise<{ id: string; cookie: string }> {
   operatorsMade++;
   const email = `operator-${operatorsMade}@example.com`;
-  await a.call("/password/sign-up", { email, password: PASSWORD });
-  await a.call("/password/verify", { token: a.links.at(-1) });
+  const up = await a.call("/password/sign-up", { email, password: PASSWORD });
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await a.call("/password/verify", { token: a.links.at(-1) }, proofOf(up));
   const made = await a.auth.tempo.api.operator.createAdmin({
     actor: SETUP,
     email,

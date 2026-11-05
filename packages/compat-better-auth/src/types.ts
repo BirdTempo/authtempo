@@ -1281,6 +1281,9 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   /**
    * `image` and `callbackURL` throw `APIError` NOT_SUPPORTED (501): core keeps neither.
    * `token` is null with `emailAndPassword.requireEmailVerification` (plan 12b): no session opens.
+   * `signUpProof` is core's sign-up proof (plan 12q), a member that Better Auth does not have.
+   * Set it as the HttpOnly cookie `__Host-tempo_signup` of the browser, or the confirm of the
+   * link deletes the password.
    */
   signUpEmail(input: {
     body: {
@@ -1295,7 +1298,7 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
       displayUsername?: string;
     };
     headers?: Headers;
-  }): Promise<{ token: SignUpTokenOf[`${RV}`]; user: User }>;
+  }): Promise<{ token: SignUpTokenOf[`${RV}`]; user: User; signUpProof: string }>;
   /** `callbackURL` and `rememberMe: false` throw `APIError` NOT_SUPPORTED (501): core keeps neither. */
   signInEmail(input: {
     body: { email: string; password: string; callbackURL?: string; rememberMe?: boolean };

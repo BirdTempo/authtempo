@@ -20,10 +20,14 @@ const json = (body: unknown, cookie = "") => ({
   },
   body: JSON.stringify(body),
 });
-const form = (body: Record<string, string>) => ({
+const form = (body: Record<string, string>, cookie = "") => ({
   method: "POST",
   redirect: "manual" as const,
-  headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+  headers: {
+    "content-type": "application/x-www-form-urlencoded",
+    origin: BASE,
+    ...(cookie ? { cookie } : {}),
+  },
   body: new URLSearchParams(body).toString(),
 });
 const named = (res: Response, name: string) =>
@@ -31,9 +35,13 @@ const named = (res: Response, name: string) =>
 
 /** A verified user: the sign-up, then the mailed verify link. Answers the session cookie. */
 async function verifiedUser(email: string): Promise<string> {
-  await SELF.fetch(`${BASE}/auth/password/sign-up`, json({ email, password: PW }));
+  const up = await SELF.fetch(`${BASE}/auth/password/sign-up`, json({ email, password: PW }));
   const token = (await lastLink()).searchParams.get("token") ?? "";
-  const verified = await SELF.fetch(`${BASE}/auth/password/verify`, form({ token }));
+  // The browser of the sign-up holds its proof, so the password stays (ruling 11 of plan 12q).
+  const verified = await SELF.fetch(
+    `${BASE}/auth/password/verify`,
+    form({ token }, named(up, "__Host-tempo_signup")),
+  );
   return named(verified, "__Host-tempo_session");
 }
 

@@ -29,17 +29,21 @@ export function sessionCookieFor(config: ResolvedConfig, token: string): string 
  * `{ token, user, session }` with the session cookie, for the password and
  * the email code routes: a browser keeps the cookie, a native app keeps the
  * token. A sign-in passes its `via` (plan 12i Task 12); a reset passes none.
+ * `extra` adds the members of one flow: the sign-up proof of a sign-up, and
+ * `passwordKept` of a sign-up confirm (ruling 11 of plan 12q).
  */
 export function signedInResponse(
   config: ResolvedConfig,
   v: { token: string; user: UserRow; session: SessionRow },
   via?: LastMethod,
+  extra: { signUpProof?: string; passwordKept?: boolean } = {},
 ): Response {
   return json(
     {
       token: v.token,
       ...publicSession({ user: v.user, session: v.session, refreshed: false }),
       ...viaField(config, via),
+      ...extra,
     },
     200,
     { "set-cookie": sessionCookieFor(config, v.token) },

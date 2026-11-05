@@ -90,7 +90,11 @@ export async function seedConformance(
   const token = link?.includes("/password/verify?token=")
     ? new URL(link).searchParams.get("token")
     : null;
-  if (token) await auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+  // The sign-up's own proof keeps the password: a confirm without it deletes
+  // the password of the sign-up (ruling 11 of plan 12q).
+  const signUpProof = signUp?.ok ? signUp.value.signUpProof : null;
+  if (token)
+    await auth.api.password?.verifyEmail({ token, ip: null, userAgent: null, signUpProof });
   const clients = auth.api.oauth?.clients;
   if (!clients) throw new Error("conformance mode needs oauth");
   const listed = await clients.list();

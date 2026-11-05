@@ -161,6 +161,15 @@ it("runs consumer-i's dashboard and mobile surfaces: organizations, the bearer h
   // Confirm the address by the mailed link, as a person does, so organization writes are allowed.
   const cookie = await confirmByLink(await lastLink(ownerEmail));
   expect(cookie).toMatch(/^__Host-tempo_session=ts_/);
+  // The link opened outside the app, with no sign-up proof, so the claim took
+  // the password (ruling 11 of plan 12q). The owner sets a first password on
+  // the proved and fresh session of the confirm, with no current password.
+  const first = await SELF.fetch(`${BASE}/api/auth/password/change`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE, cookie },
+    body: JSON.stringify({ newPassword: PASSWORD }),
+  });
+  expect(first.status).toBe(200);
 
   const dashboard = createAuthClient({
     baseURL: BASE,

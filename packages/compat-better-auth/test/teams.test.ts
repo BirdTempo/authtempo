@@ -29,6 +29,7 @@ import {
   BETTER_AUTH_TEAMS_SQLITE,
 } from "./fixtures.js";
 import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
+import { proofCookieOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -120,12 +121,17 @@ function app(org: OrganizationOptions, database: CompatDatabase = memory()) {
   });
   /** Signs up, confirms the verify link as a person does, and signs in again. */
   const person = async (email: string) => {
-    await auth.api.signUpEmail({ body: { email, password: PASSWORD, name: email } });
+    const up = await auth.api.signUpEmail({ body: { email, password: PASSWORD, name: email } });
     const link = mails.findLast((m) => m.email === email);
+    // The browser holds the proof that the app set from the answer (ruling 11 of plan 12q).
     const res = await auth.handler(
       new Request(`${BASE}/api/auth/password/verify`, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: BASE,
+          cookie: proofCookieOf(up),
+        },
         body: new URLSearchParams({ token: link?.token ?? "" }).toString(),
       }),
     );

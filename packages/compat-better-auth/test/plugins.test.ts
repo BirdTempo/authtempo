@@ -11,6 +11,7 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../src/types.js";
+import { proofCookieOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const APP = "https://app.example.com";
@@ -58,10 +59,15 @@ async function verifiedUser(auth: ReturnType<typeof betterAuth>, email: string) 
   // The newest link for the address: two tests use one address.
   const link = [...verifyLinks].reverse().find((l) => l.email === email)?.url;
   if (!link) throw new Error(`no verify link for ${email}`);
+  // The browser holds the proof that the app set from the answer (ruling 11 of plan 12q).
   const confirmed = await auth.handler(
     new Request(`${BASE}/api/auth/password/verify`, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: BASE,
+        cookie: proofCookieOf(up),
+      },
       body: new URLSearchParams({
         token: new URL(link).searchParams.get("token") ?? "",
       }).toString(),

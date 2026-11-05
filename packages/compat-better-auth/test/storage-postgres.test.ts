@@ -1070,7 +1070,11 @@ describe("the compat migration and core's own write paths on postgres", () => {
         ip: null,
         userAgent: null,
       });
-      expect(uniform).toEqual({ ok: true, value: { sent: true } });
+      // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+      expect(uniform).toEqual({
+        ok: true,
+        value: { sent: true, signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/) },
+      });
       const other = await pg.sql.unsafe<{ password: string | null }[]>(
         'SELECT a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE u."email" = $1 AND a."providerId" = $2',
         ["other@example.com", "credential"],

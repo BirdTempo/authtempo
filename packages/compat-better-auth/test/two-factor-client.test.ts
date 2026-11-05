@@ -11,6 +11,7 @@ import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { CompatDatabase, TwoFactorClientOptions } from "../src/types.js";
+import { proofOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const EMAIL = "pat@example.com";
@@ -50,10 +51,15 @@ async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn()
     },
   });
   const calls: string[] = [];
+  // The sign-up proof cookie of the last answer that set one (ruling 11 of plan 12q).
+  let proof = "";
   const fetchImpl: typeof fetch = async (input, init) => {
     const req = new Request(input, init);
     calls.push(new URL(req.url).pathname);
-    return auth.handler(req);
+    const res = await auth.handler(req);
+    if (res.headers.getSetCookie().some((c) => c.startsWith("__Host-tempo_signup=sp_")))
+      proof = proofOf(res);
+    return res;
   };
   const storage = memoryStorage();
   const c = createAuthClient({
@@ -65,13 +71,16 @@ async function setup(tf: TwoFactorClientOptions = { onTwoFactorRedirect: vi.fn()
     ],
     fetchOptions: { customFetchImpl: fetchImpl },
   });
-  /** Sign up and verify the address. The verify claims it and ends the sign-up session. */
+  /**
+   * Sign up and verify the address. The verify claims it and ends the sign-up
+   * session. It carries the sign-up's proof, so the password stays (plan 12q).
+   */
   const register = async (email: string, name: string) => {
     await c.signUp.email({ email, password: PASSWORD, name });
     await auth.handler(
       new Request(`${BASE}/api/auth/password/verify`, {
         method: "POST",
-        headers: { "content-type": "application/json", origin: BASE },
+        headers: { "content-type": "application/json", origin: BASE, cookie: proof },
         body: JSON.stringify({ token: links.at(-1) }),
       }),
     );

@@ -6,8 +6,10 @@ import {
   PENDING_HASH_PREFIX,
   type ResolvedSession,
   type Result,
+  SIGN_UP_PROOF_COOKIE,
   type StorageAdapter,
 } from "@authtempo/core";
+import { newSignUpProof } from "@authtempo/core/compat";
 import {
   APIError,
   apiError,
@@ -298,6 +300,8 @@ export function createApi(
         const typed = username?.normalize("NFKC") ?? null;
         return {
           token: null,
+          // A proof of the same form as a new address gets, so the answer tells no account (plan 12q).
+          signUpProof: newSignUpProof(),
           user: toUser(
             {
               id: newId(now),
@@ -327,9 +331,14 @@ export function createApi(
       // exhaustiveness check fits. The throw keeps a later change of the map a
       // clear fault, not a wrong answer.
       if ("sent" in v) throw compatApiError("NOT_SUPPORTED", "core answered the uniform sign-up");
+      // Core's sign-up proof (ruling 11 of plan 12q). A server caller has no
+      // cookie jar, so the answer carries it. The app sets it as the cookie
+      // `__Host-tempo_signup`, or the confirm deletes the password.
+      const signUpProof = v.signUpProof;
       // Core's answer while requireVerified is on: the user and no session.
-      if (!("token" in v)) return { token: null, user: toUser(v.user, mapped.plugins) };
-      return { token: v.token, user: toUser(v.user, mapped.plugins) };
+      if (!("token" in v))
+        return { token: null, user: toUser(v.user, mapped.plugins), signUpProof };
+      return { token: v.token, user: toUser(v.user, mapped.plugins), signUpProof };
     },
     async signInEmail({ body, headers }) {
       // Each would be dropped in silence: core answers a token, not a redirect,
@@ -356,6 +365,8 @@ export function createApi(
           ip: clientIp(req),
           userAgent: req.headers.get("user-agent"),
           ...(trustDevice ? { trustDevice } : {}),
+          // A new verify link keeps the proof of the browser's sign-up (ruling 11 of plan 12q).
+          signUpProof: cookieValue(req, SIGN_UP_PROOF_COOKIE),
         }),
       );
       // Better Auth's answer for a user with the factor on. A server caller has
@@ -399,10 +410,13 @@ export function createApi(
       // Core's verify link lands on the app origin; a callbackURL would be dropped in silence.
       if (body.callbackURL !== undefined)
         throw compatApiError("NOT_SUPPORTED", "core takes no callbackURL at the verify mail");
+      const req = reqOf(headers);
       unwrap(
         await passwords().resendVerification({
           email: body.email,
-          ip: clientIp(reqOf(headers)),
+          ip: clientIp(req),
+          // The new link keeps the proof of the browser's sign-up (ruling 11 of plan 12q).
+          signUpProof: cookieValue(req, SIGN_UP_PROOF_COOKIE),
         }),
       );
       return { status: true };

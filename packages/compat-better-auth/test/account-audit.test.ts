@@ -210,7 +210,8 @@ describe("Task 18 email verification callbacks", () => {
         body: JSON.stringify({ token: link.searchParams.get("token") }),
       }),
     );
-    expect(await verified.json()).toEqual({ verified: true });
+    // The request holds no sign-up proof, so the claim took the password (plan 12q).
+    expect(await verified.json()).toEqual({ verified: true, passwordKept: false });
     expect(calls).toEqual([
       ["before", "ada@example.com", false, "", undefined],
       ["after", "ada@example.com", true, "", undefined],

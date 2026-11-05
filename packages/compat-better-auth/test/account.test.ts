@@ -21,6 +21,7 @@ import { issuerFor } from "../src/storage/mapping.js";
 import type { BetterAuthOptions, CompatDatabase } from "../src/types.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
 import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
+import { proofOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const PATH = `${BASE}/api/auth`;
@@ -725,8 +726,13 @@ describe("the fresh rule under the shim (plan 12a)", () => {
       },
       plugins,
     );
-    await t.post("/password/sign-up", { email: "pat@example.com", password: PASSWORD }, "");
-    await t.post("/password/verify", { token: t.verifyMails.at(-1)?.token }, "");
+    const up = await t.post(
+      "/password/sign-up",
+      { email: "pat@example.com", password: PASSWORD },
+      "",
+    );
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await t.post("/password/verify", { token: t.verifyMails.at(-1)?.token }, proofOf(up));
     const signIn = await t.post(
       "/password/sign-in",
       { email: "pat@example.com", password: PASSWORD },
@@ -807,8 +813,13 @@ describe("the fresh rule on the shim's second-factor paths (plan 12a, Task 12 re
       },
       [twoFactor({ accountLockout: { enabled: false } })],
     );
-    await t.post("/password/sign-up", { email: "pat@example.com", password: PASSWORD }, "");
-    await t.post("/password/verify", { token: t.verifyMails.at(-1)?.token }, "");
+    const up = await t.post(
+      "/password/sign-up",
+      { email: "pat@example.com", password: PASSWORD },
+      "",
+    );
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await t.post("/password/verify", { token: t.verifyMails.at(-1)?.token }, proofOf(up));
     const cookie = sessionPair(
       await t.post("/password/sign-in", { email: "pat@example.com", password: PASSWORD }, ""),
     );

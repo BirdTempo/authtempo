@@ -11,6 +11,7 @@ import { organization, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { BetterAuthOptions, BetterAuthPlugin, CompatDatabase } from "../src/types.js";
 import { cookieOf } from "./admin-helpers.js";
+import { proofOf } from "./proof-helpers.js";
 
 // The app of the sso and scim tests of plan 12d Task 14, on any compat
 // database. Every row comes from a flow of the product.
@@ -106,8 +107,9 @@ export function ssoApp(
   const read = (path: string, cookie = "") => send("GET", path, undefined, cookie);
   /** A user with a verified address and no session, through the sign-up and the verify link. */
   const verified = async (email: string) => {
-    await call("/password/sign-up", { email, password: PASSWORD });
-    await call("/password/verify", { token: links.at(-1) });
+    const up = await call("/password/sign-up", { email, password: PASSWORD });
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await call("/password/verify", { token: links.at(-1) }, proofOf(up));
   };
   /** A session of a verified user through the sign-in. */
   const signedIn = async (email: string) => {

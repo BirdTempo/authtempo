@@ -9,6 +9,7 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { moveBetterAuthApiKeys } from "../src/storage/api-keys.js";
 import type { D1SchemaStorage, PostgresSchemaStorage } from "../src/storage/index.js";
 import { rawReadOf, registerRawRead } from "../src/storage/raw.js";
+import { proofCookieOf } from "./proof-helpers.js";
 
 /** One database of the suite: the shim storage after the compat migrations, and a raw insert into apikey. */
 export interface MoveDatabase {
@@ -95,12 +96,17 @@ function app(m: MoveDatabase, references: "user" | "organization", rateLimit = f
   });
   /** Signs up, confirms the verify link as a person does, and signs in. */
   const person = async (email: string) => {
-    await auth.api.signUpEmail({ body: { email, password: PASSWORD, name: email } });
+    const up = await auth.api.signUpEmail({ body: { email, password: PASSWORD, name: email } });
     const link = mails.findLast((x) => x.email === email);
+    // The browser holds the proof that the app set from the answer (ruling 11 of plan 12q).
     const res = await auth.handler(
       new Request(`${BASE}/api/auth/password/verify`, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: BASE,
+          cookie: proofCookieOf(up),
+        },
         body: new URLSearchParams({ token: link?.token ?? "" }).toString(),
       }),
     );

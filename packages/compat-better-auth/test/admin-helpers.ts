@@ -6,6 +6,7 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { COOKIE_NAME } from "../src/server/shapes.js";
 import { issuerFor } from "../src/storage/mapping.js";
 import type { BetterAuthPlugin, CompatDatabase } from "../src/types.js";
+import { proofOf } from "./proof-helpers.js";
 
 // The app of the admin plugin tests of plan 12f Task 13, on any compat
 // database: the memory adapter, Postgres, and D1.
@@ -100,8 +101,9 @@ export async function adminApp(
   const read = (path: string, cookie = "") => send("GET", path, undefined, cookie);
   /** A verified user with a session. Answers the user id and the session cookie. */
   const user = async (email: string) => {
-    await call("/password/sign-up", { email, password: PASSWORD });
-    await call("/password/verify", { token: links.at(-1) });
+    const up = await call("/password/sign-up", { email, password: PASSWORD });
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await call("/password/verify", { token: links.at(-1) }, proofOf(up));
     const signIn = await call("/password/sign-in", { email, password: PASSWORD });
     const row = await database.storage.findOne("user", [
       { field: "email", op: "eq", value: email },
@@ -109,8 +111,9 @@ export async function adminApp(
     if (!row) throw new Error(`no user ${email}`);
     return { id: row.id, cookie: cookieOf(signIn) };
   };
-  await call("/password/sign-up", { email: OPERATOR, password: PASSWORD });
-  await call("/password/verify", { token: links.at(-1) });
+  const up = await call("/password/sign-up", { email: OPERATOR, password: PASSWORD });
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await call("/password/verify", { token: links.at(-1) }, proofOf(up));
   const made = await auth.tempo.api.operator.createAdmin({
     actor: APP,
     email: OPERATOR,

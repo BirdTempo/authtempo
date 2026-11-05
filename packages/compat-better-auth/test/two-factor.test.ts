@@ -14,6 +14,7 @@ import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import { TWO_FACTOR_NOT_SUPPORTED } from "../src/server/two-factor.js";
 import type { BetterAuthOptions, CompatDatabase, TwoFactorOptions } from "../src/types.js";
+import { proofOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const EMAIL = "pat@example.com";
@@ -73,8 +74,9 @@ async function app(tf: TwoFactorOptions | null = {}) {
     );
   const get = (path: string, cookie = "") =>
     auth.handler(new Request(`${BASE}/api/auth${path}`, { headers: cookie ? { cookie } : {} }));
-  await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
-  await post("/password/verify", { token: links.at(-1) });
+  const up = await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await post("/password/verify", { token: links.at(-1) }, proofOf(up));
   const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD });
   const session = pair(cookieOf(signIn, "__Host-tempo_session"));
   return { auth, post, get, session, storage };
@@ -529,8 +531,9 @@ describe("the reset of a user with the factor on (plan 12c)", () => {
           body: JSON.stringify(body),
         }),
       );
-    await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
-    await post("/password/verify", { token: links.at(-1) });
+    const up = await post("/password/sign-up", { email: EMAIL, password: PASSWORD });
+    // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+    await post("/password/verify", { token: links.at(-1) }, proofOf(up));
     const session = pair(
       cookieOf(
         await post("/password/sign-in", { email: EMAIL, password: PASSWORD }),

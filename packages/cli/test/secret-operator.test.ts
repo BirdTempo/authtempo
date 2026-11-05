@@ -101,10 +101,12 @@ async function enroll(f: Fixture, auth: Auth, email: string): Promise<void> {
   const confirm = f.mails.findLast((m) => m.to === email);
   const token = /token=([A-Za-z0-9_%-]+)/.exec(confirm?.text ?? "")?.[1];
   if (!token) throw new Error("no confirm mail");
+  // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
   const verified = await password.verifyEmail({
     token: decodeURIComponent(token),
     ip: null,
     userAgent: null,
+    signUpProof: up.value.signUpProof,
   });
   if (!verified.ok) throw new Error(`the verify answered ${verified.code}`);
   if (verified.value.signedIn === null) throw new Error("the verify opened no session");
@@ -235,10 +237,12 @@ describe("authtempo secret status (plan 11c2)", () => {
     if (!up.ok || !("user" in up.value)) throw new Error("the sign-up gave no user");
     const token = /token=([A-Za-z0-9_%-]+)/.exec(f.mails.at(-1)?.text ?? "")?.[1];
     if (!token) throw new Error("no confirm mail");
+    // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
     const verified = await password.verifyEmail({
       token: decodeURIComponent(token),
       ip: null,
       userAgent: null,
+      signUpProof: up.value.signUpProof,
     });
     if (!verified.ok || !("user" in verified.value)) throw new Error("no verified user");
     const org = await v1.api.createOrganization({

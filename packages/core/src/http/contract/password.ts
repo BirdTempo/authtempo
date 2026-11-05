@@ -45,12 +45,20 @@ export const resetRequestBody = z.object({
   next: z.string().max(2048).optional(),
 });
 
-export const resendBody = z.object({ email: z.string().max(320) });
+/**
+ * The sign-up proof of a bearer client with no cookie jar (ruling 11 of plan
+ * 12q). A browser sends the cookie `__Host-tempo_signup`, and the cookie
+ * wins. The engine reads only the `sp_` form, so another string keeps nothing.
+ */
+const signUpProofField = z.string().max(64).optional();
+
+export const resendBody = z.object({ email: z.string().max(320), signUpProof: signUpProofField });
 
 /** Plan 12i Task 20: the sign-up code. The engine compares any string, so a bad form answers `invalid_code`. */
 export const verifyCodeBody = z.object({
   email: z.string().max(320),
   code: z.string().max(16),
+  signUpProof: signUpProofField,
 });
 
 export const resetBody = z.object({
@@ -82,14 +90,24 @@ export const resetQuery = z.object({
   error: z.enum(RESET_PAGE_ERRORS).optional(),
 });
 
-/** The confirm of a sign-up that opened no session. */
-const verifiedAnswer = z.strictObject({ verified: z.literal(true) });
+/**
+ * `passwordKept`: false when the confirm had no sign-up proof, so the claim
+ * took the password (ruling 11 of plan 12q). The person then sets a first
+ * password through `POST /password/change`.
+ */
+const passwordKept = { passwordKept: z.boolean() };
+
+/** The JSON confirm of the link, and the confirm of a sign-up that opened no session. */
+const verifiedAnswer = z.strictObject({ verified: z.literal(true), ...passwordKept });
+
+/** The sign-up proof in each sign-up answer (ruling 11 of plan 12q). */
+const signUpProof = { signUpProof: z.string() };
 
 /** The sign-up answer, as each password config answers it (plan 12b): uniform, pending, or signed in. */
 const signUpAnswer = z.union([
-  SentAnswer,
-  z.strictObject({ user: UserJson, verifyRequired: z.literal(true) }),
-  SignInAnswer,
+  SentAnswer.extend(signUpProof),
+  z.strictObject({ user: UserJson, verifyRequired: z.literal(true), ...signUpProof }),
+  SignInAnswer.extend(signUpProof),
 ]);
 
 /** The sign-in carries `via` (plan 12i); the reset does not: it is no sign-in method. */
@@ -119,7 +137,7 @@ export const PASSWORD_CONTRACT = {
   "POST /password/verify/code": {
     body: { schema: verifyCodeBody, media: ["json"], parsedBy: "zod" },
     // A session for an unverified user; a user already verified gets no session.
-    answer: { kind: "json", schema: z.union([SignInAnswer, verifiedAnswer]) },
+    answer: { kind: "json", schema: z.union([SignInAnswer.extend(passwordKept), verifiedAnswer]) },
   },
   "POST /password/verify/resend": {
     body: { schema: resendBody, media: ["json"], parsedBy: "zod" },

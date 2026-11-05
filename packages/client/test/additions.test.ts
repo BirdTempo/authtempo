@@ -310,7 +310,7 @@ describe("the client calls of the sign-in additions (plan 12i Task 15)", () => {
     // unverified account and clear the password (12b).
     expect(
       await client.password.verifyEmail({ token: tokenFromMail(server.mail.at(-1)?.text ?? "") }),
-    ).toEqual({ ok: true, value: { verified: true } });
+    ).toEqual({ ok: true, value: { verified: true, passwordKept: true } });
     expect(await client.phone.add({ phone: "+14155550100" })).toEqual({
       ok: true,
       value: { sent: true },

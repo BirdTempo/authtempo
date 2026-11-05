@@ -71,7 +71,13 @@ async function manager(w: ReturnType<typeof world>) {
   const up = await password.signUp({ email, password: PASSWORD, ip: null, userAgent: null });
   if (!up.ok) throw new Error(up.code);
   const token0 = linkToken(w.sent);
-  const verified = await password.verifyEmail({ token: token0, ip: null, userAgent: null });
+  // The sign-up's own proof keeps the password (ruling 11 of plan 12q).
+  const verified = await password.verifyEmail({
+    token: token0,
+    ip: null,
+    userAgent: null,
+    signUpProof: up.value.signUpProof,
+  });
   if (!verified.ok) throw new Error(verified.code);
   const signedIn = await password.signIn({ email, password: PASSWORD, ip: null, userAgent: null });
   if (!signedIn.ok || !("token" in signedIn.value)) throw new Error("no session");

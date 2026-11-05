@@ -20,7 +20,11 @@ describe("password", () => {
       password: PASSWORD,
     });
     expect(up.status).toBe(200);
-    expect(await up.json()).toEqual({ sent: true });
+    // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+    expect(await up.json()).toEqual({
+      sent: true,
+      signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+    });
     expect(jar.cookies.has(SESSION_COOKIE)).toBe(false);
 
     const link = await lastLink(jar, EMAIL);

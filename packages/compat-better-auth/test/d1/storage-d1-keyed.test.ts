@@ -124,7 +124,11 @@ describe("the Better Auth foreign keys on D1", () => {
       ip: null,
       userAgent: null,
     });
-    expect(uniform).toEqual({ ok: true, value: { sent: true } });
+    // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+    expect(uniform).toEqual({
+      ok: true,
+      value: { sent: true, signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/) },
+    });
     expect([await count('"user"'), await count('"account"'), await count('"session"')]).toEqual([
       2, 2, 1,
     ]);

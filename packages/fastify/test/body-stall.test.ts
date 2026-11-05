@@ -254,12 +254,17 @@ async function managerCookie(
     if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
     return res;
   };
-  await post("/password/sign-up", { email, password: PASSWORD });
+  const up = await post("/password/sign-up", { email, password: PASSWORD });
   // The token of the verify link, read as the core tests read it.
   const mail = app.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
   const token = /token=([A-Za-z0-9_%-]+)/.exec(mail?.text ?? "")?.[1];
   if (token === undefined) throw new Error(`no verify link for ${email}`);
-  await post("/password/verify", { token: decodeURIComponent(token) });
+  // The sign-up's own browser carries its proof, so the password stays (ruling 11 of plan 12q).
+  const proof = up.headers
+    .getSetCookie()
+    .find((c) => c.startsWith("__Host-tempo_signup="))
+    ?.split(";")[0];
+  await post("/password/verify", { token: decodeURIComponent(token) }, proof);
   const first = sessionCookie(await post("/password/sign-in", { email, password: PASSWORD }));
   if (first === null) throw new Error(`no session for ${email}`);
   // A read of the user row by its address: the organization API takes the row.

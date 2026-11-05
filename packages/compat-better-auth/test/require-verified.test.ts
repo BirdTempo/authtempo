@@ -9,6 +9,7 @@ import { APIError } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { CompatDatabase, EmailCallbackData } from "../src/types.js";
+import { proofCookieOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const EMAIL = "pat@example.com";
@@ -76,16 +77,25 @@ describe("emailAndPassword.requireEmailVerification (plan 12b Task 15)", () => {
         body: JSON.stringify({ email: "lee@example.com", password: PASSWORD }),
       }),
     );
-    expect({ status: res.status, cookie: res.headers.get("set-cookie") }).toEqual({
+    // No session cookie: the one cookie is core's sign-up proof (ruling 11 of plan 12q).
+    expect({
+      status: res.status,
+      cookies: res.headers.getSetCookie().map((c) => c.split("=")[0]),
+    }).toEqual({
       status: 200,
-      cookie: null,
+      cookies: ["__Host-tempo_signup"],
     });
   });
 
   it("answers EMAIL_NOT_VERIFIED at sign-in before the verify, and a session after", async () => {
     const { auth, verifies } = consumerb();
-    await signUp(auth);
-    const refused = auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } });
+    // The app sets the answer's proof as the browser's cookie, and the
+    // browser's requests carry it (ruling 11 of plan 12q).
+    const cookie = proofCookieOf(await signUp(auth));
+    const refused = auth.api.signInEmail({
+      body: { email: EMAIL, password: PASSWORD },
+      headers: new Headers({ cookie }),
+    });
     await expect(refused).rejects.toBeInstanceOf(APIError);
     await expect(refused).rejects.toMatchObject({
       statusCode: 403,
@@ -95,11 +105,12 @@ describe("emailAndPassword.requireEmailVerification (plan 12b Task 15)", () => {
     const res = await auth.handler(
       new Request(`${BASE}/api/auth/password/verify`, {
         method: "POST",
-        headers: { "content-type": "application/json", origin: BASE },
+        headers: { "content-type": "application/json", origin: BASE, cookie },
         body: JSON.stringify({ token: verifies[1]?.token ?? "" }),
       }),
     );
     expect(res.status).toBe(200);
+    expect(await res.clone().json()).toEqual({ verified: true, passwordKept: true });
     expect(res.headers.get("set-cookie")).toMatch(/session=ts_/);
     const after = await auth.api.signInEmail({ body: { email: EMAIL, password: PASSWORD } });
     expect(after).toMatchObject({ token: expect.stringMatching(/^ts_/) });

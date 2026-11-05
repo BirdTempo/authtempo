@@ -69,6 +69,19 @@ type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
 type Via = { via?: LastMethod };
 /** The answer of a sign-in that opens a session and answers its bearer token. */
 type SignInJSON = { token: string } & PublicSessionJSON & Via;
+/**
+ * The sign-up proof of each sign-up answer (plan 12q). A browser also gets
+ * it in an HttpOnly cookie. A bearer app keeps it and passes it to
+ * `verifyCode` and `resendVerification`: a confirm without it deletes the
+ * sign-up's password.
+ */
+type SignUpProof = { signUpProof: string };
+/**
+ * `passwordKept` of a sign-up confirm (plan 12q). False when the confirm
+ * had no sign-up proof, so the password went. The app then asks for a first
+ * password through `password.change` with no `currentPassword`.
+ */
+type PasswordKept = { passwordKept: boolean };
 
 /**
  * The identifier of a password sign-in (plan 12i Task 3): exactly one of
@@ -473,6 +486,7 @@ export interface Client {
    * `signUp`, `signIn`, and `reset` answer the bearer token. A browser app keeps the cookie, and a native app stores the token.
    * By default the server answers `{ sent: true }` and opens the session at the verify link (plan 12b).
    * With the server's `password.uniformSignUp: false` and `password.requireVerified` on, or `signUp: "invited"`, `signUp` answers `{ user, verifyRequired: true }` and no token.
+   * Each `signUp` answer carries `signUpProof` (plan 12q). A confirm keeps the password only with it: a browser sends its cookie, and a bearer app passes the value.
    */
   password: {
     signUp(input: {
@@ -489,8 +503,9 @@ export interface Client {
     }): Promise<
       ClientResult<
         // The third shape is the default (plan 12b). The second: uniformSignUp off and
-        // requireVerified on. Neither opens a session.
-        SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }
+        // requireVerified on. Neither opens a session. Each carries the sign-up proof (plan 12q).
+        (SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }) &
+          SignUpProof
       >
     >;
     /**
@@ -507,19 +522,31 @@ export interface Client {
         captchaToken?: string | undefined;
       },
     ): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
-    /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
-    resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
-    /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
-    verifyEmail(input: { token: string }): Promise<ClientResult<{ verified: true }>>;
+    /**
+     * A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account.
+     * A bearer app passes its `signUpProof`, so that the new link or code keeps the password (plan 12q).
+     */
+    resendVerification(input: {
+      email: string;
+      signUpProof?: string | undefined;
+    }): Promise<ClientResult<{ sent: true }>>;
+    /**
+     * The JSON verify of the link's token. Sets the session cookie when the address was unverified.
+     * `passwordKept` is false when the browser held no sign-up proof (plan 12q).
+     */
+    verifyEmail(input: { token: string }): Promise<ClientResult<{ verified: true } & PasswordKept>>;
     /**
      * The sign-up code of `password.verifyBy: "code"` (plan 12i Task 20). A
      * session with its cookie when the address was unverified, else
      * `{ verified: true }`. A wrong, expired, or spent code is `invalid_code`.
+     * A bearer app passes the `signUpProof` of its sign-up. Without it, and
+     * with no cookie, the answer says `passwordKept: false` (plan 12q).
      */
     verifyCode(input: {
       email: string;
       code: string;
-    }): Promise<ClientResult<SignInJSON | { verified: true }>>;
+      signUpProof?: string | undefined;
+    }): Promise<ClientResult<(SignInJSON | { verified: true }) & PasswordKept>>;
     requestReset(input: {
       email: string;
       next?: string | undefined;
@@ -1466,7 +1493,10 @@ export function createClient(options: ClientOptions): Client {
   const password: Client["password"] = {
     signUp: ({ name, username, captchaToken, ...rest }) =>
       changes(
-        send<SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }>(
+        send<
+          (SignInJSON | { user: PublicSession["user"]; verifyRequired: true } | { sent: true }) &
+            SignUpProof
+        >(
           "password.signUp",
           {
             ...rest,
@@ -1492,9 +1522,10 @@ export function createClient(options: ClientOptions): Client {
         ),
       ),
     resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
-    verifyEmail: (input) => changes(send<{ verified: true }>("password.verifyEmail", input)),
+    verifyEmail: (input) =>
+      changes(send<{ verified: true } & PasswordKept>("password.verifyEmail", input)),
     verifyCode: (input) =>
-      changes(send<SignInJSON | { verified: true }>("password.verifyCode", input)),
+      changes(send<(SignInJSON | { verified: true }) & PasswordKept>("password.verifyCode", input)),
     requestReset: ({ next, captchaToken, ...rest }) =>
       send<{ sent: true }>(
         "password.requestReset",

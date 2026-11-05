@@ -20,6 +20,7 @@ import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, emailOTP, magicLink, organization, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { BetterAuthOptions, CompatDatabase, InvitationEmailData } from "../src/types.js";
+import { proofOf } from "./proof-helpers.js";
 
 const BASE = "https://api.example.com";
 const PASSWORD = "correct horse battery";
@@ -72,10 +73,18 @@ function server(
     },
   });
   const seen: Request[] = [];
+  // The sign-up proof cookie of each address, as the browser of its sign-up keeps it (plan 12q).
+  const proofs = new Map<string, string>();
   const fetchImpl: typeof fetch = async (input, init) => {
     const req = new Request(input, init);
     seen.push(req.clone());
-    return auth.handler(req);
+    const body = new URL(req.url).pathname.endsWith("/password/sign-up")
+      ? ((await req.clone().json()) as { email?: string })
+      : null;
+    const res = await auth.handler(req);
+    if (body?.email && res.headers.getSetCookie().some((c) => c.startsWith("__Host-tempo_signup=")))
+      proofs.set(body.email, proofOf(res));
+    return res;
   };
   /**
    * Confirms the newest verify link of the address, as a person does, and
@@ -85,17 +94,22 @@ function server(
   const verifiedToken = async (email: string) => {
     const link = [...mails].reverse().find((m) => m.kind === "verify" && m.email === email);
     if (!link) throw new Error(`no verify link for ${email}`);
+    // The browser of the sign-up holds its proof, so the password stays (ruling 11 of plan 12q).
     const res = await auth.handler(
       new Request(`${BASE}/api/auth/password/verify`, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: BASE,
+          cookie: proofs.get(email) ?? "",
+        },
         body: new URLSearchParams({ token: link.token }).toString(),
       }),
     );
     if (res.status !== 302) throw new Error(`the verify link answered ${res.status}`);
     return (await auth.api.signInEmail({ body: { email, password: PASSWORD } })).token;
   };
-  return { auth, fetchImpl, seen, invitations, mails, verifiedToken };
+  return { auth, fetchImpl, seen, invitations, mails, verifiedToken, proofs };
 }
 
 describe("createAuthClient", () => {

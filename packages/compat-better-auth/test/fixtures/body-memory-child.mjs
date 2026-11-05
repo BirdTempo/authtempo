@@ -83,8 +83,12 @@ if (path !== "acs")
   for (let i = 0; i < K; i++) {
     const email = `u${i}@example.com`;
     const ip = `10.0.${i >> 8}.${i & 255}`;
-    await call("/password/sign-up", { email, password }, "", ip);
-    await call("/password/verify", { token: links.at(-1) }, "", ip);
+    const up = await call("/password/sign-up", { email, password }, "", ip);
+    // The sign-up's own browser carries its proof, so the password stays (ruling 11 of plan 12q).
+    const proof = (
+      up.headers.getSetCookie().find((s) => s.startsWith("__Host-tempo_signup=")) ?? ""
+    ).split(";")[0];
+    await call("/password/verify", { token: links.at(-1) }, proof, ip);
     const r = await call("/password/sign-in", { email, password }, "", ip);
     const c = (r.headers.getSetCookie().find((s) => s.startsWith(`${COOKIE_NAME}=`)) ?? "").split(
       ";",

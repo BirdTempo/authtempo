@@ -8,10 +8,10 @@ const json = (body: unknown, extra: Record<string, string> = {}) => ({
   headers: { "content-type": "application/json", origin: BASE, ...extra },
   body: JSON.stringify(body),
 });
-const form = (body: Record<string, string>) => ({
+const form = (body: Record<string, string>, extra: Record<string, string> = {}) => ({
   method: "POST",
   redirect: "manual" as const,
-  headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE },
+  headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE, ...extra },
   body: new URLSearchParams(body).toString(),
 });
 async function lastLink(): Promise<string> {
@@ -38,8 +38,13 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
   );
   expect(up.status).toBe(200);
   // The uniform answer (plan 12b): no session at sign-up; the verify link opens it.
-  expect(await up.json()).toEqual({ sent: true });
-  expect(up.headers.get("set-cookie")).toBeNull();
+  // The answer and its one cookie carry the sign-up proof (ruling 11 of plan 12q).
+  expect(await up.json()).toEqual({
+    sent: true,
+    signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+  });
+  const proof = /__Host-tempo_signup=[^;]+/.exec(up.headers.get("set-cookie") ?? "")?.[0] ?? "";
+  expect(proof).toMatch(/^__Host-tempo_signup=sp_/);
   // The example uses 1000 iterations in TEST_MODE. The stored hash shows the seam ran in workerd.
   const stored = await eventually(() =>
     env.DB.prepare(
@@ -60,9 +65,10 @@ it("signs up, confirms by the mailed link, signs in, resets, and signs in again 
   expect(page.status).toBe(200);
   expect(page.headers.get("set-cookie")).toBeNull();
   expect(await page.text()).toContain(`<form method="post" action="/auth/password/verify">`);
+  // The browser of the sign-up sends its proof, so the password stays.
   const verified = await SELF.fetch(
     `${BASE}/auth/password/verify`,
-    form({ token: new URL(verifyLink).searchParams.get("token") ?? "" }),
+    form({ token: new URL(verifyLink).searchParams.get("token") ?? "" }, { cookie: proof }),
   );
   expect(verified.status).toBe(302);
   expect(verified.headers.get("location")).toBe(`${BASE}/`);

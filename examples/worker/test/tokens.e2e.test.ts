@@ -17,13 +17,19 @@ async function lastLink(): Promise<string> {
 }
 
 it("creates a token with a session, calls with it, revokes it, and sees 401 on D1", async () => {
-  expect(
-    (await SELF.fetch(`${BASE}/auth/password/sign-up`, json({ email: EMAIL, password: PASSWORD })))
-      .status,
-  ).toBe(200);
+  const up = await SELF.fetch(
+    `${BASE}/auth/password/sign-up`,
+    json({ email: EMAIL, password: PASSWORD }),
+  );
+  expect(up.status).toBe(200);
+  // The browser of the sign-up holds its proof, so the password stays (ruling 11 of plan 12q).
+  const proof = /__Host-tempo_signup=[^;]+/.exec(up.headers.get("set-cookie") ?? "")?.[0] ?? "";
   const verifyToken = new URL(await lastLink()).searchParams.get("token") ?? "";
-  const verified = await SELF.fetch(`${BASE}/auth/password/verify`, json({ token: verifyToken }));
-  expect(await verified.json()).toEqual({ verified: true });
+  const verified = await SELF.fetch(
+    `${BASE}/auth/password/verify`,
+    json({ token: verifyToken }, { cookie: proof }),
+  );
+  expect(await verified.json()).toEqual({ verified: true, passwordKept: true });
   const signIn = await SELF.fetch(
     `${BASE}/auth/password/sign-in`,
     json({ email: EMAIL, password: PASSWORD }),

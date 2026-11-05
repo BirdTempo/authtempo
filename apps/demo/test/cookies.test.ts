@@ -18,6 +18,8 @@ describe("the cookies of the demo", () => {
     expect([...new Set(cookies.map((c) => c.name))].sort()).toEqual([
       "__Host-demo_sandbox",
       "__Host-tempo_session",
+      // The sign-up proof of core (ruling 11 of plan 12q).
+      "__Host-tempo_signup",
       "__Secure-tempo_session_oauth",
       "tempo_totp_trust",
     ]);
@@ -32,8 +34,8 @@ describe("the cookies of the demo", () => {
     expect(weak.map((c) => c.line)).toEqual([]);
   });
 
-  it("sets the sandbox cookie and the session cookie with __Host- and Path=/", () => {
-    for (const name of ["__Host-demo_sandbox", "__Host-tempo_session"]) {
+  it("sets the sandbox cookie, the session cookie, and the sign-up proof with __Host- and Path=/", () => {
+    for (const name of ["__Host-demo_sandbox", "__Host-tempo_session", "__Host-tempo_signup"]) {
       const lines = cookies.filter((c) => c.name === name);
       expect(lines.length).toBeGreaterThan(0);
       for (const c of lines)

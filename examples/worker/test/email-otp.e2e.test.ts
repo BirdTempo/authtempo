@@ -82,7 +82,11 @@ it("resets a password by an email code on D1: a weak password spends the code, a
     headers: { "content-type": "application/json", origin: BASE },
     body: JSON.stringify({ email, password: "correct horse battery" }),
   });
-  expect(await up.json()).toEqual({ sent: true });
+  // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+  expect(await up.json()).toEqual({
+    sent: true,
+    signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+  });
   // The uniform sign-up opens no session (plan 12b); the password sign-in does.
   const signIn = await SELF.fetch(`${BASE}/auth/password/sign-in`, {
     method: "POST",

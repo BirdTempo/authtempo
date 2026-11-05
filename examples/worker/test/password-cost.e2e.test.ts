@@ -27,7 +27,11 @@ it("stores a hash at 100000 iterations when TEST_MODE is unset", async () => {
     ctx,
   );
   expect(up.status).toBe(200);
-  expect(await up.json()).toEqual({ sent: true });
+  // The uniform answer carries the sign-up proof (ruling 11 of plan 12q).
+  expect(await up.json()).toEqual({
+    sent: true,
+    signUpProof: expect.stringMatching(/^sp_[A-Za-z0-9_-]{43}$/),
+  });
   // The uniform sign-up writes its rows after the answer, under ctx.waitUntil (final fix wave item 19).
   await waitOnExecutionContext(ctx);
   const stored = await env.DB.prepare(

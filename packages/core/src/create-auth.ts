@@ -347,13 +347,20 @@ export interface PasswordApi {
   /**
    * `{ sent: true }` for every address while `password.uniformSignUp` is on
    * (the default, plan 12b). With it off: a session, or `{ user,
-   * verifyRequired: true }` while `password.requireVerified` is on.
+   * verifyRequired: true }` while `password.requireVerified` is on. Each
+   * answer carries `signUpProof` (ruling 11 of plan 12q). Pass it to
+   * `verifyEmail` or `verifyCode`, or the confirm deletes the password.
    */
   signUp(input: PasswordSignUp): Promise<Result<PasswordSignUpResult>>;
   /** A session, or `{ twoFactor }` for a user with the second factor on (plan 9f). */
   signIn(input: PasswordSignIn): Promise<Result<PasswordSignInResult>>;
   /** The password of a known user again, with the sign-in's limits (plan 9f). */
   verify(input: PasswordReauth): Promise<Result<{ verified: true }>>;
+  /**
+   * The confirm of the sign-up link. With the `signUpProof` of the sign-up
+   * it keeps the password. Without it the confirm is a claim: the password
+   * goes, and the answer says `passwordKept: false` (ruling 11 of plan 12q).
+   */
   verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
   /** The sign-up code of `password.verifyBy: "code"` (plan 12i Task 20): the confirm of `verifyEmail`. */
   verifyCode(input: PasswordVerifyCode): Promise<Result<PasswordVerified>>;

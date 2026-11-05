@@ -9,6 +9,7 @@ import { betterAuthPasswordHash } from "../src/hash.js";
 import { emailOTP, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import type { CompatDatabase } from "../src/types.js";
+import { proofOf } from "./proof-helpers.js";
 
 // The shim's own POST paths run core's Origin and Fetch Metadata rules first
 // (plan 12a fix wave, final review F1): the account paths, the email OTP
@@ -62,8 +63,9 @@ async function app() {
       }),
     );
   const same = { origin: BASE, "sec-fetch-site": "same-origin" };
-  await post("/password/sign-up", { email: EMAIL, password: PASSWORD }, "", same);
-  await post("/password/verify", { token: links.at(-1) }, "", same);
+  const up = await post("/password/sign-up", { email: EMAIL, password: PASSWORD }, "", same);
+  // The sign-up's own browser keeps the password (ruling 11 of plan 12q).
+  await post("/password/verify", { token: links.at(-1) }, proofOf(up), same);
   const signIn = await post("/password/sign-in", { email: EMAIL, password: PASSWORD }, "", same);
   const set = signIn.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_session="));
   const cookie = (set ?? "").split(";")[0] ?? "";

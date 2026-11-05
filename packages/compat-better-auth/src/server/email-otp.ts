@@ -192,7 +192,10 @@ export async function emailOtpRoute(
     // Better Auth answers { status, token, user } (routes.mjs verifyEmailOTP of
     // 1.7.5, read 2026-10-25). Core opens the session of an unverified user,
     // as the shim's link does. A user already verified gets { verified: true }
-    // and no session, so the token is null.
+    // and no session, so the token is null. The request's headers go to core,
+    // so the sign-up proof cookie of the browser goes too (ruling 11 of plan
+    // 12q). Without it the confirm is a claim, and `passwordKept` is false:
+    // the app then asks for a first password.
     return translate(
       await forward("/password/verify/code", { email, code: body.otp }),
       async (b) => {
@@ -204,6 +207,7 @@ export async function emailOtpRoute(
           status: true,
           token: typeof b.token === "string" ? b.token : null,
           user: toUser(row, mapped.plugins),
+          passwordKept: b.passwordKept === true,
         };
       },
     );
