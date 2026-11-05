@@ -18,10 +18,11 @@ import { BCRYPT, listSource, user } from "../source.js";
 // claim deletes or flips while the import writes. The lease guards only
 // while it lives. So the hold reads the flag, and the import checks the
 // user row after its writes. The release fails on a lease that a claim took
-// (ruling 20 of plan 12q). A social identity goes in active, so the
-// claimant can sign in with it after the import. That session
-// is unproved, because the user is unverified, and the owner's claim ends
-// it. Before plan 12q a claim could delete before the import's identity
+// (ruling 20 of plan 12q). A social identity goes in pending under the hold,
+// with the provider `pending$<provider>`, and the activation makes it live
+// (ruling 24). So the claimant can sign in with it after the import. That
+// session is unproved, because the user is unverified, and the owner's claim
+// ends it. Before plan 12q a claim could delete before the import's identity
 // write and flip after it. The claimant's sign-in then got a proved session
 // (open point 1 of fix round 5 of plan 12p). Each step of the owner is a
 // real magic link, and each step of the claimant is a real sign-in.
@@ -129,6 +130,29 @@ function pauseBefore(at: RegExp, db: D1Database = env.DB) {
     }
   });
   return { db: v, reached: reached.wait, go: go.open };
+}
+
+/** A view of `db` that waits after the `n`th statement that `at` matches. */
+function pauseAfterNth(at: RegExp, n: number, db: D1Database = env.DB) {
+  const reached = latch();
+  const go = latch();
+  let seen = 0;
+  const v = view(db, undefined, async (sql) => {
+    if (at.test(sql) && ++seen === n) {
+      reached.open();
+      await go.wait;
+    }
+  });
+  return { db: v, reached: reached.wait, go: go.open };
+}
+
+/** A view of `db` that runs `step` after each statement, from the first that `from` matches. */
+function stepsFrom(from: RegExp, step: (sql: string) => Promise<void>, db: D1Database = env.DB) {
+  let on = false;
+  return view(db, undefined, async (sql) => {
+    if (!on && from.test(sql)) on = true;
+    if (on) await step(sql);
+  });
 }
 
 /** A view of the binding that records the text of each statement that runs. */
@@ -740,6 +764,213 @@ describe("the guards after the writes of a repair on D1 (ruling 20 of plan 12q)"
   });
 });
 
+/**
+ * The window of open point 2 of fix round 1 (ruling 24 of plan 12q). The
+ * import waits 61 s after the flag read of its hold. The owner's whole claim
+ * takes the stale lease, deletes, flips, and ends the sessions in that wait.
+ * Then the import writes its identity, and its release fails. Before ruling
+ * 24 the identity was live on the owner's account from its write to its
+ * delete. A claimant's Google sign-in there got a proved session that
+ * stayed. Now the identity goes in pending, so no sign-in finds it.
+ */
+async function windowScene(email: string, sourceId: string, repair: boolean) {
+  const subject = `g-${sourceId}`;
+  const claimant = `${sourceId}.claimant@example.net`;
+  const clock = movedClock();
+  const record = (identities: { provider: string; subject: string }[]) => [
+    user(sourceId, { email, emailVerified: false, identities }),
+  ];
+  // A repair: the first run writes the user with no credential.
+  if (repair)
+    await importUsers(createD1Adapter(env.DB), listSource(record([])), { formats: ["bcrypt"] });
+  // After each statement from the identity write on, the claimant signs in with Google.
+  const steps: { sql: string; signIn: string; rows: Awaited<ReturnType<typeof rowsOf>> }[] = [];
+  const stepped = stepsFrom(IDENTITY_INSERT, async (sql) => {
+    const signIn = await claimantGoogle(subject, claimant);
+    steps.push({ sql: sql.split(" ").slice(0, 3).join(" "), signIn, rows: await rowsOf(email) });
+  });
+  const run = pauseAfterNth(USER_UPDATE, 1, stepped);
+  const report = importUsers(
+    createD1Adapter(run.db),
+    listSource(record([{ provider: "google", subject }])),
+    { formats: ["bcrypt"], repair, now: () => clock.now() },
+  );
+  await run.reached;
+  clock.move(LEASE_MS + 1_000);
+  expect(await ownerLink(email, { clock })).toBe("ok a session");
+  run.go();
+  const r = await report;
+  expect(r.partial).toEqual([
+    { kind: "user", sourceId, missing: ["identity:google"], repairRefused: "claimed" },
+  ]);
+  // Each statement from the pending write to the delete, and a sign-in after each.
+  expect(steps.map((s) => s.sql)).toEqual([
+    "INSERT INTO ta_identity",
+    "DELETE FROM ta_verification",
+    "DELETE FROM ta_identity",
+  ]);
+  for (const s of steps) {
+    // The sign-in lands on the claimant's own user, and the owner's account holds only the owner's session.
+    expect(s.signIn).toBe("ok");
+    expect(s.rows).toMatchObject({ verified: 1, sessions: 1, proved: 1 });
+    expect(s.rows.identities).not.toContain("google");
+  }
+  expect(await claimantGoogle(subject, claimant)).toBe("ok");
+  expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  // Google proved the claimant's own address, so its user holds the `email` identity too.
+  expect(await rowsOf(claimant)).toMatchObject({
+    identities: ["email", "google"],
+    sessions: steps.length + 1,
+  });
+}
+
+describe("an import that waits 61 s in its hold while the owner claims on D1 (open point 2, ruling 24)", () => {
+  it("gives the claimant's Google sign-in no session on the owner's account at each statement of a new user's write", async () => {
+    await windowScene("lea@example.com", "lea", false);
+  });
+
+  it("gives the claimant's Google sign-in no session on the owner's account at each statement of a repair", async () => {
+    await windowScene("max@example.com", "max", true);
+  });
+});
+
+describe("the pending identity of a new user on D1 (ruling 24 of plan 12q)", () => {
+  it("deletes its rows when a claim after the release deletes the pending identity and flips after the activation", async () => {
+    const email = "ned@example.com";
+    // The import waits after its check of the user row: its second user update.
+    const run = pauseAfterNth(USER_UPDATE, 2);
+    const report = importUsers(
+      createD1Adapter(run.db),
+      listSource([
+        user("ned", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-ned" }],
+        }),
+      ]),
+      { formats: ["bcrypt"] },
+    );
+    await run.reached;
+    // The owner's claim takes a new lease, deletes the pending identity, and waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    run.go();
+    // The activation matches no row, so the import keeps nothing.
+    const r = await report;
+    expect(r.created).toEqual(NONE);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "ned", missing: ["identity:google"], repairRefused: "claimed" },
+    ]);
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    expect(await claimantGoogle("g-ned", "ned.claimant@example.net")).toBe("ok");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+
+  it("deletes its rows and answers identity_taken when another user takes the identity before the activation", async () => {
+    const email = "ola@example.com";
+    // The import waits after its pending identity write.
+    const run = pauseAfter(IDENTITY_INSERT);
+    const report = importUsers(
+      createD1Adapter(run.db),
+      listSource([
+        user("ola", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-ola" }],
+        }),
+      ]),
+      { formats: ["bcrypt"] },
+    );
+    await run.reached;
+    // A sign-in finds no pending row, so it signs up its own user with the identity.
+    expect(await claimantGoogle("g-ola", "ola.other@example.net")).toBe("ok");
+    run.go();
+    // The activation meets the key of the provider and the subject. The import deletes its row and throws nothing.
+    const r = await report;
+    expect(r.created).toEqual(NONE);
+    expect(r.partial).toEqual([
+      {
+        kind: "user",
+        sourceId: "ola",
+        missing: ["identity:google"],
+        repairRefused: "identity_taken",
+      },
+    ]);
+    expect(await leaseOf(email)).toBeNull();
+    expect(await rowsOf(email)).toEqual({
+      verified: 0,
+      passwords: 0,
+      identities: [],
+      sessions: 0,
+      proved: 0,
+    });
+    expect(await rowsOf("ola.other@example.net")).toMatchObject({
+      identities: ["email", "google"],
+      sessions: 1,
+    });
+  });
+
+  it("keeps the pending identity of a run that stops, and a repair after the sweep writes it again", async () => {
+    const email = "pia@example.com";
+    const record = () => [
+      user("pia", {
+        email,
+        emailVerified: false,
+        identities: [{ provider: "google", subject: "g-pia" }],
+      }),
+    ];
+    const clock = movedClock();
+    // The isolate dies right after the pending identity create.
+    let dead = false;
+    const dying = view(
+      env.DB,
+      async () => {
+        if (dead) throw new Error("the isolate died");
+      },
+      async (sql) => {
+        if (IDENTITY_INSERT.test(sql)) dead = true;
+      },
+    );
+    await expect(
+      importUsers(createD1Adapter(dying), listSource(record()), {
+        formats: ["bcrypt"],
+        now: () => clock.now(),
+      }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(dead).toBe(true);
+    // The pending row stays, and no sign-in finds it.
+    expect(await rowsOf(email)).toMatchObject({ identities: ["pending$google"], sessions: 0 });
+    // A repair meets the lease of the stopped run and writes nothing.
+    const early = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    expect(early.partial).toEqual([
+      { kind: "user", sourceId: "pia", missing: ["identity:google"], repairRefused: "claimed" },
+    ]);
+    // After the sweep the repair deletes the pending row, writes it again, and activates it.
+    clock.move(LEASE_MS + 1_000);
+    await app(env.DB, { clock }).api.sweepExpired();
+    expect(await leaseOf(email)).toBeNull();
+    const repair = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    expect(repair.repaired).toEqual([{ kind: "user", sourceId: "pia", rows: ["identity:google"] }]);
+    expect(await rowsOf(email)).toMatchObject({ verified: 0, identities: ["google"] });
+    expect(await leaseOf(email)).toBeNull();
+  });
+});
+
 describe("a run that stops inside its hold on D1", () => {
   it("leaves its lease: a link answers 409 for 60 s, and a repair answers claimed until the sweep deletes the lease", async () => {
     const email = "dax@example.com";
@@ -821,7 +1052,10 @@ describe("the D1 queries of one record", () => {
   // (2) and its lease read (1). The lease create (1), the flag read of the
   // hold (2), the check after the writes (2), and the release (1) came in. A repair kept its own update as that check. The
   // first form of the hold, before ruling 20, sent 9, 8, 12, and 7.
-  const PINS = { password: 13, google: 12, repair: 16, verified: 7 };
+  // The activation of the pending identity (2) came in by ruling 24, so the
+  // Google count went from 12 to 14. Measured on 2026-11-05 on
+  // <local-host>, load 9 to 10.
+  const PINS = { password: 13, google: 14, repair: 16, verified: 7 };
 
   it("sends the pinned count for a new unverified user with a password", async () => {
     const { db, count } = counting(env.DB);

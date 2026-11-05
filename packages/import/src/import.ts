@@ -57,6 +57,24 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
   ["github", isGithubSubject],
   ["linkedin", null],
 ]);
+
+/**
+ * The mark of a pending identity row (ruling 24 of plan 12q). The importer
+ * writes the identity of a held user with the provider `pending$<provider>`.
+ * It writes the real provider at the activation step, after the check.
+ * - Core takes a provider name only in the form `PROVIDER_NAME_RE`, which
+ *   has no `$`. So no sign-in finds a pending row, and core counts it as no
+ *   way in (`signsIn` in core's `identities.ts`).
+ * - A claim deletes it, as it deletes each identity other than `email`.
+ * - So the identity is live only from its activation. A claim that verified
+ *   the user before the check leaves no live row of the import.
+ */
+const PENDING_PROVIDER_PREFIX = "pending$";
+
+/** The provider of the pending row of an identity of `provider`. */
+function pendingProvider(provider: string): string {
+  return `${PENDING_PROVIDER_PREFIX}${provider}`;
+}
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
 /**
  * The skip for a record whose write meets a unique_violation on both
@@ -147,11 +165,18 @@ interface RepairRows extends CredentialRows {
    * password row is its user.
    */
   stopped: { id: string; hash: string } | null;
+  /**
+   * The pending identity rows of a run that stopped after their create. The
+   * repair deletes them before its own create: the key of an identity row
+   * is its provider and its subject.
+   */
+  stoppedIdentities: { id: string; provider: string }[];
 }
 
 /** The ids of the rows `writeCredentials` wrote, so a write or a repair can delete exactly its own rows. */
 interface Written {
-  identities: string[];
+  /** `written` is the provider that the row holds, `provider` the one that it gets at its activation. */
+  identities: { id: string; provider: string; written: string }[];
   password: { id: string; hash: string } | null;
   passkeys: string[];
 }
@@ -455,7 +480,8 @@ function userRows(
  * is missing (see `ImportReport.partial`), so with `repair` it writes the
  * missing rows only when no guard of `repairRefusal` objects. A pending
  * password row counts as missing (`PENDING_HASH_PREFIX`). A run that stopped
- * after its create left it, and no sign-in takes it.
+ * after its create left it, and no sign-in takes it. A pending identity row
+ * (`pendingProvider`) counts as missing for the same reason.
  */
 async function existingUser(
   db: StorageAdapter,
@@ -468,6 +494,7 @@ async function existingUser(
   const own = rows.verified
     ? [{ provider: "email", subject: rows.email }, ...rows.identities]
     : rows.identities;
+  const stoppedIdentities: RepairRows["stoppedIdentities"] = [];
   for (const i of own) {
     const row = await db.findOne("identity", [
       { field: "userId", op: "eq", value: rows.id },
@@ -477,6 +504,15 @@ async function existingUser(
     if (!row) {
       missing.push(`identity:${i.provider}`);
       fill.identities.push(i);
+      // Only the write of an unverified user writes a pending identity row.
+      const pending = rows.verified
+        ? null
+        : await db.findOne("identity", [
+            { field: "userId", op: "eq", value: rows.id },
+            { field: "provider", op: "eq", value: pendingProvider(i.provider) },
+            { field: "subject", op: "eq", value: i.subject },
+          ]);
+      if (pending) stoppedIdentities.push({ id: pending.id, provider: pending.provider });
     }
   }
   let stopped: RepairRows["stopped"] = null;
@@ -505,7 +541,7 @@ async function existingUser(
   const guard = await repairRefusal(db, rows, fill, planned);
   return "refused" in guard
     ? { kind: "partial", missing, repairRefused: guard.refused }
-    : { kind: "repair", missing, rows: { ...fill, seen: guard.seen, stopped } };
+    : { kind: "repair", missing, rows: { ...fill, seen: guard.seen, stopped, stoppedIdentities } };
 }
 
 /**
@@ -528,12 +564,14 @@ async function repairRefusal(
     // A pending password row is no credential: no sign-in takes it (`existingUser`).
     const password = await db.findOne("password", [{ field: "userId", op: "eq", value: rows.id }]);
     const active = password !== null && !password.hash.startsWith(PENDING_HASH_PREFIX);
+    // A pending identity row is no credential either: no sign-in finds it.
+    const identities = await db.findMany("identity", [
+      { field: "userId", op: "eq", value: rows.id },
+      { field: "provider", op: "ne", value: "email" },
+    ]);
     const held =
       (active ? password : null) ??
-      (await db.findOne("identity", [
-        { field: "userId", op: "eq", value: rows.id },
-        { field: "provider", op: "ne", value: "email" },
-      ])) ??
+      identities.find((i) => !i.provider.startsWith(PENDING_PROVIDER_PREFIX)) ??
       (await db.findOne("passkey", [{ field: "userId", op: "eq", value: rows.id }]));
     if (held) return { refused: "credential_exists" };
   }
@@ -570,15 +608,18 @@ async function writeCredentials(
    * pending (`PENDING_HASH_PREFIX`) and activate it after the other writes.
    */
   pending = false,
+  /** A write under the hold of a claim writes each identity row pending too (`pendingProvider`). */
+  held = false,
 ): Promise<Written> {
   const written: Written = { identities: [], password: null, passkeys: [] };
   for (const i of c.identities) {
     const id = newId(now);
-    written.identities.push(id);
+    const provider = held ? pendingProvider(i.provider) : i.provider;
+    written.identities.push({ id, provider: i.provider, written: provider });
     await tx.create("identity", {
       id,
       userId: c.userId,
-      provider: i.provider,
+      provider,
       subject: i.subject,
       linkedAt: now,
       createdAt: now,
@@ -616,20 +657,28 @@ async function writeCredentials(
 }
 
 /**
- * The activation of the pending password row of a write or a repair, after
- * its other writes, by its id and the pending string. True when it updated
- * the row, or when the write holds no password. Zero rows means that another
- * flow deleted the pending row or wrote the owner's hash into it. It runs
- * after the release, so a claim after the release can delete the row first.
+ * The activation of the pending rows of a write or a repair, after its
+ * other writes. The password row goes by its id and the pending string. Each
+ * pending identity row goes by its id and its pending provider, and it gets
+ * its real provider. Null when each update matched its row. Else the reason
+ * of the record's `partial` entry:
+ * - `claimed` for zero rows. Another flow deleted the pending row, or wrote
+ *   the owner's hash into the password row. It runs after the release, so a
+ *   claim after the release can delete the row first.
+ * - `identity_taken` when another user took the identity on D1 since the
+ *   plan read it: the unique key of the provider and the subject. On D1 a
+ *   throw here would run the undo log after the release, so the caller
+ *   deletes its rows instead. Postgres and MySQL throw, and the plan runs
+ *   once more (`afterViolation`).
  */
 async function activated(
   tx: StorageAdapter,
   written: Written,
   hash: string | null,
   now: Date,
-): Promise<boolean> {
-  if (written.password === null) return true;
-  return (
+): Promise<RepairRefusal | null> {
+  if (
+    written.password !== null &&
     (await tx.update(
       "password",
       [
@@ -637,8 +686,33 @@ async function activated(
         { field: "hash", op: "eq", value: written.password.hash },
       ],
       { hash: hash as string, updatedAt: now },
-    )) > 0
-  );
+    )) === 0
+  )
+    return "claimed";
+  for (const i of written.identities) {
+    if (i.written === i.provider) continue;
+    try {
+      const n = await tx.update(
+        "identity",
+        [
+          { field: "id", op: "eq", value: i.id },
+          { field: "provider", op: "eq", value: i.written },
+        ],
+        { provider: i.provider, updatedAt: now },
+      );
+      if (n === 0) return "claimed";
+    } catch (err) {
+      if (
+        !tx.isolated &&
+        err instanceof StorageError &&
+        err.code === "unique_violation" &&
+        err.model === "identity"
+      )
+        return "identity_taken";
+      throw err;
+    }
+  }
+  return null;
 }
 
 /**
@@ -650,8 +724,8 @@ async function activated(
  * since.
  */
 async function deleteWritten(tx: StorageAdapter, written: Written): Promise<void> {
-  for (const id of written.identities)
-    await tx.delete("identity", [{ field: "id", op: "eq", value: id }]);
+  for (const i of written.identities)
+    await tx.delete("identity", [{ field: "id", op: "eq", value: i.id }]);
   if (written.password !== null)
     await tx.delete("password", [
       { field: "id", op: "eq", value: written.password.id },
@@ -708,9 +782,10 @@ async function userUnchanged(
  * The guards after the writes of a user, then the activation. First the
  * release of the hold, if the caller took one. Then the check of the user
  * row (`userUnchanged`), so it is the last statement before the activation.
- * Then the activation of the pending password row. False from any of them
- * deletes the written rows by id (`deleteWritten`). It never throws to
- * undo, as core's sign-up never does.
+ * Then the activation of the pending rows (`activated`). A failure of any of
+ * them deletes the written rows by id (`deleteWritten`), and it answers the
+ * reason. Null when it kept the rows. It never throws to undo, as core's
+ * sign-up never does.
  */
 async function keepWritten(
   tx: StorageAdapter,
@@ -720,21 +795,21 @@ async function keepWritten(
   written: Written,
   hash: string | null,
   now: Date,
-): Promise<boolean> {
+): Promise<RepairRefusal | null> {
   const released = hold === undefined || (await releaseClaim(tx, userId, hold.until));
-  const kept =
-    released &&
-    (await userUnchanged(tx, userId, seen, now)) &&
-    (await activated(tx, written, hash, now));
-  if (!kept) await deleteWritten(tx, written);
-  return kept;
+  const lost =
+    !released || !(await userUnchanged(tx, userId, seen, now))
+      ? "claimed"
+      : await activated(tx, written, hash, now);
+  if (lost !== null) await deleteWritten(tx, written);
+  return lost;
 }
 
 /**
  * Writes the missing rows of a user. For an unverified user the writes go
  * under the hold of its claim (decision 5 of plan 12q). The order is the
- * hold, the delete of the pending password row of a stopped run, and the
- * writes. Then the release, the check of the user row, and the activation
+ * hold, the delete of the pending rows of a stopped run, and the writes.
+ * Then the release, the check of the user row, and the activation
  * (`keepWritten`). This is the pattern of core's sign-up
  * (`engine/password.ts`, `insertSignUp`).
  * - A claim (core `claimEmail`) takes the same hold first: on Postgres and
@@ -756,15 +831,21 @@ async function keepWritten(
  *   check or the activation then fails.
  * - The password row goes in pending (`PENDING_HASH_PREFIX`), and a sign-in
  *   refuses a pending row. On D1 the writes are visible at once. So a
- *   sign-in with the imported hash fails until the activation. A passkey
- *   and a social identity go in active. A sign-in with them gets an unproved
- *   session while the user is unverified, and the claim later ends it.
+ *   sign-in with the imported hash fails until the activation.
+ * - Under the hold a social identity goes in pending too (`pendingProvider`,
+ *   ruling 24 of plan 12q). So no sign-in finds it until the activation.
+ *   Before, an import that waited 60 seconds in the hold left a live
+ *   identity on the owner's account until its delete. A claimant's sign-in
+ *   then got a proved session there.
+ * - After the activation a sign-in with the identity gets an unproved
+ *   session while the user is unverified. The claim later deletes the
+ *   identity and ends that session. An unverified user has no passkey.
  * - A run that stops inside the hold leaves the lease on D1. A claim of the
  *   user answers as above for 60 seconds, and then it takes the lease. A
  *   repair answers `claimed` until the sweep deletes the lease: the hold
  *   takes no stale lease (core `holdClaim`).
  * A verified user has no claim and no hold. Its repair writes, then sends
- * the same check, then the activation.
+ * the same check, then the activation. Its identities go in active.
  */
 async function repairUser(
   tx: StorageAdapter,
@@ -772,22 +853,28 @@ async function repairUser(
   now: Date,
   clock: Clock,
 ): Promise<Plan<UserRows, RepairRows>> {
-  const { seen, stopped, userId } = p.rows;
-  const claimed: Plan<UserRows, RepairRows> = {
+  const { seen, stopped, stoppedIdentities, userId } = p.rows;
+  const partial = (why: RepairRefusal): Plan<UserRows, RepairRows> => ({
     kind: "partial",
     missing: p.missing,
-    repairRefused: "claimed",
-  };
+    repairRefused: why,
+  });
   const hold = seen.emailVerified ? undefined : await heldClaim(tx, userId, clock);
-  if (hold === null) return claimed;
+  if (hold === null) return partial("claimed");
   // By its id and its string, as `deleteWritten` deletes.
   if (stopped)
     await tx.delete("password", [
       { field: "id", op: "eq", value: stopped.id },
       { field: "hash", op: "eq", value: stopped.hash },
     ]);
-  const written = await writeCredentials(tx, p.rows, now, true);
-  return (await keepWritten(tx, userId, seen, hold, written, p.rows.password, now)) ? p : claimed;
+  for (const i of stoppedIdentities)
+    await tx.delete("identity", [
+      { field: "id", op: "eq", value: i.id },
+      { field: "provider", op: "eq", value: i.provider },
+    ]);
+  const written = await writeCredentials(tx, p.rows, now, true, hold !== undefined);
+  const lost = await keepWritten(tx, userId, seen, hold, written, p.rows.password, now);
+  return lost === null ? p : partial(lost);
 }
 
 /**
@@ -805,6 +892,9 @@ async function repairUser(
  *   review-12p-fix34, open point 1 of fix round 5 of plan 12p).
  * - The flag read of the hold, the release, and the check catch a claim
  *   past the life of a lease, as in `repairUser`.
+ * - The identity goes in pending under the hold, and the activation makes it
+ *   live, as in `repairUser`. So a claimant's sign-in finds no imported
+ *   identity on a verified account while the import runs.
  */
 async function writeUser(
   tx: StorageAdapter,
@@ -835,13 +925,13 @@ async function writeUser(
   const held = !rows.verified && (rows.password !== null || rows.identities.length > 0);
   const missing = rows.identities.map((i) => `identity:${i.provider}`);
   if (rows.password !== null) missing.push("password");
-  const claimed: Plan<UserRows, RepairRows> = {
+  const partial = (why: RepairRefusal): Plan<UserRows, RepairRows> => ({
     kind: "partial",
     missing,
-    repairRefused: "claimed",
-  };
+    repairRefused: why,
+  });
   const hold = held ? await heldClaim(tx, rows.id, clock) : undefined;
-  if (hold === null) return claimed;
+  if (hold === null) return partial("claimed");
   const written = await writeCredentials(
     tx,
     {
@@ -854,10 +944,12 @@ async function writeUser(
     },
     now,
     !rows.verified,
+    hold !== undefined,
   );
   if (hold === undefined) return p;
   const seen = { email: rows.email, emailVerified: false };
-  return (await keepWritten(tx, rows.id, seen, hold, written, rows.password, now)) ? p : claimed;
+  const lost = await keepWritten(tx, rows.id, seen, hold, written, rows.password, now);
+  return lost === null ? p : partial(lost);
 }
 
 function count(report: ImportReport, rows: UserRows): void {

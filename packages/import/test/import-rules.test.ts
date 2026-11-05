@@ -3,6 +3,7 @@ import {
   createAuth,
   createMemoryAdapter,
   createPbkdf2PasswordHash,
+  PROVIDER_NAME_RE,
   type StorageAdapter,
 } from "@authtempo/core";
 import { createLegacyPasswordHash, LEGACY_FORMATS } from "@authtempo/legacy-hashes";
@@ -1035,6 +1036,8 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
   /** A view of `db` whose transactions record each call of the port, as "<call> <model>". */
   function recorded(db: StorageAdapter) {
     const calls: string[] = [];
+    /** The data of each create, in order. */
+    const created: Record<string, unknown>[] = [];
     const view: StorageAdapter = {
       ...db,
       transaction: (fn) =>
@@ -1046,6 +1049,7 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
                 if (typeof value !== "function") return value;
                 return (...args: unknown[]) => {
                   calls.push(`${String(key)} ${String(args[0])}`);
+                  if (key === "create") created.push(args[1] as Record<string, unknown>);
                   return (value as (...a: unknown[]) => unknown).apply(target, args);
                 };
               },
@@ -1053,7 +1057,7 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
           ),
         ),
     };
-    return { view, calls };
+    return { view, calls, created };
   }
   const WRITE = /^(create|update|delete)/;
 
@@ -1114,6 +1118,42 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
     expect(
       await db.findOne("verification", [{ field: "id", op: "eq", value: `claim-lease:${u1}` }]),
     ).toBeNull();
+  });
+
+  it("writes the identity of a new unverified user pending under the hold, and activates it after the check (ruling 24 of plan 12q)", async () => {
+    const db = createMemoryAdapter();
+    const rec = recorded(db);
+    const r = await importUsers(
+      rec.view,
+      listSource([
+        user("u1", { emailVerified: false, identities: [{ provider: "google", subject: "g-u1" }] }),
+      ]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    expect(r.created).toMatchObject({ user: 1, identity: 1 });
+    // The calls of the port, reads too, were 9 before ruling 24. The activation of the identity came.
+    expect({ calls: rec.calls.length, writes: rec.calls.filter((c) => WRITE.test(c)) }).toEqual({
+      calls: 10,
+      writes: [
+        "create user",
+        "create verification",
+        "update user",
+        "create identity",
+        "delete verification",
+        "update user",
+        "update identity",
+      ],
+    });
+    // The pending provider is outside core's provider names, so no sign-in finds the row.
+    const pending = rec.created.find((d) => d.subject === "g-u1")?.provider;
+    expect(pending).toBe("pending$google");
+    expect(PROVIDER_NAME_RE.test(String(pending))).toBe(false);
+    const u1 = await importId("user", "supabase", "u1");
+    expect(
+      (await db.findMany("identity", [{ field: "userId", op: "eq", value: u1 }])).map(
+        (i) => i.provider,
+      ),
+    ).toEqual(["google"]);
   });
 
   it("deletes its own rows when the pending password row is gone before the activation (round 3)", async () => {
