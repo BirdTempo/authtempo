@@ -447,6 +447,12 @@ describe("claimEmail and the password row (plan 8)", () => {
           order.push(m);
           return tx.delete(m, w);
         },
+        // The deletes before the flip run under a condition (ruling 33 of plan 12q).
+        deleteOnlyWhile: async (m, w, gm, gw) => {
+          order.push(m);
+          if (!tx.deleteOnlyWhile) throw new Error("no deleteOnlyWhile");
+          return tx.deleteOnlyWhile(m, w, gm, gw);
+        },
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
@@ -484,6 +490,11 @@ describe("claimEmail and the password row (plan 8)", () => {
           order.push(`delete:${m}`);
           return tx.delete(m, w);
         },
+        deleteOnlyWhile: async (m, w, gm, gw) => {
+          order.push(`deleteOnlyWhile:${m}:${gm}`);
+          if (!tx.deleteOnlyWhile) throw new Error("no deleteOnlyWhile");
+          return tx.deleteOnlyWhile(m, w, gm, gw);
+        },
       };
       return claimEmail(recording, "u1", null, now, verified);
     });
@@ -494,8 +505,10 @@ describe("claimEmail and the password row (plan 8)", () => {
       `update:user:["emailVerified","username","displayUsername","phone","updatedAt"]`,
     );
     expect(order.filter((x) => x.startsWith("update:"))).toEqual([order[flip]]);
-    const password = order.indexOf("delete:password");
+    // Each delete before the flip runs only while the user is unverified (ruling 33 of plan 12q).
+    const password = order.indexOf("deleteOnlyWhile:password:user");
     expect(password).toBeGreaterThan(0);
+    expect(order.slice(0, flip).filter((x) => x.startsWith("delete:"))).toEqual([]);
     expect(password).toBeLessThan(flip);
     expect(flip).toBeLessThan(order.indexOf("delete:session"));
   });
