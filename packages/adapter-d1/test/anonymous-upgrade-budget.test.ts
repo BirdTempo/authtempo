@@ -675,41 +675,68 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
   // of the sign-up with 11 claimant sessions.
   // Update 2026-11-04 by plan 12p (ruling 16): the claim writes the lease
   // (+1), 3 under the cap. Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-  // Update 2026-11-05 by plan 12q: the cap read of the session (+1), 2 under
-  // the 50 queries of D1: the tightest pin of a session create.
+  // Update 2026-11-05 by plan 12q: the cap read of the session (+1). It is 2
+  // under the 50 queries of D1.
   // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
-  const UNIQUE_PINS = { retry: 48 };
+  // `overflow` (fix round 1 of Task 2 of plan 12q): the same join with 111
+  // claimant sessions. The claim ends two chunks and writes the pending-end
+  // row (+1, decision 9). It is the tightest D1 pin of a session create.
+  // Measured 2026-11-05 10:43 CST on the owner's Mac Studio, load 6.52 8.56 9.92.
+  const UNIQUE_PINS = { retry: 48, overflow: 49 };
 
-  it("signs in after a unique-key retry on the worst claim join within the D1 Free budget (rr-final L-7 of plan 12n)", async () => {
+  /**
+   * The join after one unique-key retry, with `signIns` sign-ins of the
+   * claimant after its sign-up. The claimant's requests run in other
+   * invocations, under a cap of `cap` sessions. Answers the count of the
+   * counted request, the sessions of the claimed user, and the reasons of
+   * its pending-end rows. It is an arrow function, not a declaration, so
+   * `ALL_HOOKS` keeps its narrowed type in it.
+   */
+  const uniqueRetry = async (signIns: number, cap: number) => {
     // The sign-up and the sign-ins run on the binding with no count, as requests in other invocations.
-    const other = make({}, false);
+    // Past 10 sign-ins the D1 limiter of the address refuses, so that view has an open limiter.
+    // Phone and anonymous need a shared limiter, so it says that scope.
+    const other =
+      signIns > 10
+        ? make(
+            {
+              session: { maxPerUser: cap },
+              limiter: { scope: "shared", allow: async () => true },
+            },
+            false,
+          )
+        : make({ session: { maxPerUser: cap } }, false);
     const email = "bo@example.com";
     let live = false;
     let identityReads = 0;
     let raced = 0;
     let signedUp = "";
-    const w = make({ multiSession: { max: 10 }, hooks: ALL_HOOKS }, true, async (sql) => {
-      if (!live) return;
-      if (/^SELECT\b[\s\S]*\bFROM\s+"?ta_identity"?\s+WHERE\s+"?provider"?/i.test(sql))
-        identityReads++;
-      else if (
-        identityReads === 1 &&
-        raced === 0 &&
-        /^SELECT\b[\s\S]*\bFROM\s+"?ta_user"?\s+WHERE\s+"?email"?/i.test(sql)
-      ) {
-        raced++;
-        // The claimant signs up and signs in on other devices after the read found no user.
-        await call(other, post("/password/sign-up", { email, password: PASSWORD }));
-        for (let i = 0; i < 10; i++)
-          expect(
-            (await call(other, post("/password/sign-in", { email, password: PASSWORD }))).status,
-          ).toBe(200);
-        const row = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
-          .bind(email)
-          .first<{ id: string }>();
-        signedUp = row?.id ?? "";
-      }
-    });
+    const w = make(
+      { multiSession: { max: 10 }, hooks: ALL_HOOKS, session: { maxPerUser: cap } },
+      true,
+      async (sql) => {
+        if (!live) return;
+        if (/^SELECT\b[\s\S]*\bFROM\s+"?ta_identity"?\s+WHERE\s+"?provider"?/i.test(sql))
+          identityReads++;
+        else if (
+          identityReads === 1 &&
+          raced === 0 &&
+          /^SELECT\b[\s\S]*\bFROM\s+"?ta_user"?\s+WHERE\s+"?email"?/i.test(sql)
+        ) {
+          raced++;
+          // The claimant signs up and signs in on other devices after the read found no user.
+          await call(other, post("/password/sign-up", { email, password: PASSWORD }));
+          for (let i = 0; i < signIns; i++)
+            expect(
+              (await call(other, post("/password/sign-in", { email, password: PASSWORD }))).status,
+            ).toBe(200);
+          const row = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+            .bind(email)
+            .first<{ id: string }>();
+          signedUp = row?.id ?? "";
+        }
+      },
+    );
     const b = await fullBagAnonymous(w, (address) => verifiedUser(w, address));
     const nonce = (await (await call(w, post("/social/google/id-token/nonce", {}))).json()) as {
       nonce: string;
@@ -742,13 +769,45 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
     // The second run claimed the user of the sign-up: the first run's create wrote no user.
     expect(user?.id).toBe(signedUp);
     expect(user?.v).toBe(1);
-    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM ta_session WHERE user_id = ?")
+    const left = await env.DB.prepare(
+      "SELECT COUNT(*) AS n, SUM(proved) AS proved FROM ta_session WHERE user_id = ?",
+    )
       .bind(user?.id ?? "")
-      .first<{ n: number }>();
-    // The claim ended the 11 claimant sessions; the sign-in made one.
-    expect(left?.n).toBe(1);
-    expect(done.queries).toBe(UNIQUE_PINS.retry);
+      .first<{ n: number; proved: number }>();
+    const rows = await env.DB.prepare(
+      "SELECT data FROM ta_verification WHERE purpose = 'session-end' AND identifier = ?",
+    )
+      .bind(user?.id ?? "")
+      .all<{ data: string }>();
     expect(done.queries).toBeLessThanOrEqual(BUDGET);
+    return {
+      queries: done.queries,
+      sessions: left?.n,
+      proved: left?.proved,
+      reasons: rows.results.map((r) => (JSON.parse(r.data) as { reason: string }).reason),
+    };
+  };
+
+  it("signs in after a unique-key retry on the worst claim join within the D1 Free budget (rr-final L-7 of plan 12n)", async () => {
+    // The claim ended the 11 claimant sessions; the sign-in made one.
+    expect(await uniqueRetry(10, 100)).toEqual({
+      queries: UNIQUE_PINS.retry,
+      sessions: 1,
+      proved: 1,
+      reasons: [],
+    });
+  });
+
+  it("signs in after a unique-key retry on the claim's overflow path within the D1 Free budget (plan 12q)", async () => {
+    // 111 claimant sessions under a cap of 200. The claim ends two chunks of
+    // 50 and writes a pending-end row of the reason `claimed` for the other
+    // 11. The owner's proved session is the twelfth.
+    expect(await uniqueRetry(110, 200)).toEqual({
+      queries: UNIQUE_PINS.overflow,
+      sessions: 12,
+      proved: 1,
+      reasons: ["claimed"],
+    });
   });
 
   for (const uniformSignUp of [false, true])
