@@ -28,7 +28,7 @@ function same(a: unknown, b: unknown): boolean {
  * run inside another flow's open transaction.
  * `undoOnlyWhile` keeps the D1 adapter's rule (decision 6 of plan 12q). The
  * undo of each later delete puts its row back only while a row matches the
- * condition then, and a row matches its second condition too (ruling 36).
+ * condition then. A row must match its second condition too (ruling 36).
  * A second call at a level replaces it. A nested call starts with the
  * condition of its parent. `keep` and the end of a level end the
  * condition that the level set. `deleteOnlyWhile` deletes only while its
