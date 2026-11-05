@@ -136,19 +136,26 @@ describe("holdClaim and releaseClaim on a store with no isolation", () => {
     expect(await lease(w, user.id)).toBeNull();
   });
 
-  it("throws ClaimLostError with held while the lease lives, and takes a stale lease", async () => {
+  it("throws ClaimLostError with held while a lease row stays, live or stale, and a claim takes the stale one", async () => {
     const w = world();
     const user = await signedUp(w);
-    await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
-    const second = await w.mem
-      .transaction((tx) => holdClaim(tx, user.id, w.clock))
-      .then(() => null)
-      .catch((e: unknown) => e);
-    expect(second).toBeInstanceOf(ClaimLostError);
-    expect((second as ClaimLostError).held).toBe(true);
-    // After its life the lease is stale: the hold of a stopped writer. The next hold takes it.
+    const hold = () =>
+      w.mem
+        .transaction((tx) => holdClaim(tx, user.id, w.clock))
+        .then(() => null)
+        .catch((e: unknown) => e);
+    expect(await hold()).toBeNull();
+    const live = await hold();
+    expect(live).toBeInstanceOf(ClaimLostError);
+    expect((live as ClaimLostError).held).toBe(true);
+    // After its life the lease is stale: the lease of a stopped writer, or of
+    // a claim that runs past its life. The hold takes no stale lease.
     w.advance(CLAIM_LEASE_MS + 1_000);
-    await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
+    const stale = await hold();
+    expect(stale).toBeInstanceOf(ClaimLostError);
+    expect((stale as ClaimLostError).held).toBe(true);
+    // A claim takes the stale lease, so the owner waits for no sweep.
+    expect(await ownerLink(w, w.d1())).toBe("ok a session");
     expect((await lease(w, user.id))?.expiresAt).toEqual(
       new Date(w.clock.now().getTime() + CLAIM_LEASE_MS),
     );

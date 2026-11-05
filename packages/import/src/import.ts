@@ -701,9 +701,10 @@ async function heldClaim(tx: StorageAdapter, userId: string, clock: Clock): Prom
  * - Zero rows from the activation deletes the rows of the repair by id
  *   (`deleteWritten`), and the record stays `partial` with `claimed`. It
  *   never throws to undo, as core's sign-up never does.
- * - A run that stops inside the hold leaves the lease on D1. A claim or a
- *   repair of the user then answers as above until the sweep deletes the
- *   lease after 60 seconds.
+ * - A run that stops inside the hold leaves the lease on D1. A claim of the
+ *   user answers as above for 60 seconds, and then it takes the lease. A
+ *   repair answers `claimed` until the sweep deletes the lease: the hold
+ *   takes no stale lease (core `holdClaim`).
  * A verified user has no claim and no hold. Its repair writes, then sends a
  * conditional update of the user row. The update matches the id, and the
  * `email` and `emailVerified` that the guards read. It comes from I-3 of

@@ -438,8 +438,48 @@ describe("the repair of an unverified user holds its claim on D1", () => {
   });
 });
 
+describe("a claim that runs past the life of its lease on D1", () => {
+  it("keeps the repair out when the claim deletes, waits 61 s, and flips after the repair", async () => {
+    const email = "eli@example.com";
+    const record = () => [user("eli", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    // The owner's claim takes its lease and deletes, then waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db, { clock }).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    // The claim's lease is stale now, and the claim has not flipped.
+    clock.move(LEASE_MS + 1_000);
+    const second = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    // A hold that took the stale lease wrote the password here, and the claimant signed in proved.
+    expect(second.repaired).toEqual([]);
+    expect(second.partial).toEqual([
+      { kind: "user", sourceId: "eli", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual({
+      verified: 1,
+      passwords: 0,
+      identities: ["email"],
+      sessions: 1,
+      proved: 1,
+    });
+  });
+});
+
 describe("a run that stops inside its hold on D1", () => {
-  it("leaves its lease: a link answers 409 and a repair answers claimed until the sweep deletes the lease after 60 s", async () => {
+  it("leaves its lease: a link answers 409 for 60 s, and a repair answers claimed until the sweep deletes the lease", async () => {
     const email = "dax@example.com";
     const record = () => [user("dax", { email, emailVerified: false, password: { hash: BCRYPT } })];
     const clock = movedClock();
@@ -480,8 +520,15 @@ describe("a run that stops inside its hold on D1", () => {
     clock.move(LEASE_MS / 2);
     await app(env.DB, { clock }).api.sweepExpired();
     expect(await leaseOf(email)).not.toBeNull();
-    // A sweep after the life deletes it.
+    // After the life the lease is stale. The hold takes no stale lease, so a repair still answers claimed.
     clock.move(LEASE_MS / 2 + 1_000);
+    const stale = await importUsers(createD1Adapter(env.DB), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    expect(stale.partial).toEqual(early.partial);
+    // A sweep after the life deletes it.
     await app(env.DB, { clock }).api.sweepExpired();
     expect(await leaseOf(email)).toBeNull();
     // The repair now writes the password, and the owner's link then claims.

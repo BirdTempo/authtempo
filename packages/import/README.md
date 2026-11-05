@@ -104,13 +104,14 @@ with it fails until then. A run that stops before that activation, as at
 the D1 cap, leaves the pending row. A later run counts that row as missing,
 so the record is `partial` with `password` missing. A repair deletes the
 pending row and writes the password again. A run that stops inside the hold
-leaves the lease on D1 too. Until the sweep deletes it after 60 seconds, a
-claim of that user answers 409 `conflict`, and a repair reports `not
-repaired: claimed`. A repaired passkey or social identity is active at
-once, and so is the social identity of a new unverified user. A claimant
-who also holds the authenticator or the provider account can sign in with it
-after the import. While the address is unverified, that session is
-unproved, and the owner's claim ends it.
+leaves the lease on D1 too. A claim of that user answers 409 `conflict` for
+60 seconds, and then it takes the lease. A repair reports `not repaired:
+claimed` until the sweep deletes the lease. The hold takes no stale lease,
+because a claim can run past the life of its lease. A repaired passkey or
+social identity is active at once, and so is the social identity of a new
+unverified user. A claimant who also holds the authenticator or the provider
+account can sign in with it after the import. While the address is
+unverified, that session is unproved, and the owner's claim ends it.
 Without `--repair` the importer writes nothing for a `partial` record.
 
 A repair also gives back a credential that the user removed in the app

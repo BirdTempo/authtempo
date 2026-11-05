@@ -496,7 +496,7 @@ describe("the repair of an unverified user beside an owner's claim on D1", () =>
 });
 
 describe("a run that stops after the pending password create of a new unverified user on D1", () => {
-  it("lists the user as partial with the password missing, and a repair after the lease writes the password, which signs in", async () => {
+  it("lists the user as partial with the password missing, and a repair after the sweep writes the password, which signs in", async () => {
     const email = "ivy@example.com";
     const record = () => [user("ivy", { email, emailVerified: false, password: { hash: BCRYPT } })];
     // The isolate dies right after the pending create, as at the D1 cap.
@@ -531,12 +531,12 @@ describe("a run that stops after the pending password create of a new unverified
     expect(dry.exists.user).toBe(0);
     expect(dry.partial).toEqual([{ kind: "user", sourceId: "ivy", missing: ["password"] }]);
     expect(verifyReport(dry)).toMatchObject({ held: false, partial: 1, code: 1 });
-    // The stopped run left its lease (plan 12q). A run with --repair 61 s
-    // later takes the stale lease. It deletes the pending row, then writes the password.
+    // The stopped run left its lease (plan 12q). The sweep deletes it after
+    // 60 seconds. Then a run with --repair deletes the pending row and writes the password.
+    await app(env.DB, { clock: { now: () => new Date(Date.now() + 61_000) } }).api.sweepExpired();
     const repair = await importUsers(createD1Adapter(env.DB), listSource(record()), {
       formats: ["bcrypt"],
       repair: true,
-      now: () => new Date(Date.now() + 61_000),
     });
     expect(repair.partial).toEqual([]);
     expect(repair.repaired).toEqual([{ kind: "user", sourceId: "ivy", rows: ["password"] }]);
