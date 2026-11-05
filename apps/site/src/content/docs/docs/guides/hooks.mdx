@@ -54,7 +54,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username`, `phone`, `operator` |
 | `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim`, `invite` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end`, `displaced`, `anonymous_upgrade`, `claimed` |
 
 ## How it behaves
 
@@ -116,6 +116,7 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 - `displaced`: with `multiSession` on, a sign-in in a browser whose bag is full ends the oldest session of the bag. A sign-in of a user who has a session in the browser ends that session with `sign_out`.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 - `anonymous_upgrade`: a sign-in replaced the anonymous user of the session. See [The anonymous upgrade](#the-anonymous-upgrade).
+- `claimed`: a session read found a session from before the proof of its user's address, after the proof, and ended it. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells why.
 
 ## The anonymous upgrade
 

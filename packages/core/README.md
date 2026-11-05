@@ -1443,7 +1443,9 @@ const auth = createAuth({
   `revoked`, `email_change`, or `account_deleted` since plan 12a. Since
   plan 12e it can be `oidc_logout`, and since plan 12f `banned`,
   `operator`, or `impersonation_end`. Since plan 12i it can be
-  `anonymous_upgrade`. It fires once per ended row.
+  `anonymous_upgrade`. Since plan 12q it can be `claimed`: a session read
+  ended a session from before the proof of its user's address, after the
+  proof. It fires once per ended row.
   `sweepExpired` deletes expired rows in bulk and fires no hook for them, so
   `expired` fires only when a request presents the token after its expiry.
   A claim ends a claimant's sessions with `claim` in every flow that

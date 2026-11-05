@@ -1224,7 +1224,7 @@ These routes exist unless the config sets `jwtMint: false`.
 | --- | --- |
 | Needs | A session JWT as the bearer. The JWT is of this instance. A session token, an API token, an access token, and a cookie answer 401 |
 | Input | None |
-| Answer | `{ live: true }` while the session of the JWT's `sid` claim exists and is not expired, else `{ live: false }`. A session from before the end of the user's last ban answers `{ live: false }`, also after the unban (`bannedFor`, as at every door). So does an impersonation session whose operator is banned, deleted, or without the platform role. It counts on `token-live:session:<sessionId>`, 120 per minute ([Limits](/docs/reference/limits/)) |
+| Answer | `{ live: true }` while the session of the JWT's `sid` claim exists and is not expired, else `{ live: false }`. A session from before the end of the user's last ban answers `{ live: false }`, also after the unban (`bannedFor`, as at every door). So does an impersonation session whose operator is banned, deleted, or without the platform role. So does a session from before the proof of its user's address, once the proof lands. It counts on `token-live:session:<sessionId>`, 120 per minute ([Limits](/docs/reference/limits/)) |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## Operator

@@ -551,3 +551,25 @@ describe("the undo guard of a claim on the claim-rule, races, and storage-port p
     );
   });
 });
+
+// The door of a claimed session (ruling 13 of plan 12q). An unproved session
+// of a user with a verified address is the claimant's, and it is dead. Each
+// door refuses it, the session read ends it with `claimed`, and the pages
+// say so. A change of a door fails here.
+describe("the door of a claimed session on the claim-rule, races, and hooks pages (plan 12q)", () => {
+  it("holds the door at the session read, the JWT mint, and the live check, and the words", () => {
+    const resolve = body(source("sessions.ts"), "resolveSession");
+    expect(resolve).toContain("if (claimedFor(user, session)) {");
+    expect(resolve).toContain('await sessionsEnded(config, [session], "claimed", stops, n);');
+    const jwt = source("jwt.ts");
+    expect(body(jwt, "mintSessionJwt")).toContain(
+      'if (claimedFor(user, session)) return fail("unauthorized");',
+    );
+    expect(body(jwt, "sessionLive")).toContain("if (claimedFor(user, row)) return false;");
+    expect(page("concepts/claim-rule.md")).toContain(
+      "A session that came before the proof ends at its next use once the proof lands.",
+    );
+    expect(page("concepts/races.md")).toContain("So a lost answer leaves nothing of the claimant.");
+    expect(page("guides/hooks.mdx")).toContain("`displaced`, `anonymous_upgrade`, `claimed` |");
+  });
+});

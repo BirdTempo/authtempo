@@ -39,7 +39,7 @@ sources:
 | A stranger on the network | Nothing but the public routes | An account, a guess of a code, or a list of the addresses that have accounts. |
 | A person with the password or the mailbox | The password of one account, or its mailbox | A session without the second factor. |
 | A thief of a session | One session cookie or session token | A longer hold on the account. |
-| A claimant | An account that they made with an address that they do not own | The account of the real owner, when the owner proves the address later, or a token, a grant, or a factor that outlives the proof. |
+| A claimant | An account that they made with an address that they do not own | The real owner's account after the owner proves the address, or a token, a grant, a factor, or a session that outlives the proof. A lost D1 answer at the claim leaves them nothing either. |
 | A hostile page | A page in the person's browser | A request that the person did not mean, or a code sent to another origin. |
 | A reader of a database copy | A copy of the tables | The tokens, the codes, or the secrets in the rows. |
 | A thief of an operator secret | One named operator secret | The users that the scopes of the secret reach. |
@@ -61,7 +61,7 @@ sources:
 - **Bounded guesses.** An email code admits 5 guesses, and an address gets at most 20 codes a day. A second-factor challenge admits 5 guesses, and an account at most 30 a day.
 - **Single use.** A magic link, a code, a challenge, and an OAuth code are spent in one conditional update. Two uses race for one row, and one wins.
 - **The claim rule.** A proof of an address deletes the credentials of a claimant. [The claim rule](/docs/concepts/claim-rule/) tells how.
-- **The session proof.** A session that came before the proof of its address never gains verified powers. So a claimant's session makes no token, no grant, and no factor, also while the claim runs. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
+- **The session proof.** A session that came before the proof of its address never gains verified powers. So a claimant's session makes no token, no grant, and no factor, also while the claim runs. Once the proof lands, such a session ends at its next use, with the reason `claimed`. [The session proof](/docs/concepts/claim-rule/#the-session-proof) tells the rule.
 - **Trusted origins.** A POST with an `Origin` header outside `trustedOrigins` answers 403. A `next` path must start with `/` and not `//`.
 - **A `__Host-` session cookie.** By default the session cookie is `__Host-tempo_session`. A host on a sibling subdomain cannot set it.
 - **An absolute session lifetime.** With `session.absoluteDays`, a session ends that many days after it opened, whatever its refresh.
