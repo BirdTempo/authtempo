@@ -359,7 +359,7 @@ describe("the session proof of the claim-rule page (plan 12p)", () => {
     );
     const take = body(source("users.ts"), "takeClaim");
     expect(take).toMatch(
-      /if \(tx\.isolated\) \{\s+if \(await userStillUnverified\(tx, userId, now\)\) return;/,
+      /if \(tx\.isolated\) \{\s+if \(await userStillUnverified\(tx, userId, now\)\) return null;/,
     );
     expect(take).toContain('purpose: "claim-lease",');
     // The page says that the lease lives 60 seconds: from the clock at its write (ruling 35 of plan 12p).
