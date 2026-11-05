@@ -282,19 +282,19 @@ const SITES: Site[] = [
     file: "storage/conformance.ts",
     fn: "throws",
     call: 'delete("session"',
-    count: 3,
+    count: 17,
     kind: "kit",
     reason:
-      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep",
+      "the cases of deleteRows and keep (plan 12o): a rival delete and the writes around keep; the cases of undoOnlyWhile (plan 12q): the deletes under a condition",
   },
   {
     file: "storage/conformance.ts",
     fn: "throws",
     call: 'deleteRows("session"',
-    count: 11,
+    count: 13,
     kind: "kit",
     reason:
-      "the cases of deleteRows and keep (plan 12o): the answer, the rules, the count, the rival, and the undo",
+      "the cases of deleteRows and keep (plan 12o): the answer, the rules, the count, the rival, and the undo; the cases of undoOnlyWhile (plan 12q): the deletes under a condition",
   },
 ];
 
