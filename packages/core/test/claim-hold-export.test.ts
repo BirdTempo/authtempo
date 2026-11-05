@@ -99,9 +99,14 @@ const lease = (w: World, userId: string) =>
  * Postgres and MySQL. It records each call of the port.
  */
 function isolatedView(tx: StorageAdapter, calls: string[]): StorageAdapter {
+  return recordingView(tx, calls, true);
+}
+
+/** A view of a transaction that records each call of the port, as "<call> <model>". */
+function recordingView(tx: StorageAdapter, calls: string[], isolated = false): StorageAdapter {
   return new Proxy(tx, {
     get(target, key) {
-      if (key === "isolated") return true;
+      if (key === "isolated") return isolated || target.isolated;
       const value = Reflect.get(target, key);
       if (typeof value !== "function") return value;
       return (...args: unknown[]) => {
@@ -125,14 +130,15 @@ describe("holdClaim and releaseClaim on a store with no isolation", () => {
     const w = world();
     const user = await signedUp(w);
     w.advance(5_000);
-    await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
+    const until = await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
+    expect(until).toEqual(new Date(w.clock.now().getTime() + CLAIM_LEASE_MS));
     expect(await lease(w, user.id)).toMatchObject({
       purpose: "claim-lease",
       identifier: user.id,
-      expiresAt: new Date(w.clock.now().getTime() + CLAIM_LEASE_MS),
+      expiresAt: until,
       consumedAt: null,
     });
-    await w.mem.transaction((tx) => releaseClaim(tx, user.id));
+    expect(await w.mem.transaction((tx) => releaseClaim(tx, user.id, until))).toBe(true);
     expect(await lease(w, user.id)).toBeNull();
   });
 
@@ -164,7 +170,7 @@ describe("holdClaim and releaseClaim on a store with no isolation", () => {
   it("makes the owner's link answer 409 while it holds, and the link after the release claims", async () => {
     const w = world();
     const user = await signedUp(w);
-    await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
+    const until = await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
     // The memory store retries three times after a wait of 100 ms, then answers 409.
     expect(await ownerLink(w, w.auth())).toBe("conflict");
     // A store with a query limit runs no retry.
@@ -172,10 +178,46 @@ describe("holdClaim and releaseClaim on a store with no isolation", () => {
     // The claimant keeps the user while the hold lives: no claim wrote.
     expect((await userAt(w, EMAIL)).emailVerified).toBe(false);
     expect(await w.mem.findMany("password", [])).toHaveLength(1);
-    await w.mem.transaction((tx) => releaseClaim(tx, user.id));
+    await w.mem.transaction((tx) => releaseClaim(tx, user.id, until));
     expect(await ownerLink(w, w.d1())).toBe("ok a session");
     expect((await userAt(w, EMAIL)).emailVerified).toBe(true);
     expect(await w.mem.findMany("password", [])).toEqual([]);
+  });
+
+  it("throws ClaimLostError with no held for a user that a claim verified, after the sweep deleted the claim's lease, and leaves no lease", async () => {
+    const w = world();
+    const user = await signedUp(w);
+    // The owner's claim verifies the user and leaves its lease on this store.
+    expect(await ownerLink(w, w.d1())).toBe("ok a session");
+    expect(await lease(w, user.id)).not.toBeNull();
+    // The app's sweep deletes that lease after its life.
+    w.advance(CLAIM_LEASE_MS + 1_000);
+    await w.auth().api.sweepExpired();
+    expect(await lease(w, user.id)).toBeNull();
+    const calls: string[] = [];
+    const thrown = await w.mem
+      .transaction((tx) => holdClaim(recordingView(tx, calls), user.id, w.clock))
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(ClaimLostError);
+    expect((thrown as ClaimLostError).held).toBe(false);
+    // The lease create, the flag read, and the delete of its own lease.
+    expect(calls).toEqual(["create verification", "update user", "delete verification"]);
+    expect(await lease(w, user.id)).toBeNull();
+  });
+
+  it("deletes no lease of a claim that took the stale lease of the hold, and answers false", async () => {
+    const w = world();
+    const user = await signedUp(w);
+    const until = await w.mem.transaction((tx) => holdClaim(tx, user.id, w.clock));
+    // The writer waits past the life of its lease, and the owner's claim takes it.
+    w.advance(CLAIM_LEASE_MS + 1_000);
+    expect(await ownerLink(w, w.d1())).toBe("ok a session");
+    const claims = await lease(w, user.id);
+    expect(claims?.expiresAt).toEqual(new Date(w.clock.now().getTime() + CLAIM_LEASE_MS));
+    // The release of the hold matches no row: the claim's lease has the same id and another expiry.
+    expect(await w.mem.transaction((tx) => releaseClaim(tx, user.id, until))).toBe(false);
+    expect(await lease(w, user.id)).toEqual(claims);
   });
 });
 
@@ -186,8 +228,8 @@ describe("holdClaim and releaseClaim on an isolated store", () => {
     const calls: string[] = [];
     await w.mem.transaction(async (tx) => {
       const view = isolatedView(tx, calls);
-      await holdClaim(view, user.id, w.clock);
-      await releaseClaim(view, user.id);
+      expect(await holdClaim(view, user.id, w.clock)).toBeNull();
+      expect(await releaseClaim(view, user.id, null)).toBe(true);
     });
     expect(calls).toEqual(["update user"]);
     expect(await lease(w, user.id)).toBeNull();

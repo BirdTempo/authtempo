@@ -351,7 +351,8 @@ export const CLAIM_SESSION_CHUNKS = 2;
  * is stale at its write, and the sweep keeps it while the claim runs. `now`
  * stays the time of the other writes of the claim and of the stale test.
  * `takeStale` false refuses a stale lease too: the hold of a writer that is
- * no claim (`holdClaim`).
+ * no claim (`holdClaim`). It returns the expiry that it wrote, or null on an
+ * isolated store.
  */
 async function takeClaim(
   tx: StorageAdapter,
@@ -359,9 +360,9 @@ async function takeClaim(
   now: Date,
   clock: Clock,
   takeStale = true,
-): Promise<void> {
+): Promise<Date | null> {
   if (tx.isolated) {
-    if (await userStillUnverified(tx, userId, now)) return;
+    if (await userStillUnverified(tx, userId, now)) return null;
     // An account delete took the row: `conflict`, as at the flip.
     if (!(await tx.findOne("user", [{ field: "id", op: "eq", value: userId }])))
       stopWith("conflict");
@@ -371,20 +372,21 @@ async function takeClaim(
   // A fresh read at each write: see `CLAIM_LEASE_MS`.
   const expiry = () => new Date(clock.now().getTime() + CLAIM_LEASE_MS);
   try {
+    const expiresAt = expiry();
     await tx.create("verification", {
       id,
       purpose: "claim-lease",
       identifier: userId,
       // The key of `valueHash` is unique, so each user's lease has its own hash.
       valueHash: await sha256Hex(id),
-      expiresAt: expiry(),
+      expiresAt,
       consumedAt: null,
       data: null,
       secretVersion: 1,
       createdAt: now,
       updatedAt: now,
     });
-    return;
+    return expiresAt;
   } catch (err) {
     if (
       !(
@@ -397,6 +399,7 @@ async function takeClaim(
   }
   // Another claim holds the lease, or a stale lease stays. One row takes a
   // stale lease. A writer that is no claim takes none (`holdClaim`).
+  const expiresAt = expiry();
   const taken = takeStale
     ? await tx.update(
         "verification",
@@ -404,10 +407,11 @@ async function takeClaim(
           { field: "id", op: "eq", value: id },
           { field: "expiresAt", op: "lt", value: now },
         ],
-        { expiresAt: expiry(), createdAt: now, updatedAt: now },
+        { expiresAt, createdAt: now, updatedAt: now },
       )
     : 0;
   if (taken === 0) throw new ClaimLostError("held");
+  return expiresAt;
 }
 
 /**
@@ -417,8 +421,9 @@ async function takeClaim(
  *
  * The contract: the caller runs it in its transaction, after the user row
  * exists there. It writes the user's rows, then calls `releaseClaim` in the
- * same transaction. It runs no hook between the two calls. A hook can wait
- * longer than `CLAIM_LEASE_MS`, and a claim can then take the stale lease.
+ * same transaction, with the value that this call returned. It runs no hook
+ * between the two calls. A hook can wait longer than `CLAIM_LEASE_MS`, and
+ * a claim can then take the stale lease.
  *
  * It is `takeClaim` with no take of a stale lease. On an isolated store it
  * is the hold: an update of the user row while it is unverified. That
@@ -427,31 +432,65 @@ async function takeClaim(
  * of `clock`. A claim that meets the lease answers 409 `conflict` on D1 and
  * retries after a wait elsewhere.
  *
+ * The flag read (ruling 20 of plan 12q). On a store with no isolation the
+ * hold then reads the flag with the same update. The lease guards only
+ * while it lives. A claim can verify the user and leave its lease, and the
+ * sweep can delete that lease before this create. With no read, the writer
+ * would then write onto the owner's account. On a verified user the hold
+ * deletes its own lease and throws `ClaimLostError`. An isolated store
+ * needs no second read: its hold is that update, and the row lock orders a
+ * claim after the commit.
+ *
  * It takes no stale lease, unlike a claim. A stale lease can belong to a
  * claim that still runs past its life. That claim can have deleted before
  * this hold and flip after the writes. The writer's rows would then stay on
  * the owner's account. The claim check of a sign-up counts a stale lease for
  * the same reason (`claimNotStarted`).
  *
- * It throws `ClaimLostError` with `held` when a lease row of the user
- * exists, live or stale. On an isolated store it throws `ClaimLostError`
- * when the user is verified, and it stops with `conflict` when the user row
- * is gone. A caller that stops before `releaseClaim` leaves the lease. A
- * claim takes it after 60 seconds, and the sweep deletes it then. A later
- * hold of the user waits for the sweep.
+ * It returns the expiry of its lease, or null on an isolated store. It
+ * throws `ClaimLostError` with `held` when a lease row of the user exists,
+ * live or stale. It throws `ClaimLostError` with no `held` when the user is
+ * verified or gone. On an isolated store it stops with `conflict` when the
+ * user row is gone. A caller that stops before `releaseClaim` leaves the
+ * lease. A claim takes it after 60 seconds. The app's scheduled sweep
+ * deletes the lease at its first run 60 seconds or more after its write. A
+ * later hold of the user waits for the sweep.
  */
-export async function holdClaim(tx: StorageAdapter, userId: string, clock: Clock): Promise<void> {
-  await takeClaim(tx, userId, clock.now(), clock, false);
+export async function holdClaim(
+  tx: StorageAdapter,
+  userId: string,
+  clock: Clock,
+): Promise<Date | null> {
+  const now = clock.now();
+  const until = await takeClaim(tx, userId, now, clock, false);
+  if (until === null || (await userStillUnverified(tx, userId, now))) return until;
+  await releaseClaim(tx, userId, until);
+  throw new ClaimLostError();
 }
 
 /**
- * Ends the hold of `holdClaim`, in the same transaction. On an isolated
- * store it sends nothing: the commit ends the row lock. On a store with no
- * isolation it deletes the lease by its id.
+ * Ends the hold of `holdClaim`, in the same transaction. `until` is the
+ * value that `holdClaim` returned. On an isolated store it sends nothing
+ * and answers true: the commit ends the row lock. On a store with no
+ * isolation it deletes the lease by its id and by `until`. So it never
+ * deletes the lease of a claim that took the stale lease of the hold.
+ *
+ * It answers false when its lease is gone or a claim took it. A claim can
+ * then have deleted before the writes of the caller and flip after them.
+ * The caller then deletes its own rows, as at a lost claim check.
  */
-export async function releaseClaim(tx: StorageAdapter, userId: string): Promise<void> {
-  if (tx.isolated) return;
-  await tx.delete("verification", [{ field: "id", op: "eq", value: claimLeaseId(userId) }]);
+export async function releaseClaim(
+  tx: StorageAdapter,
+  userId: string,
+  until: Date | null,
+): Promise<boolean> {
+  if (tx.isolated) return true;
+  return (
+    (await tx.delete("verification", [
+      { field: "id", op: "eq", value: claimLeaseId(userId) },
+      { field: "expiresAt", op: "eq", value: until },
+    ])) > 0
+  );
 }
 
 /**

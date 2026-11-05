@@ -1057,7 +1057,7 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
   }
   const WRITE = /^(create|update|delete)/;
 
-  it("holds the claim of an unverified user for a repair: the hold, the writes, the activation, the release (plan 12q)", async () => {
+  it("holds the claim of an unverified user for a repair: the hold and its flag read, the writes, the release, the check, the activation (plan 12q)", async () => {
     const db = createMemoryAdapter();
     await halfUser(db, false);
     const u1 = await importId("user", "supabase", "u1");
@@ -1068,19 +1068,26 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       { formats: LEGACY_FORMATS, now, repair: true },
     );
     expect(r.repaired).toEqual([{ kind: "user", sourceId: "u1", rows: ["password"] }]);
-    // No update of the user row: the hold covers the address and the flag.
-    // The calls of the port, reads too, were 11 before plan 12q. Two updates
-    // of the user row and the lease read went. The lease create and delete came.
+    // The calls of the port, reads too, were 11 before plan 12q. The update of
+    // the user row in the claim check and the lease read went. The lease
+    // create, the flag read of the hold, and the release came (ruling 20).
     expect({ calls: rec.calls.length, writes: rec.calls.filter((c) => WRITE.test(c)) }).toEqual({
-      calls: 10,
-      writes: ["create verification", "create password", "update password", "delete verification"],
+      calls: 12,
+      writes: [
+        "create verification",
+        "update user",
+        "create password",
+        "delete verification",
+        "update user",
+        "update password",
+      ],
     });
     expect(
       await db.findOne("verification", [{ field: "id", op: "eq", value: `claim-lease:${u1}` }]),
     ).toBeNull();
   });
 
-  it("holds the claim of a new unverified user: the user create, the hold, the writes, the activation, the release (plan 12q)", async () => {
+  it("holds the claim of a new unverified user: the user create, the hold and its flag read, the writes, the release, the check, the activation (plan 12q)", async () => {
     const db = createMemoryAdapter();
     const rec = recorded(db);
     const r = await importUsers(
@@ -1089,16 +1096,18 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       { formats: LEGACY_FORMATS, now },
     );
     expect(r.created).toMatchObject({ user: 1, password: 1 });
-    // The calls of the port, reads too, are 7, as before plan 12q. The hold and
-    // the release replace the update of the user row and the lease read.
+    // The calls of the port, reads too, were 7 before plan 12q. The lease read
+    // went. The lease create, the flag read of the hold, and the release came.
     expect({ calls: rec.calls.length, writes: rec.calls.filter((c) => WRITE.test(c)) }).toEqual({
-      calls: 7,
+      calls: 9,
       writes: [
         "create user",
         "create verification",
+        "update user",
         "create password",
-        "update password",
         "delete verification",
+        "update user",
+        "update password",
       ],
     });
     const u1 = await importId("user", "supabase", "u1");

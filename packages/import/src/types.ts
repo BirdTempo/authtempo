@@ -226,16 +226,19 @@ export interface ImportOptions {
  *   newer export. So a verified user's missing credential is an operator
  *   action. The same reason also comes from the hold and the checks of a
  *   repair. For an unverified user the repair first holds the claim of the
- *   user (core `holdClaim`). A claim that holds the user, or that verified
- *   it after the guards, makes the hold fail, and the repair writes nothing.
- *   For a verified user, a conditional update of the user row by the `email`
- *   and `emailVerified` that the guards read follows the writes. The last
- *   check is the activation of the pending password row. A failed update or
- *   activation means that an address change or another flow landed after
- *   the guards. The repair then deletes the rows it wrote and keeps the
- *   record here. The write of a new unverified user takes the same hold.
- *   When the hold fails, the write adds no credential row, and the record is
- *   `partial` with this reason, with or without `repair`.
+ *   user (core `holdClaim`). The hold fails when a claim holds the user, or
+ *   when a claim verified it. Then the repair writes nothing. After the
+ *   writes, the release of the hold fails when a claim took its lease. Then
+ *   a conditional update of the user row checks the `email` and
+ *   `emailVerified` that the guards read. The last check is the activation
+ *   of the pending password row. A failed release, update, or activation
+ *   means that a claim, an address change, or another flow landed after the
+ *   guards. The repair then deletes the rows it wrote and keeps the record
+ *   here. So a claim that verified the user before the update leaves no row
+ *   of the repair. A verified user takes no hold, and its repair sends the
+ *   same update. The write of a new unverified user takes the same hold and
+ *   the same checks. When one fails, the write keeps no credential row, and
+ *   the record is `partial` with this reason, with or without `repair`.
  * - `no_owner`: an organization with no member, whose members map to no owner.
  */
 export type RepairRefusal =
@@ -276,8 +279,9 @@ export interface ImportReport {
    * - Another app change since the first run, such as a removed password or
    *   passkey. Or a newer export or other options: for example, the source
    *   now states a row as verified, so the record maps to an `email` identity.
-   * The fourth is a claim that holds a new unverified user when the import
-   * comes to its credential writes. The entry then holds
+   * The fourth is a claim of a new unverified user during the import. It
+   * holds the user when the import comes to its credential writes, or it
+   * verifies the user before the checks after them. The entry then holds
    * `repairRefused: "claimed"`, with or without `repair`.
    * Without `repair` the importer never writes an entry's rows and never
    * counts it as `exists`. The operator checks that user in the app before a

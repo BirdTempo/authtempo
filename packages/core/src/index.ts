@@ -283,6 +283,7 @@ export { USERNAME_RE, type Username, type UsernameSet } from "./engine/username.
  * `claimNotStarted`: the claim check of a credential write (ruling 31 of plan 12p).
  * `holdClaim` and `releaseClaim`: the hold of the claim of a user around the writes of a
  * writer that is no claim. The importer takes it (plan 12q). A held lease throws `ClaimLostError`.
+ * `releaseClaim` takes the value that `holdClaim` returned, and answers false when a claim took the lease.
  */
 export {
   ClaimLostError,

@@ -13,10 +13,13 @@ import { BCRYPT, listSource, user } from "../source.js";
 
 // The importer holds the claim of an unverified user for its writes on D1
 // (decision 5 of plan 12q). Its hold is core's claim lease, taken before the
-// first credential write and deleted after the activation. A claim that
+// first credential write and deleted before the activation. A claim that
 // meets the lease answers 409 `conflict` on D1 and writes nothing. So no
-// claim deletes or flips while the import writes. A social identity goes in
-// active, so the claimant can sign in with it after the import. That session
+// claim deletes or flips while the import writes. The lease guards only
+// while it lives. So the hold reads the flag, and the import checks the
+// user row after its writes. The release fails on a lease that a claim took
+// (ruling 20 of plan 12q). A social identity goes in active, so the
+// claimant can sign in with it after the import. That session
 // is unproved, because the user is unverified, and the owner's claim ends
 // it. Before plan 12q a claim could delete before the import's identity
 // write and flip after it. The claimant's sign-in then got a proved session
@@ -35,6 +38,13 @@ const FLIP = /^UPDATE ta_user SET email_verified = \?/;
 const USER_INSERT = /^INSERT INTO ta_user\b/;
 const IDENTITY_INSERT = /^INSERT INTO ta_identity\b/;
 const PASSWORD_INSERT = /^INSERT INTO ta_password\b/;
+/** The lease create of the hold: the import writes no other verification row. */
+const LEASE_INSERT = /^INSERT INTO ta_verification\b/;
+/** The first update of the user row by the import: the flag read of the hold. */
+const USER_UPDATE = /^UPDATE ta_user\b/;
+/** A write of a credential row. */
+const CREDENTIAL_INSERT = /^INSERT INTO ta_(password|identity)\b/;
+const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
 /** `CLAIM_LEASE_MS` of core: the life of a lease. */
 const LEASE_MS = 60_000;
 
@@ -104,6 +114,27 @@ function pauseAfter(at: RegExp, db: D1Database = env.DB) {
     }
   });
   return { db: paused_, reached: reached.wait, go: go.open, paused: () => paused };
+}
+
+/** A view of `db` that waits at the first statement that `at` matches, before it runs. */
+function pauseBefore(at: RegExp, db: D1Database = env.DB) {
+  const reached = latch();
+  const go = latch();
+  let paused = false;
+  const v = view(db, async (sql) => {
+    if (!paused && at.test(sql)) {
+      paused = true;
+      reached.open();
+      await go.wait;
+    }
+  });
+  return { db: v, reached: reached.wait, go: go.open };
+}
+
+/** A view of the binding that records the text of each statement that runs. */
+function traced() {
+  const texts: string[] = [];
+  return { db: view(env.DB, async (sql) => void texts.push(sql)), texts };
 }
 
 /** A view that waits at the first flip of a claim, before it runs. */
@@ -273,6 +304,14 @@ async function leaseOf(email: string) {
   return env.DB.prepare("SELECT purpose, identifier FROM ta_verification WHERE id = ?")
     .bind(`claim-lease:${await userIdOf(email)}`)
     .first<{ purpose: string; identifier: string }>();
+}
+
+/** The expiry of the claim lease of the user of `email`, or null. */
+async function leaseExpiry(email: string): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT expires_at AS e FROM ta_verification WHERE id = ?")
+    .bind(`claim-lease:${await userIdOf(email)}`)
+    .first<{ e: number }>();
+  return row?.e ?? null;
 }
 
 /** The rows of the user of `email` that a claim deletes or writes, and its proved sessions. */
@@ -478,6 +517,229 @@ describe("a claim that runs past the life of its lease on D1", () => {
   });
 });
 
+/** The rows of the owner after the owner's claim: the claimant holds nothing on them. */
+const OWNER_ONLY = { verified: 1, passwords: 0, identities: ["email"], sessions: 1, proved: 1 };
+
+describe("a claim whose lease the sweep deleted before the import's hold on D1 (F1)", () => {
+  it("keeps a repair of the password out: the hold reads the flag and writes nothing", async () => {
+    const email = "fay@example.com";
+    const record = () => [user("fay", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    // The repair read the unverified user. It waits before its first write.
+    const trace = traced();
+    const run = pauseBefore(WRITE, trace.db);
+    const repair = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    await run.reached;
+    // The owner's whole claim lands in that wait, and its lease stays.
+    expect(await ownerLink(email, { clock })).toBe("ok a session");
+    expect(await leaseOf(email)).not.toBeNull();
+    // 61 s later the app's sweep deletes the claim's lease.
+    clock.move(LEASE_MS + 1_000);
+    await app(env.DB, { clock }).api.sweepExpired();
+    expect(await leaseOf(email)).toBeNull();
+    run.go();
+    const r = await repair;
+    expect(r.repaired).toEqual([]);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "fay", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    // The flag read of the hold stops the repair before its first credential write.
+    expect(trace.texts.filter((t) => CREDENTIAL_INSERT.test(t))).toEqual([]);
+    expect(await leaseOf(email)).toBeNull();
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+
+  it("keeps a new user's Google identity out: the hold reads the flag and writes nothing", async () => {
+    const email = "gus@example.com";
+    const clock = movedClock();
+    // The import created the user row. It waits after that create.
+    const trace = traced();
+    const run = pauseAfter(USER_INSERT, trace.db);
+    const report = importUsers(
+      createD1Adapter(run.db),
+      listSource([
+        user("gus", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-gus" }],
+        }),
+      ]),
+      { formats: ["bcrypt"], now: () => clock.now() },
+    );
+    await run.reached;
+    expect(await ownerLink(email, { clock })).toBe("ok a session");
+    clock.move(LEASE_MS + 1_000);
+    await app(env.DB, { clock }).api.sweepExpired();
+    expect(await leaseOf(email)).toBeNull();
+    run.go();
+    const r = await report;
+    expect(r.created.identity).toBe(0);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "gus", missing: ["identity:google"], repairRefused: "claimed" },
+    ]);
+    expect(trace.texts.filter((t) => CREDENTIAL_INSERT.test(t))).toEqual([]);
+    expect(await leaseOf(email)).toBeNull();
+    // The claimant's Google sign-in lands on no row of the owner.
+    expect(await claimantGoogle("g-gus", "gus.claimant@example.net")).toBe("ok");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+});
+
+describe("a claim that takes the stale lease of an import that waits 61 s after its lease create on D1 (F1b)", () => {
+  it("keeps a repair of the password out, and the hold deletes no lease of the claim", async () => {
+    const email = "hal@example.com";
+    const record = () => [user("hal", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    const trace = traced();
+    const run = pauseAfter(LEASE_INSERT, trace.db);
+    const repair = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    await run.reached;
+    // The import's lease is stale now. The owner's claim takes it, deletes, flips, and ends the sessions.
+    clock.move(LEASE_MS + 1_000);
+    expect(await ownerLink(email, { clock })).toBe("ok a session");
+    const claims = await leaseExpiry(email);
+    expect(claims).not.toBeNull();
+    run.go();
+    const r = await repair;
+    expect(r.repaired).toEqual([]);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "hal", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(trace.texts.filter((t) => CREDENTIAL_INSERT.test(t))).toEqual([]);
+    // The hold deleted its own lease by its expiry, so the claim's lease stays.
+    expect(await leaseExpiry(email)).toBe(claims);
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+
+  it("keeps a new user's Google identity out, and the hold deletes no lease of the claim", async () => {
+    const email = "ivy@example.com";
+    const clock = movedClock();
+    const trace = traced();
+    const run = pauseAfter(LEASE_INSERT, trace.db);
+    const report = importUsers(
+      createD1Adapter(run.db),
+      listSource([
+        user("ivy", {
+          email,
+          emailVerified: false,
+          identities: [{ provider: "google", subject: "g-ivy" }],
+        }),
+      ]),
+      { formats: ["bcrypt"], now: () => clock.now() },
+    );
+    await run.reached;
+    clock.move(LEASE_MS + 1_000);
+    expect(await ownerLink(email, { clock })).toBe("ok a session");
+    const claims = await leaseExpiry(email);
+    expect(claims).not.toBeNull();
+    run.go();
+    const r = await report;
+    expect(r.created.identity).toBe(0);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "ivy", missing: ["identity:google"], repairRefused: "claimed" },
+    ]);
+    expect(trace.texts.filter((t) => CREDENTIAL_INSERT.test(t))).toEqual([]);
+    expect(await leaseExpiry(email)).toBe(claims);
+    expect(await claimantGoogle("g-ivy", "ivy.claimant@example.net")).toBe("ok");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+});
+
+describe("the guards after the writes of a repair on D1 (ruling 20 of plan 12q)", () => {
+  it("deletes its rows when a claim past the life of its lease flips inside the hold: the check of the user row", async () => {
+    const email = "jon@example.com";
+    const record = () => [user("jon", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    // The owner's claim takes its lease and deletes, then waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db, { clock }).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    // The claim runs past the life of its lease, and the app's sweep deletes the lease.
+    clock.move(LEASE_MS + 1_000);
+    await app(env.DB, { clock }).api.sweepExpired();
+    expect(await leaseOf(email)).toBeNull();
+    // The repair holds the user, reads the flag, and waits.
+    const run = pauseAfter(USER_UPDATE);
+    const repair = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    await run.reached;
+    // The claim flips and ends the sessions in that wait.
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    // The repair writes, and its check of the user row finds the flag set.
+    run.go();
+    const r = await repair;
+    expect(r.repaired).toEqual([]);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "jon", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    // The release deleted the lease of the hold.
+    expect(await leaseOf(email)).toBeNull();
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+
+  it("deletes its rows when a claim takes its stale lease, deletes before its writes, and flips after them: the release", async () => {
+    const email = "kai@example.com";
+    const record = () => [user("kai", { email, emailVerified: false, password: { hash: BCRYPT } })];
+    await importUsers(createD1Adapter(env.DB), listSource(record()), { formats: [] });
+    const clock = movedClock();
+    // The repair holds the user, reads the flag, and waits past the life of its lease.
+    const run = pauseAfter(USER_UPDATE);
+    const repair = importUsers(createD1Adapter(run.db), listSource(record()), {
+      formats: ["bcrypt"],
+      repair: true,
+      now: () => clock.now(),
+    });
+    await run.reached;
+    clock.move(LEASE_MS + 1_000);
+    // The owner's claim takes the stale lease and deletes, then waits before its flip.
+    const claim = pauseBeforeFlip();
+    const won = app(claim.db, { clock }).api.verifyMagicLink({
+      token: await linkOf(email),
+      ip: null,
+      userAgent: null,
+    });
+    await claim.reached;
+    const claims = await leaseExpiry(email);
+    // The repair writes after the claim's delete. The flag is not set yet.
+    run.go();
+    const r = await repair;
+    // The release matches no row, because the claim took the lease.
+    expect(r.repaired).toEqual([]);
+    expect(r.partial).toEqual([
+      { kind: "user", sourceId: "kai", missing: ["password"], repairRefused: "claimed" },
+    ]);
+    expect(await leaseExpiry(email)).toBe(claims);
+    claim.go();
+    const owner = await won;
+    expect(owner.ok && "token" in owner.value).toBe(true);
+    expect(await claimantSignIn(email)).toBe("invalid_credentials");
+    expect(await rowsOf(email)).toEqual(OWNER_ONLY);
+  });
+});
+
 describe("a run that stops inside its hold on D1", () => {
   it("leaves its lease: a link answers 409 for 60 s, and a repair answers claimed until the sweep deletes the lease", async () => {
     const email = "dax@example.com";
@@ -554,10 +816,12 @@ describe("the D1 queries of one record", () => {
   // Measured on 2026-11-05 on the owner's Mac Studio. Each count holds
   // the schema read of the adapter, once per run. A statement of a batch
   // counts as one query. The counts before plan 12q were 10, 9, 15, and 7.
-  // The hold replaced the claim check. The lease create (1) and the release
-  // (1) came in. The update of the user row in the check (2) and the lease
-  // read (1) went. A repair also lost its own update of the user row (2).
-  const PINS = { password: 9, google: 8, repair: 12, verified: 7 };
+  // An update in a D1 transaction is a batch of the undo read and the
+  // write, so it counts 2. The claim check went: its update of the user row
+  // (2) and its lease read (1). The lease create (1), the flag read of the
+  // hold (2), the check after the writes (2), and the release (1) came in. A repair kept its own update as that check. The
+  // first form of the hold, before ruling 20, sent 9, 8, 12, and 7.
+  const PINS = { password: 13, google: 12, repair: 16, verified: 7 };
 
   it("sends the pinned count for a new unverified user with a password", async () => {
     const { db, count } = counting(env.DB);
