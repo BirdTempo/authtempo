@@ -259,7 +259,7 @@ const SESSION_PROOF_CHANGESET = `${REPO}.changeset/core-session-proof.md`;
 const ORDER_WORDS = [
   "1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.",
   "2. It deletes the other identities of the user.",
-  "3. It deletes the password row, except the row that a verify link confirms.",
+  "3. It deletes the password row. Only the verify link of a sign-up, opened with the proof of that sign-up, keeps the row that it confirms.",
   "4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.",
   "5. It marks the address verified.",
   "6. It deletes every session, as its last step.",
@@ -575,5 +575,40 @@ describe("the door of a claimed session on the claim-rule, races, and hooks page
       "So a lost answer leaves the claimant no credential and no way in.",
     );
     expect(page("guides/hooks.mdx")).toContain("`anonymous_upgrade`, `claimed`, `capped` |");
+  });
+});
+
+/** The facts of the section "The confirm of a sign-up" (plan 12q Task 1, ruling 11). */
+const CONFIRM_WORDS = [
+  "A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.",
+  "Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who opened the link gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.",
+  "The person then sets a first password through `POST /password/change`, with no current password.",
+  "A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link do this. A proof of another sign-up of the same address keeps nothing.",
+];
+
+describe("the confirm of a sign-up on the claim-rule page (plan 12q Task 1)", () => {
+  it("states the keep of the proof, the claim of every other confirm, and the copy of a new link, as the code does them", () => {
+    const password = source("password.ts");
+    // The keep: only the proof whose hash the row holds keeps the password row.
+    expect(body(password, "confirmSignUp")).toContain(
+      "const own = holdsProof(row.data, await proofHashOf(input.signUpProof));",
+    );
+    expect(body(password, "confirmSignUp")).toContain(
+      "const keep: ClaimKeep = own ? { passwordId, username: true } : { username: true };",
+    );
+    // The copy: an earlier row of the same password row must hold the carried proof.
+    expect(body(password, "keptProofHash")).toContain(
+      "rows.some((r) => r.data?.passwordId === passwordId && holdsProof(r.data, carried))",
+    );
+    const routes = flat(`${REPO}packages/core/src/http/routes/password.ts`);
+    // The cookie first, then the body member of the code form.
+    expect(routes).toContain(
+      "signUpProof: proofCookie(ctx.request) ?? body.value.signUpProof ?? null,",
+    );
+    expect(routes).toContain('export const PASSWORD_SET_QUERY = "password=set";');
+    expect(flat(`${REPO}packages/core/src/http/cookies.ts`)).toContain(
+      'export const SIGN_UP_PROOF_COOKIE = "__Host-tempo_signup";',
+    );
+    for (const words of CONFIRM_WORDS) expect(page("concepts/claim-rule.md")).toContain(words);
   });
 });

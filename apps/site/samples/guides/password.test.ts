@@ -11,14 +11,15 @@ describe("sign in with a password", () => {
       password: "correct horse battery",
     });
     expect(up.status).toBe(200);
-    expect(await up.json()).toEqual({ sent: true });
+    // The sign-up proof: a browser keeps it as a cookie, and its confirm keeps the password.
+    expect(await up.json()).toEqual({ sent: true, signUpProof: expect.stringMatching(/^sp_/) });
     expect(lastMailTo(h, "ada@example.com").subject).toBe("Confirm your email for api.example.com");
     // A second sign-up of the address gets the same answer, and the owner gets a mail.
     const again = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "ada@example.com",
       password: "correct horse battery",
     });
-    expect(await again.json()).toEqual({ sent: true });
+    expect(await again.json()).toEqual({ sent: true, signUpProof: expect.stringMatching(/^sp_/) });
     expect(lastMailTo(h, "ada@example.com").subject).toBe("Your account at api.example.com");
 
     const right = await call(auth, "POST", "/auth/password/sign-in", {

@@ -418,7 +418,7 @@ These routes exist when the config sets `password`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email, password, name?, username? }`. `username` needs the `username` config and `password.uniformSignUp: false`. With the uniform answer, a name at sign-up would tell a known address from a new one. So the sign-up refuses it with `invalid_body`, and the person sets the name with `POST /user/username` after the confirm. The sign-up checks the name before any read by address |
-| Answer | 200 `{ sent: true }` with no cookie, for every address. The verify link opens the session. With a `waitUntil`, the user rows, `user.afterCreate`, and the mail run after the answer, for `password.verifyBy` `"link"` and `"code"` alike. A known and a new address do the same work before it. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no cookie |
+| Answer | 200 `{ sent: true, signUpProof }` with no session cookie, for every address. Every answer sets the sign-up proof as the cookie `__Host-tempo_signup` and holds it as `signUpProof`. The verify link opens the session. With a `waitUntil`, the user rows, `user.afterCreate`, and the mail run after the answer, for `password.verifyBy` `"link"` and `"code"` alike. A known and a new address do the same work before it. With `password.uniformSignUp: false`: a session with the cookie, or 409. With `uniformSignUp: false` and `password.requireVerified` on, or with `signUp: "invited"`: `{ user, verifyRequired: true }` with no session cookie |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`password_policy`](/docs/reference/errors/#password_policy), [`password_breached`](/docs/reference/errors/#password_breached), [`breach_check_unavailable`](/docs/reference/errors/#breach_check_unavailable), [`email_taken`](/docs/reference/errors/#email_taken), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sso_required`](/docs/reference/errors/#sso_required), [`username_invalid`](/docs/reference/errors/#username_invalid), [`username_taken`](/docs/reference/errors/#username_taken) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
 
@@ -427,7 +427,7 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email?, username?, phone?, password, trustDevice?, next? }`. The body has exactly one of `email`, `username`, or `phone`. `username` needs the `username` config. `phone` needs the `phone` config. `phone` is E.164. A bad form of a username or a phone, or a phone outside `phone.regions`, answers `invalid_credentials` after the dummy hash |
+| Input | JSON `{ email?, username?, phone?, password, trustDevice?, next? }`. The body has exactly one of `email`, `username`, or `phone`. `username` needs the `username` config. `phone` needs the `phone` config. `phone` is E.164. A bad form of a username or a phone, or a phone outside `phone.regions`, answers `invalid_credentials` after the dummy hash. When the sign-in mails a new verify link, the link keeps the proof of the cookie `__Host-tempo_signup` |
 | Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 | Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-address, per-username, and per-phone limits |
@@ -446,8 +446,8 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON or form `{ token }` |
-| Answer | A form: 302 to `appURL` with the cookie. JSON: `{ verified: true }`, with the cookie when the address was unverified |
+| Input | JSON or form `{ token }`. The browser of the sign-up also sends the cookie `__Host-tempo_signup` |
+| Answer | A form: 302 to `appURL` with the cookie. JSON: `{ verified: true, passwordKept }`, with the cookie when the address was unverified. The confirm keeps the sign-up's password only with the proof cookie; see [the claim rule](/docs/concepts/claim-rule/#the-confirm-of-a-sign-up). Without it, `passwordKept` is false, and the 302 goes to `appURL` plus `/?password=set`. Each answer clears the proof cookie |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-password-verify-code"><code>POST /password/verify/code</code></h3>
@@ -455,8 +455,8 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email, code }` |
-| Answer | `{ token, user, session }` with the cookie when the address was unverified; `{ verified: true }` with no cookie for a user already verified. The code is the one of the sign-up mail with `password.verifyBy: "code"`. A wrong, expired, or spent code and an unknown address answer `invalid_code` alike; the wrong code number `password.verifyCode.maxAttempts` (5 by default) spends the code |
+| Input | JSON `{ email, code, signUpProof? }`. The cookie `__Host-tempo_signup` wins over `signUpProof` |
+| Answer | `{ token, user, session, passwordKept }` with the cookie when the address was unverified; `{ verified: true, passwordKept }` with no session cookie for a user already verified. The confirm keeps the sign-up's password only with the proof. Each answer clears the proof cookie. The code is the one of the sign-up mail with `password.verifyBy: "code"`. A wrong, expired, or spent code and an unknown address answer `invalid_code` alike; the wrong code number `password.verifyCode.maxAttempts` (5 by default) spends the code |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="post-password-verify-resend"><code>POST /password/verify/resend</code></h3>
@@ -464,8 +464,8 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email }` |
-| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`). With the link, the new link goes after the answer while `password.uniformSignUp` is on (the default). With it off, the link goes before the answer, and the sign-up answer already tells a known address |
+| Input | JSON `{ email, signUpProof? }`. The cookie `__Host-tempo_signup` wins over `signUpProof` |
+| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. The new row keeps the proof hash only when the request carries the proof of an earlier row of that sign-up. A request with the proof cookie gets it again, with the life of the new link or code. With `password.verifyBy: "code"`, the new code goes after the answer, and the address gets at most 10 code mails a day (`password-verify-code:email-day`). With the link, the new link goes after the answer while `password.uniformSignUp` is on (the default). With it off, the link goes before the answer, and the sign-up answer already tells a known address |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-password-reset-request"><code>POST /password/reset/request</code></h3>

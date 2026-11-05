@@ -29,6 +29,7 @@ Each token is the prefix plus 43 base64url characters of 32 random bytes.
 | `to_` | Organization token. It belongs to an organization, not to a person | The bearer header only | `expiresInDays`, or none |
 | `ml_` | Magic link token | The link in the mail, then the confirm form | `magicLink.ttlMinutes` |
 | `pv_` | Password verify token | The verify link in the mail | `magicLink.ttlMinutes` |
+| `sp_` | Sign-up proof | The password sign-up answer, and the cookie `__Host-tempo_signup` | The life of the verify link or code |
 | `pr_` | Password reset token | The reset link in the mail | `password.resetTtlMinutes` |
 | `os_` | Social state | The `state` parameter at the provider | 10 minutes |
 | `hs_` | Handoff id | The URLs of the handoff pages | 10 minutes, or `magicLink.ttlMinutes` when that is longer |

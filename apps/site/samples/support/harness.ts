@@ -117,6 +117,15 @@ export function sessionCookieOf(res: Response): string {
   return c?.split(";")[0] ?? "";
 }
 
+/**
+ * The `__Host-tempo_signup=…` pair that a sign-up answer sets: the sign-up
+ * proof of the browser. A confirm that sends it keeps the password.
+ */
+export function proofCookieOf(res: Response): string {
+  const c = res.headers.getSetCookie().find((x) => x.startsWith("__Host-tempo_signup="));
+  return c?.split(";")[0] ?? "";
+}
+
 /** Signs a person in by magic link, and answers the session cookie pair. */
 export async function signIn(auth: Auth, h: Harness, email: string): Promise<string> {
   await call(auth, "POST", "/auth/magic-link/request", { email });

@@ -25,9 +25,10 @@ import test from "../../../../../samples/guides/verify-by-code.test.ts?raw";
 ## Steps
 
 1. Set `password.verifyBy` to `"code"`. Set `password.verifyCodeMail` for your own text, or keep the default. Set `password.verifyCode` for another length, life, or count of tries.
-2. Show a code field after the sign-up answers `{ sent: true }`.
-3. Post `{ email, code }` to `POST /password/verify/code`. A browser gets the session cookie. A native app reads `token` from the answer.
-4. Offer "Send a new code": it posts `{ email }` to `POST /password/verify/resend`.
+2. Show a code field after the sign-up answers `{ sent: true, signUpProof }`. A browser keeps the proof as a cookie. A native app keeps `signUpProof`.
+3. Post `{ email, code }` to `POST /password/verify/code`. A native app adds `signUpProof`. A browser gets the session cookie. A native app reads `token` from the answer.
+4. When the answer says `passwordKept: false`, show a first-password form. It posts `{ newPassword }` to `POST /password/change` with the new session.
+5. Offer "Send a new code": it posts `{ email }` to `POST /password/verify/resend`. A native app adds `signUpProof`.
 
 <Code code={config} lang="ts" title="The code in place of the link" />
 
@@ -45,12 +46,13 @@ import test from "../../../../../samples/guides/verify-by-code.test.ts?raw";
 - On Workers with no `waitUntil`, `auth.handle` waits for that work before it answers, so delivery holds. Then the time can tell the two apart. Pass the `waitUntil`.
 - The resend reads the user and sends the code after the answer too.
 - A right code runs the confirm of the link. It verifies the address and applies the claim rule: the other sessions and credentials of the unverified user end. Then it opens the session with `via: "password"`.
-- A user who is already verified gets `{ verified: true }` and no session. An unverified user cannot turn on the second factor, so the code never opens a session past it.
+- A code confirmed with the proof of its sign-up keeps the password. A code confirmed without it is a claim: the password goes, and the answer says `passwordKept: false`. See [The confirm of a sign-up](/docs/concepts/claim-rule/#the-confirm-of-a-sign-up).
+- A user who is already verified gets `{ verified: true, passwordKept: true }` and no session. An unverified user cannot turn on the second factor, so the code never opens a session past it.
 - A code asked from an anonymous session links that anonymous user only when the confirm carries the same anonymous session.
 - The code check counts `password-verify-code:ip` 30 and `password-verify-code:email` 10 per 15 minutes. The resend counts the limits of [Limits](/docs/reference/limits/).
 - The sign-up and each resend count `password-verify-code:email-day`: 10 code mails per address a day. A known and an unknown address count the same.
 - So one address gets at most 10 times `maxAttempts` guesses a day. With the defaults that is 50 guesses at a code of 6 digits: 1 chance in 20 000.
-- The Better Auth shim maps `emailOTP({ overrideDefaultEmailVerification: true })` to this mode. `/email-otp/verify-email` and the `email-verification` resend map onto these routes.
+- The Better Auth shim maps `emailOTP({ overrideDefaultEmailVerification: true })` to this mode. `/email-otp/verify-email` and the `email-verification` resend map onto these routes. Its verify answer adds `passwordKept`.
 - The shim maps the plugin's `otpLength`, `expiresIn`, and `allowedAttempts` onto `password.verifyCode`, with Better Auth's defaults of 300 seconds and 3 tries. An `expiresIn` over 1800 seconds stops `betterAuth()`.
 - The shim sets `password.uniformSignUp` to false, as Better Auth does. So its sign-up answer tells a known address. On Workers, the time of its resend also tells an unverified user with a password.
 

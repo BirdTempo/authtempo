@@ -44,7 +44,7 @@ When a proof arrives for an unverified user, core runs the claim in the same tra
 
 1. It takes the claim. On Postgres and MySQL, this step holds the user row. On D1 and SQLite, it writes a lease row that lives 60 seconds.
 2. It deletes the other identities of the user. The proving identity and the `email` identity stay.
-3. It deletes the password row, except the row that a verify link confirms.
+3. It deletes the password row. Only the verify link of a sign-up, opened with the proof of that sign-up, keeps the row that it confirms. See [The confirm of a sign-up](#the-confirm-of-a-sign-up).
 4. It deletes the passkeys, the pending passkey challenges, and the pending handoff codes.
 5. It marks the address verified. The same statement clears the phone of the user. It also clears the username, except at the confirm of the sign-up that named it.
 6. It deletes every session, as its last step. [The sessions of a claimant](#the-sessions-of-a-claimant) tells the bound of this step.
@@ -56,6 +56,27 @@ The claim is final once its last write is done. When the sign-in fails after tha
 On D1 a write can land and lose its answer. So a claim can fail after its mark of the address, with no undo entry for the mark. The undo of each delete of a claim puts the row back only while the user is unverified. When the mark stays, no row of the claimant comes back. The claimant's sessions stay, because the claim failed before its session delete. Each one ends at its next use, as [the session proof](#the-session-proof) tells. When the undo reverses the mark, the rows come back with the unverified user, as before the claim. [The race rules](/docs/concepts/races/#what-stays-open) tell what stays open after such a failure.
 
 Two proofs of one address can arrive at the same time. One claims the user. On D1 the other answers 409 [`conflict`](/docs/reference/errors/#conflict). The flow of a magic link or an email code then mails a new proof of its kind to the address. The verify link mails nothing, because the address is now verified. A JSON caller gets the 409 with a `detail` that says to sign in. The form post of the mail link gets a redirect to the app with `auth_error=conflict`.
+
+## The confirm of a sign-up
+
+A password sign-up gives a sign-up proof: 32 random bytes behind `sp_`. The verify row holds their SHA-256. The proof travels two ways:
+
+- The route sets it as the HttpOnly cookie `__Host-tempo_signup`, for every caller. It lives as long as the link or the code.
+- The JSON answer holds it as `signUpProof`, for a native app with no cookie jar.
+
+A confirm that carries the proof keeps the password of the sign-up. That is the browser of the sign-up, or an app that sends its copy with the code. The cookie wins over the body.
+
+Any other confirm, by link or by code, is a claim. The claim deletes that password too, and the person who opened the link gets a proved session. The answer says `passwordKept: false`, and the redirect of the link goes to `/?password=set`.
+
+The person then sets a first password through `POST /password/change`, with no current password. The session that the confirm opened is proved and fresh, so the change takes it.
+
+So a claimant who signs up with the owner's address keeps no way in. The owner opens the link in another browser, which holds no proof of that sign-up.
+
+The default config opens no session at a sign-up, so the proof is the only signal of the sign-up's browser. A session of the user does not count.
+
+A new link or code keeps the proof hash only when its request carries the proof of an earlier row of the same sign-up. The resend and a password sign-in that mails a new link do this. A proof of another sign-up of the same address keeps nothing.
+
+The username that the sign-up named stays after both kinds of confirm.
 
 ## The edges
 

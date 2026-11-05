@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { call, callSettled, harness, linkIn, sessionCookieOf } from "../support/harness.ts";
+import {
+  call,
+  callSettled,
+  harness,
+  linkIn,
+  proofCookieOf,
+  sessionCookieOf,
+} from "../support/harness.ts";
 import { createUsernameAuth } from "./username.ts";
 
 describe("sign in with a username", () => {
@@ -7,13 +14,20 @@ describe("sign in with a username", () => {
     const h = harness();
     const auth = createUsernameAuth(h);
     const password = "correct horse battery";
-    await callSettled(auth, "POST", "/auth/password/sign-up", {
+    const up = await callSettled(auth, "POST", "/auth/password/sign-up", {
       email: "ada@example.com",
       password,
     });
-    // The confirm link proves the address and opens a fresh session.
+    // The confirm link proves the address and opens a fresh session. The
+    // browser of the sign-up sends its proof cookie, so the password stays.
     const token = linkIn(h, "ada@example.com").searchParams.get("token") ?? "";
-    const confirmed = await call(auth, "POST", "/auth/password/verify", { token });
+    const confirmed = await call(
+      auth,
+      "POST",
+      "/auth/password/verify",
+      { token },
+      { cookie: proofCookieOf(up) },
+    );
     const cookie = sessionCookieOf(confirmed);
 
     const free = await call(auth, "GET", "/auth/username/available?username=Ada_L");

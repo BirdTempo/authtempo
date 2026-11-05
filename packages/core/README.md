@@ -46,12 +46,12 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/passkeys` | session | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle, userName, userDisplayName }`; 401 |
 | POST | `/passkeys/delete` | session (fresh), `{ id }` | `{ ok: true }`; 400 `invalid_body`; 401; 403 `session_not_fresh`; 404 `not_found`; 409 `last_credential` (the last way in, see "The last-credential guard"), `second_factor_last_method`, `conflict` |
 | POST | `/passkeys/rename` | session, `{ id, name }` | `{ passkey }` in the shape of `GET /passkeys` (plan 12a). No fresh rule: a name is no way in. 400 `invalid_body` (a `name` that breaks the passkey name rule, or any other field); 401; 404 `not_found` (an unknown id, or an id of another user); 429 `rate_limited` |
-| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true }` with no cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session }` with the cookie, or `{ user, verifyRequired: true }` with no cookie under `requireVerified` or `signUp: "invited"`; 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
+| POST | `/password/sign-up` | `{ email, password, name? }` | `{ sent: true, signUpProof }` with no session cookie for every address (`password.uniformSignUp`, the default); with `uniformSignUp: false`, `{ token, user, session, signUpProof }` with the cookie, or `{ user, verifyRequired: true, signUpProof }` with no session cookie under `requireVerified` or `signUp: "invited"`. Every answer sets the proof cookie `__Host-tempo_signup` (see "The confirm of a sign-up"); 400 `invalid_body`, `password_policy`, `password_breached`, `captcha_required`; 403 `sign_up_closed`, `captcha_failed`; 409 `email_taken`, `email_taken_unverified` (only with `uniformSignUp: false`); 429 `rate_limited`; 503 `breach_check_unavailable`, `captcha_unavailable`. The captcha codes come only with `captcha` (see "Captcha"). The user is unverified until the mail link is confirmed |
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
-| POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
-| POST | `/password/verify/code` | `{ email, code }` | `{ token, user, session }` with the cookie when the address was unverified, or `{ verified: true }`; 400 `invalid_code`, `too_many_attempts`; 429 `rate_limited`. The code of `password.verifyBy: "code"` (see "The sign-up code") |
-| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link or code of the address stops working |
+| POST | `/password/verify` | form or JSON `token`, the proof cookie | form body: 302 to `appURL` with the cookie, to `appURL` plus `/?password=set` when the password went, or to `/?auth_error=<code>`; JSON body: `{ verified: true, passwordKept }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
+| POST | `/password/verify/code` | `{ email, code, signUpProof? }`, the proof cookie | `{ token, user, session, passwordKept }` with the cookie when the address was unverified, or `{ verified: true, passwordKept }`; 400 `invalid_code`, `too_many_attempts`; 429 `rate_limited`. The code of `password.verifyBy: "code"` (see "The sign-up code") |
+| POST | `/password/verify/resend` | `{ email, signUpProof? }`, the proof cookie | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link or code of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
 | POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy`, `password_breached`, or `breach_check_unavailable`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`, 503 `breach_check_unavailable`. A reset that answers the challenge still sets the password and ends every session |
@@ -557,7 +557,38 @@ is `invalid_credentials`.
 
 A magic link or a provider proof of an unverified address deletes that
 user's password, as it deletes the other credentials of a claimant. The
-verify link keeps the password it confirms.
+verify link keeps the password it confirms only with the sign-up proof.
+
+### The confirm of a sign-up
+
+A password sign-up gives a sign-up proof (plan 12q): `sp_` and 32 random
+bytes. The verify row holds its SHA-256 in `data.proofHash`. The route
+sets it as the HttpOnly cookie `__Host-tempo_signup` (`SIGN_UP_PROOF_COOKIE`)
+for every caller. The cookie lives as long as the link or the code. The
+JSON answer holds it as `signUpProof`, for a native app with no cookie jar.
+A known address gets a proof too, so the answer tells no account.
+
+The confirm keeps the sign-up's password only when the request carries
+the proof whose hash the row holds. The cookie wins over the body member of
+the code form. Any other confirm, by link or by code, is a claim: the
+password goes, and the person who opened the link gets a proved session.
+The answer says `passwordKept: false`, and the link's redirect adds
+`password=set`. The person then sets a first password through
+`POST /password/change` with no current password, on the fresh session
+that the confirm opened. The username of the sign-up stays in both cases.
+The confirm clears the cookie.
+
+So a claimant who signs up with the owner's address keeps no way in. The
+default config opens no session at a sign-up, so the proof is the only
+signal of the sign-up's own browser. A native app whose link opens in the
+system browser loses the password at the confirm. It uses the code form
+and sends `signUpProof`.
+
+A resend copies the proof hash to the new row only when the request
+carries the proof of an earlier row of the same password row. A password
+sign-in that mails a new link does the same. The resend answer then sets
+the cookie again, for the life of the new link or code. A proof of another
+sign-up of the same address keeps nothing.
 
 A reset of a verified user ends every session and keeps the passkeys and
 social identities. A reset of an unverified user claims the address. A
@@ -625,7 +656,7 @@ compare-and-set. The wrong try number `maxAttempts` spends the code and
 answers `too_many_attempts`. A right code is spent in one conditional update. Then
 the confirm of the link runs: the claim rule, and the session of an
 unverified user, with `via: "password"`. A user already verified gets
-`{ verified: true }` and no session, as at the link. So the code never
+`{ verified: true, passwordKept: true }` and no session, as at the link. So the code never
 opens a session past the second factor: an unverified user cannot turn
 the factor on. The confirm links an anonymous user only when the
 confirming request carries the anonymous session that asked for the code.

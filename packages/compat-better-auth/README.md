@@ -345,6 +345,16 @@ These rules come from plan 12b.
 - A sign-up of a new address writes rows and sends the verify mail. A taken
   address does neither, so the answer time can show that the address has an
   account, as in Better Auth.
+- A confirm keeps the sign-up's password only with core's sign-up proof
+  (plan 12q). The handler sets it as the HttpOnly cookie
+  `__Host-tempo_signup` at the sign-up. Without it, the confirm deletes the
+  password, and the person sets a first password with `/password/change`.
+  So a link that opens in another browser costs the password.
+- `api.signUpEmail` answers the proof as `signUpProof`, a member that Better
+  Auth does not have. A server call has no cookie jar, so the app sets the
+  cookie from it. The answer for a taken address holds a proof of the same
+  form. `api.signInEmail` and `api.sendVerificationEmail` read the cookie
+  from `headers`, so a new verify link keeps the proof.
 - `disableSignUp` is accepted on `emailAndPassword`, `magicLink`, `emailOTP`,
   and each social provider. Core has one sign-up rule for every method.
   `true` on every configured method and provider that creates a user maps to
@@ -1098,7 +1108,7 @@ authtempo's status.
 | Path | Body | Answer |
 | --- | --- | --- |
 | `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`, and for `email-verification` with `overrideDefaultEmailVerification`: a new sign-up code to an unverified user with a password, sent after the answer; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `change-email`, and for `email-verification` without the override |
-| `/email-otp/verify-email` | `{ email, otp }` | With `overrideDefaultEmailVerification`: `{ status: true, token, user }` with the session cookie, as Better Auth answers with `autoSignInAfterVerification`; `token: null` and no cookie for a user already verified; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`. Core runs its claim rule here, as at the verify link |
+| `/email-otp/verify-email` | `{ email, otp }` | With `overrideDefaultEmailVerification`: `{ status: true, token, user, passwordKept }` with the session cookie, as Better Auth answers with `autoSignInAfterVerification`; `token: null` and no session cookie for a user already verified; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`. Core runs its claim rule here, as at the verify link. The password stays only with the sign-up proof cookie of the browser; `passwordKept` says which (see "Secrets and sign-up") |
 | `/sign-in/email-otp` | `{ email, otp }` | `{ token, user }` with the session cookie; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`; 501 `NOT_SUPPORTED` for `name`, `image`, or another user field |
 | `/forget-password/email-otp`, `/email-otp/request-password-reset` | `{ email }` | `{ success: true }` |
 | `/email-otp/request-email-change` | `{ newEmail }` | With `changeEmail.enabled`: `{ success: true }`. The code goes to the new address with the type `change-email`. A taken address gets no code, as in Better Auth. A stale session answers 403 `SESSION_NOT_FRESH` |

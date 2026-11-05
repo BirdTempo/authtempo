@@ -99,11 +99,11 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.passkeys.sync()` | `GET /passkeys` | `{ signaled }`. It gives the browser the credential ids that the server holds, through `PublicKeyCredential.signalAllAcceptedCredentials` |
 | `client.passkeys.signalDetails()` | `GET /passkeys` | `{ signaled }`. It gives the browser the current names of the person, through `PublicKeyCredential.signalCurrentUserDetails` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |
-| `client.password.signUp({ email, password, name?, username? })` | `POST /password/sign-up` | `{ token }` and `PublicSession` |
+| `client.password.signUp({ email, password, name?, username? })` | `POST /password/sign-up` | `{ sent: true }` by default; with the server's `password.uniformSignUp: false`, `{ token }` and `PublicSession`. Each answer holds `signUpProof`. A browser also gets it as a cookie. A native app keeps it for `verifyCode` and `resendVerification` |
 | `client.password.signIn({ email \| username \| phone, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
-| `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `{ sent: true }` |
-| `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true }` |
-| `client.password.verifyCode({ email, code })` | `POST /password/verify/code` | A session with `token`, or `{ verified: true }` |
+| `client.password.resendVerification({ email, signUpProof? })` | `POST /password/verify/resend` | `{ sent: true }` |
+| `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true, passwordKept }`. `passwordKept` is false when the browser held no sign-up proof: the password went, and the app asks for a first password |
+| `client.password.verifyCode({ email, code, signUpProof? })` | `POST /password/verify/code` | A session with `token`, or `{ verified: true }`, each with `passwordKept` |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `{ sent: true }` |
 | `client.password.reset({ token, password, trustDevice? })` | `POST /password/reset` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `{ ok: true }` |

@@ -19,13 +19,15 @@ describe("prove the address at sign-up by a code", () => {
       post("/password/sign-up", { email: "ada@example.com", password: "correct horse battery" }),
       { waitUntil: (p) => void work.push(p) },
     );
-    expect(await up.json()).toEqual({ sent: true });
+    // A native app keeps the sign-up proof and sends it with the code, so the password stays.
+    const { signUpProof } = (await up.json()) as { sent: true; signUpProof: string };
     await Promise.all(work);
     const code = codeIn(h, "ada@example.com");
     const res = await auth.handle(
-      post("/password/verify/code", { email: "ada@example.com", code }),
+      post("/password/verify/code", { email: "ada@example.com", code, signUpProof }),
     );
     expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ passwordKept: true });
     expect(res.headers.getSetCookie()[0]).toMatch(/^__Host-tempo_session=/);
   });
 
