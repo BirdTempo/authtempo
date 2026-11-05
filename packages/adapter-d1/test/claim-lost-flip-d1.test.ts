@@ -19,14 +19,18 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // of U2:
 // - U0 (the control): the flip throws before it runs.
 // - U1: the flip runs, and then its answer is lost.
-// - U2: the session delete runs, and then its answer is lost. The undo
-//   restores the flip, so the rows come back as one piece.
-// - U3 (probe U2 of rr-fix6): the session delete throws before it runs, and
-//   the undo's restore of the flip throws too.
+// - U2: the session delete runs, and then its answer is lost.
+// - U3 (probe U2 of rr-fix6): the session delete throws before it runs.
+//
+// The claim is final at its flip (ruling 38 of plan 12q). So in U2 and U3
+// the undo puts back no flip, and the claimant's rows stay gone. Before
+// that ruling, U2 put the claimant's rows back with the unverified user.
 //
 // U1 and U3 leave the claimant's session from before the proof on a verified
 // user. The door of a claimed session refuses it and ends it at its first
-// read (ruling 13 of plan 12q). The last block holds that for four acts.
+// read (ruling 13 of plan 12q). The third block holds that for four acts.
+// The last block holds a throw in the session chunks after the owner signed
+// in by a second link (Minor 1 of rr-wave2).
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -287,7 +291,7 @@ describe("the undo of a claim whose answer is lost on D1 (decision 6 of plan 12q
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
   });
 
-  it("U2: a session delete that ran and lost its answer undoes the flip first, so the claimant's rows come back as one piece", async () => {
+  it("U2: a session delete that ran and lost its answer keeps the flip, and no row of the claimant comes back", async () => {
     await claimant();
     let thrown = 0;
     const view = viewOf(
@@ -302,20 +306,22 @@ describe("the undo of a claim whose answer is lost on D1 (decision 6 of plan 12q
     );
     expect(await ownerLink(view)).toBe("500 internal");
     expect(thrown).toBe(1);
-    // The session delete stands. The undo restored the flip, and then the
-    // guarded entries found the user unverified, so the password is back.
-    expect(await rows()).toEqual({ verified: false, passwords: 1, sessions: 0, leases: 0 });
-    expect(await claimantSignIn()).toBe("200 ok");
-    // The owner's next link claims.
+    // The session delete stands, and the claim is final at its flip (ruling
+    // 38 of plan 12q). So the user stays verified, and the password stays
+    // gone. The lease stays for the sweep, as after a claim that ends.
+    expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 0, leases: 1 });
+    expect(await claimantSignIn()).toBe("401 invalid_credentials");
+    // The owner signs in with a new link. The user is verified, so no claim runs.
     expect(await ownerLink()).toBe("200 ok");
     expect(await rows()).toMatchObject({ verified: true, passwords: 0 });
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
   });
 
-  it("U3: a session delete that throws, then a restore of the flip that throws, leaves the user verified with no row of the claimant", async () => {
+  it("U3: a session delete that throws before it runs keeps the flip, and the undo sends no update of the user row", async () => {
     const session = await claimant();
     let thrown = 0;
     let flipped = false;
+    let userUpdates = 0;
     const view = viewOf(
       env.DB,
       async (sql) => {
@@ -323,17 +329,16 @@ describe("the undo of a claim whose answer is lost on D1 (decision 6 of plan 12q
         else if (flipped && thrown === 0 && SESSION_DELETE.test(sql)) {
           thrown++;
           throw new Error("D1_ERROR: the session delete failed.");
-        } else if (thrown === 1 && USER_UPDATE.test(sql)) {
-          thrown++;
-          throw new Error("D1_ERROR: the restore of the flip failed.");
-        }
+        } else if (thrown === 1 && USER_UPDATE.test(sql)) userUpdates++;
       },
       async () => {},
     );
     expect(await ownerLink(view)).toBe("500 internal");
-    expect(thrown).toBe(2);
-    // The flip stands, so the guarded entries put back no password.
-    expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 0 });
+    expect(thrown).toBe(1);
+    // The claim is final at its flip (ruling 38 of plan 12q). So the undo
+    // has no restore of the flip, and it puts back no password.
+    expect(userUpdates).toBe(0);
+    expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 1 });
     expect(await claimantSignIn()).toBe("401 invalid_credentials");
     // The door of a claimed session refuses the claimant's session and ends it (ruling 13 of plan 12q).
     expect(await tokenWith(session)).toBe("401 unauthorized");
@@ -390,5 +395,96 @@ describe("the claimant's session after a lost flip answer on D1 (ruling 13 of pl
       expect(await rows()).toEqual({ verified: true, passwords: 0, sessions: 1, leases: 0 });
       expect((await sessions()).map((s) => s.proved)).toEqual([1]);
       expect(await answer(await call(make(), getWith("/session", owner)))).toBe("200 ok");
+    });
+});
+
+describe("a throw in the session chunks after the owner signed in by a second link on D1 (ruling 38 of plan 12q)", () => {
+  // Minor 1 of rr-wave2. Claim A is the owner's first magic link. A flips the
+  // user and pauses before its session chunks. The owner then signs in by a
+  // second link B: the user is verified, so B claims nothing. Then A throws
+  // in its chunks. Before ruling 38, A's undo put back the flip first. The
+  // guarded entries then put back the claimant's password beside the owner's
+  // proved session. Now the claim is final at its flip.
+  const AFTER_FLIP: [string, "before" | "after", RegExp][] = [
+    ["the first statement after the flip throws before it runs", "before", /./],
+    ["the session delete throws before it runs", "before", SESSION_DELETE],
+    ["the session delete runs and loses its answer", "after", SESSION_DELETE],
+  ];
+  for (const [name, mode, target] of AFTER_FLIP)
+    it(`${name}: the user stays verified, the password stays gone, and each claimant session answers 401`, async () => {
+      // The claimant: a sign-up and a sign-in, so one password and two unproved sessions.
+      const first = await claimant();
+      current = new Date(current.getTime() + 1);
+      const second = await call(
+        make(),
+        post("/password/sign-in", { email: EMAIL, password: PASSWORD }),
+      );
+      expect(await answer(second)).toBe("200 ok");
+      const claimantSessions = [first, cookieOf(second)];
+      current = new Date(current.getTime() + 1000);
+      // Two links of the owner: A first, then B.
+      expect((await call(make(), post("/magic-link/request", { email: EMAIL }))).status).toBe(200);
+      const tokenA = linkToken();
+      expect((await call(make(), post("/magic-link/request", { email: EMAIL }))).status).toBe(200);
+      const tokenB = linkToken();
+      expect(tokenB).not.toBe(tokenA);
+      // A pauses after its flip ran, then throws once at the target statement.
+      let flipped = false;
+      let thrown = 0;
+      let resume = () => {};
+      const go = new Promise<void>((r) => {
+        resume = r;
+      });
+      let paused = () => {};
+      const atPause = new Promise<void>((r) => {
+        paused = r;
+      });
+      const hit = (sql: string) => flipped && thrown === 0 && target.test(sql);
+      const view = viewOf(
+        env.DB,
+        async (sql) => {
+          if (mode === "before" && hit(sql)) {
+            thrown++;
+            throw new Error("D1_ERROR: the statement failed before it ran.");
+          }
+        },
+        async (sql) => {
+          if (mode === "after" && hit(sql)) {
+            thrown++;
+            throw new Error(LOST);
+          }
+          if (!flipped && FLIP.test(sql)) {
+            flipped = true;
+            paused();
+            await go;
+          }
+        },
+      );
+      const claimA = call(make(view), post("/magic-link/verify", { token: tokenA }));
+      await atPause;
+      expect(await rows()).toMatchObject({ verified: true, passwords: 0 });
+      // B in A's gap: the user is verified, so B signs in with a proved session.
+      const resB = await call(make(), post("/magic-link/verify", { token: tokenB }));
+      expect(await answer(resB)).toBe("200 ok");
+      const owner = cookieOf(resB);
+      resume();
+      expect(await answer(await claimA)).toBe("500 internal");
+      expect(thrown).toBe(1);
+      // The claim stands: verified, and no password of the claimant came back.
+      expect(await rows()).toMatchObject({ verified: true, passwords: 0, leases: 1 });
+      expect(await claimantSignIn()).toBe("401 invalid_credentials");
+      // Each claimant session answers 401: the door ends it, or the chunk did.
+      for (const c of claimantSessions)
+        expect(await answer(await call(make(), getWith("/session", c)))).toBe("401 unauthorized");
+      // A lost answer of the session delete leaves that delete in place. It
+      // ended B's session too, as a claim that ends does. Else B's session lives.
+      expect(await answer(await call(make(), getWith("/session", owner)))).toBe(
+        mode === "after" ? "401 unauthorized" : "200 ok",
+      );
+      expect((await sessions()).map((s) => s.proved)).toEqual(mode === "after" ? [] : [1]);
+      // The owner's next link signs in, and the claimant still has no way in.
+      expect(await ownerLink()).toBe("200 ok");
+      expect(await rows()).toMatchObject({ verified: true, passwords: 0 });
+      expect(await claimantSignIn()).toBe("401 invalid_credentials");
     });
 });

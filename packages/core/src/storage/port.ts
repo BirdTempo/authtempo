@@ -168,6 +168,9 @@ export interface StorageAdapter {
    * row waits for its row lock. So a throw still reverses the whole
    * transaction, and no other caller saw its writes. A claim calls it after
    * its last write, so a throw after the claim keeps the claim (spec 8.9).
+   * On a store with no isolation, a claim also calls it right after its
+   * flip (ruling 38 of plan 12q). So a throw in its session delete keeps the
+   * flip.
    */
   keep(): Promise<boolean>;
   transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T>;

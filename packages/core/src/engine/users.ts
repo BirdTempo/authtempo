@@ -227,6 +227,11 @@ export function claimLeaseId(userId: string): string {
  * claim's own lease as it wrote it (ruling 36 of plan 12q). So a claim past
  * its lease that throws puts back nothing once a rival took the lease.
  *
+ * On a store with no isolation the claim is final at its flip (ruling 38 of
+ * plan 12q): it calls `keep` right after a flip that matched a row. So a
+ * throw in the session chunks keeps the flip and the deletes. The leftover
+ * sessions are unproved and end at their next use.
+ *
  * The claimant's sessions were made before the proof, so their `proved`
  * flag is false (plan 12p). Each check of a verified address reads that
  * flag, so such a session makes no token, grant, factor, or address change
@@ -338,6 +343,19 @@ export async function claimEmail(
     // mailbox again: the safe side.
     throw new ClaimLostError();
   }
+  // The claim is final at its flip (ruling 38 of plan 12q). On a store with
+  // no isolation, other requests see the flip at once. The owner can sign in
+  // by a second proof before the session chunks below. Before this call, a
+  // throw in the chunks undid the flip first. The guarded entries then put
+  // back the claimant's password beside the owner's proved session. Now
+  // `keep` makes the deletes and the flip final. A throw in the chunks
+  // answers 500, and the claim stands. Its undo puts back only the sessions
+  // that the chunks ended, and it leaves no pending-end row. Each leftover
+  // session is unproved, so the door of ruling 13 ends it at its next use.
+  // The caller's own `keep` after the claim then finds nothing more to drop.
+  // An isolated store leaves the call out: a throw there reverses the whole
+  // claim, and no other request saw the flip.
+  if (!tx.isolated) await tx.keep();
   // The sessions last, so the session of a sign-in whose guard passed above
   // goes here. With an `afterEnd` hook, one read and one `deleteRows` of the
   // read ids per chunk of 50; with none, one statement (plan 9h). The ended

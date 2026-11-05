@@ -374,7 +374,9 @@ describe("a throw after keep leaves the claimant no way in (Review Focus 1 of pl
     const seen = throwAfterKeep(w.auth.storage);
     const confirm = () => confirmUserInvite(w.auth.config, { token, ip: null, userAgent: null });
     await expect(confirm()).rejects.toThrow(D1_REFUSAL);
-    expect(seen).toEqual({ kept: 1, thrown: 1 });
+    // Two calls: the claim's own at its flip (ruling 38 of plan 12q), then the
+    // flow's. The second finds nothing more to drop, and the rows below stay.
+    expect(seen).toEqual({ kept: 2, thrown: 1 });
     const after = await rowsOf(w);
     expect(after.user.emailVerified).toBe(true);
     expect(after.sessions).toEqual([]);
