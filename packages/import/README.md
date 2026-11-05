@@ -108,7 +108,7 @@ leaves the lease on D1 too. Until the sweep deletes it after 60 seconds, a
 claim of that user answers 409 `conflict`, and a repair reports `not
 repaired: claimed`. A repaired passkey or social identity is active at
 once, and so is the social identity of a new unverified user. A claimant
-who also holds the authenticator or the provider login can sign in with it
+who also holds the authenticator or the provider account can sign in with it
 after the import. While the address is unverified, that session is
 unproved, and the owner's claim ends it.
 Without `--repair` the importer writes nothing for a `partial` record.
