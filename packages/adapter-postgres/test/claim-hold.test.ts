@@ -288,7 +288,12 @@ describe("the hold of a claim on Postgres (ruling 16 of plan 12p)", () => {
           emailIdentities: 0,
           leases: 0,
         });
-        expect(claim.ok || claim.code === "conflict").toBe(true);
+        // Three answers mean that the delete won. After its commit the delete removes the
+        // links of the address (accountDeleted). So a claim that reads the link after that
+        // commit answers 400 invalid_token. That order happens when the connection of the
+        // claim is cold (seen 6 of 6 runs of this test alone on 2026-11-13). The test held
+        // ok and conflict only, so it failed there although the delete had won.
+        if (!claim.ok) expect(["conflict", "invalid_token"]).toContain(claim.code);
         if (claim.ok) {
           // The claim's user is a new one, so the claimant holds nothing of it.
           if (!("token" in claim.value)) throw new Error("the claim opened no session");
