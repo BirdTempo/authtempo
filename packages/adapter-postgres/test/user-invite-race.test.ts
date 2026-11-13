@@ -192,7 +192,14 @@ describe("the invitation confirm on Postgres (plan 12f2 Task 3)", () => {
         w.auth.api.operator.users.delete({ actor: APP, userId, ...REASON }),
       ]);
       expect(gone.ok).toBe(true);
-      expect([200, 409]).toContain(res.status);
+      // Two answers mean that the delete won. When the delete commits after the confirm
+      // reads the link, the confirm answers 409 conflict (or 200 when it finished first).
+      // When the delete commits before the confirm reads the link, the link is gone, and
+      // the confirm answers 400 invalid_token. The second order happens in round 0, where
+      // the connection of the confirm is cold (seen 4 of 4 runs on 2026-11-13). The test
+      // held 200 and 409 only, so it failed there although the delete had won.
+      if (res.status === 400) expect(await res.json()).toEqual({ error: "invalid_token" });
+      else expect([200, 409]).toContain(res.status);
       expect(await rowsOf(userId)).toEqual(NO_ROW);
     }
   }, 60_000);
