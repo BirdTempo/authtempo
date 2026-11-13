@@ -3,7 +3,7 @@ import readme from "../README.md?raw";
 import { COMPAT_PLUGIN, passkey } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
 import type { BetterAuthOptions } from "../src/types.js";
-import { consumerc, consumere, consumerb, consumerd, consumeri } from "../typetest/options.js";
+import { consumerb, consumerc, consumerd, consumere, consumeri } from "../typetest/options.js";
 
 const paths = (refusals: string[]) => refusals.map((r) => r.slice(0, r.indexOf(":")));
 

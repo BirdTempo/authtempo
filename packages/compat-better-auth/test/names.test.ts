@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { namesFromDrizzle } from "../src/adapters/drizzle.js";
 import { resolveNames, snake } from "../src/storage/names.js";
-import {
-  BETTER_AUTH_PG,
-  BETTER_AUTH_SQLITE,
-  countForeignKeys,
-  CONSUMER_I_PG,
-} from "./fixtures.js";
+import { BETTER_AUTH_PG, BETTER_AUTH_SQLITE, CONSUMER_I_PG, countForeignKeys } from "./fixtures.js";
 
 const NAME = Symbol.for("drizzle:Name");
 const SCHEMA = Symbol.for("drizzle:Schema");
