@@ -19,7 +19,35 @@ export const FEED_TITLE = "authtempo releases";
  * so a cached build writes the same feed as a fresh one. The build reads no
  * clock and no git commit.
  */
-export const RELEASE_DATES: Readonly<Record<string, string>> = {};
+export const RELEASE_DATES: Readonly<Record<string, string>> = {
+  "@authtempo/adapter-d1@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/adapter-mysql@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/adapter-postgres@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/adapter-sqlite@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/astro@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/breach-check@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/captcha-turnstile@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/cli@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/client@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/compat-better-auth@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/core@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/express@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/fastify@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/handoff@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/hono@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/import@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/legacy-hashes@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/mcp@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/next@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/observe@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/react@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/react-router@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/solid@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/sveltekit@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/tanstack-start@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/verify@0.1.0": "2026-11-16T15:00:00Z",
+  "@authtempo/vue@0.1.0": "2026-11-16T15:00:00Z",
+};
 
 /**
  * The updated date of a feed with no entry. RFC 4287 4.1.1 needs one updated

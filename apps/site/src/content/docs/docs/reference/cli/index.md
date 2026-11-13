@@ -17,7 +17,7 @@ sidebar:
 ## Before you start
 
 - Node 22.13 or newer. The `engines` field of `@authtempo/cli` gives this floor.
-- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so the command runs only from the repo. [Choose your stack](/docs/start/) tells why.
+- The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`. [Choose your stack](/docs/start/) tells how to start an app.
 
 ## Run it from this repo
 

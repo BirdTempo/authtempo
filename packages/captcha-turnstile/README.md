@@ -6,8 +6,7 @@ dependency.
 
 ## Install
 
-When the package is published, run `pnpm add @authtempo/captcha-turnstile`.
-Publication is on hold. In this workspace, add it with `"workspace:*"`.
+Run `pnpm add @authtempo/captcha-turnstile`.
 
 ## Config
 

@@ -33,7 +33,7 @@ sidebar:
 
 ## The packages today
 
-The `@authtempo` packages are private and at version `0.0.0`. They are not on a registry yet, and the owner decides when they publish. Until then, put your app in the pnpm workspace of the repo, in a folder under `examples/`. The `workspace:*` versions then link the packages, and Turbo builds them before your tests.
+The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.
 
 | Package | Role |
 | --- | --- |

@@ -2,7 +2,7 @@
 
 The authtempo MCP server. A coding agent uses it to search and read the authtempo docs, and to run the CLI in the project.
 
-The package is private. It is not published.
+The package is on npm as `@authtempo/mcp`.
 
 ## The binary
 

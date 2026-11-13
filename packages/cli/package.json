@@ -1,6 +1,6 @@
 {
   "name": "@authtempo/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "The authtempo command line: init, migrate, import, check, and keys rotate.",

@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "minor": "0.1",
+    "status": "current",
+    "released": "2026-11-16",
+    "schemaFrom": [16]
+  }
+]

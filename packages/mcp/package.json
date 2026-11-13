@@ -1,6 +1,6 @@
 {
   "name": "@authtempo/mcp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "The authtempo MCP server: the docs tools on stdio, and the remote docs server.",

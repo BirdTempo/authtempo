@@ -1,6 +1,6 @@
 {
   "name": "@authtempo/observe",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "The owned sinks of the authtempo event port: Workers Logs, Analytics Engine, and OTLP.",

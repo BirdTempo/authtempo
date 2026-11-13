@@ -25,7 +25,7 @@ import mcp from "../../../../../../../examples/mcp-server/src/mcp.ts?raw";
 ## Before you start
 
 - Node 22.18 or newer, and pnpm 12.8.1.
-- A clone of the authtempo repo. The `@authtempo` packages are not on a registry yet, so your app lives in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
+- The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`. [The CLI reference](/docs/reference/cli/) lists each command.
 - The CLI, built in the repo. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
 - A Cloudflare account, for the deploy and the MCP client at the end.
 - A domain on Cloudflare, for the route of the Worker. [Workers on D1](/docs/start/workers-d1/) has the deploy steps.

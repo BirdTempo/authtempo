@@ -303,11 +303,13 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Answer | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }` with no cookie for a user with the second factor on. The token's `nonce` claim must be the SHA-256 hex of the posted `nonce`. While `social.idToken.requireNonce` is on, a party that holds only the token sees only the hash, so it cannot post the nonce. With `requireNonce` false, a token posted with no nonce skips the hash check, except an Apple token with `nonce_supported` true. So a party that holds only such a token can sign in before the app. Only the one-use row of the token then stops a second use. Core checks the token before it spends the nonce, so a bad token cannot use the nonce up. The nonce is spent once. The token must verify against the provider's key set, with RS256 or ES256. It must have the provider's issuer and one `aud` of `clientId` and `audiences`. Its `exp` must not be past, its `iat` at most 60 seconds ahead, and its life at most one day. Each token signs in once, on every instance. The account rules and the gate are those of the callback. A live anonymous session of the request is replaced |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
-Owner check before the first release with this route. Core's tests use test keys, not real tokens. Run these checks on a real device:
+Real-token checks of this route. Core's tests use test keys, not real tokens.
 
-1. Sign in once with Google One Tap. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
-2. Sign in once with the native Apple sheet. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
-3. On the Apple token, confirm that `exp` minus `iat` is 86400 seconds or less. Core refuses a token with a longer life.
+1. Google One Tap: checked on 2026-11-10 with a real token. The token's `nonce` claim was the `providerNonce` value, and `exp` minus `iat` was 3600 seconds.
+2. The native Apple sheet: not checked yet. No one has confirmed that the token's `nonce` claim is the `providerNonce` value.
+3. The life of an Apple token: not checked yet. Core refuses a token with `exp` minus `iat` above 86400 seconds, but no real Apple token has proved that limit.
+
+Treat the Apple path of this route as unproven until these two checks run on a real device.
 
 ## Passkeys
 

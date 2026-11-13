@@ -19,7 +19,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
+The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.
 
 ```sh
 authtempo init my-app --stack workers-d1
@@ -67,7 +67,7 @@ The `node` stack and the `bun` stack need Node 22.18 or newer. Node runs their `
 - `init` writes no secret. A test scans each file for a key, a token, and a password.
 - A folder that holds any file of the stack stops the run with exit 2. `init` then lists each such file, and writes nothing.
 - The Node and Bun servers apply the migrations at their start. On Workers, the next steps name `authtempo migrate`.
-- Until the packages are on a registry, a new app installs only inside the pnpm workspace of the repo.
+- A new app names each `@authtempo` package at the version of the CLI.
 
 ## Next
 

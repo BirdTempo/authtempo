@@ -21,8 +21,6 @@ The full policy is on the [security page](/security/) of this site, and in [SECU
 
 ## How to report
 
-Until the first release, the two channels are not open, and the times of this policy do not apply.
-
 Report a fault through one of the two channels, in this order:
 
 1. [GitHub private vulnerability reporting](https://github.com/BirdTempo/authtempo/security/advisories/new) on the repository.
