@@ -47,7 +47,22 @@ import { changesetVersion, RELEASE_COPY_FIXTURE } from "./support/release-copy.t
 // The rehearsal of the version pull request (ruling 65 of plan 12j, C1 b).
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
-const PLAN = JSON.parse(read(PLAN_FILE)) as RehearsalPlan;
+/** The planned values of the checkout: the owner rewrites them at each release. Only the tests of the file itself read it. */
+const REAL_PLAN = JSON.parse(read(PLAN_FILE)) as RehearsalPlan;
+/**
+ * The plan of the behaviour tests. It is fixed, so the planned values that the owner
+ * writes for a release cannot change what these tests expect (the version pull request
+ * of 0.1.0 failed three of them when the real day changed from 2026-11-02 to 2026-11-16).
+ */
+const PLAN: RehearsalPlan = {
+  publish: "2026-11-02T15:00:00Z",
+  support: [{ minor: "0.1", status: "current", released: "2026-11-02", schemaFrom: [16] }],
+  resources: [
+    "| Item | Link |",
+    "| --- | --- |",
+    "| The package @authtempo/core | [@authtempo/core](https://www.npmjs.com/package/@authtempo/core) |",
+  ],
+};
 /** SECURITY.md before the first release: the fixture of the site probes. */
 const SECURITY = read("apps/site/test/fixtures/site/pre-release/SECURITY.md");
 const REPOSITORY = {
@@ -68,7 +83,7 @@ afterEach(() => {
 
 describe("the planned values of release/rehearsal.json", () => {
   it("passes the planned values of the tree, and fails each broken part", () => {
-    expect(readPlan(ROOT)).toEqual({ plan: PLAN, failures: [] });
+    expect(readPlan(ROOT)).toEqual({ plan: REAL_PLAN, failures: [] });
     const with_ = (change: Record<string, unknown>) => planFailures({ ...PLAN, ...change });
     expect(with_({ publish: "2026-11-31T15:00:00Z" })).toEqual([
       `${PLAN_FILE}: publish is not a real UTC time YYYY-MM-DDTHH:MM:SSZ`,
@@ -95,9 +110,9 @@ describe("the planned values of release/rehearsal.json", () => {
     const table = /```text\n(\| Minor \|[\s\S]*?)```/.exec(part)?.[1] ?? "";
     expect(table.trimEnd()).toBe(supportTable(JSON.parse(json) as SupportRow[]));
     if (groupVersion(ROOT) === "0.0.0") {
-      expect(PLAN.support).toEqual(JSON.parse(json));
-      expect(supportTable(PLAN.support)).toBe(table.trimEnd());
-    } else expect(PLAN.support.some((r) => r.status === "current")).toBe(true);
+      expect(REAL_PLAN.support).toEqual(JSON.parse(json));
+      expect(supportTable(REAL_PLAN.support)).toBe(table.trimEnd());
+    } else expect(REAL_PLAN.support.some((r) => r.status === "current")).toBe(true);
   });
 
   it("gives a scripted edit to each text by hand, and to no other text", () => {
