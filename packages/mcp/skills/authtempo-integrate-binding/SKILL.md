@@ -15,7 +15,7 @@ metadata:
 
 - The authtempo MCP server runs in this project.
 - An API that runs authtempo. A skill of a stack, such as `authtempo-integrate-node`, makes one.
-- A clone of the authtempo repo. The packages are not on a registry yet, so the app lives in the pnpm workspace of the repo.
+- The `@authtempo` packages are on npm, so the app installs them with `pnpm install`.
 
 ## Steps
 

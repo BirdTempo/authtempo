@@ -15,7 +15,7 @@ metadata:
 
 - The authtempo MCP server runs in this project. Its root is the folder of the project.
 - Node 22.18 or newer, pnpm 12.8.1, and Docker.
-- A clone of the authtempo repo. The packages are not on a registry yet, so the app lives in the pnpm workspace of the repo.
+- The `@authtempo` packages are on npm, so the app installs them with `pnpm install`.
 - A Postgres database and a Cloudflare account, for the deploy at the end.
 
 ## Steps

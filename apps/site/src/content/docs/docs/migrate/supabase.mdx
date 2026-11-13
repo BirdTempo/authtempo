@@ -46,7 +46,7 @@ psql "$SUPABASE_DB_URL" -c "\copy (select provider, provider_id, user_id from au
 1. Run the import as a dry run, and read the report.
 2. Check the `hashes:` line against `--formats`. It counts the hash formats of the export, such as `hashes: bcrypt 812, argon2id 4, none 31`.
 
-The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
+The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.
 
 ```sh
 authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL --dry-run

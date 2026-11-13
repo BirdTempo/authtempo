@@ -6,8 +6,7 @@ and it has no runtime dependency.
 
 ## Install
 
-When the package is published, run `pnpm add @authtempo/breach-check`.
-Publication is on hold. In this workspace, add it with `"workspace:*"`.
+Run `pnpm add @authtempo/breach-check`.
 
 ## Config
 

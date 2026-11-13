@@ -18,10 +18,6 @@ sidebar:
 - Read [Upgrades and schema versions](/docs/operations/upgrades/) for the steps of an update.
 - Read [Security policy](/docs/reference/security-policy/) for how to report a fault.
 
-## The versions today
-
-Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.
-
 ## One version
 
 Every released package has the same version. The first release is `0.1.0`. In 0.x a break is a minor with a "Breaking:" line in its changeset, a feature is a minor, and a fix is a patch. The owner names `1.0.0` in a later decision.
@@ -41,8 +37,6 @@ Every released package has the same version. The first release is `0.1.0`. In 0.
 - Keep every `@authtempo` package of an app at the same version.
 
 ## The support window
-
-No release exists yet. The first minor is the current minor at its release.
 
 The current minor gets every fix. The previous minor gets security fixes for 3 months after the next minor ships. After that date, the previous minor is unsupported. A database at a schema version of a supported minor gets to the current schema version with one `authtempo migrate`.
 

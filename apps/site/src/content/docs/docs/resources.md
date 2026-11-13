@@ -19,7 +19,57 @@ sources:
 
 ## Packages, examples, and the demo
 
-No release exists yet, so no package, example, or demo is published; this page lists them from the first release.
+| Item | Link |
+| --- | --- |
+| The package @authtempo/adapter-d1 | [@authtempo/adapter-d1](https://www.npmjs.com/package/@authtempo/adapter-d1) |
+| The package @authtempo/adapter-mysql | [@authtempo/adapter-mysql](https://www.npmjs.com/package/@authtempo/adapter-mysql) |
+| The package @authtempo/adapter-postgres | [@authtempo/adapter-postgres](https://www.npmjs.com/package/@authtempo/adapter-postgres) |
+| The package @authtempo/adapter-sqlite | [@authtempo/adapter-sqlite](https://www.npmjs.com/package/@authtempo/adapter-sqlite) |
+| The package @authtempo/astro | [@authtempo/astro](https://www.npmjs.com/package/@authtempo/astro) |
+| The package @authtempo/breach-check | [@authtempo/breach-check](https://www.npmjs.com/package/@authtempo/breach-check) |
+| The package @authtempo/captcha-turnstile | [@authtempo/captcha-turnstile](https://www.npmjs.com/package/@authtempo/captcha-turnstile) |
+| The package @authtempo/cli | [@authtempo/cli](https://www.npmjs.com/package/@authtempo/cli) |
+| The package @authtempo/client | [@authtempo/client](https://www.npmjs.com/package/@authtempo/client) |
+| The package @authtempo/compat-better-auth | [@authtempo/compat-better-auth](https://www.npmjs.com/package/@authtempo/compat-better-auth) |
+| The package @authtempo/core | [@authtempo/core](https://www.npmjs.com/package/@authtempo/core) |
+| The package @authtempo/express | [@authtempo/express](https://www.npmjs.com/package/@authtempo/express) |
+| The package @authtempo/fastify | [@authtempo/fastify](https://www.npmjs.com/package/@authtempo/fastify) |
+| The package @authtempo/handoff | [@authtempo/handoff](https://www.npmjs.com/package/@authtempo/handoff) |
+| The package @authtempo/hono | [@authtempo/hono](https://www.npmjs.com/package/@authtempo/hono) |
+| The package @authtempo/import | [@authtempo/import](https://www.npmjs.com/package/@authtempo/import) |
+| The package @authtempo/legacy-hashes | [@authtempo/legacy-hashes](https://www.npmjs.com/package/@authtempo/legacy-hashes) |
+| The package @authtempo/mcp | [@authtempo/mcp](https://www.npmjs.com/package/@authtempo/mcp) |
+| The package @authtempo/next | [@authtempo/next](https://www.npmjs.com/package/@authtempo/next) |
+| The package @authtempo/observe | [@authtempo/observe](https://www.npmjs.com/package/@authtempo/observe) |
+| The package @authtempo/react | [@authtempo/react](https://www.npmjs.com/package/@authtempo/react) |
+| The package @authtempo/react-router | [@authtempo/react-router](https://www.npmjs.com/package/@authtempo/react-router) |
+| The package @authtempo/solid | [@authtempo/solid](https://www.npmjs.com/package/@authtempo/solid) |
+| The package @authtempo/sveltekit | [@authtempo/sveltekit](https://www.npmjs.com/package/@authtempo/sveltekit) |
+| The package @authtempo/tanstack-start | [@authtempo/tanstack-start](https://www.npmjs.com/package/@authtempo/tanstack-start) |
+| The package @authtempo/verify | [@authtempo/verify](https://www.npmjs.com/package/@authtempo/verify) |
+| The package @authtempo/vue | [@authtempo/vue](https://www.npmjs.com/package/@authtempo/vue) |
+| The example astro | [examples/astro](https://github.com/BirdTempo/authtempo/tree/main/examples/astro) |
+| The example electron | [examples/electron](https://github.com/BirdTempo/authtempo/tree/main/examples/electron) |
+| The example elysia | [examples/elysia](https://github.com/BirdTempo/authtempo/tree/main/examples/elysia) |
+| The example express | [examples/express](https://github.com/BirdTempo/authtempo/tree/main/examples/express) |
+| The example fastify | [examples/fastify](https://github.com/BirdTempo/authtempo/tree/main/examples/fastify) |
+| The example hono | [examples/hono](https://github.com/BirdTempo/authtempo/tree/main/examples/hono) |
+| The example mcp-server | [examples/mcp-server](https://github.com/BirdTempo/authtempo/tree/main/examples/mcp-server) |
+| The example nestjs | [examples/nestjs](https://github.com/BirdTempo/authtempo/tree/main/examples/nestjs) |
+| The example next | [examples/next](https://github.com/BirdTempo/authtempo/tree/main/examples/next) |
+| The example node | [examples/node](https://github.com/BirdTempo/authtempo/tree/main/examples/node) |
+| The example nuxt | [examples/nuxt](https://github.com/BirdTempo/authtempo/tree/main/examples/nuxt) |
+| The example pbkdf2-probe | [examples/pbkdf2-probe](https://github.com/BirdTempo/authtempo/tree/main/examples/pbkdf2-probe) |
+| The example react | [examples/react](https://github.com/BirdTempo/authtempo/tree/main/examples/react) |
+| The example react-router | [examples/react-router](https://github.com/BirdTempo/authtempo/tree/main/examples/react-router) |
+| The example solid | [examples/solid](https://github.com/BirdTempo/authtempo/tree/main/examples/solid) |
+| The example solid-start | [examples/solid-start](https://github.com/BirdTempo/authtempo/tree/main/examples/solid-start) |
+| The example sveltekit | [examples/sveltekit](https://github.com/BirdTempo/authtempo/tree/main/examples/sveltekit) |
+| The example tanstack-start | [examples/tanstack-start](https://github.com/BirdTempo/authtempo/tree/main/examples/tanstack-start) |
+| The example worker | [examples/worker](https://github.com/BirdTempo/authtempo/tree/main/examples/worker) |
+| The example worker-d1 | [examples/worker-d1](https://github.com/BirdTempo/authtempo/tree/main/examples/worker-d1) |
+| The example worker-postgres | [examples/worker-postgres](https://github.com/BirdTempo/authtempo/tree/main/examples/worker-postgres) |
+| The demo | [Demo](/demo/) |
 
 ## Contribute
 

@@ -20,7 +20,7 @@ sidebar:
 
 ## The command
 
-The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.
 
 ```sh
 authtempo sessions end https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason "stolen laptop" --yes

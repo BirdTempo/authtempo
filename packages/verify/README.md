@@ -8,8 +8,7 @@ on Workers, Node 22.18 or newer, and Bun; it imports no Node module.
 
 ## Install
 
-When the package is on npm, run `pnpm add @authtempo/verify`.
-Publication is on hold. In this workspace, add it with `"workspace:*"`.
+Run `pnpm add @authtempo/verify`.
 
 ## Verify a request
 

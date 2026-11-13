@@ -257,6 +257,14 @@ const SUMS_OUTPUT = "${{ steps.sums.outputs.sums }}";
 const SUMS_ENV = "${{ needs.check.outputs.sums }}";
 
 /**
+ * The env of each release:check step. Turbo runs 10 tasks at once by default.
+ * On the 4 cores of a GitHub runner, 9 test tasks failed on timers on 2026-11-13
+ * (27 minutes 15 seconds, no defect in the code). One value for both files, so
+ * the two steps cannot drift.
+ */
+const CHECK_ENV = { TURBO_CONCURRENCY: "2" };
+
+/**
  * The jobs of each file. A key that this table does not name fails. A step
  * that is gone, new, or moved fails too. So a change of a workflow changes
  * this table in the same commit. The comment above each step in the workflow
@@ -274,7 +282,10 @@ const JOBS: Record<string, Record<string, Job>> = {
         // Biome on each pull request (ruling 65 of plan 12j).
         { run: "pnpm lint" },
         // The base branch of a pull request, or main on a push (ruling 67 of plan 12j, Minor 3).
-        { run: `pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}` },
+        {
+          run: `pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}`,
+          env: CHECK_ENV,
+        },
       ],
     },
   },
@@ -289,7 +300,7 @@ const JOBS: Record<string, Record<string, Job>> = {
         { name: "Check the tag", run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
         { run: "pnpm install --frozen-lockfile" },
         // A tag checkout has no local main (ruling 16 of plan 12j).
-        { run: "pnpm release:check --base origin/main" },
+        { run: "pnpm release:check --base origin/main", env: CHECK_ENV },
         {
           name: "Make the release copy",
           run: [

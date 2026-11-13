@@ -682,12 +682,18 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "Fixed log lines with event names. No spans and no metrics.",
     "OpenTelemetry spans, an experimental option since 1.7.4.",
   ),
-  row("g10", "better-auth", "Releases", "No release yet.", "Weekly patches on 1.7 and on 1.6."),
+  row(
+    "g10",
+    "better-auth",
+    "Releases",
+    "One version of every package, from 0.1.0.",
+    "Weekly patches on 1.7 and on 1.6.",
+  ),
   row(
     "g11",
     "better-auth",
     "Changelog",
-    "No release notes yet.",
+    "A changelog page and a feed of each release.",
     "A changelog on the site, and GitHub releases.",
   ),
   // Rows where Better Auth keeps a part that authtempo lacks (ruling 26 of the plan 11b lane).

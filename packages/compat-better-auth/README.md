@@ -24,18 +24,18 @@ pnpm and npm, in the app's `package.json`:
 ```json
 {
   "dependencies": {
-    "better-auth": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/sso": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@better-auth/scim": "npm:@authtempo/compat-better-auth@0.0.0",
-    "@authtempo/core": "0.0.0",
-    "@authtempo/client": "0.0.0",
-    "@authtempo/handoff": "0.0.0",
-    "@authtempo/adapter-d1": "0.0.0",
-    "@authtempo/adapter-postgres": "0.0.0"
+    "better-auth": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/sso": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@better-auth/scim": "npm:@authtempo/compat-better-auth@0.1.0",
+    "@authtempo/core": "0.1.0",
+    "@authtempo/client": "0.1.0",
+    "@authtempo/handoff": "0.1.0",
+    "@authtempo/adapter-d1": "0.1.0",
+    "@authtempo/adapter-postgres": "0.1.0"
   }
 }
 ```

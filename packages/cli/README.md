@@ -10,25 +10,8 @@ authtempo help <command>
 
 ## Install
 
-The packages are not on a registry yet: publication is the owner's call.
-Until then, build the CLI once in a clone of this repo, then run each command
-with `node` and the absolute path of the clone, from the folder of your app:
-
-```bash
-cd /path/to/authtempo
-pnpm turbo run build --filter=@authtempo/cli
-cd /path/to/my-app
-node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
-```
-
-Write the path of your clone in place of `/path/to/authtempo`. Each relative
-path that a command reads or writes, such as `--config` or `--users`,
-resolves from the current folder. `test/documented-run.test.ts` runs this
-form from a temporary folder. `examples/worker` links the binary too, but
-`pnpm --filter authtempo-example-worker exec authtempo` runs in
-`examples/worker`, not in your folder, and exits 1 on any failure, so use it
-for `--help` only. After the first release, install the CLI with
-`pnpm add -D @authtempo/cli`, or run it with `pnpm dlx @authtempo/cli`.
+Install the CLI with `pnpm add -D @authtempo/cli`, or run it with
+`pnpm dlx @authtempo/cli`.
 
 ## The rules
 
@@ -71,8 +54,8 @@ without the repo's bundle proof, and the Bun start script `bun src/main.ts`.
 Each stack adds a `README.md`, a `.gitignore`, and `.dev.vars.example` or
 `.env.example`, which lists each secret with no value. `init` runs no
 install and writes no secret. A folder that holds any of its files stops
-the run, and nothing is written. Until the packages are on a registry, a
-scaffold installs only inside this workspace.
+the run, and nothing is written. A scaffold names each
+`@authtempo` package at the version of the CLI.
 
 ## migrate
 

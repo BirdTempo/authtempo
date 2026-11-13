@@ -615,8 +615,11 @@ describe("the test-servers command", () => {
     const address = server.address();
     const port = typeof address === "object" && address !== null ? address.port : 0;
     try {
+      // lsof gives the name of the thread that holds the socket. On macOS that is
+      // `node`. On Linux it is `node-MainThread` (seen on a GitHub runner on 2026-11-13,
+      // where the test held `node` only and failed). So the name starts with node.
       expect(() => checkPortsFree([port], "authtempo-s1", LANE)).toThrow(
-        new RegExp(`^port ${port} is taken by node \\(pid ${process.pid}\\)\\. `),
+        new RegExp(`^port ${port} is taken by node[\\w-]* \\(pid ${process.pid}\\)\\. `),
       );
     } finally {
       await new Promise((done) => server.close(done));

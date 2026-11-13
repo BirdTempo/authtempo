@@ -34,8 +34,13 @@ export default defineConfig(async () => {
       // rehearsal ran at load 5.2 to 15.7 while other lanes ran tests. In the 20 evidence runs
       // of 2026-10-30 to 2026-11-03, at sampled peak load 36 to 56, they passed in up to 3.32 s.
       // In the logs the ban copy took up to 3.72 s, and the D1 run of the SSO copy up to 2.46 s.
-      // So one limit covers the pool, as in the demo pool.
-      testTimeout: 20_000,
+      // So one limit covered the pool, as in the demo pool. On 2026-11-13 the ban copy test
+      // timed out at this limit on a 4-core GitHub runner, with Turbo at 2 tasks at once and
+      // a transform time of 125 s for the package. So that runner needs more than 20 s for
+      // it (1.9 s on a laptop the same day), and no run showed how much more. The limit is
+      // now 60 s, 3 times the old one,
+      // and the next run on the runner gives the measure. A hang still fails at 60 s.
+      testTimeout: 60_000,
       reporters: ["default", conformanceCountReporter({ expected: RUNS })],
     },
   };

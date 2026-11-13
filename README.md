@@ -8,9 +8,7 @@ Docs: https://authtempo.com/docs/
 
 ## Packages
 
-The packages are not on a registry yet.
-
-After the first release: `pnpm add @authtempo/core @authtempo/adapter-d1`, then `npm audit signatures`.
+Add the packages with `pnpm add @authtempo/core @authtempo/adapter-d1`, then run `npm audit signatures`.
 
 | Package | Role |
 | --- | --- |

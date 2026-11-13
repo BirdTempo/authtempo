@@ -8,8 +8,7 @@ imports no Node module. Its peer is `@authtempo/core`.
 
 ## Install
 
-When the package is on npm, run `pnpm add @authtempo/observe`.
-Publication is on hold. In this workspace, add it with `"workspace:*"`.
+Run `pnpm add @authtempo/observe`.
 
 ## Workers Logs
 

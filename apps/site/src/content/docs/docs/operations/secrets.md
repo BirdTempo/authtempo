@@ -38,7 +38,7 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 
 ## Steps
 
-The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. Else the shell answers "command not found" at step 1.
+The `@authtempo` packages are on npm. Add the CLI to your app with `pnpm add -D @authtempo/cli`, and run each command as `pnpm exec authtempo …`.
 
 1. Make a new secret of 32 random bytes with `authtempo secret --version 2 --out secret-v2.txt`. The command writes a new file that only its owner can read, and replaces no file.
 

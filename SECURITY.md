@@ -4,13 +4,13 @@ This file tells you how to report a fault in authtempo, and what the owner does 
 
 ## Supported versions
 
-No release exists yet. The first minor is the current minor at its release.
+| Minor | Status | Released | Security fixes until | Schema versions |
+| --- | --- | --- | --- | --- |
+| 0.1 | current | 2026-11-16 | none | 16 |
 
 The current minor gets every fix. The previous minor gets security fixes for 3 months after the next minor ships. After that date, the previous minor is unsupported. A database at a schema version of a supported minor gets to the current schema version with one `authtempo migrate`. The table comes from `release/support.json`, and a check holds this file to it.
 
 ## How to report
-
-Until the first release, the two channels are not open, and the times of this policy do not apply.
 
 Report a fault through one of the two channels, in this order:
 

@@ -271,19 +271,28 @@ describe("check-workflows", () => {
 
   it("fails a job with no timeout-minutes, or with a value that is not a whole number above 0", () => {
     // The timer of vitest cannot end a sync spawn, so the job limit is the last guard of a hung step.
+    // The limit lines come from the files by place, not by value: the owner sizes the limits for
+    // the runner, and a test that holds `40` failed the version pull request when they became 60.
+    const LIMIT = /^ {4}timeout-minutes: \d+\n/gm;
+    const setNth = (text: string, n: number, to: string) => {
+      const found = [...text.matchAll(LIMIT)];
+      const m = found[n];
+      if (m?.index === undefined)
+        throw new Error(`the text holds no timeout-minutes line ${n + 1}`);
+      return text.slice(0, m.index) + to + text.slice(m.index + m[0].length);
+    };
     const NOT_SET = "timeout-minutes is not a whole number of minutes above 0";
-    expect(ciFailures(swap(CI, "    timeout-minutes: 40\n", ""))).toEqual([
+    // ci.yml has one such line, in the job check. release.yml has two: check, then publish.
+    expect(ciFailures(setNth(CI, 0, ""))).toEqual([`ci.yml: jobs.check: ${NOT_SET}`]);
+    expect(ciFailures(setNth(CI, 0, "    timeout-minutes: 0\n"))).toEqual([
       `ci.yml: jobs.check: ${NOT_SET}`,
     ]);
-    expect(ciFailures(swap(CI, "    timeout-minutes: 40\n", "    timeout-minutes: 0\n"))).toEqual([
-      `ci.yml: jobs.check: ${NOT_SET}`,
-    ]);
-    expect(releaseFailures(swap(RELEASE, "    timeout-minutes: 30\n", ""))).toEqual([
+    expect(releaseFailures(setNth(RELEASE, 1, ""))).toEqual([
       `release.yml: jobs.publish: ${NOT_SET}`,
     ]);
-    expect(
-      releaseFailures(swap(RELEASE, "    timeout-minutes: 40\n", "    timeout-minutes: 1.5\n")),
-    ).toEqual([`release.yml: jobs.check: ${NOT_SET}`]);
+    expect(releaseFailures(setNth(RELEASE, 0, "    timeout-minutes: 1.5\n"))).toEqual([
+      `release.yml: jobs.check: ${NOT_SET}`,
+    ]);
   });
 
   it("fails a publish step that is not node scripts/release/src/publish.ts", () => {
