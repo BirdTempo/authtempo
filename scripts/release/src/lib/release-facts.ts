@@ -30,10 +30,10 @@ export const TAG_PREFIX = "v";
  * check-records compares with the newest release tag before HEAD, or with
  * this commit while no tag exists. It is the merge commit of plan 12j on
  * main (2026-10-31), so the advisory record of the lane counts too. Before
- * that merge it was main 28bab0c1, the base of the 12j lane. A test holds
+ * that merge it was the base of the 12j lane. A test holds
  * it to an ancestor of HEAD.
  */
-export const RECORDS_BASE = "c09cbe15ef7c464af962377996aa0b9297bf4029";
+export const RECORDS_BASE = "b674db1626c8313c920db600d2b8d5a65a4c798d";
 
 /**
  * The scope of each released name. Read by dry-run and publish. npm and pnpm
