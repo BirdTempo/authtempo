@@ -9,7 +9,6 @@ sources:
   - packages/handoff/README.md "Failure codes"
   - packages/handoff/README.md "The native client"
   - packages/handoff/src/index.ts
-  - docs/superpowers/plans/2026-10-14-11d-sdks.md
 ---
 
 **For:** a developer of an Expo app or an Electron app who signs in through the system browser.

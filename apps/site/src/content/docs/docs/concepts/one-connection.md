@@ -3,7 +3,6 @@ title: The one-connection rule
 description: Two hangs that a before hook can cause on Postgres, and how to avoid each.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
   - packages/adapter-postgres/README.md "On Cloudflare Workers"
   - packages/core/README.md "Hooks"
   - packages/compat-better-auth/README.md "Hooks"

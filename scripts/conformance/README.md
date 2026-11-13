@@ -113,7 +113,7 @@ The mode has its own entry, `examples/worker/src/conformance-worker.ts`, and its
 
 ## The evidence lines (Step 9 of the task)
 
-Add one line per plan at the end of `docs/superpowers/plans/README.md`, in this form:
+Add one line per plan at the end of `docs/release/EVIDENCE.md`, in this form:
 
 ```markdown
 - Evidence <date> for plan 12e: OpenID conformance suite release-v5.3.2, `<plan>`: <passed> passed, <warnings> warnings, <failed> failed, <skipped> skipped, of <total> modules, read from the summary of run-test-plan.py; machine load <1-minute load>; <date>.

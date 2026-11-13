@@ -3,8 +3,8 @@ title: Backups
 description: Back up and restore the tables of authtempo on D1 and on Postgres, and know what a restore brings back.
 type: how-to
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 7
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+  - packages/adapter-d1/README.md
+  - packages/adapter-postgres/README.md
 sidebar:
   order: 5
 ---

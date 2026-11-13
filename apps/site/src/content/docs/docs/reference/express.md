@@ -5,8 +5,7 @@ type: reference
 sources:
   - packages/express/README.md
   - packages/express/src/index.ts
-  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
+  - packages/core/src/http/body-cap.ts
 sidebar:
   hidden: true
 ---

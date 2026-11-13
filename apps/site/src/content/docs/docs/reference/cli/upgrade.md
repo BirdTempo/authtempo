@@ -6,8 +6,6 @@ sources:
   - packages/cli/src/commands/upgrade.ts
   - packages/cli/src/upgrade-core.ts
   - packages/cli/src/help/upgrade.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 10"
 sidebar:
   order: 30
 ---

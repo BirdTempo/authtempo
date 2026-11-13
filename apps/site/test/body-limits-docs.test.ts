@@ -683,8 +683,8 @@ const NARROWED: [FileKey, string, number][] = [
 /** A promise that a 503 costs a write no count of its user (ruling 84 Low 1). */
 const NO_COUNT = /counts on (no limit|neither)|before any count/;
 
-/** The plan of the body limits: each page that states them cites it (spec 18 rule 4, ruling 64 Low 3). */
-const PLAN = "docs/superpowers/plans/2026-10-14-12j-release-program.md";
+/** The source of the body limits: each page that states them cites a file of core (ruling 64 Low 3). */
+const SOURCE = "packages/core/src/";
 const PLAN_PAGES = [
   FILES.errors,
   FILES.limits,
@@ -741,10 +741,10 @@ describe("the request body limits of core and the docs (rulings 43, 46, 51, 56, 
     expect({ noIp, text: `${text}x` }).toEqual({ noIp: ipKey(null), text: ipKey("x") });
   });
 
-  it("cites plan 12j in the sources of each page that states a body limit (ruling 64 Low 3)", () => {
+  it("cites a file of core in the sources of each page that states a body limit (ruling 64 Low 3)", () => {
     for (const page of PLAN_PAGES) {
       const head = readFileSync(page, "utf8").split("\n---\n")[0] ?? "";
-      const cites = head.split("\n").some((line) => line.startsWith(`  - ${PLAN}`));
+      const cites = head.split("\n").some((line) => line.startsWith(`  - ${SOURCE}`));
       expect({ page: page.slice(DOCS.length), cites }).toEqual({
         page: page.slice(DOCS.length),
         cites: true,

@@ -4,10 +4,7 @@ description: The runtimes that authtempo runs on, the Workers flags of each pack
 type: reference
 sources:
   - README.md "Rules that the code enforces"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 13
   - examples/worker/wrangler.jsonc
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 28
   - packages/adapter-sqlite/README.md "Workers"
   - packages/adapter-mysql/README.md "Workers through Hyperdrive"
 ---

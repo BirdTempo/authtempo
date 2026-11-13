@@ -3,16 +3,6 @@ title: Secrets
 description: What the app secret of authtempo protects, and how to change it with no lockout.
 type: how-to
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 22
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A sealed state payload through the social flow"
   - packages/core/README.md "Secrets"
 sidebar:
   order: 2

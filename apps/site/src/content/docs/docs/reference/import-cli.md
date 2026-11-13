@@ -4,7 +4,6 @@ description: The import CLI is now the import command of the authtempo CLI. This
 type: reference
 sources:
   - packages/cli/README.md "import"
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
 ---
 
 **For:** a reader who follows an older link to the import CLI.

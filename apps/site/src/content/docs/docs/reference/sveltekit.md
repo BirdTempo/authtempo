@@ -6,8 +6,7 @@ sources:
   - packages/sveltekit/README.md
   - packages/sveltekit/src/index.ts
   - packages/sveltekit/src/store.ts
-  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
+  - packages/core/src/http/body-cap.ts
 sidebar:
   hidden: true
 ---

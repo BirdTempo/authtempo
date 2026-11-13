@@ -3,12 +3,8 @@ title: Sessions, API tokens, and JWTs
 description: The kinds of credential that core issues, what each one may do, and how core reads each from a request.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.1
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
-  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
+  - packages/core/src/credentials.ts
+  - packages/core/src/primitives/credentials.ts
 ---
 
 **For:** a developer who must choose a credential for a browser, an app, a script, or another server.

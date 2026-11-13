@@ -3,18 +3,7 @@ title: The threat model
 description: The attackers that authtempo expects, the assets it guards, and the control that stops each attack.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.2
   - README.md "Rules that the code enforces"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 22
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
-  - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 8"
 ---
 
 **For:** a security reviewer, or a developer who must explain the risks of authtempo to one.

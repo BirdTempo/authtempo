@@ -3,21 +3,9 @@ title: Limits
 description: Every rate limit of core with its key, window, and maximum, and the counts that core keeps in its rows.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
   - packages/core/src/http/body-cap.ts
   - packages/core/README.md "Limits in version 1"
   - packages/core/README.md "Limits"
-  - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
-  - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.

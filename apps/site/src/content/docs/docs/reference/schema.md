@@ -3,7 +3,6 @@ title: Schema and migrations
 description: The tables of each schema version, the migrations of each adapter, and the rule that refuses an old database.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 7
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"
   - packages/adapter-mysql/README.md "Migrations"

@@ -40,7 +40,8 @@ These files are records, and they are append-only:
 - each `CHANGELOG.md`
 - the advisory record `docs/security/advisories.md`
 - each shipped migration file
-- the spec and the plan index under `docs/superpowers/`
+- the release evidence `docs/release/EVIDENCE.md`
+- the versioning rules `docs/release/versioning-rules.md`
 
 Do not edit the text of a record. A fault in an old entry gets a dated correction in a new entry. `check-records` holds the changelogs, the advisory record, and the migrations.
 

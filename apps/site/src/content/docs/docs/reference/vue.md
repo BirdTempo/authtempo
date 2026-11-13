@@ -6,7 +6,6 @@ sources:
   - packages/vue/README.md
   - packages/vue/src/index.ts
   - packages/vue/src/nuxt.ts
-  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
 sidebar:
   hidden: true
 ---

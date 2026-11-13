@@ -3,8 +3,6 @@ title: Resources
 description: The published authtempo packages, the example apps, and the demo, and where to contribute or report a fault.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 13"
   - .changeset/config.json
   - release/unreleased.json
   - CONTRIBUTING.md

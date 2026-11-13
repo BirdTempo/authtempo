@@ -5,8 +5,6 @@ type: reference
 sources:
   - packages/adapter-mysql/README.md "Checks at start"
   - packages/adapter-mysql/src/index.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 28
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 9"
 ---
 
 **For:** a developer who wires `@authtempo/adapter-mysql` into an app, or who reads its exports.

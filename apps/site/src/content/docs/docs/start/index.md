@@ -4,10 +4,6 @@ description: Pick the runtime and the database for authtempo, and find the tutor
 type: tutorial
 sources:
   - README.md "Packages"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 14
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 17"
 sidebar:
   order: 1
 ---

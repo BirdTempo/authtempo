@@ -3,13 +3,8 @@ title: The CLI
 description: The authtempo command line, its commands, its exit codes, its output, and its rule for secrets.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 19
   - packages/cli/README.md "The rules"
   - packages/cli/README.md "Install"
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 10"
   - packages/cli/src/stacks.ts
 sidebar:
   order: 1

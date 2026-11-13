@@ -5,8 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/secret.ts
   - packages/cli/src/help/secret.ts
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 4"
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A sealed state payload through the social flow"
 sidebar:
   order: 9
 ---

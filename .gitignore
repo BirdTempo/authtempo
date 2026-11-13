@@ -18,3 +18,7 @@ packages/core/.events/
 *.env
 # The test server addresses of this worktree. scripts/test-servers.mjs up writes it; *.env above covers it too.
 .test-servers.env
+
+# The private working notes of the owner: specs, plans, and review notes. They stay on the owner machine.
+# No test or check may read them, so a clean checkout passes without them.
+docs/superpowers/

@@ -3,15 +3,8 @@ title: Configuration
 description: Every key that createAuth accepts, with its type, its default, and the rule that construction checks.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
   - packages/core/src/config.ts
   - apps/site/scripts/lib/config-keys.ts
-  - docs/superpowers/plans/2026-10-14-11g-openapi.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 2"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.

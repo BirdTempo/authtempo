@@ -11,8 +11,6 @@ sources:
   - packages/mcp/src/worker.ts
   - packages/mcp/wrangler.jsonc
   - packages/mcp/test/drift.test.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 17"
 ---
 
 **For:** a developer or an agent that calls the authtempo MCP server and needs each tool, input, and rule.

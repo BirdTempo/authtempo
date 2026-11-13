@@ -414,9 +414,9 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
       });
   });
 
-  // Ruling 55 of plan 12e: each row that the plan made false moves with a fresh read, and cites the plan.
-  it("cites plan 12e on each row that the plan moved", () => {
-    const plan = "docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md";
+  // Ruling 55 of plan 12e: each row that the plan made false moves with a fresh read, and cites the code of the plan.
+  it("cites the OAuth token code on each row that plan 12e moved", () => {
+    const plan = "packages/core/src/engine/oauth-token.ts";
     const ids = ["a1", "a10", "a11", "a12", "a13", "a19", "a2", "a20", "a25", "a4", "a8"];
     for (const id of [...ids, "b10", "b13", "b9"])
       expect({ id, cites: COMPARE_ROWS.find((r) => r.id === id)?.source.endsWith(plan) }).toEqual({

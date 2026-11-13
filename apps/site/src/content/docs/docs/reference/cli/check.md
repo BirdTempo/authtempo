@@ -6,11 +6,6 @@ sources:
   - packages/cli/README.md "check"
   - packages/core/src/http/routes/sessions.ts
   - packages/core/src/http/cookies.ts
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 8"
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 7"
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 9"
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 6"
 sidebar:
   order: 5
 ---

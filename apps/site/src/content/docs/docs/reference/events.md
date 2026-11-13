@@ -3,12 +3,7 @@ title: Events
 description: Every event of core with its level, its fields and their kinds, and its default line.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - packages/observe/README.md "What a sink never gets"
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** an operator who reads the events of authtempo in a sink, or a developer who writes a sink.

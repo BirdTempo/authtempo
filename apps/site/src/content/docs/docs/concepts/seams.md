@@ -3,10 +3,6 @@ title: Seams and dependencies
 description: The libraries that authtempo uses, the seam that holds each one, and what happens on the day one changes.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 2
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 13
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 18
   - pnpm-workspace.yaml
 ---
 

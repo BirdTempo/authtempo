@@ -3,7 +3,6 @@ title: Upgrades and schema versions
 description: Move an API to a newer authtempo, with the migrations of its schema version applied in the right order.
 type: how-to
 sources:
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 10"
   - packages/core/README.md "Limits in version 1"
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"

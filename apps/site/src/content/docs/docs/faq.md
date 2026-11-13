@@ -14,7 +14,6 @@ sources:
   - apps/site/src/content/docs/docs/migrate/better-auth.mdx "Change the calls"
   - apps/site/src/content/docs/docs/migrate/workos.mdx "How it behaves"
   - apps/site/src/content/docs/docs/migrate/index.md "Steps"
-  - docs/superpowers/plans/2026-10-14-11d2-bindings.md "Task 17"
 ---
 
 **For:** a developer or an operator who plans to move an app to authtempo and has a question before the move.

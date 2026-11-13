@@ -268,7 +268,7 @@ export const PRE_RELEASE_SENTENCES: readonly PreReleaseSentence[] = [
   {
     file: "apps/site/src/content/docs/docs/changelog.mdx",
     sentence:
-      "Until the first release, the plan index of the repo is the record of each change: `docs/superpowers/plans/README.md`. Each row names a plan, its spec sections, and the commit that merged it.",
+      "Until the first release, this page lists no change. The first release adds its section here.",
     published: "",
   },
   // The owner adds the rows of the packages, the examples, and the demo in its place.

@@ -4,9 +4,6 @@ description: Each deprecated item of the authtempo packages, the version that de
 type: reference
 sources:
   - release/deprecations.json
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 9"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 13"
 ---
 
 **For:** a developer who upgrades an app and must know what the next minor removes.

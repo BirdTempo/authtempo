@@ -6,8 +6,6 @@ sources:
   - packages/next/README.md
   - packages/next/src/index.ts
   - examples/next/proxy.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
-  - docs/superpowers/plans/2026-10-14-11d-sdks.md
 sidebar:
   hidden: true
 ---

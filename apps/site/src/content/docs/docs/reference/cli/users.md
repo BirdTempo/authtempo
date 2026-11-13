@@ -5,8 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/users.ts
   - packages/cli/src/help/users.ts
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 6"
 sidebar:
   order: 12
 ---

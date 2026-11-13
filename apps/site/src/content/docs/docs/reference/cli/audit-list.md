@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/audit.ts
   - packages/cli/src/help/audit.ts
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
   order: 27
 ---

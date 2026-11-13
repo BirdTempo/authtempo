@@ -3,13 +3,7 @@ title: Proof of an address and the claim rule
 description: Why an account made with an unproved address is only a claim, and what core deletes when the real owner proves the address.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.2
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
   - README.md "Rules that the code enforces"
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** a developer who must know why core deletes credentials at a sign-in, and when.

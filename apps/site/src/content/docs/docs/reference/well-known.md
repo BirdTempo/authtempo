@@ -3,12 +3,8 @@ title: Well-known documents
 description: The metadata documents that auth.wellKnown serves at the origin root for the OAuth provider and for passkey related origins.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - packages/core/src/http/well-known.ts
   - packages/core/README.md "OAuth 2.1 and OIDC provider"
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 17"
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 9"
 ---
 
 **For:** a developer who runs the OAuth provider, or a client that reads its metadata.

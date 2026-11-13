@@ -3,17 +3,12 @@ title: Cookies
 description: Every cookie that core sets, with its attributes, path, life, and the flow that sets it.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.1
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.3
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
   - packages/core/src/http/cookies.ts
   - packages/core/src/engine/sessions.ts
   - packages/core/src/http/impersonation-rules.ts
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md
   - packages/core/src/engine/last-method.ts
   - packages/core/src/engine/multi-session.ts
   - packages/core/src/engine/password.ts
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md
 ---
 
 **For:** a developer who writes the cookie text of a privacy page, or checks why a browser drops a cookie.

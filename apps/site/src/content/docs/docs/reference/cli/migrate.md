@@ -6,9 +6,6 @@ sources:
   - packages/cli/README.md "migrate"
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 6"
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 6"
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 8"
 sidebar:
   order: 3
 ---

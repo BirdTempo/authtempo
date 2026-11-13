@@ -4,8 +4,7 @@ Authentication you own. The engine, the flows, the tokens, the cookies,
 and the tables are your code. Small audited libraries supply primitives
 only, each behind a named seam.
 
-Spec: `docs/superpowers/specs/2026-10-09-tempo-auth-design.md`.
-Plans: `docs/superpowers/plans/README.md`.
+Docs: https://authtempo.com/docs/
 
 ## Packages
 

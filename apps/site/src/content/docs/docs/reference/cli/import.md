@@ -7,9 +7,6 @@ sources:
   - packages/cli/README.md "The alias authtempo-import"
   - packages/import/README.md "The exit status and the report"
   - packages/import/README.md "Targets"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
-  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
 sidebar:
   order: 4
 ---

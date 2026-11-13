@@ -157,17 +157,16 @@ function review(id: string): string {
   if (parts === undefined) throw new Error(`compare.ts: row ${id} has no public source`);
   return parts.join("; ");
 }
-/** A row that a merged plan changed: the Better Auth source, then the plan file for authtempo. */
-const merged = (id: string, plans: readonly string[]) =>
-  [review(id), ...plans.map((p) => `docs/superpowers/plans/${p}`)].join("; ");
+/** A row that merged code changed: the Better Auth source, then the file of this repository that holds the authtempo cell. */
+const merged = (id: string, files: readonly string[]) => [review(id), ...files].join("; ");
 
-const P11D = "2026-10-14-11d-sdks.md";
-const P11G = "2026-10-14-11g-openapi.md";
-const P12A = "2026-10-14-12a-account-self-service.md";
-const P12B = "2026-10-14-12b-security-hardening.md";
-const P12C = "2026-10-14-12c-second-factor-reach.md";
-const P12E = "2026-10-14-12e-oauth-provider-v2.md";
-const P12I = "2026-10-14-12i-sign-in-additions.md";
+const P11D = "packages/client/src/client.ts";
+const P11G = "packages/core/src/openapi/document.ts";
+const P12A = "packages/core/src/engine/account-delete.ts";
+const P12B = "packages/core/src/secrets-entry.ts";
+const P12C = "packages/core/src/engine/second-factor.ts";
+const P12E = "packages/core/src/engine/oauth-token.ts";
+const P12I = "packages/core/src/engine/phone.ts";
 
 /** A row of the review as it stands, read on the day of the review. */
 function row(

@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/README.md "keys rotate"
   - packages/core/README.md "JWT minting"
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 3"
 sidebar:
   order: 6
 ---

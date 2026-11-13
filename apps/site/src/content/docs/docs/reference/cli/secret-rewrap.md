@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/secret.ts
   - packages/cli/src/help/secret.ts
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 4"
 sidebar:
   order: 10
 ---

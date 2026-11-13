@@ -3,9 +3,6 @@ title: Architecture and "own what you sell"
 description: The parts of authtempo, how a request moves through them, and the rule that decides what authtempo owns.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 1
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 2
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 4
   - README.md "Packages"
 ---
 

@@ -3,11 +3,7 @@ title: Tokens and prefixes
 description: Every token that core makes, with its prefix, where it travels, its life, and how core stores it.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.1
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
+  - packages/core/src/primitives/credentials.ts
 ---
 
 **For:** a developer who sees a token in a log, a URL, or a store, and must know what it is.

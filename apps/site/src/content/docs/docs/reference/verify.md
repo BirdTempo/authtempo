@@ -8,12 +8,8 @@ sources:
   - packages/verify/README.md "The rules"
   - packages/verify/README.md "The 401 and the 403"
   - packages/verify/src/index.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
   - packages/verify/README.md "DPoP"
   - packages/verify/README.md "Introspection"
-  - docs/superpowers/plans/2026-10-14-11d-sdks.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** a developer of a server that is not the auth app and must know the caller of a request.

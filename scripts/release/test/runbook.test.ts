@@ -324,10 +324,10 @@ describe("docs/release/RUNBOOK.md", () => {
     expect(step).toContain("a line starts with `test-servers:`");
   });
 
-  it("says that the records hold local paths and a user name, before the repository goes public", () => {
+  it("says that each commit names its author and that the history is final, before the repository goes public", () => {
     const step = stepOf(TEXT, "Once, before the first release", 2);
-    expect(step).toContain("local machine paths with a user name");
-    expect(step).toContain("Decide whether they may be public before the change.");
+    expect(step).toContain("Each commit names its author too");
+    expect(step).toContain("Decide whether that is acceptable before the change.");
     expect(step.indexOf("Decide whether")).toBeLessThan(step.indexOf("Then make the repository"));
   });
 

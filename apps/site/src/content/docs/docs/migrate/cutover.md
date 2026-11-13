@@ -3,13 +3,8 @@ title: The cutover
 description: Move the traffic of an app from its old auth system to authtempo, and know what ends at that moment.
 type: how-to
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17.1
   - 'packages/compat-better-auth/README.md "Storage: in place on the Better Auth tables"'
   - packages/compat-better-auth/migrations/d1/0001_compat_better_auth.sql
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
-  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 11"
 sidebar:
   order: 9
 ---

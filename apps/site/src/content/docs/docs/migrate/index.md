@@ -3,12 +3,7 @@ title: Choose a migration path
 description: Pick the compatibility package or the importer to move an app from another auth system to authtempo.
 type: how-to
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 2
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 17
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
-  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
+  - packages/import/README.md
 sidebar:
   order: 1
 ---

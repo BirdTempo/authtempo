@@ -9,7 +9,6 @@ sources:
   - packages/cli/src/generate/sql.ts
   - packages/cli/src/generate/drizzle.ts
   - packages/cli/src/generate/prisma.ts
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 7"
 sidebar:
   order: 29
 ---

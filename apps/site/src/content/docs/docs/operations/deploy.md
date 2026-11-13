@@ -5,12 +5,8 @@ type: how-to
 sources:
   - examples/worker/wrangler.jsonc
   - README.md "Rules that the code enforces"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
   - packages/core/README.md "Limits in version 1"
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
+  - packages/core/src/http/body-cap.ts
 sidebar:
   order: 1
 ---

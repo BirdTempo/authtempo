@@ -3,8 +3,7 @@ title: Glossary
 description: The approved term for each concept of authtempo, and the words that the docs do not use.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 18
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 3"
+  - README.md
 ---
 
 **For:** a reader or a writer of these docs who needs the meaning of a term.

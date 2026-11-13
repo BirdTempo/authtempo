@@ -5,10 +5,6 @@ type: reference
 sources:
   - packages/verify/README.md "Protect an MCP server"
   - packages/verify/src/mcp.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** a developer of an app with its own MCP server that must accept only a valid access token.

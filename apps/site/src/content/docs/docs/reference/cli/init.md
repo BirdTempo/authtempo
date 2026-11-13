@@ -4,9 +4,6 @@ description: Write a new app with a magic link sign-in on Workers with D1, Worke
 type: reference
 sources:
   - packages/cli/README.md "init"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 19
-  - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 7"
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 13"
 sidebar:
   order: 2
 ---

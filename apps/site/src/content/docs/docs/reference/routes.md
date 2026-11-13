@@ -6,17 +6,8 @@ sources:
   - packages/core/README.md "Routes under"
   - packages/core/src/http/route-list.ts
   - packages/core/src/http/body-cap.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
-  - docs/superpowers/plans/2026-10-14-11g-openapi.md
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md
   - packages/core/src/http/impersonation-rules.ts
-  - docs/superpowers/plans/2026-10-14-12h-observability.md
   - packages/core/src/http/health.ts
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 3"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
-  - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.

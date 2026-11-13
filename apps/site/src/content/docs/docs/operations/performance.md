@@ -3,7 +3,6 @@ title: Performance
 description: Measured times of five operations of the example Worker on local D1, with the conditions of the run beside them.
 type: reference
 sources:
-  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 15"
   - apps/site/scripts/measure-performance.ts
   - apps/site/src/data/performance.json
   - examples/worker-d1/src/measure.ts
@@ -47,7 +46,7 @@ Each operation gets calls to warm up, then the measured calls, one after another
 | Condition | Value |
 | --- | --- |
 | Date (UTC) | 2026-10-21T19:16:24.409Z |
-| Commit | `0bbd755683e0a91d5b52d3b6f63e4bb1562fcb8d` |
+| Commit | `0b06d805bc79e961fede5e276f7253d7fabda233` |
 | Machine | Darwin 27.0.0, Apple M5 Max, 18 cores, 36 GiB of memory |
 | Load before the run | 3.07, 7.36, 11.35 (1, 5, and 15 minutes) |
 | Load after the run | 2.90, 7.25, 11.29 (1, 5, and 15 minutes) |
@@ -82,7 +81,7 @@ An observer must not slow a sign-in. The timing test of core runs 5000 password 
 | Condition | Value |
 | --- | --- |
 | Date (UTC) | 2026-10-21T19:16:24.000Z |
-| Commit | `0bbd755683e0a91d5b52d3b6f63e4bb1562fcb8d` |
+| Commit | `0b06d805bc79e961fede5e276f7253d7fabda233` |
 | Cores | 18 |
 | Load before the run | 2.90, 7.25, 11.29 (1, 5, and 15 minutes) |
 | Load after the run | 3.15, 7.23, 11.25 (1, 5, and 15 minutes) |

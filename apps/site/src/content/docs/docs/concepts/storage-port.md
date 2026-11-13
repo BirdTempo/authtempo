@@ -3,11 +3,9 @@ title: The storage port
 description: The ten storage methods that core calls, the rules that every adapter keeps, and why the port is so narrow.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6
   - packages/core/README.md "The storage port"
   - packages/adapter-d1/README.md "Transactions"
   - packages/adapter-postgres/README.md "Transactions"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 7"
 ---
 
 **For:** a developer who writes an adapter, or who must know what core asks of a database.

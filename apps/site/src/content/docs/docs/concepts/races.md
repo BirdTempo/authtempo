@@ -3,12 +3,8 @@ title: The race rules
 description: How core stays right when two requests touch the same rows at the same moment, on D1 and on Postgres.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.7
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
   - packages/adapter-d1/README.md "Transactions"
   - packages/core/README.md "Limits"
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
 ---
 
 **For:** a developer who writes an adapter, a hook, or SQL of their own on the tables of authtempo.

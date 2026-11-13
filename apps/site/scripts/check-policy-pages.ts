@@ -23,7 +23,7 @@ const SECURITY_PAGE = "docs/reference/security-policy.md";
 const PATHS = {
   versioning: `apps/site/src/content/docs/${VERSIONING}`,
   securityPage: `apps/site/src/content/docs/${SECURITY_PAGE}`,
-  spec: "docs/superpowers/specs/2026-10-09-tempo-auth-design.md",
+  spec: "docs/release/versioning-rules.md",
   changesetConfig: ".changeset/config.json",
   core: "packages/core/package.json",
   releaseFacts: "scripts/release/src/lib/release-facts.ts",
@@ -66,7 +66,7 @@ interface Tie {
   mirror?: true;
 }
 
-/** The line of spec 33 item 1.2. The spec is a record, so the line stays as written. */
+/** The line of the versioning rules (docs/release/versioning-rules.md, once spec 33 item 1.2). The file is a record, so the line stays as written. */
 const SPEC_ITEM = "0.x until the first stable.";
 
 const security = (section: string) => ({ file: "SECURITY.md", section }) as const;

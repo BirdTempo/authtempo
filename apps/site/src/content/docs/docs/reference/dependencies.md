@@ -4,9 +4,6 @@ description: Each package that an app installs with a released authtempo package
 type: reference
 sources:
   - release/dependencies.json
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 7"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 13"
 ---
 
 **For:** a developer or a security reviewer who must know what an app installs with authtempo.

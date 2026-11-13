@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/editors.ts
   - packages/cli/src/commands/mcp.ts
-  - docs/superpowers/plans/2026-10-14-11e-mcp.md "Task 2"
 sidebar:
   order: 7
 ---

@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/sessions.ts
   - packages/cli/src/help/sessions.ts
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
   order: 25
 ---

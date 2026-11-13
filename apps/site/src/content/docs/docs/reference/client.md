@@ -9,7 +9,6 @@ sources:
   - packages/client/README.md "Account settings"
   - packages/client/src/client.ts
   - packages/client/src/index.ts
-  - docs/superpowers/plans/2026-11-01-12l-sso-write-order.md
 ---
 
 **For:** a developer who calls authtempo from a browser app, a native app, a desktop app, or a CLI.

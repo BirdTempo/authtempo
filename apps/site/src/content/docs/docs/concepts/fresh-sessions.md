@@ -3,9 +3,7 @@ title: Fresh sessions
 description: Why a sensitive change needs a recent sign-in or a re-authentication, and which changes need one.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.15
   - packages/core/README.md "Account"
-  - docs/superpowers/plans/2026-10-14-12a-account-self-service.md
 ---
 
 **For:** a developer who decides which changes of an account need a new proof.

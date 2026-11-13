@@ -3,12 +3,6 @@ title: Versioning policy
 description: How the packages of authtempo take their versions, what a change of each kind costs, and which docs the site shows.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 12
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 13"
   - SECURITY.md
   - .changeset/config.json
 sidebar:

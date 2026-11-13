@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/info.ts
   - packages/cli/src/help/info.ts
-  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 5"
 sidebar:
   order: 11
 ---

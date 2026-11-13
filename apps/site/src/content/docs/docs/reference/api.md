@@ -3,7 +3,6 @@ title: The API reference
 description: The auth object that createAuth answers, its in-process api, and every export of @authtempo/core.
 type: reference
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
   - packages/core/src/create-auth.ts
   - packages/core/src/index.ts
   - packages/core/src/routes.ts
@@ -11,17 +10,6 @@ sources:
   - packages/core/src/access.ts
   - packages/core/src/operator-secret.ts
   - packages/core/src/secrets-entry.ts
-  - docs/superpowers/plans/2026-10-14-11d-sdks.md
-  - docs/superpowers/plans/2026-10-14-11g-openapi.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 4"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 5"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 7"
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 8"
-  - docs/superpowers/plans/2026-10-14-12k-organizations-tokens-v2.md "Task 2"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 2"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.

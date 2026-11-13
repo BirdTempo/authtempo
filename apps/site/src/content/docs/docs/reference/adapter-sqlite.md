@@ -6,8 +6,6 @@ sources:
   - packages/adapter-sqlite/README.md "Drivers"
   - packages/adapter-sqlite/src/index.ts
   - packages/adapter-d1/src/seam-entry.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 28
-  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 9"
 ---
 
 **For:** a developer who wires `@authtempo/adapter-sqlite` into an app, or who reads its exports.

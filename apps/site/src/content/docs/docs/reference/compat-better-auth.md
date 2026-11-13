@@ -9,13 +9,8 @@ sources:
   - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
   - packages/compat-better-auth/README.md "The admin plugin"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - packages/compat-better-auth/README.md "API keys"
   - packages/compat-better-auth/README.md "Sign-in plugins"
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
-  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 7"
-  - docs/superpowers/plans/2026-10-14-12j-release-program.md "Task 3"
-  - docs/superpowers/plans/2026-11-05-12q-claim-residuals.md "Task 2"
 ---
 
 **For:** a developer who moves an app of Better Auth 1.7 to authtempo and keeps the app's code.

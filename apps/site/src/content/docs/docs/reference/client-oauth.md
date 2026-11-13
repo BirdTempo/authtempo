@@ -5,10 +5,6 @@ type: reference
 sources:
   - packages/client/README.md "The OAuth client"
   - packages/client/src/oauth/index.ts
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 20
-  - docs/superpowers/plans/2026-10-14-11d-sdks.md
-  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** a developer of a third-party app that signs a person in to an authtempo OAuth provider.

@@ -3,8 +3,6 @@ title: The account with no address
 description: Why a user can have no address, which flows make one, and what such a user can and cannot do.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
-  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 1"
   - packages/core/src/engine/address.ts
 ---
 

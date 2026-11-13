@@ -3,9 +3,7 @@ title: The evidence rules
 description: What counts as proof that authtempo works, and the rules that keep a green run from hiding a missing test.
 type: explanation
 sources:
-  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 11
   - README.md "Commands"
-  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
 ---
 
 **For:** a contributor to authtempo, or a reviewer who must decide whether a change is fit to ship.
@@ -47,7 +45,7 @@ Two more rules keep a test honest:
 
 ## Records are append-only
 
-The spec, the plan index, and the plans are records. A change adds a dated line. A rule that would need an edit of a record to pass is the wrong rule.
+The changelogs, the advisory record, the release evidence, and the versioning rules are records. A change adds a dated line. A rule that would need an edit of a record to pass is the wrong rule.
 
 ## Next
 

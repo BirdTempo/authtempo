@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/cli/src/commands/create-admin.ts
   - packages/cli/src/help/create-admin.ts
-  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
   order: 28
 ---

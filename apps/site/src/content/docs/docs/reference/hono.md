@@ -5,7 +5,6 @@ type: reference
 sources:
   - packages/hono/README.md
   - packages/hono/src/index.ts
-  - docs/superpowers/plans/2026-10-14-11d2-bindings.md
 sidebar:
   hidden: true
 ---
