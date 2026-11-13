@@ -27,8 +27,11 @@ jobs:
     # 37 seconds on one host with 18 cores. The 1-minute load was 1.2 to 12.0 at
     # the start of the runs, and the peak of each run was 40.0 to 45.1. A
     # GitHub-hosted Linux runner has 4 cores in a public repository and 2 in a
-    # private one (read 2026-11-03). No job ran on a 2-core runner, so no measure of it exists
-    # yet. The first real run gives it.
+    # private one (read 2026-11-03). The first run on GitHub, on 2026-11-13 with
+    # the repository public (4 cores), took 27 minutes 15 seconds at the Turbo
+    # default of 10 tasks at once. Nine test tasks failed on 5 second timeouts
+    # and one 1000 ms limit, with no defect in the code. The step below sets
+    # TURBO_CONCURRENCY for that reason.
     timeout-minutes: 40
     steps:
       # The full history. Without it, check-changesets and check-records find
@@ -64,4 +67,12 @@ jobs:
       # dry run run in release.yml at the tag. release-check starts the test
       # servers of the checkout through scripts/test-servers.mjs, so no step
       # starts docker compose (ruling 50 of plan 12j).
+      # TURBO_CONCURRENCY limits the tasks that Turbo runs at once. Without it,
+      # Turbo runs 10 on 4 cores, and tests with a timer fail when the machine
+      # is busy: 9 of 135 test tasks failed that way on 2026-11-13. A failed
+      # run of this kind says nothing about the code. The value 2 passed 2 full
+      # local runs on 2026-11-13 (load 3.4 and 2.4), after two code faults were
+      # fixed. No run on a GitHub runner at this value exists until this change runs.
       - run: pnpm release:check --no-osv --no-dry-run --base "origin/${GITHUB_BASE_REF:-main}"
+        env:
+          TURBO_CONCURRENCY: "2"

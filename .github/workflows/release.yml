@@ -71,7 +71,12 @@ jobs:
       # with no evidence. release-check starts the test servers of the
       # checkout through scripts/test-servers.mjs, so no step starts docker
       # compose (ruling 50 of plan 12j).
+      # TURBO_CONCURRENCY limits the tasks that Turbo runs at once. Without it,
+      # the same step of ci.yml failed 9 test tasks on timeouts on 2026-11-13,
+      # and this step would fail the same way at the tag.
       - run: pnpm release:check --base origin/main
+        env:
+          TURBO_CONCURRENCY: "2"
       # The release copy of the tagged commit. prepare refuses a folder with
       # no .release-copy file, so the checkout stays as it is.
       - name: Make the release copy
