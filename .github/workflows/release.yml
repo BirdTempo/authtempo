@@ -31,9 +31,11 @@ jobs:
     # start and 7.73 at the end (log:
     # .superpowers/tools/logs/dry-run-12n-fix1-2026-11-03.log). A GitHub-hosted
     # Linux runner has 4 cores in a public repository and 2 in a private one
-    # (read 2026-11-03). No job ran on a 2-core runner, so no measure of it exists
-    # yet. The first real run gives it.
-    timeout-minutes: 40
+    # (read 2026-11-03). The same release:check step in ci.yml took 31 minutes 29
+    # seconds on a 4-core runner on 2026-11-13, with TURBO_CONCURRENCY at 2. This
+    # job adds the OSV read and the dry run, so 40 minutes leaves no margin. A run
+    # that the limit cancels at the tag proves nothing. So the limit is 60.
+    timeout-minutes: 60
     permissions:
       contents: read
     # The SHA-256 list of the tarballs, from the step sums. The job publish

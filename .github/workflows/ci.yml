@@ -31,8 +31,10 @@ jobs:
     # the repository public (4 cores), took 27 minutes 15 seconds at the Turbo
     # default of 10 tasks at once. Nine test tasks failed on 5 second timeouts
     # and one 1000 ms limit, with no defect in the code. The step below sets
-    # TURBO_CONCURRENCY for that reason.
-    timeout-minutes: 40
+    # TURBO_CONCURRENCY for that reason. At the value 2 the run took 31 minutes
+    # 29 seconds (2026-11-13), 9 minutes short of 40. A runner can be slower on
+    # another day, and a run that the limit cancels proves nothing. So the limit is 60.
+    timeout-minutes: 60
     steps:
       # The full history. Without it, check-changesets and check-records find
       # no merge base with main and fail. The token leaves the git config, so
