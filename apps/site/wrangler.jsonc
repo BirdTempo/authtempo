@@ -6,6 +6,12 @@
   // the owner turns these two on at publication (wrangler docs, read 2026-10-14).
   "workers_dev": false,
   "preview_urls": false,
+  // The one public address of the site, set at publication on 2026-11-13. Cloudflare makes
+  // the DNS record and the certificate for a custom domain when the zone is in the same
+  // account (the zone authtempo.com is active there). Without this route and with
+  // workers_dev false, the Worker has no public address. The www host has no record and
+  // no route on purpose: a second host would serve the same pages twice.
+  "routes": [{ "pattern": "authtempo.com", "custom_domain": true }],
   // The same date as examples/worker. The Worker has no script, so the
   // Node.js compatibility flags change nothing here.
   "compatibility_date": "2026-09-30",
