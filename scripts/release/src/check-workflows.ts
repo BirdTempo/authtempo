@@ -299,6 +299,18 @@ const JOBS: Record<string, Record<string, Job>> = {
         NODE,
         { name: "Check the tag", run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
         { run: "pnpm install --frozen-lockfile" },
+        // The metadata cache for the offline smoke installs of the dry run. A frozen
+        // install leaves it empty on a new runner (read on 2026-11-16).
+        {
+          name: "Warm the metadata cache",
+          run: [
+            'mkdir "$RUNNER_TEMP/warm"',
+            'git archive HEAD | tar -x -C "$RUNNER_TEMP/warm"',
+            'rm "$RUNNER_TEMP/warm/pnpm-lock.yaml"',
+            'cd "$RUNNER_TEMP/warm"',
+            "pnpm install --lockfile-only --ignore-scripts",
+          ].join("\n"),
+        },
         // A tag checkout has no local main (ruling 16 of plan 12j).
         { run: "pnpm release:check --base origin/main", env: CHECK_ENV },
         {
