@@ -895,6 +895,40 @@ describe("dry run", () => {
       expect([path, path.startsWith(`${home}/`)]).toEqual([path, true]);
   });
 
+  it("keeps PNPM_HOME in the env of the path reads and of the children", () => {
+    // pnpm/action-setup puts the store under PNPM_HOME. Without the key, pnpm store path
+    // names an empty store, and each offline install fails (job check, 2026-11-16).
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-pnpm-home-test-"));
+    made.push(temp);
+    const { files } = childFiles(join(temp, "child"));
+    const parent = {
+      PATH: "/bin",
+      HOME: "/h",
+      PNPM_HOME: "/runner/setup-pnpm",
+      NPM_TOKEN: "secret",
+    };
+    expect(readEnv(parent, files).PNPM_HOME).toBe("/runner/setup-pnpm");
+    const env = childEnv(parent, files, { store: "/s", pnpmCache: "/c", npmCache: "/n" });
+    expect(env.PNPM_HOME).toBe("/runner/setup-pnpm");
+    expect(env.NPM_TOKEN).toBeUndefined();
+  });
+
+  it("names the package of a pnpm error on the lines after the code", async () => {
+    const { root, tmp } = setup();
+    const f = fake({
+      install: () => ({
+        status: 1,
+        stdout: "",
+        stderr:
+          "Error: ERR_PNPM_NO_OFFLINE_TARBALL\n× installing dependencies\n╰─▶ Failed to fetch tarball for left-pad@1.3.0\n",
+      }),
+    });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "pnpm install exited 1: Error: ERR_PNPM_NO_OFFLINE_TARBALL | × installing dependencies | ╰─▶ Failed to fetch tarball for left-pad@1.3.0",
+    ]);
+  });
+
   it("fails when a tool path read fails", async () => {
     const { root, tmp } = setup();
     const f = fake({

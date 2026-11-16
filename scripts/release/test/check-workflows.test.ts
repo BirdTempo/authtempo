@@ -58,7 +58,7 @@ const HISTORY = "\n        with:\n          fetch-depth: 0";
 /** The failure of an upload that is not the tarballs of the release copy. */
 const UPLOAD =
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
-  "release.yml: jobs.check step 15: the upload is not the artifact tarballs of ${{ runner.temp }}/release-copy/out/ with if-no-files-found: error";
+  "release.yml: jobs.check step 16: the upload is not the artifact tarballs of ${{ runner.temp }}/release-copy/out/ with if-no-files-found: error";
 /** The line of a token that a probe adds two lines under the environment of jobs.publish. */
 const ENV_TOKEN_LINE = lineOf(RELEASE, "    environment: release") + 2;
 const PUBLISH_PERMISSIONS = "    permissions:\n      id-token: write\n      contents: read\n";
@@ -340,7 +340,7 @@ describe("check-workflows", () => {
     const tag =
       '      - name: Check the tag\n        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"\n';
     expect(releaseFailures(swap(RELEASE, tag, ""))).toContain(
-      "release.yml: jobs.check: 14 steps, not the 15 steps of the rule",
+      "release.yml: jobs.check: 15 steps, not the 16 steps of the rule",
     );
     expect(ciFailures(swap(CI, "\n  check:\n", "\n  test:\n"))).toContain(
       "ci.yml: the jobs are not check",
@@ -377,7 +377,7 @@ describe("check-workflows", () => {
       "        run: node scripts/release/src/prepare.ts\n        working-directory: ${{ runner.temp }}/release-copy\n";
     expect(
       releaseFailures(swap(RELEASE, prepare, "        run: node scripts/release/src/prepare.ts\n")),
-    ).toEqual(["release.yml: jobs.check: step 9 is not in the release copy"]);
+    ).toEqual(["release.yml: jobs.check: step 10 is not in the release copy"]);
     expect(
       releaseFailures(
         swap(RELEASE, tag, `${tag}        working-directory: \${{ runner.temp }}/release-copy\n`),
@@ -713,14 +713,14 @@ describe("check-workflows", () => {
     expect(check(CI, RELEASE, scripts({})).failures).toEqual([
       "ci.yml: jobs.check step 5: pnpm lint is not a root script of package.json",
       "ci.yml: jobs.check step 6: pnpm release:check is not a root script of package.json",
-      "release.yml: jobs.check step 6: pnpm release:check is not a root script of package.json",
+      "release.yml: jobs.check step 7: pnpm release:check is not a root script of package.json",
     ]);
     expect(
       check(CI, RELEASE, scripts({ "release:check": "node scripts/release/src/gone.ts" })).failures,
     ).toEqual([
       "ci.yml: jobs.check step 5: pnpm lint is not a root script of package.json",
       "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
-      "release.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
+      "release.yml: jobs.check step 7: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
     ]);
   });
 
@@ -735,7 +735,7 @@ describe("check-workflows", () => {
     });
     expect(check(CI, RELEASE, without("scripts/release/src/release-check.ts")).failures).toEqual([
       "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
-      "release.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
+      "release.yml: jobs.check step 7: pnpm release:check runs scripts/release/src/release-check.ts, which does not exist",
     ]);
   });
 

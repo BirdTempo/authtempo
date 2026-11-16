@@ -68,6 +68,19 @@ jobs:
       # The lockfile as written. Without --frozen-lockfile, a new resolution
       # installs and no check sees it.
       - run: pnpm install --frozen-lockfile
+      # The metadata cache of pnpm, which the offline smoke installs of the dry
+      # run read. A frozen install fetches no metadata, so the cache is empty on
+      # a new runner. Without this step, the dry run fails with
+      # ERR_PNPM_NO_OFFLINE_META (read on a clean runner on 2026-11-16). The copy
+      # has no lockfile, so pnpm resolves each version again and caches the
+      # metadata. The copy is not kept, and no file of the checkout changes.
+      - name: Warm the metadata cache
+        run: |
+          mkdir "$RUNNER_TEMP/warm"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/warm"
+          rm "$RUNNER_TEMP/warm/pnpm-lock.yaml"
+          cd "$RUNNER_TEMP/warm"
+          pnpm install --lockfile-only --ignore-scripts
       # Every release check with OSV and the dry run. A tag checkout has no
       # local main, so the base is origin/main. Without it, a tarball ships
       # with no evidence. release-check starts the test servers of the
