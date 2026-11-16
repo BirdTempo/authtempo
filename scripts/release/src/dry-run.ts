@@ -219,6 +219,11 @@ const KEPT_ENV = [
   "TMPDIR",
   // The text encoding of the output, such as the package mark of the pnpm lines.
   "LANG",
+  // The home of pnpm. It holds no secret, only a path. pnpm/action-setup sets it and
+  // the store lies under it, so without it `pnpm store path` names an empty store and
+  // every offline install fails (read in the job check on 2026-11-16: the store was
+  // /home/runner/setup-pnpm/node_modules/.bin/store/v11, the default was another folder).
+  "PNPM_HOME",
 ] as const;
 
 /** The keys of KEPT_ENV that `parent` holds. */
@@ -346,8 +351,16 @@ export const spawnRun: Run = (cmd, args, cwd, env) => {
 };
 
 const nonEmpty = (text: string) => text.split("\n").filter((l) => l.trim() !== "");
-const firstLine = (r: RunResult) =>
-  (nonEmpty(r.stderr)[0] ?? nonEmpty(r.stdout).at(-1) ?? "no output").trim();
+// The first four lines of stderr. pnpm prints the code of an error on the first line
+// and the name of the package on the next lines. On 2026-11-16 the first line alone
+// (ERR_PNPM_NO_OFFLINE_TARBALL) hid which package was missing in the job check.
+const firstLine = (r: RunResult) => {
+  const err = nonEmpty(r.stderr)
+    .slice(0, 4)
+    .map((l) => l.trim());
+  const text = err.length > 0 ? err.join(" | ") : (nonEmpty(r.stdout).at(-1) ?? "no output").trim();
+  return text.length > 800 ? `${text.slice(0, 800)}...` : text;
+};
 
 /**
  * The summary line and the failure lines of a release check that printed its
