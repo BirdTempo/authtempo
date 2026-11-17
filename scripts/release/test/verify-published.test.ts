@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PUBLIC_REGISTRY } from "../src/lib/release-facts.ts";
 import { groupVersion, releasedNames } from "../src/lib/released.ts";
-import { summaryLine } from "../src/lib/report.ts";
+import { reportLines, summaryLine } from "../src/lib/report.ts";
 import {
   attestationsUrl,
   entry,
@@ -465,9 +465,14 @@ describe("the entry of verify-published", () => {
 
   it("asks the registry for each released name at the given version", async () => {
     const { urls, get } = allAttested();
-    const { lines, code } = await entry(ROOT, "0.1.0", get);
-    expect(lines).toEqual(["verify-published: PASS packages=27 attested=27 fallback=0 failures=0"]);
-    expect(code).toBe(0);
+    // The fallback list is empty here on purpose. The live release/fallback-published.json changes with
+    // each hand publish, and a listed name that is attested adds a note line. This test is about the
+    // names and the urls, so it must not depend on the live file. The notes have their own tests.
+    const report = await verifyPublished({ ...readVerifyInput(ROOT, "0.1.0"), fallback: [], get });
+    expect(reportLines(report)).toEqual([
+      "verify-published: PASS packages=27 attested=27 fallback=0 failures=0",
+    ]);
+    expect(report.failures).toEqual([]);
     expect(urls).toEqual(
       releasedNames(ROOT).flatMap((name) => [
         versionUrl(PUBLIC_REGISTRY, name, "0.1.0"),
