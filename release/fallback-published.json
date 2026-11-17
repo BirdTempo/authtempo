@@ -1,1 +1,137 @@
-[]
+[
+  {
+    "package": "@authtempo/adapter-d1@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/adapter-mysql@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/adapter-postgres@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/adapter-sqlite@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/astro@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/breach-check@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/captcha-turnstile@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/cli@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/client@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/compat-better-auth@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/core@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/express@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/fastify@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/handoff@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/hono@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/import@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/legacy-hashes@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/mcp@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/next@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/observe@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/react@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/react-router@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/solid@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/sveltekit@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/tanstack-start@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/verify@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  },
+  {
+    "package": "@authtempo/vue@0.1.0",
+    "date": "2026-11-16",
+    "reason": "npm offered no trusted publisher for a package with no version."
+  }
+]
