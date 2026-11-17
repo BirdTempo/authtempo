@@ -1,5 +1,11 @@
 # @authtempo/core
 
+## 0.1.1
+
+### Patch Changes
+
+- No code change. This release is the first publish through the trusted publisher of GitHub Actions, with provenance.
+
 ## 0.1.0
 
 ### Minor Changes
