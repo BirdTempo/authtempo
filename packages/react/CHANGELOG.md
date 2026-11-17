@@ -1,5 +1,11 @@
 # @authtempo/react
 
+## 0.1.1
+
+### Patch Changes
+
+- @authtempo/client@0.1.1
+
 ## 0.1.0
 
 ### Patch Changes

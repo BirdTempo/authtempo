@@ -1,5 +1,19 @@
 # @authtempo/cli
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @authtempo/core@0.1.1
+  - @authtempo/adapter-d1@0.1.1
+  - @authtempo/adapter-mysql@0.1.1
+  - @authtempo/adapter-postgres@0.1.1
+  - @authtempo/adapter-sqlite@0.1.1
+  - @authtempo/compat-better-auth@0.1.1
+  - @authtempo/import@0.1.1
+  - @authtempo/legacy-hashes@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
