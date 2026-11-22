@@ -564,7 +564,8 @@ describe("the moved prefixes (plan 12k Task 7, rulings 4 and 12)", () => {
     // Plan 12f2 Task 3 adds the call of USER_INVITE_PREFIX: 23.
     // Plan 12q Task 1 adds the call of SIGN_UP_PROOF_PREFIX: 24.
     // Plan 13a Task 2 adds the call of SETUP_LINK_PREFIX: 25.
-    expect(used.size).toBe(25);
+    // Plan 13a Task 3 adds the call of SETUP_SESSION_PREFIX: 26.
+    expect(used.size).toBe(26);
     for (const p of used) expect(CORE_PREFIXES, p).toContain(p);
   });
 });

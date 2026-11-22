@@ -262,7 +262,9 @@ describe("the column map (plan 12g)", () => {
     // Plan 12o adds 3: the per-address keys of the new proof after a lost
     // claim, one in magic-link.ts and two in email-otp.ts. Each is a key that
     // the request of that proof already counts.
-    expect(sites.length).toBe(117);
+    // Plan 13a Task 3 adds 3: the open of a setup link counts by IP and by link,
+    // and the confirm page counts by IP on the key of the open.
+    expect(sites.length).toBe(120);
     expect(sites).toContain('engine/social.ts "social-callback:ip" ipKey(ip)');
     expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
     expect(sites).toContain('http/routes/operator.ts "operator-create:actor" actorSubject(actor)');
