@@ -16,7 +16,7 @@ export type SetupLinkLock = {
 /**
  * The one lock order of each setup write (ruling R22 of plan 13a): the
  * organization row first, then the link row. The caller writes the session
- * rows after this call, so they come third. Each setup write calls this
+ * rows or the test run rows after this call, so they come third. Each setup write calls this
  * helper first in its transaction, and no setup write has an order of its
  * own. The organization delete locks the organization row, and then deletes
  * the setup links, then the setup sessions (`deleteOrganizationsRest`). So

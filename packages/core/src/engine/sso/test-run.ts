@@ -8,7 +8,7 @@ import { afterAudit } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { startSso } from "./oidc.js";
 import { setupActorName } from "./setup-drafts.js";
-import { holdLinkLive } from "./setup-live.js";
+import { lockSetupRows } from "./setup-live.js";
 import type { SetupSession } from "./setup-session.js";
 import { stepHelp } from "./step-help.js";
 import { resultHash } from "./test-run-store.js";
@@ -99,8 +99,13 @@ async function prepare(
   });
   if (!audit.ok) return audit;
   const written = await config.storage.transaction(async (tx) => {
-    // The link row lock first: a revoke in parallel then ends the write (`holdLinkLive`).
-    if (linkId !== null && !(await holdLinkLive(tx, linkId, now))) return fail("unauthorized");
+    // The organization row, then the link row, then the run rows (ruling R22 of plan 13a). A
+    // revoke or a delete in parallel then ends the write. A start of the manager holds no link,
+    // so it takes no such lock.
+    if (linkId !== null) {
+      const locked = await lockSetupRows(tx, row.organizationId, { id: linkId, now });
+      if (!locked.ok) return locked;
+    }
     // One pending run per connection: a new start ends the older one.
     await tx.update(
       "ssoTestRun",
