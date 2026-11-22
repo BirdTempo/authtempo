@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { createScimToken, type ScimTokenSummary } from "../src/engine/scim/tokens.js";
 import {
   createConnection,
   type SsoConnectionSummary,
@@ -177,10 +178,28 @@ describe("drafts stay inert (plan 13a Task 5)", () => {
     }
   });
 
-  it("discovery: a verified domain with a draft only finds no SSO route", async () => {
+  it("a domain cannot route to a draft: updateDomain answers not_found", async () => {
     const w = await world();
     const draft = await oidcDraft(w);
-    await route(w, draft.id);
+    const r = await updateDomain(w.config, SSO_APP, { id: w.domainId, connectionId: draft.id });
+    expect(r.ok ? null : [r.code, r.status]).toEqual(["not_found", 404]);
+    const row = await w.storage.findOne("ssoDomain", [
+      { field: "id", op: "eq", value: w.domainId },
+    ]);
+    expect(row?.connectionId).toBeNull();
+    // A connection that the manager made is no draft, so the same call routes to it.
+    const own = await oidcConnection(w, false, "Acme own");
+    const routed = await updateDomain(w.config, SSO_APP, { id: w.domainId, connectionId: own });
+    expect(routed.ok ? routed.value.connectionId : routed.code).toBe(own);
+  });
+
+  it("discovery: a verified domain routed to a connection that is off finds no SSO route", async () => {
+    // A domain cannot route to a draft, so the reachable row routes, then turns the connection off.
+    const w = await world();
+    const id = await oidcConnection(w, true);
+    await route(w, id);
+    const off = await updateConnection(w.config, SSO_APP, { id, enabled: false });
+    expect(off.ok ? off.value.enabled : off.code).toBe(false);
     expect(await discoverSso(w.config, { email: "ada@acme.example", ip: IP })).toEqual({
       ok: true,
       value: { sso: false },
@@ -208,7 +227,7 @@ describe("drafts stay inert (plan 13a Task 5)", () => {
     expect(row?.lastUsedAt).toBeNull();
   });
 
-  it("ACS to a draft: refused, and no user, identity, or session", async () => {
+  it("ACS to a draft with the state of a live start: refused at the request check", async () => {
     const w = await world();
     const linkId = await setupLink(w);
     const liveIdp = await createTestIdp({ alg: "rsa" });
@@ -225,19 +244,41 @@ describe("drafts stay inert (plan 13a Task 5)", () => {
     expect(await rowCounts(w)).toEqual(before);
   });
 
-  it("enforce: a domain of a link stays off, and no setup route sets it", async () => {
+  it("ACS to a connection that is off after its start: sso_not_configured, and no rows", async () => {
     const w = await world();
-    const draft = await oidcDraft(w);
+    const idp = await createTestIdp({ alg: "rsa" });
+    const id = await samlConnection(w, w.org, idp);
+    const start = await samlStart(w, id);
+    const off = await updateConnection(w.config, SSO_APP, { id, enabled: false });
+    expect(off.ok ? off.value.enabled : off.code).toBe(false);
+    const before = await rowCounts(w);
+    const xml = await idp.response(responseFor(w, id, start));
+    const answer = await postResponse(w, id, start, xml);
+    expect([answer.res.status, answer.error, answer.token]).toEqual([
+      302,
+      "sso_not_configured",
+      null,
+    ]);
+    expect(await rowCounts(w)).toEqual(before);
+  });
+
+  it("enforce: a domain of a link stays off, and no setup route sets it", async () => {
+    // A domain cannot route to a draft, so the reachable row routes, then turns the connection off.
+    const w = await world();
+    const linkId = await setupLink(w);
     await w.storage.update("ssoDomain", [{ field: "id", op: "eq", value: w.domainId }], {
-      setupLinkId: draft.linkId,
+      setupLinkId: linkId,
     });
-    await route(w, draft.id);
+    const id = await oidcConnection(w, true);
+    await route(w, id);
+    const off = await updateConnection(w.config, SSO_APP, { id, enabled: false });
+    expect(off.ok ? off.value.enabled : off.code).toBe(false);
     const refused = await updateDomain(w.config, SSO_APP, { id: w.domainId, enforce: true });
     expect(refused.ok ? null : [refused.code, refused.status]).toEqual(["invalid_body", 400]);
     const row = await w.storage.findOne("ssoDomain", [
       { field: "id", op: "eq", value: w.domainId },
     ]);
-    expect([row?.enforce, row?.setupLinkId]).toEqual([false, draft.linkId]);
+    expect([row?.enforce, row?.setupLinkId]).toEqual([false, linkId]);
     expect(await ssoRequiredFor(w.config, "ada@acme.example")).toBeNull();
     expect(await enforcedAnswer(w.config, "ada@acme.example")).toBeNull();
     // The bodies of the setup routes have no key for `enforce` or `enabled`.
@@ -291,5 +332,50 @@ describe("drafts stay inert (plan 13a Task 5)", () => {
     const own = await oidcConnection(w, false, "Acme own");
     const on = await updateConnection(w.config, SSO_APP, { id: own, enabled: true });
     expect(on.ok ? on.value.enabled : on.code).toBe(true);
+  });
+
+  it("manager changes a draft: version is 2, and a row that is no draft keeps version 1", async () => {
+    const w = await world();
+    const draft = await oidcDraft(w);
+    const own = await oidcConnection(w, false, "Acme own");
+    const version = async (id: string) =>
+      (await w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: id }]))?.version;
+    expect([await version(draft.id), await version(own)]).toEqual([1, 1]);
+    const [status] = await send(
+      w,
+      "POST",
+      `/sso/connections/update?id=${encodeURIComponent(draft.id)}`,
+      { label: "Acme draft 2" },
+    );
+    expect(status).toBe(200);
+    const changed = await updateConnection(w.config, SSO_APP, { id: own, label: "Acme own 2" });
+    expect(changed.ok ? changed.value.label : changed.code).toBe("Acme own 2");
+    expect([await version(draft.id), await version(own)]).toEqual([2, 1]);
+  });
+
+  it("pending token: the list marks it, and it holds a live slot", async () => {
+    const w = await world();
+    const linkId = await setupLink(w);
+    const made = await scimToken(w);
+    await w.storage.update("scimToken", [{ field: "id", op: "eq", value: made.id }], {
+      pending: true,
+      setupLinkId: linkId,
+    });
+    // The list sorts by id, and two ids of one millisecond sort at random.
+    w.clock.advance(1000);
+    const live = await scimToken(w);
+    const [status, body] = await send(w, "GET", `/scim/tokens?organizationId=${w.org}`);
+    const tokens = body.tokens as ScimTokenSummary[];
+    expect([status, tokens.map((t) => [t.id, t.pending])]).toEqual([
+      200,
+      [
+        [made.id, true],
+        [live.id, false],
+      ],
+    ]);
+    expectTypeOf<ScimTokenSummary["pending"]>().toEqualTypeOf<boolean>();
+    // SCIM_TOKENS_LIVE_MAX is 2: the pending token and the live token fill it.
+    const third = await createScimToken(w.config, SCIM_APP, { organizationId: w.org, name: "c" });
+    expect(third.ok ? null : [third.code, third.status]).toEqual(["token_limit", 409]);
   });
 });

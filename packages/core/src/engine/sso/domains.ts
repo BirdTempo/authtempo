@@ -504,7 +504,7 @@ const ENFORCE_REFUSED: Result<never> = {
 /**
  * Locks the connection row that `row` routes to, in the caller's
  * transaction, and answers false when no such connection of the domain's
- * organization exists. The update writes `organizationId` with its own
+ * organization exists, or when the connection is a draft. The update writes `organizationId` with its own
  * value, so no field changes: the form of `lockOrganization` (ruling 34 of
  * plan 12d). On Postgres a parallel `deleteConnection` or `updateConnection`
  * waits at this lock, and so does this update at theirs. The organization
@@ -520,6 +520,9 @@ async function lockConnection(tx: StorageAdapter, row: SsoDomainRow): Promise<bo
     [
       { field: "id", op: "eq", value: row.connectionId },
       { field: "organizationId", op: "eq", value: row.organizationId },
+      // A draft of a setup link takes no route here (spec 3 item 1, ruling R10 of plan 13a).
+      // Only the activation of the link routes a domain to it, in its own transaction.
+      { field: "draft", op: "eq", value: false },
     ],
     { organizationId: row.organizationId },
   );

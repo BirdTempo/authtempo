@@ -117,6 +117,7 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
           createdAt: "2026-01-01T00:00:30.000Z",
           lastUsedAt: null,
           expiresAt: null,
+          pending: false,
         },
       ],
     });
@@ -434,6 +435,7 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
           createdAt: w.clock.now().toISOString(),
           lastUsedAt: null,
           expiresAt: new Date(w.clock.now().getTime() + 730 * DAY_MS).toISOString(),
+          pending: false,
         },
       ],
     });

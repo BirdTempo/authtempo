@@ -887,7 +887,9 @@ async function listProviders(
     // A member who does not manage the organization sees none of its providers, as core's guard says.
     if (listed.status === 403) continue;
     if (!listed.ok) return calls.refusal(listed);
-    const { connections } = (await listed.json()) as { connections: SsoConnectionSummary[] };
+    const all = (await listed.json()) as { connections: SsoConnectionSummary[] };
+    // A draft of a setup link is no provider until an owner activates it (plan 13a, ruling R11).
+    const connections = all.connections.filter((c) => !c.draft);
     if (connections.length === 0) continue;
     const read = await calls.core(`/sso/domains${q}`);
     if (!read.ok) return calls.refusal(read);

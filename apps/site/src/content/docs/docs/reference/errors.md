@@ -705,12 +705,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="setup_not_tested"><code>setup_not_tested</code> 409</h3>
 
-- **Meaning:** No test run passed for the current version of the draft connection.
+- **Meaning:** No test run passed for the current version of the draft connection. The connection update also answers it for `enabled: true` on a draft: only the activation of the link turns on a draft.
 - **Do:** Run the test sign-in of the draft, then activate the setup link again.
 
 | Routes |
 | --- |
-| [`POST /sso/setup-links/activate`](/docs/reference/routes/#post-sso-setup-links-activate). |
+| [`POST /sso/setup-links/activate`](/docs/reference/routes/#post-sso-setup-links-activate), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update). |
 
 <h3 id="sso_required"><code>sso_required</code> 403</h3>
 

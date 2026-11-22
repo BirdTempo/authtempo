@@ -80,6 +80,12 @@ export interface ScimTokenSummary {
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /**
+   * True for a pending token of a setup link (plan 13a). It opens no
+   * directory until an owner activates the link, but it holds a live slot
+   * of `SCIM_TOKENS_LIVE_MAX`.
+   */
+  pending: boolean;
 }
 
 /** The answer form of a row. It names each field, so the hash never reaches an answer. */
@@ -92,6 +98,7 @@ function publicScimToken(row: ScimTokenRow): ScimTokenSummary {
     createdAt: row.createdAt.toISOString(),
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     expiresAt: row.expiresAt?.toISOString() ?? null,
+    pending: row.pending,
   };
 }
 

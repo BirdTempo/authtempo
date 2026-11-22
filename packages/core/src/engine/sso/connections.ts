@@ -810,7 +810,8 @@ export async function connectionOrganization(
  * domain with no way in through SSO would lock its staff out, so the owner
  * turns `enforce` off first. `enabled: true` on a draft of a setup link
  * answers `setup_not_tested` (plan 13a, pre-flight C7): only the activation
- * of the link clears `draft`, after a passed test of the draft. One
+ * of the link clears `draft`, after a passed test of the draft. Each change
+ * of a draft adds 1 to its `version`; a row that is no draft keeps it. One
  * transaction checks the roles. It writes
  * the row only when its `updatedAt` is the one read, else `conflict`. Then
  * it checks the enforced domains, and it writes one `sso_connection_update`
@@ -843,6 +844,9 @@ export async function updateConnection(
   if (held.draft && f.enabled === true) return fail("setup_not_tested");
   const now = config.clock.now();
   const changes: Partial<SsoConnectionRow> = { updatedAt: now };
+  // Each change of a draft adds 1 to its version (spec 5 item 5, ruling R9 of plan 13a).
+  // A passed test holds the version it tested, so a change after the test makes it stale.
+  if (held.draft) changes.version = held.version + 1;
   if (f.label !== undefined) changes.label = f.label;
   if (f.enabled !== undefined) changes.enabled = f.enabled;
   if (f.jit !== undefined) changes.jit = f.jit;

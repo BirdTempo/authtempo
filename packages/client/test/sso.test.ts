@@ -31,6 +31,7 @@ const CONNECTION = {
   kind: "oidc",
   label: "Acme staff",
   enabled: true,
+  draft: false,
   jit: true,
   defaultRole: "member",
   mfa: null,
@@ -53,6 +54,7 @@ const SCIM_TOKEN = {
   createdAt: "2026-01-01T00:00:00.000Z",
   lastUsedAt: null,
   expiresAt: null,
+  pending: false,
 };
 
 /**
