@@ -72,7 +72,7 @@ function recordOf(row: Pick<SsoDomainRow, "domain" | "challenge">): {
 }
 
 /** The answer form of a row. It never holds the challenge outside the record to publish. */
-function summary(row: SsoDomainRow): SsoDomainSummary {
+export function summary(row: SsoDomainRow): SsoDomainSummary {
   const verified = row.claimedDomain !== null;
   return {
     id: row.id,

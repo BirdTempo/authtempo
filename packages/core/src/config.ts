@@ -78,6 +78,7 @@ import {
 import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
 import { PARAM_SEGMENT_RE } from "./http/route-key.js";
 import { ROUTES } from "./http/route-list.js";
+import type { SetupPageInput } from "./http/setup-page.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
@@ -1375,14 +1376,7 @@ export interface SsoSetupConfig {
   page?: (input: SetupPageInput) => string;
 }
 
-/**
- * What a setup page gets (plan 13a). Task 9 adds the fields of each step;
- * Task 0 names the type so that the config can hold a page.
- */
-export interface SetupPageInput {
-  /** The token of the form, for each POST of the page. */
-  csrf: string;
-}
+export type { DraftSummary, SetupPageInput, TestSummary } from "./http/setup-page.js";
 
 /** The SSO config after construction (plan 12d). */
 export interface ResolvedSso {

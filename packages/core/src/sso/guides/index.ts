@@ -21,7 +21,15 @@ import { okta } from "./okta.js";
 export type SpField = "acsUrl" | "entityId" | "redirectUri" | "scimBaseUrl" | "scimToken";
 
 /** One instruction. `value` names the SP value that the page shows beside it. */
-export type GuideStep = { text: string; value?: SpField };
+export type GuideStep = {
+  text: string;
+  value?: SpField;
+  /**
+   * The reason that a person did not confirm this step on a real tenant (Task 15 proves it).
+   * The setup page shows it beside the step, so an IT admin knows to check the label.
+   */
+  unconfirmed?: string;
+};
 
 export interface IdpGuide {
   id: string;
@@ -34,6 +42,8 @@ export interface IdpGuide {
   steps: GuideStep[];
   /** How the provider's app tile opens `/sso/<id>/start`, or the gap (it starts with "Gap: "). */
   launch: string;
+  /** The reason that `launch` is not confirmed on a real tenant. The setup page shows it. */
+  launchUnconfirmed?: string;
   /** How the provider sends SCIM, or null when it does not. */
   directory: string | null;
 }
@@ -65,7 +75,10 @@ export interface FilledGuide {
 const START_ROUTE = "/sso/<id>/start";
 
 /** The real value of each SP field of a connection. */
-function spValues(config: ResolvedConfig, connectionId: string): Record<SpField, string | null> {
+export function spValues(
+  config: ResolvedConfig,
+  connectionId: string,
+): Record<SpField, string | null> {
   return {
     acsUrl: acsUrl(config, connectionId),
     entityId: spEntityId(config, connectionId),

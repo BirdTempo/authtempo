@@ -243,6 +243,17 @@ const setupToken = z.string().min(1).max(256);
 export const setupPageQuery = z.strictObject({ token: setupToken });
 export const setupOpenBody = z.strictObject({ token: setupToken });
 
+/** The pages of the setup (plan 13a Task 9). The type of `SetupPageInput.step` is built from this list. */
+export const SETUP_PAGE_STEPS = [
+  "idp",
+  "domain",
+  "connect",
+  "test",
+  "directory",
+  "handback",
+  "confirm",
+] as const;
+
 /** A domain of a setup session: the organization is the organization of the link. */
 export const setupDomainAddBody = z.strictObject({ domain: z.string().min(1).max(253) });
 
@@ -278,7 +289,13 @@ const setupScimTokenAnswer = z.strictObject({
  * The query of the status page. `run` is the test run whose result the page
  * shows: the ACS of a test sign-in answers 303 to it (pre-flight C9 of plan 13a).
  */
-export const setupStatusQuery = z.strictObject({ run: id.optional() });
+export const setupStatusQuery = z.strictObject({
+  run: id.optional(),
+  // The page of the setup and the guide of the IdP (plan 13a Task 9). Both are choices of the
+  // person: a step that the link does not hold, or an id with no guide, falls back to the default.
+  step: z.enum(SETUP_PAGE_STEPS).optional(),
+  idp: z.string().min(1).max(40).optional(),
+});
 
 /** What a setup session sees: its link and its own drafts, never a live row or a secret. */
 const setupStatusAnswer = z.strictObject({
@@ -415,5 +432,7 @@ export const SSO_CONTRACT = {
   "GET /sso/setup/status": {
     query: { schema: setupStatusQuery, parsedBy: "zod" },
     answer: { kind: "json", schema: setupStatusAnswer },
+    // The page of the setup (plan 13a Task 9). The JSON answer is for the client call (Task 11).
+    alt: { kind: "html" },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

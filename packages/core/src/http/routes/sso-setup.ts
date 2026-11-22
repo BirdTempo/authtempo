@@ -1,21 +1,38 @@
+import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { scimBase } from "../../engine/scim/discovery.js";
+import { publicConnection } from "../../engine/sso/connections.js";
+import { summary as domainSummary } from "../../engine/sso/domains.js";
 import { setupRefused } from "../../engine/sso/setup-events.js";
 import {
   openSetupSession,
   requireSetupSession,
   SETUP_PAGE_PER_IP,
 } from "../../engine/sso/setup-session.js";
+import { testRunResult } from "../../engine/sso/test-run.js";
+import type { ErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
+import { sha256Hex } from "../../primitives/crypto.js";
 import { fail } from "../../result.js";
-import type { SsoSetupLinkRow, SsoSetupSessionRow } from "../../schema.js";
+import type { SetupStep, SsoSetupLinkRow, SsoSetupSessionRow } from "../../schema.js";
+import { guideOf, spValues } from "../../sso/guides/index.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { escapeHtml } from "../confirm-page.js";
-import { setupOpenBody, setupPageQuery } from "../contract/sso.js";
+import { setupOpenBody, setupPageQuery, setupStatusQuery } from "../contract/sso.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, respond } from "../json.js";
 import { ROUTES, type RouteKey } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
+import {
+  type DraftSummary,
+  renderSetupPage,
+  type SetupDomain,
+  type SetupPageInput,
+  type SetupPageStep,
+  stepsOfLink,
+  type TestSummary,
+} from "../setup-page.js";
 import { readQuery } from "./sso.js";
 
 /**
@@ -133,6 +150,153 @@ function openedPage(config: ResolvedConfig): string {
 `;
 }
 
+/** The step that the page opens on when the person chose none: the first step that has work left. */
+function firstOpenStep(
+  link: SsoSetupLinkRow,
+  have: { idp: boolean; draft: boolean; verified: boolean; passed: boolean; token: boolean },
+  testRun: boolean,
+): SetupPageStep {
+  if (link.readyAt !== null) return "confirm";
+  const has = (s: SetupStep) => link.steps.includes(s);
+  if (has("connection") && testRun) return "test";
+  if (has("connection") && !have.draft && !have.idp) return "idp";
+  if (has("domain") && !have.verified) return "domain";
+  if (has("connection") && !have.draft) return "connect";
+  if (has("connection") && !have.passed) return "test";
+  if (has("directory") && !have.token) return "directory";
+  return "handback";
+}
+
+/**
+ * Reads the rows of one setup session and builds the input of the page. It reads the rows of
+ * the link only: its domains, its one draft, its pending token, and its runs. A run id of another
+ * link answers `not_found` in `testRunResult`, and the page shows that code and no result.
+ */
+async function pageInput(
+  config: ResolvedConfig,
+  caller: SetupCaller,
+  query: z.infer<typeof setupStatusQuery>,
+): Promise<SetupPageInput> {
+  const { link, session } = caller;
+  const linkIs = { field: "setupLinkId", op: "eq", value: link.id } as const;
+  const [organization, domainRows, draftRow, tokenRow] = await Promise.all([
+    config.storage.findOne("organization", [{ field: "id", op: "eq", value: link.organizationId }]),
+    config.storage.findMany(
+      "ssoDomain",
+      [{ field: "organizationId", op: "eq", value: link.organizationId }, linkIs],
+      { sort: { field: "id", dir: "asc" } },
+    ),
+    config.storage.findOne("ssoConnection", [linkIs, { field: "draft", op: "eq", value: true }]),
+    config.storage.findOne("scimToken", [linkIs, { field: "pending", op: "eq", value: true }]),
+  ]);
+  const domains: SetupDomain[] = domainRows.map((row) => {
+    const d = domainSummary(row);
+    return { id: d.id, domain: d.domain, verified: d.verified, record: d.record };
+  });
+  let draft: DraftSummary | null = null;
+  if (draftRow) {
+    const c = publicConnection(config, draftRow);
+    draft = {
+      id: c.id,
+      kind: c.kind,
+      label: c.label,
+      version: draftRow.version,
+      issuer: c.oidc?.issuer ?? null,
+      clientId: c.oidc?.clientId ?? null,
+      ssoUrl: c.saml?.ssoUrl ?? null,
+      idpEntityId: c.saml?.idpEntityId ?? null,
+    };
+  }
+
+  // The run of the query, else the newest run of this link for the draft.
+  let runId = query.run ?? null;
+  if (runId === null && draftRow) {
+    const [newest] = await config.storage.findMany(
+      "ssoTestRun",
+      [
+        { field: "linkId", op: "eq", value: link.id },
+        { field: "connectionId", op: "eq", value: draftRow.id },
+      ],
+      {
+        sort: [
+          { field: "createdAt", dir: "desc" },
+          { field: "id", dir: "desc" },
+        ],
+        limit: 1,
+      },
+    );
+    runId = newest?.id ?? null;
+  }
+  let test: TestSummary | null = null;
+  let error: ErrorCode | null = null;
+  if (runId !== null) {
+    const result = await testRunResult(config, caller, runId);
+    if (result.ok) {
+      const r = result.value;
+      test = {
+        outcome: r.run.outcome,
+        step: r.run.step,
+        help: r.help,
+        attributeNames: r.run.attributeNames,
+        address: r.address,
+        name: r.name,
+        domainClaimed: r.run.domainClaimed,
+        current: draftRow !== null && r.run.draftVersion === draftRow.version,
+      };
+    } else error = result.code;
+  }
+
+  let guide = query.idp === undefined ? null : guideOf(query.idp);
+  if (guide !== null && !guide.kinds.some((k) => link.kinds.includes(k))) guide = null;
+  // A saved draft with no choice of IdP keeps the generic guide of its kind.
+  if (guide === null && draftRow)
+    guide = guideOf(draftRow.kind === "saml" ? "generic-saml" : "generic-oidc");
+
+  const sp = spValues(config, draftRow?.id ?? "");
+  const values = {
+    acsUrl: draftRow ? (sp.acsUrl ?? "") : "",
+    entityId: draftRow ? (sp.entityId ?? "") : "",
+    redirectUri: draftRow ? (sp.redirectUri ?? "") : "",
+    scimBaseUrl: sp.scimBaseUrl ?? scimBase(config),
+    scimToken: "",
+  };
+
+  const allowed = stepsOfLink(link.steps);
+  const step: SetupPageStep =
+    query.step !== undefined && allowed.includes(query.step)
+      ? query.step
+      : firstOpenStep(
+          link,
+          {
+            idp: query.idp !== undefined,
+            draft: draftRow !== null,
+            verified: domains.some((d) => d.verified),
+            passed: test?.outcome === "passed" && test.current,
+            token: tokenRow !== null,
+          },
+          query.run !== undefined,
+        );
+
+  return {
+    step,
+    // One value for one session, and no other party can compute it: it hashes the secret of the session.
+    csrf: await sha256Hex(`setup-csrf:${session.tokenHash}`),
+    link: {
+      organization: organization?.name ?? "",
+      note: link.note,
+      steps: link.steps,
+      kinds: link.kinds,
+    },
+    guide,
+    values,
+    draft,
+    test,
+    error,
+    domains,
+    scim: tokenRow ? { hint: tokenRow.hint } : null,
+  };
+}
+
 /**
  * The routes of the setup link for its IT admin (plan 13a Task 3). They
  * exist when `sso.setup` is on. The routes of the setup session itself are
@@ -179,5 +343,15 @@ export function ssoSetupRoutes(config: ResolvedConfig): Route[] {
         });
       },
     },
+    // The page of the setup (Task 9). The ACS of a test sign-in answers 303 here with `run=<id>`.
+    setupSessionRoute("GET /sso/setup/status", async (ctx, caller) => {
+      const query = readQuery(ctx.url, setupStatusQuery);
+      if (!query.ok) return respond(query);
+      const input = await pageInput(ctx.config, caller, query.value);
+      return new Response(renderSetupPage(ctx.config, input), {
+        status: 200,
+        headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
+      });
+    }),
   ];
 }

@@ -18,7 +18,6 @@ export const UNMOUNTED_ROUTES: ReadonlySet<string> = new Set<RouteKey>([
   "POST /sso/setup/connection",
   "POST /sso/setup/scim-token",
   "POST /sso/setup/handback",
-  "GET /sso/setup/status",
 ]);
 
 /** ROUTES without the keys above, in the order of ROUTES. */

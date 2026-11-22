@@ -179,6 +179,7 @@ describe("schema version 17 (plan 13a)", () => {
   it("exports the config types of the setup page from the package", () => {
     const page = (input: SetupPageInput) => `<form data-csrf="${input.csrf}"></form>`;
     const setup: SsoSetupConfig = { ttlHours: 24, page };
-    expect(setup.page?.({ csrf: "c" })).toBe('<form data-csrf="c"></form>');
+    // The page reads `csrf` only, so the rest of the input is a cast.
+    expect(setup.page?.({ csrf: "c" } as SetupPageInput)).toBe('<form data-csrf="c"></form>');
   });
 });

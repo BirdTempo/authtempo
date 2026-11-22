@@ -81,19 +81,30 @@ export const entra: IdpGuide = {
     {
       text: 'For OIDC, select "Add optional claim", select the ID token type, then select email.',
     },
-    // Unconfirmed: check on a real tenant (Task 15). The docs do not say what the claim holds for a user with no address.
-    { text: "For OIDC, make sure that each user who signs in has an email address in Entra." },
+    {
+      text: "For OIDC, make sure that each user who signs in has an email address in Entra.",
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: "The docs do not say what the claim holds for a user with no address.",
+    },
     { text: "Assign the users who sign in to the enterprise application." },
     { text: 'For SCIM, in "Enterprise apps", select the application, then "Provisioning".' },
     { text: 'For SCIM, select "New configuration".' },
     { text: 'For SCIM, enter the SCIM base URL in "Tenant URL".', value: "scimBaseUrl" },
-    // Unconfirmed: check on a real tenant (Task 15). The docs do not show how "New configuration" offers this method.
-    { text: "For SCIM, choose the long-lived bearer token as the method of authentication." },
-    // Unconfirmed: check on a real tenant (Task 15). The docs name "Secret Token", but not its place in "New configuration".
-    { text: 'For SCIM, paste the SCIM token in "Secret Token".', value: "scimToken" },
+    {
+      text: "For SCIM, choose the long-lived bearer token as the method of authentication.",
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: 'The docs do not show how "New configuration" offers this method.',
+    },
+    {
+      text: 'For SCIM, paste the SCIM token in "Secret Token".',
+      value: "scimToken",
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: 'The docs name "Secret Token", but not its place in "New configuration".',
+    },
     { text: 'For SCIM, select "Test Connection".' },
   ],
-  // Unconfirmed: check on a real tenant (Task 15). The docs do not name the page that holds "Homepage URL".
+  // Unconfirmed: check on a real tenant (Task 15).
+  launchUnconfirmed: 'The docs do not name the page that holds "Homepage URL".',
   launch:
     'For SAML, enter /sso/<id>/start in "Sign on URL" of "Basic SAML Configuration". ' +
     "The My Apps tile then opens that URL. " +

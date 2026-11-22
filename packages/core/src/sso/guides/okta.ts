@@ -38,8 +38,11 @@ export const okta: IdpGuide = {
     { text: 'For SAML, select "SAML 2.0" as the "Sign-in method".' },
     { text: 'For SAML, enter the ACS URL in "Single sign-on URL".', value: "acsUrl" },
     { text: 'For SAML, enter the entity ID in "Audience URI (SP Entity ID)".', value: "entityId" },
-    // Unconfirmed: check on a real tenant (Task 15). The docs do not list the options of "Name ID format".
-    { text: 'For SAML, set "Name ID format" to the persistent format.' },
+    {
+      text: 'For SAML, set "Name ID format" to the persistent format.',
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: 'The docs do not list the options of "Name ID format".',
+    },
     {
       text: 'For SAML, in "Attribute Statements (optional)", add an attribute with the "Name" email.',
     },
@@ -61,11 +64,16 @@ export const okta: IdpGuide = {
       value: "scimBaseUrl",
     },
     { text: 'For SCIM, set "Authentication Mode" to "HTTP Header".' },
-    // Unconfirmed: check on a real tenant (Task 15). The docs do not say if Okta adds "Bearer " to this field.
-    { text: 'For SCIM, paste the SCIM token in "Authorization".', value: "scimToken" },
+    {
+      text: 'For SCIM, paste the SCIM token in "Authorization".',
+      value: "scimToken",
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: 'The docs do not say if Okta adds "Bearer " to this field.',
+    },
   ],
-  // Unconfirmed: check on a real tenant (Task 15). The docs name the "Login flow" choice, but they
-  // do not give the label of the option that redirects to "Initiate login URI".
+  // Unconfirmed: check on a real tenant (Task 15).
+  launchUnconfirmed:
+    'The docs name the "Login flow" choice, but they do not give the label of the option that redirects to "Initiate login URI".',
   launch:
     'For SAML, set "Do not display application icon to users" on the SAML app. ' +
     "Then add a Bookmark App with the URL /sso/<id>/start. " +

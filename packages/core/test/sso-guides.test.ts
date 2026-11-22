@@ -38,9 +38,16 @@ const guideSchema = z.strictObject({
     scimToken: z.string(),
   }),
   steps: z
-    .array(z.strictObject({ text: z.string().min(1), value: z.enum(SP_FIELDS).optional() }))
+    .array(
+      z.strictObject({
+        text: z.string().min(1),
+        value: z.enum(SP_FIELDS).optional(),
+        unconfirmed: z.string().min(1).optional(),
+      }),
+    )
     .min(1),
   launch: z.string(),
+  launchUnconfirmed: z.string().min(1).optional(),
   directory: z.string().min(1).nullable(),
 });
 

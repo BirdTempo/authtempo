@@ -37,8 +37,11 @@ export const googleWorkspace: IdpGuide = {
     { text: 'In "Service Provider Details", enter the ACS URL in "ACS URL".', value: "acsUrl" },
     { text: 'Enter the entity ID in "Entity ID".', value: "entityId" },
     { text: 'Keep "Start URL" empty.' },
-    // Unconfirmed: check on a real tenant (Task 15). The docs do not give the label of the persistent option.
-    { text: 'Set "Name ID format" to the persistent format.' },
+    {
+      text: 'Set "Name ID format" to the persistent format.',
+      // Unconfirmed: check on a real tenant (Task 15).
+      unconfirmed: "The docs do not give the label of the persistent option.",
+    },
     { text: 'Click "Continue".' },
     { text: 'Click "Add mapping", and select the primary email in "Google Directory attributes".' },
     { text: 'Enter email as the name of the attribute in "App attributes".' },
