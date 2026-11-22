@@ -13,10 +13,10 @@ import {
   type SsoSetupLinkRow,
 } from "../../schema.js";
 import { writeAuditIn } from "../operator/audit.js";
-import { lockOrganization } from "../teams.js";
 import { tokenHint } from "../tokens.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { recheckSsoManager, type SsoActor, ssoDraft } from "./guard.js";
+import { lockSetupRows } from "./setup-live.js";
 
 /**
  * The setup links of an organization (plan 13a, spec 6.1). A manager mints
@@ -171,11 +171,11 @@ export async function createSetupLink(
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel mint (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock holds the count below against a parallel mint (the 12k limit form). The new link
+      // row comes after the organization row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(tx, input.organizationId, null);
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       const live = await tx.findMany(
         "ssoSetupLink",
         [
@@ -211,8 +211,9 @@ export async function createSetupLink(
 
 /**
  * Revokes a setup link (spec 6.1 item 7). The actor must still manage the
- * organization of the link. One transaction sets `revokedAt` on the link
- * where it is not revoked and not ended, sets `endedAt` on each live setup
+ * organization of the link. One transaction locks the organization row,
+ * sets `revokedAt` on the link where it is not revoked and not ended
+ * (`lockSetupRows`), sets `endedAt` on each live setup
  * session of the link, and writes the `sso_setup_link_revoke` audit row.
  * So the next request of such a session fails, and no draft write lands
  * after the revoke. A link that is revoked or ended already answers ok and
@@ -239,17 +240,16 @@ export async function revokeSetupLink(
   if (!draft.ok) return draft;
   const now = config.clock.now();
   const revoked = await config.storage.transaction(async (tx): Promise<OperatorAuditRow | null> => {
-    const n = await tx.update(
-      "ssoSetupLink",
-      [
-        { field: "id", op: "eq", value: link.id },
-        { field: "revokedAt", op: "eq", value: null },
-        { field: "endedAt", op: "eq", value: null },
-      ],
-      { revokedAt: now, updatedAt: now },
-    );
-    // A parallel revoke, an activation, or a hand back ended the link first.
-    if (n === 0) return null;
+    // The organization row, then the link row, then the session rows (ruling R22 of plan 13a).
+    // An expired link is revoked too. A parallel revoke, an activation, or a hand back ended the
+    // link first, or a parallel delete removed the organization: nothing to write.
+    const held = await lockSetupRows(tx, link.organizationId, {
+      id: link.id,
+      now,
+      set: { revokedAt: now },
+      whenExpired: "accept",
+    });
+    if (!held.ok) return null;
     await tx.update(
       "ssoSetupSession",
       [

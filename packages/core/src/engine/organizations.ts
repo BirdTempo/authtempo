@@ -830,12 +830,15 @@ export async function deleteOrganizationsRest(
   // The tokens and the role rows of the organization have no use without it (plan 12k).
   await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
-  // Plan 13a (ruling R17): the setup sessions go before their links. Each
-  // read of them needs the organization row (setup-session.ts).
-  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R17): each read of the setup rows needs the organization
+  // row (setup-session.ts). The links go before their sessions, in the order
+  // of each setup write: the organization row, the link row, then the session
+  // rows (ruling R22, `lockSetupRows`). The reverse order made a deadlock.
   await tx.delete("ssoSetupLink", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 13a Task 7: the test runs hold ids and names of attributes only. They need no organization
   // row to read, because the connection delete in the head already stops a start and a callback.
+  // They go after the link, in the order of the start (ruling R22).
   await tx.delete("ssoTestRun", [{ field: "organizationId", op: "in", value: list }]);
   // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", [{ field: "organizationId", op: "in", value: list }]);

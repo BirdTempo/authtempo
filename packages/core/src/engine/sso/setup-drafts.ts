@@ -88,7 +88,7 @@ async function gate(
  * Adds a domain to the organization of the link, with the link id on the row.
  * The row routes to no connection. The rules of `addDomain` hold. A domain that the
  * manager or another link added answers `conflict`, and its challenge does not change.
- * The link is held live in the transaction of the write (`holdLinkLive`).
+ * The link is held live in the transaction of the write (`lockSetupRows`).
  */
 export async function addSetupDomain(
   config: ResolvedConfig,

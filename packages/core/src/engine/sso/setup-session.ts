@@ -12,9 +12,9 @@ import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAuditRow, SsoSetupLinkRow, SsoSetupSessionRow } from "../../schema.js";
 import { writeAuditIn } from "../operator/audit.js";
-import { lockOrganization } from "../teams.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { ssoDraft } from "./guard.js";
+import { lockSetupRows } from "./setup-live.js";
 
 /**
  * The setup session (plan 13a, spec 6.1 items 5 and 6). The IT admin opens a
@@ -72,9 +72,10 @@ async function organizationExists(config: ResolvedConfig, id: string): Promise<b
  * `rate_limited`. The token has the form of a link token and names a link
  * that is not revoked, not ended, and not expired, else
  * `setup_link_invalid` (one answer for each cause). One count on
- * `setup-open:link`, else `rate_limited`. One transaction then sets the
- * first `openedAt` of the link where the link is still live, reads and locks
- * the organization row (`setup_link_invalid` when it is gone), ends each
+ * `setup-open:link`, else `rate_limited`. One transaction then reads and
+ * locks the organization row, and sets the first `openedAt` of the link
+ * where the link is still live (`lockSetupRows`). An organization that is
+ * gone and a link that is not live answer `setup_link_invalid`. It ends each
  * live session of the link, writes the new session, and writes the
  * `sso_setup_link_open` audit row. So a revoke in parallel fails the open or
  * ends its session. The answer holds the value of the `Set-Cookie` header.
@@ -122,26 +123,18 @@ export async function openSetupSession(
     endedAt: null,
   };
   const opened = await config.storage.transaction(async (tx): Promise<OperatorAuditRow | null> => {
-    // The where holds the live link again: a revoke or an end since the read above fails the open.
-    const n = await tx.update(
-      "ssoSetupLink",
-      [
-        { field: "id", op: "eq", value: link.id },
-        { field: "revokedAt", op: "eq", value: null },
-        { field: "endedAt", op: "eq", value: null },
-        { field: "expiresAt", op: "gt", value: now },
-      ],
-      { openedAt: link.openedAt ?? now, updatedAt: now },
-    );
-    if (n === 0) return null;
-    // Ruling R17 of plan 13a: the organization row is read and locked here, after the link, in
-    // the order of the draft writes. A delete act that took the row refuses the open. A later
-    // act waits for this commit, and its sweep then deletes this session with the link. So no
-    // session row outlives its link (Minor 1 of the Task 2b review).
-    const organization = await tx.findOne("organization", [
-      { field: "id", op: "eq", value: link.organizationId },
-    ]);
-    if (!organization || !(await lockOrganization(tx, organization))) return null;
+    // Ruling R22 of plan 13a: the organization row, then the link row, then the session rows, in
+    // the order of each setup write and of the organization delete. A delete that holds the
+    // organization row refuses the open after its commit. A later delete waits for this commit,
+    // and deletes this session with the link. So no session row outlives its link (ruling R17).
+    // The where of the link holds it live again: a revoke or an end since the read above fails
+    // the open.
+    const held = await lockSetupRows(tx, link.organizationId, {
+      id: link.id,
+      now,
+      set: { openedAt: link.openedAt ?? now },
+    });
+    if (!held.ok) return null;
     await tx.update(
       "ssoSetupSession",
       [

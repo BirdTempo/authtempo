@@ -12,8 +12,7 @@ import type { OperatorAuditRow, ScimScope, ScimTokenRow } from "../../schema.js"
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "../sso/domains.js";
 import { type SsoActor, ssoDraft } from "../sso/guard.js";
-import { holdLinkLive } from "../sso/setup-live.js";
-import { lockOrganization } from "../teams.js";
+import { lockSetupRows } from "../sso/setup-live.js";
 import { tokenHint } from "../tokens.js";
 
 /**
@@ -182,14 +181,16 @@ export async function createScimToken(
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
-      // A pending token needs its link live at the write: a revoke or an activation before this fails it.
-      if (pendingFor !== undefined && !(await holdLinkLive(tx, pendingFor, now)))
-        return fail("unauthorized");
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel create (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel create (the 12k
+      // limit form). A pending token needs its link live at the write: a revoke or an activation
+      // before this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        pendingFor === undefined ? null : { id: pendingFor, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       // The port has no OR: the tokens with no expiry, then the tokens that expire after now.
       const at = { field: "organizationId", op: "eq", value: organization.id } as const;
       const live = [

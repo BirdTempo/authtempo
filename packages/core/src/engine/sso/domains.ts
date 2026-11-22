@@ -13,10 +13,9 @@ import type { Meter } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { auditDraft, operatorAct, operatorActed, writeAuditIn } from "../operator/audit.js";
 import { type OperatorActor, requireScope } from "../operator/guards.js";
-import { lockOrganization } from "../teams.js";
 import type { DnsTxtPort } from "./dns.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
-import { holdLinkLive } from "./setup-live.js";
+import { lockSetupRows } from "./setup-live.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
@@ -259,14 +258,16 @@ export async function addDomain(
   let added: Result<Added>;
   try {
     added = await config.storage.transaction(async (tx): Promise<Result<Added>> => {
-      // A setup link must be live at the write: a revoke or an activation before this fails it.
-      if (input.setupLinkId !== undefined && !(await holdLinkLive(tx, input.setupLinkId, now)))
-        return fail("unauthorized");
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel add (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel add (the 12k
+      // limit form). A setup link must be live at the write: a revoke or an activation before
+      // this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        input.setupLinkId === undefined ? null : { id: input.setupLinkId, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       const held = await tx.findOne("ssoDomain", [
         { field: "organizationId", op: "eq", value: organization.id },
         { field: "domain", op: "eq", value: domain },
@@ -419,7 +420,11 @@ export async function verifyDomainWith(
   try {
     audit = await config.storage.transaction(async (tx) => {
       // A setup link must be live at the claim: a revoke or an activation before this fails it.
-      if (input.setupLinkId !== undefined && !(await holdLinkLive(tx, input.setupLinkId, at)))
+      // The organization row comes before the link row (ruling R22 of plan 13a).
+      if (
+        input.setupLinkId !== undefined &&
+        !(await lockSetupRows(tx, row.organizationId, { id: input.setupLinkId, now: at })).ok
+      )
         return "ended" as const;
       const n = await tx.update(
         "ssoDomain",

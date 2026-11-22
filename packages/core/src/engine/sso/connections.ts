@@ -17,13 +17,12 @@ import { writeAuditIn } from "../operator/audit.js";
 import { isOwner } from "../organizations.js";
 import { roleRowDef } from "../permissions.js";
 import { holdsRolePart, ROLE_RE, rankOf } from "../ranks.js";
-import { lockOrganization } from "../teams.js";
 import { kindOn as kindIsOn } from "./discover.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
 import { importIdpMetadata } from "./saml-sp.js";
-import { holdLinkLive } from "./setup-live.js";
+import { lockSetupRows } from "./setup-live.js";
 
 /**
  * The OIDC and SAML connections of an organization (plan 12d Task 3, spec
@@ -765,14 +764,16 @@ export async function createConnection(
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
-      // A draft needs its link live at the write: a revoke or an activation before this fails it.
-      if (draftFor !== undefined && !(await holdLinkLive(tx, draftFor, now)))
-        return fail("unauthorized");
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel create (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel create (the 12k
+      // limit form). A draft needs its link live at the write: a revoke or an activation before
+      // this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        draftFor === undefined ? null : { id: draftFor, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       const fault = await roleFault(
         config,
         tx,
@@ -887,8 +888,12 @@ export async function updateConnection(
   const row: SsoConnectionRow = { ...held, ...changes };
   const updated = await config.storage
     .transaction(async (tx): Promise<Result<OperatorAuditRow>> => {
-      if (draftFor !== undefined && !(await holdLinkLive(tx, draftFor, now)))
-        return fail("unauthorized");
+      // A draft needs its link live at the write. The organization row comes before the link row
+      // (ruling R22 of plan 13a). A write of the manager holds no link, so it takes no such lock.
+      if (draftFor !== undefined) {
+        const locked = await lockSetupRows(tx, held.organizationId, { id: draftFor, now });
+        if (!locked.ok) return locked;
+      }
       if (f.defaultRole !== undefined || f.scimRoles !== undefined) {
         const fault = await roleFault(
           config,
