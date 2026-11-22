@@ -714,6 +714,9 @@ export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Pr
  * plan 12d): ten deletes of IN_CHUNK group ids. On the D1 binding the route
  * sent 23 queries with 50 groups, 20 of them with no group (2026-10-24). So
  * ten deletes fit the 50 queries of D1 Free with room for a due refresh.
+ * Plan 13a (ruling R6) adds the setup session and setup link deletes: 2
+ * queries more, so 25 and 22 by count. Task 1 of plan 13a measures them on
+ * the D1 binding.
  */
 export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
 

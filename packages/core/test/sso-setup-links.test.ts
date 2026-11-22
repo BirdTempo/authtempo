@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SsoConfig } from "../src/config.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import { addMember, deleteOrganization, updateMemberRole } from "../src/engine/organizations.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
@@ -191,6 +192,27 @@ describe("the SSO setup links (plan 13a Task 2)", () => {
     expect(r).toEqual({ ok: false, code: "forbidden_rank", status: 403 });
     expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
     expect(await w.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await listSetupLinks(w.config, actor, org)).toEqual({
+      ok: false,
+      code: "forbidden_rank",
+      status: 403,
+    });
+  });
+
+  it("answers 403 forbidden_rank to an owner of another organization who revokes or gets a link", async () => {
+    const { w, actor, org } = await world();
+    const made = await mint(w, actor, org);
+    const other = await managerSession(w, "owner@bexley.example", "bexley");
+    const foreign = await guarded(w, other.token, other.org);
+    const refused = { ok: false, code: "forbidden_rank", status: 403 };
+    expect(await revokeSetupLink(w.config, foreign, made.id)).toEqual(refused);
+    expect(await getSetupLink(w.config, foreign, made.id)).toEqual(refused);
+    expect((await linkRow(w, made.id))?.revokedAt).toBeNull();
+    expect(
+      await w.storage.findMany("operatorAudit", [
+        { field: "action", op: "eq", value: "sso_setup_link_revoke" },
+      ]),
+    ).toEqual([]);
   });
 
   it("sets the link revokedAt and the session endedAt in one transaction", async () => {
@@ -267,6 +289,20 @@ describe("the SSO setup links (plan 13a Task 2)", () => {
     await openSession(w, made.id, org);
     const gone = await deleteOrganization(w.config, { user: owner.user, organizationId: org });
     expect(gone).toEqual({ ok: true, value: { ok: true } });
+    expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
+    expect(await w.storage.findMany("ssoSetupSession", [])).toEqual([]);
+  });
+
+  it("deletes the links and the setup sessions in the act of a solo owner's account delete", async () => {
+    const { w, actor, org, owner } = await world();
+    const made = await mint(w, actor, org);
+    await openSession(w, made.id, org);
+    const session = await resolveSession(w.config, owner.token);
+    if (!session) throw new Error("the session ended");
+    const done = await deleteAccount(w.config, { session, ip: null, userAgent: null });
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    // No sweep ran: the act itself took both models.
+    expect(await w.storage.findMany("organization", [])).toEqual([]);
     expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
     expect(await w.storage.findMany("ssoSetupSession", [])).toEqual([]);
   });
