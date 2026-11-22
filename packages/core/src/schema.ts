@@ -214,6 +214,14 @@ export type VerificationPurpose =
    */
   | "saml-assertion"
   /**
+   * The address and the name that one test run of a draft read (plan 13a
+   * Task 7). The run row holds neither, so this row carries them to the
+   * result page of the person who ran the test. The identifier is the run
+   * id. The valueHash is the SHA-256 hex of `sso-test-result:<run id>`. The
+   * data is { address, name }. It lives 15 minutes, and the sweep deletes it.
+   */
+  | "sso-test-result"
+  /**
    * The latest expiry of one session: a SAML `SessionNotOnOrAfter` (ruling
    * 38 Q1 of plan 12d). The session create writes it in its own handle.
    * The sliding refresh reads it, so a refresh never moves `expiresAt` past

@@ -18,7 +18,11 @@ export const acsBody = z.object({ SAMLResponse: z.string(), RelayState: z.string
  * by hand. The app payload `data` of the social start (plan 12i Task 19)
  * does not ride an SSO sign-in, so this query does not offer it.
  */
-export const ssoStartQuery = z.object({ next: z.string().max(2048).optional() });
+export const ssoStartQuery = z.object({
+  next: z.string().max(2048).optional(),
+  // `1`: the test start of a draft by a setup session or a manager (plan 13a Task 7).
+  test: z.literal("1").optional(),
+});
 
 // Strict: a key that core does not read answers invalid_body.
 export const domainListQuery = z.strictObject({ organizationId: id });

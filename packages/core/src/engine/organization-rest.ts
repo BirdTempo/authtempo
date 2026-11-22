@@ -62,9 +62,11 @@ export async function deferOrganizationRest(
  * delete. A row with more than `IN_CHUNK` groups costs 3: the group read and
  * the two deletes of one chunk of groups. The row then waits for the next
  * sweep. Plan 13a (ruling R17) adds the setup session and setup link
- * deletes: 15.
+ * deletes: 15. Plan 13a Task 7 adds the test run delete: 16 (1 group read, 8 deletes up to the
+ * run delete, the member, group member, group and team member deletes, the 2 session calls, and
+ * the row delete).
  */
-export const ORGANIZATION_REST_CALLS = 15;
+export const ORGANIZATION_REST_CALLS = 16;
 
 /**
  * The sweep step of the pending rows of `ORGANIZATION_REST`, inside `limit`

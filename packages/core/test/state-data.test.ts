@@ -246,7 +246,8 @@ describe("the sealed state payload (plan 12i Task 19)", () => {
     const keys = (key: "GET /social/:provider/start" | "GET /sso/:connectionId/start") =>
       Object.keys((ROUTE_CONTRACT[key].query.schema as z.ZodObject<z.ZodRawShape>).shape);
     expect(keys("GET /social/:provider/start")).toEqual(["next", "data"]);
-    expect(keys("GET /sso/:connectionId/start")).toEqual(["next"]);
+    // `test` is the flag of the test run (plan 13a Task 7). It is no app payload.
+    expect(keys("GET /sso/:connectionId/start")).toEqual(["next", "test"]);
   });
 
   it("passes the payload to the session hook at the callback", async () => {

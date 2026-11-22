@@ -32,7 +32,11 @@ import { recheckSsoManager, requireSsoManager, type SsoActor } from "../../engin
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
+import { requireSetupSession } from "../../engine/sso/setup-session.js";
+import { startTestRun } from "../../engine/sso/test-run.js";
+import type { SsoTestDone } from "../../engine/sso/test-run-store.js";
 import { limit, spendLimit } from "../../limiter/limit.js";
+import { SETUP_SESSION_COOKIE } from "../../primitives/credentials.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import {
@@ -442,13 +446,69 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
     res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
     return res;
   };
+  // The IdP redirect of a start, with the binding cookie.
+  const startedAnswer = (value: { location: string; bindToken: string }): Response => {
+    const res = redirect(value.location);
+    res.headers.set(
+      "set-cookie",
+      oauthCookie(bindName, value.bindToken, bindPath, BIND_MAX_AGE_SECONDS),
+    );
+    return res;
+  };
+  /**
+   * `GET /sso/:connectionId/start?test=1` (plan 13a Task 7). A setup session or a manager starts
+   * a test run of a connection. The setup cookie is `SameSite=Lax`, so a cross-site GET carries it.
+   * The start writes a run row, so a request that the browser marks `cross-site` or `same-site`
+   * answers as for no credential and writes nothing. The setup cookie decides the caller first:
+   * the closed list has the key of this route, but the route is not a route of `ROUTES`, so
+   * `setupSessionRoute` cannot build it. Each refusal but the limit is the answer of no
+   * credential (404), so a caller learns nothing about the connection ids.
+   */
+  const testStart = async (ctx: RouteContext): Promise<Response> => {
+    const none = () => respond(fail("sso_not_configured"));
+    const site = ctx.request.headers.get("sec-fetch-site");
+    if (site === "cross-site" || site === "same-site") return none();
+    const connectionId = ctx.params.connectionId ?? "";
+    const input = {
+      ip: ctx.ip,
+      userAgent: ctx.request.headers.get("user-agent"),
+      next: ctx.url.searchParams.get("next") ?? undefined,
+    };
+    const answer = (r: Result<{ location: string; bindToken: string }>) => {
+      if (r.ok) return startedAnswer(r.value);
+      return r.code === "rate_limited" ? respond(r) : none();
+    };
+    if (readCookie(ctx.request, SETUP_SESSION_COOKIE) !== null) {
+      const auth = await requireSetupSession(ctx.config, ctx.request);
+      if (!auth.ok) return none();
+      return answer(await startTestRun(ctx.config, auth.value, connectionId, input));
+    }
+    // No setup cookie and no manager session: the answer of no credential.
+    if (!(await sessionFromRequest(ctx.config, ctx.request))) return none();
+    return managed(
+      ctx,
+      async () => ok({ id: connectionId }),
+      async (q) => connectionOrganization(ctx.config, q.id),
+      (actor, q) => startTestRun(ctx.config, actor, q.id, input),
+      startedAnswer,
+    );
+  };
   // The answer of the OIDC callback and of the SAML ACS. Each answer ends
   // the flow of this browser, so the binding cookie goes.
   const signedInAnswer = (
     config: ResolvedConfig,
-    r: Result<SsoSignedIn | SignInChallenge>,
+    r: Result<SsoSignedIn | SignInChallenge | SsoTestDone>,
   ): Response => {
     if (!r.ok) return unbound(authErrorRedirect(config, r.code));
+    // A test run: the ACS is a cross-site POST, so the setup cookie is not here. The answer is a
+    // 303 to the status route, which reads the run by its id with the cookie (plan 13a, C9).
+    if ("test" in r.value)
+      return unbound(
+        redirect(
+          `${config.baseURL}${config.basePath}/sso/setup/status?run=${encodeURIComponent(r.value.test.id)}`,
+          303,
+        ),
+      );
     if ("twoFactor" in r.value)
       return unbound(redirect(challengePageUrl(config, r.value.twoFactor.challenge)));
     const res = redirect(resolveNext(config, r.value.next));
@@ -499,6 +559,8 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       path: "/sso/:connectionId/start",
       key: "GET /sso/:connectionId/start",
       async handler(ctx) {
+        // The test start of a draft (plan 13a Task 7). It is one route with two callers.
+        if (ctx.url.searchParams.get("test") === "1") return testStart(ctx);
         const r = await startSso(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
           next: ctx.url.searchParams.get("next") ?? undefined,
