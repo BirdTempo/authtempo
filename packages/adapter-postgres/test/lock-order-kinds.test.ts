@@ -1407,9 +1407,14 @@ const SITES: Record<string, readonly string[] | string> = {
     "a platform role revoke with no impersonation",
   ],
   "operator/platform-role createAdmin": ["an admin create"],
-  // The domain proof of plan 12d. Its rows are of no kind of user-hold.ts.
-  "sso/domains addDomain": "one kind: the lock of the organization row, then domain rows",
-  "sso/domains verifyDomainWith": "no kind: the claim of the domain row, then its audit row",
+  // The domain proof of plan 12d. Its rows are of no kind of user-hold.ts. Ruling R22 of plan
+  // 13a: each setup write calls lockSetupRows first, the organization row, then the link row.
+  // The organization delete takes the organization row, then the link rows. The link rows are
+  // no kind, so this check cannot see that order. setup-delete-race.test.ts races it.
+  "sso/domains addDomain":
+    "one kind: the lock of the organization row, the link row of a setup write, then domain rows",
+  "sso/domains verifyDomainWith":
+    "one kind: with a setup link, the lock of the organization row and the link row; then the claim of the domain row and its audit row",
   // Ruling 34 of plan 12d: the connection row comes before the domain rows in the three
   // sites of a domain and a connection. Ruling 35 adds the organization delete: its
   // deleteOrganizationsRows deletes the connection rows before the domain rows. The two
@@ -1422,20 +1427,29 @@ const SITES: Record<string, readonly string[] | string> = {
   "sso/domains loseDomain": "no kind: the loss of the claim of the domain row, then its audit row",
   // The connections of plan 12d Task 3. Their rows are of no kind of user-hold.ts either.
   "sso/connections createConnection":
-    "one kind: the lock of the organization row, then reads of role rows and connections, then the connection row",
+    "one kind: the lock of the organization row, the link row of a setup write, reads of role rows and connections, then the connection row",
   "sso/connections updateConnection":
-    "no kind: reads of role rows, the connection row, reads of domains, then its audit row",
+    "one kind: with a setup link, the lock of the organization row and the link row; then reads of role rows, the connection row, reads of domains, and its audit row",
   "sso/connections deleteConnection":
     "no kind: the connection row, then the domain rows routed to it, then its audit row",
   // The SCIM tokens of plan 12d Task 9b. Their rows are of no kind of user-hold.ts.
   "scim/tokens createScimToken":
-    "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
+    "one kind: the lock of the organization row, the link row of a setup write, reads of token rows, then the token row and its audit row",
   "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
-  // The setup links of plan 13a Task 2. Their rows are of no kind of user-hold.ts.
+  // The setup links, setup sessions, and test runs of plan 13a. Their rows are of no kind of
+  // user-hold.ts. Each takes the organization row first (lockSetupRows, ruling R22).
   "sso/setup-links createSetupLink":
     "one kind: the lock of the organization row, then a read of the live links, then the link row and its audit row",
   "sso/setup-links revokeSetupLink":
-    "no kind: the link row, then the setup session rows of the link, then its audit row",
+    "one kind: the lock of the organization row, the link row, then the setup session rows of the link and its audit row",
+  "sso/setup-session openSetupSession":
+    "one kind: the lock of the organization row, the link row, then the setup session rows of the link, the new session, and its audit row",
+  // Plan 13a Task 7: the start of a test run. A start of a setup session takes the
+  // organization row and its link row first; a start of the manager takes no lock.
+  "sso/test-run prepare":
+    "one kind: with a setup link, the lock of the organization row and the link row; then the test run rows of the connection and its audit row",
+  "sso/test-run-store passTestRun":
+    "no kind: reads of domain rows, the test run row, then its result verification row",
   // The SCIM Users of plan 12d Task 10: the user hold, the sessions, the scimUser row,
   // the organization lock, the member and team member rows, then the audit row.
   "scim/users writeChange": [
@@ -1479,7 +1493,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // operator/accounts.ts, and Task 2 the third (the operator create). Task 3
     // adds the one of user-invite.ts (the confirm). Plan 13a Task 2 adds the two
     // of sso/setup-links.ts: the mint (createSetupLink) and the revoke (revokeSetupLink).
-    expect(found.length).toBe(90);
+    // Plan 13a Task 3 adds the open of sso/setup-session.ts (openSetupSession), and Task 7
+    // the start of a test run (prepare) and its pass (passTestRun): 93 (2026-11-23).
+    expect(found.length).toBe(93);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
