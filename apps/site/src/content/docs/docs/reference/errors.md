@@ -706,7 +706,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="setup_not_tested"><code>setup_not_tested</code> 409</h3>
 
 - **Meaning:** No test run passed for the current version of the draft connection. The connection update also answers it for `enabled: true` on a draft: only the activation of the link turns on a draft.
-- **Do:** Run the test sign-in of the draft, then activate the setup link again.
+- **Do:** Ask the person who set up the link to run the test sign-in of the draft again, then activate the setup link. A change to a domain or to the pending SCIM token also needs a new test run.
 
 | Routes |
 | --- |

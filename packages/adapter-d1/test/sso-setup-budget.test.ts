@@ -31,7 +31,11 @@ const BIND = "__Secure-tempo_session_oauth=";
  * domain or of the pending token reads the draft of the link (1 query) and, when it finds one,
  * moves its version (1 query). The domain writes of this scene come before the draft, so each
  * sends 1 more: 16 and 18, were 15 and 17. The token write comes after the draft and sends 3
- * more: 19, was 16 (the read and the update of the draft, and 1 query that is not traced). The scene also puts the token before the test run now.
+ * more: 19, was 16. The bump is one read and one update. An update in a transaction is two
+ * statements on D1 (a read for the undo, then the write; see `RECHECK_ROW_WRITES` in domains.ts).
+ * So the bump is 1 + 2 = 3 statements, and the domain writes, which come before the draft in this
+ * scene, send 1 more (the read only). The counts are the same in each run. The scene also puts
+ * the token before the test run now.
  */
 const PINS: Record<string, number> = {
   mint: 15,

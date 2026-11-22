@@ -1022,6 +1022,80 @@ describe("what the owner read besides the draft (R32)", () => {
   });
 });
 
+describe("the order of the rows in a write of a link (R22, ruling 35)", () => {
+  /**
+   * The engine on a storage that records each write of the draft connection, a domain and a
+   * token in a transaction. `deleteConnection` and the activation take the connection row first,
+   * so each writer must take the draft row (the version bump) before its domain or token row.
+   * Postgres reaches no deadlock here, as a draft takes no route (ruling R10), so the order is
+   * proven by the sequence of the writes.
+   */
+  function recording(config: X["w"]["config"]) {
+    const log: string[] = [];
+    const wrap = (tx: StorageAdapter): StorageAdapter => ({
+      ...tx,
+      async update(m, where, data) {
+        log.push(`update ${m}`);
+        return tx.update(m, where, data);
+      },
+      async delete(m, where) {
+        log.push(`delete ${m}`);
+        return tx.delete(m, where);
+      },
+      transaction: (fn) => tx.transaction((inner) => fn(wrap(inner))),
+    });
+    const storage: StorageAdapter = {
+      ...config.storage,
+      transaction: (fn) => config.storage.transaction((tx) => fn(wrap(tx))),
+    };
+    return { config: { ...config, storage }, log };
+  }
+
+  /** The first write of the draft comes before the first write of `other`. */
+  function draftFirst(log: string[], other: string) {
+    const draft = log.indexOf("update ssoConnection");
+    const row = log.findIndex((l) => l.endsWith(` ${other}`) && l !== "update ssoConnection");
+    expect([draft >= 0, row >= 0]).toEqual([true, true]);
+    expect(draft).toBeLessThan(row);
+  }
+
+  it("verifies a domain after the draft row", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const record = r.pendingRecord;
+    if (record === null) throw new Error("no record");
+    x.w.answers.a[record.name] = [record.value];
+    x.w.answers.b[record.name] = [record.value];
+    const rec = recording(x.w.config);
+    expect((await verifySetupDomain(rec.config, r.s, r.pendingDomainId)).ok).toBe(true);
+    draftFirst(rec.log, "ssoDomain");
+  });
+
+  it("deletes a domain of the link after the draft row", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const rec = recording(x.w.config);
+    expect((await deleteDomain(rec.config, x.actor, { id: r.pendingDomainId })).ok).toBe(true);
+    draftFirst(rec.log, "ssoDomain");
+  });
+
+  it("gives a new challenge after the draft row", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const rec = recording(x.w.config);
+    expect((await addSetupDomain(rec.config, r.s, "setup-pending.example")).ok).toBe(true);
+    draftFirst(rec.log, "ssoDomain");
+  });
+
+  it("replaces the pending token after the draft row", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const rec = recording(x.w.config);
+    expect((await createPendingScimToken(rec.config, r.s)).ok).toBe(true);
+    draftFirst(rec.log, "scimToken");
+  });
+});
+
 describe("the preview", () => {
   it("shows the OIDC issuer, the sign-in host, the verified domain, and the token name", async () => {
     const x = await world();

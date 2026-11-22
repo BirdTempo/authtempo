@@ -431,6 +431,11 @@ export async function verifyDomainWith(
         !(await lockSetupRows(tx, row.organizationId, { id: input.setupLinkId, now: at })).ok
       )
         return "ended" as const;
+      // A claim by a setup session changes what the preview shows (ruling R32). The draft row
+      // comes before the domain row (ruling 35): `deleteConnection` and the activation take the
+      // connection row first, so a bump after the domain write could deadlock with them. If a
+      // parallel verify claimed the row first, the version moves with no change: it is safe.
+      if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, at);
       const n = await tx.update(
         "ssoDomain",
         [
@@ -441,8 +446,6 @@ export async function verifyDomainWith(
       );
       // A parallel verify of this row claimed it first: nothing to write.
       if (n === 0) return null;
-      // A claim by a setup session changes what the preview shows (ruling R32).
-      if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, at);
       return writeAuditIn(tx, draft.value, at);
     });
   } catch (e) {
@@ -584,11 +587,14 @@ export async function deleteDomain(
     async (tx): Promise<Result<OperatorAuditRow>> => {
       const row = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
       if (!row) return fail("not_found");
-      const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
-      if (n === 0) return fail("not_found");
       // The owner removes a domain that a setup link added: the preview changes (ruling R32).
       // Chosen: the owner-side write bumps too, so no writer of the preview skips the bump.
+      // The draft row comes before the domain row (ruling 35), as in `deleteConnection`.
+      // Owner acts that change the preview with no bump (`updateDomain`, `enforceOff`, the revoke
+      // of the pending token, `deleteConnection`) only reduce what goes live: out of scope.
       if (row.setupLinkId !== null) await bumpSetupDraft(tx, row.setupLinkId, now);
+      const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
+      if (n === 0) return fail("not_found");
       const draft = ssoDraft(actor, "sso_domain_delete", {
         targetUserId: null,
         data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
