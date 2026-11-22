@@ -431,6 +431,16 @@ export {
 } from "./social/provider.js";
 export type { SlackConfig } from "./social/slack.js";
 export type { TwitterConfig } from "./social/twitter.js";
+export {
+  type FilledGuide,
+  type FilledStep,
+  fillGuide,
+  GUIDES,
+  type GuideStep,
+  guideOf,
+  type IdpGuide,
+  type SpField,
+} from "./sso/guides/index.js";
 export { createMemoryAdapter } from "./storage/memory.js";
 export {
   type FindManyOptions,
