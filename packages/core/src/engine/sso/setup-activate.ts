@@ -73,6 +73,24 @@ async function verifiedDomainsOf(storage: StorageAdapter, linkId: string, organi
   );
 }
 
+/** The domains of the link that now route to the connection: the rows that the activation wrote. */
+async function routedDomainsOf(
+  storage: StorageAdapter,
+  linkId: string,
+  organizationId: string,
+  connectionId: string,
+) {
+  return storage.findMany(
+    "ssoDomain",
+    [
+      { field: "setupLinkId", op: "eq", value: linkId },
+      { field: "organizationId", op: "eq", value: organizationId },
+      { field: "connectionId", op: "eq", value: connectionId },
+    ],
+    { sort: { field: "id", dir: "asc" } },
+  );
+}
+
 async function pendingTokenOf(storage: StorageAdapter, linkId: string, organizationId: string) {
   return storage.findOne("scimToken", [
     { field: "setupLinkId", op: "eq", value: linkId },
@@ -197,17 +215,22 @@ export async function activateSetup(
       );
       // The owner path takes no lock of the link: its write can land after our read.
       if (turned === 0) throw new Refused("setup_not_tested");
-      const domains = await verifiedDomainsOf(tx, link.id, link.organizationId);
       // One set-based write. The claim must still hold at the write: a lost claim routes nothing.
+      // The domain must be unrouted (R25): a link must not take a route from a live connection,
+      // and a domain that the draft already holds needs no write. A draft holds no route before
+      // its activation, so "unrouted" is the whole rule.
       await tx.update(
         "ssoDomain",
         [
           { field: "setupLinkId", op: "eq", value: link.id },
           { field: "organizationId", op: "eq", value: link.organizationId },
           { field: "claimedDomain", op: "ne", value: null },
+          { field: "connectionId", op: "eq", value: null },
         ],
         { connectionId: draft.id, updatedAt: now },
       );
+      // Read after the write, in the same transaction: the audit names the routed rows only.
+      const domains = await routedDomainsOf(tx, link.id, link.organizationId, draft.id);
       const token = await pendingTokenOf(tx, link.id, link.organizationId);
       if (token)
         await tx.update(

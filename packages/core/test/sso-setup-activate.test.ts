@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig, SsoConfig } from "../src/config.js";
 import { addMember, updateMemberRole } from "../src/engine/organizations.js";
 import { resolveSession } from "../src/engine/sessions.js";
-import { updateConnection } from "../src/engine/sso/connections.js";
+import { createConnection, updateConnection } from "../src/engine/sso/connections.js";
 import { recheckSsoManager, requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
 import { activateSetup, previewSetup } from "../src/engine/sso/setup-activate.js";
 import {
@@ -415,6 +415,85 @@ describe("the act", () => {
       .filter((d) => d.connectionId !== null)
       .map((d) => d.id);
     expect(routed).toEqual([r.domainId]);
+  });
+
+  it("refuses a draft whose only passed run belongs to another connection at the same version", async () => {
+    const x = await world();
+    const r = await ready(x);
+    // A passed run of another connection of the organization, at version 1 like the draft.
+    const other = await createConnection(x.w.config, x.actor, {
+      ...OIDC,
+      organizationId: x.org,
+      label: "Other IdP",
+    });
+    if (!other.ok) throw new Error(other.code);
+    await pass(x, { ...r, connId: other.value.id }, 1);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    const draft = await x.w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: r.connId },
+    ]);
+    expect(draft).toMatchObject({ draft: true, enabled: false });
+  });
+
+  it("lists in the audit only the domains that this activation routed (a claim lost in between)", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const second = await addSetupDomain(x.w.config, r.s, "second.example");
+    if (!second.ok || second.value.record === null) throw new Error("no second domain");
+    x.w.answers.a[second.value.record.name] = [second.value.record.value];
+    x.w.answers.b[second.value.record.name] = [second.value.record.value];
+    expect((await verifySetupDomain(x.w.config, r.s, second.value.id)).ok).toBe(true);
+    // The claim of the second domain is lost right after the first read of the domains of the
+    // transaction. The hook runs in the same transaction, as a commit of another connection.
+    // Whatever the order of the act, the audit must list the routed domains and no others.
+    let lost = false;
+    const storage = inTransaction(x.w.config.storage, async (tx, model, op) => {
+      if (model !== "ssoDomain" || op !== "findMany" || lost) return;
+      lost = true;
+      await tx.update("ssoDomain", [{ field: "id", op: "eq", value: second.value.id }], {
+        claimedDomain: null,
+      });
+    });
+    const done = await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop);
+    expect(done.ok).toBe(true);
+    const routed = (await x.w.storage.findMany("ssoDomain", []))
+      .filter((d) => d.connectionId !== null)
+      .map((d) => d.id)
+      .sort();
+    const rows = await auditOf(x.w, "sso_setup_link_activate");
+    const row = rows[0];
+    if (!row) throw new Error("no audit row");
+    const listed = [...(row.data as { domainIds: string[] }).domainIds].sort();
+    // This proves the order only: the audit list equals the routed set when the claim is lost
+    // after the first domain read. The filter on `connectionId` has its own test below.
+    expect(listed).toEqual(routed);
+    expect(lost).toBe(true);
+  });
+
+  it("does not take over a domain that a live connection already holds, and keeps its enforce", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const live = await createConnection(x.w.config, x.actor, {
+      ...OIDC,
+      organizationId: x.org,
+      label: "Live IdP",
+    });
+    if (!live.ok) throw new Error(live.code);
+    // The owner path routes the verified domain of the link to the live connection, with enforce.
+    await x.w.storage.update("ssoDomain", [{ field: "id", op: "eq", value: r.domainId }], {
+      connectionId: live.value.id,
+      enforce: true,
+    });
+    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    expect(done.ok).toBe(true);
+    const domain = await x.w.storage.findOne("ssoDomain", [
+      { field: "id", op: "eq", value: r.domainId },
+    ]);
+    expect(domain).toMatchObject({ connectionId: live.value.id, enforce: true });
+    const rows = await auditOf(x.w, "sso_setup_link_activate");
+    expect(rows[0]?.data).toMatchObject({ domainIds: [] });
   });
 
   it("does not route a domain of the organization that the link did not add", async () => {
