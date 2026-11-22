@@ -84,6 +84,13 @@ const audits = (w: W) =>
   ]);
 
 describe("the setup session (plan 13a Task 3)", () => {
+  it("answers 404 not_found to an open while sso.setup is off, and writes no row", async () => {
+    const w = ssoAuth({ sso: { oidc: true } as SsoConfig, password: { hash: FAST } });
+    const r = await openSetupSession(w.config, `sl_${"A".repeat(43)}`, META);
+    expect(r).toEqual({ ok: false, code: "not_found", status: 404 });
+    expect(await sessions(w)).toEqual([]);
+  });
+
   it("opens with a __Host-tempo_setup cookie that is HttpOnly, Secure, SameSite=Lax, and Path=/", async () => {
     const { w, mint, org } = await world();
     const made = await mint();
