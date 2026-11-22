@@ -692,6 +692,12 @@ export async function createConnection(
   actor: SsoActor,
   input: ConnectionFields & { organizationId: string; kind: "oidc" | "saml"; label: string },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). It makes the row the one draft of that link:
+   * `draft` true, `enabled` false, `setupLinkId` set. The count of the link is checked in the
+   * transaction that holds the organization lock, so two parallel writes make one draft.
+   */
+  draftFor?: string,
 ): Promise<Result<SsoConnectionSummary>> {
   // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
   const config = withSecrets(outer, [input.clientSecret]);
@@ -742,7 +748,7 @@ export async function createConnection(
     organizationId: input.organizationId,
     kind,
     label: f.label,
-    enabled: f.enabled ?? true,
+    enabled: draftFor === undefined ? (f.enabled ?? true) : false,
     jit: f.jit ?? true,
     defaultRole: f.defaultRole ?? DEFAULT_ROLE,
     config: { ...stored },
@@ -752,9 +758,9 @@ export async function createConnection(
     mfa: f.mfa ?? null,
     scimRoles: f.scimRoles ?? null,
     // A create of the manager or the app is live (plan 13a). Only a setup link makes a draft.
-    draft: false,
+    draft: draftFor !== undefined,
     version: 1,
-    setupLinkId: null,
+    setupLinkId: draftFor ?? null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
@@ -777,6 +783,13 @@ export async function createConnection(
         { limit },
       );
       if (held.length >= limit) return fail("connection_limit");
+      if (draftFor !== undefined) {
+        const own = await tx.findOne("ssoConnection", [
+          { field: "setupLinkId", op: "eq", value: draftFor },
+          { field: "draft", op: "eq", value: true },
+        ]);
+        if (own) return fail("conflict");
+      }
       await tx.create("ssoConnection", row);
       const draft = connectionDraft(actor, "sso_connection_create", row, f.changed, meta);
       if (!draft.ok) return draft;

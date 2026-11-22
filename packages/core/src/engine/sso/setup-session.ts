@@ -138,6 +138,9 @@ export async function openSetupSession(
   });
 }
 
+/** What `requireSetupSession` answers: the live link and its live session row. */
+export type SetupSession = { link: SsoSetupLinkRow; session: SsoSetupSessionRow };
+
 /**
  * The setup session of a request, or `unauthorized`. Every refusal is the
  * same value: no cookie, a value of the wrong form, an unknown value, an
@@ -150,7 +153,7 @@ export async function openSetupSession(
 export async function requireSetupSession(
   config: ResolvedConfig,
   request: Pick<Request, "headers">,
-): Promise<Result<{ link: SsoSetupLinkRow; session: SsoSetupSessionRow }>> {
+): Promise<Result<SetupSession>> {
   const cookie = readCookie(request, SETUP_SESSION_COOKIE);
   if (cookie === null || !SESSION_TOKEN_RE.test(cookie)) return fail("unauthorized");
   const now = config.clock.now();

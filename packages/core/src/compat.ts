@@ -19,6 +19,8 @@
  * the two seams gets the user row's rule, with no session and no fresh rule.
  */
 export type { DomainRecordOf } from "./compat-seams.js";
+/** The providerId form of a Better Auth app (plan 13a Task 4): one rule for core's setup draft and the shim. */
+export { PROVIDER_ID_RE } from "./compat-seams.js";
 export {
   type CheckedScimCaller,
   canManageSomeSso,

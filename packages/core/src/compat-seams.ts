@@ -25,6 +25,13 @@ export type DomainRecordOf = (
   connectionLabel: string | null,
 ) => { name: string; values: readonly string[] } | null;
 
+/**
+ * A providerId of a Better Auth app: letters, digits, `_`, and `-`, so it sits in one DNS label
+ * of the record and in one path segment. The compat package reads it from here, so core's
+ * label rule of a setup draft and the shim's rule of a manager write are one rule.
+ */
+export const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 const configRecords = new WeakMap<object, DomainRecordOf>();
 /**
  * The key of the record on a resolved config. It is a property, not a

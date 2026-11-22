@@ -238,7 +238,12 @@ export async function domainOrganization(
 export async function addDomain(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { organizationId: string; domain: string } & SsoActMeta,
+  input: {
+    organizationId: string;
+    domain: string;
+    /** The setup link that adds the domain (plan 13a). A new row keeps it; a retry keeps the row's own. */
+    setupLinkId?: string;
+  } & SsoActMeta,
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
@@ -305,7 +310,7 @@ export async function addDomain(
           failures: 0,
           firstFailureAt: null,
           expiresAt,
-          setupLinkId: null,
+          setupLinkId: input.setupLinkId ?? null,
         };
         await tx.create("ssoDomain", row);
       }

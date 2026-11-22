@@ -9,7 +9,7 @@ import {
   type SignInPageInput,
   type SmsPort,
 } from "@authtempo/core";
-import { type DomainRecordOf, withDomainRecord } from "@authtempo/core/compat";
+import { type DomainRecordOf, PROVIDER_ID_RE, withDomainRecord } from "@authtempo/core/compat";
 import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
@@ -522,8 +522,10 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
  * A providerId: letters, digits, `_`, and `-`, so it sits in one DNS label
  * of the record and in one path segment. Better Auth refuses a record
  * identifier over 63 characters (DNS_LABEL_MAX_LENGTH, dist/index.mjs:2584).
+ * The rule lives in core now (plan 13a Task 4): core's setup draft refuses the
+ * same labels, so the two cannot drift.
  */
-export const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export { PROVIDER_ID_RE };
 
 /**
  * Better Auth's record of a domain proof (@better-auth/sso 1.7.2

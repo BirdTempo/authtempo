@@ -140,6 +140,11 @@ export async function createScimToken(
     expiresInDays?: number | undefined;
   },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). The row is then a pending token of that link. The
+   * transaction removes the earlier pending token of the link first, so a link holds one.
+   */
+  pendingFor?: string,
 ): Promise<Result<{ token: string; id: string; hint: string }>> {
   const on = scimOn(config);
   if (!on.ok) return on;
@@ -171,8 +176,8 @@ export async function createScimToken(
     expiresAt: typeof days === "number" ? new Date(now.getTime() + days * DAY_MS) : null,
     lastUsedAt: null,
     // A token of the manager or the app is live (plan 13a). Only a setup link makes a pending one.
-    pending: false,
-    setupLinkId: null,
+    pending: pendingFor !== undefined,
+    setupLinkId: pendingFor ?? null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
@@ -181,6 +186,12 @@ export async function createScimToken(
       ]);
       // The lock holds the count below against a parallel create (the 12k limit form).
       if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // A new pending token of a link replaces the old one, before the count of live slots.
+      if (pendingFor !== undefined)
+        await tx.delete("scimToken", [
+          { field: "setupLinkId", op: "eq", value: pendingFor },
+          { field: "pending", op: "eq", value: true },
+        ]);
       // The port has no OR: the tokens with no expiry, then the tokens that expire after now.
       const at = { field: "organizationId", op: "eq", value: organization.id } as const;
       const live = [
