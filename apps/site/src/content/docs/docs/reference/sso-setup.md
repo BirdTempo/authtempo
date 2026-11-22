@@ -29,6 +29,8 @@ sources:
 
 Any other key of `sso.setup` throws a `ConfigError`.
 
+An organization holds at most 2 live links. A live link is not revoked, not ended, and not expired. The mint answers `setup_link_limit` past it. The calls of `sso.setupLinks` need a manager with a second factor on.
+
 ## Routes
 
 The setup link routes exist only when `sso.setup` is on.
@@ -66,6 +68,8 @@ The server API has no `setupLinks` call. A server holds no setup cookie and no m
 | `sso_setup_ready` | After a handback | Every owner of the organization |
 | `sso_activated` | After an activation | Every owner of the organization |
 | `hooks.sso.setupReady({ organizationId, linkId })` | After the commit of a handback | Your code. A throw writes one log line, and the handback stays. |
+
+A notice is a mail. A failed mail writes one log line, and the change stays. An owner with no address gets no mail.
 
 ## The events, the limits, and the errors
 

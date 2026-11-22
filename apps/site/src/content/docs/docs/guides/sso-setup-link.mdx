@@ -40,7 +40,7 @@ import test from "../../../../../samples/guides/sso-setup-link.test.ts?raw";
 
 The owner is the last check. Nothing the IT admin does goes live without the owner.
 
-**One risk stays.** A person who steals the link before the IT admin uses it can fill a draft. That draft can name a provider that the thief controls. If the owner then activates it after a quick read of the preview, the thief signs in to the organization through that provider. The test run does not stop this, because a thief's provider passes a test too. Core cannot know who the IT admin is. Two things limit the risk. The notice to every owner shows that a setup is ready, so a second owner can ask who handed it back. The link also ends at its time, at a revoke, and at the first activation.
+**One risk stays.** A person who steals the link before the IT admin uses it can fill a draft. That draft can name a provider that the thief controls. If the owner then activates it after a quick read of the preview, the thief signs in to the organization through that provider. The test run does not stop this, because a thief's provider passes a test too. Core cannot know who the IT admin is. Two things limit the risk. The notice to every owner shows that a setup is ready, so a second owner can ask who handed it back. The notice is a mail. A failed mail writes one log line, and the handback stays. An owner with no address gets no mail. So do not rely on the notice alone. The link also ends at its time, at a revoke, and at the first activation.
 
 So the owner must do three things before an activation:
 
@@ -53,7 +53,7 @@ So the owner must do three things before an activation:
 - The link, the open, and the page answer one code, [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), for an unknown, expired, revoked, or ended link. An answer tells nothing about the link.
 - A draft is not a live row. It signs nobody in, and the SCIM token of a draft opens no directory, until the owner activates.
 - The IT admin sets the values of the provider only. The owner sets `enabled`, `jit`, `defaultRole`, `mfa`, and `scimRoles` after the setup.
-- An organization holds a limit of open links. The mint answers [`setup_link_limit`](/docs/reference/errors/#setup_link_limit) past it.
+- An organization holds at most 2 live links. A live link is not revoked, not ended, and not expired. The mint answers [`setup_link_limit`](/docs/reference/errors/#setup_link_limit) past it.
 - Each guide shows the date on which a person read the provider docs. A label that the docs do not confirm shows as Unconfirmed. No guide was checked on a real tenant yet.
 
 ## If it fails

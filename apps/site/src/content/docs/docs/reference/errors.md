@@ -696,7 +696,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="setup_link_limit"><code>setup_link_limit</code> 409</h3>
 
-- **Meaning:** The organization holds its limit of open setup links.
+- **Meaning:** The organization holds its limit of 2 live setup links.
 - **Do:** Revoke a setup link that the organization does not use, then mint the new link again.
 
 | Routes |
