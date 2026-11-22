@@ -894,7 +894,10 @@ export interface SsoSetupLinkRow extends BaseRow {
   createdBy: string;
   expiresAt: Date;
   revokedAt: Date | null;
-  /** The activation or the handback ended the link. */
+  /**
+   * The activation ended the link. The hand back does not: it sets `readyAt`, and the link
+   * stays live until the owner activates or revokes it, or it expires.
+   */
   endedAt: Date | null;
   openedAt: Date | null;
   /** The IT admin handed the drafts back to the owners. */

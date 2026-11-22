@@ -121,8 +121,7 @@ const SCIM_GROUP_CALLS = 2;
  * `resolveSession` 4, the limiter 1, and the membership read 1. In the
  * transaction: the user lock 2, the spend of the link 1, the session of the
  * proof 1, the impersonation hold 1, the organization rule 3, the owner lock
- * 2, the user delete 1, the solo organizations 6, the
- * invitation delete 1,
+ * 2, the user delete 1, the solo organizations 6, the invitation delete 1,
  * the member delete of the user 1, the owner recount 1, `endSessions` 4, the
  * page of the impersonation sessions 2, the scimUser read 1, and the 13
  * deletes of `LAST_MODELS`. After the commit: the verification delete 1 and

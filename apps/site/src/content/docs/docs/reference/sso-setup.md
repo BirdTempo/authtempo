@@ -46,6 +46,7 @@ The setup link routes exist only when `sso.setup` is on.
 | [`POST /sso/setup/open`](/docs/reference/routes/#post-sso-setup-open) | The IT admin, with the link |
 | [`POST /sso/setup/domains/add`](/docs/reference/routes/#post-sso-setup-domains-add) | The setup session |
 | [`POST /sso/setup/domains/verify`](/docs/reference/routes/#post-sso-setup-domains-verify) | The setup session |
+| [`GET /sso/:connectionId/start?test=1`](/docs/reference/routes/#get-sso-connectionid-start) | The setup session, or a manager. It starts a test sign-in of a draft. While `sso.setup` is off, the flag has no effect |
 | [`POST /sso/setup/connection`](/docs/reference/routes/#post-sso-setup-connection) | The setup session |
 | [`POST /sso/setup/scim-token`](/docs/reference/routes/#post-sso-setup-scim-token) | The setup session |
 | [`POST /sso/setup/handback`](/docs/reference/routes/#post-sso-setup-handback) | The setup session |
