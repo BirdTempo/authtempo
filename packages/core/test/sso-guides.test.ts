@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { scimBase } from "../src/engine/scim/discovery.js";
 import { acsUrl, spEntityId } from "../src/engine/sso/connections.js";
 import { ssoCallbackUrl } from "../src/engine/sso/oidc.js";
 import { fillGuide, GUIDES, guideOf, type SpField } from "../src/sso/guides/index.js";
@@ -111,7 +112,7 @@ describe("the IdP guides (plan 13a Task 6)", () => {
       acsUrl: acsUrl(config, id),
       entityId: spEntityId(config, id),
       redirectUri: ssoCallbackUrl(config, id),
-      scimBaseUrl: `${config.baseURL}${config.basePath}/scim/v2`,
+      scimBaseUrl: scimBase(config),
       // The token is shown once at its mint; no guide holds it.
       scimToken: null,
     };
@@ -152,6 +153,35 @@ describe("the IdP guides (plan 13a Task 6)", () => {
         expect(s.text.slice(0, -1), `${g.id}: ${s.text}`).not.toMatch(/[.;!?](\s|$)/);
         expect(gerunds(s.text), `${g.id}: ${s.text}`).toEqual([]);
       }
+    }
+  });
+
+  it("launch and directory: each sentence has at most 20 words and no gerund as a noun", () => {
+    for (const g of GUIDES) {
+      for (const text of [g.launch, g.directory ?? ""]) {
+        // The whole text: a quoted doc sentence can hold a full stop, and the lint skips quotes.
+        expect(gerunds(text), `${g.id}: ${text}`).toEqual([]);
+        for (const sentence of text.split(/(?<=[.;:!?]"?)\s+/).filter((t) => t !== "")) {
+          expect(words(sentence), `${g.id}: ${sentence}`).toBeLessThanOrEqual(20);
+        }
+      }
+    }
+  });
+
+  it("SAML: a step asks for a persistent NameID, and a step asks for an attribute email", () => {
+    // Core sends a NameIDPolicy of the persistent format and reads the address from the attribute
+    // `email` (engine/sso/saml-sp.ts, saml/assertion.ts). A guide without these steps fails at sign-in.
+    for (const g of GUIDES) {
+      if (!g.kinds.includes("saml")) continue;
+      const saml = g.steps
+        .map((s) => s.text)
+        .filter((t) => !t.startsWith("For OIDC,") && !t.startsWith("For SCIM,"));
+      const nameId = saml.filter(
+        (t) => /persistent/i.test(t) && /name ?id|name identifier/i.test(t),
+      );
+      const email = saml.filter((t) => /\bemail\b/.test(t) && /attribute|claim/i.test(t));
+      expect(nameId.length, `${g.id}: NameID step`).toBeGreaterThanOrEqual(1);
+      expect(email.length, `${g.id}: email step`).toBeGreaterThanOrEqual(1);
     }
   });
 

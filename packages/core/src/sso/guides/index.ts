@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { scimBase } from "../../engine/scim/discovery.js";
 import { acsUrl, spEntityId } from "../../engine/sso/connections.js";
 import { ssoCallbackUrl } from "../../engine/sso/oidc.js";
 import { entra } from "./entra.js";
@@ -69,8 +70,8 @@ function spValues(config: ResolvedConfig, connectionId: string): Record<SpField,
     acsUrl: acsUrl(config, connectionId),
     entityId: spEntityId(config, connectionId),
     redirectUri: ssoCallbackUrl(config, connectionId),
-    // The SCIM routes live under `<basePath>/scim/v2` (route-list.ts); the base is one per deployment.
-    scimBaseUrl: `${config.baseURL}${config.basePath}/scim/v2`,
+    // One SCIM base per deployment: the same source as the SCIM routes and their `location` values.
+    scimBaseUrl: scimBase(config),
     scimToken: null,
   };
 }

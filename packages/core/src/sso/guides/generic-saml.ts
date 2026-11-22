@@ -29,7 +29,7 @@ export const genericSaml: IdpGuide = {
     },
     { text: 'Enter the entity ID in "SP entity ID (Audience)".', value: "entityId" },
     { text: "If your IdP reads SP metadata, give it the entity ID URL as the metadata URL." },
-    { text: "Send the address of the user as the NameID or as an attribute." },
+    { text: "Send a persistent NameID, and send the address in an attribute with the name email." },
     { text: "Sign the assertion or the response." },
     { text: "Copy the IdP metadata XML to the setup page." },
     { text: 'For SCIM, enter the SCIM base URL in "SCIM base URL".', value: "scimBaseUrl" },

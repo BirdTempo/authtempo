@@ -3,10 +3,13 @@ import type { IdpGuide } from "./index.js";
 /**
  * Google Workspace. Each label comes from the Google Workspace Admin Help,
  * read on 2026-11-23 (the page says "Last updated 2026-11-10 UTC"):
- * - SAML: https://knowledge.workspace.google.com/admin/apps/set-up-your-own-custom-saml-app
+ * - SAML ("Name ID format", "Add mapping", "Google Directory attributes", "App attributes"):
+ *   https://knowledge.workspace.google.com/admin/apps/set-up-your-own-custom-saml-app
  *   (was https://support.google.com/a/answer/6087519)
+ *   It says: "The default Name ID is the primary email." It does not list the options of "Name ID format".
  * - SCIM: https://knowledge.workspace.google.com/admin/users/advanced/automated-user-provisioning-with-custom-scim-profiles
- *   and .../admin/users/advanced/about-automated-user-provisioning
+ *   and https://knowledge.workspace.google.com/admin/users/advanced/about-automated-user-provisioning
+ *   It says: "Supports Bearer Token authentication. OAuth token authentication is not supported."
  *
  * No OIDC kind: a Google sign-in for an OIDC client is a Google Cloud
  * setup, not a Google Admin setup. This guide did not read those docs.
@@ -34,7 +37,12 @@ export const googleWorkspace: IdpGuide = {
     { text: 'In "Service Provider Details", enter the ACS URL in "ACS URL".', value: "acsUrl" },
     { text: 'Enter the entity ID in "Entity ID".', value: "entityId" },
     { text: 'Keep "Start URL" empty.' },
-    { text: 'Click "Continue", then click "Finish".' },
+    // Unconfirmed: check on a real tenant (Task 15). The docs do not give the label of the persistent option.
+    { text: 'Set "Name ID format" to the persistent format.' },
+    { text: 'Click "Continue".' },
+    { text: 'Click "Add mapping", and select the primary email in "Google Directory attributes".' },
+    { text: 'Enter email as the name of the attribute in "App attributes".' },
+    { text: 'Click "Finish".' },
     { text: 'In "User access", turn the app on for the users who sign in.' },
     { text: 'For SCIM, under "Autoprovisioning", click "Configure auto-provisioning".' },
     { text: 'For SCIM, paste the SCIM token in "Access token".', value: "scimToken" },
