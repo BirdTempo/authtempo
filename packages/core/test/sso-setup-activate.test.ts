@@ -1,0 +1,819 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuthConfig, SsoConfig } from "../src/config.js";
+import { addMember, updateMemberRole } from "../src/engine/organizations.js";
+import { resolveSession } from "../src/engine/sessions.js";
+import { updateConnection } from "../src/engine/sso/connections.js";
+import { recheckSsoManager, requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
+import { activateSetup, previewSetup } from "../src/engine/sso/setup-activate.js";
+import {
+  addSetupDomain,
+  createPendingScimToken,
+  saveDraftConnection,
+  verifySetupDomain,
+} from "../src/engine/sso/setup-drafts.js";
+import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
+import { openSetupSession, requireSetupSession } from "../src/engine/sso/setup-session.js";
+import { setupSessionRoute } from "../src/http/routes/sso-setup.js";
+import { newId } from "../src/primitives/ids.js";
+import { ok } from "../src/result.js";
+import type { StorageAdapter } from "../src/storage/port.js";
+import { createTestIdp } from "../src/testing/saml-idp.js";
+import { recordAddress, recordCredential } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
+import { SSO_APP, ssoAuth } from "./sso/helpers.js";
+import { managerSession } from "./sso/manager-helpers.js";
+import { verifiedSession } from "./totp-helpers.js";
+
+const HOUR_MS = 3_600_000;
+const META = { ip: recordAddress("198.51.100.9"), userAgent: "setup-activate-test" };
+const SECRET = "idp-client-secret-0123456789";
+const OIDC = {
+  kind: "oidc",
+  label: "Acme Okta",
+  issuer: "https://login.idp.example/acme",
+  clientId: "acme-client",
+  clientSecret: SECRET,
+} as const;
+const NOT_TESTED = { ok: false, code: "setup_not_tested", status: 409 };
+const INVALID = { ok: false, code: "setup_link_invalid", status: 404 };
+const RANK = { ok: false, code: "forbidden_rank", status: 403 };
+const STEPS = ["domain", "connection", "directory"] as ("domain" | "connection" | "directory")[];
+
+beforeEach(() => {
+  for (const m of ["error", "info", "warn", "log", "debug"] as const)
+    vi.spyOn(console, m).mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
+
+/** SSO with setup on, an owner of acme who passes the manager guard, and SCIM. */
+async function world(extra: Partial<AuthConfig> = {}) {
+  const w = ssoAuth({
+    sso: { oidc: true, saml: true, setup: {} } as SsoConfig,
+    scim: {},
+    password: { hash: FAST, uniformSignUp: false },
+    ...extra,
+  });
+  const owner = await managerSession(w, "owner@acme.example", "acme");
+  const actor = await guarded(w, owner.token, owner.org);
+  return { w, owner, actor, org: owner.org };
+}
+type X = Awaited<ReturnType<typeof world>>;
+
+/** The actor of the manager guard for a session token, as a route gets it. */
+async function guarded(w: X["w"], token: string, org: string): Promise<SsoActor> {
+  const resolved = await resolveSession(w.config, token);
+  if (!resolved) throw new Error("the session ended");
+  const r = await requireSsoManager(w.config, resolved, org);
+  if (!r.ok) throw new Error(r.code);
+  return r.value;
+}
+
+/** A link with a setup session, an OIDC draft, a verified and a pending domain, and a pending token. */
+async function ready(x: X, kind: "oidc" | "saml" = "oidc", tag = "setup") {
+  const { w, actor, org } = x;
+  const made = await createSetupLink(w.config, actor, {
+    organizationId: org,
+    steps: STEPS,
+    kinds: ["oidc", "saml"],
+    note: "Ada at Acme IT",
+  });
+  if (!made.ok) throw new Error(made.code);
+  recordCredential(made.value.token);
+  const opened = await openSetupSession(w.config, made.value.token, META);
+  if (!opened.ok) throw new Error(opened.code);
+  const pair = opened.value.cookie.split(";")[0] ?? "";
+  recordCredential(pair.split("=")[1] ?? "");
+  const checked = await requireSetupSession(
+    w.config,
+    new Request("https://auth.example/auth/sso/setup/status", { headers: { cookie: pair } }),
+  );
+  if (!checked.ok) throw new Error(checked.code);
+  const s = checked.value;
+  let cert: string | null = null;
+  const saved =
+    kind === "oidc"
+      ? await saveDraftConnection(w.config, s, OIDC)
+      : await (async () => {
+          const idp = await createTestIdp({ alg: "rsa" });
+          cert = idp.certificatePem;
+          return saveDraftConnection(w.config, s, {
+            kind: "saml",
+            label: "Acme SAML",
+            idpEntityId: idp.entityId,
+            ssoUrl: "https://sso.idp.example/saml/acme",
+            certificates: [idp.certificatePem],
+          });
+        })();
+  if (!saved.ok) throw new Error(saved.code);
+  const added = await addSetupDomain(w.config, s, `${tag}.example`);
+  if (!added.ok) throw new Error(added.code);
+  const record = added.value.record;
+  if (record === null) throw new Error("no record");
+  w.answers.a[record.name] = [record.value];
+  w.answers.b[record.name] = [record.value];
+  const verified = await verifySetupDomain(w.config, s, added.value.id);
+  if (!verified.ok) throw new Error(verified.code);
+  const pending = await addSetupDomain(w.config, s, `${tag}-pending.example`);
+  if (!pending.ok) throw new Error(pending.code);
+  const token = await createPendingScimToken(w.config, s);
+  if (!token.ok) throw new Error(token.code);
+  recordCredential(token.value.token);
+  return {
+    s,
+    linkId: s.link.id,
+    connId: saved.value.id,
+    domainId: added.value.id,
+    pendingDomainId: pending.value.id,
+    tokenId: token.value.id,
+    cert,
+    clearToken: token.value.token,
+  };
+}
+type R = Awaited<ReturnType<typeof ready>>;
+
+/** A passed run of the draft at `version`, as the callback of a test run writes it. */
+async function pass(x: X, r: R, version = 1) {
+  const now = x.w.clock.now();
+  return x.w.storage.create("ssoTestRun", {
+    id: newId(now),
+    createdAt: now,
+    updatedAt: now,
+    organizationId: x.org,
+    connectionId: r.connId,
+    linkId: r.linkId,
+    outcome: "passed",
+    step: null,
+    attributeNames: ["email"],
+    domainClaimed: true,
+    draftVersion: version,
+  });
+}
+
+const noop = async () => ok(undefined);
+
+/** Every row that an activation can change, for a before and after compare. */
+async function tables(w: X["w"]) {
+  const find = (
+    m:
+      | "ssoConnection"
+      | "ssoDomain"
+      | "scimToken"
+      | "ssoSetupLink"
+      | "ssoSetupSession"
+      | "operatorAudit",
+  ) => w.storage.findMany(m, [], { sort: { field: "id", dir: "asc" } });
+  return {
+    connections: await find("ssoConnection"),
+    domains: await find("ssoDomain"),
+    tokens: await find("scimToken"),
+    links: await find("ssoSetupLink"),
+    sessions: await find("ssoSetupSession"),
+    audit: await find("operatorAudit"),
+  };
+}
+
+const auditOf = (w: X["w"], action: string) =>
+  w.storage.findMany("operatorAudit", [{ field: "action", op: "eq", value: action }]);
+
+describe("the condition of the activation", () => {
+  it("answers 409 setup_not_tested for a draft with no passed run, and changes nothing", async () => {
+    const x = await world();
+    const r = await ready(x);
+    x.w.clock.advance(1000);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("answers 409 setup_not_tested for a failed or a pending run", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const run = await pass(x, r);
+    await x.w.storage.update("ssoTestRun", [{ field: "id", op: "eq", value: run.id }], {
+      outcome: "failed",
+    });
+    await x.w.storage.create("ssoTestRun", {
+      ...run,
+      id: newId(x.w.clock.now()),
+      outcome: "pending",
+    });
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+  });
+
+  it("answers 409 setup_not_tested when the draft changed after the pass (pass at v1, draft at v2)", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    x.w.clock.advance(1000);
+    const changed = await saveDraftConnection(x.w.config, r.s, { ...OIDC, label: "Acme Okta 2" });
+    expect(changed.ok).toBe(true);
+    expect(
+      (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: r.connId }]))
+        ?.version,
+    ).toBe(2);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("answers 409 setup_not_tested when the owner changes the draft after the pass", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    x.w.clock.advance(1000);
+    const changed = await updateConnection(x.w.config, x.actor, {
+      id: r.connId,
+      label: "Owner label",
+    });
+    expect(changed.ok).toBe(true);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+  });
+
+  it("answers 409 setup_not_tested when the link has no draft", async () => {
+    const x = await world();
+    const made = await createSetupLink(x.w.config, x.actor, {
+      organizationId: x.org,
+      steps: STEPS,
+      kinds: ["oidc"],
+      note: "Ada at Acme IT",
+    });
+    if (!made.ok) throw new Error(made.code);
+    expect(await activateSetup(x.w.config, x.actor, made.value.id, noop)).toEqual(NOT_TESTED);
+  });
+
+  it("answers setup_not_tested when a write of the owner lands between the read and the update of the draft", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    x.w.clock.advance(1000);
+    // The owner path takes no lock of the link. Its commit can fall between our read of the
+    // passed run and our write of the draft. The hook puts that write in the same transaction.
+    const storage = inTransaction(x.w.config.storage, async (tx, model, op) => {
+      if (model !== "ssoTestRun" || op !== "findMany") return;
+      await tx.update("ssoConnection", [{ field: "id", op: "eq", value: r.connId }], {
+        version: 2,
+        label: "Racing owner",
+      });
+    });
+    const before = await tables(x.w);
+    expect(await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop)).toEqual(
+      NOT_TESTED,
+    );
+    const after = await tables(x.w);
+    // The refusal undoes the write of the hook with the rest of the transaction.
+    expect(after.connections[0]).toMatchObject({ draft: true, enabled: false, version: 1 });
+    expect({ ...after, connections: [] }).toEqual({ ...before, connections: [] });
+  });
+});
+
+/**
+ * A storage whose transactions give `hook` the chance to act after each call of the
+ * transaction. The hook gets the transaction itself, so what it writes is part of the same
+ * transaction, as a write that another connection committed in between.
+ */
+function inTransaction(
+  storage: StorageAdapter,
+  hook: (tx: StorageAdapter, model: string, op: string) => Promise<void>,
+  replace: Partial<Record<string, (...a: never[]) => unknown>> = {},
+): StorageAdapter {
+  const wrapTx = (tx: StorageAdapter): StorageAdapter =>
+    new Proxy(tx, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value !== "function") return value;
+        return async (...args: never[]) => {
+          const swap = replace[String(prop)];
+          const out = swap
+            ? await swap.apply(target, args)
+            : await (value as (...a: never[]) => unknown).apply(target, args);
+          await hook(tx, String(args[0]), String(prop));
+          return out;
+        };
+      },
+    });
+  return new Proxy(storage, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === "transaction")
+        return (fn: (tx: StorageAdapter) => Promise<unknown>) =>
+          target.transaction((tx) => fn(wrapTx(tx)));
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+describe("the act", () => {
+  it("makes the draft live in one transaction", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    x.w.clock.advance(5000);
+    const at = x.w.clock.now();
+    const before = await tables(x.w);
+    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    if (!done.ok) throw new Error(done.code);
+    expect(done.value).toMatchObject({ id: r.connId, enabled: true, draft: false });
+    const row = await x.w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: r.connId },
+    ]);
+    expect(row).toMatchObject({ enabled: true, draft: false, version: 1, updatedAt: at });
+    expect(row?.updatedAt.getTime()).toBeGreaterThan(
+      before.connections[0]?.updatedAt.getTime() ?? 0,
+    );
+    const domains = await x.w.storage.findMany("ssoDomain", []);
+    const verified = domains.find((d) => d.id === r.domainId);
+    const pending = domains.find((d) => d.id === r.pendingDomainId);
+    expect(verified).toMatchObject({ connectionId: r.connId, enforce: false, updatedAt: at });
+    expect(pending).toMatchObject({ connectionId: null, enforce: false });
+    const token = await x.w.storage.findOne("scimToken", [
+      { field: "id", op: "eq", value: r.tokenId },
+    ]);
+    expect(token).toMatchObject({ pending: false, updatedAt: at });
+    const link = await x.w.storage.findOne("ssoSetupLink", [
+      { field: "id", op: "eq", value: r.linkId },
+    ]);
+    expect(link).toMatchObject({ endedAt: at, updatedAt: at, revokedAt: null });
+    const sessions = await x.w.storage.findMany("ssoSetupSession", [
+      { field: "linkId", op: "eq", value: r.linkId },
+    ]);
+    expect(sessions.length).toBeGreaterThan(0);
+    for (const s of sessions) expect(s.endedAt).toEqual(at);
+    const rows = await auditOf(x.w, "sso_setup_link_activate");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.data).toMatchObject({
+      organizationId: x.org,
+      linkId: r.linkId,
+      connectionId: r.connId,
+      domainIds: [r.domainId],
+      tokenId: r.tokenId,
+    });
+    expect(await auditOf(x.w, "sso_connection_update")).toHaveLength(1);
+    // No value of the link, the token, or the secret reaches an audit row.
+    const text = JSON.stringify(await x.w.storage.findMany("operatorAudit", []));
+    expect(text).not.toContain(r.clearToken);
+    expect(text).not.toContain(SECRET);
+  });
+
+  it("lets a new link be minted and writes nothing for a revoke of the ended link", async () => {
+    const x = await world();
+    const a = await ready(x);
+    const b = await createSetupLink(x.w.config, x.actor, {
+      organizationId: x.org,
+      steps: STEPS,
+      kinds: ["oidc"],
+      note: "Second",
+    });
+    expect(b.ok).toBe(true);
+    // Two live links: a third mint is refused until the activation ends one.
+    const third = { organizationId: x.org, steps: STEPS, kinds: ["oidc" as const], note: "Third" };
+    expect(await createSetupLink(x.w.config, x.actor, third)).toMatchObject({
+      ok: false,
+      code: "setup_link_limit",
+    });
+    await pass(x, a);
+    expect((await activateSetup(x.w.config, x.actor, a.linkId, noop)).ok).toBe(true);
+    expect((await createSetupLink(x.w.config, x.actor, third)).ok).toBe(true);
+    const before = await tables(x.w);
+    expect(await revokeSetupLink(x.w.config, x.actor, a.linkId)).toEqual(ok(undefined));
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("rolls back every write when the audit write fails, and sends no notice", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    x.w.clock.advance(1000);
+    const before = await tables(x.w);
+    const sent = x.w.mail.length;
+    const storage = inTransaction(x.w.config.storage, async () => {}, {
+      create: ((model: string) => {
+        if (model === "operatorAudit") throw new Error("the audit write failed");
+        return undefined;
+      }) as never,
+    });
+    await expect(
+      activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop),
+    ).rejects.toThrow("the audit write failed");
+    expect(await tables(x.w)).toEqual(before);
+    expect(x.w.mail).toHaveLength(sent);
+  });
+
+  it("never sets enforce, also for a verified domain of the link", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    for (const d of await x.w.storage.findMany("ssoDomain", [])) expect(d.enforce).toBe(false);
+  });
+
+  it("routes only the verified domain of two", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    const routed = (await x.w.storage.findMany("ssoDomain", []))
+      .filter((d) => d.connectionId !== null)
+      .map((d) => d.id);
+    expect(routed).toEqual([r.domainId]);
+  });
+
+  it("does not route a domain of the organization that the link did not add", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    // acme.example is the verified domain that the world makes; the manager added it.
+    const own = (await x.w.storage.findMany("ssoDomain", [])).find(
+      (d) => d.domain === "acme.example",
+    );
+    expect(own?.connectionId ?? null).toBeNull();
+  });
+
+  it("emits sso.activated once, with ids only, after the commit; a refusal emits none", async () => {
+    const batches: { name: string }[][] = [];
+    const x = await world({ observe: { sink: { write: (b) => void batches.push([...b]) } } });
+    const seen = async () => {
+      await x.w.config.observe.flush();
+      return batches.flat().filter((e) => e.name === "sso.activated");
+    };
+    const r = await ready(x);
+    // No passed run yet: the act refuses and the event stays silent.
+    const refused = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    expect(refused.ok).toBe(false);
+    expect(await seen()).toEqual([]);
+    await pass(x, r, 1);
+    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    expect(done.ok).toBe(true);
+    // The sink adds an envelope (time, level). The field list is pinned by the EVENTS table.
+    expect(await seen()).toMatchObject([
+      {
+        name: "sso.activated",
+        organizationId: x.org,
+        connectionId: r.connId,
+        linkId: r.linkId,
+      },
+    ]);
+  });
+
+  it("sends sso_activated to each owner after the commit, and runs the audit hook after it", async () => {
+    const seen: { action: string; ended: boolean }[] = [];
+    let linkId = "";
+    const x = await world({
+      hooks: {
+        operator: {
+          afterAction: async (e) => {
+            const link = linkId
+              ? await x.w.storage.findOne("ssoSetupLink", [
+                  { field: "id", op: "eq", value: linkId },
+                ])
+              : null;
+            seen.push({ action: e.audit.action, ended: link?.endedAt != null });
+          },
+        },
+      },
+    });
+    const second = await verifiedSession(x.w, "second@acme.example");
+    const added = await addMember(x.w.config, {
+      user: x.owner.user,
+      organizationId: x.org,
+      userId: second.user.id,
+      role: "owner",
+    });
+    expect(added.ok).toBe(true);
+    const guest = await verifiedSession(x.w, "guest@acme.example");
+    await addMember(x.w.config, {
+      user: x.owner.user,
+      organizationId: x.org,
+      userId: guest.user.id,
+      role: "member",
+    });
+    const r = await ready(x);
+    linkId = r.linkId;
+    await pass(x, r);
+    x.w.mail.length = 0;
+    seen.length = 0;
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    const notices = x.w.mail.filter((m) => m.subject.startsWith("SSO setup notice"));
+    expect(notices.map((m) => m.to).sort()).toEqual(["owner@acme.example", "second@acme.example"]);
+    for (const m of notices) expect(m.text).toContain("turned on");
+    expect(seen).toHaveLength(2);
+    expect(seen.map((s) => s.action).sort()).toEqual([
+      "sso_connection_update",
+      "sso_setup_link_activate",
+    ]);
+    for (const s of seen) expect(s.ended).toBe(true);
+  });
+
+  it("answers ok when a mail port throws, and the act stays", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    x.w.config.mail.send = async () => {
+      throw new Error("mail is down");
+    };
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    expect(
+      (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: r.connId }]))
+        ?.enabled,
+    ).toBe(true);
+  });
+});
+
+describe("who may activate", () => {
+  it("stops at the re-check of the route after the body read, and changes nothing", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const before = await tables(x.w);
+    let calls = 0;
+    const gone = await activateSetup(x.w.config, x.actor, r.linkId, async () => {
+      calls += 1;
+      return { ok: false, code: "unauthorized", status: 401 };
+    });
+    expect(gone).toEqual({ ok: false, code: "unauthorized", status: 401 });
+    expect(calls).toBe(1);
+    expect(await tables(x.w)).toEqual(before);
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, async () => ok(undefined))).ok).toBe(
+      true,
+    );
+  });
+
+  it("answers forbidden_rank to an owner who lost the rank after the guard", async () => {
+    const x = await world();
+    const second = await verifiedSession(x.w, "second@acme.example");
+    await addMember(x.w.config, {
+      user: x.owner.user,
+      organizationId: x.org,
+      userId: second.user.id,
+      role: "owner",
+    });
+    const r = await ready(x);
+    await pass(x, r);
+    const demoted = await updateMemberRole(x.w.config, {
+      user: second.user,
+      organizationId: x.org,
+      userId: x.owner.user.id,
+      role: "member",
+    });
+    expect(demoted.ok).toBe(true);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(RANK);
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("answers forbidden_rank to a member below owner at the guard, and writes nothing", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const member = await verifiedSession(x.w, "member@acme.example");
+    await addMember(x.w.config, {
+      user: x.owner.user,
+      organizationId: x.org,
+      userId: member.user.id,
+      role: "admin",
+    });
+    const resolved = await resolveSession(x.w.config, member.token);
+    if (!resolved) throw new Error("no session");
+    const guard = await requireSsoManager(x.w.config, resolved, x.org);
+    expect(guard).toMatchObject({ ok: false, code: "forbidden_rank", status: 403 });
+    expect(await auditOf(x.w, "sso_setup_link_activate")).toEqual([]);
+  });
+
+  it("gives the refusal of the guard to an owner with no fresh proof", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    x.w.clock.advance(x.w.config.session.freshMinutes * 60_000);
+    // A route runs the guard first, so the act is never reached.
+    const resolved = await resolveSession(x.w.config, x.owner.token);
+    if (!resolved) throw new Error("no session");
+    expect(await requireSsoManager(x.w.config, resolved, x.org)).toMatchObject({
+      ok: false,
+      code: "session_not_fresh",
+    });
+    expect(await auditOf(x.w, "sso_setup_link_activate")).toEqual([]);
+  });
+
+  it("answers unauthorized when the session of the owner ended after the guard", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const resolved = await resolveSession(x.w.config, x.owner.token);
+    if (!resolved) throw new Error("no session");
+    await x.w.storage.delete("session", [{ field: "id", op: "eq", value: resolved.session.id }]);
+    const before = await tables(x.w);
+    expect(
+      await activateSetup(x.w.config, x.actor, r.linkId, async () =>
+        recheckSsoManager(x.w.config, x.actor, x.org).then((c) => (c.ok ? ok(undefined) : c)),
+      ),
+    ).toEqual({
+      ok: false,
+      code: "unauthorized",
+      status: 401,
+    });
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("answers forbidden_rank to an owner of another organization, and writes nothing", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const other = await managerSession(x.w, "owner@bexley.example", "bexley");
+    const foreign = await guarded(x.w, other.token, other.org);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, foreign, r.linkId, noop)).toEqual(RANK);
+    expect(await previewSetup(x.w.config, foreign, r.linkId)).toEqual(RANK);
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("lets the app actor activate", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    expect((await activateSetup(x.w.config, SSO_APP, r.linkId, noop)).ok).toBe(true);
+    const rows = await auditOf(x.w, "sso_setup_link_activate");
+    expect(rows[0]).toMatchObject({ actorKind: "app", actorId: "sso-test" });
+  });
+
+  it("gives the holder of a link no route to activate", () => {
+    expect(() =>
+      setupSessionRoute("POST /sso/setup-links/activate" as never, async () => new Response()),
+    ).toThrow();
+  });
+});
+
+describe("a link that is not live", () => {
+  it("answers 404 setup_link_invalid for an ended link: the second activation", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(INVALID);
+    expect(await tables(x.w)).toEqual(before);
+  });
+
+  it("answers 404 setup_link_invalid for a revoked link, and for an expired link", async () => {
+    const x = await world();
+    const a = await ready(x);
+    await pass(x, a);
+    expect((await revokeSetupLink(x.w.config, x.actor, a.linkId)).ok).toBe(true);
+    expect(await activateSetup(x.w.config, x.actor, a.linkId, noop)).toEqual(INVALID);
+    const b = await ready(x, "oidc", "second");
+    await pass(x, b);
+    x.w.clock.advance(73 * HOUR_MS);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, b.linkId, noop)).toEqual(INVALID);
+    expect(await tables(x.w)).toEqual(before);
+    expect(
+      (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: b.connId }]))
+        ?.draft,
+    ).toBe(true);
+  });
+
+  it("answers 404 not_found for an id with no link", async () => {
+    const x = await world();
+    expect(await activateSetup(x.w.config, x.actor, "no-such-link", noop)).toMatchObject({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  it("answers 404 not_found while sso.setup is off", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const off = { ...x.w.config, sso: { ...x.w.config.sso, setup: null } } as never;
+    expect(await activateSetup(off, x.actor, r.linkId, noop)).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+    expect(await previewSetup(off, x.actor, r.linkId)).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+  });
+});
+
+describe("the race of two activations", () => {
+  it("lets one of two parallel activations win, with one set of audit rows", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const results = await Promise.all([
+      activateSetup(x.w.config, x.actor, r.linkId, noop),
+      activateSetup(x.w.config, x.actor, r.linkId, noop),
+    ]);
+    expect(results.filter((v) => v.ok)).toHaveLength(1);
+    const lost = results.find((v) => !v.ok);
+    expect(lost).toMatchObject({ ok: false });
+    expect([404, 409]).toContain(lost && !lost.ok ? lost.status : 0);
+    expect(await auditOf(x.w, "sso_setup_link_activate")).toHaveLength(1);
+    expect(await auditOf(x.w, "sso_connection_update")).toHaveLength(1);
+  });
+
+  it("answers 404 for the loser that read the link before the winner committed", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    let armed = true;
+    // The first read of the link row is the read of the loser. The winner commits right after it.
+    const storage = new Proxy(x.w.config.storage, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== "findOne") return typeof value === "function" ? value.bind(target) : value;
+        return async (model: string, where: never, ...rest: never[]) => {
+          const row = await (value as (...a: unknown[]) => Promise<unknown>).call(
+            target,
+            model,
+            where,
+            ...rest,
+          );
+          if (model === "ssoSetupLink" && armed) {
+            armed = false;
+            const won = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+            expect(won.ok).toBe(true);
+          }
+          return row;
+        };
+      },
+    });
+    const lost = await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop);
+    expect(lost).toEqual(INVALID);
+    expect(await auditOf(x.w, "sso_setup_link_activate")).toHaveLength(1);
+    expect(await auditOf(x.w, "sso_connection_update")).toHaveLength(1);
+  });
+});
+
+describe("the preview", () => {
+  it("shows the OIDC issuer, the sign-in host, the verified domain, and the token name", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const p = await previewSetup(x.w.config, x.actor, r.linkId);
+    expect(p).toEqual(
+      ok({
+        kind: "oidc",
+        issuerOrEntityId: OIDC.issuer,
+        signInHost: "login.idp.example",
+        fingerprints: [],
+        domains: ["setup.example"],
+
+        scim: {
+          name: "Setup link directory",
+          scopes: ["scim.users.read", "scim.users.write", "scim.groups.read", "scim.groups.write"],
+        },
+      }),
+    );
+  });
+
+  it("shows the SAML entity id, the host of the sign-in URL, and the SHA-256 fingerprint of each certificate", async () => {
+    const x = await world();
+    const r = await ready(x, "saml");
+    const p = await previewSetup(x.w.config, x.actor, r.linkId);
+    if (!p.ok || p.value === null) throw new Error("no preview");
+    expect(p.value.kind).toBe("saml");
+    expect(p.value.signInHost).toBe("sso.idp.example");
+    // An independent route to the value: the base64 body, decoded with atob, then WebCrypto.
+    const body = (r.cert ?? "").replace(/-----[A-Z ]+-----|\s/g, "");
+    const der = Uint8Array.from(atob(body), (ch) => ch.charCodeAt(0));
+    const sum = new Uint8Array(await crypto.subtle.digest("SHA-256", der));
+    const expected = Array.from(sum, (b) => b.toString(16).padStart(2, "0")).join("");
+    expect(expected).toMatch(/^[0-9a-f]{64}$/);
+    expect(p.value.fingerprints).toEqual([expected]);
+    expect(p.value.issuerOrEntityId).toMatch(/^https?:\/\//);
+  });
+
+  it("holds no secret and no token", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const text = JSON.stringify(await previewSetup(x.w.config, x.actor, r.linkId));
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain(r.clearToken);
+    expect(text).not.toContain("clientSecret");
+  });
+
+  it("answers null for a link with no draft, and 404 for an unknown link", async () => {
+    const x = await world();
+    const made = await createSetupLink(x.w.config, x.actor, {
+      organizationId: x.org,
+      steps: STEPS,
+      kinds: ["oidc"],
+      note: "Ada at Acme IT",
+    });
+    if (!made.ok) throw new Error(made.code);
+    expect(await previewSetup(x.w.config, x.actor, made.value.id)).toEqual(ok(null));
+    expect(await previewSetup(x.w.config, x.actor, "no-such-link")).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+  });
+
+  it("changes nothing", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const before = await tables(x.w);
+    await previewSetup(x.w.config, x.actor, r.linkId);
+    expect(await tables(x.w)).toEqual(before);
+  });
+});

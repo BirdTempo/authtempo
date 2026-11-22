@@ -144,6 +144,18 @@ function pemBody(pem: string): Uint8Array<ArrayBuffer> | null {
 }
 
 /**
+ * The SHA-256 of the DER bytes of one PEM certificate, in lower case hex, or null when the
+ * text is no certificate. The owner compares it with the fingerprint that the IdP admin
+ * page shows (plan 13a, spec 6.5 item 2).
+ */
+export async function certificateFingerprint(pem: string): Promise<string | null> {
+  const der = pemBody(pem);
+  if (der === null) return null;
+  const digest = await crypto.subtle.digest("SHA-256", der);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Reads the key and `notAfter` of one PEM certificate. The key is RSA (`rsaEncryption`) or
  * EC on P-256 (`id-ecPublicKey` with `prime256v1`); any other key answers null.
  */

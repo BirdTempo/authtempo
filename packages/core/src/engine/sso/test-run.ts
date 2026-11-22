@@ -3,6 +3,7 @@ import { limit } from "../../limiter/limit.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SsoConnectionRow, SsoTestRunRow } from "../../schema.js";
+import type { StorageAdapter } from "../../storage/port.js";
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
@@ -156,7 +157,19 @@ export async function lastPassedRun(
   connectionId: string,
   version: number,
 ): Promise<SsoTestRunRow | null> {
-  const [run] = await config.storage.findMany(
+  return passedRunIn(config.storage, connectionId, version);
+}
+
+/**
+ * `lastPassedRun` on a given storage. The activation reads through its transaction, so the
+ * read and the writes of the act share one view (plan 13a Task 8). One query, one copy.
+ */
+export async function passedRunIn(
+  storage: StorageAdapter,
+  connectionId: string,
+  version: number,
+): Promise<SsoTestRunRow | null> {
+  const [run] = await storage.findMany(
     "ssoTestRun",
     [
       { field: "connectionId", op: "eq", value: connectionId },

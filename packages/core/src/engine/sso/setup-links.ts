@@ -412,7 +412,7 @@ export async function listSetupLinks(
 
 /**
  * One link by its id. The actor must still manage the organization of the
- * link. An unknown id answers `not_found`. Task 8 adds the preview.
+ * link. An unknown id answers `not_found`. The preview is `previewSetup`.
  */
 export async function getSetupLink(
   config: ResolvedConfig,
