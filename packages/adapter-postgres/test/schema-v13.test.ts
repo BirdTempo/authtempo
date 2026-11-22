@@ -111,8 +111,8 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
 
   it("names every model of the schema", async () => {
     const models = Object.keys(schema) as (keyof typeof schema)[];
-    // 27 models to version 13; plan 12d adds six.
-    expect(models).toHaveLength(33);
+    // 27 models to version 13; plan 12d adds six, and plan 13a adds three.
+    expect(models).toHaveLength(36);
     const db = await freshDatabase();
     try {
       const tables = (

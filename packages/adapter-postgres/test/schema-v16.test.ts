@@ -67,7 +67,9 @@ describe("schema version 16 on Postgres (plan 12p)", () => {
         { id: "sv", proved: true },
         { id: "sv2", proved: true },
       ]);
-      // The gate passes: the adapter reads the database at version 16.
+      // The adapter reads only a database of the current version: apply the later migrations first (0017 since plan 13a).
+      for (const m of MIGRATIONS.slice(i0016 + 1)) await a.unsafe(m.sql);
+      // The gate passes: the adapter reads the rows of version 15.
       const db = createPostgresAdapter(a);
       expect(await db.findOne("session", [{ field: "id", op: "eq", value: "sv" }])).toMatchObject({
         userId: "uv",
@@ -95,11 +97,14 @@ describe("schema version 16 on Postgres (plan 12p)", () => {
   it("migrates a database with no session", async () => {
     const { a, close } = await freshSchema();
     try {
-      for (const m of MIGRATIONS) await a.unsafe(m.sql);
+      // The files to 0016 make version 16. The later files follow (0017 since plan 13a).
+      const i0016 = MIGRATIONS.findIndex((m) => m.name === "0016_schema_v16");
+      for (const m of MIGRATIONS.slice(0, i0016 + 1)) await a.unsafe(m.sql);
       const version = await a.unsafe<{ value: string }[]>(
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
       );
       expect(version[0]?.value).toBe("16");
+      for (const m of MIGRATIONS.slice(i0016 + 1)) await a.unsafe(m.sql);
       expect(await createPostgresAdapter(a).findMany("session", [])).toEqual([]);
     } finally {
       await close();

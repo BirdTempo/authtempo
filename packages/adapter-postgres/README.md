@@ -109,6 +109,8 @@ Version 15 (plan 12i, 2026-10-24) is the account with no address. `ta_user.email
 
 Version 16 (plan 12p, 2026-11-04) is the session proof. `ta_session` gets `proved`, NOT NULL with the default false. The fill sets true on each session whose user has a verified address, so a verified user keeps each live session. A session of a user with no address, or with an unverified address, reads false. A user with no address signs in again for verified powers. A user with an unverified address proves it first. Apply `0016_schema_v16` before you deploy a core at version 16; the adapter refuses a database at version 15.
 
+Version 17 (plan 13a, 2026-11-23) is the enterprise setup. It adds the tables `ta_sso_setup_link`, `ta_sso_test_run`, and `ta_sso_setup_session`. `ta_sso_connection` gets `draft` (NOT NULL, default false), `version` (NOT NULL, default 1), and `setup_link_id`. `ta_sso_domain` gets `setup_link_id`. `ta_scim_token` gets `pending` (NOT NULL, default false) and `setup_link_id`. A row of version 16 reads as no draft, at version 1, with no setup link, and not pending. The file adds columns and tables and changes no row. Apply `0017_schema_v17` before you deploy a core at version 17; the adapter refuses a database at version 16.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.
