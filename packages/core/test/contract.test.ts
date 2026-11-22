@@ -140,7 +140,7 @@ function world(secretHash = "0".repeat(64)) {
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The domain routes and the SAML ACS of plan 12d; no test of this file asks the resolver.
-    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
+    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }], setup: {} },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
     // The username routes of plan 12i Task 2.
@@ -805,6 +805,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /sso/domains/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The open of a setup link (plan 13a Task 3): no session. The valid body is a token of the
+    // right form that names no link, so it answers 404 setup_link_invalid past the parse.
+    {
+      key: "POST /sso/setup/open",
+      body: { token: `sl_${"A".repeat(43)}` },
+      refused: INVALID_BODY,
+    },
     // The connection rows of plan 12d Task 3. Their query names the row, so the guard runs
     // before the read (plan 12l), and the manager sends them. The valid create answers
     // not_found past the parse, since OIDC is off; the valid update changes the connection.
@@ -949,7 +956,8 @@ describe("the route contract (plan 11g)", () => {
     // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
     // Plan 12i Task 6 adds the module anonymous: 26. Plan 12i Task 11 adds
     // the module multi-session: 27. Plan 12f2 Task 3 adds the module user-invite: 28.
-    expect(modules.length).toBe(28);
+    // Plan 13a Task 3 adds the module sso-setup: 29.
+    expect(modules.length).toBe(29);
     expect([...mounted].sort()).toEqual(keys.filter((k) => !UNMOUNTED_ROUTES.has(k)));
   });
 
@@ -1521,7 +1529,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds the bodies of the operator update and delete.
     // Plan 12f2 Task 3 adds the body of the invitation confirm.
     // Plan 12f2 Task 5 adds the body of the operator create.
-    expect(withBody.length).toBe(112);
+    // Plan 13a Task 3 mounts the open of a setup link: 113.
+    expect(withBody.length).toBe(113);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1553,7 +1562,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds the refused bodies of the operator update and delete: 108.
     // Plan 12f2 Task 3 adds the refused body of the invitation confirm.
     // Plan 12f2 Task 5 adds the refused body of the operator create: 110.
-    expect(refusals).toBe(110);
+    // Plan 13a Task 3 adds the refused body of the setup open: 111.
+    expect(refusals).toBe(111);
   });
 
   it("names the media of a body by its read call", async () => {

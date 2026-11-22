@@ -22,6 +22,7 @@ import { secondFactorRoutes } from "./second-factor.js";
 import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
 import { ssoRoutes } from "./sso.js";
+import { ssoSetupRoutes } from "./sso-setup.js";
 import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
@@ -59,6 +60,7 @@ export type RouteModule =
   | "user-invite"
   | "oauth"
   | "sso"
+  | "sso-setup"
   | "scim"
   | "openapi"
   | "health";
@@ -96,6 +98,7 @@ export function coreRouteModules(
     { module: "user-invite", routes: userInviteRoutes(config) },
     { module: "oauth", routes: oauthRoutes(config) },
     { module: "sso", routes: ssoRoutes(config) },
+    { module: "sso-setup", routes: ssoSetupRoutes(config) },
     { module: "scim", routes: scimRoutes(config) },
     { module: "health", routes: healthRoutes(config) },
   ];

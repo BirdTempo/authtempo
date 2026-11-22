@@ -223,6 +223,8 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   // Plan 12d Task 9b: `$scimToken` names a SCIM token of the world.
   "POST /scim/tokens/create": { organizationId: "$org", name: "directory" },
   "POST /scim/tokens/revoke": { id: "$scimToken" },
+  // Plan 13a Task 3: the open of a setup link.
+  "POST /sso/setup/open": { token: `sl_${BODY43}` },
 };
 
 /**
@@ -244,6 +246,8 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "POST /sso/connections/update": { id: "$connection" },
   "GET /scim/tokens": { organizationId: "$org" },
   "GET /username/available": { username: "ada" },
+  // Plan 13a Task 3: the confirm page needs a token of the form of a setup link.
+  "GET /sso/setup": { token: `sl_${BODY43}` },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -393,7 +397,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The domain and connection routes of plan 12d. No family of this file reaches a resolver.
-    sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
+    sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }], setup: {} },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
     // The username routes of plan 12i Task 2.

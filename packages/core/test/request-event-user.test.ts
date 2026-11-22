@@ -192,7 +192,7 @@ async function walkWorld() {
       users: true,
       impersonation: {},
     },
-    sso: { dns: [{ name: "none", txt: async () => [] }] },
+    sso: { dns: [{ name: "none", txt: async () => [] }], setup: {} },
     scim: {},
     openapi: true,
     username: {},

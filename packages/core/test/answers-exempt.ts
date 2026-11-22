@@ -196,12 +196,17 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /multi-session/switch",
   // Plan 12f2 Task 3: the invitation confirm with operator.users off.
   "POST /user/invite/confirm",
+  // Plan 13a Task 3: the two setup routes with sso.setup off (sso-setup-routes.test.ts).
+  "GET /sso/setup",
+  "POST /sso/setup/open",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
 const ORIGIN_ANSWERED: readonly RouteKey[] = [
   // Plan 12f2 Task 3: the form post of the invitation page.
   "POST /user/invite/confirm",
+  // Plan 13a Task 3: a cross-site post to the open of a setup link (sso-setup-routes.test.ts).
+  "POST /sso/setup/open",
   "POST /handoff/continue",
   "POST /handoff/redeem",
   "POST /identities/unlink",
@@ -360,6 +365,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...routerRows("internal", ROUTER_REASON, INTERNAL_ANSWERED),
   ...routerRows("origin_not_trusted", ROUTER_REASON, ORIGIN_ANSWERED),
   ...routerRows("not_found", ROUTER_REASON, NOT_FOUND_ANSWERED),
+  // The confirm page reads no row, so it cannot tell a bad link: the open answers it, and a scanner learns nothing.
+  ...rows(
+    "setup_link_invalid",
+    "the page reads no row by design (spec 6.1 item 5); sso-setup-routes.test.ts proves the answer at the open",
+    ["GET /sso/setup"],
+  ),
 
   // `conflict` needs a lost compare-and-set round, which no request can cause on its own.
   ...rows(

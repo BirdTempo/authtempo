@@ -13,8 +13,6 @@ export const UNMOUNTED_ROUTES: ReadonlySet<string> = new Set<RouteKey>([
   "GET /sso/setup-links/get",
   "POST /sso/setup-links/revoke",
   "POST /sso/setup-links/activate",
-  "GET /sso/setup",
-  "POST /sso/setup/open",
   "POST /sso/setup/domains/add",
   "POST /sso/setup/domains/verify",
   "POST /sso/setup/connection",

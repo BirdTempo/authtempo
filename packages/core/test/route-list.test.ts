@@ -55,6 +55,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   "user-invite": ["operatorUsers"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
   sso: ["sso"],
+  "sso-setup": ["ssoSetup"],
   scim: ["scim"],
   openapi: ["openapi"],
   health: ["health", "readiness"],
