@@ -51,6 +51,7 @@ interface Seen {
   status: number;
   body: Record<string, unknown>;
   text: string;
+  headerText: string;
   headers: Headers;
 }
 
@@ -98,6 +99,8 @@ async function scene() {
       status: res.status,
       body: text.startsWith("{") ? (JSON.parse(text) as Record<string, unknown>) : {},
       text: `${text}\n${res.headers.get("location") ?? ""}`,
+      // Every header but Set-Cookie, which carries the session of the open on purpose.
+      headerText: [...res.headers].filter(([k]) => k !== "set-cookie").join("\n"),
       headers: res.headers,
     };
     answers.push(seen);
@@ -592,6 +595,90 @@ describe("the activation and a live connection", () => {
   });
 });
 
+describe("the limits and the form checks against a thief who guesses (plan 13a Task 14, row 9)", () => {
+  /** The `sso.setup_refused` steps that the events hold, in order. */
+  async function steps(x: Scene): Promise<string[]> {
+    return (await x.events())
+      .filter((e) => e.name === "sso.setup_refused")
+      .map((e) => (e as unknown as { step: string }).step);
+  }
+
+  it("answers 429 to the 21st open of one link, from any address", async () => {
+    const x = await scene();
+    const s = await stolen(x);
+    const seen: number[] = [];
+    // The mint step opened once. Opens 2 to 21 come from 20 addresses, so no address limit hits.
+    for (let i = 0; i < 20; i++)
+      seen.push(
+        (
+          await x.call("POST", "/sso/setup/open", {
+            body: { token: s.token },
+            ip: `203.0.113.${i + 1}`,
+          })
+        ).status,
+      );
+    expect(seen).toEqual([...Array(19).fill(200), 429]);
+    expect(await steps(x)).toEqual(["open_link_limit"]);
+  });
+
+  it("answers 429 to the 61st open try of one address, a refused token too", async () => {
+    const x = await scene();
+    const bad = `sl_${"A".repeat(43)}`;
+    const seen: number[] = [];
+    for (let i = 0; i < 61; i++)
+      seen.push(
+        (await x.call("POST", "/sso/setup/open", { body: { token: bad }, ip: THIEF_IP })).status,
+      );
+    expect(seen.slice(0, 60)).toEqual(Array(60).fill(404));
+    expect(seen[60]).toBe(429);
+    expect((await steps(x)).at(-1)).toBe("open_ip_limit");
+  });
+
+  it("tells a token of the wrong form from an unknown token only in the event", async () => {
+    const x = await scene();
+    const form = await x.call("POST", "/sso/setup/open", { body: { token: "nope" }, ip: THIEF_IP });
+    const unknown = await x.call("POST", "/sso/setup/open", {
+      body: { token: `sl_${"A".repeat(43)}` },
+      ip: THIEF_IP,
+    });
+    expect([form.status, form.body.error]).toEqual([404, "setup_link_invalid"]);
+    expect([unknown.status, unknown.body.error]).toEqual([404, "setup_link_invalid"]);
+    expect(await steps(x)).toEqual(["open_token_form", "open_link_invalid"]);
+  });
+
+  it("tells a cookie of the wrong form from an unknown cookie only in the event", async () => {
+    const x = await scene();
+    const wrong = await x.call("GET", "/sso/setup/status", {
+      cookie: `${SETUP_SESSION_COOKIE}=nope`,
+    });
+    const unknown = await x.call("GET", "/sso/setup/status", {
+      cookie: `${SETUP_SESSION_COOKIE}=ss_${"A".repeat(43)}`,
+    });
+    expect([wrong.status, wrong.body.error]).toEqual([NONE.status, NONE.error]);
+    expect([unknown.status, unknown.body.error]).toEqual([NONE.status, NONE.error]);
+    expect(await steps(x)).toEqual(["session_cookie", "session_ended"]);
+  });
+
+  it("answers 429 to the 61st write of a link, a refused body too", async () => {
+    const x = await scene();
+    const s = await stolen(x);
+    const seen: number[] = [];
+    for (let i = 0; i < 61; i++)
+      seen.push(
+        (
+          await x.call("POST", "/sso/setup/domains/verify", {
+            cookie: s.cookie,
+            ip: THIEF_IP,
+            body: { id: "nope" },
+          })
+        ).status,
+      );
+    expect(seen.slice(0, 60)).toEqual(Array(60).fill(401));
+    expect(seen[60]).toBe(429);
+    expect((await steps(x)).at(-1)).toBe("draft_limit");
+  });
+});
+
 describe("the token leak scan (row 5)", () => {
   it("shows the link token in the mint answer only, and the session token nowhere", async () => {
     const x = await scene();
@@ -640,6 +727,13 @@ describe("the token leak scan (row 5)", () => {
     const holders = x.answers.filter((a) => a.text.includes(s.token));
     expect(holders.map((a) => a.body.token)).toEqual([s.token]);
     for (const a of x.answers) expect(a.text).not.toContain(s.session);
+    // A header is part of an answer. Set-Cookie holds the session of the open only.
+    expect(x.answers.length).toBeGreaterThan(8);
+    for (const a of x.answers) {
+      expect(a.headerText).not.toContain(s.token);
+      expect(a.headerText).not.toContain(s.session);
+      for (const c of a.headers.getSetCookie()) expect(c).not.toContain(s.token);
+    }
   });
 });
 
@@ -878,7 +972,7 @@ describe("the test and the real flow share their checks (row 7)", () => {
         (e) => e.name === "sso.failed" && "connectionId" in e && e.connectionId === liveId,
       );
       expect(failed).toHaveLength(1);
-      expect((failed[0] as { step: string }).step).toBe(run?.step);
+      expect((failed[0] as unknown as { step: string }).step).toBe(run?.step);
     },
   );
 });
