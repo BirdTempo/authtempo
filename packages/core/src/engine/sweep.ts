@@ -14,6 +14,7 @@ import {
   sweepOrganizationRest,
 } from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
+import { SETUP_SWEEP_CALLS, sweepSetupRows } from "./sso/setup-retention.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -57,6 +58,11 @@ export interface SweepResult {
   ssoPendingDomains: number;
   /** SCIM tokens past `expiresAt` (plan 12d). A token with no expiry is never swept. 0 while `scim` is off. */
   scimTokens: number;
+  /**
+   * Setup links and setup sessions that expired more than 30 days ago, and test runs older than
+   * 30 days (plan 13a, ruling R30). A link takes its `note` with it. 0 while `sso.setup` is off.
+   */
+  ssoSetupRows: number;
   /**
    * Organizations that an account delete took, whose teams, invitations,
    * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
@@ -450,6 +456,9 @@ export async function sweepExpired(
     ? await storage.delete("scimToken", [{ field: "expiresAt", op: "lt", value: now }])
     : 0;
   if (config.scim) meter.step(1);
+  // The setup links, sessions and test runs past their retention (plan 13a, ruling R30).
+  const ssoSetupRows = config.sso?.setup ? await sweepSetupRows(storage, now) : 0;
+  if (config.sso?.setup) meter.step(SETUP_SWEEP_CALLS);
   // The share of the anonymous step (plan 12i Task 6, the lane ruling): one page. Each step
   // before it stops that many calls earlier, so each share above stays as it was.
   const anonymousShare = config.anonymous ? ANONYMOUS_PAGE_CALLS : 0;
@@ -541,6 +550,7 @@ export async function sweepExpired(
     ssoDomains,
     ssoPendingDomains,
     scimTokens,
+    ssoSetupRows,
     organizationRows,
     anonymousUsers,
   };

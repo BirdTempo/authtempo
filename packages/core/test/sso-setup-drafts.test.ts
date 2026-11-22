@@ -487,6 +487,25 @@ describe("a write after the end of the link (review round 1, Important 1)", () =
     expect(await domains(w)).toEqual([]);
   });
 
+  it("removes the pending SCIM token of the link at the revoke, and keeps the token of the app (security M2)", async () => {
+    const w = await world();
+    const s = await session(w);
+    const made = await createPendingScimToken(w.config, s);
+    if (!made.ok) throw new Error(made.code);
+    // A live token that the app made for the same organization stays.
+    const other = await createScimToken(w.config, SSO_APP, {
+      organizationId: s.link.organizationId,
+      name: "Directory",
+    });
+    if (!other.ok) throw new Error(other.code);
+    expect((await w.storage.findMany("scimToken", [])).map((r) => r.id).sort()).toEqual(
+      [made.value.id, other.value.id].sort(),
+    );
+    expect((await revokeSetupLink(w.config, SSO_APP, s.link.id)).ok).toBe(true);
+    // The dead token held a slot of the organization until now.
+    expect((await w.storage.findMany("scimToken", [])).map((r) => r.id)).toEqual([other.value.id]);
+  });
+
   it("gives an ended link no new draft row after the activation made its draft live", async () => {
     const w = await world();
     const s = await session(w);

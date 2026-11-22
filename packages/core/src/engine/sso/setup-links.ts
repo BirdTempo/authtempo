@@ -221,7 +221,7 @@ export async function createSetupLink(
  * organization of the link. One transaction locks the organization row,
  * sets `revokedAt` on the link where it is not revoked and not ended
  * (`lockSetupRows`), sets `endedAt` on each live setup
- * session of the link, and writes the `sso_setup_link_revoke` audit row.
+ * session of the link, deletes the pending SCIM token of the link, and writes the `sso_setup_link_revoke` audit row.
  * So the next request of such a session fails, and no draft write lands
  * after the revoke. A link that is revoked or ended already answers ok and
  * writes nothing. An unknown id answers `not_found`.
@@ -265,6 +265,13 @@ export async function revokeSetupLink(
       ],
       { endedAt: now, updatedAt: now },
     );
+    // The pending SCIM token of the link opens no directory, but it holds one of the live slots
+    // of the organization (`SCIM_TOKENS_LIVE_MAX`) until some flow removes it. After the revoke
+    // no setup session of the link can make or read it, so it goes here (security review M2).
+    await tx.delete("scimToken", [
+      { field: "setupLinkId", op: "eq", value: link.id },
+      { field: "pending", op: "eq", value: true },
+    ]);
     return writeAuditIn(tx, draft.value, now);
   });
   if (revoked) await afterAudit(config, revoked);
