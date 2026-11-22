@@ -80,6 +80,7 @@ export const CHECKS: readonly { name: string; base?: true }[] = [
   { name: "check-dependencies" },
   { name: "check-workflows" },
   { name: "check-support" },
+  { name: "check-guides" },
   { name: "check-osv" },
 ];
 
