@@ -51,11 +51,25 @@ const LINK_TOKEN_RE = new RegExp(`^${SETUP_LINK_PREFIX}[A-Za-z0-9_-]{43}$`);
 const SESSION_TOKEN_RE = new RegExp(`^${SETUP_SESSION_PREFIX}[A-Za-z0-9_-]{43}$`);
 
 /**
+ * True when the organization row of a link exists (ruling R17 of plan 13a).
+ * The act of an account delete deletes the organization row, and the sweep
+ * deletes the setup links and setup sessions later (`deleteOrganizationsRest`).
+ * So the open and each request read the organization row: a link or a
+ * session of a deleted organization opens nothing before the sweep. The read
+ * costs one query here, and the act of the delete sends no setup delete.
+ */
+async function organizationExists(config: ResolvedConfig, id: string): Promise<boolean> {
+  return (
+    (await config.storage.findOne("organization", [{ field: "id", op: "eq", value: id }])) !== null
+  );
+}
+
+/**
  * Opens a setup session for the link of `token`. The checks, in this order:
  * `sso.setup` is on, else `not_found`. One count on `setup-open:ip`, else
  * `rate_limited`. The token has the form of a link token and names a link
- * that is not revoked, not ended, and not expired, else `setup_link_invalid`
- * (one answer for each cause). One count on `setup-open:link`, else
+ * that is not revoked, not ended, and not expired, of an organization whose
+ * row exists, else `setup_link_invalid` (one answer for each cause). One count on `setup-open:link`, else
  * `rate_limited`. One transaction then sets the first `openedAt` of the link
  * where the link is still live, ends each live session of the link, writes
  * the new session, and writes the `sso_setup_link_open` audit row. So a
@@ -78,7 +92,8 @@ export async function openSetupSession(
     { field: "endedAt", op: "eq", value: null },
     { field: "expiresAt", op: "gt", value: config.clock.now() },
   ]);
-  if (!link) return fail("setup_link_invalid");
+  if (!link || !(await organizationExists(config, link.organizationId)))
+    return fail("setup_link_invalid");
   if (!(await limit(config, "setup-open:link", link.id, SETUP_OPEN_PER_LINK)))
     return fail("rate_limited");
   const draft = ssoDraft(OPEN_ACTOR, "sso_setup_link_open", {
@@ -144,8 +159,9 @@ export type SetupSession = { link: SsoSetupLinkRow; session: SsoSetupSessionRow 
 /**
  * The setup session of a request, or `unauthorized`. Every refusal is the
  * same value: no cookie, a value of the wrong form, an unknown value, an
- * ended session, an idle session, an absolute end, and a link that is
- * revoked or ended. The row of the link is the second guard: the revoke and
+ * ended session, an idle session, an absolute end, a link that is revoked
+ * or ended, and an organization that is gone. The row of the link is the
+ * second guard: the revoke and
  * the end of a link end their sessions in their own transaction, and this
  * read refuses a row that they missed. A pass moves `lastSeenAt` by one
  * conditional update, so a session that ended in parallel passes no request.
@@ -169,7 +185,8 @@ export async function requireSetupSession(
     { field: "revokedAt", op: "eq", value: null },
     { field: "endedAt", op: "eq", value: null },
   ]);
-  if (!link) return fail("unauthorized");
+  if (!link || !(await organizationExists(config, link.organizationId)))
+    return fail("unauthorized");
   const touched = await config.storage.update(
     "ssoSetupSession",
     [

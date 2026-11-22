@@ -769,8 +769,7 @@ export async function organizationGroups(
 /**
  * The rows of the organizations of `list` that give access or hold a claim
  * (ruling 78 of plan 12d): the organization rows, then the connection, the
- * domain, the SCIM token, the setup session, and the setup link rows (plan
- * 13a). The organization rows lock first, in id
+ * domain, and the SCIM token rows. The organization rows lock first, in id
  * order (`lockInOrder`), in the step of the organization row. The account
  * delete takes these rows and the member rows in its act. A flow that comes
  * later finds no organization, no domain claim, and no SCIM token.
@@ -799,11 +798,11 @@ export async function deleteOrganizationsHead(
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
-  // Plan 13a (ruling R6): a setup link and its setup session give access to
-  // the drafts of the organization, so they go in this step too. The
-  // sessions go before their links.
-  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
-  await tx.delete("ssoSetupLink", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R17): the setup links and setup sessions are not here.
+  // The open and each setup session request read the organization row
+  // (setup-session.ts), so no flow reaches them after this step. They go in
+  // `deleteOrganizationsRest`, and the act of an account delete costs no
+  // more D1 queries than before plan 13a.
 }
 
 /**
@@ -828,6 +827,10 @@ export async function deleteOrganizationsRest(
   // The tokens and the role rows of the organization have no use without it (plan 12k).
   await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R17): the setup sessions go before their links. Each
+  // read of them needs the organization row (setup-session.ts).
+  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoSetupLink", [{ field: "organizationId", op: "in", value: list }]);
   // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", [{ field: "organizationId", op: "in", value: list }]);
   // The scimGroupMember rows come after the member rows, as in a group write (ruling 59 M1).

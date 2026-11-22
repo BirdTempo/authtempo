@@ -165,11 +165,10 @@ describe("the account delete with no per-invocation query limit (ruling 10 of pl
    * one. Since Low A the reserve before the act keeps no route limiter. So
    * the direct delete and the confirm of an owner of 1 solo organization
    * each take 2 shared organizations here, as with no parallel invocation.
-   * Plan 13a (ruling R6) adds the setup session and setup link deletes:
-   * SOLO_CALLS goes from 6 to 8. So the confirm now takes 1 shared
-   * organization, and the direct delete still takes 2.
+   * Plan 13a (ruling R17) keeps the setup rows out of the act, so
+   * SOLO_CALLS stays 6 and both edges stay 2.
    */
-  const EDGE = { direct: 2, confirm: 1 } as const;
+  const EDGE = { direct: 2, confirm: 2 } as const;
   for (const scene of ["direct", "confirm"] as const)
     for (const shared of [EDGE[scene], EDGE[scene] + 1])
       it(`${shared > EDGE[scene] ? "refuses" : "deletes"} a co-owner of ${shared} organizations with a parallel invocation: ${scene}`, async () => {

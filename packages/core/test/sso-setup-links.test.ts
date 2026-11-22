@@ -10,6 +10,7 @@ import {
   listSetupLinks,
   revokeSetupLink,
 } from "../src/engine/sso/setup-links.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -293,7 +294,7 @@ describe("the SSO setup links (plan 13a Task 2)", () => {
     expect(await w.storage.findMany("ssoSetupSession", [])).toEqual([]);
   });
 
-  it("deletes the links and the setup sessions in the act of a solo owner's account delete", async () => {
+  it("leaves the links and the setup sessions of a solo owner's account delete to the sweep (ruling R17)", async () => {
     const { w, actor, org, owner } = await world();
     const made = await mint(w, actor, org);
     await openSession(w, made.id, org);
@@ -301,8 +302,11 @@ describe("the SSO setup links (plan 13a Task 2)", () => {
     if (!session) throw new Error("the session ended");
     const done = await deleteAccount(w.config, { session, ip: null, userAgent: null });
     expect(done).toEqual({ ok: true, value: { ok: true } });
-    // No sweep ran: the act itself took both models.
+    // The act sends no setup delete: the sweep takes both models with the rest.
     expect(await w.storage.findMany("organization", [])).toEqual([]);
+    expect(await w.storage.findMany("ssoSetupLink", [])).toHaveLength(1);
+    expect(await w.storage.findMany("ssoSetupSession", [])).toHaveLength(1);
+    expect((await sweepExpired(w.config)).organizationRows).toBe(1);
     expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
     expect(await w.storage.findMany("ssoSetupSession", [])).toEqual([]);
   });

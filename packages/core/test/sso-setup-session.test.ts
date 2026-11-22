@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SsoConfig } from "../src/config.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { requireSsoManager } from "../src/engine/sso/guard.js";
 import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
@@ -11,6 +12,7 @@ import {
   SETUP_SESSION_ABSOLUTE_MS,
   SETUP_SESSION_IDLE_MS,
 } from "../src/engine/sso/setup-session.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { ROUTES } from "../src/http/route-list.js";
 import { SETUP_SESSION_ROUTES } from "../src/http/routes/sso-setup.js";
 import { SETUP_SESSION_COOKIE } from "../src/primitives/credentials.js";
@@ -58,7 +60,7 @@ async function world(ttlHours?: number) {
     recordCredential(made.value.token);
     return made.value;
   };
-  return { w, actor, org: owner.org, mint };
+  return { w, actor, owner, org: owner.org, mint };
 }
 
 type W = Awaited<ReturnType<typeof world>>["w"];
@@ -298,6 +300,28 @@ describe("the setup session (plan 13a Task 3)", () => {
       });
       expect(await requireSetupSession(w.config, withCookie(opened.cookie))).toEqual(UNAUTHORIZED);
     }
+  });
+
+  it("refuses the open and each session request of an organization that an account delete took, before the sweep", async () => {
+    const { w, mint, owner } = await world();
+    const opened = await open(w, (await mint()).token);
+    const idle = await mint();
+    const session = await resolveSession(w.config, owner.token);
+    if (!session) throw new Error("the session ended");
+    const done = await deleteAccount(w.config, { session, ip: null, userAgent: null });
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    // Ruling R17: the act deletes the organization row, and the sweep deletes the setup rows.
+    // Until the sweep, the organization read of the open and of each request refuses them.
+    expect(await w.storage.findMany("organization", [])).toEqual([]);
+    expect(await w.storage.findMany("ssoSetupLink", [])).toHaveLength(2);
+    expect(await sessions(w)).toHaveLength(1);
+    expect(await requireSetupSession(w.config, withCookie(opened.cookie))).toEqual(UNAUTHORIZED);
+    expect(await openSetupSession(w.config, idle.token, META)).toEqual(INVALID);
+    expect(await sessions(w)).toHaveLength(1);
+    expect(await audits(w)).toHaveLength(1);
+    await sweepExpired(w.config);
+    expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
+    expect(await sessions(w)).toEqual([]);
   });
 
   it("counts 20 opens of one link in an hour, then answers 429 rate_limited and opens no session", async () => {

@@ -105,10 +105,9 @@ const SCIM_GROUP_CALLS = 2;
  *   the user's sessions, and the sweep makes a logout of a later one.
  * - 9: the solo organizations keep 6 calls of 15 in the act: the
  *   organization, connection, domain, and SCIM token deletes, the member
- *   delete with its count, and one pending row. Plan 13a (ruling R6) adds
- *   the setup session and setup link deletes to the act, so it keeps 8
- *   calls of 17. The SCIM Users and Groups,
- *   the teams, the invitations, the tokens, the roles, the team members, and
+ *   delete with its count, and one pending row. The SCIM Users and Groups,
+ *   the teams, the invitations, the tokens, the roles, the team members,
+ *   the setup sessions and links (plan 13a, ruling R17), and
  *   the active organization of the sessions go at the sweep
  *   (organization-rest.ts). So a solo organization with SCIM Groups goes
  *   with the account too.
@@ -123,7 +122,7 @@ const SCIM_GROUP_CALLS = 2;
  * `resolveSession` 4, the limiter 1, and the membership read 1. In the
  * transaction: the user lock 2, the spend of the link 1, the session of the
  * proof 1, the impersonation hold 1, the organization rule 3, the owner lock
- * 2, the user delete 1, the solo organizations 6 (8 since plan 13a), the
+ * 2, the user delete 1, the solo organizations 6, the
  * invitation delete 1,
  * the member delete of the user 1, the owner recount 1, `endSessions` 4, the
  * page of the impersonation sessions 2, the scimUser read 1, and the 13
@@ -143,11 +142,12 @@ const SCIM_GROUP_CALLS = 2;
  * at 3 such organizations (51), so a size check refuses it (ruling 10 M1 of
  * plan 12f2).
  *
- * Plan 13a (ruling R6) adds 2 deletes to `deleteOrganizationsHead`: the
- * setup sessions and the setup links. A scene with a solo organization
- * sends 2 queries more than the counts above. No D1 run has measured them
- * yet: the D1 tables come with Task 1 of plan 13a, which measures the pins
- * again. The size check counts the 2 deletes through `SOLO_CALLS`.
+ * Plan 13a first put the setup session and setup link deletes in
+ * `deleteOrganizationsHead` (ruling R6). On the D1 binding each scene with
+ * a solo organization then sent 2 queries more, and a user actor fit no
+ * solo organization. Ruling R17 moves the 2 deletes to the sweep
+ * (`deleteOrganizationsRest`), and the setup open and each setup request
+ * read the organization row. So the act sends the counts above again.
  */
 
 /**
@@ -180,19 +180,18 @@ export const DELETE_KEEP = SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
 /**
  * The statements of the solo organizations in the act when one or more go,
  * for any count (rulings 30 and 78 of plan 12d): the organization,
- * connection, domain, SCIM token, setup session, and setup link deletes
- * (the last two since plan 13a, ruling R6), the member delete with its
- * count, and one pending row. The operator delete reads it to refuse a
- * delete that cannot fit its budget.
+ * connection, domain, and SCIM token deletes, the member delete with its
+ * count, and one pending row. The setup rows of plan 13a go at the sweep
+ * (ruling R17). The operator delete reads it to refuse a delete that cannot
+ * fit its budget.
  */
-const SOLO_CALLS = 8;
+const SOLO_CALLS = 6;
 
 /**
  * The part of `SOLO_CALLS` that `deleteOrganizationsHead` sends on D1: the
- * organization, connection, domain, SCIM token, setup session, and setup
- * link deletes.
+ * organization, connection, domain, and SCIM token deletes.
  */
-const SOLO_HEAD_CALLS = 6;
+const SOLO_HEAD_CALLS = 4;
 
 /**
  * The statements of one `lockInOrder` at the worst: 2 on MySQL (ruling 2 of
