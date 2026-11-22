@@ -3,7 +3,22 @@ import type { ResolvedConfig } from "../../config.js";
 import { scimBase } from "../../engine/scim/discovery.js";
 import { publicConnection } from "../../engine/sso/connections.js";
 import { summary as domainSummary } from "../../engine/sso/domains.js";
+import { recheckSsoManager } from "../../engine/sso/guard.js";
+import { activateSetup, previewSetup } from "../../engine/sso/setup-activate.js";
+import {
+  addSetupDomain,
+  createPendingScimToken,
+  saveDraftConnection,
+  verifySetupDomain,
+} from "../../engine/sso/setup-drafts.js";
 import { setupRefused } from "../../engine/sso/setup-events.js";
+import {
+  createSetupLink,
+  getSetupLink,
+  handBack,
+  listSetupLinks,
+  revokeSetupLink,
+} from "../../engine/sso/setup-links.js";
 import {
   openSetupSession,
   requireSetupSession,
@@ -15,12 +30,24 @@ import type { ErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { sha256Hex } from "../../primitives/crypto.js";
-import { fail } from "../../result.js";
+import { fail, ok } from "../../result.js";
 import type { SetupStep, SsoSetupLinkRow, SsoSetupSessionRow } from "../../schema.js";
 import { guideOf, spValues } from "../../sso/guides/index.js";
 import { isJsonRequest, readBody } from "../body.js";
 import { escapeHtml } from "../confirm-page.js";
-import { setupOpenBody, setupPageQuery, setupStatusQuery } from "../contract/sso.js";
+import {
+  domainIdBody,
+  setupConnectionBody,
+  setupDomainAddBody,
+  setupLinkCreateBody,
+  setupLinkCreateQuery,
+  setupLinkIdBody,
+  setupLinkIdQuery,
+  setupLinkListQuery,
+  setupOpenBody,
+  setupPageQuery,
+  setupStatusQuery,
+} from "../contract/sso.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, respond } from "../json.js";
 import { ROUTES, type RouteKey } from "../route-list.js";
@@ -34,7 +61,7 @@ import {
   stepsOfLink,
   type TestSummary,
 } from "../setup-page.js";
-import { readQuery } from "./sso.js";
+import { managedBody, managedCall, readQuery } from "./sso.js";
 
 /**
  * The closed list of the setup session (plan 13a Task 3, spec 6.1 item 6).
@@ -192,7 +219,7 @@ async function pageInput(
   config: ResolvedConfig,
   caller: SetupCaller,
   query: z.infer<typeof setupStatusQuery>,
-): Promise<SetupPageInput> {
+): Promise<{ page: SetupPageInput; status: Record<string, unknown> }> {
   const { link, session } = caller;
   const linkIs = { field: "setupLinkId", op: "eq", value: link.id } as const;
   const [organization, domainRows, draftRow, tokenRow] = await Promise.all([
@@ -293,7 +320,7 @@ async function pageInput(
           query.run !== undefined,
         );
 
-  return {
+  const page: SetupPageInput = {
     step,
     // One value for one session, and no other party can compute it: it hashes the secret of the session.
     csrf: await sha256Hex(`setup-csrf:${session.tokenHash}`),
@@ -311,6 +338,23 @@ async function pageInput(
     domains,
     scim: tokenRow ? { hint: tokenRow.hint } : null,
   };
+  // The JSON answer of the same rows (the contract of `GET /sso/setup/status`). The test result
+  // is null for a run that is not a run of this link: the page shows its code, the JSON does not.
+  const status = {
+    link: {
+      id: link.id,
+      steps: link.steps,
+      kinds: link.kinds,
+      note: link.note,
+      expiresAt: link.expiresAt.toISOString(),
+      readyAt: link.readyAt?.toISOString() ?? null,
+    },
+    domains: domainRows.map(domainSummary),
+    connection: draftRow ? publicConnection(config, draftRow) : null,
+    scimToken: tokenRow ? { id: tokenRow.id, hint: tokenRow.hint } : null,
+    test,
+  };
+  return { page, status };
 }
 
 /**
@@ -361,15 +405,181 @@ export function ssoSetupRoutes(config: ResolvedConfig): Route[] {
     },
     withStatusLimit(
       // The page of the setup (Task 9). The ACS of a test sign-in answers 303 here with `run=<id>`.
+      // A caller that asks for JSON (the client call) gets the rows of the same read (Task 11).
       setupSessionRoute("GET /sso/setup/status", async (ctx, caller) => {
         const query = readQuery(ctx.url, setupStatusQuery);
         if (!query.ok) return respond(query);
-        const input = await pageInput(ctx.config, caller, query.value);
-        return new Response(renderSetupPage(ctx.config, input), {
+        const { page, status } = await pageInput(ctx.config, caller, query.value);
+        if ((ctx.request.headers.get("accept") ?? "").toLowerCase().includes("application/json"))
+          return json(status);
+        return new Response(renderSetupPage(ctx.config, page), {
           status: 200,
           headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
         });
       }),
     ),
+    ...linkRoutes(),
+    ...sessionRoutes(),
+  ];
+}
+
+/** The organization of a setup link, or null for an id with no row (`not_found`). */
+async function linkOrganization(config: ResolvedConfig, id: string): Promise<string | null> {
+  const row = await config.storage.findOne("ssoSetupLink", [{ field: "id", op: "eq", value: id }]);
+  return row ? row.organizationId : null;
+}
+
+/**
+ * The five routes of a manager for the setup links (plan 13a Task 11). Each runs `managedCall`:
+ * the session, the `sso-manage:user` count, the body, the organization of the row, the manager
+ * guard, then the act. A link of another organization answers `forbidden_rank` (ruling R8), and
+ * an id with no row answers `not_found`. The body of each is at the floor (64 KiB).
+ */
+function linkRoutes(): Route[] {
+  const meta = (ctx: RouteContext) => ({
+    ip: ctx.ip,
+    userAgent: ctx.request.headers.get("user-agent"),
+  });
+  const byId = (input: { id: string }, ctx: RouteContext) => linkOrganization(ctx.config, input.id);
+  const idQuery = async (ctx: RouteContext) => readQuery(ctx.url, setupLinkIdQuery);
+  return [
+    {
+      method: "POST",
+      path: "/sso/setup-links/create",
+      key: "POST /sso/setup-links/create",
+      handler: (ctx) =>
+        managedCall(
+          ctx.config,
+          ctx,
+          async (c) => {
+            const query = readQuery(c.url, setupLinkCreateQuery);
+            if (!query.ok) return query;
+            const body = await managedBody(setupLinkCreateBody)(c);
+            if (!body.ok) return body;
+            return ok({ ...body.value, organizationId: query.value.organizationId });
+          },
+          async (input) => input.organizationId,
+          (actor, input) => createSetupLink(ctx.config, actor, input, meta(ctx)),
+          (made) => json(made),
+        ),
+    },
+    {
+      method: "GET",
+      path: "/sso/setup-links/list",
+      key: "GET /sso/setup-links/list",
+      handler: (ctx) =>
+        managedCall(
+          ctx.config,
+          ctx,
+          async (c) => readQuery(c.url, setupLinkListQuery),
+          async (q) => q.organizationId,
+          (actor, q) => listSetupLinks(ctx.config, actor, q.organizationId),
+          (links) => json({ links }),
+        ),
+    },
+    {
+      method: "GET",
+      path: "/sso/setup-links/get",
+      key: "GET /sso/setup-links/get",
+      handler: (ctx) =>
+        managedCall(
+          ctx.config,
+          ctx,
+          idQuery,
+          (q) => byId(q, ctx),
+          async (actor, q) => {
+            const link = await getSetupLink(ctx.config, actor, q.id);
+            if (!link.ok) return link;
+            const preview = await previewSetup(ctx.config, actor, q.id);
+            if (!preview.ok) return preview;
+            return ok({ link: link.value, preview: preview.value });
+          },
+          (found) => json(found),
+        ),
+    },
+    {
+      method: "POST",
+      path: "/sso/setup-links/revoke",
+      key: "POST /sso/setup-links/revoke",
+      handler: (ctx) =>
+        managedCall(
+          ctx.config,
+          ctx,
+          managedBody(setupLinkIdBody),
+          (b) => byId(b, ctx),
+          (actor, b) => revokeSetupLink(ctx.config, actor, b.id, meta(ctx)),
+          () => json({ ok: true }),
+        ),
+    },
+    {
+      method: "POST",
+      path: "/sso/setup-links/activate",
+      key: "POST /sso/setup-links/activate",
+      handler: (ctx) =>
+        managedCall(
+          ctx.config,
+          ctx,
+          managedBody(setupLinkIdBody),
+          (b) => byId(b, ctx),
+          async (actor, b) => {
+            const link = await linkOrganization(ctx.config, b.id);
+            // The row can go between the two reads: the engine answers `not_found` for it.
+            const organizationId = link ?? "";
+            return activateSetup(
+              ctx.config,
+              actor,
+              b.id,
+              async () => {
+                const still = await recheckSsoManager(ctx.config, actor, organizationId);
+                return still.ok ? ok(undefined) : still;
+              },
+              meta(ctx),
+            );
+          },
+          (connection) => json({ connection }),
+        ),
+    },
+  ];
+}
+
+/**
+ * The five routes of a setup session that write (plan 13a Task 11). Each is built with
+ * `setupSessionRoute`, so the cookie check runs before the handler and before any body read. The
+ * body of each is JSON only, as the contract says. The connection route has a cap of 4 MiB
+ * (`BODY_CAPS`, ruling R5). The engine counts each write on `setup-draft:link` after the read.
+ */
+function sessionRoutes(): Route[] {
+  const meta = (ctx: RouteContext) => ({
+    ip: ctx.ip,
+    userAgent: ctx.request.headers.get("user-agent"),
+  });
+  return [
+    setupSessionRoute("POST /sso/setup/domains/add", async (ctx, caller) => {
+      const body = await managedBody(setupDomainAddBody)(ctx);
+      if (!body.ok) return respond(body);
+      const r = await addSetupDomain(ctx.config, caller, body.value.domain, meta(ctx));
+      return r.ok ? json({ domain: r.value }) : respond(r);
+    }),
+    setupSessionRoute("POST /sso/setup/domains/verify", async (ctx, caller) => {
+      const body = await managedBody(domainIdBody)(ctx);
+      if (!body.ok) return respond(body);
+      const r = await verifySetupDomain(ctx.config, caller, body.value.id, meta(ctx));
+      return r.ok ? json({ domain: r.value }) : respond(r);
+    }),
+    setupSessionRoute("POST /sso/setup/connection", async (ctx, caller) => {
+      const body = await managedBody(setupConnectionBody)(ctx);
+      if (!body.ok) return respond(body);
+      const r = await saveDraftConnection(ctx.config, caller, body.value, meta(ctx));
+      return r.ok ? json({ connection: r.value }) : respond(r);
+    }),
+    setupSessionRoute("POST /sso/setup/scim-token", async (ctx, caller) => {
+      const r = await createPendingScimToken(ctx.config, caller, meta(ctx));
+      if (!r.ok) return respond(r);
+      return json({ id: r.value.id, token: r.value.token, scimBaseUrl: scimBase(ctx.config) });
+    }),
+    setupSessionRoute("POST /sso/setup/handback", async (ctx, caller) => {
+      const r = await handBack(ctx.config, caller);
+      return r.ok ? json({ ok: true }) : respond(r);
+    }),
   ];
 }

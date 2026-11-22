@@ -7,18 +7,7 @@ import { ROUTES, type RouteKey } from "../src/http/route-list.js";
  * "lists only routes that no module mounts" in test/route-list.test.ts holds each key here to
  * no mount: a task that mounts a route removes its key here, or that test fails.
  */
-export const UNMOUNTED_ROUTES: ReadonlySet<string> = new Set<RouteKey>([
-  "POST /sso/setup-links/create",
-  "GET /sso/setup-links/list",
-  "GET /sso/setup-links/get",
-  "POST /sso/setup-links/revoke",
-  "POST /sso/setup-links/activate",
-  "POST /sso/setup/domains/add",
-  "POST /sso/setup/domains/verify",
-  "POST /sso/setup/connection",
-  "POST /sso/setup/scim-token",
-  "POST /sso/setup/handback",
-]);
+export const UNMOUNTED_ROUTES: ReadonlySet<string> = new Set<RouteKey>([]);
 
 /** ROUTES without the keys above, in the order of ROUTES. */
 export const MOUNTED_ROUTES = ROUTES.filter((r) => !UNMOUNTED_ROUTES.has(`${r.method} ${r.path}`));

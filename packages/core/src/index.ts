@@ -258,6 +258,16 @@ export {
   dohGoogle,
 } from "./engine/sso/dns.js";
 export type { SsoDomainSummary } from "./engine/sso/domains.js";
+export {
+  activateSetup,
+  previewSetup,
+  type SetupPreview,
+} from "./engine/sso/setup-activate.js";
+export {
+  lastPassedRun,
+  startTestRun,
+  testRunResult,
+} from "./engine/sso/test-run.js";
 export type { SweepResult } from "./engine/sweep.js";
 export type { TeamMemberSummary, TeamSummary } from "./engine/teams.js";
 export type { TokenQuota } from "./engine/token-use.js";
@@ -325,6 +335,7 @@ export {
   type PasswordVerifyPageInput,
   type ResetPageInput,
 } from "./http/password-pages.js";
+export { renderSetupPage } from "./http/setup-page.js";
 export { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 export { ipKey, isIpLiteral } from "./limiter/ip-key.js";

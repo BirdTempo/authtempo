@@ -206,6 +206,18 @@ export const COMPARED = [
   "scim.tokens.list",
   "scim.tokens.create",
   "scim.tokens.revoke",
+  "sso.setupLinks.create",
+  "sso.setupLinks.list",
+  "sso.setupLinks.get",
+  "sso.setupLinks.revoke",
+  "sso.setupLinks.activate",
+  "sso.setup.open",
+  "sso.setup.status",
+  "sso.setup.domains.add",
+  "sso.setup.domains.verify",
+  "sso.setup.connection",
+  "sso.setup.scimToken",
+  "sso.setup.handback",
 ] as const satisfies readonly ClientOperation[];
 type Compared = (typeof COMPARED)[number];
 
@@ -335,6 +347,18 @@ export const ANSWER_ROWS: { readonly [O in Compared]: AnswerEqual<O> } = {
   "scim.tokens.list": true,
   "scim.tokens.create": true,
   "scim.tokens.revoke": true,
+  "sso.setupLinks.create": true,
+  "sso.setupLinks.list": true,
+  "sso.setupLinks.get": true,
+  "sso.setupLinks.revoke": true,
+  "sso.setupLinks.activate": true,
+  "sso.setup.open": true,
+  "sso.setup.status": true,
+  "sso.setup.domains.add": true,
+  "sso.setup.domains.verify": true,
+  "sso.setup.connection": true,
+  "sso.setup.scimToken": true,
+  "sso.setup.handback": true,
 };
 /** The compared rows that fail, by name; `true` is refused while one exists. */
 type FailingAnswer = { [O in Compared]: AnswerEqual<O> extends true ? never : O }[Compared];
@@ -415,6 +439,12 @@ export const BODY_AS_INPUT = [
   "sso.connections.delete",
   "scim.tokens.create",
   "scim.tokens.revoke",
+  "sso.setupLinks.revoke",
+  "sso.setupLinks.activate",
+  "sso.setup.open",
+  "sso.setup.domains.add",
+  "sso.setup.domains.verify",
+  "sso.setup.connection",
 ] as const satisfies readonly Compared[];
 type BodyAsInput = (typeof BODY_AS_INPUT)[number];
 
@@ -487,6 +517,12 @@ export const BODY_ROWS: { readonly [O in BodyAsInput]: BodyEqual<O> } = {
   "sso.connections.delete": true,
   "scim.tokens.create": true,
   "scim.tokens.revoke": true,
+  "sso.setupLinks.revoke": true,
+  "sso.setupLinks.activate": true,
+  "sso.setup.open": true,
+  "sso.setup.domains.add": true,
+  "sso.setup.domains.verify": true,
+  "sso.setup.connection": true,
 };
 type FailingBody = { [O in BodyAsInput]: BodyEqual<O> extends true ? never : O }[BodyAsInput];
 export const noFailingBody: [FailingBody] extends [never] ? true : FailingBody = true;
@@ -500,6 +536,7 @@ export const noFailingBody: [FailingBody] extends [never] ? true : FailingBody =
 export const QUERY_AND_BODY_AS_INPUT = [
   "sso.connections.create",
   "sso.connections.update",
+  "sso.setupLinks.create",
 ] as const satisfies readonly Compared[];
 type QueryAndBodyAsInput = (typeof QUERY_AND_BODY_AS_INPUT)[number];
 
@@ -509,6 +546,7 @@ export const QUERY_AND_BODY_ROWS: {
 } = {
   "sso.connections.create": true,
   "sso.connections.update": true,
+  "sso.setupLinks.create": true,
 };
 type FailingQueryAndBody = {
   [O in QueryAndBodyAsInput]: QueryAndBodyEqual<O> extends true ? never : O;

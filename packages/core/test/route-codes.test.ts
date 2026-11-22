@@ -30,6 +30,8 @@ import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { createSession } from "../src/engine/sessions.js";
 import { createConnection } from "../src/engine/sso/connections.js";
 import { addDomain } from "../src/engine/sso/domains.js";
+import { createSetupLink } from "../src/engine/sso/setup-links.js";
+import { openSetupSession } from "../src/engine/sso/setup-session.js";
 import { addTeamMember, createTeam } from "../src/engine/teams.js";
 import { API_TOKEN_CAP, createApiToken } from "../src/engine/tokens.js";
 import { CHALLENGE_MAX_ATTEMPTS } from "../src/engine/totp.js";
@@ -225,6 +227,20 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /scim/tokens/revoke": { id: "$scimToken" },
   // Plan 13a Task 3: the open of a setup link.
   "POST /sso/setup/open": { token: `sl_${BODY43}` },
+  // Plan 13a Task 11: `$link` names a setup link of the world. The session routes need the
+  // setup cookie, so the families that reach them send one.
+  "POST /sso/setup-links/create": { steps: ["domain"], kinds: ["oidc"], note: "Ada" },
+  "POST /sso/setup-links/revoke": { id: "$link" },
+  "POST /sso/setup-links/activate": { id: "$link" },
+  "POST /sso/setup/domains/add": { domain: "setup.example" },
+  "POST /sso/setup/domains/verify": { id: "$domain" },
+  "POST /sso/setup/connection": {
+    kind: "oidc",
+    label: "Acme",
+    issuer: "https://login.idp.example",
+    clientId: "acme",
+    clientSecret: "acme-secret",
+  },
 };
 
 /**
@@ -248,6 +264,9 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /username/available": { username: "ada" },
   // Plan 13a Task 3: the confirm page needs a token of the form of a setup link.
   "GET /sso/setup": { token: `sl_${BODY43}` },
+  "POST /sso/setup-links/create": { organizationId: "$org" },
+  "GET /sso/setup-links/list": { organizationId: "$org" },
+  "GET /sso/setup-links/get": { id: "$link" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -269,6 +288,7 @@ const UNFILLED: Fills = {
   $domain: "d1",
   $connection: "c1",
   $scimToken: "k1",
+  $link: "l1",
   $phone: "+14155550100",
   $phoneCode: "123456",
 };
@@ -566,6 +586,25 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // platform operator: operator-impersonation.test.ts answers its 429.
     const routes = declaring("rate_limited").filter((key) => key !== "POST /operator/impersonate");
     expect(routes.length).toBeGreaterThan(0);
+    // A setup session, opened before the limiter refuses: the routes of a setup session count
+    // after the cookie check, so a request with another credential answers 401 (plan 13a Task 11).
+    const setupLink = must(
+      await createSetupLink(
+        config,
+        { kind: "app", name: "route-codes" },
+        {
+          organizationId: org.organization.id,
+          steps: ["domain", "connection", "directory"],
+          kinds: ["oidc"],
+          note: "Ada",
+        },
+      ),
+    );
+    const setupOpen = must(
+      await openSetupSession(config, setupLink.token, { ip: null, userAgent: null }),
+    );
+    const setupCookie = { cookie: setupOpen.cookie.split(";")[0] ?? "" };
+    fills.$link = setupLink.id;
     // The anonymous delete counts for an anonymous session only (plan 12i Task 6).
     const anonymous = must(
       await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
@@ -575,26 +614,28 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       w,
       routes,
       (key) =>
-        key === "POST /anonymous/delete"
-          ? w.cookie(anonymous.token)
-          : // The anonymous sign-in counts a request with no session only.
-            key === "POST /anonymous/sign-in"
-            ? {}
-            : key === "POST /token/live"
-              ? { authorization: `Bearer ${jwt.token}` }
-              : key === "GET /tokens/current"
-                ? { authorization: `Bearer ${windowed.token}` }
-                : key === "GET /organizations/tokens/current"
-                  ? { authorization: `Bearer ${orgWindowed.token}` }
-                  : // The device page counts a request with no session only.
-                    key === "GET /oauth/device"
-                    ? {}
-                    : // The operator user tools count a secret call before the compare
-                      // (plan 12f), and so does the override of plan 12d.
-                      entryOf(key).feature === "operatorUsers" ||
-                        entryOf(key).feature === "operatorSso"
-                      ? { authorization: `Operator ${"x".repeat(32)}` }
-                      : w.cookie(me.token),
+        takes(key, "setupSession")
+          ? setupCookie
+          : key === "POST /anonymous/delete"
+            ? w.cookie(anonymous.token)
+            : // The anonymous sign-in counts a request with no session only.
+              key === "POST /anonymous/sign-in"
+              ? {}
+              : key === "POST /token/live"
+                ? { authorization: `Bearer ${jwt.token}` }
+                : key === "GET /tokens/current"
+                  ? { authorization: `Bearer ${windowed.token}` }
+                  : key === "GET /organizations/tokens/current"
+                    ? { authorization: `Bearer ${orgWindowed.token}` }
+                    : // The device page counts a request with no session only.
+                      key === "GET /oauth/device"
+                      ? {}
+                      : // The operator user tools count a secret call before the compare
+                        // (plan 12f), and so does the override of plan 12d.
+                        entryOf(key).feature === "operatorUsers" ||
+                          entryOf(key).feature === "operatorSso"
+                        ? { authorization: `Operator ${"x".repeat(32)}` }
+                        : w.cookie(me.token),
       fills,
     );
     // The five routes that carry the code in a redirect to the app. The Apple
@@ -699,12 +740,21 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
         { organizationId: org.organization.id, name: "directory" },
       ),
     );
+    // A setup link of the organization, so each link route with an id reaches the guard (plan 13a Task 11).
+    const link = must(
+      await createSetupLink(
+        config,
+        { kind: "app", name: "route-codes" },
+        { organizationId: org.organization.id, steps: ["domain"], kinds: ["oidc"], note: "Ada" },
+      ),
+    );
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,
       $team: team.id,
       $domain: domain.id,
       $connection: connection.id,
       $scimToken: scimToken.id,
+      $link: link.id,
     });
     expect(unlike(results, "forbidden_rank", 403)).toEqual({});
   });
@@ -1479,6 +1529,8 @@ const EXPIRY_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   // A pending domain past 7 days needs a platform operator with a fresh session after the
   // move of the clock: sso/domain-routes.test.ts drives it.
   "POST /sso/domains/verify",
+  // The verify of a setup session needs the setup cookie: sso-setup-session-routes.test.ts drives it.
+  "POST /sso/setup/domains/verify",
 ];
 
 describe("token_expired on every route that declares it (plan 11g)", () => {

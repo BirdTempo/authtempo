@@ -192,10 +192,24 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.scim.tokens.list({ organizationId })` | `GET /scim/tokens` | `ScimTokenJSON[]` |
 | `client.scim.tokens.create({ organizationId, name, scopes?, expiresInDays? })` | `POST /scim/tokens/create` | `{ token, id, hint }`. The clear token appears once |
 | `client.scim.tokens.revoke({ id })` | `POST /scim/tokens/revoke` | `{ ok: true }` |
+| `client.sso.setupLinks.create({ organizationId, steps, kinds, note, ttlHours? })` | `POST /sso/setup-links/create` | `{ id, token, expiresAt }`. The clear token appears once |
+| `client.sso.setupLinks.list({ organizationId })` | `GET /sso/setup-links/list` | `SetupLinkJSON[]` |
+| `client.sso.setupLinks.get({ id })` | `GET /sso/setup-links/get` | `{ link, preview }`. `preview` is `null` while the link has no draft |
+| `client.sso.setupLinks.revoke({ id })` | `POST /sso/setup-links/revoke` | `{ ok: true }` |
+| `client.sso.setupLinks.activate({ id })` | `POST /sso/setup-links/activate` | `SsoConnectionJSON`. `setup_not_tested` until a test of the current draft passes |
+| `client.sso.setup.open({ token })` | `POST /sso/setup/open` | `{ linkId }`, and the setup cookie |
+| `client.sso.setup.status({ run? })` | `GET /sso/setup/status` | `SetupStatusJSON`: the link, the drafts of the session, and the `test` result |
+| `client.sso.setup.domains.add({ domain })` | `POST /sso/setup/domains/add` | `SsoDomainJSON`, with `record` |
+| `client.sso.setup.domains.verify({ id })` | `POST /sso/setup/domains/verify` | `SsoDomainJSON` |
+| `client.sso.setup.connection(input: SetupConnectionInput)` | `POST /sso/setup/connection` | `SsoConnectionJSON`, a draft. No answer holds the client secret |
+| `client.sso.setup.scimToken()` | `POST /sso/setup/scim-token` | `{ id, token, scimBaseUrl }`. The clear token appears once |
+| `client.sso.setup.handback()` | `POST /sso/setup/handback` | `{ ok: true }` |
 
 The password, email code, and second factor operations answer `not_found` when the server turns the feature off.
 
 The SSO and SCIM token operations answer `not_found` when the server turns `sso` or `scim` off. A domain, connection, or SCIM token call needs a fresh session of an owner with a second factor on. Wrap each one in `withFresh`. [Enterprise SSO](/docs/guides/sso/) and [SCIM provisioning](/docs/guides/scim/) give the flows.
+
+The `sso.setupLinks` calls need a signed-in manager of the organization and `sso.setup` on the server. A link of another organization answers `forbidden_rank`. The `sso.setup` calls need the setup cookie that `sso.setup.open` sets. A bearer token or a normal session cookie answers `unauthorized` there, so make the client of the setup page with no `token`. The setup session calls are for a browser: the cookie is `__Host-` and `HttpOnly`.
 
 `sso.connections.create` sends `organizationId` in the query, and `sso.connections.update` sends `id` in the query. The body holds the other fields. Core runs the manager guard before it reads the body.
 
@@ -296,7 +310,7 @@ The types of the package:
 | Sign-in additions | `PasswordIdentifier`, `IdTokenNonceJSON`, `BrowserSessionJSON`, `SocialStateData` |
 | Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
-| Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON` |
+| Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON`, `SetupLinkJSON`, `SetupLinkInput`, `SetupPreviewJSON`, `SetupConnectionInput`, `SetupStatusJSON` |
 
 ## Next
 

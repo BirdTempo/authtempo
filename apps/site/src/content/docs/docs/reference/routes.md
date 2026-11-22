@@ -24,7 +24,7 @@ sources:
 - With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
 - A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`. So does the `conflict` of a sign-up confirm that lost its claim.
-- A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
+- A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 4194304 bytes for `POST /sso/setup/connection`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
 - The body reads of the routes with a cap above 65536 bytes hold at most 16777216 bytes at once in one isolate. The reads of signed-in users hold at most 8388608 bytes of it, and every other read at most 8388608 bytes. One IP holds at most 4194304 bytes, and so does the one client with no IP. A user may hold the cap of its read, with one large read at a time. A client is its IP before a session and its user after one. A read past that answers 503 [`body_busy`](/docs/reference/errors/#body_busy) with `Retry-After: 1`, and no parse runs. The SCIM routes answer their own SCIM 503.
 - Such a read that gets no bytes for 10 s answers 408 [`body_timeout`](/docs/reference/errors/#body_timeout). So does a read that runs past the time of its cap at 131072 bytes per second, at least 10 s. For a signed-in user the rate is 262144 bytes per second. No parse runs. The SCIM routes answer their own SCIM 408.
 - An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
@@ -1839,7 +1839,7 @@ The setup link routes exist when the config sets `sso.setup` (plan 13a). This fe
 | Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
 | Input | None |
 | Answer | `{ id, token, scimBaseUrl }`. The pending SCIM token leaves core this one time |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-setup-handback"><code>POST /sso/setup/handback</code></h3>
 
@@ -1848,7 +1848,7 @@ The setup link routes exist when the config sets `sso.setup` (plan 13a). This fe
 | Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
 | Input | None |
 | Answer | `{ ok: true }`. The link is ready for the owner |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-sso-setup-status"><code>GET /sso/setup/status</code></h3>
 

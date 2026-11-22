@@ -359,6 +359,46 @@ export const CLIENT_CALLS = [
   { operation: "scim.tokens.list", method: "GET", path: "/scim/tokens", select: "tokens" },
   { operation: "scim.tokens.create", method: "POST", path: "/scim/tokens/create" },
   { operation: "scim.tokens.revoke", method: "POST", path: "/scim/tokens/revoke" },
+  // Plan 13a Task 11: the setup links of a manager. The page of the confirm step
+  // (`GET /sso/setup`) is a link that a browser opens, so it has no row.
+  { operation: "sso.setupLinks.create", method: "POST", path: "/sso/setup-links/create" },
+  {
+    operation: "sso.setupLinks.list",
+    method: "GET",
+    path: "/sso/setup-links/list",
+    select: "links",
+  },
+  { operation: "sso.setupLinks.get", method: "GET", path: "/sso/setup-links/get" },
+  { operation: "sso.setupLinks.revoke", method: "POST", path: "/sso/setup-links/revoke" },
+  {
+    operation: "sso.setupLinks.activate",
+    method: "POST",
+    path: "/sso/setup-links/activate",
+    select: "connection",
+  },
+  // Plan 13a Task 11: the calls of a setup session. The session is the setup cookie.
+  { operation: "sso.setup.open", method: "POST", path: "/sso/setup/open" },
+  { operation: "sso.setup.status", method: "GET", path: "/sso/setup/status" },
+  {
+    operation: "sso.setup.domains.add",
+    method: "POST",
+    path: "/sso/setup/domains/add",
+    select: "domain",
+  },
+  {
+    operation: "sso.setup.domains.verify",
+    method: "POST",
+    path: "/sso/setup/domains/verify",
+    select: "domain",
+  },
+  {
+    operation: "sso.setup.connection",
+    method: "POST",
+    path: "/sso/setup/connection",
+    select: "connection",
+  },
+  { operation: "sso.setup.scimToken", method: "POST", path: "/sso/setup/scim-token" },
+  { operation: "sso.setup.handback", method: "POST", path: "/sso/setup/handback" },
 ] as const satisfies readonly ClientCall[];
 
 /** The name of one row of `CLIENT_CALLS`. */

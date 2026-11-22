@@ -297,6 +297,22 @@ export const setupStatusQuery = z.strictObject({
   idp: z.string().min(1).max(40).optional(),
 });
 
+/**
+ * The result of one test run of the draft (plan 13a Task 11). Null while the session has no run,
+ * or when the run of the query is not a run of this link. `address` and `name` come from the IdP,
+ * so a client treats each as hostile text. `current` is false for a run of an older draft version.
+ */
+const setupTestJson = z.strictObject({
+  outcome: z.enum(["passed", "failed", "pending"]),
+  step: z.string().nullable(),
+  help: z.string(),
+  attributeNames: z.array(z.string()),
+  address: z.string().nullable(),
+  name: z.string().nullable(),
+  domainClaimed: z.boolean(),
+  current: z.boolean(),
+});
+
 /** What a setup session sees: its link and its own drafts, never a live row or a secret. */
 const setupStatusAnswer = z.strictObject({
   link: z.strictObject({
@@ -310,6 +326,7 @@ const setupStatusAnswer = z.strictObject({
   domains: z.array(DomainJson),
   connection: ConnectionJson.nullable(),
   scimToken: z.strictObject({ id: z.string(), hint: z.string() }).nullable(),
+  test: setupTestJson.nullable(),
 });
 
 /** The contract of `routes/sso.ts` (plan 12d Tasks 2 and 3). */

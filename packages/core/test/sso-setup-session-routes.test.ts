@@ -1,0 +1,305 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SsoConfig } from "../src/config.js";
+import { resolveSession } from "../src/engine/sessions.js";
+import { requireSsoManager } from "../src/engine/sso/guard.js";
+import { createSetupLink } from "../src/engine/sso/setup-links.js";
+import { BODY_CAPS } from "../src/http/body-cap.js";
+import { SETUP_SESSION_COOKIE } from "../src/primitives/credentials.js";
+import { newId } from "../src/primitives/ids.js";
+import { BASE_URL, recordCredential } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
+import { ssoAuth } from "./sso/helpers.js";
+import { managerSession } from "./sso/manager-helpers.js";
+
+const SECRET = "idp-client-secret-0123456789";
+const OIDC = {
+  kind: "oidc",
+  label: "Acme Okta",
+  issuer: "https://login.idp.example/acme",
+  clientId: "acme-client",
+  clientSecret: SECRET,
+};
+const CLIENT = { "cf-connecting-ip": "198.51.100.7", "user-agent": "setup-session-routes/1" };
+
+beforeEach(() => {
+  for (const m of ["error", "info", "warn", "log", "debug"] as const)
+    vi.spyOn(console, m).mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
+
+async function world(
+  steps: ("domain" | "connection" | "directory")[] = ["domain", "connection", "directory"],
+) {
+  const w = ssoAuth({
+    sso: { oidc: true, setup: {} } as SsoConfig,
+    scim: {},
+    password: { hash: FAST, uniformSignUp: false },
+  });
+  const a = await managerSession(w, "owner@acme.example", "acme");
+  const b = await managerSession(w, "owner@beta.example", "beta");
+  const actorOf = async (m: typeof a) => {
+    const resolved = await resolveSession(w.config, m.token);
+    if (!resolved) throw new Error("the session ended");
+    const g = await requireSsoManager(w.config, resolved, m.org);
+    if (!g.ok) throw new Error(g.code);
+    return g.value;
+  };
+  /** A link of `m`'s organization, opened through the route: the setup cookie pair. */
+  const open = async (m: typeof a, linkSteps = steps) => {
+    const made = await createSetupLink(w.config, await actorOf(m), {
+      organizationId: m.org,
+      steps: linkSteps,
+      kinds: ["oidc"],
+      note: "Ada at IT",
+    });
+    if (!made.ok) throw new Error(made.code);
+    recordCredential(made.value.token);
+    const res = await w.handle(post("/sso/setup/open", { token: made.value.token }));
+    const pair = (res.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+    recordCredential(pair.split("=")[1] ?? "");
+    return { cookie: pair, linkId: made.value.id };
+  };
+  return { w, a, b, open };
+}
+type World = Awaited<ReturnType<typeof world>>;
+
+function post(path: string, body: unknown, cookie?: string, raw?: string) {
+  return new Request(`${BASE_URL}/auth${path}`, {
+    method: "POST",
+    headers: {
+      ...CLIENT,
+      "content-type": "application/json",
+      origin: BASE_URL,
+      ...(cookie === undefined ? {} : { cookie }),
+    },
+    body: raw ?? JSON.stringify(body),
+  });
+}
+
+async function send(w: World["w"], path: string, body: unknown, cookie?: string, raw?: string) {
+  const res = await w.handle(post(path, body, cookie, raw));
+  return [res.status, (await res.json()) as Record<string, unknown>] as const;
+}
+
+const NONE = [401, { error: "unauthorized" }] as const;
+const PATHS = [
+  ["/sso/setup/domains/add", { domain: "acme.example" }],
+  ["/sso/setup/domains/verify", { id: "x" }],
+  ["/sso/setup/connection", OIDC],
+  ["/sso/setup/scim-token", {}],
+  ["/sso/setup/handback", {}],
+] as const;
+
+describe("the setup session routes (plan 13a Task 11)", () => {
+  it("answers each route with no credential, or a manager cookie, as 401 unauthorized", async () => {
+    const { w, a } = await world();
+    for (const [path, body] of PATHS) {
+      expect(await send(w, path, body), path).toEqual(NONE);
+      expect(await send(w, path, body, `__Host-tempo_session=${a.token}`), path).toEqual(NONE);
+      expect(
+        await send(w, path, body, `${SETUP_SESSION_COOKIE}=ss_${"A".repeat(43)}`),
+        path,
+      ).toEqual(NONE);
+    }
+    const bearer = new Request(`${BASE_URL}/auth/sso/setup/handback`, {
+      method: "POST",
+      headers: {
+        ...CLIENT,
+        authorization: `Bearer ${a.token}`,
+        "content-type": "application/json",
+        origin: BASE_URL,
+      },
+      body: "{}",
+    });
+    expect([(await w.handle(bearer)).status]).toEqual([401]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+    expect(await w.storage.findMany("ssoDomain", [])).toEqual([]);
+  });
+
+  it("reads no body before the cookie check: a bad body with no cookie is 401, with a cookie 400", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    for (const [path] of PATHS.filter(([p]) => p !== "/sso/setup/scim-token")) {
+      expect(await send(w, path, null, undefined, "{not json"), path).toEqual(NONE);
+    }
+    const [status, answer] = await send(w, "/sso/setup/domains/add", { nope: 1 }, s.cookie);
+    expect([status, answer]).toEqual([400, { error: "invalid_body" }]);
+    const [cs, ca] = await send(w, "/sso/setup/connection", { kind: "oidc" }, s.cookie);
+    expect([cs, ca]).toEqual([400, { error: "invalid_body" }]);
+  });
+
+  it("holds the connection route to a 4 MiB cap", () => {
+    expect(BODY_CAPS["POST /sso/setup/connection"]).toBe(4_194_304);
+  });
+
+  it("adds and verifies a domain, saves a draft, mints a token, and hands back", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    const [ds, added] = await send(
+      w,
+      "/sso/setup/domains/add",
+      { domain: "acme.example" },
+      s.cookie,
+    );
+    expect(ds).toBe(200);
+    const domain = added.domain as { id: string; record: { name: string; value: string } };
+    w.answers.a[domain.record.name] = [domain.record.value];
+    w.answers.b[domain.record.name] = [domain.record.value];
+    const [vs, verified] = await send(w, "/sso/setup/domains/verify", { id: domain.id }, s.cookie);
+    expect([vs, (verified.domain as { verified: boolean }).verified]).toEqual([200, true]);
+    const [cs, conn] = await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    expect(cs).toBe(200);
+    expect(JSON.stringify(conn)).not.toContain(SECRET);
+    const draft = conn.connection as { id: string; kind: string; label: string };
+    expect([draft.kind, draft.label]).toEqual(["oidc", "Acme Okta"]);
+    const [ts, token] = await send(w, "/sso/setup/scim-token", {}, s.cookie, "");
+    expect(ts).toBe(200);
+    expect(String(token.token).length).toBeGreaterThan(20);
+    recordCredential(String(token.token));
+    expect(String(token.scimBaseUrl)).toContain("/scim/v2");
+    const [hs, back] = await send(w, "/sso/setup/handback", {}, s.cookie);
+    expect([hs, back]).toEqual([200, { ok: true }]);
+    const link = await w.storage.findOne("ssoSetupLink", [
+      { field: "id", op: "eq", value: s.linkId },
+    ]);
+    expect(link?.readyAt).not.toBeNull();
+  });
+
+  it("answers the status as JSON for an Accept of application/json, and as a page otherwise", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    const get = (accept?: string) =>
+      w.handle(
+        new Request(`${BASE_URL}/auth/sso/setup/status`, {
+          headers: { ...CLIENT, cookie: s.cookie, ...(accept ? { accept } : {}) },
+        }),
+      );
+    const page = await get();
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const res = await get("application/json");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = (await res.json()) as {
+      link: { id: string };
+      connection: { label: string } | null;
+      domains: unknown[];
+      scimToken: unknown;
+      test: unknown;
+    };
+    expect(body.link.id).toBe(s.linkId);
+    expect(body.connection?.label).toBe("Acme Okta");
+    expect(body.domains).toEqual([]);
+    expect(body.scimToken).toBeNull();
+    expect(body.test).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+  });
+
+  it("answers a test result in the JSON status for a run of the link, and not_found for another link", async () => {
+    const { w, a, b, open } = await world();
+    const s = await open(a);
+    const t = await open(b);
+    const [, conn] = await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    const connId = (conn.connection as { id: string }).id;
+    const now = w.clock.now();
+    const run = await w.storage.create("ssoTestRun", {
+      id: newId(now),
+      createdAt: now,
+      updatedAt: now,
+      organizationId: a.org,
+      connectionId: connId,
+      linkId: s.linkId,
+      outcome: "passed",
+      step: null,
+      attributeNames: ["email"],
+      domainClaimed: false,
+      draftVersion: 1,
+    });
+    const status = async (cookie: string) => {
+      const res = await w.handle(
+        new Request(`${BASE_URL}/auth/sso/setup/status?run=${run.id}`, {
+          headers: { ...CLIENT, cookie, accept: "application/json" },
+        }),
+      );
+      return [
+        res.status,
+        (await res.json()) as { test: { outcome: string; current: boolean } | null },
+      ] as const;
+    };
+    const [own, ownBody] = await status(s.cookie);
+    expect([own, ownBody.test?.outcome, ownBody.test?.current]).toEqual([200, "passed", true]);
+    const [other, otherBody] = await status(t.cookie);
+    expect([other, otherBody.test]).toEqual([200, null]);
+  });
+
+  it("holds a session of link A to its own organization: it cannot touch org B", async () => {
+    const { w, a, b, open } = await world();
+    const s = await open(a);
+    const other = await open(b);
+    const [, added] = await send(
+      w,
+      "/sso/setup/domains/add",
+      { domain: "beta.example" },
+      other.cookie,
+    );
+    const bDomain = (added.domain as { id: string }).id;
+    const before = await w.storage.findMany("ssoDomain", []);
+    expect(await send(w, "/sso/setup/domains/verify", { id: bDomain }, s.cookie)).toEqual(NONE);
+    expect(await w.storage.findMany("ssoDomain", [])).toEqual(before);
+    // Its own draft lands in org A only.
+    await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    const drafts = await w.storage.findMany("ssoConnection", []);
+    expect(drafts.map((d) => d.organizationId)).toEqual([a.org]);
+  });
+
+  it("answers domain_unverified to a verify with no record, and domain_taken to a second organization", async () => {
+    const { w, a, b, open } = await world();
+    const s = await open(a);
+    const t = await open(b);
+    const add = async (cookie: string) => {
+      const [, answer] = await send(
+        w,
+        "/sso/setup/domains/add",
+        { domain: "shared.example" },
+        cookie,
+      );
+      return answer.domain as { id: string; record: { name: string; value: string } };
+    };
+    const first = await add(s.cookie);
+    const second = await add(t.cookie);
+    const [us, unverified] = await send(w, "/sso/setup/domains/verify", { id: first.id }, s.cookie);
+    expect([us, unverified.error]).toEqual([400, "domain_unverified"]);
+    w.answers.a[first.record.name] = [first.record.value, second.record.value];
+    w.answers.b[first.record.name] = [first.record.value, second.record.value];
+    const [vs] = await send(w, "/sso/setup/domains/verify", { id: first.id }, s.cookie);
+    expect(vs).toBe(200);
+    const [ts, taken] = await send(w, "/sso/setup/domains/verify", { id: second.id }, t.cookie);
+    expect([ts, taken.error]).toEqual([409, "domain_taken"]);
+  });
+
+  it("answers 400 token_expired to a verify of a pending domain past its life, and 429 past the draft limit", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    const [, added] = await send(w, "/sso/setup/domains/add", { domain: "late.example" }, s.cookie);
+    const id = (added.domain as { id: string }).id;
+    await w.storage.update("ssoDomain", [{ field: "id", op: "eq", value: id }], {
+      expiresAt: new Date(w.clock.now().getTime() - 1000),
+    });
+    expect(await send(w, "/sso/setup/domains/verify", { id }, s.cookie)).toEqual([
+      400,
+      { error: "token_expired" },
+    ]);
+    // The gate counts each write of the link: 60 an hour, and the next answers 429.
+    let last = 0;
+    for (let i = 0; i < 60; i += 1)
+      last = (await send(w, "/sso/setup/scim-token", {}, s.cookie, "{}"))[0];
+    expect(last).toBe(429);
+  });
+
+  it("answers 401 for a step that the link does not hold", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a, ["domain"]);
+    expect(await send(w, "/sso/setup/connection", OIDC, s.cookie)).toEqual(NONE);
+    expect(await send(w, "/sso/setup/scim-token", {}, s.cookie, "")).toEqual(NONE);
+  });
+});

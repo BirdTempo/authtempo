@@ -63,7 +63,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
     // Task 15 adds the two ID-token calls, the passkey-first sign-up, the two
     // Signal API reads, and the three multi-session calls.
-    expect(CLIENT_CALLS).toHaveLength(131);
+    // Plan 13a Task 11 adds the five setup link calls and the seven setup session calls.
+    expect(CLIENT_CALLS).toHaveLength(143);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -213,6 +214,23 @@ describe("the call table of the client (plan 11d)", () => {
     await c.scim.tokens.list(org);
     await c.scim.tokens.create({ ...org, name: "Entra" });
     await c.scim.tokens.revoke({ id: "s" });
+    await c.sso.setupLinks.create({
+      ...org,
+      steps: ["domain"],
+      kinds: ["oidc"],
+      note: "Ada",
+    });
+    await c.sso.setupLinks.list(org);
+    await c.sso.setupLinks.get({ id: "l" });
+    await c.sso.setupLinks.revoke({ id: "l" });
+    await c.sso.setupLinks.activate({ id: "l" });
+    await c.sso.setup.open({ token: "t" });
+    await c.sso.setup.status();
+    await c.sso.setup.domains.add({ domain: "b.c" });
+    await c.sso.setup.domains.verify({ id: "d" });
+    await c.sso.setup.connection({ kind: "oidc", label: "Staff" });
+    await c.sso.setup.scimToken();
+    await c.sso.setup.handback();
     expect([...new Set(seen)].sort()).toEqual(
       [...new Set(CLIENT_CALLS.map((r) => `${r.method} ${r.path}`))].sort(),
     );
@@ -238,18 +256,20 @@ describe("the call table of the client (plan 11d)", () => {
     // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
     // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
     // Task 15 adds six compared rows and three that are not.
-    expect(COMPARED).toHaveLength(121);
+    // Plan 13a Task 11 adds twelve compared rows.
+    expect(COMPARED).toHaveLength(133);
     expect(NOT_COMPARED).toHaveLength(10);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
     // Plan 12i Task 2 adds username.set. Task 5 adds phone.verify, phone.add, and phone.verifyAdd.
     // Task 20 adds password.verifyCode. Task 15 adds the multi-session switch and sign-out.
     // Plan 12l moves the two SSO connection writes to QUERY_AND_BODY_AS_INPUT.
-    expect(BODY_AS_INPUT).toHaveLength(67);
+    // Plan 13a Task 11 adds six: revoke, activate, open, domains add and verify, connection.
+    expect(BODY_AS_INPUT).toHaveLength(73);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // A row that sends its id in the query is a compared row and no body row (plan 12l).
-    // The two SSO connection writes are these rows.
-    expect(QUERY_AND_BODY_AS_INPUT).toHaveLength(2);
+    // The two SSO connection writes and the mint of a setup link are these rows.
+    expect(QUERY_AND_BODY_AS_INPUT).toHaveLength(3);
     for (const op of QUERY_AND_BODY_AS_INPUT) {
       expect(COMPARED, op).toContain(op);
       expect(BODY_AS_INPUT, op).not.toContain(op);

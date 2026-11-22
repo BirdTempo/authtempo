@@ -219,13 +219,14 @@ const OPEN_NODES: Readonly<Record<string, string>> = {
 
 describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
   it("derives the cap of each route as the next power of two above its largest valid body, at least 64 KiB", () => {
-    // A route that no module mounts reads no body (plan 13a). The task that
-    // mounts it adds its derived cap to BODY_CAPS, the pin below, and the docs.
+    // A route that no module mounts reads no body (plan 13a). Task 11 mounted the last of them,
+    // so the setup connection route is in the rows with its cap of 4 MiB (ruling R5).
     const all = largestBodies();
     const rows = all.filter((r) => !UNMOUNTED_ROUTES.has(r.key));
+    expect(rows).toHaveLength(all.length);
     expect(
-      all
-        .filter((r) => UNMOUNTED_ROUTES.has(r.key) && derivedCap(r.bytes) > BODY_CAP_FLOOR)
+      rows
+        .filter((r) => derivedCap(r.bytes) > BODY_CAP_FLOOR && r.key.includes("/setup/"))
         .map((r) => [r.key, derivedCap(r.bytes)]),
     ).toEqual([["POST /sso/setup/connection", 4_194_304]]);
     const table = rows.map((r) => ({ ...r, cap: bodyCapOf(r.key as RouteKey) }));
@@ -258,8 +259,9 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(REQUEST_BODY_MAX).toBe(Math.max(...table.map((r) => r.cap)));
     expect(perCap).toEqual(
       new Map([
-        [65_536, rows.length - 3],
+        [65_536, rows.length - 4],
         [262_144, 1],
+        [4_194_304, 1],
         [8_388_608, 2],
       ]),
     );

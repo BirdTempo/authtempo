@@ -2777,7 +2777,8 @@ export const ROUTES = Object.freeze([
     path: "/sso/setup/scim-token",
     feature: "ssoSetup",
     auth: ["setupSession"],
-    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    // No body is read, so no `invalid_body` (plan 13a Task 11).
+    codes: ["unauthorized", "rate_limited", "impersonation_session"],
     oauthCodes: [],
   },
   {
@@ -2785,7 +2786,9 @@ export const ROUTES = Object.freeze([
     path: "/sso/setup/handback",
     feature: "ssoSetup",
     auth: ["setupSession"],
-    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    // No body is read and no limit counts: a hand back is one write that a second call repeats
+    // as a no-op. So neither `invalid_body` nor `rate_limited` (plan 13a Task 11).
+    codes: ["unauthorized", "impersonation_session"],
     oauthCodes: [],
   },
   {

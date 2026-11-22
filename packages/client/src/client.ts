@@ -24,6 +24,7 @@ import type {
   TeamSummary,
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
+import type { AnswerOf, BodyOf, QueryOf } from "@authtempo/core/openapi";
 import {
   DEFAULT_LAST_METHOD_COOKIE,
   isLastMethod,
@@ -177,6 +178,22 @@ export type SsoDomainJSON = SsoDomainSummary;
 export type SsoConnectionJSON = SsoConnectionSummary;
 /** One SCIM token of an organization (plan 12d). Never the token, never its hash. */
 export type ScimTokenJSON = ScimTokenSummary;
+/**
+ * The setup of an SSO connection by the IT admin of a customer (plan 13a). Each type is the type
+ * of the route contract, so the client and the server keep one shape. None holds a client secret.
+ */
+/** One setup link. It holds no token and no hash. */
+export type SetupLinkJSON = AnswerOf<"GET /sso/setup-links/list">["links"][number];
+/** What the activation of a link makes live. Null: the link has no draft connection yet. */
+export type SetupPreviewJSON = AnswerOf<"GET /sso/setup-links/get">["preview"];
+/** The mint of a setup link. The organization goes in the query, the rest in the body. */
+export type SetupLinkInput = QueryOf<"POST /sso/setup-links/create"> &
+  BodyOf<"POST /sso/setup-links/create">;
+/** The IdP values of the draft connection of a setup session. The owner sets the rest after the setup. */
+export type SetupConnectionInput = BodyOf<"POST /sso/setup/connection">;
+/** What a setup session sees: its link, its own drafts, and the result of a test. */
+export type SetupStatusJSON = AnswerOf<"GET /sso/setup/status">;
+
 /** The fields of a new SSO connection. Core checks the rules of each kind and names the field it refuses. */
 export type SsoConnectionInput = Omit<ConnectionFields, "organizationId" | "kind" | "label"> & {
   organizationId: string;
@@ -1075,6 +1092,46 @@ export interface Client {
       /** `kind` and `organizationId` never change. */
       update(input: { id: string } & ConnectionFields): Promise<ClientResult<SsoConnectionJSON>>;
       delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+    /**
+     * The setup links of an organization (plan 13a). A manager mints a link and gives it to the
+     * IT admin of a customer. The calls need what the connection calls need, and `sso.setup` on
+     * the server. A link of another organization answers `forbidden_rank`.
+     */
+    setupLinks: {
+      /** The clear `token` appears once. Give it to the IT admin, never to a log. */
+      create(
+        input: SetupLinkInput,
+      ): Promise<ClientResult<{ id: string; token: string; expiresAt: string }>>;
+      list(input: { organizationId: string }): Promise<ClientResult<SetupLinkJSON[]>>;
+      /** The link, and what its activation makes live (`null`: no draft yet). */
+      get(input: {
+        id: string;
+      }): Promise<ClientResult<{ link: SetupLinkJSON; preview: SetupPreviewJSON }>>;
+      revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+      /** Makes the draft live. `setup_not_tested` until a test of the current draft has passed. */
+      activate(input: { id: string }): Promise<ClientResult<SsoConnectionJSON>>;
+    };
+    /**
+     * The calls of a setup session, for the page of the IT admin (plan 13a). The session is the
+     * `__Host-` setup cookie that `open` sets. These calls take no bearer token and no normal
+     * session: any other credential answers `unauthorized`. Make the client with no `token`.
+     */
+    setup: {
+      /** Opens the session with the token of the link and sets the cookie. */
+      open(input: { token: string }): Promise<ClientResult<{ linkId: string }>>;
+      /** The link, the drafts of the session, and the result of a test (`run` names the run). */
+      status(input?: { run?: string | undefined }): Promise<ClientResult<SetupStatusJSON>>;
+      domains: {
+        add(input: { domain: string }): Promise<ClientResult<SsoDomainJSON>>;
+        verify(input: { id: string }): Promise<ClientResult<SsoDomainJSON>>;
+      };
+      /** Saves the draft connection. It is not live until a manager activates the link. */
+      connection(input: SetupConnectionInput): Promise<ClientResult<SsoConnectionJSON>>;
+      /** The clear SCIM `token` appears once. */
+      scimToken(): Promise<ClientResult<{ id: string; token: string; scimBaseUrl: string }>>;
+      /** Tells the manager that the setup is ready. */
+      handback(): Promise<ClientResult<{ ok: true }>>;
     };
   };
   /**
@@ -2266,6 +2323,60 @@ export function createClient(options: ClientOptions): Client {
             { id },
           ),
         delete: (input) => send<{ ok: true }>("sso.connections.delete", input),
+      },
+      setupLinks: {
+        // Core runs the manager guard before it reads the body: the organization travels in the query.
+        create: ({ organizationId, ...body }) =>
+          send<{ id: string; token: string; expiresAt: string }>("sso.setupLinks.create", body, {
+            organizationId,
+          }),
+        list: (input) =>
+          part<{ links: SetupLinkJSON[] }, "sso.setupLinks.list">(
+            "sso.setupLinks.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        get: (input) =>
+          send<{ link: SetupLinkJSON; preview: SetupPreviewJSON }>(
+            "sso.setupLinks.get",
+            undefined,
+            { id: input.id },
+          ),
+        revoke: (input) => send<{ ok: true }>("sso.setupLinks.revoke", input),
+        activate: (input) =>
+          part<{ connection: SsoConnectionJSON }, "sso.setupLinks.activate">(
+            "sso.setupLinks.activate",
+            input,
+          ),
+      },
+      setup: {
+        open: (input) => send<{ linkId: string }>("sso.setup.open", input),
+        status: (input) =>
+          send<SetupStatusJSON>(
+            "sso.setup.status",
+            undefined,
+            input?.run === undefined ? undefined : { run: input.run },
+          ),
+        domains: {
+          add: (input) =>
+            part<{ domain: SsoDomainJSON }, "sso.setup.domains.add">(
+              "sso.setup.domains.add",
+              input,
+            ),
+          verify: (input) =>
+            part<{ domain: SsoDomainJSON }, "sso.setup.domains.verify">(
+              "sso.setup.domains.verify",
+              input,
+            ),
+        },
+        connection: (input) =>
+          part<{ connection: SsoConnectionJSON }, "sso.setup.connection">(
+            "sso.setup.connection",
+            input,
+          ),
+        scimToken: () =>
+          send<{ id: string; token: string; scimBaseUrl: string }>("sso.setup.scimToken"),
+        handback: () => send<{ ok: true }>("sso.setup.handback"),
       },
     },
     scim: {

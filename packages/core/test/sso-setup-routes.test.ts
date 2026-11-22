@@ -16,8 +16,6 @@ import { managerSession } from "./sso/manager-helpers.js";
 
 const MINUTE_MS = 60_000;
 const CLIENT = { "cf-connecting-ip": "198.51.100.7", "user-agent": "setup-routes-agent/1" };
-const STATUS = "GET /sso/setup/status" as const;
-const HANDBACK = "POST /sso/setup/handback" as const;
 
 beforeEach(() => {
   for (const m of ["error", "info", "warn", "log", "debug"] as const)
@@ -99,32 +97,9 @@ const auditRows = (w: World["w"]) =>
     { field: "action", op: "eq", value: "sso_setup_link_open" },
   ]);
 
-/** A router with a stub at the status key: the route of Task 9 does not exist yet, so the test builds its own. */
+/** A router with the real routes: Task 11 mounts the status and the handback, so no stub is needed. */
 function withStatusRoute(w: World["w"]) {
-  const routes = coreRoutes(w.config).filter((r) => r.key !== STATUS && r.key !== HANDBACK);
-  routes.push(
-    // The answer has the shape of the contract of the status route, so the answers check reads it.
-    setupSessionRoute(STATUS, async (_ctx, caller) =>
-      json(
-        {
-          link: {
-            id: caller.link.id,
-            steps: ["domain", "connection"],
-            kinds: ["oidc"],
-            note: caller.link.note,
-            expiresAt: caller.link.expiresAt.toISOString(),
-            readyAt: null,
-          },
-          domains: [],
-          connection: null,
-          scimToken: null,
-        },
-        200,
-      ),
-    ),
-    setupSessionRoute(HANDBACK, async () => json({ done: true }, 200)),
-  );
-  return createRouter(w.config, routes);
+  return createRouter(w.config, coreRoutes(w.config));
 }
 
 describe("the setup routes (plan 13a Task 3)", () => {
@@ -253,7 +228,11 @@ describe("the setup routes (plan 13a Task 3)", () => {
     const cookie = cookieOf(await w.handle(jsonPost("/sso/setup/open", { token: made.token })));
     // The cookie is live: the one route of the list that this test builds accepts it.
     const router = withStatusRoute(w);
-    const live = await router(getWith("/sso/setup/status", cookie));
+    const live = await router(
+      new Request(url("/sso/setup/status"), {
+        headers: { ...CLIENT, cookie, accept: "application/json" },
+      }),
+    );
     expect(live.status).toBe(200);
     expect(((await live.json()) as { link: { id: string } }).link.id).toBe(made.id);
     const org = owner.org;

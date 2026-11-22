@@ -7,71 +7,11 @@ import { describe, expect, it } from "vitest";
 
 /** Every route that no SDK calls, with the reason. A row that names no route fails the test. */
 const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
-  // Plan 13a: the client calls of the setup routes come in Task 11, which removes these rows.
-  {
-    method: "POST",
-    path: "/sso/setup-links/create",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "GET",
-    path: "/sso/setup-links/list",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "GET",
-    path: "/sso/setup-links/get",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup-links/revoke",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup-links/activate",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
   {
     method: "GET",
     path: "/sso/setup",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/open",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/domains/add",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/domains/verify",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/connection",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/scim-token",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/setup/handback",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
-  },
-  {
-    method: "GET",
-    path: "/sso/setup/status",
-    reason: "plan 13a Task 11 adds the client call and removes this row",
+    reason:
+      "the confirm page of the setup link; a browser opens it, and the client calls open from the page (plan 13a)",
   },
   {
     method: "GET",
