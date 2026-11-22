@@ -486,7 +486,10 @@ describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d
 // The route reads the session once since ruling 78 of plan 12d (2026-10-24): 31, was 32.
 // Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7 to 10.0 on
 // 18 CPUs): the delete also deletes the setup sessions and the setup links: 33, was 31.
-const MEASURED_ORGANIZATION_DELETE = { delete: 33 };
+// Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
+// a query count does not change with the load): the delete also deletes the SSO test runs:
+// 34, was 33.
+const MEASURED_ORGANIZATION_DELETE = { delete: 34 };
 /**
  * The account delete of the sole member of an organization with SCIM
  * Groups (ruling 78 of plan 12d, 2026-10-24). Before, it answered
@@ -501,7 +504,10 @@ const ACCOUNT_DELETE_GROUPS = 120;
 // Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7 to 10.0 on
 // 18 CPUs): the rest of the organization deletes the setup sessions and the setup links.
 // The act stays 38, and the sweeps are 23, 23, and 35, were 24, 24, and 34.
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [23, 23, 35] };
+// Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
+// a query count does not change with the load): the rest also deletes the SSO test runs,
+// so the last sweep sends 36, was 35. The act stays 38.
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [23, 23, 36] };
 const GROUPS = 500;
 
 /**

@@ -906,14 +906,21 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * to 10.0 on 18 CPUs): the rest of the organization deletes the setup
  * sessions and the setup links, so the sweep with the rest row sends 2
  * queries more. The acts do not change.
+ * Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to
+ * 40 on 18 CPUs; a query count does not change with the load): the rest also
+ * deletes the SSO test runs, so the rest of each organization sends 1 query
+ * more. The plain scene sweeps in 33, was 32. The sweeps of each operator
+ * scene send 1 query more in total: the first sweep sends 47, was 48, and
+ * the last sweep sends 2 more. The due and confirm scenes measure the same
+ * counts as before. The acts do not change.
  */
 const SOLO_COUNTS = {
-  plain: [42, [32]],
+  plain: [42, [33]],
   due: [44, [33]],
   confirm: [45, [33]],
-  operator: [49, [48, 48, 48, 37]],
-  operatorConfirm0: [48, [48, 48, 48, 41]],
-  operatorConfirm3: [48, [48, 48, 48, 43]],
+  operator: [49, [47, 48, 48, 39]],
+  operatorConfirm0: [48, [47, 48, 48, 43]],
+  operatorConfirm3: [48, [47, 48, 48, 45]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**
