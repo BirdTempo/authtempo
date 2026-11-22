@@ -766,7 +766,8 @@ export async function organizationGroups(
 /**
  * The rows of the organizations of `list` that give access or hold a claim
  * (ruling 78 of plan 12d): the organization rows, then the connection, the
- * domain, and the SCIM token rows. The organization rows lock first, in id
+ * domain, the SCIM token, the setup session, and the setup link rows (plan
+ * 13a). The organization rows lock first, in id
  * order (`lockInOrder`), in the step of the organization row. The account
  * delete takes these rows and the member rows in its act. A flow that comes
  * later finds no organization, no domain claim, and no SCIM token.
@@ -795,6 +796,11 @@ export async function deleteOrganizationsHead(
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R6): a setup link and its setup session give access to
+  // the drafts of the organization, so they go in this step too. The
+  // sessions go before their links.
+  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoSetupLink", [{ field: "organizationId", op: "in", value: list }]);
 }
 
 /**
