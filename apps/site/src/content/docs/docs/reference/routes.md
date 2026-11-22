@@ -1792,7 +1792,7 @@ The setup link routes exist when the config sets `sso.setup` (plan 13a). This fe
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | Query `{ token }` |
+| Input | Query `{ token }`. Each load counts on `setup-page:ip:<ip>`, 60 per hour. A refusal emits `sso.setup_refused` with the step `page_ip_limit` |
 | Answer | The confirm page, as HTML. It changes nothing, so a mail scanner that opens the link opens no session |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
@@ -1801,7 +1801,7 @@ The setup link routes exist when the config sets `sso.setup` (plan 13a). This fe
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON or form `{ token }` |
+| Input | JSON or form `{ token }`. Each try counts on `setup-open:ip:<ip>`, 60 per hour. Each open of a live link counts on `setup-open:link:<linkId>`, 20 per hour. A success emits `sso.setup_opened`. A refusal emits `sso.setup_refused` with its step |
 | Answer | JSON: `{ linkId }`. A form: the first page of the setup. It sets the cookie `__Host-tempo_setup` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 

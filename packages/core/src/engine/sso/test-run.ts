@@ -8,6 +8,7 @@ import { afterAudit } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { startSso } from "./oidc.js";
 import { setupActorName } from "./setup-drafts.js";
+import { setupRefused } from "./setup-events.js";
 import { lockSetupRows } from "./setup-live.js";
 import type { SetupSession } from "./setup-session.js";
 import { stepHelp } from "./step-help.js";
@@ -77,13 +78,17 @@ async function prepare(
       !row.draft ||
       row.setupLinkId !== who.link.id ||
       row.organizationId !== who.link.organizationId
-    )
+    ) {
+      setupRefused(config, "test_caller");
       return fail("unauthorized");
+    }
     actor = { kind: "app", name: setupActorName(who.link.id) };
     linkId = who.link.id;
   } else actor = who;
-  if (!(await limit(config, "setup-test:connection", row.id, SETUP_TEST_PER_CONNECTION)))
+  if (!(await limit(config, "setup-test:connection", row.id, SETUP_TEST_PER_CONNECTION))) {
+    setupRefused(config, "test_limit");
     return fail("rate_limited");
+  }
   const now = config.clock.now();
   const runId = newId(now);
   const audit = ssoDraft(actor, "sso_test_run", {

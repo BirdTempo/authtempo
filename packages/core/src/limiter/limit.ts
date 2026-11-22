@@ -112,6 +112,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   // Plan 13a Task 3: the open of a setup link, by IP (each try) and by link (each live open).
   "setup-open:ip",
   "setup-open:link",
+  // Plan 13a Task 12: the loads of the confirm page, by IP, apart from the opens.
+  "setup-page:ip",
   // Plan 13a Task 4: the draft writes of one setup link (domain, connection, token).
   "setup-draft:link",
   // Plan 13a Task 7: the test starts of one connection (a run row each).

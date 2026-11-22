@@ -1,8 +1,9 @@
 import type { ResolvedConfig } from "../../config.js";
+import { setupRefused } from "../../engine/sso/setup-events.js";
 import {
   openSetupSession,
   requireSetupSession,
-  SETUP_OPEN_PER_IP,
+  SETUP_PAGE_PER_IP,
 } from "../../engine/sso/setup-session.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
@@ -147,9 +148,11 @@ export function ssoSetupRoutes(config: ResolvedConfig): Route[] {
       handler: async (ctx) => {
         const query = readQuery(ctx.url, setupPageQuery);
         if (!query.ok) return respond(query);
-        // The page reads no row, but each view costs a render: it counts on the key of the open.
-        if (!(await limit(ctx.config, "setup-open:ip", ipKey(ctx.ip), SETUP_OPEN_PER_IP)))
+        // The page reads no row, but each view costs a render: it counts on its own key.
+        if (!(await limit(ctx.config, "setup-page:ip", ipKey(ctx.ip), SETUP_PAGE_PER_IP))) {
+          setupRefused(ctx.config, "page_ip_limit");
           return respond(fail("rate_limited"));
+        }
         return new Response(confirmPage(ctx.config, query.value.token), {
           status: 200,
           headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),

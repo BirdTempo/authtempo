@@ -74,6 +74,10 @@ Each event has these fields too:
 | `operator.action` | info | `action: enum`, `actorKind: enum`, `auditId: id` | An operator act commits with its audit row. |
 | `operator.refused` | warn | `action?: enum`, `actorKind: enum`, `code: code` | The guard or `hooks.operator.beforeAction` refuses an operator act of a known actor. |
 | `scim.change` | info | `resource: enum`, `action: enum`, `organizationId: id`, `resourceId: id` | A SCIM write commits, beside `hooks.scim.afterChange`. |
+| `sso.setup_opened` | info | `linkId: id`, `organizationId: id` | An IT admin opens a setup link. The event holds no token and no cookie. |
+| `sso.setup_refused` | warn | `step: enum` | The setup refuses an open, a page load, a request of a setup session, a draft write, or a test start. The answer is the answer of no credential, so `step` is the only place that names the cause. |
+| `sso.test_run` | info | `connectionId: id`, `linkId?: id`, `outcome: enum`, `step?: enum` | A test run of a draft connection ends. `step` is set for a failed run. The event holds no address, no name, and no attribute. |
+| `sso.activated` | info | `organizationId: id`, `connectionId: id`, `linkId: id` | An owner activates a draft connection. |
 | `scim.owner_kept` | info | `scimUserId: id` | A SCIM deactivate keeps the member row of an owner. |
 | `sso.second_factor_idp` | info | `connectionId: id`, `claim: enum` | The provider of an SSO sign-in passed the second factor. `claim` names the list that matched, never its value. |
 
@@ -239,7 +243,10 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 36 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete`, `sso_setup_link_create`, `sso_setup_link_open`, `sso_setup_link_revoke`, `sso_setup_link_activate`, `sso_test_run` |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 108 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 109 values: each family of [Limits](/docs/reference/limits/). |
+| `sso.setup_refused.step` | `open_token_form`, `open_link_invalid`, `open_ip_limit`, `open_link_limit`, `open_lost`, `page_ip_limit`, `session_cookie`, `session_ended`, `session_link`, `draft_step`, `draft_limit`, `test_caller`, `test_limit` |
+| `sso.test_run.outcome` | `passed`, `failed` |
+| `sso.test_run.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

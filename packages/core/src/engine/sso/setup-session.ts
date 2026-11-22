@@ -14,6 +14,7 @@ import type { OperatorAuditRow, SsoSetupLinkRow, SsoSetupSessionRow } from "../.
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { ssoDraft } from "./guard.js";
+import { setupOpened, setupRefused } from "./setup-events.js";
 import { lockSetupRows } from "./setup-live.js";
 
 /**
@@ -44,6 +45,12 @@ export const SETUP_OPEN_PER_LINK = { seconds: 3600, max: 20 };
  * count makes a guess likely.
  */
 export const SETUP_OPEN_PER_IP = { seconds: 3600, max: 60 };
+/**
+ * The loads of the confirm page `GET /sso/setup` by one IP: 60 per hour, on the key `setup-page:ip`.
+ * The page reads no row, but each view costs a render. It has its own key, so a person who reloads
+ * the page spends none of the opens of an office address (`SETUP_OPEN_PER_IP`).
+ */
+export const SETUP_PAGE_PER_IP = { seconds: 3600, max: 60 };
 
 /** The actor of the open: nobody is signed in. The link id goes in `data` (pre-flight C5). */
 const OPEN_ACTOR = { kind: "app", name: "setup-link" } as const;
@@ -87,18 +94,28 @@ export async function openSetupSession(
   meta: SsoActMeta = {},
 ): Promise<Result<{ cookie: string; linkId: string }>> {
   if (!config.sso || !config.sso.setup) return fail("not_found");
-  if (!(await limit(config, "setup-open:ip", ipKey(meta.ip ?? null), SETUP_OPEN_PER_IP)))
+  if (!(await limit(config, "setup-open:ip", ipKey(meta.ip ?? null), SETUP_OPEN_PER_IP))) {
+    setupRefused(config, "open_ip_limit");
     return fail("rate_limited");
-  if (!LINK_TOKEN_RE.test(token)) return fail("setup_link_invalid");
+  }
+  if (!LINK_TOKEN_RE.test(token)) {
+    setupRefused(config, "open_token_form");
+    return fail("setup_link_invalid");
+  }
   const link = await config.storage.findOne("ssoSetupLink", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
     { field: "revokedAt", op: "eq", value: null },
     { field: "endedAt", op: "eq", value: null },
     { field: "expiresAt", op: "gt", value: config.clock.now() },
   ]);
-  if (!link) return fail("setup_link_invalid");
-  if (!(await limit(config, "setup-open:link", link.id, SETUP_OPEN_PER_LINK)))
+  if (!link) {
+    setupRefused(config, "open_link_invalid");
+    return fail("setup_link_invalid");
+  }
+  if (!(await limit(config, "setup-open:link", link.id, SETUP_OPEN_PER_LINK))) {
+    setupRefused(config, "open_link_limit");
     return fail("rate_limited");
+  }
   const draft = ssoDraft(OPEN_ACTOR, "sso_setup_link_open", {
     targetUserId: null,
     data: { organizationId: link.organizationId, linkId: link.id },
@@ -146,8 +163,12 @@ export async function openSetupSession(
     await tx.create("ssoSetupSession", row);
     return writeAuditIn(tx, draft.value, now);
   });
-  if (!opened) return fail("setup_link_invalid");
+  if (!opened) {
+    setupRefused(config, "open_lost");
+    return fail("setup_link_invalid");
+  }
   await afterAudit(config, opened);
+  setupOpened(config, link.id, link.organizationId);
   const seconds = Math.floor((expiresAt.getTime() - now.getTime()) / 1000);
   // Lax, never None: the SAML ACS is a cross-site POST, and the browser must not send this cookie there (pre-flight C9).
   return ok({
@@ -174,7 +195,10 @@ export async function requireSetupSession(
   request: Pick<Request, "headers">,
 ): Promise<Result<SetupSession>> {
   const cookie = readCookie(request, SETUP_SESSION_COOKIE);
-  if (cookie === null || !SESSION_TOKEN_RE.test(cookie)) return fail("unauthorized");
+  if (cookie === null || !SESSION_TOKEN_RE.test(cookie)) {
+    setupRefused(config, "session_cookie");
+    return fail("unauthorized");
+  }
   const now = config.clock.now();
   const session = await config.storage.findOne("ssoSetupSession", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(cookie) },
@@ -182,14 +206,19 @@ export async function requireSetupSession(
     { field: "expiresAt", op: "gt", value: now },
     { field: "lastSeenAt", op: "gt", value: new Date(now.getTime() - SETUP_SESSION_IDLE_MS) },
   ]);
-  if (!session) return fail("unauthorized");
+  if (!session) {
+    setupRefused(config, "session_ended");
+    return fail("unauthorized");
+  }
   const link = await config.storage.findOne("ssoSetupLink", [
     { field: "id", op: "eq", value: session.linkId },
     { field: "revokedAt", op: "eq", value: null },
     { field: "endedAt", op: "eq", value: null },
   ]);
-  if (!link || !(await organizationExists(config, link.organizationId)))
+  if (!link || !(await organizationExists(config, link.organizationId))) {
+    setupRefused(config, "session_link");
     return fail("unauthorized");
+  }
   const touched = await config.storage.update(
     "ssoSetupSession",
     [
@@ -198,6 +227,10 @@ export async function requireSetupSession(
     ],
     { lastSeenAt: now, updatedAt: now },
   );
-  if (touched === 0) return fail("unauthorized");
+  if (touched === 0) {
+    // The session ended between the read and the touch: the same cause as an ended session.
+    setupRefused(config, "session_ended");
+    return fail("unauthorized");
+  }
   return ok({ link, session: { ...session, lastSeenAt: now, updatedAt: now } });
 }

@@ -76,6 +76,44 @@ const GUARD_STEP: Readonly<Record<SsoGuardStep, true>> = {
 
 export const SSO_GUARD_STEPS: readonly string[] = Object.keys(GUARD_STEP);
 
+/**
+ * A refusal of the setup flow (plan 13a Task 12). The event `sso.setup_refused` names one step. The
+ * answer of each step is the same as for no credential, so the event is the only place that tells
+ * the cause. The prefix names the act: `open`, `page`, `session`, `draft`, `test`.
+ */
+export type SetupRefusalStep =
+  | "open_token_form"
+  | "open_link_invalid"
+  | "open_ip_limit"
+  | "open_link_limit"
+  | "open_lost"
+  | "page_ip_limit"
+  | "session_cookie"
+  | "session_ended"
+  | "session_link"
+  | "draft_step"
+  | "draft_limit"
+  | "test_caller"
+  | "test_limit";
+
+const SETUP_REFUSAL_STEP: Readonly<Record<SetupRefusalStep, true>> = {
+  open_token_form: true,
+  open_link_invalid: true,
+  open_ip_limit: true,
+  open_link_limit: true,
+  open_lost: true,
+  page_ip_limit: true,
+  session_cookie: true,
+  session_ended: true,
+  session_link: true,
+  draft_step: true,
+  draft_limit: true,
+  test_caller: true,
+  test_limit: true,
+};
+
+export const SETUP_REFUSAL_STEPS: readonly string[] = Object.keys(SETUP_REFUSAL_STEP);
+
 /** The claim of a profile that passed the second factor of a connection (spec 30 item 13). */
 export type SsoMfaClaim = "amr" | "acr" | "authnContext";
 

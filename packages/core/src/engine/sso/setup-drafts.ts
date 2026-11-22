@@ -13,6 +13,7 @@ import {
 } from "./connections.js";
 import { addDomain, type SsoActMeta, type SsoDomainSummary, verifyDomain } from "./domains.js";
 import type { SsoActor } from "./guard.js";
+import { setupRefused } from "./setup-events.js";
 import type { SetupSession } from "./setup-session.js";
 
 /**
@@ -78,9 +79,14 @@ async function gate(
   auth: SetupSession,
   step: SetupStep,
 ): Promise<Result<true>> {
-  if (!auth.link.steps.includes(step)) return fail("unauthorized");
-  if (!(await limit(config, "setup-draft:link", auth.link.id, SETUP_DRAFT_PER_LINK)))
+  if (!auth.link.steps.includes(step)) {
+    setupRefused(config, "draft_step");
+    return fail("unauthorized");
+  }
+  if (!(await limit(config, "setup-draft:link", auth.link.id, SETUP_DRAFT_PER_LINK))) {
+    setupRefused(config, "draft_limit");
     return fail("rate_limited");
+  }
   return ok(true);
 }
 

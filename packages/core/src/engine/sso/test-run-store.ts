@@ -6,6 +6,7 @@ import type { SsoTestRunRow } from "../../schema.js";
 import { normalizeEmail } from "../users.js";
 import { inOrganizationDomains } from "./domains.js";
 import type { SsoProfile } from "./resolve.js";
+import { testRunEnded } from "./setup-events.js";
 
 /**
  * The rows of a test run after its start (plan 13a Task 7, spec 6.4). The sign-in files call
@@ -65,7 +66,7 @@ export async function failTestRun(
   step: string,
 ): Promise<SsoTestRunRow> {
   const now = config.clock.now();
-  await config.storage.update(
+  const ended = await config.storage.update(
     "ssoTestRun",
     [
       { field: "id", op: "eq", value: run.id },
@@ -73,6 +74,7 @@ export async function failTestRun(
     ],
     { outcome: "failed", step, updatedAt: now },
   );
+  if (ended === 1) testRunEnded(config, run, "failed", step);
   return (
     (await config.storage.findOne("ssoTestRun", [{ field: "id", op: "eq", value: run.id }])) ?? run
   );
@@ -92,7 +94,7 @@ export async function passTestRun(
   const address = profile.email === null ? null : normalizeEmail(profile.email);
   if (address === null) return failTestRun(config, run, "address");
   const now = config.clock.now();
-  await config.storage.transaction(async (tx) => {
+  const passed = await config.storage.transaction(async (tx) => {
     const claimed = await inOrganizationDomains(tx, run.organizationId, address);
     const n = await tx.update(
       "ssoTestRun",
@@ -108,7 +110,7 @@ export async function passTestRun(
         updatedAt: now,
       },
     );
-    if (n !== 1) return;
+    if (n !== 1) return false;
     await tx.create("verification", {
       id: newId(now),
       purpose: "sso-test-result",
@@ -124,7 +126,10 @@ export async function passTestRun(
       updatedAt: now,
       secretVersion: config.keyring.current,
     });
+    return true;
   });
+  // After the commit, as each other event of a flow.
+  if (passed) testRunEnded(config, run, "passed");
   return (
     (await config.storage.findOne("ssoTestRun", [{ field: "id", op: "eq", value: run.id }])) ?? run
   );
