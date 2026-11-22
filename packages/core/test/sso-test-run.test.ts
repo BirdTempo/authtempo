@@ -30,14 +30,14 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 /** The world of `scimAuth` with SSO setup, OIDC with a fake IdP, SAML, and a sink of the events. */
-async function world() {
+async function world(setup = true) {
   const tokens: Record<string, FakeIdToken> = {};
   const idp = fakeFetch((call) =>
     Response.json({ id_token: call.form.code, token_type: "Bearer" }),
   );
   const batches: AuthEvent[][] = [];
   const w = await scimAuth({
-    sso: { oidc: true, saml: true, setup: {}, fetch: idp.fetchFn },
+    sso: { oidc: true, saml: true, ...(setup ? { setup: {} } : {}), fetch: idp.fetchFn },
     jwt: fakeJwt(tokens),
     observe: { sink: { write: (b) => void batches.push([...b]) } },
   });
@@ -725,6 +725,51 @@ describe("the guards of the callbacks that no real flow reaches (review round 1)
         { field: "purpose", op: "eq", value: "sso-test-result" },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("with sso.setup unset, ?test=1 is no flag (R29)", () => {
+  /** What a caller sees of a start: the status, the host and path of the Location, and the bind cookie. */
+  async function seen(res: Response) {
+    const location = new URL(res.headers.get("location") ?? "https://none.invalid/");
+    return {
+      status: res.status,
+      where: `${location.host}${location.pathname}`,
+      bound: bindOf(res) !== "",
+    };
+  }
+
+  it("starts a normal sign-in for a manager and for an anonymous caller, and writes no run and no audit row", async () => {
+    const w = await world(false);
+    const live = await createConnection(w.config, SSO_APP, {
+      organizationId: w.org,
+      ...OIDC,
+      label: "Live",
+    });
+    if (!live.ok) throw new Error(live.code);
+    const id = live.value.id;
+    const manager = { cookie: `__Host-tempo_session=${w.owner.token}` };
+    const anonymous: Record<string, string> = {};
+    const before = await tables(w);
+    for (const headers of [anonymous, manager]) {
+      const plain = await seen(await w.handle(get(`/auth/sso/${id}/start`, headers)));
+      const flagged = await seen(await w.handle(get(`/auth/sso/${id}/start?test=1`, headers)));
+      expect(plain.status).toBe(302);
+      expect(plain.bound).toBe(true);
+      expect(flagged).toEqual(plain);
+    }
+    // A connection that does not exist answers as it does without the flag.
+    const gone = await seen(await w.handle(get("/auth/sso/nope/start", anonymous)));
+    expect(await seen(await w.handle(get("/auth/sso/nope/start?test=1", anonymous)))).toEqual(
+      gone,
+    );
+    // A normal start writes its state row (`verification`) and nothing else.
+    expect(changed(before, await tables(w))).toEqual(["verification"]);
+    expect(await runs(w)).toEqual([]);
+    expect(
+      await w.storage.findMany("operatorAudit", [{ field: "action", op: "eq", value: "sso_test_run" }]),
+    ).toEqual([]);
+    expect((await w.events()).map((e) => e.name)).not.toContain("sso.test_run");
   });
 });
 

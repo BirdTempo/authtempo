@@ -576,8 +576,11 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       path: "/sso/:connectionId/start",
       key: "GET /sso/:connectionId/start",
       async handler(ctx) {
-        // The test start of a draft (plan 13a Task 7). It is one route with two callers.
-        if (ctx.url.searchParams.get("test") === "1") return testStart(ctx);
+        // The test start of a draft (plan 13a Task 7). It is one route with two callers. With
+        // `sso.setup` unset the flag means nothing: the request is a normal start, as it was
+        // before the setup links (R29). Off by default must change no answer and write no row.
+        if (ctx.config.sso?.setup && ctx.url.searchParams.get("test") === "1")
+          return testStart(ctx);
         const r = await startSso(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
           next: ctx.url.searchParams.get("next") ?? undefined,
