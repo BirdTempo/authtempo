@@ -50,6 +50,7 @@ Each operation has one security requirement for each credential form that the ro
 | `clientSecretBasic` | `http` | The client id and secret of a client with a secret, as HTTP Basic, for `POST /oauth/token` and `POST /oauth/revoke`. Each half is form-encoded first |
 | `oauthDpop` | `http` | A DPoP-bound access token as `Authorization: DPoP <token>`, with a proof of its key in the `DPoP` header (RFC 9449 section 7.1), for the userinfo routes |
 | `scimToken` | `http` | A SCIM token of an organization as the bearer, for the routes under `/scim/v2`. It starts with `sk_` |
+| `setupCookie` | `apiKey` | The cookie `__Host-tempo_setup` of a setup session, for the setup routes that a setup session uses (plan 13a) |
 
 ## Tags
 
@@ -82,6 +83,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `oauthDevice` | `oauth.device` | off |
 | `sso` | `sso` | off |
 | `operatorSso` | `operator` and `sso` | off |
+| `ssoSetup` | `sso.setup` | off |
 | `scim` | `scim` | off |
 | `openapi` | `openapi` | off |
 | `health` | always on | on |

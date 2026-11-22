@@ -158,6 +158,11 @@ export const BETTER_AUTH_CODES = {
   // Plan 12d Task 4, by the same rule until Task 14.
   sso_failed: "SSO_FAILED",
   sso_not_configured: "SSO_NOT_CONFIGURED",
+  // Plan 13a Task 0b. Better Auth 1.7.x has no setup link. So these are
+  // authtempo's own names, in the style of the SSO codes. The status stays core's.
+  setup_link_invalid: "SETUP_LINK_INVALID",
+  setup_link_limit: "SETUP_LINK_LIMIT",
+  setup_not_tested: "SETUP_NOT_TESTED",
   // Plan 12d Task 5, by the same rule until Task 14.
   sso_required: "SSO_REQUIRED",
   sso_domain_mismatch: "SSO_DOMAIN_MISMATCH",

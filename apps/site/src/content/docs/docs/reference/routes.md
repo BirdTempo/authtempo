@@ -1739,6 +1739,126 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Answer | `application/samlmetadata+xml`: one `EntityDescriptor` whose `entityID` is this URL, with one `SPSSODescriptor` (`AuthnRequestsSigned="false"`, `WantAssertionsSigned="true"`) and one HTTP-POST `AssertionConsumerService` at the ACS URL. It is not signed. An id that names no SAML connection answers 404 |
 | Errors | [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
 
+<!-- Task 15 writes the full page. -->
+The setup link routes exist when the config sets `sso.setup` (plan 13a). This feature ships with plan 13a. An owner of an organization, or a platform operator, mints a setup link. The IT admin of the organization opens it and fills in drafts: a domain, a connection, and a SCIM token. Nothing goes live until the owner activates the link.
+
+<h3 id="post-sso-setup-links-create"><code>POST /sso/setup-links/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }`; JSON `{ steps, kinds, ttlHours?, note }` |
+| Answer | `{ id, token, expiresAt }`. The token leaves core this one time |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_limit`](/docs/reference/errors/#setup_link_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-links-list"><code>GET /sso/setup-links/list</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ links }`. No link holds its token or its hash |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-links-get"><code>GET /sso/setup-links/get</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ id }` |
+| Answer | `{ link, preview }`. `preview` is what an activation makes live, or `null` when the link has no draft connection |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-links-revoke"><code>POST /sso/setup-links/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The link opens no more |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-links-activate"><code>POST /sso/setup-links/activate</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | The connection, made live. A passed test run of the current draft must exist |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`setup_not_tested`](/docs/reference/errors/#setup_not_tested), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup"><code>GET /sso/setup</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | Query `{ token }` |
+| Answer | The confirm page, as HTML. It changes nothing, so a mail scanner that opens the link opens no session |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-open"><code>POST /sso/setup/open</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | JSON or form `{ token }` |
+| Answer | JSON: `{ linkId }`. A form: the first page of the setup. It sets the cookie `__Host-tempo_setup` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-domains-add"><code>POST /sso/setup/domains/add</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ domain }` |
+| Answer | The domain row, as a draft of the link |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-domains-verify"><code>POST /sso/setup/domains/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ id }` |
+| Answer | The domain row, after the DNS check |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-connection"><code>POST /sso/setup/connection</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ kind, label, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }` |
+| Answer | The draft connection. It takes the values of the provider only. The owner sets `enabled`, `jit`, `defaultRole`, `mfa`, and `scimRoles` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-scim-token"><code>POST /sso/setup/scim-token</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | None |
+| Answer | `{ id, token, scimBaseUrl }`. The pending SCIM token leaves core this one time |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-handback"><code>POST /sso/setup/handback</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | None |
+| Answer | `{ ok: true }`. The link is ready for the owner |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-status"><code>GET /sso/setup/status</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | Query `{ run? }` |
+| Answer | The link, the drafts of the session, and the result of the test run `run`. No live row and no secret |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
 ## SCIM
 
 These routes exist when the config sets `scim` (plan 12d). A directory, such as Entra ID or Okta, provisions the staff of an organization with a SCIM token. A token holds `sk_` and 43 characters. Core stores its SHA-256 only, so the answer of the create is the one time the token leaves core.

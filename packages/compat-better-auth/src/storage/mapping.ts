@@ -157,6 +157,11 @@ export type MappedModel = Exclude<
   | "scimUser"
   | "scimGroup"
   | "scimGroupMember"
+  // Plan 13a Task 0b: core's own tables again. The compat migration of schema
+  // version 17 (Task 1) creates them.
+  | "ssoSetupLink"
+  | "ssoTestRun"
+  | "ssoSetupSession"
 >;
 
 export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {

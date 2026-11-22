@@ -117,6 +117,8 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/sso\/connections\/(create|update|delete)$/, "the connection writes of SSO"],
   // Plan 12d Task 9b: the two SCIM token writes. The list answers a hint only (ruling 40).
   [/^\/scim\/tokens\/(create|revoke)$/, "the SCIM token writes"],
+  // Plan 13a Task 11: each setup link route, and each route of a setup session.
+  [/^\/sso\/setup(-links)?(\/|$)/, "the setup link routes of SSO"],
 ];
 
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
