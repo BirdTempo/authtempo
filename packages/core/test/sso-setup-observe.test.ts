@@ -16,6 +16,7 @@ import {
 } from "../src/engine/sso/setup-session.js";
 import { SETUP_REFUSAL_STEPS } from "../src/engine/sso/steps.js";
 import { SETUP_TEST_PER_CONNECTION, startTestRun } from "../src/engine/sso/test-run.js";
+import { failTestRun, passTestRun } from "../src/engine/sso/test-run-store.js";
 import { LIMIT_FAMILIES } from "../src/limiter/limit.js";
 import { EVENTS, validateEvent } from "../src/observe/events.js";
 import type { AuthEvent } from "../src/observe/port.js";
@@ -291,6 +292,7 @@ describe("one sso.setup_refused for each refusal step", () => {
     expect(w.config.sso?.setup).toBeDefined();
     expect([...SETUP_REFUSAL_STEPS].sort()).toEqual(
       [
+        "domain_row",
         "draft_limit",
         "draft_step",
         "open_ip_limit",
@@ -303,7 +305,12 @@ describe("one sso.setup_refused for each refusal step", () => {
         "session_ended",
         "session_link",
         "test_caller",
+        "test_connection",
+        "test_credential",
         "test_limit",
+        "test_link",
+        "test_setup_off",
+        "test_site",
       ].sort(),
     );
   });
@@ -439,6 +446,83 @@ describe("one sso.setup_refused for each refusal step", () => {
     ).toEqual(["test_limit"]);
   });
 
+  it("test_site: a cross-site or same-site start answers 404 and names the step", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    for (const site of ["cross-site", "same-site"]) {
+      const steps = await stepsOf(w, async () => {
+        const res = await w.handle(
+          get(`/auth/sso/${id}/start?test=1`, { cookie: s.cookie, "sec-fetch-site": site }),
+        );
+        expect(res.status).toBe(404);
+      });
+      expect(steps).toEqual(["test_site"]);
+    }
+    // A start of the same site passes: no refusal.
+    expect(
+      await stepsOf(w, () =>
+        w.handle(
+          get(`/auth/sso/${id}/start?test=1`, { cookie: s.cookie, "sec-fetch-site": "none" }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("test_credential: a start with no setup cookie and no manager session", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    const steps = await stepsOf(w, async () => {
+      expect((await w.handle(get(`/auth/sso/${id}/start?test=1`, CLIENT))).status).toBe(404);
+    });
+    expect(steps).toEqual(["test_credential"]);
+  });
+
+  it("test_connection: a start of an id with no row", async () => {
+    const w = await world();
+    const s = await setup(w);
+    expect(
+      await stepsOf(w, () =>
+        startTestRun(w.config, s, "no-such-connection", { ip: IP, userAgent: AGENT }),
+      ),
+    ).toEqual(["test_connection"]);
+  });
+
+  it("test_link: the link ends between the session check and the start", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    // The session object is the one that the route checked. The revoke lands after the check.
+    await w.storage.update("ssoSetupLink", [{ field: "id", op: "eq", value: s.linkId }], {
+      revokedAt: w.clock.now(),
+    });
+    const steps = await stepsOf(w, async () => {
+      const r = await startTestRun(w.config, s, id, { ip: IP, userAgent: AGENT });
+      expect(r.ok).toBe(false);
+    });
+    expect(steps).toEqual(["test_link"]);
+  });
+
+  it("test_setup_off: a start when sso.setup is off", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    if (!w.config.sso) throw new Error("no sso");
+    const off = { ...w.config, sso: { ...w.config.sso, setup: false as const } };
+    expect(await stepsOf(w, () => startTestRun(off, s, id, { ip: IP, userAgent: AGENT }))).toEqual([
+      "test_setup_off",
+    ]);
+  });
+
+  it("domain_row: a verify of an id with no row", async () => {
+    const w = await world();
+    const s = await setup(w);
+    expect(await stepsOf(w, () => verifySetupDomain(w.config, s, "no-such-domain"))).toEqual([
+      "domain_row",
+    ]);
+  });
+
   it("emits nothing for a pass of each gate", async () => {
     const w = await world();
     const s = await setup(w);
@@ -500,6 +584,56 @@ describe("sso.test_run", () => {
     // The state is spent: a replay changes no run and emits nothing.
     const again = await added(w, "sso.test_run", () => oidcCallback(w, id, started, claims));
     expect(again).toEqual([]);
+  });
+
+  it("emits once when failTestRun ends the same run twice", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    await startTest(w, id, s.cookie);
+    const run = await w.storage.findOne("ssoTestRun", [
+      { field: "connectionId", op: "eq", value: id },
+    ]);
+    if (!run) throw new Error("no run");
+    const first = await added(w, "sso.test_run", () => failTestRun(w.config, run, "id_token"));
+    expect(first).toHaveLength(1);
+    const second = await added(w, "sso.test_run", () => failTestRun(w.config, run, "state"));
+    expect(second).toEqual([]);
+  });
+
+  it("emits nothing and writes no result when passTestRun meets an ended run", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    await startTest(w, id, s.cookie);
+    const run = await w.storage.findOne("ssoTestRun", [
+      { field: "connectionId", op: "eq", value: id },
+    ]);
+    if (!run) throw new Error("no run");
+    await failTestRun(w.config, run, "id_token");
+    const profile = {
+      subject: "a-1",
+      email: ADA,
+      name: null,
+      image: null,
+      amr: [],
+      acr: null,
+      authnContext: null,
+      sessionNotOnOrAfter: null,
+    };
+    const before = (
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ])
+    ).length;
+    const events = await added(w, "sso.test_run", () => passTestRun(w.config, run, profile, []));
+    expect(events).toEqual([]);
+    const after = (
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ])
+    ).length;
+    expect(after).toBe(before);
   });
 
   it("emits no link for the run of a manager", async () => {

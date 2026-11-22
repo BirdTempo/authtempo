@@ -25,6 +25,7 @@ import { connectionSecret, type OidcStored, tokenAuthOf } from "./connections.js
 import { kindOn } from "./discover.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
+import { setupRefused } from "./setup-events.js";
 import type { OidcStep } from "./steps.js";
 import { failTestRun, passTestRun, pendingRun, type SsoTestDone } from "./test-run-store.js";
 
@@ -289,7 +290,11 @@ async function testConnection(
   const row = await config.storage.findOne("ssoConnection", [
     { field: "id", op: "eq", value: connectionId },
   ]);
-  if (!row || !kindOn(sso, row.kind)) return fail("sso_not_configured");
+  if (!row || !kindOn(sso, row.kind)) {
+    // Only a test start reads here. The answer is the one of no credential, so the event names it.
+    setupRefused(config, "test_connection");
+    return fail("sso_not_configured");
+  }
   return ok({ sso, row });
 }
 

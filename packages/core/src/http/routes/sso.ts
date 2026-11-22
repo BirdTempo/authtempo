@@ -32,6 +32,7 @@ import { recheckSsoManager, requireSsoManager, type SsoActor } from "../../engin
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
+import { setupRefused } from "../../engine/sso/setup-events.js";
 import { requireSetupSession } from "../../engine/sso/setup-session.js";
 import { startTestRun } from "../../engine/sso/test-run.js";
 import type { SsoTestDone } from "../../engine/sso/test-run-store.js";
@@ -477,7 +478,10 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
   const testStart = async (ctx: RouteContext): Promise<Response> => {
     const none = () => respond(fail("sso_not_configured"));
     const site = ctx.request.headers.get("sec-fetch-site");
-    if (site === "cross-site" || site === "same-site") return none();
+    if (site === "cross-site" || site === "same-site") {
+      setupRefused(ctx.config, "test_site");
+      return none();
+    }
     const connectionId = ctx.params.connectionId ?? "";
     const input = {
       ip: ctx.ip,
@@ -494,7 +498,10 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       return answer(await startTestRun(ctx.config, auth.value, connectionId, input));
     }
     // No setup cookie and no manager session: the answer of no credential.
-    if (!(await sessionFromRequest(ctx.config, ctx.request))) return none();
+    if (!(await sessionFromRequest(ctx.config, ctx.request))) {
+      setupRefused(ctx.config, "test_credential");
+      return none();
+    }
     return managed(
       ctx,
       async () => ok({ id: connectionId }),

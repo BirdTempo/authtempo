@@ -79,7 +79,7 @@ export const SSO_GUARD_STEPS: readonly string[] = Object.keys(GUARD_STEP);
 /**
  * A refusal of the setup flow (plan 13a Task 12). The event `sso.setup_refused` names one step. The
  * answer of each step is the same as for no credential, so the event is the only place that tells
- * the cause. The prefix names the act: `open`, `page`, `session`, `draft`, `test`.
+ * the cause. The prefix names the act: `open`, `page`, `session`, `draft`, `domain`, `test`.
  */
 export type SetupRefusalStep =
   | "open_token_form"
@@ -94,7 +94,13 @@ export type SetupRefusalStep =
   | "draft_step"
   | "draft_limit"
   | "test_caller"
-  | "test_limit";
+  | "test_limit"
+  | "test_site"
+  | "test_credential"
+  | "test_connection"
+  | "test_link"
+  | "test_setup_off"
+  | "domain_row";
 
 const SETUP_REFUSAL_STEP: Readonly<Record<SetupRefusalStep, true>> = {
   open_token_form: true,
@@ -110,6 +116,12 @@ const SETUP_REFUSAL_STEP: Readonly<Record<SetupRefusalStep, true>> = {
   draft_limit: true,
   test_caller: true,
   test_limit: true,
+  test_site: true,
+  test_credential: true,
+  test_connection: true,
+  test_link: true,
+  test_setup_off: true,
+  domain_row: true,
 };
 
 export const SETUP_REFUSAL_STEPS: readonly string[] = Object.keys(SETUP_REFUSAL_STEP);

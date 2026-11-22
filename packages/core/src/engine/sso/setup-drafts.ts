@@ -131,7 +131,10 @@ export async function verifySetupDomain(
     { field: "organizationId", op: "eq", value: auth.link.organizationId },
     { field: "setupLinkId", op: "eq", value: auth.link.id },
   ]);
-  if (!row) return fail("unauthorized");
+  if (!row) {
+    setupRefused(config, "domain_row");
+    return fail("unauthorized");
+  }
   return verifyDomain(config, actorOf(auth), { id: row.id, setupLinkId: auth.link.id, ...meta });
 }
 

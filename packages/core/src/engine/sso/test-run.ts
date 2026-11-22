@@ -71,7 +71,10 @@ async function prepare(
   let actor: SsoActor;
   let linkId: string | null = null;
   if ("link" in who) {
-    if (!config.sso?.setup) return fail("sso_not_configured");
+    if (!config.sso?.setup) {
+      setupRefused(config, "test_setup_off");
+      return fail("sso_not_configured");
+    }
     // A setup session tests the draft of its own link, in its own organization, and nothing else.
     if (
       !who.link.steps.includes("connection") ||
@@ -135,7 +138,11 @@ async function prepare(
     });
     return ok(await writeAuditIn(tx, audit.value, now));
   });
-  if (!written.ok) return written;
+  if (!written.ok) {
+    // After the transaction ended, never inside it. A link that ended in the start has no run.
+    if (linkId !== null) setupRefused(config, "test_link");
+    return written;
+  }
   await afterAudit(config, written.value);
   return ok({ runId });
 }
