@@ -86,7 +86,9 @@ async function gate(
 
 /**
  * Adds a domain to the organization of the link, with the link id on the row.
- * The row routes to no connection. The rules of `addDomain` hold.
+ * The row routes to no connection. The rules of `addDomain` hold. A domain that the
+ * manager or another link added answers `conflict`, and its challenge does not change.
+ * The link is held live in the transaction of the write (`holdLinkLive`).
  */
 export async function addSetupDomain(
   config: ResolvedConfig,
@@ -105,9 +107,9 @@ export async function addSetupDomain(
 }
 
 /**
- * Verifies a domain of the organization of the link. A row of another
- * organization, and an id with no row, answer `unauthorized`: the answer
- * of no credential, so the id tells nothing. The rules of `verifyDomain` hold,
+ * Verifies a domain that this link added. A row of another organization, a row of the manager
+ * or of another link, and an id with no row answer `unauthorized`: the answer
+ * of no credential, so the id tells nothing. Such a row never reaches the DNS check. The rules of `verifyDomain` hold,
  * and the claim routes no connection.
  */
 export async function verifySetupDomain(
@@ -121,9 +123,10 @@ export async function verifySetupDomain(
   const row = await config.storage.findOne("ssoDomain", [
     { field: "id", op: "eq", value: id },
     { field: "organizationId", op: "eq", value: auth.link.organizationId },
+    { field: "setupLinkId", op: "eq", value: auth.link.id },
   ]);
   if (!row) return fail("unauthorized");
-  return verifyDomain(config, actorOf(auth), { id: row.id, ...meta });
+  return verifyDomain(config, actorOf(auth), { id: row.id, setupLinkId: auth.link.id, ...meta });
 }
 
 /** The draft connection of the link, or null. A live connection is never a draft of a link. */
@@ -169,7 +172,7 @@ export async function saveDraftConnection(
     return bad("label must not be of the providerId form in an app with a compat package");
   const held = await draftOf(config, auth);
   const actor = actorOf(auth);
-  if (held) return updateConnection(config, actor, { ...input, id: held.id }, meta);
+  if (held) return updateConnection(config, actor, { ...input, id: held.id }, meta, auth.link.id);
   return createConnection(
     config,
     actor,

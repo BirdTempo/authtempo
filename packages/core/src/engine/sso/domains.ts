@@ -16,6 +16,7 @@ import { type OperatorActor, requireScope } from "../operator/guards.js";
 import { lockOrganization } from "../teams.js";
 import type { DnsTxtPort } from "./dns.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
+import { holdLinkLive } from "./setup-live.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
@@ -258,6 +259,9 @@ export async function addDomain(
   let added: Result<Added>;
   try {
     added = await config.storage.transaction(async (tx): Promise<Result<Added>> => {
+      // A setup link must be live at the write: a revoke or an activation before this fails it.
+      if (input.setupLinkId !== undefined && !(await holdLinkLive(tx, input.setupLinkId, now)))
+        return fail("unauthorized");
       const organization = await tx.findOne("organization", [
         { field: "id", op: "eq", value: input.organizationId },
       ]);
@@ -267,6 +271,10 @@ export async function addDomain(
         { field: "organizationId", op: "eq", value: organization.id },
         { field: "domain", op: "eq", value: domain },
       ]);
+      // A link reaches its own rows only. A row of the manager or of another link is `conflict`:
+      // it is not shown, and its challenge does not change.
+      if (held && input.setupLinkId !== undefined && held.setupLinkId !== input.setupLinkId)
+        return fail("conflict");
       if (held?.claimedDomain != null) return ok({ row: held, audit: null });
       let row: SsoDomainRow;
       if (held) {
@@ -337,7 +345,7 @@ export async function addDomain(
 export async function verifyDomain(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { id: string } & SsoActMeta,
+  input: { id: string; setupLinkId?: string } & SsoActMeta,
 ): Promise<Result<SsoDomainSummary>> {
   return verifyDomainWith(config, actor, input, "own");
 }
@@ -362,7 +370,7 @@ export async function verifyDomain(
 export async function verifyDomainWith(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { id: string } & SsoActMeta,
+  input: { id: string; setupLinkId?: string } & SsoActMeta,
   record: "own" | "compat",
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
@@ -371,6 +379,9 @@ export async function verifyDomainWith(
     { field: "id", op: "eq", value: input.id },
   ]);
   if (!row) return fail("not_found");
+  // A setup link proves its own rows only: no other row reaches the limiter or the DNS check.
+  if (input.setupLinkId !== undefined && row.setupLinkId !== input.setupLinkId)
+    return fail("not_found");
   if (
     !(await limit(
       config,
@@ -404,9 +415,12 @@ export async function verifyDomainWith(
     expiresAt: null,
     updatedAt: at,
   };
-  let audit: OperatorAuditRow | null;
+  let audit: OperatorAuditRow | null | "ended";
   try {
     audit = await config.storage.transaction(async (tx) => {
+      // A setup link must be live at the claim: a revoke or an activation before this fails it.
+      if (input.setupLinkId !== undefined && !(await holdLinkLive(tx, input.setupLinkId, at)))
+        return "ended" as const;
       const n = await tx.update(
         "ssoDomain",
         [
@@ -424,6 +438,7 @@ export async function verifyDomainWith(
     if (e instanceof StorageError && e.code === "unique_violation") return fail("domain_taken");
     throw e;
   }
+  if (audit === "ended") return fail("unauthorized");
   if (audit === null) {
     const current = await config.storage.findOne("ssoDomain", [
       { field: "id", op: "eq", value: row.id },

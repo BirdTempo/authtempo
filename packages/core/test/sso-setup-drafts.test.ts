@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withDomainRecord } from "../src/compat.js";
 import { carryDomainRecord, type DomainRecordOf } from "../src/compat-seams.js";
 import { createOrganization } from "../src/engine/organizations.js";
+import { createScimToken } from "../src/engine/scim/tokens.js";
 import { createConnection } from "../src/engine/sso/connections.js";
 import { addDomain } from "../src/engine/sso/domains.js";
 import {
@@ -14,13 +15,13 @@ import {
   setupActorName,
   verifySetupDomain,
 } from "../src/engine/sso/setup-drafts.js";
-import { createSetupLink } from "../src/engine/sso/setup-links.js";
+import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
 import { openSetupSession, requireSetupSession } from "../src/engine/sso/setup-session.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { SetupStep } from "../src/schema.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { recordAddress, recordCredential } from "./helpers.js";
-import { scimAuth } from "./scim/helpers.js";
+import { SCIM_APP, scimAuth } from "./scim/helpers.js";
 import { SSO_APP } from "./sso/helpers.js";
 
 const HOUR_MS = 3_600_000;
@@ -76,6 +77,9 @@ async function session(
 }
 
 const connections = (w: W) => w.storage.findMany("ssoConnection", []);
+/** The domains of a test, less `acme.example`, the domain that the world verifies at its start. */
+const domains = async (w: W) =>
+  (await w.storage.findMany("ssoDomain", [])).filter((d) => d.domain !== "acme.example");
 
 describe("the steps and the kinds of the link", () => {
   it("refuses a connection write when the steps hold no connection", async () => {
@@ -413,8 +417,398 @@ describe("the limit of draft writes", () => {
     expect(await saveDraftConnection(w.config, s, OIDC)).toMatchObject({ code: "rate_limited" });
     expect(await connections(w)).toEqual([]);
     // The count is per link.
-    expect(await addSetupDomain(w.config, other, "acme.test")).toMatchObject({ ok: true });
+    expect(await addSetupDomain(w.config, other, "other.acme.test")).toMatchObject({ ok: true });
     w.clock.advance(HOUR_MS + 1000);
     expect(await addSetupDomain(w.config, s, "acme.test")).toMatchObject({ ok: true });
+  });
+
+  it("counts a verify on the same key, so a verify of no row runs out at 60", async () => {
+    const w = await world();
+    const s = await session(w);
+    for (let i = 0; i < 60; i++)
+      expect(await verifySetupDomain(w.config, s, "no-such-id")).toEqual(UNAUTHORIZED);
+    expect(await verifySetupDomain(w.config, s, "no-such-id")).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
+  });
+});
+
+/** The ends of a link: each one makes the link not live for a write. */
+const ENDS = [
+  ["revoked", (now: Date) => ({ revokedAt: now })],
+  ["ended", (now: Date) => ({ endedAt: now })],
+  ["expired", (now: Date) => ({ expiresAt: new Date(now.getTime() - 1000) })],
+] as const;
+
+describe("a write after the end of the link (review round 1, Important 1)", () => {
+  for (const [name, change] of ENDS) {
+    it(`refuses a draft, a domain add, a domain verify, and a token of a link that is ${name}`, async () => {
+      const w = await world();
+      const s = await session(w);
+      // The stale session object is the one that passed `requireSetupSession` before the end.
+      const own = await addDomain(w.config, SSO_APP, {
+        organizationId: w.org,
+        domain: "acme.test",
+        setupLinkId: s.link.id,
+      });
+      if (!own.ok || own.value.record === null) throw new Error("no domain");
+      w.answers.a[own.value.record.name] = [own.value.record.value];
+      w.answers.b[own.value.record.name] = [own.value.record.value];
+      const saved = await saveDraftConnection(w.config, s, OIDC);
+      expect(saved.ok).toBe(true);
+      await w.storage.update(
+        "ssoSetupLink",
+        [{ field: "id", op: "eq", value: s.link.id }],
+        change(w.clock.now()),
+      );
+      expect(await saveDraftConnection(w.config, s, { ...OIDC, label: "After" })).toEqual(
+        UNAUTHORIZED,
+      );
+      expect(await addSetupDomain(w.config, s, "new.acme.test")).toEqual(UNAUTHORIZED);
+      expect(await verifySetupDomain(w.config, s, own.value.id)).toEqual(UNAUTHORIZED);
+      expect(await createPendingScimToken(w.config, s)).toEqual(UNAUTHORIZED);
+      expect(await w.storage.findMany("scimToken", [])).toEqual([]);
+      const held = await domains(w);
+      expect(held.map((d) => d.domain)).toEqual(["acme.test"]);
+      expect(held[0]?.verifiedAt).toBeNull();
+      expect((await connections(w))[0]).toMatchObject({ label: "Acme Okta", version: 1 });
+    });
+  }
+
+  it("revokes through the real revoke and then refuses each write", async () => {
+    const w = await world();
+    const s = await session(w);
+    expect((await revokeSetupLink(w.config, SSO_APP, s.link.id)).ok).toBe(true);
+    expect(await saveDraftConnection(w.config, s, OIDC)).toEqual(UNAUTHORIZED);
+    expect(await addSetupDomain(w.config, s, "acme.test")).toEqual(UNAUTHORIZED);
+    expect(await createPendingScimToken(w.config, s)).toEqual(UNAUTHORIZED);
+    expect(await connections(w)).toEqual([]);
+    expect(await domains(w)).toEqual([]);
+  });
+
+  it("gives an ended link no new draft row after the activation made its draft live", async () => {
+    const w = await world();
+    const s = await session(w);
+    const saved = await saveDraftConnection(w.config, s, OIDC);
+    if (!saved.ok) throw new Error(saved.code);
+    await w.storage.update("ssoConnection", [{ field: "id", op: "eq", value: saved.value.id }], {
+      draft: false,
+      enabled: true,
+    });
+    await w.storage.update("ssoSetupLink", [{ field: "id", op: "eq", value: s.link.id }], {
+      endedAt: w.clock.now(),
+    });
+    expect(await saveDraftConnection(w.config, s, { ...OIDC, label: "Late" })).toEqual(
+      UNAUTHORIZED,
+    );
+    const rows = await connections(w);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ label: "Acme Okta", draft: false, enabled: true, version: 1 });
+  });
+
+  /**
+   * A config whose storage runs `hook` once, right after the second read of a connection row
+   * that is still a draft: the read of `draftOf` is the first, the read of `updateConnection`
+   * the second. So the hook lands between that read and the write: the race of an activation.
+   */
+  function racing(w: W, hook: () => Promise<void>): W["config"] {
+    let seen = 0;
+    let armed: (() => Promise<void>) | null = hook;
+    const storage = new Proxy(w.config.storage, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== "findOne") return typeof value === "function" ? value.bind(target) : value;
+        return async (model: string, where: never, ...rest: never[]) => {
+          const row = await (value as (...a: unknown[]) => Promise<unknown>).call(
+            target,
+            model,
+            where,
+            ...rest,
+          );
+          if (model === "ssoConnection" && row && (row as { draft: boolean }).draft) {
+            seen += 1;
+            if (seen === 2 && armed) {
+              const run = armed;
+              armed = null;
+              await run();
+            }
+          }
+          return row;
+        };
+      },
+    });
+    return { ...w.config, storage };
+  }
+
+  it("answers unauthorized when an activation ends the link between the read and the write", async () => {
+    const w = await world();
+    const s = await session(w);
+    const saved = await saveDraftConnection(w.config, s, OIDC);
+    if (!saved.ok) throw new Error(saved.code);
+    w.clock.advance(1000);
+    const config = racing(w, async () => {
+      await w.storage.update("ssoConnection", [{ field: "id", op: "eq", value: saved.value.id }], {
+        draft: false,
+        enabled: true,
+      });
+      await w.storage.update("ssoSetupLink", [{ field: "id", op: "eq", value: s.link.id }], {
+        endedAt: w.clock.now(),
+      });
+    });
+    expect(await saveDraftConnection(config, s, { ...OIDC, label: "Stale" })).toEqual(UNAUTHORIZED);
+    expect((await connections(w))[0]).toMatchObject({
+      label: "Acme Okta",
+      draft: false,
+      enabled: true,
+      version: 1,
+    });
+  });
+
+  it("changes no live row when only the draft mark goes between the read and the write", async () => {
+    const w = await world();
+    const s = await session(w);
+    const saved = await saveDraftConnection(w.config, s, OIDC);
+    if (!saved.ok) throw new Error(saved.code);
+    w.clock.advance(1000);
+    const config = racing(w, async () => {
+      await w.storage.update("ssoConnection", [{ field: "id", op: "eq", value: saved.value.id }], {
+        draft: false,
+      });
+    });
+    expect(await saveDraftConnection(config, s, { ...OIDC, label: "Stale" })).toMatchObject({
+      ok: false,
+      code: "conflict",
+    });
+    expect((await connections(w))[0]).toMatchObject({
+      label: "Acme Okta",
+      draft: false,
+      version: 1,
+    });
+  });
+
+  it("refuses a change of a live row that carries the id of the link", async () => {
+    const w = await world();
+    const s = await session(w);
+    const saved = await saveDraftConnection(w.config, s, OIDC);
+    if (!saved.ok) throw new Error(saved.code);
+    const { updateConnection } = await import("../src/engine/sso/connections.js");
+    await w.storage.update("ssoConnection", [{ field: "id", op: "eq", value: saved.value.id }], {
+      draft: false,
+    });
+    const r = await updateConnection(
+      w.config,
+      { kind: "app", name: setupActorName(s.link.id) },
+      { id: saved.value.id, label: "X" },
+      {},
+      s.link.id,
+    );
+    expect(r).toEqual(UNAUTHORIZED);
+  });
+});
+
+describe("the domains of the link only (review round 1, Important 2)", () => {
+  /** The DNS answers that would verify `row`, so a verify that reaches the check would pass. */
+  function answer(w: W, record: { name: string; value: string } | null) {
+    if (record === null) throw new Error("no record");
+    w.answers.a[record.name] = [record.value];
+    w.answers.b[record.name] = [record.value];
+  }
+
+  it("refuses the add of a domain of the manager with conflict, and keeps its challenge", async () => {
+    const w = await world();
+    const manager = await addDomain(w.config, SSO_APP, {
+      organizationId: w.org,
+      domain: "acme.test",
+    });
+    if (!manager.ok) throw new Error(manager.code);
+    const before = await w.storage.findMany("ssoDomain", []);
+    const s = await session(w);
+    const r = await addSetupDomain(w.config, s, "acme.test");
+    expect(r).toMatchObject({ ok: false, code: "conflict", status: 409 });
+    expect(JSON.stringify(r)).not.toContain(manager.value.record?.value ?? "no-value");
+    expect(await w.storage.findMany("ssoDomain", [])).toEqual(before);
+    expect(before[0]?.setupLinkId).toBeNull();
+  });
+
+  it("refuses the add of a verified domain of the manager with conflict", async () => {
+    const w = await world();
+    const manager = await addDomain(w.config, SSO_APP, {
+      organizationId: w.org,
+      domain: "acme.test",
+    });
+    if (!manager.ok) throw new Error(manager.code);
+    answer(w, manager.value.record);
+    const { verifyDomain } = await import("../src/engine/sso/domains.js");
+    expect((await verifyDomain(w.config, SSO_APP, { id: manager.value.id })).ok).toBe(true);
+    const s = await session(w);
+    expect(await addSetupDomain(w.config, s, "acme.test")).toMatchObject({
+      ok: false,
+      code: "conflict",
+    });
+  });
+
+  it("refuses the add of a domain of another link, and keeps its challenge", async () => {
+    const w = await world();
+    const a = await session(w);
+    const b = await session(w);
+    const first = await addSetupDomain(w.config, a, "acme.test");
+    if (!first.ok) throw new Error(first.code);
+    const before = await w.storage.findMany("ssoDomain", []);
+    expect(await addSetupDomain(w.config, b, "acme.test")).toMatchObject({
+      ok: false,
+      code: "conflict",
+    });
+    expect(await w.storage.findMany("ssoDomain", [])).toEqual(before);
+  });
+
+  it("returns the same domain for a repeat add of the same link", async () => {
+    const w = await world();
+    const s = await session(w);
+    const first = await addSetupDomain(w.config, s, "acme.test");
+    const again = await addSetupDomain(w.config, s, "acme.test");
+    if (!first.ok || !again.ok) throw new Error("add");
+    expect(again.value.id).toBe(first.value.id);
+    expect(await domains(w)).toHaveLength(1);
+  });
+
+  it("verifies no domain of the manager and none of another link, and never asks DNS", async () => {
+    const w = await world();
+    const manager = await addDomain(w.config, SSO_APP, {
+      organizationId: w.org,
+      domain: "m.acme.test",
+    });
+    const a = await session(w);
+    const b = await session(w);
+    const theirs = await addSetupDomain(w.config, a, "a.acme.test");
+    if (!manager.ok || !theirs.ok) throw new Error("add");
+    answer(w, manager.value.record);
+    answer(w, theirs.value.record);
+    const asked = w.a.calls.length + w.b.calls.length;
+    expect(await verifySetupDomain(w.config, b, manager.value.id)).toEqual(UNAUTHORIZED);
+    expect(await verifySetupDomain(w.config, b, theirs.value.id)).toEqual(UNAUTHORIZED);
+    expect(w.a.calls.length + w.b.calls.length).toBe(asked);
+    const rows = await domains(w);
+    expect(rows.every((r) => r.verifiedAt === null)).toBe(true);
+    // The link that added the domain proves it.
+    expect((await verifySetupDomain(w.config, a, theirs.value.id)).ok).toBe(true);
+  });
+});
+
+describe("the verify of the engine keeps the scope of a link by itself (review round 1, Important 2)", () => {
+  it("answers not_found for a row that another link or the manager added, before DNS", async () => {
+    const w = await world();
+    const manager = await addDomain(w.config, SSO_APP, {
+      organizationId: w.org,
+      domain: "m.acme.test",
+    });
+    if (!manager.ok || manager.value.record === null) throw new Error("add");
+    w.answers.a[manager.value.record.name] = [manager.value.record.value];
+    w.answers.b[manager.value.record.name] = [manager.value.record.value];
+    const { verifyDomain } = await import("../src/engine/sso/domains.js");
+    const asked = w.a.calls.length + w.b.calls.length;
+    expect(
+      await verifyDomain(w.config, SSO_APP, { id: manager.value.id, setupLinkId: "some-link" }),
+    ).toMatchObject({ ok: false, code: "not_found" });
+    expect(w.a.calls.length + w.b.calls.length).toBe(asked);
+  });
+});
+
+describe("the audit rows and the steps of the writes (review round 1, Important 3)", () => {
+  /** The rows of an action by a setup actor: the world's own domain claim has none. */
+  const rowsOf = async (w: W, action: string) =>
+    (await w.storage.findMany("operatorAudit", [])).filter(
+      (r) => r.action === action && r.actorId?.startsWith("setup.") === true,
+    );
+
+  it("writes sso_domain_add, sso_domain_verify, and scim_token_create by the setup actor", async () => {
+    const w = await world();
+    const s = await session(w);
+    const added = await addSetupDomain(w.config, s, "acme.test", META);
+    if (!added.ok || added.value.record === null) throw new Error("no domain");
+    w.answers.a[added.value.record.name] = [added.value.record.value];
+    w.answers.b[added.value.record.name] = [added.value.record.value];
+    expect((await verifySetupDomain(w.config, s, added.value.id, META)).ok).toBe(true);
+    const token = await createPendingScimToken(w.config, s, META);
+    if (!token.ok) throw new Error(token.code);
+    for (const action of ["sso_domain_add", "sso_domain_verify", "scim_token_create"]) {
+      const rows = await rowsOf(w, action);
+      expect(rows, action).toHaveLength(1);
+      expect(rows[0], action).toMatchObject({
+        actorKind: "app",
+        actorId: setupActorName(s.link.id),
+        ip: META.ip,
+      });
+    }
+    expect((await rowsOf(w, "sso_domain_verify"))[0]?.data).toMatchObject({
+      organizationId: w.org,
+      domainId: added.value.id,
+    });
+    expect((await rowsOf(w, "scim_token_create"))[0]?.data).toMatchObject({
+      organizationId: w.org,
+      tokenId: token.value.id,
+    });
+    expect(JSON.stringify(await w.storage.findMany("operatorAudit", []))).not.toContain(
+      token.value.token,
+    );
+  });
+
+  it("lets the directory step make a token and the other steps not", async () => {
+    const w = await world();
+    const only = await session(w, ["directory"]);
+    expect(await createPendingScimToken(w.config, only)).toMatchObject({ ok: true });
+    const w2 = await world();
+    const others = await session(w2, ["domain", "connection"]);
+    expect(await createPendingScimToken(w2.config, others)).toEqual(UNAUTHORIZED);
+    expect(await w2.storage.findMany("scimToken", [])).toEqual([]);
+  });
+
+  it("lets the domain step add a domain and refuses a verify of a link with no domain step", async () => {
+    const w = await world();
+    const s = await session(w, ["connection"]);
+    // A row of this link that a verify would prove: the step, not the row, must refuse.
+    const own = await addDomain(w.config, SSO_APP, {
+      organizationId: w.org,
+      domain: "acme.test",
+      setupLinkId: s.link.id,
+    });
+    if (!own.ok || own.value.record === null) throw new Error("no domain");
+    w.answers.a[own.value.record.name] = [own.value.record.value];
+    w.answers.b[own.value.record.name] = [own.value.record.value];
+    expect(await verifySetupDomain(w.config, s, own.value.id)).toEqual(UNAUTHORIZED);
+    expect((await domains(w))[0]?.verifiedAt).toBeNull();
+  });
+});
+
+describe("the pending token and the live slots (review round 1, Minor 2)", () => {
+  it("replaces its own pending token in an organization with no free slot", async () => {
+    const w = await world();
+    const a = await session(w);
+    const b = await session(w);
+    const first = await createPendingScimToken(w.config, a);
+    if (!first.ok) throw new Error(first.code);
+    expect((await createPendingScimToken(w.config, b)).ok).toBe(true);
+    // Two live slots are full. The old token of the link makes no slot for its replacement.
+    const again = await createPendingScimToken(w.config, a);
+    if (!again.ok) throw new Error(again.code);
+    const rows = await w.storage.findMany("scimToken", []);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.id)).not.toContain(first.value.id);
+    expect(rows.map((r) => r.id)).toContain(again.value.id);
+  });
+
+  it("keeps a token when a manager token fills the last slot, and the manager token is refused", async () => {
+    const w = await world();
+    const s = await session(w);
+    const pending = await createPendingScimToken(w.config, s);
+    if (!pending.ok) throw new Error(pending.code);
+    const live = await createScimToken(w.config, SCIM_APP, { organizationId: w.org, name: "m" });
+    expect(live.ok).toBe(true);
+    expect(
+      await createScimToken(w.config, SCIM_APP, { organizationId: w.org, name: "n" }),
+    ).toMatchObject({ code: "token_limit" });
+    expect((await w.storage.findMany("scimToken", [])).map((r) => r.id)).toContain(
+      pending.value.id,
+    );
   });
 });

@@ -23,6 +23,7 @@ import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
 import { importIdpMetadata } from "./saml-sp.js";
+import { holdLinkLive } from "./setup-live.js";
 
 /**
  * The OIDC and SAML connections of an organization (plan 12d Task 3, spec
@@ -764,6 +765,9 @@ export async function createConnection(
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
+      // A draft needs its link live at the write: a revoke or an activation before this fails it.
+      if (draftFor !== undefined && !(await holdLinkLive(tx, draftFor, now)))
+        return fail("unauthorized");
       const organization = await tx.findOne("organization", [
         { field: "id", op: "eq", value: input.organizationId },
       ]);
@@ -835,6 +839,12 @@ export async function updateConnection(
   actor: SsoActor,
   input: ConnectionFields & { id: string },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). The write then changes the draft of that link
+   * only: the row must be a draft of the link at the read and at the write, else
+   * `unauthorized`, and the link must be live in the transaction.
+   */
+  draftFor?: string,
 ): Promise<Result<SsoConnectionSummary>> {
   // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
   const config = withSecrets(outer, [input.clientSecret]);
@@ -844,6 +854,8 @@ export async function updateConnection(
     { field: "id", op: "eq", value: input.id },
   ]);
   if (!held) return fail("not_found");
+  if (draftFor !== undefined && (!held.draft || held.setupLinkId !== draftFor))
+    return fail("unauthorized");
   const on = kindOn(sso.value, held.kind);
   if (!on.ok) return on;
   if (
@@ -875,6 +887,8 @@ export async function updateConnection(
   const row: SsoConnectionRow = { ...held, ...changes };
   const updated = await config.storage
     .transaction(async (tx): Promise<Result<OperatorAuditRow>> => {
+      if (draftFor !== undefined && !(await holdLinkLive(tx, draftFor, now)))
+        return fail("unauthorized");
       if (f.defaultRole !== undefined || f.scimRoles !== undefined) {
         const fault = await roleFault(
           config,
@@ -889,6 +903,14 @@ export async function updateConnection(
         [
           { field: "id", op: "eq", value: held.id },
           { field: "updatedAt", op: "eq", value: held.updatedAt },
+          // An activation between the read and this write clears `draft`: the write then changes
+          // no row, and a live connection never gets a draft write.
+          ...(draftFor === undefined
+            ? []
+            : ([
+                { field: "draft", op: "eq", value: true },
+                { field: "setupLinkId", op: "eq", value: draftFor },
+              ] as const)),
         ],
         changes,
       );

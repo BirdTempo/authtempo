@@ -12,6 +12,7 @@ import type { OperatorAuditRow, ScimScope, ScimTokenRow } from "../../schema.js"
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "../sso/domains.js";
 import { type SsoActor, ssoDraft } from "../sso/guard.js";
+import { holdLinkLive } from "../sso/setup-live.js";
 import { lockOrganization } from "../teams.js";
 import { tokenHint } from "../tokens.js";
 
@@ -181,17 +182,14 @@ export async function createScimToken(
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
+      // A pending token needs its link live at the write: a revoke or an activation before this fails it.
+      if (pendingFor !== undefined && !(await holdLinkLive(tx, pendingFor, now)))
+        return fail("unauthorized");
       const organization = await tx.findOne("organization", [
         { field: "id", op: "eq", value: input.organizationId },
       ]);
       // The lock holds the count below against a parallel create (the 12k limit form).
       if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
-      // A new pending token of a link replaces the old one, before the count of live slots.
-      if (pendingFor !== undefined)
-        await tx.delete("scimToken", [
-          { field: "setupLinkId", op: "eq", value: pendingFor },
-          { field: "pending", op: "eq", value: true },
-        ]);
       // The port has no OR: the tokens with no expiry, then the tokens that expire after now.
       const at = { field: "organizationId", op: "eq", value: organization.id } as const;
       const live = [
@@ -202,8 +200,10 @@ export async function createScimToken(
           limit: SCIM_TOKENS_LIVE_MAX,
         })),
       ];
-      if (live.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
-      await tx.create("scimToken", row);
+      // The old pending token of the link goes when the new one is written, so it makes no slot.
+      // A refusal below leaves it: the delete comes after the checks.
+      const slots = live.filter((t) => !(t.pending && t.setupLinkId === pendingFor));
+      if (slots.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
       const draft = ssoDraft(actor, "scim_token_create", {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name, scopes: row.scopes },
@@ -211,6 +211,12 @@ export async function createScimToken(
         userAgent: meta.userAgent ?? null,
       });
       if (!draft.ok) return draft;
+      if (pendingFor !== undefined)
+        await tx.delete("scimToken", [
+          { field: "setupLinkId", op: "eq", value: pendingFor },
+          { field: "pending", op: "eq", value: true },
+        ]);
+      await tx.create("scimToken", row);
       return ok(await writeAuditIn(tx, draft.value, now));
     },
   );
