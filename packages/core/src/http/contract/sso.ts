@@ -115,6 +115,7 @@ export const ConnectionJson = z.strictObject({
   kind: z.enum(["oidc", "saml"]),
   label: z.string(),
   enabled: z.boolean(),
+  draft: z.boolean(),
   jit: z.boolean(),
   defaultRole: z.string(),
   mfa: z

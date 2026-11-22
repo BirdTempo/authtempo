@@ -291,9 +291,10 @@ const BEARER_RE = /^Bearer ([^ ]+)$/i;
 /**
  * The auth check of each SCIM route (plan 12d Task 9 Behavior 3, deviation
  * 18). The order: the form of the header and the token, then one lookup by
- * the SHA-256 of the token, then the expiry. A failure at any step counts
- * once on `scim-auth:ip:<ip>` and answers 401, or 429 when that count is
- * refused. A pass counts on `scim:token:<id>` and never on the IP key; a
+ * the SHA-256 of the token, then the expiry. The lookup finds no pending
+ * token of a setup link (plan 13a), so it fails as an unknown token. A
+ * failure at any step counts once on `scim-auth:ip:<ip>` and answers 401,
+ * or 429 when that count is refused. A pass counts on `scim:token:<id>` and never on the IP key; a
  * refused count answers 429. `lastUsedAt` moves by one conditional update,
  * only when it is null or older than 60 seconds. A caller that
  * `scimRequestAs` set skips the token steps and counts on its own key.
@@ -317,6 +318,8 @@ export async function authenticateScim(
   if (token === undefined || !SCIM_TOKEN_RE.test(token)) return failed();
   const row = await config.storage.findOne("scimToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+    // A pending token of a setup link opens no directory until an owner activates it (plan 13a).
+    { field: "pending", op: "eq", value: false },
   ]);
   const now = config.clock.now();
   if (!row || (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())) return failed();

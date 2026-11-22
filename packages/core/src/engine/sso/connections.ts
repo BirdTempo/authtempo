@@ -176,6 +176,11 @@ export interface SsoConnectionSummary {
   kind: "oidc" | "saml";
   label: string;
   enabled: boolean;
+  /**
+   * True for a draft of a setup link (plan 13a). A draft signs in no one,
+   * and only the activation of the link makes it live.
+   */
+  draft: boolean;
   jit: boolean;
   defaultRole: string;
   /** Every key of the list, an empty list for a key with no value. */
@@ -224,6 +229,7 @@ export function publicConnection(
     kind: row.kind,
     label: row.label,
     enabled: row.enabled,
+    draft: row.draft,
     jit: row.jit,
     defaultRole: row.defaultRole,
     mfa: row.mfa
@@ -802,7 +808,10 @@ export async function connectionOrganization(
  * sealed again under the current version. `enabled: false` answers
  * `invalid_body` while an enforced domain routes to the connection. Such a
  * domain with no way in through SSO would lock its staff out, so the owner
- * turns `enforce` off first. One transaction checks the roles. It writes
+ * turns `enforce` off first. `enabled: true` on a draft of a setup link
+ * answers `setup_not_tested` (plan 13a, pre-flight C7): only the activation
+ * of the link clears `draft`, after a passed test of the draft. One
+ * transaction checks the roles. It writes
  * the row only when its `updatedAt` is the one read, else `conflict`. Then
  * it checks the enforced domains, and it writes one `sso_connection_update`
  * audit row with the changed keys.
@@ -831,6 +840,7 @@ export async function updateConnection(
   const fields = checkFields(config, held.kind, input as unknown as Record<string, unknown>);
   if (!fields.ok) return fields;
   const f = fields.value;
+  if (held.draft && f.enabled === true) return fail("setup_not_tested");
   const now = config.clock.now();
   const changes: Partial<SsoConnectionRow> = { updatedAt: now };
   if (f.label !== undefined) changes.label = f.label;
