@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { checkGuides, entry, MAX_AGE_DAYS } from "../src/check-guides.ts";
 import { summaryLine } from "../src/lib/report.ts";
 
@@ -35,8 +35,17 @@ describe("check-guides: the age of each guide", () => {
   });
 
   it("gives the same result for the same date, whatever the real date is", () => {
-    const guides = [guide("okta", 181)];
-    expect(checkGuides(guides, TODAY)).toEqual(checkGuides(guides, TODAY));
+    const guides = [guide("okta", 181), guide("entra", 10)];
+    const results = ["2020-01-01", "2090-06-15"].map((real) => {
+      vi.useFakeTimers({ now: new Date(`${real}T00:00:00Z`) });
+      try {
+        return checkGuides(guides, TODAY);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]?.failures).toHaveLength(1);
     // One day later, a guide of 180 days is 181 days old.
     expect(checkGuides([guide("okta", 180)], "2027-03-02").failures).toHaveLength(1);
   });
@@ -46,6 +55,33 @@ describe("check-guides: the age of each guide", () => {
       "okta: checkedOn 2027-02-30 is not a real date YYYY-MM-DD",
     ]);
     expect(checkGuides([], TODAY).failures).toEqual(["read 0 guides"]);
+  });
+
+  it("fails a missing date and a date of another format", () => {
+    const bad = [
+      { id: "okta", checkedOn: undefined as unknown as string },
+      { id: "entra", checkedOn: "2027/02/01" },
+      { id: "generic-saml", checkedOn: "2027-2-1" },
+    ];
+    expect(checkGuides(bad, TODAY).failures).toEqual([
+      "okta: checkedOn undefined is not a real date YYYY-MM-DD",
+      "entra: checkedOn 2027/02/01 is not a real date YYYY-MM-DD",
+      "generic-saml: checkedOn 2027-2-1 is not a real date YYYY-MM-DD",
+    ]);
+  });
+
+  it("fails a date after the check date, and passes the check date itself", () => {
+    expect(checkGuides([{ id: "okta", checkedOn: "2072-01-10" }], TODAY).failures).toEqual([
+      `okta: checkedOn 2072-01-10 is after ${TODAY}; a guide is not checked in the future`,
+    ]);
+    expect(checkGuides([{ id: "okta", checkedOn: "2027-03-02" }], TODAY).failures).toHaveLength(1);
+    expect(checkGuides([guide("okta", 0)], TODAY).failures).toEqual([]);
+  });
+
+  it("names a bad date argument once, not each guide", () => {
+    const r = checkGuides([guide("okta", 10), guide("entra", 10)], "2027-3-1");
+    expect(r.failures).toEqual(["the date 2027-3-1 is not a real date YYYY-MM-DD"]);
+    expect(summaryLine(r)).toBe("check-guides: FAIL guides=2 failures=1");
   });
 });
 
@@ -96,6 +132,34 @@ describe("check-guides: the built core", () => {
         "  packages/core/dist/sso/guides/index.js is older than packages/core/src/sso/guides/index.ts; the build is older than the change",
         "  read 0 guides",
       ]);
+      expect(code).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exits 1 when the built module exports no GUIDES list", async () => {
+    for (const text of ["export const OTHER = [];\n", "export const GUIDES = 5;\n"]) {
+      const root = tree(1000, 2000, []);
+      writeFileSync(join(root, "packages/core/dist/sso/guides/index.js"), text);
+      try {
+        const { lines, code } = await entry(root, TODAY);
+        expect(lines[1]).toBe("  packages/core/dist/sso/guides/index.js exports no GUIDES list");
+        expect(code).toBe(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("exits 1 when the guide source folder is gone (the compare cannot run)", async () => {
+    const root = tree(1000, 2000, [guide("okta", 10)]);
+    rmSync(join(root, "packages/core/src"), { recursive: true });
+    try {
+      const { lines, code } = await entry(root, TODAY);
+      expect(lines[1]).toBe(
+        "  packages/core/src/sso/guides holds no .ts file; the build cannot be compared with the change",
+      );
       expect(code).toBe(1);
     } finally {
       rmSync(root, { recursive: true, force: true });

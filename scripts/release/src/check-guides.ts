@@ -33,22 +33,38 @@ function dayTime(text: string): number | null {
 export function checkGuides(guides: readonly GuideDate[], today: string): Report {
   const failures: string[] = [];
   const now = dayTime(today);
+  const counts = { guides: guides.length };
+  // A bad date argument is one failure that names the argument, not one for each guide.
+  if (now === null)
+    return requireCounts(
+      {
+        name: "check-guides",
+        counts,
+        failures: [`the date ${today} is not a real date YYYY-MM-DD`],
+        notes: [],
+      },
+      ["guides"],
+    );
   for (const g of guides) {
     const then = dayTime(g.checkedOn);
-    if (then === null || now === null) {
+    if (then === null) {
       failures.push(`${g.id}: checkedOn ${g.checkedOn} is not a real date YYYY-MM-DD`);
       continue;
     }
     const age = Math.round((now - then) / 86_400_000);
+    // A date after the check date keeps a guide fresh for ever, so it fails too.
+    if (age < 0) {
+      failures.push(
+        `${g.id}: checkedOn ${g.checkedOn} is after ${today}; a guide is not checked in the future`,
+      );
+      continue;
+    }
     if (age > MAX_AGE_DAYS)
       failures.push(
         `${g.id}: checkedOn ${g.checkedOn} is ${age} days before ${today}; a guide is checked again within ${MAX_AGE_DAYS} days`,
       );
   }
-  return requireCounts(
-    { name: "check-guides", counts: { guides: guides.length }, failures, notes: [] },
-    ["guides"],
-  );
+  return requireCounts({ name: "check-guides", counts, failures, notes: [] }, ["guides"]);
 }
 
 /** Each file of `dir` with its change time, or an empty list when the folder is not there. */
@@ -77,11 +93,12 @@ export async function entry(
   if (!existsSync(join(root, indexFile)))
     return unread(`${indexFile} does not exist; the build did not run`);
   const built = filesOf(join(root, DIST), ".js").reduce((a, b) => (b.time < a.time ? b : a));
-  const source = filesOf(join(root, SRC), ".ts").reduce<{ path: string; time: number } | null>(
-    (a, b) => (a === null || b.time > a.time ? b : a),
-    null,
-  );
-  if (source !== null && built.time < source.time)
+  const sources = filesOf(join(root, SRC), ".ts");
+  // Without the source the compare cannot run, and a moved source must not pass an old build.
+  const [source] = [...sources].sort((a, b) => b.time - a.time);
+  if (source === undefined)
+    return unread(`${SRC} holds no .ts file; the build cannot be compared with the change`);
+  if (built.time < source.time)
     return unread(
       `${DIST}/${basename(built.path)} is older than ${SRC}/${basename(source.path)}; the build is older than the change`,
     );
