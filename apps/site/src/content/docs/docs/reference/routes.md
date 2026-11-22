@@ -1708,7 +1708,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Field | Value |
 | --- | --- |
 | Needs | Nothing. It counts on `sso-start:ip:<ip>`, 30 per 15 minutes |
-| Input | Query `{ next? }` |
+| Input | Query `{ next?, test? }`. `test=1` starts a test run of a draft connection, for a setup session of the link that made the draft, or for a manager. A test start refuses a request that the browser marks `cross-site` or `same-site`, and a request with no `Sec-Fetch-Site` header passes. It counts on `setup-test:connection:<connectionId>`, 20 per hour. A refusal other than the limit answers 404 for a setup session |
 | Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. For SAML, the 302 goes to the `ssoUrl` with `SAMLRequest` and `RelayState`, by the HTTP-Redirect binding. For OIDC, the redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`sso_failed`](/docs/reference/errors/#sso_failed) |
 

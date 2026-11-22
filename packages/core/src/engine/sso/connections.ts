@@ -976,6 +976,9 @@ export async function deleteConnection(
       if (!row) return fail("not_found");
       const n = await tx.delete("ssoConnection", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
+      // The test runs of the connection go with it (plan 13a Task 7): they hold names only, and
+      // no page reads them after the connection is gone. One more call on D1 (ruling R20d).
+      await tx.delete("ssoTestRun", [{ field: "connectionId", op: "eq", value: row.id }]);
       await tx.update("ssoDomain", [{ field: "connectionId", op: "eq", value: row.id }], {
         connectionId: null,
         enforce: false,

@@ -461,8 +461,18 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
    * The start writes a run row, so a request that the browser marks `cross-site` or `same-site`
    * answers as for no credential and writes nothing. The setup cookie decides the caller first:
    * the closed list has the key of this route, but the route is not a route of `ROUTES`, so
-   * `setupSessionRoute` cannot build it. Each refusal but the limit is the answer of no
-   * credential (404), so a caller learns nothing about the connection ids.
+   * `setupSessionRoute` cannot build it. On the setup path each refusal but the limit is the
+   * answer of no credential (404), so a caller learns nothing about the connection ids.
+   *
+   * A request with no `Sec-Fetch-Site` header passes (ruling R20b). An old browser (Safari before
+   * 16.4) sends none, and a client with no cookie jar has no ambient cookie. The worst case is a
+   * page of another site that makes such a browser send the cookie: the start then writes one run
+   * row and ends the pending run of the connection. It starts no sign-in that the page can finish,
+   * because the binding cookie goes to the browser. `same-site` is refused too, so a link from a
+   * dashboard on another subdomain of the site answers 404.
+   *
+   * The manager path keeps the answers of the manager guard (ruling R20c): 403, 404, or 429. The
+   * caller is a signed-in principal, so those answers give an outsider nothing.
    */
   const testStart = async (ctx: RouteContext): Promise<Response> => {
     const none = () => respond(fail("sso_not_configured"));

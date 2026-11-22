@@ -124,6 +124,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `setup-open:ip:<ip>` | 1 hour | 60 | Each try to open a setup link, a bad token too, and each load of the confirm page `GET /sso/setup` |
 | `setup-open:link:<linkId>` | 1 hour | 20 | Each open of a live setup link, after the token check |
 | `setup-draft:link:<linkId>` | 1 hour | 60 | Each draft write of a setup session: a domain add or verify, the draft connection, and the pending SCIM token. A refused body counts too |
+| `setup-test:connection:<connectionId>` | 1 hour | 20 | Each test start of one connection, for a setup session and for a manager. A start that the checks refuse does not count |
 | `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
 | `username-available:ip:<ip>` | 15 minutes | 30 | Username check, before the name rules |
 | `password:username:<username>` | 15 minutes | 10 | Password sign-in by username, on the stored form, after the name rules |

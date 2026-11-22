@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteOrganization } from "../src/engine/organizations.js";
-import { createConnection } from "../src/engine/sso/connections.js";
+import { createConnection, deleteConnection } from "../src/engine/sso/connections.js";
 import { saveDraftConnection } from "../src/engine/sso/setup-drafts.js";
 import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
 import { openSetupSession, requireSetupSession } from "../src/engine/sso/setup-session.js";
 import { stepHelp } from "../src/engine/sso/step-help.js";
 import { SSO_FAILED_STEPS } from "../src/engine/sso/steps.js";
-import { lastPassedRun, testRunResult } from "../src/engine/sso/test-run.js";
+import { lastPassedRun, startTestRun, testRunResult } from "../src/engine/sso/test-run.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { parseXml } from "../src/saml/xml.js";
 import { schema } from "../src/schema.js";
@@ -309,9 +309,7 @@ describe("the result of a test run", () => {
     expect(after.session).toBe(before.session);
     expect(after.member).toBe(before.member);
     expect(after.scimUser).toBe(before.scimUser);
-    const sign = (await w.events())
-      .slice(eventsBefore)
-      .filter((e) => e.name === "sign_in");
+    const sign = (await w.events()).slice(eventsBefore).filter((e) => e.name === "sign_in");
     expect(sign).toEqual([]);
     // Hand-off (e): the run is no user notice.
     expect(w.mail.length).toBe(mailBefore);
@@ -539,7 +537,225 @@ describe("the checks are the checks of the real sign-in", () => {
   });
 });
 
+describe("who may start a test of a draft (review round 1, Important 2)", () => {
+  const INPUT = { ip: META.ip, userAgent: META.userAgent };
+
+  it("refuses the draft of another link of the same organization, and ends no run of it", async () => {
+    const w = await world();
+    const a = await setup(w);
+    const b = await setup(w);
+    const id = await oidcDraft(w, a);
+    expect((await startTest(w, id, { cookie: a.cookie })).status).toBe(302);
+    const before = await tables(w);
+    const res = await startTest(w, id, { cookie: b.cookie });
+    expect(res.status).toBe(404);
+    expect(await tables(w)).toEqual(before);
+    expect((await only(w)).outcome).toBe("pending");
+  });
+
+  it("refuses a session of a link whose steps hold no connection", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    // The session object is the input of the engine call: only the steps differ from a real one.
+    const noStep = { ...s, link: { ...s.link, steps: ["domain" as const] } };
+    const before = await tables(w);
+    const r = await startTestRun(w.config, noStep, id, INPUT);
+    expect(r).toMatchObject({ ok: false, code: "unauthorized" });
+    expect(await tables(w)).toEqual(before);
+  });
+
+  it("writes no run when the link ends between the session check and the write", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    // The first transaction of the start is the write of the run. The hook revokes the link just before it.
+    let armed = true;
+    const storage = new Proxy(w.config.storage, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value !== "function") return value;
+        if (prop !== "transaction") return value.bind(target);
+        return async (...args: unknown[]) => {
+          if (armed) {
+            armed = false;
+            await w.storage.update("ssoSetupLink", [{ field: "id", op: "eq", value: s.linkId }], {
+              revokedAt: w.clock.now(),
+            });
+          }
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    const before = await tables(w);
+    const r = await startTestRun({ ...w.config, storage }, s, id, INPUT);
+    expect(r).toMatchObject({ ok: false, code: "unauthorized" });
+    expect(await tables(w)).toEqual(before);
+  });
+});
+
+describe("the start limit and the Fetch Metadata header (review round 1)", () => {
+  it("passes a start with no Sec-Fetch-Site header, and the start only ends the pending run", async () => {
+    // Old browsers send no header (Safari before 16.4). A page of another site can then make
+    // the browser send the setup cookie in a top-level GET. The start writes one run row and ends
+    // the pending run of the connection; it starts no sign-in that the page can finish, and the
+    // binding cookie goes to the browser that got the redirect. A client with no cookie jar
+    // sends no cookie. So the start with no header is accepted (ruling R20b).
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    expect((await startTest(w, id, { cookie: s.cookie })).status).toBe(302);
+    expect((await startTest(w, id, { cookie: s.cookie })).status).toBe(302);
+    expect((await runs(w)).map((r) => r.outcome).sort()).toEqual(["failed", "pending"]);
+  });
+
+  it("limits the starts of one connection to 20 an hour, and counts no refused caller", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const other = await setup(w);
+    const id = await oidcDraft(w, s);
+    // A stranger with the id burns none of the budget.
+    for (let i = 0; i < 5; i++) await startTest(w, id, { cookie: other.cookie });
+    for (let i = 0; i < 20; i++)
+      expect((await startTest(w, id, { cookie: s.cookie })).status).toBe(302);
+    expect((await startTest(w, id, { cookie: s.cookie })).status).toBe(429);
+    const second = await oidcDraft(w, other);
+    expect((await startTest(w, second, { cookie: other.cookie })).status).toBe(302);
+  });
+});
+
+describe("the guards of the callbacks that no real flow reaches (review round 1)", () => {
+  /** A second draft in the same organization: the run of another connection. */
+  async function otherRun(w: W) {
+    const t = await setup(w);
+    const id = await oidcDraft(w, t);
+    await startTest(w, id, { cookie: t.cookie });
+    const [run] = await runs(w);
+    if (!run) throw new Error("no run");
+    return run;
+  }
+
+  it("keeps the run of another connection when an OIDC state names it", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    const foreign = await otherRun(w);
+    const started = await startTest(w, id, { cookie: s.cookie });
+    const [state] = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "oauth-state" },
+      { field: "identifier", op: "eq", value: `sso:${id}` },
+    ]);
+    if (!state) throw new Error("no state");
+    await w.storage.update("verification", [{ field: "id", op: "eq", value: state.id }], {
+      data: { ...(state.data as object), testRunId: foreign.id },
+    });
+    await oidcCallback(w, id, started, { sub: "a-1", email: ADA });
+    const after = await w.storage.findOne("ssoTestRun", [
+      { field: "id", op: "eq", value: foreign.id },
+    ]);
+    expect(after).toMatchObject({ outcome: "pending" });
+    expect(
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not pass an OIDC run that names another organization", async () => {
+    const w = await world();
+    const other = await seedOrganization(w, "beta");
+    const s = await setup(w);
+    const id = await oidcDraft(w, s);
+    const started = await startTest(w, id, { cookie: s.cookie });
+    const run = await only(w);
+    await w.storage.update("ssoTestRun", [{ field: "id", op: "eq", value: run.id }], {
+      organizationId: other,
+    });
+    await oidcCallback(w, id, started, { sub: "a-1", email: ADA });
+    expect((await only(w)).outcome).toBe("failed");
+    expect(
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("keeps the run of another connection when a SAML request row names it", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const idp = await createTestIdp({ alg: "rsa" });
+    const id = await samlDraft(w, s, idp.certificatePem, idp.entityId);
+    const foreign = await otherRun(w);
+    const start = await samlTestStart(w, id, s.cookie);
+    const [row] = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "saml-request" },
+      { field: "identifier", op: "eq", value: id },
+    ]);
+    if (!row) throw new Error("no request row");
+    await w.storage.update("verification", [{ field: "id", op: "eq", value: row.id }], {
+      data: { ...(row.data as object), testRunId: foreign.id },
+    });
+    await postResponse(w, id, start, await idp.response(responseFor(w, id, start)));
+    const after = await w.storage.findOne("ssoTestRun", [
+      { field: "id", op: "eq", value: foreign.id },
+    ]);
+    expect(after).toMatchObject({ outcome: "pending" });
+    expect(
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not pass a SAML run that names another organization", async () => {
+    const w = await world();
+    const other = await seedOrganization(w, "beta");
+    const s = await setup(w);
+    const idp = await createTestIdp({ alg: "rsa" });
+    const id = await samlDraft(w, s, idp.certificatePem, idp.entityId);
+    const start = await samlTestStart(w, id, s.cookie);
+    const run = await only(w);
+    await w.storage.update("ssoTestRun", [{ field: "id", op: "eq", value: run.id }], {
+      organizationId: other,
+    });
+    await postResponse(w, id, start, await idp.response(responseFor(w, id, start)));
+    expect((await only(w)).outcome).toBe("failed");
+    expect(
+      await w.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "sso-test-result" },
+      ]),
+    ).toEqual([]);
+  });
+});
+
 describe("the draft version and the organization delete", () => {
+  it("hides the address and the name after the 15 minutes of the result row", async () => {
+    const w = await world();
+    const s = await setup(w);
+    await oidcPass(w, s);
+    const run = await only(w);
+    w.clock.advance(14 * 60_000);
+    expect(await testRunResult(w.config, s, run.id)).toMatchObject({
+      ok: true,
+      value: { address: ADA },
+    });
+    w.clock.advance(2 * 60_000);
+    const late = await testRunResult(w.config, s, run.id);
+    expect(late).toMatchObject({ ok: true, value: { address: null, name: null } });
+    expect(late.ok && late.value.run.outcome).toBe("passed");
+  });
+
+  it("removes the runs of a connection with its delete", async () => {
+    const w = await world();
+    const s = await setup(w);
+    const { id } = await oidcPass(w, s);
+    await startTest(w, id, { cookie: s.cookie });
+    expect(await runs(w)).toHaveLength(2);
+    const gone = await deleteConnection(w.config, SSO_APP, { id });
+    expect(gone.ok).toBe(true);
+    expect(await runs(w)).toEqual([]);
+  });
+
   it("binds a pass to the version of the draft (hand-off f)", async () => {
     const w = await world();
     const s = await setup(w);

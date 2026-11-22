@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { limit } from "../../limiter/limit.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SsoConnectionRow, SsoTestRunRow } from "../../schema.js";
@@ -47,6 +48,15 @@ export async function startTestRun(
   });
 }
 
+/**
+ * The test starts of one connection: 20 an hour (review round 1, ruling R20d). Each start writes
+ * a run row and an audit row, and runs have no age sweep, so core owns this cap. A person tests
+ * a few times; the draft writes have 60 an hour for a link (ruling R3), and a test needs a few
+ * of those writes first. The key is the connection, so it holds for a manager and for a link.
+ * Only a caller that passed the checks of `prepare` counts, so a stranger burns none of it.
+ */
+export const SETUP_TEST_PER_CONNECTION = { seconds: 3600, max: 20 };
+
 /** The step of a run that a newer run of the same connection ends: the first step of the flow. */
 const SUPERSEDED_STEP = { oidc: "state", saml: "request" } as const;
 
@@ -72,6 +82,8 @@ async function prepare(
     actor = { kind: "app", name: setupActorName(who.link.id) };
     linkId = who.link.id;
   } else actor = who;
+  if (!(await limit(config, "setup-test:connection", row.id, SETUP_TEST_PER_CONNECTION)))
+    return fail("rate_limited");
   const now = config.clock.now();
   const runId = newId(now);
   const audit = ssoDraft(actor, "sso_test_run", {

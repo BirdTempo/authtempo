@@ -5,16 +5,16 @@ import type { OidcStep } from "./steps.js";
  * The help line of each step that a test run can fail at (plan 13a Task 7). The line is fixed
  * text, so the page never shows a raw message of the IdP or a part of an assertion. A provider
  * guide may add its own lines later. These lines hold for each provider. A step added to a
- * union and not listed here fails the compile.
+ * union and not listed here fails the compile. The step `binding` has no line: a callback with
+ * no matching binding cookie never ends a run (see `runOidc`), so no run holds that step.
  */
-const HELP: Readonly<Record<OidcStep | SamlStep, string>> = {
+const HELP: Readonly<Record<Exclude<OidcStep | SamlStep, "binding">, string>> = {
   discovery:
     "Core could not read the settings of the IdP. Check that the issuer address is correct.",
   discovery_host: "The IdP gave an address that core does not call. Use a public https address.",
   secret: "Core could not open the client secret. Enter the client secret again.",
   state: "The test sign-in expired or was used twice. Start the test again.",
   state_connection: "The test sign-in belongs to another connection. Start the test again.",
-  binding: "The browser that returned is not the browser that started the test. Start it again.",
   code: "The IdP sent no code. Check the redirect address and the access of the app in the IdP.",
   exchange:
     "The IdP refused the code. Check the client ID, the client secret, and the redirect address.",
