@@ -2525,6 +2525,7 @@ export const ROUTES = Object.freeze([
       "second_factor_required",
       "session_not_fresh",
       "conflict",
+      "setup_not_tested",
       "impersonation_session",
     ],
     oauthCodes: [],
