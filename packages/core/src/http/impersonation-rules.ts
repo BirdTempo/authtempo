@@ -62,6 +62,20 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // /organizations/tokens (12k ruling 7). A token outlives the impersonation.
   "POST /scim/tokens/create",
   "POST /scim/tokens/revoke",
+  // The setup links of plan 13a: every route refuses an impersonation session (Task 11).
+  "POST /sso/setup-links/create",
+  "GET /sso/setup-links/list",
+  "GET /sso/setup-links/get",
+  "POST /sso/setup-links/revoke",
+  "POST /sso/setup-links/activate",
+  "GET /sso/setup",
+  "POST /sso/setup/open",
+  "POST /sso/setup/domains/add",
+  "POST /sso/setup/domains/verify",
+  "POST /sso/setup/connection",
+  "POST /sso/setup/scim-token",
+  "POST /sso/setup/handback",
+  "GET /sso/setup/status",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
