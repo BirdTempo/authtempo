@@ -27,16 +27,21 @@ const BIND = "__Secure-tempo_session_oauth=";
  * The measured statements of each step, with the D1 limiter. The activate step is the largest:
  * it locks the rows, routes the domains, turns on the token, and sends the notices.
  * Measured 2026-11-23 05:24 on the owner's Mac Studio, load 7.94 5.86 5.38.
+ * Remeasured 2026-11-23 06:57, load 4.5 to 7.0, after ruling R32 of plan 13a: each write of a
+ * domain or of the pending token reads the draft of the link (1 query) and, when it finds one,
+ * moves its version (1 query). The domain writes of this scene come before the draft, so each
+ * sends 1 more: 16 and 18, were 15 and 17. The token write comes after the draft and sends 3
+ * more: 19, was 16 (the read and the update of the draft, and 1 query that is not traced). The scene also puts the token before the test run now.
  */
 const PINS: Record<string, number> = {
   mint: 15,
   open: 13,
-  domainAdd: 15,
-  domainVerify: 17,
+  domainAdd: 16,
+  domainVerify: 18,
   saveDraft: 16,
   testStart: 18,
   testCallback: 12,
-  scimToken: 16,
+  scimToken: 19,
   status: 13,
   preview: 18,
   activate: 38,
@@ -233,6 +238,12 @@ describe("the queries of each step of the SSO setup scene on D1 (plan 13a Task 1
     got.saveDraft = saved.queries;
     const connectionId = ((await saved.res.json()) as { connection: { id: string } }).connection.id;
 
+    // R32: the token write moves the version of the draft, so it comes before the test run. A
+    // write after the run would make the run stale.
+    const scim = await measure(post("/sso/setup/scim-token", {}, cookie));
+    expect(scim.res.status).toBe(200);
+    got.scimToken = scim.queries;
+
     const started = await measure(get(`/sso/${connectionId}/start?test=1`, cookie));
     expect(started.res.status).toBe(302);
     got.testStart = started.queries;
@@ -262,10 +273,6 @@ describe("the queries of each step of the SSO setup scene on D1 (plan 13a Task 1
     );
     expect(back.res.status).toBe(303);
     got.testCallback = back.queries;
-
-    const scim = await measure(post("/sso/setup/scim-token", {}, cookie));
-    expect(scim.res.status).toBe(200);
-    got.scimToken = scim.queries;
 
     const status = await measure(get("/sso/setup/status", cookie));
     expect(status.res.status).toBe(200);

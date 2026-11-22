@@ -507,7 +507,9 @@ const ACCOUNT_DELETE_GROUPS = 120;
 // Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
 // a query count does not change with the load): the rest also deletes the SSO test runs,
 // so the last sweep sends 36, was 35. The act stays 38.
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [23, 23, 36] };
+// Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the sweep runs the
+// setup step when `sso` is on, so each sweep sends 3 queries more: 26, 26, and 39.
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [26, 26, 39] };
 const GROUPS = 500;
 
 /**
