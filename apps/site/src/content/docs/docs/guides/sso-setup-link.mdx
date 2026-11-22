@@ -1,0 +1,77 @@
+---
+title: Set up SSO with a setup link
+description: An owner sends a setup link to the IT admin of a customer. The IT admin fills in drafts. The owner reads the preview and activates.
+type: how-to
+sources:
+  - packages/core/src/engine/sso/setup-links.ts
+  - packages/core/src/sso/guides/index.ts
+  - packages/client/src/client.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/sso-setup-link.ts?raw";
+import test from "../../../../../samples/guides/sso-setup-link.test.ts?raw";
+
+**For:** an app developer who lets the owner of an organization hand the SSO setup to the IT admin of a customer.
+
+**What it does:** this page turns on the setup links, then shows the five steps. The owner mints a link. The IT admin fills in drafts. A test sign-in passes. The IT admin hands back. The owner reads the preview and activates.
+
+## Before you start
+
+- A working [Enterprise SSO](/docs/guides/sso/) config, with `organizations` on.
+- A signed-in owner with a second factor on. An owner manages the SSO setup only with a second factor ([`second_factor_required`](/docs/reference/errors/#second_factor_required)).
+- The notices of the account on, by [`account.notices`](/docs/reference/config/). `sso.setup` fails at start when `account.notices` is `false`, because no owner would learn that a setup waits.
+
+## Steps
+
+1. Turn on `sso.setup` in the config. It is off by default. `ttlHours` sets the life of a link from 1 to 168 hours, and the default is 72. The hook `hooks.sso.setupReady` runs after each handback.
+2. The owner mints a link with the steps and the kinds that the customer needs. The answer holds the clear token one time. Send the address to the IT admin. Never write the token to a log.
+3. The IT admin opens the address. The page asks to confirm, and only the confirm opens a session. So a mail scanner that opens the link opens nothing.
+4. The IT admin follows the guide of the provider on the setup page. The guide shows the values to copy. The list at the end of this page has one guide page for each provider. The IT admin adds the domain and publishes its TXT record. Then the IT admin saves the connection and, if the link has the step, takes a SCIM token one time.
+5. The IT admin starts a test sign-in. The test must pass for the draft as it is now. A change of the draft makes the old test void.
+6. The IT admin hands back. Core sends the notice `sso_setup_ready` to every owner of the organization and runs `hooks.sso.setupReady`.
+7. The owner reads the preview, then activates. The activation answers [`setup_not_tested`](/docs/reference/errors/#setup_not_tested) until a test of the current draft has passed. The link ends at the activation, and core sends the notice `sso_activated`.
+
+<Code code={sample} lang="ts" title="Turn on the setup links, mint a link, and activate" />
+
+<Code code={test} lang="ts" title="The sample as a test" />
+
+## What the owner must read before the activation
+
+The owner is the last check. Nothing the IT admin does goes live without the owner.
+
+**One risk stays.** A person who steals the link before the IT admin uses it can fill a draft. That draft can name a provider that the thief controls. If the owner then activates it after a quick read of the preview, the thief signs in to the organization through that provider. The test run does not stop this, because a thief's provider passes a test too. Core cannot know who the IT admin is. Two things limit the risk. The notice to every owner shows that a setup is ready, so a second owner can ask who handed it back. The link also ends at its time, at a revoke, and at the first activation.
+
+So the owner must do three things before an activation:
+
+- Read the domain, the provider address, and the sign-in URL of the preview. They must be the values of the customer.
+- Ask the IT admin by a second channel, such as a phone call, if the draft is the draft of the customer.
+- Revoke the link when the answer is no.
+
+## How it behaves
+
+- The link, the open, and the page answer one code, [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), for an unknown, expired, revoked, or ended link. An answer tells nothing about the link.
+- A draft is not a live row. It signs nobody in, and the SCIM token of a draft opens no directory, until the owner activates.
+- The IT admin sets the values of the provider only. The owner sets `enabled`, `jit`, `defaultRole`, `mfa`, and `scimRoles` after the setup.
+- An organization holds a limit of open links. The mint answers [`setup_link_limit`](/docs/reference/errors/#setup_link_limit) past it.
+- Each guide shows the date on which a person read the provider docs. A label that the docs do not confirm shows as Unconfirmed. No guide was checked on a real tenant yet.
+
+## If it fails
+
+- [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid): the link is unknown, expired, revoked, or ended. Mint a new link.
+- [`setup_not_tested`](/docs/reference/errors/#setup_not_tested): no test of the current draft has passed. Ask the IT admin to run the test again.
+- [`setup_link_limit`](/docs/reference/errors/#setup_link_limit): revoke a link that is not in use, then mint again.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): wait. Each limit of the setup is in [Limits](/docs/reference/limits/).
+
+## The guide of each provider
+
+- [Okta](/docs/guides/sso-setup-idp-okta/)
+- [Microsoft Entra ID](/docs/guides/sso-setup-idp-entra/)
+- [Google Workspace](/docs/guides/sso-setup-idp-google-workspace/)
+- [Generic SAML](/docs/guides/sso-setup-idp-generic-saml/)
+- [Generic OIDC](/docs/guides/sso-setup-idp-generic-oidc/)
+
+## Next
+
+- [Setup link reference](/docs/reference/sso-setup/)
+- [Enterprise SSO](/docs/guides/sso/)

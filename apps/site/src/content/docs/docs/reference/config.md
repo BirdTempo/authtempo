@@ -373,7 +373,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). Each connection names how its token request sends the client secret, `tokenEndpointAuthMethod`: see [create a connection](/docs/reference/routes/#post-sso-connections-create). |
 | `sso.saml` | `true` or object | off | Turns on the SAML connections (plan 12d Task 8). |
 | `sso.saml.clockSkewSeconds` | number | 120 | A whole number from 0 to 300. |
-| `sso.setup` | object or `false` | off | Turns on the setup links (plan 13a). It needs `organizations`. This feature ships with plan 13a. <!-- Task 15 writes the full page. --> |
+| `sso.setup` | object or `false` | off | Turns on the setup links. It needs `sso` and `organizations`. See [Setup link reference](/docs/reference/sso-setup/). |
 | `sso.setup.ttlHours` | number | 72 | The default life of a setup link. A whole number from 1 to 168. |
 | `sso.setup.page` | function | the page of core | Replaces the setup page of core. It takes `SetupPageInput` and returns HTML. |
 | `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. Core reads the discovery document, the token answer, and the JWKS with a cap of 65536 bytes each. A larger answer fails the sign-in with `sso_failed`. |

@@ -1739,8 +1739,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Answer | `application/samlmetadata+xml`: one `EntityDescriptor` whose `entityID` is this URL, with one `SPSSODescriptor` (`AuthnRequestsSigned="false"`, `WantAssertionsSigned="true"`) and one HTTP-POST `AssertionConsumerService` at the ACS URL. It is not signed. An id that names no SAML connection answers 404 |
 | Errors | [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
 
-<!-- Task 15 writes the full page. -->
-The setup link routes exist when the config sets `sso.setup` (plan 13a). This feature ships with plan 13a. An owner of an organization, or a platform operator, mints a setup link. The IT admin of the organization opens it and fills in drafts: a domain, a connection, and a SCIM token. Nothing goes live until the owner activates the link.
+The setup link routes exist when the config sets `sso.setup`. Read [Set up SSO with a setup link](/docs/guides/sso-setup-link/) for the steps and [Setup link reference](/docs/reference/sso-setup/) for the config and the rules. An owner of an organization, or a platform operator, mints a setup link. The IT admin of the organization opens it and fills in drafts: a domain, a connection, and a SCIM token. Nothing goes live until the owner activates the link.
 
 <h3 id="post-sso-setup-links-create"><code>POST /sso/setup-links/create</code></h3>
 

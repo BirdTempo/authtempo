@@ -41,7 +41,6 @@ sources:
 | 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`. It is true when the session came after the proof of its address. It is also true when the user has no address and is not anonymous. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A fill sets it from the user of each live session (plan 12p). |
 | 17 | `0017_schema_v17` | `ta_sso_setup_link`, `ta_sso_test_run`, `ta_sso_setup_session`. It also adds `draft`, `version`, and `setup_link_id` to `ta_sso_connection`, `pending` and `setup_link_id` to `ta_scim_token`, and `setup_link_id` to `ta_sso_domain`. This is the schema of the setup link (plan 13a). The setup link ships with plan 13a. |
 
-<!-- Task 15 writes the full page. The adapter files of version 17 come with plan 13a Task 1. -->
 `SCHEMA_VERSION` of `@authtempo/core` is 17.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
