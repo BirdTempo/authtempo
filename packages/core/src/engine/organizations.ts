@@ -717,7 +717,9 @@ export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Pr
  * Plan 13a (ruling R17) adds the setup session and setup link deletes to
  * the rest: 2 queries more in this route. On the D1 binding the organization
  * delete of the SCIM Groups test sent 33 queries, 31 before (2026-11-23,
- * load 6, 18 CPUs). So the ten deletes still fit 50.
+ * load 6, 18 CPUs). Plan 13a Task 7 adds the test run delete to the rest: 1 query
+ * more, so 34 of 50 by the count of the code (not yet measured on the D1 binding).
+ * So the ten deletes still fit 50.
  */
 export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
 

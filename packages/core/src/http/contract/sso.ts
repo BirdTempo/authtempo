@@ -348,10 +348,14 @@ export const SSO_CONTRACT = {
   "GET /sso/:connectionId/callback": {
     query: { schema: callbackQuery, parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
+    // A test run (plan 13a Task 7, C9): a 303 to the status page of the run, `?run=<id>`.
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
   },
   "POST /sso/:connectionId/acs": {
     body: { schema: acsBody, media: ["form"], parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
+    // A test run (plan 13a Task 7, C9): a 303 to the status page of the run, `?run=<id>`.
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
   },
   "GET /sso/:connectionId/metadata": { answer: { kind: "metadata", standard: "saml-metadata" } },
   // Plan 13a: the setup links, behind the manager guard.

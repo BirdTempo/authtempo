@@ -26,7 +26,7 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const LOG_METHODS = ["error", "info", "warn", "log", "debug"] as const;
 const IP = recordAddress("198.51.100.7");
-const META = { ip: IP, userAgent: "setup-test" };
+const META = { ip: IP, userAgent: "setup-session-agent/1" };
 /** What a caller gets with no credential: the same value for each refusal of a setup route. */
 const UNAUTHORIZED = { ok: false, code: "unauthorized", status: 401 };
 const INVALID = { ok: false, code: "setup_link_invalid", status: 404 };

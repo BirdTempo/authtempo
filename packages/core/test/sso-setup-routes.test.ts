@@ -15,7 +15,7 @@ import { ssoAuth } from "./sso/helpers.js";
 import { managerSession } from "./sso/manager-helpers.js";
 
 const MINUTE_MS = 60_000;
-const CLIENT = { "cf-connecting-ip": "198.51.100.7", "user-agent": "setup-test" };
+const CLIENT = { "cf-connecting-ip": "198.51.100.7", "user-agent": "setup-routes-agent/1" };
 const STATUS = "GET /sso/setup/status" as const;
 const HANDBACK = "POST /sso/setup/handback" as const;
 
