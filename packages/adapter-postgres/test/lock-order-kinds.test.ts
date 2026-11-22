@@ -1444,6 +1444,12 @@ const SITES: Record<string, readonly string[] | string> = {
     "one kind: the lock of the organization row, the link row, then the setup session rows of the link and its audit row",
   "sso/setup-session openSetupSession":
     "one kind: the lock of the organization row, the link row, then the setup session rows of the link, the new session, and its audit row",
+  // Plan 13a Task 10: the hand back. It writes no audit row.
+  "sso/setup-links handBack":
+    "one kind: the lock of the organization row, the link row, then the readyAt of the link row",
+  // Plan 13a Task 8: the activation, the one place where a draft goes live.
+  "sso/setup-activate activateSetup":
+    "one kind: the lock of the organization row, the link row, then a read of the draft and its test run, the connection row, the domain rows, the token row, the setup session rows, the link row, and two audit rows",
   // Plan 13a Task 7: the start of a test run. A start of a setup session takes the
   // organization row and its link row first; a start of the manager takes no lock.
   "sso/test-run prepare":
@@ -1495,7 +1501,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // of sso/setup-links.ts: the mint (createSetupLink) and the revoke (revokeSetupLink).
     // Plan 13a Task 3 adds the open of sso/setup-session.ts (openSetupSession), and Task 7
     // the start of a test run (prepare) and its pass (passTestRun): 93 (2026-11-23).
-    expect(found.length).toBe(93);
+    // Plan 13a Task 8 adds the activation (activateSetup), and Task 10 the hand back
+    // (handBack): 95 (2026-11-23). Tasks 9 and 12 add no site.
+    expect(found.length).toBe(95);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
