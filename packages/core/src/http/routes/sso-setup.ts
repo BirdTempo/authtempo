@@ -37,6 +37,7 @@ import { isJsonRequest, readBody } from "../body.js";
 import { escapeHtml } from "../confirm-page.js";
 import {
   domainIdBody,
+  setupActivateBody,
   setupConnectionBody,
   setupDomainAddBody,
   setupLinkCreateBody,
@@ -519,7 +520,7 @@ function linkRoutes(): Route[] {
         managedCall(
           ctx.config,
           ctx,
-          managedBody(setupLinkIdBody),
+          managedBody(setupActivateBody),
           (b) => byId(b, ctx),
           async (actor, b) => {
             const link = await linkOrganization(ctx.config, b.id);
@@ -529,6 +530,7 @@ function linkRoutes(): Route[] {
               ctx.config,
               actor,
               b.id,
+              b.version,
               async () => {
                 const still = await recheckSsoManager(ctx.config, actor, organizationId);
                 return still.ok ? ok(undefined) : still;

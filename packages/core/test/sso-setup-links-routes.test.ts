@@ -127,7 +127,7 @@ describe("the setup link routes (plan 13a Task 11)", () => {
       ["GET", `/sso/setup-links/list?organizationId=${a.org}`, ""],
       ["GET", `/sso/setup-links/get?id=${made.id}`, ""],
       ["POST", "/sso/setup-links/revoke", "", { id: made.id }],
-      ["POST", "/sso/setup-links/activate", "", { id: made.id }],
+      ["POST", "/sso/setup-links/activate", "", { id: made.id, version: 1 }],
     ];
     for (const [method, path, , body] of calls) {
       const [status, answer] = await call(w, method as "GET" | "POST", path, null, body);
@@ -141,7 +141,12 @@ describe("the setup link routes (plan 13a Task 11)", () => {
       ["POST", `/sso/setup-links/create?organizationId=${a.org}`, { steps: [] }],
       ["POST", `/sso/setup-links/create?organizationId=${a.org}`, { ...MINT, extra: 1 }],
       ["POST", "/sso/setup-links/revoke", { id: "" }],
-      ["POST", "/sso/setup-links/activate", { id: 5 }],
+      ["POST", "/sso/setup-links/activate", { id: 5, version: 1 }],
+      // R28: the version is required, a whole number of at least 1.
+      ["POST", "/sso/setup-links/activate", { id: "x" }],
+      ["POST", "/sso/setup-links/activate", { id: "x", version: 0 }],
+      ["POST", "/sso/setup-links/activate", { id: "x", version: 1.5 }],
+      ["POST", "/sso/setup-links/activate", { id: "x", version: "1" }],
       ["GET", "/sso/setup-links/list"],
       ["GET", "/sso/setup-links/get"],
     ];
@@ -181,6 +186,7 @@ describe("the setup link routes (plan 13a Task 11)", () => {
     const made = await mint(w, a.org, a.token);
     const [status, answer] = await call(w, "POST", "/sso/setup-links/activate", a.token, {
       id: made.id,
+      version: 1,
     });
     expect(status).toBe(409);
     expect(answer.error).toBe("setup_not_tested");
@@ -194,7 +200,7 @@ describe("the setup link routes (plan 13a Task 11)", () => {
       ["GET", `/sso/setup-links/get?id=${made.id}`],
       ["GET", `/sso/setup-links/list?organizationId=${a.org}`],
       ["POST", "/sso/setup-links/revoke", { id: made.id }],
-      ["POST", "/sso/setup-links/activate", { id: made.id }],
+      ["POST", "/sso/setup-links/activate", { id: made.id, version: 1 }],
       ["POST", `/sso/setup-links/create?organizationId=${a.org}`, MINT],
     ];
     for (const [method, path, body] of refused) {
@@ -234,7 +240,7 @@ describe("the guard of the setup link routes (plan 13a Task 11)", () => {
       ["GET", `/sso/setup-links/list?organizationId=${org}`, undefined],
       ["GET", `/sso/setup-links/get?id=${id}`, undefined],
       ["POST", "/sso/setup-links/revoke", { id }],
-      ["POST", "/sso/setup-links/activate", { id }],
+      ["POST", "/sso/setup-links/activate", { id, version: 1 }],
     ] as const;
     const refused = async (token: string, code: string) => {
       for (const [method, path, body] of calls)

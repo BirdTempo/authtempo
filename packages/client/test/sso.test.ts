@@ -315,10 +315,10 @@ const CASES: readonly Case[] = [
   },
   {
     name: "sso.setupLinks.activate",
-    run: (c) => c.sso.setupLinks.activate({ id: "l1" }),
+    run: (c) => c.sso.setupLinks.activate({ id: "l1", version: 3 }),
     route: "POST /sso/setup-links/activate",
     url: "/auth/sso/setup-links/activate",
-    body: { id: "l1" },
+    body: { id: "l1", version: 3 },
     answer: { connection: CONNECTION },
     value: CONNECTION,
   },
@@ -477,9 +477,16 @@ describe("client.sso and client.scim.tokens (plan 12d Task 13)", () => {
       status: 403,
     });
     const { client: notTested } = answering(409, { error: "setup_not_tested" });
-    expect(await notTested.sso.setupLinks.activate({ id: "l1" })).toEqual({
+    expect(await notTested.sso.setupLinks.activate({ id: "l1", version: 1 })).toEqual({
       ok: false,
       code: "setup_not_tested",
+      status: 409,
+    });
+    // R28: a draft that changed after the preview answers `conflict`.
+    const { client: changed } = answering(409, { error: "conflict" });
+    expect(await changed.sso.setupLinks.activate({ id: "l1", version: 1 })).toEqual({
+      ok: false,
+      code: "conflict",
       status: 409,
     });
     const { client: noCookie } = answering(401, { error: "unauthorized" });

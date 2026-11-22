@@ -207,6 +207,12 @@ const setupLinkCreateAnswer = z.strictObject({
 export const setupLinkListQuery = z.strictObject({ organizationId: id });
 export const setupLinkIdQuery = z.strictObject({ id });
 export const setupLinkIdBody = z.strictObject({ id });
+/**
+ * The activation names the draft version that the owner read in the preview (R28). The link
+ * holder can change the draft after the preview, so an activation with no version, or with
+ * another version, must not turn the draft on: the engine answers `conflict`.
+ */
+export const setupActivateBody = z.strictObject({ id, version: z.number().int().min(1) });
 
 /** One setup link. It never holds the token or its hash. */
 export const SetupLinkJson = z.strictObject({
@@ -227,10 +233,12 @@ export const SetupLinkJson = z.strictObject({
 
 /**
  * What an activation makes live (spec 6.5 item 2). Null: the link has no
- * draft connection yet. A fingerprint is the SHA-256 hex of a certificate.
+ * draft connection yet. A fingerprint is the SHA-256 hex of a certificate. The `version` is the
+ * draft version that the owner sends back in the activation (R28).
  */
 const SetupPreviewJson = z.strictObject({
   kind: kinds,
+  version: z.number().int(),
   issuerOrEntityId: z.string(),
   signInHost: z.string(),
   fingerprints: z.array(z.string()),
@@ -414,7 +422,7 @@ export const SSO_CONTRACT = {
     answer: { kind: "json", schema: OkAnswer },
   },
   "POST /sso/setup-links/activate": {
-    body: jsonBody(setupLinkIdBody),
+    body: jsonBody(setupActivateBody),
     answer: { kind: "json", schema: connectionAnswer },
   },
   // The confirm page changes nothing: a mail scanner can open the link (spec 6.1 item 5).

@@ -258,7 +258,7 @@ describe("a stolen setup link (plan 13a Task 14, rows 1 and 2)", () => {
     const rows = await tables(x.w);
     for (const credential of [{ cookie: s.cookie }, { bearer: s.token }, { bearer: s.session }]) {
       for (const [path, body] of [
-        ["/sso/setup-links/activate", { id: s.linkId }],
+        ["/sso/setup-links/activate", { id: s.linkId, version: 1 }],
         [`/sso/connections/update?id=${draft.id}`, { enabled: true }],
         ["/sso/domains/update", { id: x.w.domainId, enforce: true }],
         ["/sso/domains/update", { id: x.w.domainId, connectionId: draft.id }],
@@ -332,7 +332,7 @@ describe("a stolen setup link (plan 13a Task 14, rows 1 and 2)", () => {
     expect(x.w.mail.filter((m) => m.subject.startsWith("SSO setup notice"))).toEqual([]);
     const done = await x.call("POST", "/sso/setup-links/activate", {
       cookie: x.manager,
-      body: { id: s.linkId },
+      body: { id: s.linkId, version: 1 },
     });
     expect(done.status).toBe(200);
     const notices = x.w.mail.filter((m) => m.subject.startsWith("SSO setup notice"));
@@ -354,7 +354,7 @@ describe("a stolen setup link (plan 13a Task 14, rows 1 and 2)", () => {
       (
         await x.call("POST", "/sso/setup-links/activate", {
           cookie: x.manager,
-          body: { id: s.linkId },
+          body: { id: s.linkId, version: 1 },
         })
       ).status,
     ).toBe(200);
@@ -368,7 +368,7 @@ describe("a stolen setup link (plan 13a Task 14, rows 1 and 2)", () => {
     const rows = await tables(x.w);
     const twice = await x.call("POST", "/sso/setup-links/activate", {
       cookie: x.manager,
-      body: { id: s.linkId },
+      body: { id: s.linkId, version: 1 },
     });
     expect([twice.status, twice.body.error]).toEqual([404, "setup_link_invalid"]);
     expect(await tables(x.w)).toEqual(rows);
@@ -433,8 +433,47 @@ describe("a stolen setup link (plan 13a Task 14, rows 1 and 2)", () => {
 });
 
 describe("the activation of a thief's draft (plan 13a Task 14, rows 1 and 2)", () => {
-  const activate = (x: Scene, linkId: string, cookie = x.manager) =>
-    x.call("POST", "/sso/setup-links/activate", { cookie, body: { id: linkId } });
+  /** The activation of an owner who read the draft just before: it sends the draft version of now. */
+  const activate = async (x: Scene, linkId: string, cookie = x.manager, version?: number) => {
+    const draft = await x.w.storage.findOne("ssoConnection", [
+      { field: "setupLinkId", op: "eq", value: linkId },
+    ]);
+    return x.call("POST", "/sso/setup-links/activate", {
+      cookie,
+      body: { id: linkId, version: version ?? draft?.version ?? 1 },
+    });
+  };
+
+  it("answers 409 conflict when the thief changes and tests the draft again after the preview (R28)", async () => {
+    const x = await scene();
+    const s = await stolen(x);
+    await thiefDraft(x, s.cookie);
+    // The owner reads the preview of the draft.
+    const preview = await x.call("GET", `/sso/setup-links/get?id=${s.linkId}`, {
+      cookie: x.manager,
+    });
+    const seen = (preview.body.preview as { version: number }).version;
+    expect(seen).toBe(1);
+    // The link stays open: the thief saves another IdP under the same draft and passes its test.
+    const swapped = await thiefDraft(x, s.cookie);
+    const row = await x.w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: swapped.id },
+    ]);
+    expect(row?.version).toBe(2);
+    const before = await tables(x.w);
+    const refused = await activate(x, s.linkId, x.manager, seen);
+    expect([refused.status, refused.body.error]).toEqual([409, "conflict"]);
+    expect(await tables(x.w)).toEqual(before);
+    expect(
+      await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: swapped.id }]),
+    ).toMatchObject({ draft: true, enabled: false });
+    // The owner reads the new preview, and the activation then goes through.
+    const again = await x.call("GET", `/sso/setup-links/get?id=${s.linkId}`, {
+      cookie: x.manager,
+    });
+    expect((again.body.preview as { version: number }).version).toBe(2);
+    expect((await activate(x, s.linkId, x.manager, 2)).status).toBe(200);
+  });
 
   it("answers 409 setup_not_tested to a draft with no test, or with a test of an older draft", async () => {
     const x = await scene();
@@ -584,7 +623,7 @@ describe("the activation and a live connection", () => {
     const draft = await thiefDraft(x, s.cookie);
     const done = await x.call("POST", "/sso/setup-links/activate", {
       cookie: x.manager,
-      body: { id: s.linkId },
+      body: { id: s.linkId, version: 1 },
     });
     expect(done.status).toBe(200);
     const row = await x.w.storage.findOne("ssoDomain", [
@@ -690,7 +729,7 @@ describe("the token leak scan (row 5)", () => {
     await x.call("GET", `/sso/setup-links/get?id=${s.linkId}`, { cookie: x.manager });
     await x.call("POST", "/sso/setup-links/activate", {
       cookie: x.manager,
-      body: { id: s.linkId },
+      body: { id: s.linkId, version: 1 },
     });
     await x.call("POST", "/sso/setup/open", { body: { token: s.token } });
 

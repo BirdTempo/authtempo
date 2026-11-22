@@ -271,14 +271,14 @@ describe("the setup session routes (plan 13a Task 11)", () => {
       }),
     );
     expect(get.status).toBe(200);
-    const got = (await get.json()) as { preview: { scim: unknown } | null };
+    const got = (await get.json()) as { preview: { scim: unknown; version: number } | null };
     expect(got.preview).not.toBeNull();
     expect(got.preview?.scim).not.toBeNull();
     expect(JSON.stringify(got)).not.toContain(SECRET);
     const [status, activated] = await send(
       w,
       "/sso/setup-links/activate",
-      { id: s.linkId },
+      { id: s.linkId, version: got.preview?.version },
       manager,
     );
     expect(status).toBe(200);
@@ -289,7 +289,12 @@ describe("the setup session routes (plan 13a Task 11)", () => {
     ]);
     expect(row?.draft).toBe(false);
     expect(JSON.stringify(activated)).not.toContain(SECRET);
-    const again = await send(w, "/sso/setup-links/activate", { id: s.linkId }, manager);
+    const again = await send(
+      w,
+      "/sso/setup-links/activate",
+      { id: s.linkId, version: got.preview?.version },
+      manager,
+    );
     expect(again[0]).toBeGreaterThanOrEqual(400);
   });
 

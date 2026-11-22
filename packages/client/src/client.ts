@@ -1109,8 +1109,12 @@ export interface Client {
         id: string;
       }): Promise<ClientResult<{ link: SetupLinkJSON; preview: SetupPreviewJSON }>>;
       revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
-      /** Makes the draft live. `setup_not_tested` until a test of the current draft has passed. */
-      activate(input: { id: string }): Promise<ClientResult<SsoConnectionJSON>>;
+      /**
+       * Makes the draft live. Send the `version` of the preview that the owner read. A draft
+       * that changed after the preview answers `conflict`: read the preview again.
+       * `setup_not_tested` until a test of the current draft has passed.
+       */
+      activate(input: { id: string; version: number }): Promise<ClientResult<SsoConnectionJSON>>;
     };
     /**
      * The calls of a setup session, for the page of the IT admin (plan 13a). The session is the

@@ -398,11 +398,6 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "conflict",
-    "the contract declares it for the activate, but the engine answers setup_not_tested for each lost round of the activate (setup-activate.ts), so no request causes it",
-    ["POST /sso/setup-links/activate"],
-  ),
-  ...rows(
-    "conflict",
     "a draft write that loses its compare-and-set round; no single request causes it. sso-setup-drafts.test.ts proves the engine path. The domain add has a route test: sso-setup-session-routes.test.ts",
     ["POST /sso/setup/connection"],
   ),

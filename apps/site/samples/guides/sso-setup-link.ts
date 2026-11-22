@@ -65,7 +65,10 @@ export async function mintSetupLink(
 
 /**
  * After the handback: read what an activation makes live, then activate. The
- * activation answers `setup_not_tested` until a test of this exact draft has passed.
+ * activation sends the `version` of the preview that the owner read. When the
+ * link holder changes the draft after the preview, the activation answers
+ * `conflict` and nothing goes live: read the preview again. The activation
+ * answers `setup_not_tested` until a test of this exact draft has passed.
  */
 export async function reviewAndActivate(
   client: ReturnType<typeof ownerClient>,
@@ -74,12 +77,14 @@ export async function reviewAndActivate(
 ) {
   const got = await client.sso.setupLinks.get({ id: linkId });
   if (!got.ok) throw new Error(got.code);
-  if (!approve(got.value.preview)) {
+  const preview = got.value.preview;
+  if (preview === null) throw new Error("The link has no draft yet.");
+  if (!approve(preview)) {
     const revoked = await client.sso.setupLinks.revoke({ id: linkId });
     if (!revoked.ok) throw new Error(revoked.code);
     return null;
   }
-  const live = await client.sso.setupLinks.activate({ id: linkId });
+  const live = await client.sso.setupLinks.activate({ id: linkId, version: preview.version });
   if (!live.ok) throw new Error(live.code);
   return live.value;
 }

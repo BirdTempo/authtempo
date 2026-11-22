@@ -80,17 +80,22 @@ describe("setup link sample", () => {
   });
 
   it("revokes a link whose preview the owner refuses, and activates one that the owner accepts", async () => {
-    const refuse = stubFetch([{ link: { id: "lnk1" }, preview: { domains: [] } }, { ok: true }]);
+    const refuse = stubFetch([
+      { link: { id: "lnk1" }, preview: { version: 2, domains: [] } },
+      { ok: true },
+    ]);
     expect(await reviewAndActivate(ownerClient(refuse.fetchImpl), "lnk1", () => false)).toBeNull();
     expect(refuse.seen.map((s) => s.url.pathname)).toEqual([
       "/auth/sso/setup-links/get",
       "/auth/sso/setup-links/revoke",
     ]);
     const accept = stubFetch([
-      { link: { id: "lnk1" }, preview: { domains: [] } },
+      { link: { id: "lnk1" }, preview: { version: 2, domains: [] } },
       { connection: { id: "con1" } },
     ]);
     await reviewAndActivate(ownerClient(accept.fetchImpl), "lnk1", () => true);
+    // R28: the activation sends the version that the preview showed.
+    expect(accept.seen[1]?.body).toEqual({ id: "lnk1", version: 2 });
     expect(accept.seen.map((s) => s.url.pathname)).toEqual([
       "/auth/sso/setup-links/get",
       "/auth/sso/setup-links/activate",

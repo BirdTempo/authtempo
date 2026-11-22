@@ -231,7 +231,7 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   // setup cookie, so the families that reach them send one.
   "POST /sso/setup-links/create": { steps: ["domain"], kinds: ["oidc"], note: "Ada" },
   "POST /sso/setup-links/revoke": { id: "$link" },
-  "POST /sso/setup-links/activate": { id: "$link" },
+  "POST /sso/setup-links/activate": { id: "$link", version: 1 },
   "POST /sso/setup/domains/add": { domain: "setup.example" },
   "POST /sso/setup/domains/verify": { id: "$domain" },
   "POST /sso/setup/connection": {

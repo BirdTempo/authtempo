@@ -1765,7 +1765,7 @@ The setup link routes exist when the config sets `sso.setup`. Read [Set up SSO w
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ id }` |
-| Answer | `{ link, preview }`. `preview` is what an activation makes live, or `null` when the link has no draft connection |
+| Answer | `{ link, preview }`. `preview` is what an activation makes live, or `null` when the link has no draft connection. `preview.version` is the version of the draft. Send it to the activation |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-setup-links-revoke"><code>POST /sso/setup-links/revoke</code></h3>
@@ -1782,8 +1782,8 @@ The setup link routes exist when the config sets `sso.setup`. Read [Set up SSO w
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
-| Input | JSON `{ id }` |
-| Answer | The connection, made live. A passed test run of the current draft must exist |
+| Input | JSON `{ id, version }`. `version` is the `preview.version` that the owner read. It is an integer of 1 or more |
+| Answer | The connection, made live. The `version` must equal the version of the draft now, and a passed test run of that draft must exist. When the link holder changed the draft after the preview, the answer is `conflict` and nothing goes live. Read the preview again |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`setup_not_tested`](/docs/reference/errors/#setup_not_tested), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-sso-setup"><code>GET /sso/setup</code></h3>

@@ -34,6 +34,11 @@ import { passedRunIn } from "./test-run.js";
 /** What an activation makes live (spec 6.5 item 2). It holds no secret and no token. */
 export interface SetupPreview {
   kind: "oidc" | "saml";
+  /**
+   * The version of the draft that the preview shows. The activation must send it back (R28), and
+   * a draft that changed after the preview answers `conflict`.
+   */
+  version: number;
   issuerOrEntityId: string;
   signInHost: string;
   /** SHA-256 hex of each certificate of a SAML draft. An OIDC draft has none. */
@@ -126,6 +131,7 @@ export async function previewSetup(
     const c = draft.config as unknown as OidcStored;
     return ok({
       kind: "oidc",
+      version: draft.version,
       issuerOrEntityId: c.issuer,
       signInHost: hostOf(c.endpoints?.authorizeUrl ?? c.issuer),
       fingerprints: [],
@@ -141,6 +147,7 @@ export async function previewSetup(
   }
   return ok({
     kind: "saml",
+    version: draft.version,
     issuerOrEntityId: c.idpEntityId,
     signInHost: hostOf(c.ssoUrl),
     fingerprints,
@@ -165,9 +172,12 @@ class Refused extends Error {
  * re-check that the route runs after its body read.
  *
  * One transaction does the rest, in the lock order of core (the organization row, then the
- * link row, `holdSetupRows`). The link must be live: not revoked, not ended, not expired, else
+ * link row, `lockSetupRows`). The link must be live: not revoked, not ended, not expired, else
  * 404 `setup_link_invalid`, so a second activation and a race both end there. Then the link
- * must have a draft and a passed run for the exact `version` of the draft, else 409
+ * must have a draft, else 409 `setup_not_tested`. The `version` argument is the version that
+ * the owner read in the preview (R28): when the draft has another version, the act answers 409
+ * `conflict`, so a draft that the link holder changed and tested again after the preview does
+ * not go live. Then the draft needs a passed run for its exact `version`, else 409
  * `setup_not_tested`. Then it writes: the connection `enabled` true and `draft` false (the
  * `where` holds the version, so a write of the owner that lands after the read fails the act
  * with `setup_not_tested`), the verified domains of the link get the `connectionId`, the
@@ -183,6 +193,7 @@ export async function activateSetup(
   config: ResolvedConfig,
   actor: SsoActor,
   linkId: string,
+  version: number,
   recheck: () => Promise<Result<void>>,
   meta: SsoActMeta = {},
 ): Promise<Result<SsoConnectionSummary>> {
@@ -203,6 +214,11 @@ export async function activateSetup(
       if (!held.ok) throw new Refused("setup_link_invalid");
       const draft = await draftOf(tx, link.id, link.organizationId);
       if (!draft) throw new Refused("setup_not_tested");
+      // R28: the owner activates the draft that the owner read. The link stays open after a
+      // handback, so the holder can change the draft and test it again after the preview. The
+      // compare is here, after the lock and on the row of this transaction, so no write can fall
+      // between the compare and the update below (its `where` holds the same version).
+      if (draft.version !== version) throw new Refused("conflict");
       if (!(await passedRunIn(tx, draft.id, draft.version))) throw new Refused("setup_not_tested");
       const turned = await tx.update(
         "ssoConnection",

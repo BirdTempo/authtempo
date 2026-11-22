@@ -196,7 +196,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.sso.setupLinks.list({ organizationId })` | `GET /sso/setup-links/list` | `SetupLinkJSON[]` |
 | `client.sso.setupLinks.get({ id })` | `GET /sso/setup-links/get` | `{ link, preview }`. `preview` is `null` while the link has no draft |
 | `client.sso.setupLinks.revoke({ id })` | `POST /sso/setup-links/revoke` | `{ ok: true }` |
-| `client.sso.setupLinks.activate({ id })` | `POST /sso/setup-links/activate` | `SsoConnectionJSON`. `setup_not_tested` until a test of the current draft passes |
+| `client.sso.setupLinks.activate({ id, version })` | `POST /sso/setup-links/activate` | `SsoConnectionJSON`. `version` is `preview.version` of the read. `conflict` when the draft changed after the read. `setup_not_tested` until a test of the current draft passes |
 | `client.sso.setup.open({ token })` | `POST /sso/setup/open` | `{ linkId }`, and the setup cookie |
 | `client.sso.setup.status({ run? })` | `GET /sso/setup/status` | `SetupStatusJSON`: the link, the drafts of the session, and the `test` result |
 | `client.sso.setup.domains.add({ domain })` | `POST /sso/setup/domains/add` | `SsoDomainJSON`, with `record` |

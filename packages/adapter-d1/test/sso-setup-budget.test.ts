@@ -275,7 +275,11 @@ describe("the queries of each step of the SSO setup scene on D1 (plan 13a Task 1
     expect(preview.res.status).toBe(200);
     got.preview = preview.queries;
 
-    const activated = await measure(post("/sso/setup-links/activate", { id: linkId }, boss.cookie));
+    // R28: the owner sends back the draft version that the preview showed.
+    const shown = (await preview.res.json()) as { preview: { version: number } };
+    const activated = await measure(
+      post("/sso/setup-links/activate", { id: linkId, version: shown.preview.version }, boss.cookie),
+    );
     expect(activated.res.status).toBe(200);
     got.activate = activated.queries;
 

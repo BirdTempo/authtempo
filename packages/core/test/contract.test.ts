@@ -847,7 +847,7 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
     },
     {
       key: "POST /sso/setup-links/activate",
-      body: { id },
+      body: { id, version: 1 },
       session: true,
       headers: manager,
       refused: INVALID_BODY,

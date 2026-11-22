@@ -223,7 +223,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.sso.setupLinks.list(org);
     await c.sso.setupLinks.get({ id: "l" });
     await c.sso.setupLinks.revoke({ id: "l" });
-    await c.sso.setupLinks.activate({ id: "l" });
+    await c.sso.setupLinks.activate({ id: "l", version: 1 });
     await c.sso.setup.open({ token: "t" });
     await c.sso.setup.status();
     await c.sso.setup.domains.add({ domain: "b.c" });

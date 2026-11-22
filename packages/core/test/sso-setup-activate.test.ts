@@ -151,6 +151,23 @@ async function pass(x: X, r: R, version = 1) {
 
 const noop = async () => ok(undefined);
 
+/**
+ * The activation of an owner who read the draft just before: it sends the version that the draft
+ * has now, as the preview showed it. A link with no draft sends 1. The tests of R28 call
+ * `activateSetup` with a named version instead.
+ */
+async function activateRead(
+  config: Parameters<typeof activateSetup>[0],
+  actor: SsoActor,
+  linkId: string,
+  recheck: Parameters<typeof activateSetup>[4],
+) {
+  const draft = await config.storage.findOne("ssoConnection", [
+    { field: "setupLinkId", op: "eq", value: linkId },
+  ]);
+  return activateSetup(config, actor, linkId, draft?.version ?? 1, recheck);
+}
+
 /** Every row that an activation can change, for a before and after compare. */
 async function tables(w: X["w"]) {
   const find = (
@@ -181,7 +198,7 @@ describe("the condition of the activation", () => {
     const r = await ready(x);
     x.w.clock.advance(1000);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
     expect(await tables(x.w)).toEqual(before);
   });
 
@@ -197,7 +214,7 @@ describe("the condition of the activation", () => {
       id: newId(x.w.clock.now()),
       outcome: "pending",
     });
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
   });
 
   it("answers 409 setup_not_tested when the draft changed after the pass (pass at v1, draft at v2)", async () => {
@@ -212,7 +229,7 @@ describe("the condition of the activation", () => {
         ?.version,
     ).toBe(2);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
     expect(await tables(x.w)).toEqual(before);
   });
 
@@ -226,7 +243,7 @@ describe("the condition of the activation", () => {
       label: "Owner label",
     });
     expect(changed.ok).toBe(true);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
   });
 
   it("answers 409 setup_not_tested when the link has no draft", async () => {
@@ -238,7 +255,7 @@ describe("the condition of the activation", () => {
       note: "Ada at Acme IT",
     });
     if (!made.ok) throw new Error(made.code);
-    expect(await activateSetup(x.w.config, x.actor, made.value.id, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, made.value.id, noop)).toEqual(NOT_TESTED);
   });
 
   it("answers setup_not_tested when a write of the owner lands between the read and the update of the draft", async () => {
@@ -256,7 +273,7 @@ describe("the condition of the activation", () => {
       });
     });
     const before = await tables(x.w);
-    expect(await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop)).toEqual(
+    expect(await activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop)).toEqual(
       NOT_TESTED,
     );
     const after = await tables(x.w);
@@ -310,7 +327,7 @@ describe("the act", () => {
     x.w.clock.advance(5000);
     const at = x.w.clock.now();
     const before = await tables(x.w);
-    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    const done = await activateRead(x.w.config, x.actor, r.linkId, noop);
     if (!done.ok) throw new Error(done.code);
     expect(done.value).toMatchObject({ id: r.connId, enabled: true, draft: false });
     const row = await x.w.storage.findOne("ssoConnection", [
@@ -371,7 +388,7 @@ describe("the act", () => {
       code: "setup_link_limit",
     });
     await pass(x, a);
-    expect((await activateSetup(x.w.config, x.actor, a.linkId, noop)).ok).toBe(true);
+    expect((await activateRead(x.w.config, x.actor, a.linkId, noop)).ok).toBe(true);
     expect((await createSetupLink(x.w.config, x.actor, third)).ok).toBe(true);
     const before = await tables(x.w);
     expect(await revokeSetupLink(x.w.config, x.actor, a.linkId)).toEqual(ok(undefined));
@@ -392,7 +409,7 @@ describe("the act", () => {
       }) as never,
     });
     await expect(
-      activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop),
+      activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop),
     ).rejects.toThrow("the audit write failed");
     expect(await tables(x.w)).toEqual(before);
     expect(x.w.mail).toHaveLength(sent);
@@ -402,7 +419,7 @@ describe("the act", () => {
     const x = await world();
     const r = await ready(x);
     await pass(x, r);
-    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    await activateRead(x.w.config, x.actor, r.linkId, noop);
     for (const d of await x.w.storage.findMany("ssoDomain", [])) expect(d.enforce).toBe(false);
   });
 
@@ -410,7 +427,7 @@ describe("the act", () => {
     const x = await world();
     const r = await ready(x);
     await pass(x, r);
-    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    await activateRead(x.w.config, x.actor, r.linkId, noop);
     const routed = (await x.w.storage.findMany("ssoDomain", []))
       .filter((d) => d.connectionId !== null)
       .map((d) => d.id);
@@ -428,7 +445,7 @@ describe("the act", () => {
     });
     if (!other.ok) throw new Error(other.code);
     await pass(x, { ...r, connId: other.value.id }, 1);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
     const draft = await x.w.storage.findOne("ssoConnection", [
       { field: "id", op: "eq", value: r.connId },
     ]);
@@ -455,7 +472,7 @@ describe("the act", () => {
         claimedDomain: null,
       });
     });
-    const done = await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop);
+    const done = await activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop);
     expect(done.ok).toBe(true);
     const routed = (await x.w.storage.findMany("ssoDomain", []))
       .filter((d) => d.connectionId !== null)
@@ -486,7 +503,7 @@ describe("the act", () => {
       connectionId: live.value.id,
       enforce: true,
     });
-    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    const done = await activateRead(x.w.config, x.actor, r.linkId, noop);
     expect(done.ok).toBe(true);
     const domain = await x.w.storage.findOne("ssoDomain", [
       { field: "id", op: "eq", value: r.domainId },
@@ -500,7 +517,7 @@ describe("the act", () => {
     const x = await world();
     const r = await ready(x);
     await pass(x, r);
-    await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    await activateRead(x.w.config, x.actor, r.linkId, noop);
     // acme.example is the verified domain that the world makes; the manager added it.
     const own = (await x.w.storage.findMany("ssoDomain", [])).find(
       (d) => d.domain === "acme.example",
@@ -517,11 +534,11 @@ describe("the act", () => {
     };
     const r = await ready(x);
     // No passed run yet: the act refuses and the event stays silent.
-    const refused = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    const refused = await activateRead(x.w.config, x.actor, r.linkId, noop);
     expect(refused.ok).toBe(false);
     expect(await seen()).toEqual([]);
     await pass(x, r, 1);
-    const done = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+    const done = await activateRead(x.w.config, x.actor, r.linkId, noop);
     expect(done.ok).toBe(true);
     // The sink adds an envelope (time, level). The field list is pinned by the EVENTS table.
     expect(await seen()).toMatchObject([
@@ -571,7 +588,7 @@ describe("the act", () => {
     await pass(x, r);
     x.w.mail.length = 0;
     seen.length = 0;
-    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    expect((await activateRead(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
     const notices = x.w.mail.filter((m) => m.subject.startsWith("SSO setup notice"));
     expect(notices.map((m) => m.to).sort()).toEqual(["owner@acme.example", "second@acme.example"]);
     for (const m of notices) expect(m.text).toContain("turned on");
@@ -590,7 +607,7 @@ describe("the act", () => {
     x.w.config.mail.send = async () => {
       throw new Error("mail is down");
     };
-    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    expect((await activateRead(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
     expect(
       (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: r.connId }]))
         ?.enabled,
@@ -605,14 +622,14 @@ describe("who may activate", () => {
     await pass(x, r);
     const before = await tables(x.w);
     let calls = 0;
-    const gone = await activateSetup(x.w.config, x.actor, r.linkId, async () => {
+    const gone = await activateRead(x.w.config, x.actor, r.linkId, async () => {
       calls += 1;
       return { ok: false, code: "unauthorized", status: 401 };
     });
     expect(gone).toEqual({ ok: false, code: "unauthorized", status: 401 });
     expect(calls).toBe(1);
     expect(await tables(x.w)).toEqual(before);
-    expect((await activateSetup(x.w.config, x.actor, r.linkId, async () => ok(undefined))).ok).toBe(
+    expect((await activateRead(x.w.config, x.actor, r.linkId, async () => ok(undefined))).ok).toBe(
       true,
     );
   });
@@ -636,7 +653,7 @@ describe("who may activate", () => {
     });
     expect(demoted.ok).toBe(true);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(RANK);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(RANK);
     expect(await tables(x.w)).toEqual(before);
   });
 
@@ -682,7 +699,7 @@ describe("who may activate", () => {
     await x.w.storage.delete("session", [{ field: "id", op: "eq", value: resolved.session.id }]);
     const before = await tables(x.w);
     expect(
-      await activateSetup(x.w.config, x.actor, r.linkId, async () =>
+      await activateRead(x.w.config, x.actor, r.linkId, async () =>
         recheckSsoManager(x.w.config, x.actor, x.org).then((c) => (c.ok ? ok(undefined) : c)),
       ),
     ).toEqual({
@@ -700,7 +717,7 @@ describe("who may activate", () => {
     const other = await managerSession(x.w, "owner@bexley.example", "bexley");
     const foreign = await guarded(x.w, other.token, other.org);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, foreign, r.linkId, noop)).toEqual(RANK);
+    expect(await activateRead(x.w.config, foreign, r.linkId, noop)).toEqual(RANK);
     expect(await previewSetup(x.w.config, foreign, r.linkId)).toEqual(RANK);
     expect(await tables(x.w)).toEqual(before);
   });
@@ -709,7 +726,7 @@ describe("who may activate", () => {
     const x = await world();
     const r = await ready(x);
     await pass(x, r);
-    expect((await activateSetup(x.w.config, SSO_APP, r.linkId, noop)).ok).toBe(true);
+    expect((await activateRead(x.w.config, SSO_APP, r.linkId, noop)).ok).toBe(true);
     const rows = await auditOf(x.w, "sso_setup_link_activate");
     expect(rows[0]).toMatchObject({ actorKind: "app", actorId: "sso-test" });
   });
@@ -726,9 +743,9 @@ describe("a link that is not live", () => {
     const x = await world();
     const r = await ready(x);
     await pass(x, r);
-    expect((await activateSetup(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
+    expect((await activateRead(x.w.config, x.actor, r.linkId, noop)).ok).toBe(true);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, noop)).toEqual(INVALID);
+    expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(INVALID);
     expect(await tables(x.w)).toEqual(before);
   });
 
@@ -737,12 +754,12 @@ describe("a link that is not live", () => {
     const a = await ready(x);
     await pass(x, a);
     expect((await revokeSetupLink(x.w.config, x.actor, a.linkId)).ok).toBe(true);
-    expect(await activateSetup(x.w.config, x.actor, a.linkId, noop)).toEqual(INVALID);
+    expect(await activateRead(x.w.config, x.actor, a.linkId, noop)).toEqual(INVALID);
     const b = await ready(x, "oidc", "second");
     await pass(x, b);
     x.w.clock.advance(73 * HOUR_MS);
     const before = await tables(x.w);
-    expect(await activateSetup(x.w.config, x.actor, b.linkId, noop)).toEqual(INVALID);
+    expect(await activateRead(x.w.config, x.actor, b.linkId, noop)).toEqual(INVALID);
     expect(await tables(x.w)).toEqual(before);
     expect(
       (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: b.connId }]))
@@ -752,7 +769,7 @@ describe("a link that is not live", () => {
 
   it("answers 404 not_found for an id with no link", async () => {
     const x = await world();
-    expect(await activateSetup(x.w.config, x.actor, "no-such-link", noop)).toMatchObject({
+    expect(await activateRead(x.w.config, x.actor, "no-such-link", noop)).toMatchObject({
       ok: false,
       code: "not_found",
       status: 404,
@@ -764,7 +781,7 @@ describe("a link that is not live", () => {
     const r = await ready(x);
     await pass(x, r);
     const off = { ...x.w.config, sso: { ...x.w.config.sso, setup: null } } as never;
-    expect(await activateSetup(off, x.actor, r.linkId, noop)).toMatchObject({
+    expect(await activateRead(off, x.actor, r.linkId, noop)).toMatchObject({
       ok: false,
       code: "not_found",
     });
@@ -781,8 +798,8 @@ describe("the race of two activations", () => {
     const r = await ready(x);
     await pass(x, r);
     const results = await Promise.all([
-      activateSetup(x.w.config, x.actor, r.linkId, noop),
-      activateSetup(x.w.config, x.actor, r.linkId, noop),
+      activateRead(x.w.config, x.actor, r.linkId, noop),
+      activateRead(x.w.config, x.actor, r.linkId, noop),
     ]);
     expect(results.filter((v) => v.ok)).toHaveLength(1);
     const lost = results.find((v) => !v.ok);
@@ -811,17 +828,94 @@ describe("the race of two activations", () => {
           );
           if (model === "ssoSetupLink" && armed) {
             armed = false;
-            const won = await activateSetup(x.w.config, x.actor, r.linkId, noop);
+            const won = await activateRead(x.w.config, x.actor, r.linkId, noop);
             expect(won.ok).toBe(true);
           }
           return row;
         };
       },
     });
-    const lost = await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, noop);
+    const lost = await activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop);
     expect(lost).toEqual(INVALID);
     expect(await auditOf(x.w, "sso_setup_link_activate")).toHaveLength(1);
     expect(await auditOf(x.w, "sso_connection_update")).toHaveLength(1);
+  });
+});
+
+const CONFLICT = { ok: false, code: "conflict", status: 409 };
+
+describe("the draft that the owner read (R28)", () => {
+  /** The owner reads the preview, then the link holder edits the draft and runs a new test that passes. */
+  async function swapAfterPreview() {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    const preview = await previewSetup(x.w.config, x.actor, r.linkId);
+    if (!preview.ok || preview.value === null) throw new Error("no preview");
+    x.w.clock.advance(1000);
+    const swapped = await saveDraftConnection(x.w.config, r.s, {
+      ...OIDC,
+      issuer: "https://login.thief.example/acme",
+    });
+    expect(swapped.ok).toBe(true);
+    await pass(x, r, 2);
+    return { x, r, seen: preview.value.version };
+  }
+
+  it("shows the version of the draft in the preview", async () => {
+    const x = await world();
+    const r = await ready(x);
+    const p = await previewSetup(x.w.config, x.actor, r.linkId);
+    expect(p.ok && p.value?.version).toBe(1);
+    await saveDraftConnection(x.w.config, r.s, { ...OIDC, label: "Acme Okta 2" });
+    const next = await previewSetup(x.w.config, x.actor, r.linkId);
+    expect(next.ok && next.value?.version).toBe(2);
+  });
+
+  it("answers 409 conflict for a draft that was changed and tested again after the preview, and keeps the connection inactive", async () => {
+    const { x, r, seen } = await swapAfterPreview();
+    expect(seen).toBe(1);
+    const before = await tables(x.w);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, seen, noop)).toEqual(CONFLICT);
+    expect(await tables(x.w)).toEqual(before);
+    const row = await x.w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: r.connId },
+    ]);
+    expect(row).toMatchObject({ draft: true, enabled: false, version: 2 });
+    expect(await auditOf(x.w, "sso_setup_link_activate")).toEqual([]);
+  });
+
+  it("activates the changed draft when the owner reads the new version", async () => {
+    const { x, r } = await swapAfterPreview();
+    const again = await previewSetup(x.w.config, x.actor, r.linkId);
+    if (!again.ok || again.value === null) throw new Error("no preview");
+    expect(again.value.version).toBe(2);
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, 2, noop)).ok).toBe(true);
+  });
+
+  it("answers 409 conflict for a version that the draft never had", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, 7, noop)).toEqual(CONFLICT);
+  });
+
+  it("compares the version inside the transaction, after the lock: a write that lands after the read is a conflict", async () => {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r, 1);
+    await pass(x, r, 2);
+    // The holder's edit commits after the link lock and before the draft read of the act: the
+    // hook runs it in the same transaction. The act must compare the version after it.
+    const storage = inTransaction(x.w.config.storage, async (tx, model, op) => {
+      if (model !== "ssoSetupLink" || op !== "update") return;
+      await tx.update("ssoConnection", [{ field: "id", op: "eq", value: r.connId }], {
+        version: 2,
+      });
+    });
+    expect(await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, 1, noop)).toEqual(
+      CONFLICT,
+    );
   });
 });
 
@@ -833,6 +927,7 @@ describe("the preview", () => {
     expect(p).toEqual(
       ok({
         kind: "oidc",
+        version: 1,
         issuerOrEntityId: OIDC.issuer,
         signInHost: "login.idp.example",
         fingerprints: [],
