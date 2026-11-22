@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, resolveConfig } from "../src/config.js";
 import { createConnection } from "../src/engine/sso/connections.js";
+import { SSO_CONTRACT, setupLinkCreateBody } from "../src/http/contract/sso.js";
 import { ROUTES } from "../src/http/route-list.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import type { SetupPageInput, SsoSetupConfig } from "../src/index.js";
+import { securitySchemes } from "../src/openapi/schemes.js";
+import {
+  CORE_PREFIXES,
+  SETUP_LINK_PREFIX,
+  SETUP_SESSION_COOKIE,
+} from "../src/primitives/credentials.js";
 import { newId } from "../src/primitives/ids.js";
 import { SCHEMA_VERSION, type SsoSetupLinkRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -135,5 +143,42 @@ describe("schema version 17 (plan 13a)", () => {
         sso: { dns: DNS, setup: { page: "<html>" } },
       });
     expect(make).toThrow(/sso\.setup\.page must be a function/);
+  });
+
+  it("names the link prefix and the setup cookie in one place, and the scheme reads the cookie", () => {
+    expect([SETUP_LINK_PREFIX, SETUP_SESSION_COOKIE]).toEqual(["sl_", "__Host-tempo_setup"]);
+    // A moved key prefix may not shadow the prefix of a setup link.
+    expect(CORE_PREFIXES).toContain(SETUP_LINK_PREFIX);
+    const schemes = securitySchemes({
+      basePath: "/auth",
+      cookieName: "tempo_session",
+      features: new Set(),
+      scopes: new Map(),
+      version: "0.0.0",
+    });
+    expect(schemes.setupCookie).toMatchObject({ in: "cookie", name: SETUP_SESSION_COOKIE });
+  });
+
+  const mint = { steps: ["domain"], kinds: ["oidc"], note: "Pat at Acme IT" };
+  it.each([
+    ["kinds", { ...mint, kinds: ["oidc", "oidc"] }],
+    ["steps", { ...mint, steps: ["domain", "domain"] }],
+  ])("mint: refuses a repeated value in %s", (_field, body) => {
+    expect(setupLinkCreateBody.safeParse(mint).success).toBe(true);
+    expect(setupLinkCreateBody.safeParse(body).success).toBe(false);
+  });
+
+  it("status: takes an optional run id in the query (pre-flight C9)", () => {
+    const query = SSO_CONTRACT["GET /sso/setup/status"].query.schema;
+    expect(query.safeParse({}).success).toBe(true);
+    expect(query.safeParse({ run: "run_1" }).success).toBe(true);
+    expect(query.safeParse({ run: "" }).success).toBe(false);
+    expect(query.safeParse({ other: "x" }).success).toBe(false);
+  });
+
+  it("exports the config types of the setup page from the package", () => {
+    const page = (input: SetupPageInput) => `<form data-csrf="${input.csrf}"></form>`;
+    const setup: SsoSetupConfig = { ttlHours: 24, page };
+    expect(setup.page?.({ csrf: "c" })).toBe('<form data-csrf="c"></form>');
   });
 });

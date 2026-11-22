@@ -180,9 +180,16 @@ const kinds = z.enum(["oidc", "saml"]);
  * `sso.setup.ttlHours`.
  */
 export const setupLinkCreateQuery = z.strictObject({ organizationId: id });
+/** True when no value of `list` comes twice. */
+const eachOnce = (list: readonly string[]) => new Set(list).size === list.length;
+/** A repeated step or kind answers invalid_body: a link names each one once. */
 export const setupLinkCreateBody = z.strictObject({
-  steps: z.array(z.enum(SETUP_STEPS)).min(1).max(SETUP_STEPS.length),
-  kinds: z.array(kinds).min(1).max(2),
+  steps: z
+    .array(z.enum(SETUP_STEPS))
+    .min(1)
+    .max(SETUP_STEPS.length)
+    .refine(eachOnce, "each step once"),
+  kinds: z.array(kinds).min(1).max(2).refine(eachOnce, "each kind once"),
   ttlHours: z.number().int().min(1).max(SETUP_TTL_HOURS_MAX).optional(),
   note: z.string().min(1).max(80),
 });
@@ -261,6 +268,12 @@ const setupScimTokenAnswer = z.strictObject({
   token: z.string(),
   scimBaseUrl: z.string(),
 });
+
+/**
+ * The query of the status page. `run` is the test run whose result the page
+ * shows: the ACS of a test sign-in answers 303 to it (pre-flight C9 of plan 13a).
+ */
+export const setupStatusQuery = z.strictObject({ run: id.optional() });
 
 /** What a setup session sees: its link and its own drafts, never a live row or a secret. */
 const setupStatusAnswer = z.strictObject({
@@ -391,6 +404,7 @@ export const SSO_CONTRACT = {
     answer: { kind: "json", schema: OkAnswer },
   },
   "GET /sso/setup/status": {
+    query: { schema: setupStatusQuery, parsedBy: "zod" },
     answer: { kind: "json", schema: setupStatusAnswer },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

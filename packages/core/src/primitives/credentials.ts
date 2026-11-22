@@ -18,6 +18,16 @@ export const ORGANIZATION_TOKEN_PREFIX = "to_";
 /** A SCIM token of an organization's directory: `sk_` and 32 random bytes as base64url (plan 12d). */
 export const SCIM_TOKEN_PREFIX = "sk_";
 
+/** The token of an SSO setup link: `sl_` and 32 random bytes as base64url (plan 13a). */
+export const SETUP_LINK_PREFIX = "sl_";
+
+/**
+ * The cookie of an SSO setup session (plan 13a). The open of a setup link
+ * sets it, and only the routes of the setup session read it. It is not a
+ * session cookie of a user, so `cookieName` does not change it.
+ */
+export const SETUP_SESSION_COOKIE = "__Host-tempo_setup";
+
 /**
  * Every prefix of a credential that core issues, `to_` (organization tokens,
  * plan 12k), `sk_` (SCIM tokens, plan 12d), and `rs_` (the SAML `RelayState`,
@@ -25,7 +35,7 @@ export const SCIM_TOKEN_PREFIX = "sk_";
  * may not shadow one of them (ruling 12 of plan 12k). A test reads each
  * `randomToken` call of core against this list. `ui_` is the invitation
  * link of a created user (plan 12f2 Task 3). `sp_` is the sign-up proof
- * (ruling 11 of plan 12q).
+ * (ruling 11 of plan 12q). `sl_` is the SSO setup link (plan 13a).
  */
 export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "ts_",
@@ -53,6 +63,7 @@ export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "rs_",
   "ui_",
   "sp_",
+  "sl_",
 ]);
 
 /** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */

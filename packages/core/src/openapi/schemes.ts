@@ -4,6 +4,7 @@ import {
   ORGANIZATION_TOKEN_PREFIX,
   SCIM_TOKEN_PREFIX,
   SESSION_TOKEN_PREFIX,
+  SETUP_SESSION_COOKIE,
 } from "../primitives/credentials.js";
 import type { OpenApiOptions } from "./deployment.js";
 
@@ -129,7 +130,7 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
     setupCookie: {
       type: "apiKey",
       in: "cookie",
-      name: "__Host-tempo_setup",
+      name: SETUP_SESSION_COOKIE,
       description:
         "The cookie of a setup session (plan 13a). The open of a setup link sets it. Only the routes of the setup session take it.",
     },
