@@ -110,9 +110,19 @@ export async function entry(
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 
+/**
+ * The default check date: the calendar date at UTC+14, the latest date on
+ * earth. The owner works at UTC+8. A UTC date is still the day before until
+ * 08:00 local, so a guide checked that morning would show a false red
+ * "checkedOn is after the check date". `now` is an argument, so a test sets it.
+ */
+export function defaultToday(now: Date): string {
+  return new Date(now.getTime() + 14 * 3_600_000).toISOString().slice(0, 10);
+}
+
 if (import.meta.main) {
   // The date is an argument (`check-guides.ts 2027-03-01`), and the clock is the default.
-  const today = process.argv[2] ?? new Date().toISOString().slice(0, 10);
+  const today = process.argv[2] ?? defaultToday(new Date());
   const { lines, code } = await entry(fileURLToPath(new URL("../../../", import.meta.url)), today);
   for (const line of lines) console.log(line);
   process.exit(code);

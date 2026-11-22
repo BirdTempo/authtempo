@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { checkGuides, entry, MAX_AGE_DAYS } from "../src/check-guides.ts";
+import { checkGuides, defaultToday, entry, MAX_AGE_DAYS } from "../src/check-guides.ts";
 import { summaryLine } from "../src/lib/report.ts";
 
 // The check takes its date by argument, so no test here reads the real clock.
@@ -76,6 +76,18 @@ describe("check-guides: the age of each guide", () => {
     ]);
     expect(checkGuides([{ id: "okta", checkedOn: "2027-03-02" }], TODAY).failures).toHaveLength(1);
     expect(checkGuides([guide("okta", 0)], TODAY).failures).toEqual([]);
+  });
+
+  it("takes the UTC+14 date as the default, so a guide of the owner's morning passes", () => {
+    // 2027-03-01 22:00 UTC is already 2027-03-02 at UTC+8 and UTC+14.
+    const now = new Date("2027-03-01T22:00:00Z");
+    expect(now.toISOString().slice(0, 10)).toBe("2027-03-01");
+    const today = defaultToday(now);
+    expect(today).toBe("2027-03-02");
+    expect(checkGuides([{ id: "okta", checkedOn: "2027-03-02" }], today).failures).toEqual([]);
+    // Before 10:00 UTC the UTC+14 date is still the UTC date.
+    expect(defaultToday(new Date("2027-03-01T09:59:59Z"))).toBe("2027-03-01");
+    expect(defaultToday(new Date("2027-03-01T10:00:00Z"))).toBe("2027-03-02");
   });
 
   it("names a bad date argument once, not each guide", () => {
