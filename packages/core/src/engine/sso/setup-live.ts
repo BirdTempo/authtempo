@@ -62,3 +62,34 @@ export async function lockSetupRows(
   );
   return n > 0 ? ok(organization) : fail("unauthorized");
 }
+
+/**
+ * Adds 1 to the `version` of the draft connection of a setup link (ruling R32 of plan 13a). The
+ * preview shows the draft, the domains of the link, and the pending SCIM token. The activation
+ * compares the version that the owner read (ruling R28). So each write of the domains or of the
+ * pending token of the link bumps the version, in the same transaction, after `lockSetupRows`.
+ * A passed test run holds the version that it tested, so such a write also makes the old test
+ * stale: the IT admin tests again before the activation. A link with no draft yet has nothing
+ * to bump: the first draft starts at 1 and the owner reads it after. The lock order of ruling
+ * R22 holds: the organization row, the link row, then this connection row, and the domain or
+ * token rows of the write come after it (the order of `lockConnection` in domains.ts).
+ */
+export async function bumpSetupDraft(
+  tx: StorageAdapter,
+  linkId: string,
+  now: Date,
+): Promise<void> {
+  const draft = await tx.findOne("ssoConnection", [
+    { field: "setupLinkId", op: "eq", value: linkId },
+    { field: "draft", op: "eq", value: true },
+  ]);
+  if (!draft) return;
+  await tx.update(
+    "ssoConnection",
+    [
+      { field: "id", op: "eq", value: draft.id },
+      { field: "version", op: "eq", value: draft.version },
+    ],
+    { version: draft.version + 1, updatedAt: now },
+  );
+}

@@ -15,7 +15,7 @@ import { auditDraft, operatorAct, operatorActed, writeAuditIn } from "../operato
 import { type OperatorActor, requireScope } from "../operator/guards.js";
 import type { DnsTxtPort } from "./dns.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
-import { lockSetupRows } from "./setup-live.js";
+import { bumpSetupDraft, lockSetupRows } from "./setup-live.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
@@ -278,7 +278,11 @@ export async function addDomain(
         return fail("conflict");
       if (held?.claimedDomain != null) return ok({ row: held, audit: null });
       let row: SsoDomainRow;
+      // Each write of a row of a setup link moves the version of its draft (ruling R32). The
+      // draft row comes before the domain rows (ruling 35). Each bump comes after the last
+      // refusal of its branch.
       if (held) {
+        if (held.setupLinkId !== null) await bumpSetupDraft(tx, held.setupLinkId, now);
         row = { ...held, challenge, expiresAt, updatedAt: now };
         const n = await tx.update(
           "ssoDomain",
@@ -303,6 +307,7 @@ export async function addDomain(
           { limit },
         );
         if (rows.length >= limit) return fail("domain_limit");
+        if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, now);
         row = {
           id: newId(now),
           createdAt: now,
@@ -436,6 +441,8 @@ export async function verifyDomainWith(
       );
       // A parallel verify of this row claimed it first: nothing to write.
       if (n === 0) return null;
+      // A claim by a setup session changes what the preview shows (ruling R32).
+      if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, at);
       return writeAuditIn(tx, draft.value, at);
     });
   } catch (e) {
@@ -579,6 +586,9 @@ export async function deleteDomain(
       if (!row) return fail("not_found");
       const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
+      // The owner removes a domain that a setup link added: the preview changes (ruling R32).
+      // Chosen: the owner-side write bumps too, so no writer of the preview skips the bump.
+      if (row.setupLinkId !== null) await bumpSetupDraft(tx, row.setupLinkId, now);
       const draft = ssoDraft(actor, "sso_domain_delete", {
         targetUserId: null,
         data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },

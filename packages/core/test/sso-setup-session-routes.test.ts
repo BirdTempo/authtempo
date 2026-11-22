@@ -261,8 +261,9 @@ describe("the setup session routes (plan 13a Task 11)", () => {
       }),
     );
     expect(callback.status).toBe(303);
+    // The token write after the draft moved the version to 2 (ruling R32). The test ran after it.
     expect(await w.storage.findMany("ssoTestRun", [])).toMatchObject([
-      { outcome: "passed", draftVersion: 1, linkId: s.linkId },
+      { outcome: "passed", draftVersion: 2, linkId: s.linkId },
     ]);
     const manager = `__Host-tempo_session=${a.token}`;
     const get = await w.handle(

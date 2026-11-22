@@ -3,6 +3,7 @@ import type { AuthConfig, SsoConfig } from "../src/config.js";
 import { addMember, updateMemberRole } from "../src/engine/organizations.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createConnection, updateConnection } from "../src/engine/sso/connections.js";
+import { deleteDomain } from "../src/engine/sso/domains.js";
 import { recheckSsoManager, requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
 import { activateSetup, previewSetup } from "../src/engine/sso/setup-activate.js";
 import {
@@ -118,12 +119,19 @@ async function ready(x: X, kind: "oidc" | "saml" = "oidc", tag = "setup") {
   const token = await createPendingScimToken(w.config, s);
   if (!token.ok) throw new Error(token.code);
   recordCredential(token.value.token);
+  // The domain, claim, and token writes of the setup moved the version of the draft (ruling R32).
+  const draft = await w.storage.findOne("ssoConnection", [
+    { field: "id", op: "eq", value: saved.value.id },
+  ]);
   return {
+    /** The version of the draft when the setup is done: what the owner reads in the preview. */
+    v: draft?.version ?? 0,
     s,
     linkId: s.link.id,
     connId: saved.value.id,
     domainId: added.value.id,
     pendingDomainId: pending.value.id,
+    pendingRecord: pending.value.record,
     tokenId: token.value.id,
     cert,
     clearToken: token.value.token,
@@ -132,7 +140,7 @@ async function ready(x: X, kind: "oidc" | "saml" = "oidc", tag = "setup") {
 type R = Awaited<ReturnType<typeof ready>>;
 
 /** A passed run of the draft at `version`, as the callback of a test run writes it. */
-async function pass(x: X, r: R, version = 1) {
+async function pass(x: X, r: R, version = r.v) {
   const now = x.w.clock.now();
   return x.w.storage.create("ssoTestRun", {
     id: newId(now),
@@ -220,14 +228,14 @@ describe("the condition of the activation", () => {
   it("answers 409 setup_not_tested when the draft changed after the pass (pass at v1, draft at v2)", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
+    await pass(x, r);
     x.w.clock.advance(1000);
     const changed = await saveDraftConnection(x.w.config, r.s, { ...OIDC, label: "Acme Okta 2" });
     expect(changed.ok).toBe(true);
     expect(
       (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: r.connId }]))
         ?.version,
-    ).toBe(2);
+    ).toBe(r.v + 1);
     const before = await tables(x.w);
     expect(await activateRead(x.w.config, x.actor, r.linkId, noop)).toEqual(NOT_TESTED);
     expect(await tables(x.w)).toEqual(before);
@@ -236,7 +244,7 @@ describe("the condition of the activation", () => {
   it("answers 409 setup_not_tested when the owner changes the draft after the pass", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
+    await pass(x, r);
     x.w.clock.advance(1000);
     const changed = await updateConnection(x.w.config, x.actor, {
       id: r.connId,
@@ -261,14 +269,14 @@ describe("the condition of the activation", () => {
   it("answers setup_not_tested when a write of the owner lands between the read and the update of the draft", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
+    await pass(x, r);
     x.w.clock.advance(1000);
     // The owner path takes no lock of the link. Its commit can fall between our read of the
     // passed run and our write of the draft. The hook puts that write in the same transaction.
     const storage = inTransaction(x.w.config.storage, async (tx, model, op) => {
       if (model !== "ssoTestRun" || op !== "findMany") return;
       await tx.update("ssoConnection", [{ field: "id", op: "eq", value: r.connId }], {
-        version: 2,
+        version: r.v + 1,
         label: "Racing owner",
       });
     });
@@ -278,7 +286,7 @@ describe("the condition of the activation", () => {
     );
     const after = await tables(x.w);
     // The refusal undoes the write of the hook with the rest of the transaction.
-    expect(after.connections[0]).toMatchObject({ draft: true, enabled: false, version: 1 });
+    expect(after.connections[0]).toMatchObject({ draft: true, enabled: false, version: r.v });
     expect({ ...after, connections: [] }).toEqual({ ...before, connections: [] });
   });
 });
@@ -333,7 +341,7 @@ describe("the act", () => {
     const row = await x.w.storage.findOne("ssoConnection", [
       { field: "id", op: "eq", value: r.connId },
     ]);
-    expect(row).toMatchObject({ enabled: true, draft: false, version: 1, updatedAt: at });
+    expect(row).toMatchObject({ enabled: true, draft: false, version: r.v, updatedAt: at });
     expect(row?.updatedAt.getTime()).toBeGreaterThan(
       before.connections[0]?.updatedAt.getTime() ?? 0,
     );
@@ -455,12 +463,13 @@ describe("the act", () => {
   it("lists in the audit only the domains that this activation routed (a claim lost in between)", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r);
     const second = await addSetupDomain(x.w.config, r.s, "second.example");
     if (!second.ok || second.value.record === null) throw new Error("no second domain");
     x.w.answers.a[second.value.record.name] = [second.value.record.value];
     x.w.answers.b[second.value.record.name] = [second.value.record.value];
     expect((await verifySetupDomain(x.w.config, r.s, second.value.id)).ok).toBe(true);
+    // The writes above moved the version (ruling R32), so the test run comes after them.
+    await pass(x, r, r.v + 2);
     // The claim of the second domain is lost right after the first read of the domains of the
     // transaction. The hook runs in the same transaction, as a commit of another connection.
     // Whatever the order of the act, the audit must list the routed domains and no others.
@@ -537,7 +546,7 @@ describe("the act", () => {
     const refused = await activateRead(x.w.config, x.actor, r.linkId, noop);
     expect(refused.ok).toBe(false);
     expect(await seen()).toEqual([]);
-    await pass(x, r, 1);
+    await pass(x, r);
     const done = await activateRead(x.w.config, x.actor, r.linkId, noop);
     expect(done.ok).toBe(true);
     // The sink adds an envelope (time, level). The field list is pinned by the EVENTS table.
@@ -849,16 +858,16 @@ describe("the draft that the owner read (R28)", () => {
   async function swapAfterPreview() {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
+    await pass(x, r);
     const preview = await previewSetup(x.w.config, x.actor, r.linkId);
     if (!preview.ok || preview.value === null) throw new Error("no preview");
     x.w.clock.advance(1000);
-    const swapped = await saveDraftConnection(x.w.config, r.s, {
+    const swapped =await saveDraftConnection(x.w.config, r.s, {
       ...OIDC,
       issuer: "https://login.thief.example/acme",
     });
     expect(swapped.ok).toBe(true);
-    await pass(x, r, 2);
+    await pass(x, r, r.v + 1);
     return { x, r, seen: preview.value.version };
   }
 
@@ -866,22 +875,22 @@ describe("the draft that the owner read (R28)", () => {
     const x = await world();
     const r = await ready(x);
     const p = await previewSetup(x.w.config, x.actor, r.linkId);
-    expect(p.ok && p.value?.version).toBe(1);
+    expect(p.ok && p.value?.version).toBe(r.v);
     await saveDraftConnection(x.w.config, r.s, { ...OIDC, label: "Acme Okta 2" });
     const next = await previewSetup(x.w.config, x.actor, r.linkId);
-    expect(next.ok && next.value?.version).toBe(2);
+    expect(next.ok && next.value?.version).toBe(r.v + 1);
   });
 
   it("answers 409 conflict for a draft that was changed and tested again after the preview, and keeps the connection inactive", async () => {
     const { x, r, seen } = await swapAfterPreview();
-    expect(seen).toBe(1);
+    expect(seen).toBe(r.v);
     const before = await tables(x.w);
     expect(await activateSetup(x.w.config, x.actor, r.linkId, seen, noop)).toEqual(CONFLICT);
     expect(await tables(x.w)).toEqual(before);
     const row = await x.w.storage.findOne("ssoConnection", [
       { field: "id", op: "eq", value: r.connId },
     ]);
-    expect(row).toMatchObject({ draft: true, enabled: false, version: 2 });
+    expect(row).toMatchObject({ draft: true, enabled: false, version: r.v + 1 });
     expect(await auditOf(x.w, "sso_setup_link_activate")).toEqual([]);
   });
 
@@ -889,33 +898,127 @@ describe("the draft that the owner read (R28)", () => {
     const { x, r } = await swapAfterPreview();
     const again = await previewSetup(x.w.config, x.actor, r.linkId);
     if (!again.ok || again.value === null) throw new Error("no preview");
-    expect(again.value.version).toBe(2);
-    expect((await activateSetup(x.w.config, x.actor, r.linkId, 2, noop)).ok).toBe(true);
+    expect(again.value.version).toBe(r.v + 1);
+    expect((await activateSetup(x.w.config, x.actor, r.linkId, r.v + 1, noop)).ok).toBe(true);
   });
 
   it("answers 409 conflict for a version that the draft never had", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
-    expect(await activateSetup(x.w.config, x.actor, r.linkId, 7, noop)).toEqual(CONFLICT);
+    await pass(x, r);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, r.v + 7, noop)).toEqual(CONFLICT);
   });
 
   it("compares the version inside the transaction, after the lock: a write that lands after the read is a conflict", async () => {
     const x = await world();
     const r = await ready(x);
-    await pass(x, r, 1);
-    await pass(x, r, 2);
+    await pass(x, r);
+    await pass(x, r, r.v + 1);
     // The holder's edit commits after the link lock and before the draft read of the act: the
     // hook runs it in the same transaction. The act must compare the version after it.
     const storage = inTransaction(x.w.config.storage, async (tx, model, op) => {
       if (model !== "ssoSetupLink" || op !== "update") return;
       await tx.update("ssoConnection", [{ field: "id", op: "eq", value: r.connId }], {
-        version: 2,
+        version: r.v + 1,
       });
     });
-    expect(await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, 1, noop)).toEqual(
+    expect(await activateSetup({ ...x.w.config, storage }, x.actor, r.linkId, r.v, noop)).toEqual(
       CONFLICT,
     );
+  });
+});
+
+describe("what the owner read besides the draft (R32)", () => {
+  /** The version of the draft of the link now. */
+  const versionOf = async (x: X, r: R) =>
+    (await x.w.storage.findOne("ssoConnection", [{ field: "id", op: "eq", value: r.connId }]))
+      ?.version;
+
+  /**
+   * The owner reads the preview of a tested link, then `write` changes what the preview shows.
+   * The version must move by 1, and the activation with the old version must be a conflict.
+   */
+  async function afterPreview(write: (x: X, r: R) => Promise<unknown>) {
+    const x = await world();
+    const r = await ready(x);
+    await pass(x, r);
+    const preview = await previewSetup(x.w.config, x.actor, r.linkId);
+    if (!preview.ok || preview.value === null) throw new Error("no preview");
+    const seen = preview.value.version;
+    x.w.clock.advance(1000);
+    await write(x, r);
+    return { x, r, seen };
+  }
+
+  async function expectBump(write: (x: X, r: R) => Promise<unknown>) {
+    const { x, r, seen } = await afterPreview(write);
+    expect(await versionOf(x, r)).toBe(seen + 1);
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, seen, noop)).toEqual(CONFLICT);
+    const row = await x.w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: r.connId },
+    ]);
+    expect(row).toMatchObject({ draft: true, enabled: false });
+  }
+
+  const addAndVerifyEvil = async (x: X, r: R) => {
+    const added = await addSetupDomain(x.w.config, r.s, "evil.example");
+    if (!added.ok || added.value.record === null) throw new Error("no domain");
+    x.w.answers.a[added.value.record.name] = [added.value.record.value];
+    x.w.answers.b[added.value.record.name] = [added.value.record.value];
+    const verified = await verifySetupDomain(x.w.config, r.s, added.value.id);
+    expect(verified.ok).toBe(true);
+  };
+
+  it("answers 409 conflict when the link holder adds and verifies a domain after the preview, and routes nothing to it", async () => {
+    const { x, r, seen } = await afterPreview(addAndVerifyEvil);
+    // The test passed for the draft as it was. The owner read setup.example only.
+    expect(await activateSetup(x.w.config, x.actor, r.linkId, seen, noop)).toEqual(CONFLICT);
+    const domains = await x.w.storage.findMany("ssoDomain", []);
+    expect(domains.filter((d) => d.connectionId !== null)).toEqual([]);
+    expect(domains.map((d) => d.domain)).toContain("evil.example");
+  });
+
+  it("bumps the version when a domain is added", async () => {
+    await expectBump(async (x, r) => {
+      expect((await addSetupDomain(x.w.config, r.s, "other.example")).ok).toBe(true);
+    });
+  });
+
+  it("bumps the version when a pending domain gets a new challenge", async () => {
+    await expectBump(async (x, r) => {
+      expect((await addSetupDomain(x.w.config, r.s, "setup-pending.example")).ok).toBe(true);
+    });
+  });
+
+  it("bumps the version when a domain is verified", async () => {
+    await expectBump(async (x, r) => {
+      const record = r.pendingRecord;
+      if (record === null) throw new Error("no record");
+      x.w.answers.a[record.name] = [record.value];
+      x.w.answers.b[record.name] = [record.value];
+      expect((await verifySetupDomain(x.w.config, r.s, r.pendingDomainId)).ok).toBe(true);
+    });
+  });
+
+  it("bumps the version when the owner removes a domain of the link", async () => {
+    await expectBump(async (x, r) => {
+      expect((await deleteDomain(x.w.config, x.actor, { id: r.pendingDomainId })).ok).toBe(true);
+    });
+  });
+
+  it("bumps the version when the pending SCIM token is replaced", async () => {
+    await expectBump(async (x, r) => {
+      expect((await createPendingScimToken(x.w.config, r.s)).ok).toBe(true);
+    });
+  });
+
+  it("does not bump the draft of another link", async () => {
+    const x = await world();
+    const r = await ready(x, "oidc", "one");
+    const r2 = await ready(x, "oidc", "two");
+    const before = await versionOf(x, r);
+    expect((await addSetupDomain(x.w.config, r2.s, "third.example")).ok).toBe(true);
+    expect(await versionOf(x, r)).toBe(before);
   });
 });
 
@@ -927,7 +1030,7 @@ describe("the preview", () => {
     expect(p).toEqual(
       ok({
         kind: "oidc",
-        version: 1,
+        version: r.v,
         issuerOrEntityId: OIDC.issuer,
         signInHost: "login.idp.example",
         fingerprints: [],

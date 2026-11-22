@@ -12,7 +12,7 @@ import type { OperatorAuditRow, ScimScope, ScimTokenRow } from "../../schema.js"
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "../sso/domains.js";
 import { type SsoActor, ssoDraft } from "../sso/guard.js";
-import { lockSetupRows } from "../sso/setup-live.js";
+import { bumpSetupDraft, lockSetupRows } from "../sso/setup-live.js";
 import { tokenHint } from "../tokens.js";
 
 /**
@@ -212,11 +212,14 @@ export async function createScimToken(
         userAgent: meta.userAgent ?? null,
       });
       if (!draft.ok) return draft;
-      if (pendingFor !== undefined)
+      if (pendingFor !== undefined) {
+        // The pending token is in the preview: the version moves (ruling R32).
+        await bumpSetupDraft(tx, pendingFor, now);
         await tx.delete("scimToken", [
           { field: "setupLinkId", op: "eq", value: pendingFor },
           { field: "pending", op: "eq", value: true },
         ]);
+      }
       await tx.create("scimToken", row);
       return ok(await writeAuditIn(tx, draft.value, now));
     },
