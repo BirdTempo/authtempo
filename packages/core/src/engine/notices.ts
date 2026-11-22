@@ -48,6 +48,12 @@ export interface NoticeMailInput {
   provider?: string;
   /** The new address of `email_changed`. */
   newEmail?: string;
+  /**
+   * The setup link of `sso_setup_ready` and `sso_activated`: its id and the note of its maker
+   * (the IT contact). Never the link token or its hash. The note is text of a manager: a builder
+   * that renders HTML must escape it.
+   */
+  setup?: { linkId: string; note: string };
 }
 
 /** The first line of each notice but the impersonation and setup notices, which have their own text. */
@@ -83,18 +89,25 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
         `If you did not ask for support, contact ${input.appName}.`,
       ].join("\n"),
     };
-  // Plan 13a Task 10 writes the full text of the two setup notices.
-  if (input.event === "sso_setup_ready" || input.event === "sso_activated")
+  // The two setup notices (plan 13a). They name the link by its id and note, and hold no token.
+  if (input.event === "sso_setup_ready" || input.event === "sso_activated") {
+    const lines = [
+      input.event === "sso_setup_ready"
+        ? "The SSO setup of your organization is ready for an owner."
+        : "An owner turned on the SSO setup of your organization.",
+    ];
+    if (input.setup !== undefined) {
+      lines.push(`Setup link: ${input.setup.linkId}.`, `Note: ${input.setup.note}`);
+    }
+    if (input.event === "sso_setup_ready")
+      lines.push("Open the SSO page of your organization to test and turn on the connection.");
+    lines.push(`Time: ${input.at.toISOString()}.`);
     return {
       to: input.email,
       subject: `SSO setup notice for ${input.appName}`,
-      text: [
-        input.event === "sso_setup_ready"
-          ? "The SSO setup of your organization is ready for an owner."
-          : "An owner turned on the SSO setup of your organization.",
-        `Time: ${input.at.toISOString()}.`,
-      ].join("\n"),
+      text: lines.join("\n"),
     };
+  }
   const lines = [WHAT[input.event]];
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);
   if (input.provider !== undefined) lines.push(`The provider is ${input.provider}.`);
