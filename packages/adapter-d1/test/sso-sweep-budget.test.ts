@@ -182,11 +182,11 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
     // A pass costs 3 calls: two resolvers and the update. A row starts only while its worst
     // cost still fits: 5 calls, two resolvers and a loss. Before review m4 of Task 2b, a
     // sweep checked 1 domain.
-    // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step
-    // of the sweep runs when `sso` is on and sends 3 queries, so the sweeps check 8, 8, 8,
-    // and 1 domains, was 9, 9, and 7.
-    expect(passes.map((s) => s.domains)).toEqual([8, 8, 8, 1, 0]);
-    expect(passes.map((s) => s.calls)).toEqual([46, 46, 46, 25, 22]);
+    expect(passes.map((s) => s.domains)).toEqual([9, 9, 7, 0]);
+    expect(passes.map((s) => s.calls)).toEqual([46, 46, 43, 22]);
+    // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of
+    // the sweep runs when `sso` is on and sends 3 queries when no link ended. It runs last, in
+    // the calls that stay, so the domains stay 9, 9, and 7 and the last two sweeps send 3 more.
     // Then every record goes: the loss path, with its transaction and audit row, in the budget.
     // The next check is due 30 days after the pass; three failures 36 hours apart lose each domain.
     records.clear();
@@ -205,11 +205,8 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
     // not asked. The read takes at most 10 such rows, at 39 calls. A loss costs 4 calls:
     // the resolver, the read and the write of the update, and the audit row. So a sweep
     // loses 7 domains in 47 calls. Each of the three steps checks all 25 domains.
-    // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of
-    // the sweep sends 3 queries when `sso` is on. A sweep loses 6 domains, was 7, and the
-    // first two steps check 9, 9, and 7 domains, was 10, 10, and 5.
-    expect(lost.map((s) => s.domains)).toEqual([9, 9, 7, 0, 9, 9, 7, 0, 6, 6, 6, 6, 1, 0]);
-    expect(Math.max(...lost.map((s) => s.calls))).toBe(46);
+    expect(lost.map((s) => s.domains)).toEqual([10, 10, 5, 0, 10, 10, 5, 0, 7, 7, 7, 4, 0]);
+    expect(Math.max(...lost.map((s) => s.calls))).toBe(47);
     expect(lost.reduce((n, s) => n + s.domains, 0)).toBe(75);
     expect(
       await rows("SELECT count(*) AS n FROM ta_sso_domain WHERE claimed_domain IS NOT NULL"),
@@ -247,14 +244,13 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
       if (s.domains === 0) break;
     }
     for (const s of passes) expect([s.refused, s.calls <= 50]).toEqual([0, true]);
-    expect(passes.map((s) => s.scimTokens)).toEqual([4, 0, 0, 0, 0]);
+    expect(passes.map((s) => s.scimTokens)).toEqual([4, 0, 0, 0]);
     // Measured 2026-10-22 (load 16.6): the SCIM step costs 1 call in each sweep, so
     // 46, 46, 40, and 19 calls become 47, 47, 41, and 20. The recheck still checks 9,
     // 9, and 7 domains. After the ninth row 3 calls stay, and a row starts only while 5 fit.
-    // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): with the setup
-    // step of the sweep, 8, 8, 8, and 1 domains in 47, 47, 47, 26, and 23 calls.
-    expect(passes.map((s) => s.domains)).toEqual([8, 8, 8, 1, 0]);
-    expect(passes.map((s) => s.calls)).toEqual([47, 47, 47, 26, 23]);
+    expect(passes.map((s) => s.domains)).toEqual([9, 9, 7, 0]);
+    expect(passes.map((s) => s.calls)).toEqual([47, 47, 44, 23]);
+    // Plan 13a fix wave 1 round 2 (ruling R33): the setup step sends 3 queries in the last two sweeps.
     expect(await rows("SELECT count(*) AS n FROM ta_scim_token")).toBe(0);
   }, 300_000);
 });

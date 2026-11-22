@@ -299,11 +299,7 @@ const MEASURED = {
     mint: [4, 1],
     read: [6, 1],
   },
-  // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of
-  // the sweep sends 3 queries when `sso` is on. The first sweep stays at its cap of 48. The
-  // second sweep sends 34, was 28: it has the setup step, and the first sweep ended fewer
-  // sessions.
-  sweeps: [48, 34],
+  sweeps: [48, 31],
   get: 5,
   list: 5,
   delete: 13,
@@ -536,13 +532,11 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
  * The families come first in the budget, and a page of one session stays.
  * The pending-end row names the families that do not fit, and the sweep
  * ends them with 2 queries each.
- * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the sweep runs the
- * setup step when `sso` is on. Each sweep sends 3 queries more, and the meter keeps 5 calls.
  */
 const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
-  0: [49, 10, 0, [48, 35]],
-  7: [49, 2, 4, [48, 49]],
-  20: [49, 2, 4, [48, 49, 50, 28]],
+  0: [49, 10, 0, [48, 32]],
+  7: [49, 2, 4, [48, 46]],
+  20: [49, 2, 4, [48, 49, 46]],
 };
 
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";

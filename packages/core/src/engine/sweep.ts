@@ -14,7 +14,7 @@ import {
   sweepOrganizationRest,
 } from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
-import { sweepSetupRows } from "./sso/setup-retention.js";
+import { SETUP_SWEEP_CALLS, sweepSetupRows } from "./sso/setup-retention.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -457,12 +457,6 @@ export async function sweepExpired(
     ? await storage.delete("scimToken", [{ field: "expiresAt", op: "lt", value: now }])
     : 0;
   if (config.scim) meter.step(1);
-  // The setup links, sessions and test runs past their retention (plan 13a, ruling R30).
-  // It runs when `sso` is on, not only `sso.setup`: an app that turned `sso.setup` off keeps
-  // the rows of the links that it minted before (ruling R33).
-  const setupSwept = config.sso ? await sweepSetupRows(storage, now) : { rows: 0, calls: 0 };
-  const ssoSetupRows = setupSwept.rows;
-  meter.step(setupSwept.calls);
   // The share of the anonymous step (plan 12i Task 6, the lane ruling): one page. Each step
   // before it stops that many calls earlier, so each share above stays as it was.
   const anonymousShare = config.anonymous ? ANONYMOUS_PAGE_CALLS : 0;
@@ -528,6 +522,16 @@ export async function sweepExpired(
     "pending end",
     endPendingRows(config, ends, meter, budget - anonymousShare),
   );
+  // The setup links, sessions and test runs past their retention (plan 13a, ruling R30). It
+  // runs when `sso` is on, not only `sso.setup`: an app that turned `sso.setup` off keeps the
+  // rows of the links that it minted before (ruling R33). It comes after every step that a
+  // user waits for: a row past 30 days waits for no flow, so it takes only the calls that stay
+  // (5 at most), and the next sweep does it when no call stays. It keeps the share of the
+  // anonymous step.
+  const setupFits = config.sso && meter.used + SETUP_SWEEP_CALLS <= budget - anonymousShare;
+  const setupSwept = setupFits ? await sweepSetupRows(storage, now) : { rows: 0, calls: 0 };
+  const ssoSetupRows = setupSwept.rows;
+  meter.step(setupSwept.calls);
   // Last, in its share and every call that the steps above left. An anonymous user past its
   // days has no live session, so it waits for no other step.
   const anonymousUsers = config.anonymous

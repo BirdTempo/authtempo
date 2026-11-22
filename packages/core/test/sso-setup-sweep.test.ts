@@ -135,9 +135,28 @@ describe("the sweep of the setup rows (R30)", () => {
     expect(await ids("ssoSetupLink")).toHaveLength(0);
   });
 
+  it("leaves the rows for the next sweep when fewer than 5 calls stay, so it never takes a call from a step that a user waits for", async () => {
+    const { w, link, ids } = world(true);
+    await link("old", -(SETUP_RETENTION_MS + DAY));
+    // A storage that reports 46 statements for the sweep: 4 calls stay of the budget of 50.
+    let reads = 0;
+    const full = new Proxy(w.config.storage, {
+      get(target, key) {
+        if (key === "statementsSent") return () => (reads++ === 0 ? 0 : 46);
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const result = await sweepExpired({ ...w.config, storage: full });
+    expect(result.ssoSetupRows).toBe(0);
+    expect(await ids("ssoSetupLink")).toHaveLength(1);
+    // The next sweep, with room, deletes it.
+    expect((await sweepExpired(w.config)).ssoSetupRows).toBe(1);
+  });
+
   it("sweeps nothing and counts 0 while sso is off", async () => {
     const w = ssoAuth({});
-    const result = await sweepExpired({ ...w.config, sso: undefined });
+    const result = await sweepExpired({ ...w.config, sso: null });
     expect(result.ssoSetupRows).toBe(0);
   });
 

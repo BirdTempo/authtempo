@@ -604,12 +604,8 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       session: { slidingRefreshDays: 0.05 },
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
-  // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the sweep runs the
-  // setup step when `sso` is on, so each sweep of an app with sso sends 3 queries more (the
-  // read of the links, the sessions, the runs) and the meter keeps 5 calls for it. The acts
-  // do not change. The delete sweeps in 4 steps, was 3.
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [47, 47, 47, 36]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [47, 47, 42]];
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [48, 48, 47]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 34]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
@@ -917,18 +913,18 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * scene send 1 query more in total: the first sweep sends 47, was 48, and
  * the last sweep sends 2 more. The due and confirm scenes measure the same
  * counts as before. The acts do not change.
- * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the sweep runs the
- * setup step when `sso` is on, not only `sso.setup`. The scenes with sso on send 3 queries
- * more in each sweep, and the meter keeps 5 calls for the step, so the operator scenes end in
- * 5 sweeps, was 4. The plain scene has no sso and does not change.
+ *
+ * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
+ * sweep runs when `sso` is on and sends 3 idle queries as the last step. The last sweep of each
+ * scene with `sso` sends 3 more. The plain scene has no `sso`, so it stays.
  */
 const SOLO_COUNTS = {
   plain: [42, [33]],
   due: [44, [36]],
   confirm: [45, [36]],
-  operator: [49, [48, 47, 47, 47, 30]],
-  operatorConfirm0: [48, [48, 47, 47, 47, 34]],
-  operatorConfirm3: [48, [48, 47, 47, 47, 36]],
+  operator: [49, [47, 48, 48, 42]],
+  operatorConfirm0: [48, [47, 48, 48, 46]],
+  operatorConfirm3: [48, [47, 48, 48, 48]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**
