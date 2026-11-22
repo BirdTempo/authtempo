@@ -760,14 +760,14 @@ describe("with sso.setup unset, ?test=1 is no flag (R29)", () => {
     }
     // A connection that does not exist answers as it does without the flag.
     const gone = await seen(await w.handle(get("/auth/sso/nope/start", anonymous)));
-    expect(await seen(await w.handle(get("/auth/sso/nope/start?test=1", anonymous)))).toEqual(
-      gone,
-    );
+    expect(await seen(await w.handle(get("/auth/sso/nope/start?test=1", anonymous)))).toEqual(gone);
     // A normal start writes its state row (`verification`) and nothing else.
     expect(changed(before, await tables(w))).toEqual(["verification"]);
     expect(await runs(w)).toEqual([]);
     expect(
-      await w.storage.findMany("operatorAudit", [{ field: "action", op: "eq", value: "sso_test_run" }]),
+      await w.storage.findMany("operatorAudit", [
+        { field: "action", op: "eq", value: "sso_test_run" },
+      ]),
     ).toEqual([]);
     expect((await w.events()).map((e) => e.name)).not.toContain("sso.test_run");
   });

@@ -408,9 +408,9 @@ describe("the act", () => {
         return undefined;
       }) as never,
     });
-    await expect(
-      activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop),
-    ).rejects.toThrow("the audit write failed");
+    await expect(activateRead({ ...x.w.config, storage }, x.actor, r.linkId, noop)).rejects.toThrow(
+      "the audit write failed",
+    );
     expect(await tables(x.w)).toEqual(before);
     expect(x.w.mail).toHaveLength(sent);
   });
