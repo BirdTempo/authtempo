@@ -902,14 +902,18 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * read of the outbox. Plan 12f2 (verify-12f2-r10 Low A, 2026-10-25): the
  * size check keeps no route limiter, so the page of the operator scene
  * ends 2 more impersonation sessions: 49, and the last sweep sends 35.
+ * Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7
+ * to 10.0 on 18 CPUs): the rest of the organization deletes the setup
+ * sessions and the setup links, so the sweep with the rest row sends 2
+ * queries more. The acts do not change.
  */
 const SOLO_COUNTS = {
-  plain: [42, [30]],
-  due: [44, [31]],
-  confirm: [45, [31]],
-  operator: [49, [48, 48, 48, 35]],
-  operatorConfirm0: [48, [48, 48, 48, 39]],
-  operatorConfirm3: [48, [48, 48, 48, 41]],
+  plain: [42, [32]],
+  due: [44, [33]],
+  confirm: [45, [33]],
+  operator: [49, [48, 48, 48, 37]],
+  operatorConfirm0: [48, [48, 48, 48, 41]],
+  operatorConfirm3: [48, [48, 48, 48, 43]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**

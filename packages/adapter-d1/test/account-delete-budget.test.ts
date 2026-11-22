@@ -118,7 +118,9 @@ describe("the account delete of solo organizations on D1 (rulings 29 and 30 of p
     // Plan 12f2 ends the own sessions in a page (ruling 1 of plan 12f2, B1). With no
     // session.afterEnd hook the page sends 2 queries more than endSessions: its read, its
     // link read, its delete, and the last delete. The run of 2026-10-25 at the move of 12f2
-    // onto main gives 29, 37, 37, 37.
+    // onto main gives 29, 37, 37, 37. Plan 13a (ruling R19) moves the setup session and
+    // setup link deletes to the sweep of the rest. The run of 2026-11-23 on the binding
+    // (load averages 8.7 to 10.0 on 18 CPUs) gives the same counts.
     expect(runs.map((r) => r.queries)).toEqual([29, 37, 37, 37]);
     for (const r of runs) expect([r.queries <= 50, r.left]).toEqual([true, 0]);
   }, 120_000);
