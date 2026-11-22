@@ -398,7 +398,11 @@ export const CONFIG_KEYS = {
     dns: true,
     fetch: true,
     limits: true,
+    setup: true,
   } satisfies Keys<SsoConfig>,
+  "sso.setup": { ttlHours: true, page: true } satisfies Keys<
+    Exclude<NonNullable<SsoConfig["setup"]>, false>
+  >,
   "sso.saml": { clockSkewSeconds: true } satisfies Keys<
     Exclude<NonNullable<SsoConfig["saml"]>, true>
   >,
