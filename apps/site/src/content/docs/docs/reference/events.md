@@ -243,7 +243,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 36 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete`, `sso_setup_link_create`, `sso_setup_link_open`, `sso_setup_link_revoke`, `sso_setup_link_activate`, `sso_test_run` |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 109 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 110 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.setup_refused.step` | 19 values: `open_token_form`, `open_link_invalid`, `open_ip_limit`, `open_link_limit`, `open_lost`, `page_ip_limit`, `session_cookie`, `session_ended`, `session_link`, `draft_step`, `draft_limit`, `test_caller`, `test_limit`, `test_site`, `test_credential`, `test_connection`, `test_link`, `test_setup_off`, `domain_row` |
 | `sso.test_run.outcome` | `passed`, `failed` |
 | `sso.test_run.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |

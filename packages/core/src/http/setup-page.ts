@@ -337,7 +337,13 @@ function body(config: ResolvedConfig, input: SetupPageInput): string {
   }
 }
 
-/** The page of core: a header, the steps of the link, and the form or the text of one step. */
+/**
+ * The page of core: a header, the steps of the link, and the form or the text of one step.
+ * The forms post to `/sso/setup/domains/add`, `domains/verify`, `connection`, `scim-token`, and
+ * `handback`. Task 11 mounts these routes, and it must accept a form body and answer a form post
+ * with a 303 or an HTML page. Until then a form of this page gets 404. The forms hold no csrf
+ * value: the Origin and Fetch Metadata rules of the router do that check.
+ */
 export function defaultSetupPage(config: ResolvedConfig, input: SetupPageInput): string {
   const idp = input.guide === null ? "" : `&idp=${input.guide.id}`;
   const nav = stepsOfLink(input.link.steps)

@@ -8,6 +8,7 @@ import {
   openSetupSession,
   requireSetupSession,
   SETUP_PAGE_PER_IP,
+  SETUP_STATUS_PER_IP,
 } from "../../engine/sso/setup-session.js";
 import { testRunResult } from "../../engine/sso/test-run.js";
 import type { ErrorCode } from "../../errors.js";
@@ -88,9 +89,6 @@ export function setupSessionRoute(
   };
 }
 
-/** The loads of the setup page that one IP may make in one hour. A page that polls a run is one load each. */
-const SETUP_STATUS_PER_IP = { seconds: 3600, max: 600 };
-
 /**
  * Counts each load of a route on `setup-status:ip` before the cookie check, so a caller with no
  * valid cookie costs a count too. The route stays a setup session route: the check runs after.
@@ -143,9 +141,9 @@ button { font: inherit; padding: 0.75rem 1.5rem; border: 0; border-radius: 0.375
 }
 
 /**
- * The page after a form open. Task 9 replaces it with the first page of the
- * setup. The link goes to the status route by a top-level GET, which carries
- * the cookie of `SameSite=Lax`.
+ * The page after a form open. It holds one link to the page of the setup
+ * (`GET /sso/setup/status`). The link is a top-level GET, which carries the
+ * cookie of `SameSite=Lax`.
  */
 function openedPage(config: ResolvedConfig): string {
   const next = escapeHtml(`${config.basePath}/sso/setup/status`);

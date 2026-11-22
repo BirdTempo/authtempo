@@ -339,6 +339,45 @@ describe("the setup page route (plan 13a Task 9)", () => {
     for (const n of names) expect(body).toContain(escapeHtml(n));
   });
 
+  it("route: a hostile organization name, note, and label come out escaped from storage", async () => {
+    const x = await world();
+    const h = (t: string) => `"><script>alert('${t}')</script>&<b>`;
+    const { cookie, session, linkId } = await x.open();
+    await x.w.config.storage.update(
+      "organization",
+      [{ field: "id", op: "eq", value: session.link.organizationId }],
+      { name: h("org") },
+    );
+    await x.w.config.storage.update("ssoSetupLink", [{ field: "id", op: "eq", value: linkId }], {
+      note: h("note"),
+    });
+    const saved = await saveDraftConnection(x.w.config, session, { ...OIDC, label: h("label") });
+    if (!saved.ok) throw new Error(saved.code);
+    for (const step of ["idp", "connect", "test"]) {
+      const body = await html(await x.status(cookie, `?step=${step}`));
+      expect(body, step).not.toContain("<script");
+      for (const t of ["org", "note"]) expect(body, step).toContain(escapeHtml(h(t)));
+      if (step === "connect") expect(body, step).toContain(escapeHtml(h("label")));
+    }
+  });
+
+  it("route: the page holds neither the setup token nor the cookie value, in the body or the headers", async () => {
+    const x = await world();
+    const made = await x.open();
+    const secret = made.cookie.split("=")[1] ?? "";
+    expect(secret.length).toBeGreaterThan(10);
+    const token = made.session.link.tokenHash;
+    for (const step of STEPS) {
+      const res = await x.status(made.cookie, `?step=${step}`);
+      const all = `${[...res.headers].map(([k, v]) => `${k}: ${v}`).join("\n")}\n${await res.text()}`;
+      expect(all, step).not.toContain(secret);
+      expect(all, step).not.toContain(decodeURIComponent(secret));
+      // The stored hash of the link is a credential of the link too.
+      expect(all, step).not.toContain(token);
+      expect(all, step).not.toContain(made.session.session.tokenHash);
+    }
+  });
+
   it("override: sso.setup.page gives the HTML, and core still sets the headers", async () => {
     const seen: SetupPageInput[] = [];
     const x = await world({
@@ -475,6 +514,8 @@ describe("the page escapes every value (plan 13a Task 9, hand-offs)", () => {
       }),
     ],
     ["scim hint", (h) => ({ step: "directory", scim: { hint: h } })],
+    // The type is a closed code of core. A custom code or a later change must not reach the page raw.
+    ["error code", (h) => ({ error: h as SetupPageInput["error"] })],
     [
       "test attribute name",
       (h) => ({ step: "test", draft: DRAFT, test: { ...TEST, attributeNames: [h] } }),

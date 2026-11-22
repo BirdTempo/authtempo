@@ -13,6 +13,7 @@ import {
   SETUP_OPEN_PER_IP,
   SETUP_OPEN_PER_LINK,
   SETUP_PAGE_PER_IP,
+  SETUP_STATUS_PER_IP,
 } from "../src/engine/sso/setup-session.js";
 import { SETUP_REFUSAL_STEPS } from "../src/engine/sso/steps.js";
 import { SETUP_TEST_PER_CONNECTION, startTestRun } from "../src/engine/sso/test-run.js";
@@ -246,6 +247,7 @@ describe("the limits of the open (plan 13a Task 12, rulings R3 and C11)", () => 
     expect(SETUP_OPEN_PER_LINK).toEqual({ seconds: 3600, max: 20 });
     expect(SETUP_OPEN_PER_IP).toEqual({ seconds: 3600, max: 60 });
     expect(SETUP_PAGE_PER_IP).toEqual({ seconds: 3600, max: 60 });
+    expect(SETUP_STATUS_PER_IP).toEqual({ seconds: 3600, max: 600 });
     expect(SETUP_DRAFT_PER_LINK).toEqual({ seconds: 3600, max: 60 });
     expect(SETUP_TEST_PER_CONNECTION).toEqual({ seconds: 3600, max: 20 });
     expect(LIMIT_FAMILIES).toEqual(
@@ -253,6 +255,7 @@ describe("the limits of the open (plan 13a Task 12, rulings R3 and C11)", () => 
         "setup-open:ip",
         "setup-open:link",
         "setup-page:ip",
+        "setup-status:ip",
         "setup-draft:link",
         "setup-test:connection",
       ]),

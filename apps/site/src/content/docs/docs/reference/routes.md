@@ -1855,8 +1855,8 @@ The setup link routes exist when the config sets `sso.setup` (plan 13a). This fe
 | Field | Value |
 | --- | --- |
 | Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
-| Input | Query `{ run? }` |
-| Answer | The link, the drafts of the session, and the result of the test run `run`. No live row and no secret |
+| Input | Query `{ run?, step?, idp? }`. `step` names a page of the setup, and `idp` names a guide |
+| Answer | An HTML page of the setup, with the guide, the draft, and the result of the test run `run`. The JSON answer holds the link, the drafts of the session, and that result. No live row and no secret |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## SCIM

@@ -51,6 +51,11 @@ export const SETUP_OPEN_PER_IP = { seconds: 3600, max: 60 };
  * the page spends none of the opens of an office address (`SETUP_OPEN_PER_IP`).
  */
 export const SETUP_PAGE_PER_IP = { seconds: 3600, max: 60 };
+/**
+ * The loads of the setup page `GET /sso/setup/status` by one IP: 600 per hour, on the key
+ * `setup-status:ip`. A page that polls a run is one load each. The count runs before the cookie check.
+ */
+export const SETUP_STATUS_PER_IP = { seconds: 3600, max: 600 };
 
 /** The actor of the open: nobody is signed in. The link id goes in `data` (pre-flight C5). */
 const OPEN_ACTOR = { kind: "app", name: "setup-link" } as const;
