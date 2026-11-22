@@ -398,8 +398,13 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "conflict",
-    "a write that loses its compare-and-set round, or a draft that changed under the activate; no request causes it alone. sso-setup-drafts.test.ts and sso-setup-activate.test.ts prove the engine path",
-    ["POST /sso/setup-links/activate", "POST /sso/setup/domains/add", "POST /sso/setup/connection"],
+    "the contract declares it for the activate, but the engine answers setup_not_tested for each lost round of the activate (setup-activate.ts), so no request causes it",
+    ["POST /sso/setup-links/activate"],
+  ),
+  ...rows(
+    "conflict",
+    "a draft write that loses its compare-and-set round; no single request causes it. sso-setup-drafts.test.ts proves the engine path. The domain add has a route test: sso-setup-session-routes.test.ts",
+    ["POST /sso/setup/connection"],
   ),
 
   // `conflict` needs a lost compare-and-set round, which no request can cause on its own.
@@ -809,10 +814,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   // the engine tests prove those reads.
   ...(
     [
-      ["POST /sso/setup-links/activate", "connection.oidc", "absent"],
-      ["POST /sso/setup-links/activate", "connection.saml.subjectAttribute", "null"],
-      ["POST /sso/setup-links/activate", "connection.saml.attributes.name", "null"],
-      ["GET /sso/setup-links/get", "preview.scim", "null"],
       ["POST /sso/setup/domains/add", "domain.record", "null"],
       ["POST /sso/setup/domains/add", "domain.expiresAt", "null"],
       ["POST /sso/setup/domains/verify", "domain.verifiedAt", "null"],
@@ -822,6 +823,31 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       ["GET /sso/setup/status", "domains[].checkedAt", "null"],
       ["GET /sso/setup/status", "domains[].connectionId", "null"],
       ["GET /sso/setup/status", "domains[].expiresAt", "null"],
+    ] as const
+  ).map(
+    ([key, field, form]): AnswerShapeExempt => ({
+      key,
+      field,
+      form,
+      reason:
+        "the route tests answer the other form of this field: a domain in its other state needs a verify or a time step; sso-setup-drafts.test.ts proves the engine read of this form",
+    }),
+  ),
+  {
+    key: "POST /sso/setup-links/activate",
+    field: "connection.oidc.endpoints",
+    form: "null",
+    reason:
+      "the activate test must run the real test run, which needs fixed endpoints on the draft; the route test of POST /sso/setup/connection answers null endpoints for a draft with discovery, and publicConnection builds the field the same for each route",
+  },
+  // The connection of a SAML draft: the route tests use an OIDC draft. publicConnection builds
+  // this shape for each route, and test/sso/connections.test.ts (the SAML create, the lines that
+  // read `oidc` undefined, `subjectAttribute: null`, and `attributes.name: null`) proves it.
+  ...(
+    [
+      ["POST /sso/setup-links/activate", "connection.oidc", "absent"],
+      ["POST /sso/setup-links/activate", "connection.saml.subjectAttribute", "null"],
+      ["POST /sso/setup-links/activate", "connection.saml.attributes.name", "null"],
       ["GET /sso/setup/status", "connection.oidc", "absent"],
       ["GET /sso/setup/status", "connection.saml.subjectAttribute", "null"],
       ["GET /sso/setup/status", "connection.saml.attributes.name", "null"],
@@ -832,7 +858,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       field,
       form,
       reason:
-        "the route tests answer the other form of this field; sso-setup-activate.test.ts and sso-setup-drafts.test.ts prove the engine read of this form",
+        "the route tests use an OIDC draft; publicConnection builds the SAML form of this field for every route, and test/sso/connections.test.ts proves it",
     }),
   ),
 ];

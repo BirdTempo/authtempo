@@ -9,8 +9,10 @@ import { SETUP_SESSION_COOKIE } from "../src/primitives/credentials.js";
 import { newId } from "../src/primitives/ids.js";
 import { BASE_URL, recordCredential } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
+import { type FakeIdToken, fakeFetch, fakeJwt } from "./social-helpers.js";
 import { ssoAuth } from "./sso/helpers.js";
 import { managerSession } from "./sso/manager-helpers.js";
+import { endpointsOf, issuerOf } from "./sso/sign-in-helpers.js";
 
 const SECRET = "idp-client-secret-0123456789";
 const OIDC = {
@@ -32,8 +34,19 @@ async function world(
   steps: ("domain" | "connection" | "directory")[] = ["domain", "connection", "directory"],
   limits?: { domainsPerOrganization: number },
 ) {
+  // The fake IdP of a test run: the token endpoint answers the code as the ID token.
+  const tokens: Record<string, FakeIdToken> = {};
+  const idp = fakeFetch((call) =>
+    Response.json({ id_token: call.form.code, token_type: "Bearer" }),
+  );
   const w = ssoAuth({
-    sso: { oidc: true, setup: {}, ...(limits ? { limits } : {}) } as SsoConfig,
+    sso: {
+      oidc: true,
+      setup: {},
+      fetch: idp.fetchFn,
+      ...(limits ? { limits } : {}),
+    } as SsoConfig,
+    jwt: fakeJwt(tokens),
     scim: {},
     password: { hash: FAST, uniformSignUp: false },
   });
@@ -61,7 +74,7 @@ async function world(
     recordCredential(pair.split("=")[1] ?? "");
     return { cookie: pair, linkId: made.value.id };
   };
-  return { w, a, b, open };
+  return { w, a, b, open, tokens };
 }
 type World = Awaited<ReturnType<typeof world>>;
 
@@ -164,31 +177,93 @@ describe("the setup session routes (plan 13a Task 11)", () => {
     expect([status, answer]).toEqual([409, { error: "domain_limit" }]);
   });
 
-  it("previews the draft for the manager, and activates it through the route", async () => {
+  it("answers 409 conflict to a link that adds a domain that the manager added", async () => {
     const { w, a, open } = await world();
+    const s = await open(a);
+    const manager = `__Host-tempo_session=${a.token}`;
+    const [ms] = await send(
+      w,
+      "/sso/domains/add",
+      { organizationId: a.org, domain: "acme.example" },
+      manager,
+    );
+    expect(ms).toBe(200);
+    const before = await w.storage.findMany("ssoDomain", []);
+    const [status, answer] = await send(
+      w,
+      "/sso/setup/domains/add",
+      { domain: "acme.example" },
+      s.cookie,
+    );
+    expect([status, answer]).toEqual([409, { error: "conflict" }]);
+    // The challenge of the manager stays: the rows do not change.
+    expect(await w.storage.findMany("ssoDomain", [])).toEqual(before);
+  });
+
+  it("answers a null scim in the preview of a draft with no directory token", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    const [, conn] = await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    expect(conn.connection).toBeDefined();
+    const got = await w.handle(
+      new Request(`${BASE_URL}/auth/sso/setup-links/get?id=${s.linkId}`, {
+        headers: { ...CLIENT, cookie: `__Host-tempo_session=${a.token}` },
+      }),
+    );
+    expect(got.status).toBe(200);
+    const body = (await got.json()) as { preview: { scim: unknown } | null };
+    expect(body.preview).not.toBeNull();
+    expect(body.preview?.scim).toBeNull();
+  });
+
+  it("previews the draft for the manager, and activates it through the route", async () => {
+    const { w, a, open, tokens } = await world();
     const s = await open(a);
     const [, added] = await send(w, "/sso/setup/domains/add", { domain: "acme.example" }, s.cookie);
     const domain = added.domain as { id: string; record: { name: string; value: string } };
     w.answers.a[domain.record.name] = [domain.record.value];
     w.answers.b[domain.record.name] = [domain.record.value];
     expect((await send(w, "/sso/setup/domains/verify", { id: domain.id }, s.cookie))[0]).toBe(200);
-    const [, conn] = await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    const tested = { ...OIDC, issuer: issuerOf("acme"), endpoints: endpointsOf("acme") };
+    const [, conn] = await send(w, "/sso/setup/connection", tested, s.cookie);
     const connId = (conn.connection as { id: string }).id;
     expect((await send(w, "/sso/setup/scim-token", {}, s.cookie, "{}"))[0]).toBe(200);
-    const now = w.clock.now();
-    await w.storage.create("ssoTestRun", {
-      id: newId(now),
-      createdAt: now,
-      updatedAt: now,
-      organizationId: a.org,
-      connectionId: connId,
-      linkId: s.linkId,
-      outcome: "passed",
-      step: null,
-      attributeNames: ["email"],
-      domainClaimed: true,
-      draftVersion: 1,
+    // The passed run comes by the product path: the test start of the link, then the IdP callback.
+    const started = await w.handle(
+      new Request(`${BASE_URL}/auth/sso/${connId}/start?test=1`, {
+        headers: { ...CLIENT, cookie: s.cookie },
+      }),
+    );
+    expect(started.status).toBe(302);
+    const url = new URL(started.headers.get("location") ?? "");
+    const bind = started.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+      ?.split(";")[0];
+    expect(bind).toBeDefined();
+    tokens["tcode-1"] = {
+      audience: "acme-client",
+      issuer: issuerOf("acme"),
+      claims: {
+        sub: "a-1",
+        email: "ada@acme.example",
+        name: "Ada",
+        nonce: url.searchParams.get("nonce") ?? "",
+      },
+    };
+    const back = new URLSearchParams({
+      code: "tcode-1",
+      state: url.searchParams.get("state") ?? "",
     });
+    const callback = await w.handle(
+      new Request(`${BASE_URL}/auth/sso/${connId}/callback?${back}`, {
+        headers: { ...CLIENT, cookie: bind ?? "" },
+      }),
+    );
+    expect(callback.status).toBe(303);
+    expect(await w.storage.findMany("ssoTestRun", [])).toMatchObject([
+      { outcome: "passed", draftVersion: 1, linkId: s.linkId },
+    ]);
     const manager = `__Host-tempo_session=${a.token}`;
     const get = await w.handle(
       new Request(`${BASE_URL}/auth/sso/setup-links/get?id=${s.linkId}`, {
