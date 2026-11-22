@@ -13,6 +13,7 @@ import {
 import { coreRouteModules, coreRoutes, type RouteModule } from "../src/http/routes/index.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE, base, everyFeature, SOCIAL } from "./every-feature.js";
+import { MOUNTED_ROUTES, UNMOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /** The key of a mounted route as `ROUTES` writes it (plan 11g: `routeKeyOf`). */
 function templated(r: { method: string; path: string }): string {
@@ -68,7 +69,7 @@ describe("ROUTES (plan 11a)", () => {
     expect(new Set(raw).size).toBe(raw.length);
     const served = [...new Set(routes.map(templated))].sort();
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
-    expect(served).toEqual([...listed].sort());
+    expect(served).toEqual(MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     expect(new Set(listed).size).toBe(listed.length);
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
@@ -89,7 +90,20 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
-    expect(listed.length).toBe(209);
+    // Plan 13a Task 0 adds the 13 routes of the enterprise setup, not mounted yet.
+    expect(listed.length).toBe(222);
+  });
+
+  it("lists only routes that no module mounts as unmounted (plan 13a)", () => {
+    const listed = new Set(ROUTES.map((r) => `${r.method} ${r.path}`));
+    const served = new Set(coreRoutes(everyFeature()).map(templated));
+    for (const key of UNMOUNTED_ROUTES) {
+      expect(listed.has(key), `ROUTES has no entry ${key}`).toBe(true);
+      expect(served.has(key), `${key} is mounted: remove it from test/unmounted-routes.ts`).toBe(
+        false,
+      );
+    }
+    expect(MOUNTED_ROUTES.length + UNMOUNTED_ROUTES.size).toBe(ROUTES.length);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -391,6 +405,7 @@ describe("the entry fields and the module tie (plan 11g)", () => {
     // provider for a `:provider` template. Apple's callback is the POST entry, not the GET template.
     const providers = everyFeature().social.providers.length;
     for (const key of entries.keys()) {
+      if (UNMOUNTED_ROUTES.has(key)) continue;
       const template = key.includes("/:provider/");
       // The ID-token route serves google and apple only (plan 12i Task 10).
       const want = !template

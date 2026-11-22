@@ -745,6 +745,10 @@ export async function createConnection(
     secretVersion: config.keyring.current,
     mfa: f.mfa ?? null,
     scimRoles: f.scimRoles ?? null,
+    // A create of the manager or the app is live (plan 13a). Only a setup link makes a draft.
+    draft: false,
+    version: 1,
+    setupLinkId: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

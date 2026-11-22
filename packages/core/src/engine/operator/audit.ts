@@ -210,6 +210,12 @@ export const SSO_AUDIT_REASON: Readonly<Record<(typeof SSO_AUDIT_ACTIONS)[number
   scim_group_create: "a directory created a group",
   scim_group_update: "a directory changed a group",
   scim_group_delete: "a directory deleted a group",
+  // Plan 13a: the setup link and the test run.
+  sso_setup_link_create: "an organization created an SSO setup link",
+  sso_setup_link_open: "an IT admin opened an SSO setup link",
+  sso_setup_link_revoke: "an organization revoked an SSO setup link",
+  sso_setup_link_activate: "an organization activated an SSO setup",
+  sso_test_run: "a test sign-in ran against a draft SSO connection",
 };
 
 /**

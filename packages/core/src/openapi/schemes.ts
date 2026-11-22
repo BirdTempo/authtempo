@@ -20,6 +20,7 @@ export const SCHEME_NAMES = [
   "clientSecretBasic",
   "oauthDpop",
   "scimToken",
+  "setupCookie",
 ] as const;
 export type SchemeName = (typeof SCHEME_NAMES)[number];
 
@@ -40,12 +41,14 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   initialAccessToken: ["initialAccessToken"],
   clientSecretBasic: ["clientSecretBasic"],
   scimToken: ["scimToken"],
+  setupSession: ["setupCookie"],
 };
 
 /**
  * The six security schemes of spec 25 item 8, and the initial access token
  * of the register route, the client Basic auth, and the DPoP scheme (plan 12e),
- * and the organization token (plan 12k), and the SCIM token (plan 12d). The OAuth flow URLs are
+ * and the organization token (plan 12k), and the SCIM token (plan 12d), and the
+ * setup cookie (plan 13a). The OAuth flow URLs are
  * absolute with a `serverUrl`; with none, they are absolute paths, which
  * resolve against the server of the document. A token prefix is in a
  * description only, never a value.
@@ -122,6 +125,13 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       type: "http",
       scheme: "bearer",
       description: `A SCIM token of an organization as the bearer (plan 12d). It starts with \`${SCIM_TOKEN_PREFIX}\`. Only the routes under \`/scim/v2\` take it.`,
+    },
+    setupCookie: {
+      type: "apiKey",
+      in: "cookie",
+      name: "__Host-tempo_setup",
+      description:
+        "The cookie of a setup session (plan 13a). The open of a setup link sets it. Only the routes of the setup session take it.",
     },
   };
 }

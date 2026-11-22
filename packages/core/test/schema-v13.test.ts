@@ -35,13 +35,16 @@ describe("schema version 13 (plan 12k)", () => {
   });
 
   it("defines the five models with their keys", () => {
-    // Plan 12d adds its six models after them.
-    expect(Object.keys(schema).slice(-11, -6)).toEqual([
+    // Plan 12d adds its six models after them, and plan 13a three more.
+    const keys = Object.keys(schema);
+    const first = keys.indexOf("organizationRole");
+    expect(keys.slice(first, first + 6)).toEqual([
       "organizationRole",
       "team",
       "teamMember",
       "organizationToken",
       "movedToken",
+      "ssoConnection",
     ]);
     // One record per key of a source (plan 12k Task 12 review, M2).
     expect([schema.movedToken.unique, schema.movedToken.indexes]).toEqual([

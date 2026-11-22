@@ -305,6 +305,7 @@ export async function addDomain(
           failures: 0,
           firstFailureAt: null,
           expiresAt,
+          setupLinkId: null,
         };
         await tx.create("ssoDomain", row);
       }

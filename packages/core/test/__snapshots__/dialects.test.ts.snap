@@ -2261,7 +2261,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_scim_token WHERE id = ? RETURNING id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at",
+    "sql": "DELETE FROM ta_scim_token WHERE id = ? RETURNING id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id",
   },
   "scimToken.insert": {
     "params": [
@@ -2275,8 +2275,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       1767225600000,
       1767225600000,
+      1,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "scimToken.reinsertRow": {
     "params": [
@@ -2290,8 +2292,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       1767225600000,
       1767225600000,
+      1,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "scimToken.restoreRow": {
     "params": [
@@ -2313,9 +2317,13 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       1767225600000,
       1767225600000,
+      1,
+      1,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_scim_token SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, name = CASE WHEN name IS ? THEN ? ELSE name END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, hint = CASE WHEN hint IS ? THEN ? ELSE hint END, scopes = CASE WHEN scopes IS ? THEN ? ELSE scopes END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, last_used_at = CASE WHEN last_used_at IS ? THEN ? ELSE last_used_at END WHERE id = ?",
+    "sql": "UPDATE ta_scim_token SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, name = CASE WHEN name IS ? THEN ? ELSE name END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, hint = CASE WHEN hint IS ? THEN ? ELSE hint END, scopes = CASE WHEN scopes IS ? THEN ? ELSE scopes END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, last_used_at = CASE WHEN last_used_at IS ? THEN ? ELSE last_used_at END, pending = CASE WHEN pending IS ? THEN ? ELSE pending END, setup_link_id = CASE WHEN setup_link_id IS ? THEN ? ELSE setup_link_id END WHERE id = ?",
   },
   "scimToken.select": {
     "params": [
@@ -2325,7 +2333,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at FROM ta_scim_token WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id FROM ta_scim_token WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "scimToken.undoCreate": {
     "params": [
@@ -2337,7 +2345,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at FROM ta_scim_token WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id FROM ta_scim_token WHERE id = ?",
   },
   "scimToken.update": {
     "params": [
@@ -2350,9 +2358,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       1767225600000,
       1767225600000,
+      1,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_scim_token SET created_at = ?, updated_at = ?, organization_id = ?, name = ?, token_hash = ?, hint = ?, scopes = ?, expires_at = ?, last_used_at = ? WHERE id = ?",
+    "sql": "UPDATE ta_scim_token SET created_at = ?, updated_at = ?, organization_id = ?, name = ?, token_hash = ?, hint = ?, scopes = ?, expires_at = ?, last_used_at = ?, pending = ?, setup_link_id = ? WHERE id = ?",
   },
   "scimUser.delete": {
     "params": [
@@ -2710,7 +2720,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_sso_connection WHERE id = ? RETURNING id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles",
+    "sql": "DELETE FROM ta_sso_connection WHERE id = ? RETURNING id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id",
   },
   "ssoConnection.insert": {
     "params": [
@@ -2728,8 +2738,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      1,
+      7,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "ssoConnection.reinsertRow": {
     "params": [
@@ -2747,8 +2760,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      1,
+      7,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "ssoConnection.restoreRow": {
     "params": [
@@ -2778,9 +2794,15 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       "{"a":1}",
       "{"a":1}",
+      1,
+      1,
+      7,
+      7,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_connection SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, kind = CASE WHEN kind IS ? THEN ? ELSE kind END, label = CASE WHEN label IS ? THEN ? ELSE label END, enabled = CASE WHEN enabled IS ? THEN ? ELSE enabled END, jit = CASE WHEN jit IS ? THEN ? ELSE jit END, default_role = CASE WHEN default_role IS ? THEN ? ELSE default_role END, config = CASE WHEN config IS ? THEN ? ELSE config END, client_secret = CASE WHEN client_secret IS ? THEN ? ELSE client_secret END, secret_version = CASE WHEN secret_version IS ? THEN ? ELSE secret_version END, mfa = CASE WHEN mfa IS ? THEN ? ELSE mfa END, scim_roles = CASE WHEN scim_roles IS ? THEN ? ELSE scim_roles END WHERE id = ?",
+    "sql": "UPDATE ta_sso_connection SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, kind = CASE WHEN kind IS ? THEN ? ELSE kind END, label = CASE WHEN label IS ? THEN ? ELSE label END, enabled = CASE WHEN enabled IS ? THEN ? ELSE enabled END, jit = CASE WHEN jit IS ? THEN ? ELSE jit END, default_role = CASE WHEN default_role IS ? THEN ? ELSE default_role END, config = CASE WHEN config IS ? THEN ? ELSE config END, client_secret = CASE WHEN client_secret IS ? THEN ? ELSE client_secret END, secret_version = CASE WHEN secret_version IS ? THEN ? ELSE secret_version END, mfa = CASE WHEN mfa IS ? THEN ? ELSE mfa END, scim_roles = CASE WHEN scim_roles IS ? THEN ? ELSE scim_roles END, draft = CASE WHEN draft IS ? THEN ? ELSE draft END, version = CASE WHEN version IS ? THEN ? ELSE version END, setup_link_id = CASE WHEN setup_link_id IS ? THEN ? ELSE setup_link_id END WHERE id = ?",
   },
   "ssoConnection.select": {
     "params": [
@@ -2790,7 +2812,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles FROM ta_sso_connection WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id FROM ta_sso_connection WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "ssoConnection.undoCreate": {
     "params": [
@@ -2802,7 +2824,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles FROM ta_sso_connection WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id FROM ta_sso_connection WHERE id = ?",
   },
   "ssoConnection.update": {
     "params": [
@@ -2819,9 +2841,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      1,
+      7,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_connection SET created_at = ?, updated_at = ?, organization_id = ?, kind = ?, label = ?, enabled = ?, jit = ?, default_role = ?, config = ?, client_secret = ?, secret_version = ?, mfa = ?, scim_roles = ? WHERE id = ?",
+    "sql": "UPDATE ta_sso_connection SET created_at = ?, updated_at = ?, organization_id = ?, kind = ?, label = ?, enabled = ?, jit = ?, default_role = ?, config = ?, client_secret = ?, secret_version = ?, mfa = ?, scim_roles = ?, draft = ?, version = ?, setup_link_id = ? WHERE id = ?",
   },
   "ssoDomain.delete": {
     "params": [
@@ -2836,7 +2861,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_sso_domain WHERE id = ? RETURNING id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at",
+    "sql": "DELETE FROM ta_sso_domain WHERE id = ? RETURNING id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id",
   },
   "ssoDomain.insert": {
     "params": [
@@ -2855,8 +2880,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       1767225600000,
       1767225600000,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "ssoDomain.reinsertRow": {
     "params": [
@@ -2875,8 +2901,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       1767225600000,
       1767225600000,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "ssoDomain.restoreRow": {
     "params": [
@@ -2908,9 +2935,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       1767225600000,
       1767225600000,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_domain SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, domain = CASE WHEN domain IS ? THEN ? ELSE domain END, challenge = CASE WHEN challenge IS ? THEN ? ELSE challenge END, claimed_domain = CASE WHEN claimed_domain IS ? THEN ? ELSE claimed_domain END, connection_id = CASE WHEN connection_id IS ? THEN ? ELSE connection_id END, enforce = CASE WHEN enforce IS ? THEN ? ELSE enforce END, include_subdomains = CASE WHEN include_subdomains IS ? THEN ? ELSE include_subdomains END, verified_at = CASE WHEN verified_at IS ? THEN ? ELSE verified_at END, checked_at = CASE WHEN checked_at IS ? THEN ? ELSE checked_at END, failures = CASE WHEN failures IS ? THEN ? ELSE failures END, first_failure_at = CASE WHEN first_failure_at IS ? THEN ? ELSE first_failure_at END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END WHERE id = ?",
+    "sql": "UPDATE ta_sso_domain SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, domain = CASE WHEN domain IS ? THEN ? ELSE domain END, challenge = CASE WHEN challenge IS ? THEN ? ELSE challenge END, claimed_domain = CASE WHEN claimed_domain IS ? THEN ? ELSE claimed_domain END, connection_id = CASE WHEN connection_id IS ? THEN ? ELSE connection_id END, enforce = CASE WHEN enforce IS ? THEN ? ELSE enforce END, include_subdomains = CASE WHEN include_subdomains IS ? THEN ? ELSE include_subdomains END, verified_at = CASE WHEN verified_at IS ? THEN ? ELSE verified_at END, checked_at = CASE WHEN checked_at IS ? THEN ? ELSE checked_at END, failures = CASE WHEN failures IS ? THEN ? ELSE failures END, first_failure_at = CASE WHEN first_failure_at IS ? THEN ? ELSE first_failure_at END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, setup_link_id = CASE WHEN setup_link_id IS ? THEN ? ELSE setup_link_id END WHERE id = ?",
   },
   "ssoDomain.select": {
     "params": [
@@ -2920,7 +2949,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at FROM ta_sso_domain WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id FROM ta_sso_domain WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "ssoDomain.undoCreate": {
     "params": [
@@ -2932,7 +2961,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at FROM ta_sso_domain WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id FROM ta_sso_domain WHERE id = ?",
   },
   "ssoDomain.update": {
     "params": [
@@ -2950,9 +2979,353 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       1767225600000,
       1767225600000,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_domain SET created_at = ?, updated_at = ?, organization_id = ?, domain = ?, challenge = ?, claimed_domain = ?, connection_id = ?, enforce = ?, include_subdomains = ?, verified_at = ?, checked_at = ?, failures = ?, first_failure_at = ?, expires_at = ? WHERE id = ?",
+    "sql": "UPDATE ta_sso_domain SET created_at = ?, updated_at = ?, organization_id = ?, domain = ?, challenge = ?, claimed_domain = ?, connection_id = ?, enforce = ?, include_subdomains = ?, verified_at = ?, checked_at = ?, failures = ?, first_failure_at = ?, expires_at = ?, setup_link_id = ? WHERE id = ?",
+  },
+  "ssoSetupLink.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id IN (?, ?) AND substr(id, 1, ?) = ?",
+  },
+  "ssoSetupLink.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id = ? RETURNING id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at",
+  },
+  "ssoSetupLink.insert": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_link (id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoSetupLink.reinsertRow": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_link (id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoSetupLink.restoreRow": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-organizationId",
+      "s-tokenHash",
+      "s-tokenHash",
+      "s-hint",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-note",
+      "s-createdBy",
+      "s-createdBy",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_link SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, hint = CASE WHEN hint IS ? THEN ? ELSE hint END, steps = CASE WHEN steps IS ? THEN ? ELSE steps END, kinds = CASE WHEN kinds IS ? THEN ? ELSE kinds END, note = CASE WHEN note IS ? THEN ? ELSE note END, created_by = CASE WHEN created_by IS ? THEN ? ELSE created_by END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, revoked_at = CASE WHEN revoked_at IS ? THEN ? ELSE revoked_at END, ended_at = CASE WHEN ended_at IS ? THEN ? ELSE ended_at END, opened_at = CASE WHEN opened_at IS ? THEN ? ELSE opened_at END, ready_at = CASE WHEN ready_at IS ? THEN ? ELSE ready_at END WHERE id = ?",
+  },
+  "ssoSetupLink.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at FROM ta_sso_setup_link WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+  },
+  "ssoSetupLink.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id = ?",
+  },
+  "ssoSetupLink.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at FROM ta_sso_setup_link WHERE id = ?",
+  },
+  "ssoSetupLink.update": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_link SET created_at = ?, updated_at = ?, organization_id = ?, token_hash = ?, hint = ?, steps = ?, kinds = ?, note = ?, created_by = ?, expires_at = ?, revoked_at = ?, ended_at = ?, opened_at = ?, ready_at = ? WHERE id = ?",
+  },
+  "ssoSetupSession.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id IN (?, ?) AND substr(id, 1, ?) = ?",
+  },
+  "ssoSetupSession.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id = ? RETURNING id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at",
+  },
+  "ssoSetupSession.insert": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_session (id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoSetupSession.reinsertRow": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_session (id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoSetupSession.restoreRow": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "s-linkId",
+      "s-linkId",
+      "s-organizationId",
+      "s-organizationId",
+      "s-tokenHash",
+      "s-tokenHash",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_session SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, link_id = CASE WHEN link_id IS ? THEN ? ELSE link_id END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, token_hash = CASE WHEN token_hash IS ? THEN ? ELSE token_hash END, last_seen_at = CASE WHEN last_seen_at IS ? THEN ? ELSE last_seen_at END, expires_at = CASE WHEN expires_at IS ? THEN ? ELSE expires_at END, ended_at = CASE WHEN ended_at IS ? THEN ? ELSE ended_at END WHERE id = ?",
+  },
+  "ssoSetupSession.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at FROM ta_sso_setup_session WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+  },
+  "ssoSetupSession.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id = ?",
+  },
+  "ssoSetupSession.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at FROM ta_sso_setup_session WHERE id = ?",
+  },
+  "ssoSetupSession.update": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_session SET created_at = ?, updated_at = ?, link_id = ?, organization_id = ?, token_hash = ?, last_seen_at = ?, expires_at = ?, ended_at = ? WHERE id = ?",
+  },
+  "ssoTestRun.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id IN (?, ?) AND substr(id, 1, ?) = ?",
+  },
+  "ssoTestRun.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id = ? RETURNING id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version",
+  },
+  "ssoTestRun.insert": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      1,
+      7,
+    ],
+    "sql": "INSERT INTO ta_sso_test_run (id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoTestRun.reinsertRow": {
+    "params": [
+      "id-1",
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      1,
+      7,
+    ],
+    "sql": "INSERT INTO ta_sso_test_run (id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  },
+  "ssoTestRun.restoreRow": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-organizationId",
+      "s-connectionId",
+      "s-connectionId",
+      "s-linkId",
+      "s-linkId",
+      "s-outcome",
+      "s-outcome",
+      "s-step",
+      "s-step",
+      "{"a":1}",
+      "{"a":1}",
+      1,
+      1,
+      7,
+      7,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_test_run SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, organization_id = CASE WHEN organization_id IS ? THEN ? ELSE organization_id END, connection_id = CASE WHEN connection_id IS ? THEN ? ELSE connection_id END, link_id = CASE WHEN link_id IS ? THEN ? ELSE link_id END, outcome = CASE WHEN outcome IS ? THEN ? ELSE outcome END, step = CASE WHEN step IS ? THEN ? ELSE step END, attribute_names = CASE WHEN attribute_names IS ? THEN ? ELSE attribute_names END, domain_claimed = CASE WHEN domain_claimed IS ? THEN ? ELSE domain_claimed END, draft_version = CASE WHEN draft_version IS ? THEN ? ELSE draft_version END WHERE id = ?",
+  },
+  "ssoTestRun.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version FROM ta_sso_test_run WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+  },
+  "ssoTestRun.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id = ?",
+  },
+  "ssoTestRun.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version FROM ta_sso_test_run WHERE id = ?",
+  },
+  "ssoTestRun.update": {
+    "params": [
+      1767225600000,
+      1767225600000,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      1,
+      7,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_test_run SET created_at = ?, updated_at = ?, organization_id = ?, connection_id = ?, link_id = ?, outcome = ?, step = ?, attribute_names = ?, domain_claimed = ?, draft_version = ? WHERE id = ?",
   },
   "team.delete": {
     "params": [
@@ -5826,7 +6199,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_scim_token WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at",
+    "sql": "DELETE FROM ta_scim_token WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id",
   },
   "scimToken.insert": {
     "params": [
@@ -5840,8 +6213,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      true,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text::jsonb, $9, $10)",
+    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text::jsonb, $9, $10, $11, $12)",
   },
   "scimToken.reinsertRow": {
     "params": [
@@ -5855,8 +6230,10 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      true,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    "sql": "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
   },
   "scimToken.restoreRow": {
     "params": [
@@ -5878,9 +6255,13 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      true,
+      true,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_scim_token SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, name = CASE WHEN name IS NOT DISTINCT FROM $7 THEN $8 ELSE name END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $9 THEN $10 ELSE token_hash END, hint = CASE WHEN hint IS NOT DISTINCT FROM $11 THEN $12 ELSE hint END, scopes = CASE WHEN scopes IS NOT DISTINCT FROM $13::text::jsonb THEN $14 ELSE scopes END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $15 THEN $16 ELSE expires_at END, last_used_at = CASE WHEN last_used_at IS NOT DISTINCT FROM $17 THEN $18 ELSE last_used_at END WHERE id = $19",
+    "sql": "UPDATE ta_scim_token SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, name = CASE WHEN name IS NOT DISTINCT FROM $7 THEN $8 ELSE name END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $9 THEN $10 ELSE token_hash END, hint = CASE WHEN hint IS NOT DISTINCT FROM $11 THEN $12 ELSE hint END, scopes = CASE WHEN scopes IS NOT DISTINCT FROM $13::text::jsonb THEN $14 ELSE scopes END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $15 THEN $16 ELSE expires_at END, last_used_at = CASE WHEN last_used_at IS NOT DISTINCT FROM $17 THEN $18 ELSE last_used_at END, pending = CASE WHEN pending IS NOT DISTINCT FROM $19 THEN $20 ELSE pending END, setup_link_id = CASE WHEN setup_link_id IS NOT DISTINCT FROM $21 THEN $22 ELSE setup_link_id END WHERE id = $23",
   },
   "scimToken.select": {
     "params": [
@@ -5890,7 +6271,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at FROM ta_scim_token WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id FROM ta_scim_token WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "scimToken.undoCreate": {
     "params": [
@@ -5902,7 +6283,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at FROM ta_scim_token WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id FROM ta_scim_token WHERE id = $1",
   },
   "scimToken.update": {
     "params": [
@@ -5915,9 +6296,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      true,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_scim_token SET created_at = $1, updated_at = $2, organization_id = $3, name = $4, token_hash = $5, hint = $6, scopes = $7::text::jsonb, expires_at = $8, last_used_at = $9 WHERE id = $10",
+    "sql": "UPDATE ta_scim_token SET created_at = $1, updated_at = $2, organization_id = $3, name = $4, token_hash = $5, hint = $6, scopes = $7::text::jsonb, expires_at = $8, last_used_at = $9, pending = $10, setup_link_id = $11 WHERE id = $12",
   },
   "scimUser.delete": {
     "params": [
@@ -6275,7 +6658,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_sso_connection WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles",
+    "sql": "DELETE FROM ta_sso_connection WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id",
   },
   "ssoConnection.insert": {
     "params": [
@@ -6293,8 +6676,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      true,
+      7,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::jsonb, $11, $12, $13::text::jsonb, $14::text::jsonb)",
+    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::jsonb, $11, $12, $13::text::jsonb, $14::text::jsonb, $15, $16, $17)",
   },
   "ssoConnection.reinsertRow": {
     "params": [
@@ -6312,8 +6698,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      true,
+      7,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+    "sql": "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
   },
   "ssoConnection.restoreRow": {
     "params": [
@@ -6343,9 +6732,15 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "{"a":1}",
       "{"a":1}",
       "{"a":1}",
+      true,
+      true,
+      7,
+      7,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_connection SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, kind = CASE WHEN kind IS NOT DISTINCT FROM $7 THEN $8 ELSE kind END, label = CASE WHEN label IS NOT DISTINCT FROM $9 THEN $10 ELSE label END, enabled = CASE WHEN enabled IS NOT DISTINCT FROM $11 THEN $12 ELSE enabled END, jit = CASE WHEN jit IS NOT DISTINCT FROM $13 THEN $14 ELSE jit END, default_role = CASE WHEN default_role IS NOT DISTINCT FROM $15 THEN $16 ELSE default_role END, config = CASE WHEN config IS NOT DISTINCT FROM $17::text::jsonb THEN $18 ELSE config END, client_secret = CASE WHEN client_secret IS NOT DISTINCT FROM $19 THEN $20 ELSE client_secret END, secret_version = CASE WHEN secret_version IS NOT DISTINCT FROM $21 THEN $22 ELSE secret_version END, mfa = CASE WHEN mfa IS NOT DISTINCT FROM $23::text::jsonb THEN $24 ELSE mfa END, scim_roles = CASE WHEN scim_roles IS NOT DISTINCT FROM $25::text::jsonb THEN $26 ELSE scim_roles END WHERE id = $27",
+    "sql": "UPDATE ta_sso_connection SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, kind = CASE WHEN kind IS NOT DISTINCT FROM $7 THEN $8 ELSE kind END, label = CASE WHEN label IS NOT DISTINCT FROM $9 THEN $10 ELSE label END, enabled = CASE WHEN enabled IS NOT DISTINCT FROM $11 THEN $12 ELSE enabled END, jit = CASE WHEN jit IS NOT DISTINCT FROM $13 THEN $14 ELSE jit END, default_role = CASE WHEN default_role IS NOT DISTINCT FROM $15 THEN $16 ELSE default_role END, config = CASE WHEN config IS NOT DISTINCT FROM $17::text::jsonb THEN $18 ELSE config END, client_secret = CASE WHEN client_secret IS NOT DISTINCT FROM $19 THEN $20 ELSE client_secret END, secret_version = CASE WHEN secret_version IS NOT DISTINCT FROM $21 THEN $22 ELSE secret_version END, mfa = CASE WHEN mfa IS NOT DISTINCT FROM $23::text::jsonb THEN $24 ELSE mfa END, scim_roles = CASE WHEN scim_roles IS NOT DISTINCT FROM $25::text::jsonb THEN $26 ELSE scim_roles END, draft = CASE WHEN draft IS NOT DISTINCT FROM $27 THEN $28 ELSE draft END, version = CASE WHEN version IS NOT DISTINCT FROM $29 THEN $30 ELSE version END, setup_link_id = CASE WHEN setup_link_id IS NOT DISTINCT FROM $31 THEN $32 ELSE setup_link_id END WHERE id = $33",
   },
   "ssoConnection.select": {
     "params": [
@@ -6355,7 +6750,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles FROM ta_sso_connection WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id FROM ta_sso_connection WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "ssoConnection.undoCreate": {
     "params": [
@@ -6367,7 +6762,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles FROM ta_sso_connection WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id FROM ta_sso_connection WHERE id = $1",
   },
   "ssoConnection.update": {
     "params": [
@@ -6384,9 +6779,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       "{"a":1}",
       "{"a":1}",
+      true,
+      7,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_connection SET created_at = $1, updated_at = $2, organization_id = $3, kind = $4, label = $5, enabled = $6, jit = $7, default_role = $8, config = $9::text::jsonb, client_secret = $10, secret_version = $11, mfa = $12::text::jsonb, scim_roles = $13::text::jsonb WHERE id = $14",
+    "sql": "UPDATE ta_sso_connection SET created_at = $1, updated_at = $2, organization_id = $3, kind = $4, label = $5, enabled = $6, jit = $7, default_role = $8, config = $9::text::jsonb, client_secret = $10, secret_version = $11, mfa = $12::text::jsonb, scim_roles = $13::text::jsonb, draft = $14, version = $15, setup_link_id = $16 WHERE id = $17",
   },
   "ssoDomain.delete": {
     "params": [
@@ -6401,7 +6799,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_sso_domain WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at",
+    "sql": "DELETE FROM ta_sso_domain WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id",
   },
   "ssoDomain.insert": {
     "params": [
@@ -6420,8 +6818,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
   },
   "ssoDomain.reinsertRow": {
     "params": [
@@ -6440,8 +6839,9 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      "s-setupLinkId",
     ],
-    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+    "sql": "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
   },
   "ssoDomain.restoreRow": {
     "params": [
@@ -6473,9 +6873,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      "s-setupLinkId",
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_domain SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, domain = CASE WHEN domain IS NOT DISTINCT FROM $7 THEN $8 ELSE domain END, challenge = CASE WHEN challenge IS NOT DISTINCT FROM $9 THEN $10 ELSE challenge END, claimed_domain = CASE WHEN claimed_domain IS NOT DISTINCT FROM $11 THEN $12 ELSE claimed_domain END, connection_id = CASE WHEN connection_id IS NOT DISTINCT FROM $13 THEN $14 ELSE connection_id END, enforce = CASE WHEN enforce IS NOT DISTINCT FROM $15 THEN $16 ELSE enforce END, include_subdomains = CASE WHEN include_subdomains IS NOT DISTINCT FROM $17 THEN $18 ELSE include_subdomains END, verified_at = CASE WHEN verified_at IS NOT DISTINCT FROM $19 THEN $20 ELSE verified_at END, checked_at = CASE WHEN checked_at IS NOT DISTINCT FROM $21 THEN $22 ELSE checked_at END, failures = CASE WHEN failures IS NOT DISTINCT FROM $23 THEN $24 ELSE failures END, first_failure_at = CASE WHEN first_failure_at IS NOT DISTINCT FROM $25 THEN $26 ELSE first_failure_at END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $27 THEN $28 ELSE expires_at END WHERE id = $29",
+    "sql": "UPDATE ta_sso_domain SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, domain = CASE WHEN domain IS NOT DISTINCT FROM $7 THEN $8 ELSE domain END, challenge = CASE WHEN challenge IS NOT DISTINCT FROM $9 THEN $10 ELSE challenge END, claimed_domain = CASE WHEN claimed_domain IS NOT DISTINCT FROM $11 THEN $12 ELSE claimed_domain END, connection_id = CASE WHEN connection_id IS NOT DISTINCT FROM $13 THEN $14 ELSE connection_id END, enforce = CASE WHEN enforce IS NOT DISTINCT FROM $15 THEN $16 ELSE enforce END, include_subdomains = CASE WHEN include_subdomains IS NOT DISTINCT FROM $17 THEN $18 ELSE include_subdomains END, verified_at = CASE WHEN verified_at IS NOT DISTINCT FROM $19 THEN $20 ELSE verified_at END, checked_at = CASE WHEN checked_at IS NOT DISTINCT FROM $21 THEN $22 ELSE checked_at END, failures = CASE WHEN failures IS NOT DISTINCT FROM $23 THEN $24 ELSE failures END, first_failure_at = CASE WHEN first_failure_at IS NOT DISTINCT FROM $25 THEN $26 ELSE first_failure_at END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $27 THEN $28 ELSE expires_at END, setup_link_id = CASE WHEN setup_link_id IS NOT DISTINCT FROM $29 THEN $30 ELSE setup_link_id END WHERE id = $31",
   },
   "ssoDomain.select": {
     "params": [
@@ -6485,7 +6887,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at FROM ta_sso_domain WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id FROM ta_sso_domain WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "ssoDomain.undoCreate": {
     "params": [
@@ -6497,7 +6899,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at FROM ta_sso_domain WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at, setup_link_id FROM ta_sso_domain WHERE id = $1",
   },
   "ssoDomain.update": {
     "params": [
@@ -6515,9 +6917,353 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       7,
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      "s-setupLinkId",
       "id-1",
     ],
-    "sql": "UPDATE ta_sso_domain SET created_at = $1, updated_at = $2, organization_id = $3, domain = $4, challenge = $5, claimed_domain = $6, connection_id = $7, enforce = $8, include_subdomains = $9, verified_at = $10, checked_at = $11, failures = $12, first_failure_at = $13, expires_at = $14 WHERE id = $15",
+    "sql": "UPDATE ta_sso_domain SET created_at = $1, updated_at = $2, organization_id = $3, domain = $4, challenge = $5, claimed_domain = $6, connection_id = $7, enforce = $8, include_subdomains = $9, verified_at = $10, checked_at = $11, failures = $12, first_failure_at = $13, expires_at = $14, setup_link_id = $15 WHERE id = $16",
+  },
+  "ssoSetupLink.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4",
+  },
+  "ssoSetupLink.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at",
+  },
+  "ssoSetupLink.insert": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_link (id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at) VALUES ($1, $2, $3, $4, $5, $6, $7::text::jsonb, $8::text::jsonb, $9, $10, $11, $12, $13, $14, $15)",
+  },
+  "ssoSetupLink.reinsertRow": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_link (id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+  },
+  "ssoSetupLink.restoreRow": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-organizationId",
+      "s-tokenHash",
+      "s-tokenHash",
+      "s-hint",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-note",
+      "s-createdBy",
+      "s-createdBy",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_link SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $7 THEN $8 ELSE token_hash END, hint = CASE WHEN hint IS NOT DISTINCT FROM $9 THEN $10 ELSE hint END, steps = CASE WHEN steps IS NOT DISTINCT FROM $11::text::jsonb THEN $12 ELSE steps END, kinds = CASE WHEN kinds IS NOT DISTINCT FROM $13::text::jsonb THEN $14 ELSE kinds END, note = CASE WHEN note IS NOT DISTINCT FROM $15 THEN $16 ELSE note END, created_by = CASE WHEN created_by IS NOT DISTINCT FROM $17 THEN $18 ELSE created_by END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $19 THEN $20 ELSE expires_at END, revoked_at = CASE WHEN revoked_at IS NOT DISTINCT FROM $21 THEN $22 ELSE revoked_at END, ended_at = CASE WHEN ended_at IS NOT DISTINCT FROM $23 THEN $24 ELSE ended_at END, opened_at = CASE WHEN opened_at IS NOT DISTINCT FROM $25 THEN $26 ELSE opened_at END, ready_at = CASE WHEN ready_at IS NOT DISTINCT FROM $27 THEN $28 ELSE ready_at END WHERE id = $29",
+  },
+  "ssoSetupLink.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at FROM ta_sso_setup_link WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+  },
+  "ssoSetupLink.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_link WHERE id = $1",
+  },
+  "ssoSetupLink.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at FROM ta_sso_setup_link WHERE id = $1",
+  },
+  "ssoSetupLink.update": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-tokenHash",
+      "s-hint",
+      "{"a":1}",
+      "{"a":1}",
+      "s-note",
+      "s-createdBy",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_link SET created_at = $1, updated_at = $2, organization_id = $3, token_hash = $4, hint = $5, steps = $6::text::jsonb, kinds = $7::text::jsonb, note = $8, created_by = $9, expires_at = $10, revoked_at = $11, ended_at = $12, opened_at = $13, ready_at = $14 WHERE id = $15",
+  },
+  "ssoSetupSession.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4",
+  },
+  "ssoSetupSession.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id = $1 RETURNING id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at",
+  },
+  "ssoSetupSession.insert": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_session (id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  },
+  "ssoSetupSession.reinsertRow": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+    ],
+    "sql": "INSERT INTO ta_sso_setup_session (id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  },
+  "ssoSetupSession.restoreRow": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-linkId",
+      "s-linkId",
+      "s-organizationId",
+      "s-organizationId",
+      "s-tokenHash",
+      "s-tokenHash",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_session SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, link_id = CASE WHEN link_id IS NOT DISTINCT FROM $5 THEN $6 ELSE link_id END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $7 THEN $8 ELSE organization_id END, token_hash = CASE WHEN token_hash IS NOT DISTINCT FROM $9 THEN $10 ELSE token_hash END, last_seen_at = CASE WHEN last_seen_at IS NOT DISTINCT FROM $11 THEN $12 ELSE last_seen_at END, expires_at = CASE WHEN expires_at IS NOT DISTINCT FROM $13 THEN $14 ELSE expires_at END, ended_at = CASE WHEN ended_at IS NOT DISTINCT FROM $15 THEN $16 ELSE ended_at END WHERE id = $17",
+  },
+  "ssoSetupSession.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at FROM ta_sso_setup_session WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+  },
+  "ssoSetupSession.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_setup_session WHERE id = $1",
+  },
+  "ssoSetupSession.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, link_id, organization_id, token_hash, last_seen_at, expires_at, ended_at FROM ta_sso_setup_session WHERE id = $1",
+  },
+  "ssoSetupSession.update": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-linkId",
+      "s-organizationId",
+      "s-tokenHash",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_setup_session SET created_at = $1, updated_at = $2, link_id = $3, organization_id = $4, token_hash = $5, last_seen_at = $6, expires_at = $7, ended_at = $8 WHERE id = $9",
+  },
+  "ssoTestRun.delete": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4",
+  },
+  "ssoTestRun.deleteReturning": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id = $1 RETURNING id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version",
+  },
+  "ssoTestRun.insert": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      true,
+      7,
+    ],
+    "sql": "INSERT INTO ta_sso_test_run (id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::jsonb, $10, $11)",
+  },
+  "ssoTestRun.reinsertRow": {
+    "params": [
+      "id-1",
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      true,
+      7,
+    ],
+    "sql": "INSERT INTO ta_sso_test_run (id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+  },
+  "ssoTestRun.restoreRow": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-organizationId",
+      "s-connectionId",
+      "s-connectionId",
+      "s-linkId",
+      "s-linkId",
+      "s-outcome",
+      "s-outcome",
+      "s-step",
+      "s-step",
+      "{"a":1}",
+      "{"a":1}",
+      true,
+      true,
+      7,
+      7,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_test_run SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, organization_id = CASE WHEN organization_id IS NOT DISTINCT FROM $5 THEN $6 ELSE organization_id END, connection_id = CASE WHEN connection_id IS NOT DISTINCT FROM $7 THEN $8 ELSE connection_id END, link_id = CASE WHEN link_id IS NOT DISTINCT FROM $9 THEN $10 ELSE link_id END, outcome = CASE WHEN outcome IS NOT DISTINCT FROM $11 THEN $12 ELSE outcome END, step = CASE WHEN step IS NOT DISTINCT FROM $13 THEN $14 ELSE step END, attribute_names = CASE WHEN attribute_names IS NOT DISTINCT FROM $15::text::jsonb THEN $16 ELSE attribute_names END, domain_claimed = CASE WHEN domain_claimed IS NOT DISTINCT FROM $17 THEN $18 ELSE domain_claimed END, draft_version = CASE WHEN draft_version IS NOT DISTINCT FROM $19 THEN $20 ELSE draft_version END WHERE id = $21",
+  },
+  "ssoTestRun.select": {
+    "params": [
+      "id-1",
+      "id-2",
+      3,
+      "id-",
+      5,
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version FROM ta_sso_test_run WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+  },
+  "ssoTestRun.undoCreate": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "DELETE FROM ta_sso_test_run WHERE id = $1",
+  },
+  "ssoTestRun.undoSelect": {
+    "params": [
+      "id-1",
+    ],
+    "sql": "SELECT id, created_at, updated_at, organization_id, connection_id, link_id, outcome, step, attribute_names, domain_claimed, draft_version FROM ta_sso_test_run WHERE id = $1",
+  },
+  "ssoTestRun.update": {
+    "params": [
+      2026-01-01T00:00:00.000Z,
+      2026-01-01T00:00:00.000Z,
+      "s-organizationId",
+      "s-connectionId",
+      "s-linkId",
+      "s-outcome",
+      "s-step",
+      "{"a":1}",
+      true,
+      7,
+      "id-1",
+    ],
+    "sql": "UPDATE ta_sso_test_run SET created_at = $1, updated_at = $2, organization_id = $3, connection_id = $4, link_id = $5, outcome = $6, step = $7, attribute_names = $8::text::jsonb, domain_claimed = $9, draft_version = $10 WHERE id = $11",
   },
   "team.delete": {
     "params": [

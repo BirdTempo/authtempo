@@ -202,6 +202,15 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   "scimGroupMember.id": ascii(64, ROW_ID),
   "scimGroupMember.groupId": ascii(64, ROW_ID),
   "scimGroupMember.scimUserId": ascii(64, ROW_ID),
+  // Schema version 17 (plan 13a): the enterprise setup. Each token hash is a SHA-256 hex.
+  "ssoSetupLink.id": ascii(64, ROW_ID),
+  "ssoSetupLink.organizationId": ascii(64, ROW_ID),
+  "ssoSetupLink.tokenHash": ascii(64, HASH),
+  "ssoTestRun.id": ascii(64, ROW_ID),
+  "ssoTestRun.connectionId": ascii(64, ROW_ID),
+  "ssoSetupSession.id": ascii(64, ROW_ID),
+  "ssoSetupSession.tokenHash": ascii(64, HASH),
+  "ssoSetupSession.linkId": ascii(64, ROW_ID),
 };
 
 function fieldType(model: ModelName, field: string): FieldType {

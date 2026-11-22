@@ -66,6 +66,7 @@ import {
   tokenEndpoint,
 } from "./social-helpers.js";
 import { codeNow, enrolled, PASSWORD, verifiedSession, wrongFor } from "./totp-helpers.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /**
  * The codes that one world answers on every route that declares them (plan
@@ -307,9 +308,12 @@ function takes(key: RouteKey, form: string): boolean {
   return (entryOf(key).auth as readonly string[]).includes(form);
 }
 
-/** The routes whose entry declares `code`, in `codes` or `oauthCodes`. */
+/**
+ * The routes whose entry declares `code`, in `codes` or `oauthCodes`. A route that no module
+ * mounts yet answers 404 to each request (plan 13a), so the families skip it.
+ */
 function declaring(code: string): RouteKey[] {
-  return ROUTES.filter(
+  return MOUNTED_ROUTES.filter(
     (r) =>
       (r.codes as readonly string[]).includes(code) ||
       (r.oauthCodes as readonly string[]).includes(code),

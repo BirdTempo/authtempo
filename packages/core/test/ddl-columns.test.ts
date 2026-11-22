@@ -162,8 +162,9 @@ describe("the column map (plan 12g)", () => {
     // Every row names a string field that a key or an index holds.
     for (const k of Object.keys(MYSQL_STRINGS)) expect(keyed.has(k), k).toBe(true);
     // 81 of version 13, 22 of the six models of version 14 (plan 12d), and
-    // the username and the phone of version 15 (plan 12i).
-    expect(keyed.size).toBe(105);
+    // the username and the phone of version 15 (plan 12i), and 8 of the three
+    // models of version 17 (plan 13a).
+    expect(keyed.size).toBe(113);
   });
 
   it("keeps each MySQL key under the InnoDB limit", () => {

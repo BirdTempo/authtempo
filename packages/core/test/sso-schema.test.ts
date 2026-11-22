@@ -20,7 +20,12 @@ describe("schema version 14 (plan 12d)", () => {
   });
 
   it("holds the six models with their keys", () => {
-    expect(Object.keys(schema).slice(-6)).toEqual([
+    // Plan 13a adds models after these six and appends fields to three of them.
+    // This test holds the part of plan 12d; test/schema-v17.test.ts and the
+    // conformance suite hold the rest.
+    const keys = Object.keys(schema);
+    const first = keys.indexOf("ssoConnection");
+    expect(keys.slice(first, first + 6)).toEqual([
       "ssoConnection",
       "ssoDomain",
       "scimToken",
@@ -28,7 +33,7 @@ describe("schema version 14 (plan 12d)", () => {
       "scimGroup",
       "scimGroupMember",
     ]);
-    expect(Object.entries(schema.ssoConnection.fields).slice(3)).toEqual([
+    expect(Object.entries(schema.ssoConnection.fields).slice(3, 14)).toEqual([
       ["organizationId", { type: "string" }],
       ["kind", { type: "string" }],
       ["label", { type: "string" }],
@@ -41,7 +46,7 @@ describe("schema version 14 (plan 12d)", () => {
       ["mfa", { type: "json", nullable: true }],
       ["scimRoles", { type: "json", nullable: true }],
     ]);
-    expect(Object.entries(schema.ssoDomain.fields).slice(3)).toEqual([
+    expect(Object.entries(schema.ssoDomain.fields).slice(3, 15)).toEqual([
       ["organizationId", { type: "string" }],
       ["domain", { type: "string" }],
       ["challenge", { type: "string" }],
@@ -55,7 +60,7 @@ describe("schema version 14 (plan 12d)", () => {
       ["firstFailureAt", { type: "date", nullable: true }],
       ["expiresAt", { type: "date", nullable: true }],
     ]);
-    expect(Object.entries(schema.scimToken.fields).slice(3)).toEqual([
+    expect(Object.entries(schema.scimToken.fields).slice(3, 10)).toEqual([
       ["organizationId", { type: "string" }],
       ["name", { type: "string" }],
       ["tokenHash", { type: "string" }],
@@ -158,13 +163,20 @@ describe("schema version 14 (plan 12d)", () => {
       "scim_group_create",
       "scim_group_update",
       "scim_group_delete",
+      // Plan 13a.
+      "sso_setup_link_create",
+      "sso_setup_link_open",
+      "sso_setup_link_revoke",
+      "sso_setup_link_activate",
+      "sso_test_run",
     ]);
     for (const action of SSO_AUDIT_ACTIONS)
       expect({ action, count: OPERATOR_ACTIONS.filter((a) => a === action).length }).toEqual({
         action,
         count: 1,
       });
-    // 10 of plan 12f, 18 of plan 12d, and 3 of plan 12f2 (user_create, user_update, user_delete).
-    expect(OPERATOR_ACTIONS).toHaveLength(31);
+    // 10 of plan 12f, 18 of plan 12d, 3 of plan 12f2 (user_create, user_update, user_delete),
+    // and 5 of plan 13a.
+    expect(OPERATOR_ACTIONS).toHaveLength(36);
   });
 });

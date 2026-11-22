@@ -1009,6 +1009,8 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "operator.beforeAction": "operator.refused",
   "operator.afterAction": "operator.action",
   "sso.beforeSignIn": REFUSAL_EXEMPT,
+  // Plan 13a: the `readyAt` of the link is the record of the handback. Task 12 adds the events of the setup.
+  "sso.setupReady": NO_EVENT_EXEMPT,
   "scim.afterChange": "scim.change",
   "anonymous.beforeLink": REFUSAL_EXEMPT,
   // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.

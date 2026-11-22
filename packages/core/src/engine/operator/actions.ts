@@ -39,6 +39,12 @@ const ACTIONS: Readonly<Record<OperatorAction, true>> = {
   scim_group_create: true,
   scim_group_update: true,
   scim_group_delete: true,
+  // The actions of plan 13a: the setup link and the test run.
+  sso_setup_link_create: true,
+  sso_setup_link_open: true,
+  sso_setup_link_revoke: true,
+  sso_setup_link_activate: true,
+  sso_test_run: true,
 };
 
 export const OPERATOR_ACTIONS: readonly OperatorAction[] = Object.freeze(

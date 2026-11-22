@@ -10,6 +10,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { newId } from "../src/primitives/ids.js";
 import { BASE, everyFeature } from "./every-feature.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /**
  * The auth probe of plan 11g Task 5: every route of `ROUTES` against the
@@ -52,7 +53,8 @@ async function answerOf(res: Response): Promise<Answer> {
   return { status: res.status, code: null };
 }
 
-const keys = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
+// A route that no module mounts yet answers 404 to each request (plan 13a): the probe skips it.
+const keys = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 const entryOf = (key: RouteKey) => {
   const entry = ROUTES.find((r) => `${r.method} ${r.path}` === key);
   if (!entry) throw new Error(`no entry ${key}`);

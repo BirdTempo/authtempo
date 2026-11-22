@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { ROUTES } from "../../src/http/route-list.js";
 import { LIMIT_FAMILIES } from "../../src/limiter/limit.js";
 import { EVENTS, type EventName } from "../../src/observe/events.js";
 import type { AuthEvent } from "../../src/observe/port.js";
 import { EVENTS_EXEMPT } from "../events-exempt.js";
+import { MOUNTED_ROUTES } from "../unmounted-routes.js";
 
 /**
  * The check run of plan 12h Task 12. The recorder of `test/setup/events.ts`
@@ -104,7 +104,8 @@ const emails = finder(addresses.filter((a) => a.includes("@")));
 const others = finder(addresses.filter((a) => !a.includes("@")));
 
 const NAMES = Object.keys(EVENTS) as EventName[];
-const KEYS = ROUTES.map((r) => `${r.method} ${r.path}`);
+// A route that no module mounts yet has no request record (plan 13a): the check skips it.
+const KEYS = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}`);
 const named = new Set(records.map((r) => r.event.name));
 const exempt = new Set(EVENTS_EXEMPT.map((row) => row.name));
 const covered = NAMES.filter((name) => named.has(name) || exempt.has(name));

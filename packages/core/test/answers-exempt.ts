@@ -1,4 +1,5 @@
-import { ROUTES, type RouteKey } from "../src/http/route-list.js";
+import type { RouteKey } from "../src/http/route-list.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /** One declared code of one route that no test of core answers, with the reason (plan 11g Task 5). */
 export interface AnswersExempt {
@@ -7,8 +8,11 @@ export interface AnswersExempt {
   readonly reason: string;
 }
 
-/** The key of each entry of `ROUTES`. */
-const KEYS = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
+/**
+ * The key of each entry of `ROUTES` that a module mounts. The check holds no
+ * code of a route that no module mounts yet (plan 13a), so it needs no row.
+ */
+const KEYS = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 
 /** One row per key of `keys` for `code`, with `reason`. */
 function rows(code: string, reason: string, keys: readonly RouteKey[]): AnswersExempt[] {

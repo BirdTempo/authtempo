@@ -12,7 +12,7 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * `health` and `readiness`, the probes of a host. Plan 12i adds
  * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
  * `passkeySignUp`, `username`, `phone`, `anonymous`, `multiSession`, and
- * `socialIdToken`.
+ * `socialIdToken`. Plan 13a adds `ssoSetup`, the setup links.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -41,6 +41,7 @@ export const ROUTE_FEATURES = [
   "oauthRegistration",
   "oauthDevice",
   "sso",
+  "ssoSetup",
   "scim",
   "openapi",
   "health",
@@ -69,7 +70,8 @@ export type AuthForm =
   | "operator" // Authorization: Operator <secret>
   | "initialAccessToken" // the initial access token of RFC 7591 as the bearer (plan 12e)
   | "clientSecretBasic" // the client id and secret as HTTP Basic, RFC 6749 section 2.3.1 (plan 12e)
-  | "scimToken"; // an sk_ bearer of an organization's directory (plan 12d)
+  | "scimToken" // an sk_ bearer of an organization's directory (plan 12d)
+  | "setupSession"; // the __Host-tempo_setup cookie of a setup link (plan 13a)
 
 export interface RouteEntry {
   readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -91,7 +93,8 @@ export interface RouteEntry {
    * `health` (plan 12h) is in every deployment. `readiness` (plan 12h)
    * needs `observe.readiness: true`. `sso` (plan 12d) needs `organizations`
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
-   * (plan 12d) needs `organizations` and `scim`.
+   * (plan 12d) needs `organizations` and `scim`. `ssoSetup` (plan 13a)
+   * needs `sso` with `setup` on, and so `organizations` and the notices.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
    * `passkeySignUp` (plan 12i Task 8) needs `passkey` with `signUp` on:
    * `true`, or an object with `dailyCap` or `isolateLimiter`.
@@ -2615,6 +2618,181 @@ export const ROUTES = Object.freeze([
     feature: "sso",
     auth: ["none"],
     codes: ["sso_not_configured"],
+    oauthCodes: [],
+  },
+  {
+    // Plan 13a: the setup links of an organization, behind the manager guard.
+    method: "POST",
+    path: "/sso/setup-links/create",
+    feature: "ssoSetup",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "setup_link_limit",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/sso/setup-links/list",
+    feature: "ssoSetup",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    // The preview of Task 8: what an activation makes live.
+    method: "GET",
+    path: "/sso/setup-links/get",
+    feature: "ssoSetup",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "setup_link_invalid",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup-links/revoke",
+    feature: "ssoSetup",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "setup_link_invalid",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup-links/activate",
+    feature: "ssoSetup",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "setup_link_invalid",
+      "setup_not_tested",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    // The confirm page of a setup link. A GET opens no session, so a mail scanner opens nothing.
+    method: "GET",
+    path: "/sso/setup",
+    feature: "ssoSetup",
+    auth: ["none"],
+    codes: ["rate_limited", "invalid_body", "setup_link_invalid", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    // The POST of the confirm page: it opens the setup session and sets `__Host-tempo_setup`.
+    method: "POST",
+    path: "/sso/setup/open",
+    feature: "ssoSetup",
+    auth: ["none"],
+    codes: ["rate_limited", "invalid_body", "setup_link_invalid", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    // The routes of a setup session, the closed list of Task 3. Each writes a draft only.
+    method: "POST",
+    path: "/sso/setup/domains/add",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "domain_limit",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup/domains/verify",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "token_expired",
+      "domain_unverified",
+      "domain_taken",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup/connection",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "conflict", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup/scim-token",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/setup/handback",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "impersonation_session"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/sso/setup/status",
+    feature: "ssoSetup",
+    auth: ["setupSession"],
+    codes: ["unauthorized", "rate_limited", "impersonation_session"],
     oauthCodes: [],
   },
   {

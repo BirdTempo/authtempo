@@ -163,6 +163,9 @@ export async function createScimToken(
     scopes: scopes.value,
     expiresAt: typeof days === "number" ? new Date(now.getTime() + days * DAY_MS) : null,
     lastUsedAt: null,
+    // A token of the manager or the app is live (plan 13a). Only a setup link makes a pending one.
+    pending: false,
+    setupLinkId: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

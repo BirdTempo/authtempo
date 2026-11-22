@@ -101,6 +101,12 @@ export const ERRORS = {
   // is gone, is off, or is of a kind that cannot sign in yet.
   sso_failed: 400,
   sso_not_configured: 404,
+  // plan 13a: the organization holds its limit of open setup links. No passed test run
+  // exists for the current version of the draft. The setup link is unknown, expired,
+  // revoked, or ended: one code and one body for each, so an answer tells nothing.
+  setup_link_limit: 409,
+  setup_not_tested: 409,
+  setup_link_invalid: 404,
   // plan 12d Task 5, in order. Only SSO signs in an address of an enforced
   // domain. The address is outside the verified domains of the connection's
   // organization. The connection creates no user (jit off). SCIM deactivated

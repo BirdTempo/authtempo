@@ -57,6 +57,7 @@ import { FAST } from "./password-helpers.js";
 import { SSO_APP, ssoAuth } from "./sso/helpers.js";
 import { type Manager, managerSession } from "./sso/manager-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
+import { UNMOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /**
  * The request body limits of core (rulings 43 and 46 of the 12j lane). The
@@ -218,7 +219,15 @@ const OPEN_NODES: Readonly<Record<string, string>> = {
 
 describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
   it("derives the cap of each route as the next power of two above its largest valid body, at least 64 KiB", () => {
-    const rows = largestBodies();
+    // A route that no module mounts reads no body (plan 13a). The task that
+    // mounts it adds its derived cap to BODY_CAPS, the pin below, and the docs.
+    const all = largestBodies();
+    const rows = all.filter((r) => !UNMOUNTED_ROUTES.has(r.key));
+    expect(
+      all
+        .filter((r) => UNMOUNTED_ROUTES.has(r.key) && derivedCap(r.bytes) > BODY_CAP_FLOOR)
+        .map((r) => [r.key, derivedCap(r.bytes)]),
+    ).toEqual([["POST /sso/setup/connection", 4_194_304]]);
     const table = rows.map((r) => ({ ...r, cap: bodyCapOf(r.key as RouteKey) }));
     const perCap = new Map<number, number>();
     for (const r of table) perCap.set(r.cap, (perCap.get(r.cap) ?? 0) + 1);

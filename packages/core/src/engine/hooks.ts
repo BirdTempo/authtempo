@@ -623,6 +623,12 @@ export interface SsoHooks {
     profile: SsoProfile;
     user: UserRow | null;
   }): Awaitable<void>;
+  /**
+   * After the commit of the handback of a setup link (plan 13a, spec 6.3):
+   * the drafts wait for an owner. A throw writes one log line, and the
+   * handback stays. Only a handback runs it, so only `sso.setup` runs it.
+   */
+  setupReady?(e: { organizationId: string; linkId: string }): Awaitable<void>;
 }
 
 /**
@@ -737,6 +743,7 @@ export const OPERATOR_HOOK_POINTS: Readonly<Record<keyof OperatorHooks, true>> =
 
 export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
   beforeSignIn: true,
+  setupReady: true,
 };
 
 export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {
