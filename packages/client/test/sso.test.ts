@@ -490,6 +490,31 @@ describe("client.sso and client.scim.tokens (plan 12d Task 13)", () => {
     });
   });
 
+  it("answers a typed error for each refusal code of the setup calls", async () => {
+    type C = ReturnType<typeof answering>["client"];
+    const create = (c: C) =>
+      c.sso.setupLinks.create({
+        organizationId: "o1",
+        steps: ["domain"],
+        kinds: ["oidc"],
+        note: "Ada at IT",
+      });
+    const calls: [string, number, (c: C) => Promise<unknown>][] = [
+      ["setup_link_invalid", 404, (c) => c.sso.setupLinks.revoke({ id: "l1" })],
+      ["setup_link_limit", 409, create],
+      ["domain_limit", 409, (c) => c.sso.setup.domains.add({ domain: "acme.example" })],
+      ["domain_taken", 409, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["domain_unverified", 400, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["token_expired", 400, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["invalid_body", 400, (c) => c.sso.setup.scimToken()],
+      ["rate_limited", 429, (c) => c.sso.setup.handback()],
+    ];
+    for (const [code, status, run] of calls) {
+      const { client } = answering(status, { error: code });
+      expect(await run(client), code).toEqual({ ok: false, code, status });
+    }
+  });
+
   it("sends no key for an optional field the caller did not set", async () => {
     const { seen, client } = answering(200, {});
     await client.sso.discover({ email: "ada@acme.example" });

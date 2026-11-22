@@ -393,23 +393,13 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   // Plan 13a Task 11. The activate answers `setup_link_invalid` only when two activations race for one link.
   ...rows(
     "setup_link_invalid",
-    "a link that ends between the guard and the claim; sso-setup-activate.test.ts proves the engine path. The get and the revoke read the row, so a gone link is not_found",
-    ["GET /sso/setup-links/get", "POST /sso/setup-links/revoke", "POST /sso/setup-links/activate"],
+    "the get and the revoke read the row, so a gone link is not_found; the activate test answers it for a second activation",
+    ["GET /sso/setup-links/get", "POST /sso/setup-links/revoke"],
   ),
   ...rows(
     "conflict",
     "a write that loses its compare-and-set round, or a draft that changed under the activate; no request causes it alone. sso-setup-drafts.test.ts and sso-setup-activate.test.ts prove the engine path",
     ["POST /sso/setup-links/activate", "POST /sso/setup/domains/add", "POST /sso/setup/connection"],
-  ),
-  ...rows(
-    "setup_link_limit",
-    "the limit of live links for one organization; sso-setup-links.test.ts proves the engine path",
-    ["POST /sso/setup-links/create"],
-  ),
-  ...rows(
-    "domain_limit",
-    "the limit of domains for one organization, which addDomain of the live route checks too; sso/domains.test.ts proves the engine path",
-    ["POST /sso/setup/domains/add"],
   ),
 
   // `conflict` needs a lost compare-and-set round, which no request can cause on its own.
@@ -819,11 +809,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   // the engine tests prove those reads.
   ...(
     [
-      ["POST /sso/setup-links/activate", "connection.mfa", "null"],
-      ["POST /sso/setup-links/activate", "connection.scimRoles", "null"],
       ["POST /sso/setup-links/activate", "connection.oidc", "absent"],
-      ["POST /sso/setup-links/activate", "connection.oidc.endpoints", "null"],
-      ["POST /sso/setup-links/activate", "connection.saml", "absent"],
       ["POST /sso/setup-links/activate", "connection.saml.subjectAttribute", "null"],
       ["POST /sso/setup-links/activate", "connection.saml.attributes.name", "null"],
       ["GET /sso/setup-links/get", "preview.scim", "null"],

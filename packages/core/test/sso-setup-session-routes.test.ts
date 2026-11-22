@@ -4,6 +4,7 @@ import { resolveSession } from "../src/engine/sessions.js";
 import { requireSsoManager } from "../src/engine/sso/guard.js";
 import { createSetupLink } from "../src/engine/sso/setup-links.js";
 import { BODY_CAPS } from "../src/http/body-cap.js";
+import { SETUP_SESSION_ROUTES } from "../src/http/routes/sso-setup.js";
 import { SETUP_SESSION_COOKIE } from "../src/primitives/credentials.js";
 import { newId } from "../src/primitives/ids.js";
 import { BASE_URL, recordCredential } from "./helpers.js";
@@ -29,9 +30,10 @@ afterEach(() => vi.restoreAllMocks());
 
 async function world(
   steps: ("domain" | "connection" | "directory")[] = ["domain", "connection", "directory"],
+  limits?: { domainsPerOrganization: number },
 ) {
   const w = ssoAuth({
-    sso: { oidc: true, setup: {} } as SsoConfig,
+    sso: { oidc: true, setup: {}, ...(limits ? { limits } : {}) } as SsoConfig,
     scim: {},
     password: { hash: FAST, uniformSignUp: false },
   });
@@ -101,17 +103,21 @@ describe("the setup session routes (plan 13a Task 11)", () => {
         path,
       ).toEqual(NONE);
     }
-    const bearer = new Request(`${BASE_URL}/auth/sso/setup/handback`, {
-      method: "POST",
-      headers: {
-        ...CLIENT,
-        authorization: `Bearer ${a.token}`,
-        "content-type": "application/json",
-        origin: BASE_URL,
-      },
-      body: "{}",
-    });
-    expect([(await w.handle(bearer)).status]).toEqual([401]);
+    // A bearer token of a manager, on each route of the closed list that has a key of its own.
+    for (const key of SETUP_SESSION_ROUTES.filter((k) => !k.includes("?"))) {
+      const [method, path] = key.split(" ") as [string, string];
+      const bearer = new Request(`${BASE_URL}/auth${path}`, {
+        method,
+        headers: {
+          ...CLIENT,
+          authorization: `Bearer ${a.token}`,
+          "content-type": "application/json",
+          origin: BASE_URL,
+        },
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      expect((await w.handle(bearer)).status, key).toBe(401);
+    }
     expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
     expect(await w.storage.findMany("ssoDomain", [])).toEqual([]);
   });
@@ -128,8 +134,88 @@ describe("the setup session routes (plan 13a Task 11)", () => {
     expect([cs, ca]).toEqual([400, { error: "invalid_body" }]);
   });
 
-  it("holds the connection route to a 4 MiB cap", () => {
-    expect(BODY_CAPS["POST /sso/setup/connection"]).toBe(4_194_304);
+  it("holds the connection route to a 4 MiB cap, and reads no body of a caller with no cookie", async () => {
+    const cap = BODY_CAPS["POST /sso/setup/connection"];
+    expect(cap).toBe(4_194_304);
+    const { w, a, open } = await world();
+    const s = await open(a);
+    const big = "x".repeat(5 * 1024 * 1024);
+    // No cookie: the answer is 401 and the body stays unread.
+    const bare = post("/sso/setup/connection", null, undefined, big);
+    expect((await w.handle(bare)).status).toBe(401);
+    expect(bare.bodyUsed).toBe(false);
+    // A cookie: the read stops at the cap.
+    const [status, answer] = await send(w, "/sso/setup/connection", null, s.cookie, big);
+    expect([status, answer]).toEqual([413, { error: "body_too_large" }]);
+    expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+
+  it("answers 409 domain_limit to a domain past sso.limits.domainsPerOrganization", async () => {
+    const { w, a, open } = await world(undefined, { domainsPerOrganization: 1 });
+    const s = await open(a);
+    const [first] = await send(w, "/sso/setup/domains/add", { domain: "one.example" }, s.cookie);
+    expect(first).toBe(200);
+    const [status, answer] = await send(
+      w,
+      "/sso/setup/domains/add",
+      { domain: "two.example" },
+      s.cookie,
+    );
+    expect([status, answer]).toEqual([409, { error: "domain_limit" }]);
+  });
+
+  it("previews the draft for the manager, and activates it through the route", async () => {
+    const { w, a, open } = await world();
+    const s = await open(a);
+    const [, added] = await send(w, "/sso/setup/domains/add", { domain: "acme.example" }, s.cookie);
+    const domain = added.domain as { id: string; record: { name: string; value: string } };
+    w.answers.a[domain.record.name] = [domain.record.value];
+    w.answers.b[domain.record.name] = [domain.record.value];
+    expect((await send(w, "/sso/setup/domains/verify", { id: domain.id }, s.cookie))[0]).toBe(200);
+    const [, conn] = await send(w, "/sso/setup/connection", OIDC, s.cookie);
+    const connId = (conn.connection as { id: string }).id;
+    expect((await send(w, "/sso/setup/scim-token", {}, s.cookie, "{}"))[0]).toBe(200);
+    const now = w.clock.now();
+    await w.storage.create("ssoTestRun", {
+      id: newId(now),
+      createdAt: now,
+      updatedAt: now,
+      organizationId: a.org,
+      connectionId: connId,
+      linkId: s.linkId,
+      outcome: "passed",
+      step: null,
+      attributeNames: ["email"],
+      domainClaimed: true,
+      draftVersion: 1,
+    });
+    const manager = `__Host-tempo_session=${a.token}`;
+    const get = await w.handle(
+      new Request(`${BASE_URL}/auth/sso/setup-links/get?id=${s.linkId}`, {
+        headers: { ...CLIENT, cookie: manager },
+      }),
+    );
+    expect(get.status).toBe(200);
+    const got = (await get.json()) as { preview: { scim: unknown } | null };
+    expect(got.preview).not.toBeNull();
+    expect(got.preview?.scim).not.toBeNull();
+    expect(JSON.stringify(got)).not.toContain(SECRET);
+    const [status, activated] = await send(
+      w,
+      "/sso/setup-links/activate",
+      { id: s.linkId },
+      manager,
+    );
+    expect(status).toBe(200);
+    const live = activated.connection as { id: string; label: string };
+    expect([live.id, live.label]).toEqual([connId, "Acme Okta"]);
+    const row = await w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: connId },
+    ]);
+    expect(row?.draft).toBe(false);
+    expect(JSON.stringify(activated)).not.toContain(SECRET);
+    const again = await send(w, "/sso/setup-links/activate", { id: s.linkId }, manager);
+    expect(again[0]).toBeGreaterThanOrEqual(400);
   });
 
   it("adds and verifies a domain, saves a draft, mints a token, and hands back", async () => {

@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SsoConfig } from "../src/config.js";
 import { createOrganization } from "../src/engine/organizations.js";
 import { createSetupLink } from "../src/engine/sso/setup-links.js";
-import { ROUTES } from "../src/http/route-list.js";
+import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { SETUP_SESSION_ROUTES } from "../src/http/routes/sso-setup.js";
 import { BASE_URL, recordCredential } from "./helpers.js";
 import { operatorFixture } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
@@ -63,7 +64,11 @@ async function call(
   return [res.status, (await res.json()) as Record<string, unknown>];
 }
 
-const MINT = { steps: ["domain", "connection"], kinds: ["oidc"], note: "Ada at Acme IT" };
+const MINT: {
+  steps: ("domain" | "connection" | "directory")[];
+  kinds: ("oidc" | "saml")[];
+  note: string;
+} = { steps: ["domain", "connection"], kinds: ["oidc"], note: "Ada at Acme IT" };
 
 async function mint(w: World["w"], org: string, token: string) {
   const [status, body] = await call(
@@ -93,7 +98,25 @@ describe("the setup link routes (plan 13a Task 11)", () => {
     const { w } = await world(false);
     const keys = new Set(coreRoutes(w.config).map((r) => r.key));
     for (const key of LINK_KEYS) expect(keys.has(key), key).toBe(false);
-    expect(keys.has("GET /sso/setup/status")).toBe(false);
+    // The routes of the setup session, from the closed list (the test start has a query, no key of its own).
+    const session = SETUP_SESSION_ROUTES.filter((key) => !key.includes("?"));
+    expect(session).toHaveLength(6);
+    for (const key of session) expect(keys.has(key as RouteKey), key).toBe(false);
+  });
+
+  it("answers 409 setup_link_limit to a third live link through the route", async () => {
+    const { w, a } = await world();
+    await mint(w, a.org, a.token);
+    await mint(w, a.org, a.token);
+    const [status, answer] = await call(
+      w,
+      "POST",
+      `/sso/setup-links/create?organizationId=${a.org}`,
+      a.token,
+      MINT,
+    );
+    expect([status, answer]).toEqual([409, { error: "setup_link_limit" }]);
+    expect(await rows(w)).toHaveLength(2);
   });
 
   it("answers 401 to each route with no credential", async () => {
