@@ -840,14 +840,12 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     reason:
       "the activate test must run the real test run, which needs fixed endpoints on the draft; the route test of POST /sso/setup/connection answers null endpoints for a draft with discovery, and publicConnection builds the field the same for each route",
   },
-  // The connection of a SAML draft: the route tests use an OIDC draft. publicConnection builds
+  // The connection of a SAML draft: the route tests use an OIDC draft (test/sso-setup-adversarial
+  // answers the activate route with a SAML draft, so its rows are gone). publicConnection builds
   // this shape for each route, and test/sso/connections.test.ts (the SAML create, the lines that
   // read `oidc` undefined, `subjectAttribute: null`, and `attributes.name: null`) proves it.
   ...(
     [
-      ["POST /sso/setup-links/activate", "connection.oidc", "absent"],
-      ["POST /sso/setup-links/activate", "connection.saml.subjectAttribute", "null"],
-      ["POST /sso/setup-links/activate", "connection.saml.attributes.name", "null"],
       ["GET /sso/setup/status", "connection.oidc", "absent"],
       ["GET /sso/setup/status", "connection.saml.subjectAttribute", "null"],
       ["GET /sso/setup/status", "connection.saml.attributes.name", "null"],

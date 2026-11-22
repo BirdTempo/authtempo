@@ -52,7 +52,10 @@ export const SOCIAL: NonNullable<AuthConfig["social"]> = {
 };
 
 /** A config with every feature on: every route that core can serve exists. */
-export function everyFeature(): ResolvedConfig {
+export function everyFeature(
+  /** Keys that join the `sso` block, such as the kinds that a setup link may hold (plan 13a Task 14). */
+  sso: Partial<NonNullable<AuthConfig["sso"]>> = {},
+): ResolvedConfig {
   return resolveConfig({
     ...base,
     social: SOCIAL,
@@ -91,7 +94,7 @@ export function everyFeature(): ResolvedConfig {
     // Plan 12d: one resolver that answers no record. No test of the list asks it.
     // Plan 13a Task 0: the enterprise setup. Its routes are in test/unmounted-routes.ts until
     // a task mounts them.
-    sso: { dns: [{ name: "none", txt: async () => [] }], setup: {} },
+    sso: { dns: [{ name: "none", txt: async () => [] }], setup: {}, ...sso },
     // Plan 12d Task 9b: the SCIM token routes and the SCIM server.
     scim: {},
     openapi: true,
