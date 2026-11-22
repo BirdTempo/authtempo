@@ -16,9 +16,16 @@ import { freshMysqlDatabase, MYSQL_SERVERS } from "./support/mysql.js";
 
 /**
  * The MySQL migrations, typed here. The first is the baseline of adapter-mysql at version
- * 13. Then come the files of version 14 (plan 12d), 15 (plan 12i), and 16 (plan 12p).
+ * 13. Then come the files of version 14 (plan 12d), 15 (plan 12i), 16 (plan 12p), and 17
+ * (plan 13a).
  */
-const CORE = ["0001_schema_v13", "0002_schema_v14", "0003_schema_v15", "0004_schema_v16"];
+const CORE = [
+  "0001_schema_v13",
+  "0002_schema_v14",
+  "0003_schema_v15",
+  "0004_schema_v16",
+  "0005_schema_v17",
+];
 
 beforeAll(() => {
   assertFreshBuild();
@@ -49,7 +56,7 @@ describe.each(MYSQL_SERVERS)(
         tables: "core",
         dryRun: false,
         before: null,
-        after: 16,
+        after: 17,
         pending: CORE,
         applied: CORE,
         copied: [],
@@ -60,8 +67,8 @@ describe.each(MYSQL_SERVERS)(
       const again = migrate(["--json"]);
       expect(again.status, again.stderr).toBe(0);
       expect(JSON.parse(again.stdout)).toMatchObject({
-        before: 16,
-        after: 16,
+        before: 17,
+        after: 17,
         pending: [],
         applied: [],
       });
@@ -130,7 +137,7 @@ describe.each(MYSQL_SERVERS)(
       expect(r.status, r.stderr).toBe(0);
       expect(JSON.parse(r.stdout)).toMatchObject({
         before: null,
-        after: 16,
+        after: 17,
         pending: CORE,
         applied: CORE,
       });
@@ -156,7 +163,7 @@ describe.each(MYSQL_SERVERS)(
         id: "schema_version",
         status: "pass",
         code: null,
-        detail: "the database is at version 16",
+        detail: "the database is at version 17",
       });
       expect(result("schema_shape")).toEqual({
         id: "schema_shape",

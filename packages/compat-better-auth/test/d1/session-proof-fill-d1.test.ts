@@ -111,7 +111,17 @@ describe("the fill of compat 0013 by hand on D1 (ruling 22 of plan 12p)", () => 
         { key: "schema_version", value: "16" },
       ]),
     );
-    // The storage of version 16 opens, and it reads the flag of each session.
+    // The later shipped files run after the steps by hand: 0014 of plan 13a moves the store to
+    // core 17. Then the storage opens, and it reads the flag of each session.
+    await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS.slice(i0013 + 1));
+    expect(
+      (await env.DB.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).results,
+    ).toEqual(
+      expect.arrayContaining([
+        { key: "compat_better_auth", value: "14" },
+        { key: "schema_version", value: "17" },
+      ]),
+    );
     const { storage } = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });
     const rows = await storage.findMany("session", [], { sort: { field: "id", dir: "asc" } });
     expect(rows.map((r) => [r.id, r.proved])).toEqual(paged.map((r) => [r.id, r.v === 1]));

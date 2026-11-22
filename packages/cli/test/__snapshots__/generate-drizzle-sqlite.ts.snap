@@ -1,4 +1,4 @@
-// authtempo schema version 16, dialect sqlite, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 17, dialect sqlite, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -564,6 +564,9 @@ export const taSsoConnection = sqliteTable(
     secretVersion: integer("secret_version").notNull(),
     mfa: text("mfa", { mode: "json" }),
     scimRoles: text("scim_roles", { mode: "json" }),
+    draft: integer("draft", { mode: "boolean" }).notNull(),
+    version: integer("version").notNull(),
+    setupLinkId: text("setup_link_id"),
   },
   (t) => [
     index("ix_ta_sso_connection__organization_id").on(t.organizationId),
@@ -588,6 +591,7 @@ export const taSsoDomain = sqliteTable(
     failures: integer("failures").notNull(),
     firstFailureAt: integer("first_failure_at", { mode: "timestamp_ms" }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    setupLinkId: text("setup_link_id"),
   },
   (t) => [
     uniqueIndex("ux_ta_sso_domain__organization_id__domain").on(t.organizationId, t.domain),
@@ -609,6 +613,8 @@ export const taScimToken = sqliteTable(
     scopes: text("scopes", { mode: "json" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
     lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
+    pending: integer("pending", { mode: "boolean" }).notNull(),
+    setupLinkId: text("setup_link_id"),
   },
   (t) => [
     uniqueIndex("ux_ta_scim_token__token_hash").on(t.tokenHash),
@@ -670,5 +676,69 @@ export const taScimGroupMember = sqliteTable(
   (t) => [
     uniqueIndex("ux_ta_scim_group_member__group_id__scim_user_id").on(t.groupId, t.scimUserId),
     index("ix_ta_scim_group_member__scim_user_id").on(t.scimUserId),
+  ],
+);
+
+export const taSsoSetupLink = sqliteTable(
+  "ta_sso_setup_link",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    hint: text("hint").notNull(),
+    steps: text("steps", { mode: "json" }).notNull(),
+    kinds: text("kinds", { mode: "json" }).notNull(),
+    note: text("note").notNull(),
+    createdBy: text("created_by").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    openedAt: integer("opened_at", { mode: "timestamp_ms" }),
+    readyAt: integer("ready_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_sso_setup_link__token_hash").on(t.tokenHash),
+    index("ix_ta_sso_setup_link__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taSsoTestRun = sqliteTable(
+  "ta_sso_test_run",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    linkId: text("link_id"),
+    outcome: text("outcome").notNull(),
+    step: text("step"),
+    attributeNames: text("attribute_names", { mode: "json" }).notNull(),
+    domainClaimed: integer("domain_claimed", { mode: "boolean" }).notNull(),
+    draftVersion: integer("draft_version").notNull(),
+  },
+  (t) => [
+    index("ix_ta_sso_test_run__connection_id").on(t.connectionId),
+  ],
+);
+
+export const taSsoSetupSession = sqliteTable(
+  "ta_sso_setup_session",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    linkId: text("link_id").notNull(),
+    organizationId: text("organization_id").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_sso_setup_session__token_hash").on(t.tokenHash),
+    index("ix_ta_sso_setup_session__link_id").on(t.linkId),
   ],
 );

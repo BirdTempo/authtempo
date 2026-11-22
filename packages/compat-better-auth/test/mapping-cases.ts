@@ -55,6 +55,10 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">, rawDb: D1Subse
         "ta_scim_user",
         "ta_scim_group",
         "ta_scim_group_member",
+        // Core's setup tables (migration 0014, plan 13a).
+        "ta_sso_setup_link",
+        "ta_sso_test_run",
+        "ta_sso_setup_session",
       ].map((t) => rawDb.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -168,6 +172,9 @@ export function mappingCases(
         "scimUser",
         "scimGroup",
         "scimGroupMember",
+        "ssoSetupLink",
+        "ssoTestRun",
+        "ssoSetupSession",
       ] as const) {
         const info = await rows<{ name: string; notnull: number }>(
           `PRAGMA table_info(${TABLES[model]})`,
@@ -201,6 +208,9 @@ export function mappingCases(
         "scimUser",
         "scimGroup",
         "scimGroupMember",
+        "ssoSetupLink",
+        "ssoTestRun",
+        "ssoSetupSession",
       ] as const) {
         const list = await rows<{ name: string; unique: number; origin: string }>(
           `PRAGMA index_list(${TABLES[model]})`,
