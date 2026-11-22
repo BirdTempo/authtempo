@@ -1431,6 +1431,11 @@ const SITES: Record<string, readonly string[] | string> = {
   "scim/tokens createScimToken":
     "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
   "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
+  // The setup links of plan 13a Task 2. Their rows are of no kind of user-hold.ts.
+  "sso/setup-links createSetupLink":
+    "one kind: the lock of the organization row, then a read of the live links, then the link row and its audit row",
+  "sso/setup-links revokeSetupLink":
+    "no kind: the link row, then the setup session rows of the link, then its audit row",
   // The SCIM Users of plan 12d Task 10: the user hold, the sessions, the scimUser row,
   // the organization lock, the member and team member rows, then the audit row.
   "scim/users writeChange": [
@@ -1472,8 +1477,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
     // one of the passkey-first sign-up. Plan 12f2 Task 4 adds the two of
     // operator/accounts.ts, and Task 2 the third (the operator create). Task 3
-    // adds the one of user-invite.ts (the confirm).
-    expect(found.length).toBe(88);
+    // adds the one of user-invite.ts (the confirm). Plan 13a Task 2 adds the two
+    // of sso/setup-links.ts: the mint (createSetupLink) and the revoke (revokeSetupLink).
+    expect(found.length).toBe(90);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
