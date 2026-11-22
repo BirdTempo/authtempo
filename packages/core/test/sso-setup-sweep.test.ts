@@ -13,8 +13,31 @@ import { ssoAuth } from "./sso/helpers.js";
 const DAY = 86_400_000;
 
 function world(setup: boolean) {
-  const w = ssoAuth({ sso: setup ? { oidc: true, setup: {} } : { oidc: true } });
+  const w = ssoAuth({
+    sso: setup ? { oidc: true, setup: {} } : { oidc: true },
+    scim: {},
+  });
   const at = (ms: number) => new Date(w.clock.now().getTime() + ms);
+  /** A SCIM token row. `linkId` null is a token of the manager. */
+  const token = async (name: string, linkId: string | null, pending: boolean) => {
+    const now = w.clock.now();
+    const id = newId(now);
+    await w.storage.create("scimToken", {
+      id,
+      createdAt: now,
+      updatedAt: now,
+      organizationId: "org1",
+      name: `Token ${name}`,
+      tokenHash: `thash-${name}`,
+      hint: "abcd",
+      scopes: ["scim.users.read"],
+      expiresAt: null,
+      lastUsedAt: null,
+      pending,
+      setupLinkId: linkId,
+    });
+    return id;
+  };
   /** A link whose `expiresAt` is `expiresIn` ms from now. */
   const link = async (name: string, expiresIn: number) => {
     const now = w.clock.now();
@@ -74,7 +97,8 @@ function world(setup: boolean) {
   };
   const ids = async (model: "ssoSetupLink" | "ssoSetupSession" | "ssoTestRun") =>
     (await w.storage.findMany(model, [])).map((r) => r.id).sort();
-  return { w, link, session, run, ids };
+  const tokens = async () => (await w.storage.findMany("scimToken", [])).map((t) => t.id).sort();
+  return { w, link, session, run, token, tokens, ids };
 }
 
 describe("the sweep of the setup rows (R30)", () => {
@@ -103,11 +127,51 @@ describe("the sweep of the setup rows (R30)", () => {
     expect(await ids("ssoTestRun")).not.toContain(oldRun);
   });
 
-  it("sweeps nothing and counts 0 while sso.setup is off", async () => {
+  it("sweeps while sso is on and sso.setup is off: a link that was minted before setup went off still goes", async () => {
     const { w, link, ids } = world(false);
     await link("old", -(SETUP_RETENTION_MS + DAY));
     const result = await sweepExpired(w.config);
+    expect(result.ssoSetupRows).toBe(1);
+    expect(await ids("ssoSetupLink")).toHaveLength(0);
+  });
+
+  it("sweeps nothing and counts 0 while sso is off", async () => {
+    const w = ssoAuth({});
+    const result = await sweepExpired({ ...w.config, sso: undefined });
     expect(result.ssoSetupRows).toBe(0);
-    expect(await ids("ssoSetupLink")).toHaveLength(1);
+  });
+
+  it("deletes the pending token of a deleted link, and keeps every other token", async () => {
+    const { w, link, token, tokens } = world(true);
+    const old = await link("old", -(SETUP_RETENTION_MS + DAY));
+    const recent = await link("recent", -DAY);
+    await token("pending-old", old, true);
+    const keptRecent = await token("pending-recent", recent, true);
+    // An activated token has `pending` false. A deleted link must not take it.
+    const activated = await token("activated-old", old, false);
+    const manager = await token("manager", null, false);
+    await sweepExpired(w.config);
+    expect(await tokens()).toEqual([keptRecent, activated, manager].sort());
+  });
+
+  it("keeps a link, a session, and a run at the edge, and deletes them one millisecond past it", async () => {
+    const { w, link, session, run, ids } = world(true);
+    const live = await link("live", DAY);
+    // A row that ends exactly now is not past its end: it stays.
+    const endsNow = await link("ends-now", 0);
+    const sessionNow = await session("ends-now", live, 0);
+    // Exactly the retention after the end: the delete is `lt`, so the row stays.
+    const atEdge = await link("edge", -SETUP_RETENTION_MS);
+    const sessionEdge = await session("edge", live, -SETUP_RETENTION_MS);
+    const runEdge = await run("edge", -SETUP_RETENTION_MS);
+    // One millisecond past the edge: the row goes.
+    await link("past", -SETUP_RETENTION_MS - 1);
+    await session("past", live, -SETUP_RETENTION_MS - 1);
+    await run("past", -SETUP_RETENTION_MS - 1);
+    const result = await sweepExpired(w.config);
+    expect(result.ssoSetupRows).toBe(3);
+    expect(await ids("ssoSetupLink")).toEqual([live, endsNow, atEdge].sort());
+    expect(await ids("ssoSetupSession")).toEqual([sessionNow, sessionEdge].sort());
+    expect(await ids("ssoTestRun")).toEqual([runEdge]);
   });
 });

@@ -862,7 +862,7 @@ describe("the draft that the owner read (R28)", () => {
     const preview = await previewSetup(x.w.config, x.actor, r.linkId);
     if (!preview.ok || preview.value === null) throw new Error("no preview");
     x.w.clock.advance(1000);
-    const swapped =await saveDraftConnection(x.w.config, r.s, {
+    const swapped = await saveDraftConnection(x.w.config, r.s, {
       ...OIDC,
       issuer: "https://login.thief.example/acme",
     });

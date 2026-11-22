@@ -14,7 +14,7 @@ import {
   sweepOrganizationRest,
 } from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
-import { SETUP_SWEEP_CALLS, sweepSetupRows } from "./sso/setup-retention.js";
+import { sweepSetupRows } from "./sso/setup-retention.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -60,7 +60,8 @@ export interface SweepResult {
   scimTokens: number;
   /**
    * Setup links and setup sessions that expired more than 30 days ago, and test runs older than
-   * 30 days (plan 13a, ruling R30). A link takes its `note` with it. 0 while `sso.setup` is off.
+   * 30 days (plan 13a, ruling R30). A link takes its `note` and its pending SCIM token with it.
+   * 0 while `sso` is off. It also runs while only `sso.setup` is off.
    */
   ssoSetupRows: number;
   /**
@@ -457,8 +458,11 @@ export async function sweepExpired(
     : 0;
   if (config.scim) meter.step(1);
   // The setup links, sessions and test runs past their retention (plan 13a, ruling R30).
-  const ssoSetupRows = config.sso?.setup ? await sweepSetupRows(storage, now) : 0;
-  if (config.sso?.setup) meter.step(SETUP_SWEEP_CALLS);
+  // It runs when `sso` is on, not only `sso.setup`: an app that turned `sso.setup` off keeps
+  // the rows of the links that it minted before (ruling R33).
+  const setupSwept = config.sso ? await sweepSetupRows(storage, now) : { rows: 0, calls: 0 };
+  const ssoSetupRows = setupSwept.rows;
+  meter.step(setupSwept.calls);
   // The share of the anonymous step (plan 12i Task 6, the lane ruling): one page. Each step
   // before it stops that many calls earlier, so each share above stays as it was.
   const anonymousShare = config.anonymous ? ANONYMOUS_PAGE_CALLS : 0;

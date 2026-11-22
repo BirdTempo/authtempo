@@ -74,11 +74,7 @@ export async function lockSetupRows(
  * R22 holds: the organization row, the link row, then this connection row, and the domain or
  * token rows of the write come after it (the order of `lockConnection` in domains.ts).
  */
-export async function bumpSetupDraft(
-  tx: StorageAdapter,
-  linkId: string,
-  now: Date,
-): Promise<void> {
+export async function bumpSetupDraft(tx: StorageAdapter, linkId: string, now: Date): Promise<void> {
   const draft = await tx.findOne("ssoConnection", [
     { field: "setupLinkId", op: "eq", value: linkId },
     { field: "draft", op: "eq", value: true },

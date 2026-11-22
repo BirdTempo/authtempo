@@ -3,7 +3,7 @@
 "@authtempo/client": minor
 ---
 
-Add the SSO setup link. An owner of an organization mints a link and sends it to the IT admin of a customer. The IT admin opens it and fills in drafts: a domain, a connection, and a SCIM token. A test sign-in must pass for the current draft. The IT admin hands back, and the owner reads the preview and activates. Nothing goes live before the activation. The activation sends the `version` of the preview that the owner read, and answers `conflict` when the draft changed after that read. The sweep deletes the setup links, setup sessions, and test runs 30 days after they ended, and counts them in `ssoSetupRows`.
+Add the SSO setup link. An owner of an organization mints a link and sends it to the IT admin of a customer. The IT admin opens it and fills in drafts: a domain, a connection, and a SCIM token. A test sign-in must pass for the current draft. The IT admin hands back, and the owner reads the preview and activates. Nothing goes live before the activation. The activation sends the `version` of the preview that the owner read, and answers `conflict` when the draft, a domain, or the pending SCIM token changed after that read. The sweep deletes the setup links, setup sessions, and test runs 30 days after they expired, with the pending SCIM token of each deleted link, and counts them in `ssoSetupRows`.
 
 It is off by default. Turn it on with `sso: { setup: {} }`. It needs `sso` and `organizations`. It throws a `ConfigError` at start when `account.notices` is `false`, because the owners learn of a ready setup by a notice. `ttlHours` sets the life of a link from 1 to 168 hours, and the default is 72. `page` replaces the setup page of core. The hook `hooks.sso.setupReady` runs after each handback.
 
