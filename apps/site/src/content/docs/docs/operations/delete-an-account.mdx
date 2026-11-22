@@ -49,7 +49,7 @@ The delete runs one transaction with its audit row. A refusal writes nothing and
 
 - The user row and every row of the user go: the identities, the passkeys, the tokens, and the second factor.
 - After the commit, the mailed links of the user go too, the invitation link of an operator create among them.
-- Each organization where the user is the only member goes with the account. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep.
+- Each organization where the user is the only member goes with the account. Its teams, invitations, tokens, roles, SCIM rows, and SSO setup links and setup sessions go at the next sweep. Until then a setup link of the organization opens nothing, and its setup sessions open no route.
 - The act ends a page of the sessions. The sweep ends the rest with the reason `account_deleted`.
 - The user gets the notice mail `account_deleted` at the old address, unless `account.notices` is false. The notice holds no IP of the operator. A user with no address gets no notice.
 - The audit rows of the user stay. Each holds the user id, the reason, and `data`, and no address. Core has no retention rule for them, so your app sets one.

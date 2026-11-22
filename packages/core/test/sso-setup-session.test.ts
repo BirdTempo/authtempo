@@ -324,6 +324,43 @@ describe("the setup session (plan 13a Task 3)", () => {
     expect(await sessions(w)).toEqual([]);
   });
 
+  it("writes no session row when an account delete takes the organization after the link read of the open", async () => {
+    const { w, mint, owner } = await world();
+    const made = await mint();
+    const session = await resolveSession(w.config, owner.token);
+    if (!session) throw new Error("the session ended");
+    const storage = w.config.storage;
+    const findOne = storage.findOne.bind(storage);
+    const transaction = storage.transaction.bind(storage);
+    // The seam: the link read of the open arms it, and the next transaction first runs the act
+    // of the delete to its commit. So the act lands between the read and the insert of the open.
+    let armed = false;
+    storage.findOne = (async (model, where) => {
+      const row = await findOne(model, where);
+      if (model === "ssoSetupLink" && where.some((w) => w.field === "tokenHash")) armed = true;
+      return row;
+    }) as typeof storage.findOne;
+    storage.transaction = (async (fn) => {
+      if (armed) {
+        armed = false;
+        storage.transaction = transaction;
+        const done = await deleteAccount(w.config, { session, ip: null, userAgent: null });
+        expect(done).toEqual({ ok: true, value: { ok: true } });
+      }
+      return transaction(fn);
+    }) as typeof storage.transaction;
+    expect(await openSetupSession(w.config, made.token, META)).toEqual(INVALID);
+    storage.findOne = findOne;
+    storage.transaction = transaction;
+    expect(await w.storage.findMany("organization", [])).toEqual([]);
+    // Minor 1 of the Task 2b review: an orphan session row here outlives the sweep of its link.
+    expect(await sessions(w)).toEqual([]);
+    expect(await audits(w)).toEqual([]);
+    await sweepExpired(w.config);
+    expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
+    expect(await sessions(w)).toEqual([]);
+  });
+
   it("counts 20 opens of one link in an hour, then answers 429 rate_limited and opens no session", async () => {
     const { w, mint } = await world();
     const made = await mint();

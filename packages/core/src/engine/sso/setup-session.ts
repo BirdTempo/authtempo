@@ -12,6 +12,7 @@ import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAuditRow, SsoSetupLinkRow, SsoSetupSessionRow } from "../../schema.js";
 import { writeAuditIn } from "../operator/audit.js";
+import { lockOrganization } from "../teams.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { ssoDraft } from "./guard.js";
 
@@ -54,9 +55,10 @@ const SESSION_TOKEN_RE = new RegExp(`^${SETUP_SESSION_PREFIX}[A-Za-z0-9_-]{43}$`
  * True when the organization row of a link exists (ruling R17 of plan 13a).
  * The act of an account delete deletes the organization row, and the sweep
  * deletes the setup links and setup sessions later (`deleteOrganizationsRest`).
- * So the open and each request read the organization row: a link or a
- * session of a deleted organization opens nothing before the sweep. The read
- * costs one query here, and the act of the delete sends no setup delete.
+ * So each request reads the organization row: a session of a deleted
+ * organization opens no route before the sweep. The read costs one query
+ * here, and the act of the delete sends no setup delete. The open reads the
+ * row in its transaction (`openSetupSession`).
  */
 async function organizationExists(config: ResolvedConfig, id: string): Promise<boolean> {
   return (
@@ -68,14 +70,15 @@ async function organizationExists(config: ResolvedConfig, id: string): Promise<b
  * Opens a setup session for the link of `token`. The checks, in this order:
  * `sso.setup` is on, else `not_found`. One count on `setup-open:ip`, else
  * `rate_limited`. The token has the form of a link token and names a link
- * that is not revoked, not ended, and not expired, of an organization whose
- * row exists, else `setup_link_invalid` (one answer for each cause). One count on `setup-open:link`, else
- * `rate_limited`. One transaction then sets the first `openedAt` of the link
- * where the link is still live, ends each live session of the link, writes
- * the new session, and writes the `sso_setup_link_open` audit row. So a
- * revoke in parallel fails the open or ends its session. The answer holds the
- * value of the `Set-Cookie` header. The session ends at the earlier of 8
- * hours and the end of the link.
+ * that is not revoked, not ended, and not expired, else
+ * `setup_link_invalid` (one answer for each cause). One count on
+ * `setup-open:link`, else `rate_limited`. One transaction then sets the
+ * first `openedAt` of the link where the link is still live, reads and locks
+ * the organization row (`setup_link_invalid` when it is gone), ends each
+ * live session of the link, writes the new session, and writes the
+ * `sso_setup_link_open` audit row. So a revoke in parallel fails the open or
+ * ends its session. The answer holds the value of the `Set-Cookie` header.
+ * The session ends at the earlier of 8 hours and the end of the link.
  */
 export async function openSetupSession(
   config: ResolvedConfig,
@@ -92,8 +95,7 @@ export async function openSetupSession(
     { field: "endedAt", op: "eq", value: null },
     { field: "expiresAt", op: "gt", value: config.clock.now() },
   ]);
-  if (!link || !(await organizationExists(config, link.organizationId)))
-    return fail("setup_link_invalid");
+  if (!link) return fail("setup_link_invalid");
   if (!(await limit(config, "setup-open:link", link.id, SETUP_OPEN_PER_LINK)))
     return fail("rate_limited");
   const draft = ssoDraft(OPEN_ACTOR, "sso_setup_link_open", {
@@ -132,6 +134,14 @@ export async function openSetupSession(
       { openedAt: link.openedAt ?? now, updatedAt: now },
     );
     if (n === 0) return null;
+    // Ruling R17 of plan 13a: the organization row is read and locked here, after the link, in
+    // the order of the draft writes. A delete act that took the row refuses the open. A later
+    // act waits for this commit, and its sweep then deletes this session with the link. So no
+    // session row outlives its link (Minor 1 of the Task 2b review).
+    const organization = await tx.findOne("organization", [
+      { field: "id", op: "eq", value: link.organizationId },
+    ]);
+    if (!organization || !(await lockOrganization(tx, organization))) return null;
     await tx.update(
       "ssoSetupSession",
       [

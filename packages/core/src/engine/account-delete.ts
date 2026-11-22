@@ -107,8 +107,7 @@ const SCIM_GROUP_CALLS = 2;
  *   organization, connection, domain, and SCIM token deletes, the member
  *   delete with its count, and one pending row. The SCIM Users and Groups,
  *   the teams, the invitations, the tokens, the roles, the team members,
- *   the setup sessions and links (plan 13a, ruling R17), and
- *   the active organization of the sessions go at the sweep
+ *   and the active organization of the sessions go at the sweep
  *   (organization-rest.ts). So a solo organization with SCIM Groups goes
  *   with the account too.
  *
@@ -147,7 +146,11 @@ const SCIM_GROUP_CALLS = 2;
  * a solo organization then sent 2 queries more, and a user actor fit no
  * solo organization. Ruling R17 moves the 2 deletes to the sweep
  * (`deleteOrganizationsRest`), and the setup open and each setup request
- * read the organization row. So the act sends the counts above again.
+ * read the organization row. So the act sends the counts above again. The
+ * sweep step of one solo organization costs 2 more (`ORGANIZATION_REST_CALLS`
+ * 15). The run of 2026-11-23 on the D1 binding (load 6, 18 CPUs): each act
+ * at its old pin, the organization delete route 33, and the worst sweep 43
+ * (the operator confirm with 3 SCIM Groups).
  */
 
 /**

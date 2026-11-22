@@ -2,9 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteAccount } from "../../src/engine/account-delete.js";
 import { ORGANIZATION_REST } from "../../src/engine/organization-rest.js";
 import { deleteOrganization } from "../../src/engine/organizations.js";
+import { createSetupLink } from "../../src/engine/sso/setup-links.js";
+import { openSetupSession, requireSetupSession } from "../../src/engine/sso/setup-session.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
+import type { AuthConfig, SsoConfig } from "../../src/index.js";
 import { IN_CHUNK } from "../../src/storage/batch.js";
 import { type ScimWorld, scim, scimAuth, scimToken } from "./helpers.js";
+
+/** The actor of a mint in the window: an app, which the manager recheck lets through. */
+const APP = { kind: "app", name: "support-tool" } as const;
 
 // The SCIM Groups go with their organization (ruling 53 P9 and ruling 74
 // of plan 12d): the organization delete removes the scimGroup and
@@ -23,8 +29,8 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 /** Acme with the SCIM User ada and `n` Groups, each with ada as its member. */
-async function acmeWithGroups(n: number) {
-  const w = await scimAuth();
+async function acmeWithGroups(n: number, overrides: Partial<AuthConfig> = {}) {
+  const w = await scimAuth(overrides);
   const { token } = await scimToken(w);
   const made = await scim(w, token, "POST", "/Users", {
     schemas: [USER_URN],
@@ -129,6 +135,54 @@ describe("the SCIM Groups of a deleted organization (ruling 74 of plan 12d)", ()
     expect(await pendingRests(w)).toBe(1);
     expect((await sweepExpired(w.config)).organizationRows).toBe(1);
     expect(await rows(w)).toEqual({ organizations: 0, groups: 0, members: 0, scimUsers: 0 });
+    expect(await pendingRests(w)).toBe(0);
+  }, 30_000);
+
+  it("refuses the setup link and its session while the rest waits for a second sweep (ruling R17)", async () => {
+    const { w, token, ada } = await acmeWithGroups(IN_CHUNK + 1, {
+      sso: { oidc: true, setup: {} } as SsoConfig,
+    });
+    const off = await scim(w, token, "PATCH", `/Users/${ada}`, {
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+      Operations: [{ op: "replace", path: "active", value: false }],
+    });
+    expect(off.status).toBe(200);
+    const mint = () =>
+      createSetupLink(w.config, APP, {
+        organizationId: w.org,
+        steps: ["domain"],
+        kinds: ["oidc"],
+        note: "Ada at Acme IT",
+      });
+    const first = await mint();
+    const idle = await mint();
+    if (!first.ok || !idle.ok) throw new Error("no link");
+    const opened = await openSetupSession(w.config, first.value.token);
+    if (!opened.ok) throw new Error(opened.code);
+    const request = new Request("https://api.example.com/auth/sso/setup/status", {
+      headers: { cookie: opened.value.cookie.split(";")[0] ?? "" },
+    });
+    expect((await requireSetupSession(w.config, request)).ok).toBe(true);
+    const setup = async () => ({
+      links: (await w.storage.findMany("ssoSetupLink", [])).length,
+      sessions: (await w.storage.findMany("ssoSetupSession", [])).length,
+    });
+    const done = await deleteAccount(w.config, { session: w.owner, ip: null, userAgent: null });
+    expect(done).toEqual({ ok: true, value: { ok: true } });
+    // The first sweep takes one chunk of groups. The rest row waits, and the setup rows wait with it.
+    expect((await sweepExpired(w.config)).organizationRows).toBe(0);
+    expect(await pendingRests(w)).toBe(1);
+    expect(await setup()).toEqual({ links: 2, sessions: 1 });
+    // In the window the organization row is gone. The status route and each draft write take
+    // `requireSetupSession`, so they refuse with the request. The open and a mint refuse too.
+    expect(await requireSetupSession(w.config, request)).toMatchObject({ code: "unauthorized" });
+    expect(await openSetupSession(w.config, idle.value.token)).toMatchObject({
+      code: "setup_link_invalid",
+    });
+    expect(await mint()).toMatchObject({ code: "not_found" });
+    expect(await setup()).toEqual({ links: 2, sessions: 1 });
+    expect((await sweepExpired(w.config)).organizationRows).toBe(1);
+    expect(await setup()).toEqual({ links: 0, sessions: 0 });
     expect(await pendingRests(w)).toBe(0);
   }, 30_000);
 });
