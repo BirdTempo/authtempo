@@ -125,6 +125,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `setup-page:ip:<ip>` | 1 hour | 60 | Each load of the confirm page `GET /sso/setup`. It has its own key, so a reload of the page spends no open |
 | `setup-open:link:<linkId>` | 1 hour | 20 | Each open of a live setup link, after the token check |
 | `setup-draft:link:<linkId>` | 1 hour | 60 | Each draft write of a setup session: a domain add or verify, the draft connection, and the pending SCIM token. A refused body counts too |
+| `setup-status:ip:<ip>` | 1 hour | 600 | Each load of the setup page `GET /sso/setup/status`, before the cookie check |
 | `setup-test:connection:<connectionId>` | 1 hour | 20 | Each test start of one connection, for a setup session and for a manager. A start that the checks refuse does not count |
 | `username:user:<userId>` | 1 hour | 5 | Username set, after the fresh rule and the name rules |
 | `username-available:ip:<ip>` | 15 minutes | 30 | Username check, before the name rules |

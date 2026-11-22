@@ -116,6 +116,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "setup-page:ip",
   // Plan 13a Task 4: the draft writes of one setup link (domain, connection, token).
   "setup-draft:link",
+  // Plan 13a Task 9: the loads of the setup page, by IP (each load, a refused cookie too).
+  "setup-status:ip",
   // Plan 13a Task 7: the test starts of one connection (a run row each).
   "setup-test:connection",
   // Plan 12i: the username set and the availability check.

@@ -88,6 +88,24 @@ export function setupSessionRoute(
   };
 }
 
+/** The loads of the setup page that one IP may make in one hour. A page that polls a run is one load each. */
+const SETUP_STATUS_PER_IP = { seconds: 3600, max: 600 };
+
+/**
+ * Counts each load of a route on `setup-status:ip` before the cookie check, so a caller with no
+ * valid cookie costs a count too. The route stays a setup session route: the check runs after.
+ */
+function withStatusLimit(route: Route): Route {
+  return {
+    ...route,
+    async handler(ctx) {
+      if (!(await limit(ctx.config, "setup-status:ip", ipKey(ctx.ip), SETUP_STATUS_PER_IP)))
+        return respond(fail("rate_limited"));
+      return route.handler(ctx);
+    },
+  };
+}
+
 /**
  * The confirm page of a setup link. It reads no row and writes none, so a
  * mail scanner that fetches the link opens nothing (spec 6.1 item 5). The
@@ -343,15 +361,17 @@ export function ssoSetupRoutes(config: ResolvedConfig): Route[] {
         });
       },
     },
-    // The page of the setup (Task 9). The ACS of a test sign-in answers 303 here with `run=<id>`.
-    setupSessionRoute("GET /sso/setup/status", async (ctx, caller) => {
-      const query = readQuery(ctx.url, setupStatusQuery);
-      if (!query.ok) return respond(query);
-      const input = await pageInput(ctx.config, caller, query.value);
-      return new Response(renderSetupPage(ctx.config, input), {
-        status: 200,
-        headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
-      });
-    }),
+    withStatusLimit(
+      // The page of the setup (Task 9). The ACS of a test sign-in answers 303 here with `run=<id>`.
+      setupSessionRoute("GET /sso/setup/status", async (ctx, caller) => {
+        const query = readQuery(ctx.url, setupStatusQuery);
+        if (!query.ok) return respond(query);
+        const input = await pageInput(ctx.config, caller, query.value);
+        return new Response(renderSetupPage(ctx.config, input), {
+          status: 200,
+          headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
+        });
+      }),
+    ),
   ];
 }

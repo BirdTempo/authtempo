@@ -266,7 +266,8 @@ describe("the column map (plan 12g)", () => {
     // and the confirm page counts by IP on the key of the open.
     // Plan 13a Task 4 adds 1: the draft writes of a setup link, keyed by the link id.
     // Plan 13a Task 7 adds 1: the test starts of one connection, keyed by the connection id.
-    expect(sites.length).toBe(122);
+    // Plan 13a Task 9 adds 1: the loads of the setup page, keyed by IP.
+    expect(sites.length).toBe(123);
     expect(sites).toContain('engine/social.ts "social-callback:ip" ipKey(ip)');
     expect(sites).toContain('engine/user-invite.ts "user-invite-confirm:ip" ipKey(input.ip)');
     expect(sites).toContain('http/routes/operator.ts "operator-create:actor" actorSubject(actor)');

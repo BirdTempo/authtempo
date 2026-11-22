@@ -774,4 +774,30 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "every member has a verified address: the organization create, the member add, and the invitation accept need one, and no route takes an address away; address-less.test.ts proves the engine reads",
     }),
   ),
+  // Plan 13a Task 9: the route serves the page only. The JSON answer of the schema is Task 11,
+  // and Task 11 removes these rows when its tests answer each shape.
+  ...(
+    [
+      ["domains[].record", "null"],
+      ["domains[].verifiedAt", "null"],
+      ["domains[].checkedAt", "null"],
+      ["domains[].connectionId", "null"],
+      ["domains[].expiresAt", "null"],
+      ["connection.mfa", "null"],
+      ["connection.scimRoles", "null"],
+      ["connection.oidc", "absent"],
+      ["connection.oidc.endpoints", "null"],
+      ["connection.saml", "absent"],
+      ["connection.saml.subjectAttribute", "null"],
+      ["connection.saml.attributes.name", "null"],
+    ] as const
+  ).map(
+    ([field, form]): AnswerShapeExempt => ({
+      key: "GET /sso/setup/status",
+      field,
+      form,
+      reason:
+        "Task 9 answers the HTML page of this route; the JSON answer is Task 11, which removes this row",
+    }),
+  ),
 ];
