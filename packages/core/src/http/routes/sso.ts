@@ -87,6 +87,18 @@ import { ssoContinuePage } from "../sso-continue-page.js";
  */
 export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
 
+/**
+ * The status of each listed connection until plan 13b Task 9 reads it from the row. The
+ * contract of `GET /sso/connections` needs the five keys, so each one is null for now.
+ */
+const NO_STATUS = Object.freeze({
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastFailureStep: null,
+  certificateEndsAt: null,
+  expiryStage: null,
+});
+
 /** Counts one SSO manager write of the user on its limit. True when the write is within the limit. */
 export function ssoManageAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
   return limit(config, "sso-manage:user", userId, SSO_MANAGE_PER_USER);
@@ -717,7 +729,8 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
           async (c) => readQuery(c.url, connectionListQuery),
           async (q) => q.organizationId,
           (actor, q) => listConnections(ctx.config, actor, q),
-          (connections) => json({ connections }),
+          (connections) =>
+            json({ connections: connections.map((c) => ({ ...c, status: NO_STATUS })) }),
         ),
     },
     {

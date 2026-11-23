@@ -174,6 +174,38 @@ describe("the connection routes (plan 12d Task 3)", () => {
     ]);
   });
 
+  it("answers each listed connection with a status of five nulls (plan 13b Task 0)", async () => {
+    // Task 9 fills the status from the row. Until then each field is null.
+    const w = await routeWorld();
+    const made = await createConnection(w.auth.config, SSO_APP, {
+      ...oidcBody(),
+      organizationId: w.org,
+      kind: "oidc",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const [status, body] = await send(
+      w,
+      "GET",
+      `/sso/connections?organizationId=${w.org}`,
+      null,
+      w.owner.token,
+    );
+    expect(status).toBe(200);
+    const listed = body.connections as { id: string; status: unknown }[];
+    expect(listed.map((c) => [c.id, c.status])).toEqual([
+      [
+        made.value.id,
+        {
+          lastSuccessAt: null,
+          lastFailureAt: null,
+          lastFailureStep: null,
+          certificateEndsAt: null,
+          expiryStage: null,
+        },
+      ],
+    ]);
+  });
+
   it("answers the refusals of the guard, the input, and the limit", async () => {
     const w = await routeWorld({ factor: false, limits: { connectionsPerOrganization: 1 } });
     const made = await createConnection(w.auth.config, SSO_APP, {

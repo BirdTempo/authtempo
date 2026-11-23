@@ -91,6 +91,24 @@ describe("schema version 18 (plan 13b)", () => {
     expect(schema.operatorAudit.indexes).toContainEqual(["organizationId", "id"]);
   });
 
+  it.each([
+    ["operatorAudit", "organizationId", "string"],
+    ["ssoConnection", "certificateEndsAt", "date"],
+    ["ssoConnection", "expiryStage", "integer"],
+    ["ssoConnection", "expiryNoticeAt", "date"],
+    ["ssoConnection", "lastSuccessAt", "date"],
+    ["ssoConnection", "lastFailureAt", "date"],
+    ["ssoConnection", "lastFailureStep", "string"],
+    ["scimToken", "expiryStage", "integer"],
+    ["scimToken", "expiryNoticeAt", "date"],
+    ["ssoSetupLink", "expiryStage", "integer"],
+    ["ssoSetupLink", "expiryNoticeAt", "date"],
+  ] as const)("nullable: %s.%s is a nullable %s", (model, field, type) => {
+    // An act on a user writes a null organization, and a row from before version 18 has no value.
+    const fields: Record<string, unknown> = schema[model].fields;
+    expect(fields[field]).toEqual({ type, nullable: true });
+  });
+
   it("expiry columns: a connection, a SCIM token, and a link read back each new field null", async () => {
     const w = ssoAuth({ sso: { oidc: true }, scim: {} });
     const organizationId = await seedOrganization(w);

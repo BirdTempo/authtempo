@@ -665,6 +665,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
+    // The query takes organizationId (plan 13b), but plan 13b Task 6 applies the filter.
     read("/operator/audit", auditQuery, (api, actor, q) =>
       api.audit.list({
         actor,
