@@ -325,12 +325,15 @@ export async function ownerAddresses(
   for (let page = 0; page < maxPages; page++) {
     const where: Where<"member">[] = [{ field: "organizationId", op: "eq", value: organizationId }];
     if (after !== null) where.push({ field: "id", op: "gt", value: after });
-    const members: MemberRow[] = await config.storage.findMany("member", where, {
+    // One row more than the page tells a full last page from a cut one (plan 13b Task 12): with
+    // `limit: pageSize`, an organization of exactly `pageSize` members on the last page looked cut.
+    const rows: MemberRow[] = await config.storage.findMany("member", where, {
       sort: { field: "id", dir: "asc" },
-      limit: pageSize,
+      limit: pageSize + 1,
     });
+    const members = rows.slice(0, pageSize);
     for (const m of members) if (isOwner(o, rankOf(o.ranks, m.role))) ids.push(m.userId);
-    if (members.length < pageSize) {
+    if (rows.length <= pageSize) {
       complete = true;
       break;
     }

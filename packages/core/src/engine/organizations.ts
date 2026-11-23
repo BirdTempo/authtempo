@@ -77,21 +77,30 @@ export interface AuditMeta {
  * The audit draft of a member or invitation act of `caller` in `organizationId` (plan 13b Task
  * 4). The caller is the actor. The IP and the user agent come from `meta`. `data` holds ids and
  * roles, never an address.
+ *
+ * A session of an impersonation (`session.actorId` not null) makes the operator the actor, with
+ * `platform: true` (plan 13b Task 12). The organization audit then shows a platform act with no
+ * IP and no user agent (spec 6.6 item 5). Without this, the IP and the user agent of the operator
+ * showed as an act of the member. The rules of impersonation allow some of these routes, for
+ * example the revoke and the accept of an invitation.
  */
 export function memberAuditDraft(
   caller: Pick<UserRow, "id">,
   organizationId: string,
-  meta: AuditMeta,
+  meta: AuditMeta & { session?: Pick<SessionRow, "actorId"> | undefined },
   input: {
     action: OrganizationAuditAction;
     targetUserId: string | null;
     data: Record<string, unknown>;
   },
 ): Result<OperatorAuditDraft> {
-  return organizationAuditDraft({ kind: "user", user: caller }, organizationId, {
+  const operatorId = meta.session?.actorId ?? null;
+  const actor = operatorId === null ? caller : { id: operatorId };
+  return organizationAuditDraft({ kind: "user", user: actor }, organizationId, {
     ...input,
     ip: meta.ip ?? null,
     userAgent: meta.userAgent ?? null,
+    platform: operatorId !== null,
   });
 }
 
