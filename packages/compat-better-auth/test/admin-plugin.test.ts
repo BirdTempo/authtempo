@@ -23,7 +23,12 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import { COOKIE_NAME, SESSION_KEYS } from "../src/server/shapes.js";
-import type { AdminOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
+import type {
+  AdminOptions,
+  ApiKeyServerApi,
+  BetterAuthOptions,
+  CompatDatabase,
+} from "../src/types.js";
 import { adminApp, cookieOf, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
@@ -1034,7 +1039,9 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
       expect(made.status).toBe(200);
       const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
       const body = references === "organization" ? { organizationId: orgId } : {};
-      const own = await a.auth.api.createApiKey({
+      // `adminApp` takes its plugins as a plain list, so its type does not see the key calls.
+      const keys = a.auth.api as unknown as ApiKeyServerApi;
+      const own = await keys.createApiKey({
         body: { name: "own", ...body },
         headers: new Headers({ cookie: ann.cookie }),
       });
@@ -1046,19 +1053,15 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
       const auditBefore = await db.storage.findMany("operatorAudit", []);
       const refused = { status: 403, code: BETTER_AUTH_CODES.impersonation_session };
       const calls = {
-        create: await thrown(
-          a.auth.api.createApiKey({ body: { name: "x", ...body }, headers: imp }),
-        ),
+        create: await thrown(keys.createApiKey({ body: { name: "x", ...body }, headers: imp })),
         update: await thrown(
-          a.auth.api.updateApiKey({ body: { keyId: own.id, name: "y" }, headers: imp }),
+          keys.updateApiKey({ body: { keyId: own.id, name: "y" }, headers: imp }),
         ),
         // Core's route of a user token revoke takes an impersonation session, so only the
         // organization key delete refuses.
         ...(references === "organization"
           ? {
-              delete: await thrown(
-                a.auth.api.deleteApiKey({ body: { keyId: own.id }, headers: imp }),
-              ),
+              delete: await thrown(keys.deleteApiKey({ body: { keyId: own.id }, headers: imp })),
             }
           : {}),
       };
