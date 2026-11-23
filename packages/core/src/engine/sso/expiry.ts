@@ -198,7 +198,8 @@ async function readDue(storage: StorageAdapter, kind: ExpiryKind, now: Date): Pr
         ...base(r),
         label: r.label,
         end: r.certificateEndsAt,
-        closed: false,
+        // A draft or a disabled connection signs no user in, so it sends no notice (ruling R13).
+        closed: r.draft || !r.enabled,
       }));
     case "scim_token":
       return (await storage.findMany("scimToken", [due], opts)).map((r) => ({
@@ -244,7 +245,9 @@ async function claim(
 /**
  * The expiry step of the sweep for one kind (plan 13b Task 10, spec 6.7 item 2). It reads at
  * most `EXPIRY_PAGE` due rows, and for each row it claims the due stage before it sends. A row
- * with no end, an end in the past, or a closed link loses its notice date and sends nothing. For
+ * with no end, an end in the past, a closed link, or a draft or disabled connection loses its
+ * notice date and sends nothing. The step reads one page of `EXPIRY_OWNER_PAGE` members. An owner
+ * past that page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`. For
  * an open row, the owners get at most `EXPIRY_MAIL_MAX` mails, then the step emits `sso.expiring`
  * and runs `hooks.sso.expiring`. Both run also while `account.notices` is off. The claim is the
  * record: a failed mail writes `notice.mail_failed`, and no sweep sends it again. The step stops
@@ -296,6 +299,14 @@ export async function sweepExpiry(
     });
     meter.step(1);
     if (!won) continue;
+    // An owner past the one member page gets no mail, and `ownersCut` does not count that owner.
+    // This line, the same as the one of the hand back, records the loss.
+    if (!owners.complete)
+      config.observe.emit({
+        name: "notice.mail_failed",
+        event: "sso_expiring",
+        errorName: new RangeError("owner scan bound"),
+      });
     let mails = 0;
     let attempts = 0;
     for (const email of owners.addresses) {

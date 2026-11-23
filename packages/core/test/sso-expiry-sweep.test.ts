@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig, SsoConfig } from "../src/config.js";
 import { createScimToken } from "../src/engine/scim/tokens.js";
+import { updateConnection } from "../src/engine/sso/connections.js";
+import { sweepExpiry } from "../src/engine/sso/expiry.js";
 import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { newId } from "../src/primitives/ids.js";
 import type { ExpiryKind } from "../src/schema.js";
+import { meterOf } from "../src/storage/meter.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import { recordCredential } from "./helpers.js";
@@ -376,6 +379,90 @@ describe("the expiry step of the sweep (plan 13b Task 10)", () => {
     expect(reads.mock.calls.filter(([model]) => model === "ssoSetupLink")).toEqual([]);
     expect(result.ssoExpiryNotices).toBe(1);
     expect(w.calls).toMatchObject([{ kind: "scim_token", id: token.value.id }]);
+  });
+
+  it("owner past the page: 101 members, the owner on page 2 gets no mail, and one line says so", async () => {
+    const w = await world();
+    // acme has its owner. 99 members and 1 late owner make 101: the late owner is on page 2.
+    for (let i = 0; i < 99; i++) {
+      const user = await w.seedUser(`member${i}@acme.example`);
+      w.clock.advance(1000);
+      const now = w.clock.now();
+      await w.storage.create("member", {
+        id: newId(now),
+        createdAt: now,
+        updatedAt: now,
+        organizationId: w.org,
+        userId: user.id,
+        role: "member",
+      });
+    }
+    await moreOwners(w, 1);
+    const id = await samlRow(w);
+    moveTo(w, STAGE_30);
+    const mails = await mailsOf(w, () => sweepExpired(w.config));
+    expect(mails.map((m) => m.to)).toEqual(["owner@acme.example"]);
+    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, mails: 1 }]);
+    expect(await w.events("notice.mail_failed")).toMatchObject([
+      { name: "notice.mail_failed", event: "sso_expiring", errorName: "RangeError" },
+    ]);
+  });
+
+  it("end past: a due SAML row whose end is past gets no mail, and its expiryNoticeAt goes to null", async () => {
+    const w = await world();
+    const id = await samlRow(w);
+    moveTo(w, "2027-02-16T00:00:00.000Z");
+    const mails = await mailsOf(w, () => sweepExpired(w.config));
+    expect([mails, w.calls]).toEqual([[], []]);
+    expect(stageOf(await connection(w, id))).toEqual([null, null]);
+    expect(await w.events("sso.expiring")).toEqual([]);
+  });
+
+  it("3 calls left: a row with 3 owners waits, and with 4 calls left it sends", async () => {
+    const w = await world();
+    await moreOwners(w, 2);
+    const id = await samlRow(w);
+    moveTo(w, STAGE_30);
+    const now = w.clock.now();
+    // The read is 1 call and the owner read 2. Then 3 calls stay: the claim and 3 mails need 4.
+    const short = meterOf(w.config.storage, 0);
+    const mails = await mailsOf(w, async () => {
+      expect(await sweepExpiry(w.config, "saml_certificate", now, short, 6)).toBe(0);
+    });
+    expect([mails, w.calls]).toEqual([[], []]);
+    expect(short.used).toBe(3);
+    expect(stageOf(await connection(w, id))).toEqual([null, STAGE_30]);
+    const enough = meterOf(w.config.storage, 0);
+    const sent = await mailsOf(w, async () => {
+      expect(await sweepExpiry(w.config, "saml_certificate", now, enough, 7)).toBe(1);
+    });
+    expect(sent).toHaveLength(3);
+    expect(enough.used).toBe(7);
+  });
+
+  it("setup off: with `sso.setup` false the expiry step does not read ssoSetupLink", async () => {
+    const w = await world({ sso: { saml: true, setup: false } as SsoConfig });
+    await samlRow(w);
+    moveTo(w, STAGE_30);
+    const reads = vi.spyOn(w.config.storage, "findMany");
+    expect((await sweepExpired(w.config)).ssoExpiryNotices).toBe(1);
+    // The reads of the expiry step: each one has an `expiryNoticeAt` term. Other steps read links too.
+    const models = reads.mock.calls
+      .filter(([, where]) => JSON.stringify(where).includes('"field":"expiryNoticeAt"'))
+      .map(([model]) => model);
+    expect(models).toEqual(["ssoConnection", "scimToken"]);
+  });
+
+  it("disabled: a due connection that is off gets no mail, and its expiryNoticeAt goes to null (ruling R13)", async () => {
+    const w = await world();
+    const id = await samlRow(w);
+    const off = await updateConnection(w.config, SSO_APP, { id, enabled: false });
+    expect(off.ok).toBe(true);
+    moveTo(w, STAGE_30);
+    const mails = await mailsOf(w, () => sweepExpired(w.config));
+    expect([mails, w.calls]).toEqual([[], []]);
+    expect(stageOf(await connection(w, id))).toEqual([null, null]);
+    expect(await w.events("sso.expiring")).toEqual([]);
   });
 
   it("names the token and the link in the notice, with no token, and stops one kind on a storage fault", async () => {

@@ -632,7 +632,8 @@ export interface SsoHooks {
   /**
    * Once for each expiry stage of a row, after the sweep claims the stage (plan 13b): a SAML
    * certificate, a SCIM token, or a setup link ends at `at`. It runs also when
-   * `account.notices` is false. A throw writes one log line, and the claim stays.
+   * `account.notices` is false. A throw writes one log line, and the claim stays. The call
+   * budget does not count the work of this hook. One sweep runs it at most 15 times.
    */
   expiring?(e: { organizationId: string; kind: ExpiryKind; id: string; at: Date }): Awaitable<void>;
 }
