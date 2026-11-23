@@ -235,6 +235,11 @@ describe("GET /organizations/audit (plan 13b Task 6)", () => {
     expect(ids).toEqual([...ids].sort());
     expect(ids).toEqual(await storedIds(w, w.o1));
     expect(p.next).toBeNull();
+    // Final review M1: a last page that is full also gives next null. The read takes limit + 1
+    // rows, so 3 rows at limit 3 show that no row comes after them.
+    const full = await page(w, w.owner.token, { organizationId: w.o1, limit: "3" });
+    expect(full.rows.map((r) => r.id)).toEqual(ids);
+    expect(full.next).toBeNull();
   });
 
   it(
