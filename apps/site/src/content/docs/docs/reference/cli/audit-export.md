@@ -58,6 +58,7 @@ An `invalid_body` stop with well-formed ids names the likely cause: a deployment
 - `ndjson` writes one JSON object per line: the row of [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit).
 - `csv` writes one header line, then one record per row. The columns are `id`, `createdAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `organizationId`, `reason`, `data`, `ip`, and `userAgent`. The `data` cell holds JSON text.
 - A CSV cell that starts with `=`, `+`, `-`, `@`, a tab, or a carriage return starts with `'` (the OWASP rule). So a spreadsheet runs no formula.
+- A CSV cell that holds a comma, a quote, a line break, or a `;` is in quotes. A spreadsheet with `;` as its list separator (for example de-DE or fr-FR) then keeps the cell whole, and no part of it starts a new cell.
 
 The export holds the operator view of each row: the actor kind and id, the reason, and the IP and user agent of each act. The organization audit of the owner shows less. Give the file only to a person who may see the operator data.
 

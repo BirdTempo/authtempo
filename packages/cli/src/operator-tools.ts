@@ -596,10 +596,15 @@ export const AUDIT_CSV_COLUMNS = [
  */
 const FORMULA_START = /^[=+\-@\t\r]/;
 
-/** One CSV cell (RFC 4180): the formula guard, then quotes when the cell holds a comma, a quote, or a line break. */
+/**
+ * One CSV cell (RFC 4180): the formula guard, then quotes when the cell holds
+ * a comma, a quote, a line break, or a `;`. A spreadsheet with `;` as its list
+ * separator (de-DE, fr-FR) splits an unquoted line at `;`, and the part after
+ * it can start with a formula lead (ruling R23 of plan 13b).
+ */
 function csvCell(value: string): string {
   const safe = FORMULA_START.test(value) ? `'${value}` : value;
-  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+  return /[",;\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** One audit row as one CSV record. A null is an empty cell, and `data` is JSON text. */
