@@ -64,7 +64,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Task 15 adds the two ID-token calls, the passkey-first sign-up, the two
     // Signal API reads, and the three multi-session calls.
     // Plan 13a Task 11 adds the five setup link calls and the seven setup session calls.
-    expect(CLIENT_CALLS).toHaveLength(143);
+    // Plan 13b Task 7 adds the organization audit list. The export calls the same row.
+    expect(CLIENT_CALLS).toHaveLength(144);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -163,6 +164,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.organizations.tokens.update({ ...org, id: "t", name: "cd" });
     await c.organizations.tokens.revoke({ ...org, id: "t" });
     await c.organizations.tokens.current();
+    await c.organizations.audit.list(org);
     await c.tokens.create({ name: "ci" });
     await c.tokens.list();
     await c.tokens.revoke({ id: "t" });
@@ -256,8 +258,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
     // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
     // Task 15 adds six compared rows and three that are not.
-    // Plan 13a Task 11 adds twelve compared rows.
-    expect(COMPARED).toHaveLength(133);
+    // Plan 13a Task 11 adds twelve compared rows. Plan 13b Task 7 adds the audit list.
+    expect(COMPARED).toHaveLength(134);
     expect(NOT_COMPARED).toHaveLength(10);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.

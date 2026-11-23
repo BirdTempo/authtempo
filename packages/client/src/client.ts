@@ -176,6 +176,8 @@ export type OAuthGrantJSON = Omit<OAuthGrantSummary, "createdAt"> & { createdAt:
 export type SsoDomainJSON = SsoDomainSummary;
 /** One SSO connection of an organization (plan 12d). No answer holds the client secret. */
 export type SsoConnectionJSON = SsoConnectionSummary;
+/** One connection of the list, with the status of its last sign-ins and its certificate end (plan 13b). */
+export type SsoConnectionListedJSON = AnswerOf<"GET /sso/connections">["connections"][number];
 /** One SCIM token of an organization (plan 12d). Never the token, never its hash. */
 export type ScimTokenJSON = ScimTokenSummary;
 /**
@@ -189,6 +191,12 @@ export type SetupPreviewJSON = AnswerOf<"GET /sso/setup-links/get">["preview"];
 /** The mint of a setup link. The organization goes in the query, the rest in the body. */
 export type SetupLinkInput = QueryOf<"POST /sso/setup-links/create"> &
   BodyOf<"POST /sso/setup-links/create">;
+/** One row of the audit of an organization (plan 13b), as the route contract answers it. */
+export type OrganizationAuditView = AnswerOf<"GET /organizations/audit">["rows"][number];
+/** The query of the audit of an organization. `limit` is 1 to 100, and the server default is 50. */
+export type OrganizationAuditQuery = Omit<QueryOf<"GET /organizations/audit">, "limit"> & {
+  limit?: number | undefined;
+};
 /** The IdP values of the draft connection of a setup session. The owner sets the rest after the setup. */
 export type SetupConnectionInput = BodyOf<"POST /sso/setup/connection">;
 /** What a setup session sees: its link, its own drafts, and the result of a test. */
@@ -776,6 +784,23 @@ export interface Client {
         ClientResult<{ organization: OrganizationJSON; apiToken: OrganizationTokenSummaryJSON }>
       >;
     };
+    /**
+     * The audit of one organization (plan 13b), in id order. It needs `audit:read`, which
+     * the owner holds by default. A row from before schema version 18 is not in it.
+     */
+    audit: {
+      /** One page. Pass `next` as `after` to read the page after it. `next` is null on the last page. */
+      list(
+        input: OrganizationAuditQuery,
+      ): Promise<ClientResult<{ rows: OrganizationAuditView[]; next: string | null }>>;
+      /**
+       * Every row of the query, page by page with `limit` 100. It holds one page at a time.
+       * A failed page throws its `ClientFailure`, after the rows of the pages before it.
+       */
+      export(
+        input: Omit<OrganizationAuditQuery, "after" | "limit">,
+      ): AsyncIterable<OrganizationAuditView>;
+    };
   };
   /**
    * API tokens for scripts and CLIs. `create`, `list`, `revoke`, and `update`
@@ -1087,7 +1112,7 @@ export interface Client {
     };
     /** The OIDC and SAML connections of an organization. */
     connections: {
-      list(input: { organizationId: string }): Promise<ClientResult<SsoConnectionJSON[]>>;
+      list(input: { organizationId: string }): Promise<ClientResult<SsoConnectionListedJSON[]>>;
       create(input: SsoConnectionInput): Promise<ClientResult<SsoConnectionJSON>>;
       /** `kind` and `organizationId` never change. */
       update(input: { id: string } & ConnectionFields): Promise<ClientResult<SsoConnectionJSON>>;
@@ -1750,6 +1775,44 @@ export function createClient(options: ClientOptions): Client {
       ),
     delete: () => changes(shaped(send<unknown>("anonymous.delete", {}), isOkTrue)),
   };
+  const auditList: Client["organizations"]["audit"]["list"] = ({
+    organizationId,
+    limit,
+    after,
+    action,
+    from,
+    to,
+  }) =>
+    send<{ rows: OrganizationAuditView[]; next: string | null }>(
+      "organizations.audit.list",
+      undefined,
+      {
+        organizationId,
+        ...(limit !== undefined ? { limit: String(limit) } : {}),
+        ...(after !== undefined ? { after } : {}),
+        ...(action !== undefined ? { action } : {}),
+        ...(from !== undefined ? { from } : {}),
+        ...(to !== undefined ? { to } : {}),
+      },
+    );
+  const audit: Client["organizations"]["audit"] = {
+    list: auditList,
+    // One request for each page, and only when the caller asks for the next row: a caller
+    // that stops early sends no more requests. A page is dropped when its rows are out.
+    async *export(input) {
+      let after: string | undefined;
+      do {
+        const page = await auditList({
+          ...input,
+          limit: 100,
+          ...(after !== undefined ? { after } : {}),
+        });
+        if (!page.ok) throw page;
+        yield* page.value.rows;
+        after = page.value.next ?? undefined;
+      } while (after !== undefined);
+    },
+  };
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),
     unlink: ({ id }) => shaped(send<unknown>("identities.unlink", { id }), isOkTrue),
@@ -2173,6 +2236,7 @@ export function createClient(options: ClientOptions): Client {
             "organizations.tokens.current",
           ),
       },
+      audit,
     },
     tokens: {
       create: ({ expiresInDays, organizationId, permissions, metadata, ...rest }) =>
@@ -2305,7 +2369,7 @@ export function createClient(options: ClientOptions): Client {
       },
       connections: {
         list: (input) =>
-          part<{ connections: SsoConnectionJSON[] }, "sso.connections.list">(
+          part<{ connections: SsoConnectionListedJSON[] }, "sso.connections.list">(
             "sso.connections.list",
             undefined,
             { organizationId: input.organizationId },
