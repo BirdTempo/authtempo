@@ -251,6 +251,8 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /handoff/start": { challenge: BODY43, redirect: "example://auth" },
   "GET /organizations/members": { organizationId: "$org" },
   "GET /organizations/invitations": { organizationId: "$org" },
+  // Plan 13b Task 6: the audit of an organization.
+  "GET /organizations/audit": { organizationId: "$org" },
   "GET /organizations/roles": { organizationId: "$org" },
   "GET /organizations/roles/get": { organizationId: "$org", name: "editor" },
   "GET /organizations/teams": { organizationId: "$org" },

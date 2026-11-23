@@ -665,11 +665,12 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
-    // The query takes organizationId (plan 13b), but plan 13b Task 6 applies the filter.
+    // organizationId reads the rows of one organization (plan 13b Task 6).
     read("/operator/audit", auditQuery, (api, actor, q) =>
       api.audit.list({
         actor,
         ...(q.targetUserId === undefined ? {} : { targetUserId: q.targetUserId }),
+        ...(q.organizationId === undefined ? {} : { organizationId: q.organizationId }),
         ...(q.after === undefined ? {} : { after: q.after }),
         ...limitOf(q.limit),
       }),

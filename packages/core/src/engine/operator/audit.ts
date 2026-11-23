@@ -4,19 +4,23 @@ import { isOperatorReason } from "../../operator-secret.js";
 import { newMonotonicId } from "../../primitives/ids.js";
 import { hasControlChar, removeRefusedChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
-import type {
-  OperatorAction,
-  OperatorAuditRow,
-  ORGANIZATION_AUDIT_ACTIONS,
+import {
+  type OperatorAction,
+  type OperatorAuditRow,
+  type ORGANIZATION_AUDIT_ACTIONS,
   ORGANIZATION_VISIBLE_ACTIONS,
-  SessionRow,
-  SSO_AUDIT_ACTIONS,
-  UserRow,
+  type SessionRow,
+  type SSO_AUDIT_ACTIONS,
+  type UserRow,
 } from "../../schema.js";
+import { findManyIn } from "../../storage/batch.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore } from "../hooks.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
-import { endedList } from "../sessions.js";
+// organizations.ts imports this file too. The cycle is safe: each side reads the other only
+// inside a function, never at module load.
+import { standing } from "../organizations.js";
+import { endedList, type ResolvedSession } from "../sessions.js";
 import { checkActor, type OperatorActor, requireScope } from "./guards.js";
 
 // The reason rule lives in the entry @authtempo/core/operator-secret, so the CLI reads the same rule (ruling 40).
@@ -592,13 +596,21 @@ function idInput(value: unknown): boolean {
  * reads one user's rows through its index.
  * `after` is the `next` of the page before. `limit` is 1 to 100, default
  * 50. `next` is the last id when the page is full, else null; so one
- * empty page comes after a full last page. Needs `operator.users` (else
- * `not_found`, as the user reads), an actor that passes `checkActor`, and
- * the scope `audit`.
+ * empty page comes after a full last page. `organizationId` reads the rows
+ * of one organization through its index (plan 13b); an operator act on a
+ * user names no organization, so the filter leaves it out. Needs
+ * `operator.users` (else `not_found`, as the user reads), an actor that
+ * passes `checkActor`, and the scope `audit`.
  */
 export async function listAudit(
   config: ResolvedConfig,
-  input: { actor: OperatorActor; targetUserId?: string; after?: string; limit?: number },
+  input: {
+    actor: OperatorActor;
+    targetUserId?: string;
+    organizationId?: string;
+    after?: string;
+    limit?: number;
+  },
 ): Promise<Result<{ rows: OperatorAuditRow[]; next: string | null }>> {
   if (!config.operator?.users) return fail("not_found");
   const named = checkActor(input.actor);
@@ -607,13 +619,17 @@ export async function listAudit(
   if (!scoped.ok) return scoped;
   const limit = input.limit ?? PAGE.default;
   if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max) return fail("invalid_body");
-  if (!idInput(input.targetUserId) || !idInput(input.after)) return fail("invalid_body");
+  if (!idInput(input.targetUserId) || !idInput(input.organizationId) || !idInput(input.after))
+    return fail("invalid_body");
   const rows = await config.storage.findMany(
     "operatorAudit",
     [
       ...(input.targetUserId === undefined
         ? []
         : [{ field: "targetUserId" as const, op: "eq" as const, value: input.targetUserId }]),
+      ...(input.organizationId === undefined
+        ? []
+        : [{ field: "organizationId" as const, op: "eq" as const, value: input.organizationId }]),
       ...(input.after === undefined
         ? []
         : [{ field: "id" as const, op: "gt" as const, value: input.after }]),
@@ -621,4 +637,110 @@ export async function listAudit(
     { sort: { field: "id", dir: "asc" }, limit },
   );
   return ok({ rows, next: rows.length === limit ? (rows.at(-1)?.id ?? null) : null });
+}
+
+/** A date input: absent, or a valid `Date`. */
+function dateInput(value: unknown): boolean {
+  return value === undefined || (value instanceof Date && !Number.isNaN(value.getTime()));
+}
+
+/** True for the act of a member: a user actor with no `data.platform` flag (plan 13b). */
+function memberAct(row: OperatorAuditRow): boolean {
+  return row.actorKind === "user" && row.data?.platform !== true;
+}
+
+/**
+ * The view of one row for the members of its organization (plan 13b, the view rule of Task 6).
+ * A member act shows the user id, the current address, the IP, and the user agent. `email` is
+ * null when the user row is gone; the row stays. The organization sees no detail of the
+ * platform: the act of a platform operator (`data.platform`) and of an operator secret shows
+ * `platform` with no id, no IP, and no user agent. A directory act shows the token name, and an
+ * app act the app name, with no IP and no user agent.
+ */
+function organizationView(
+  row: OperatorAuditRow,
+  emails: ReadonlyMap<string, string | null>,
+): OrganizationAuditView {
+  const member = memberAct(row);
+  const actor: OrganizationAuditView["actor"] = member
+    ? { kind: "member", id: row.actorId, email: emails.get(row.actorId) ?? null }
+    : row.actorKind === "scim" || row.actorKind === "app"
+      ? { kind: row.actorKind, id: row.actorId, email: null }
+      : { kind: "platform", id: null, email: null };
+  return {
+    id: row.id,
+    at: row.createdAt.toISOString(),
+    actor,
+    action: row.action,
+    targetUserId: row.targetUserId,
+    data: row.data,
+    ip: member ? row.ip : null,
+    userAgent: member ? row.userAgent : null,
+  };
+}
+
+/**
+ * The audit rows of one organization, oldest first, for its members (plan 13b Task 6). The
+ * caller needs `audit:read` in the organization: the owner of the `ranks` form, or a role of the
+ * `roles` form that lists it. A missing organization answers `not_found`, and a non-member or a
+ * missing permission `forbidden_rank`, as `GET /organizations/invitations` does.
+ *
+ * One read takes `limit + 1` rows through the index `[organizationId, id]`. `next` is the last id
+ * of the page only when one more row exists, so no empty page comes after the last one. `action`,
+ * `from` (inclusive), and `to` (exclusive) narrow the read. A row with a null `organizationId`
+ * (a row of version 17 or older) is never in the answer. Then one read of the users of the
+ * member actors (`findManyIn`, 50 ids for each statement) gives each current address.
+ * `limit` is 1 to 100, default 50; a bad input answers `invalid_body`.
+ */
+export async function listOrganizationAudit(
+  config: ResolvedConfig,
+  input: {
+    session: Pick<ResolvedSession, "user" | "session">;
+    organizationId: string;
+    after?: string;
+    limit?: number;
+    action?: string;
+    from?: Date;
+    to?: Date;
+  },
+): Promise<Result<{ rows: OrganizationAuditView[]; next: string | null }>> {
+  if (!config.organizations) return fail("not_found");
+  const limit = input.limit ?? PAGE.default;
+  if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max) return fail("invalid_body");
+  if (input.organizationId === undefined || !idInput(input.organizationId))
+    return fail("invalid_body");
+  if (!idInput(input.after) || !dateInput(input.from) || !dateInput(input.to))
+    return fail("invalid_body");
+  const visible: readonly string[] = ORGANIZATION_VISIBLE_ACTIONS;
+  if (input.action !== undefined && !visible.includes(input.action)) return fail("invalid_body");
+  const { from, to } = input;
+  if (from !== undefined && to !== undefined && from.getTime() >= to.getTime())
+    return fail("invalid_body");
+  const s = await standing(config, input.session.user, input.organizationId, { audit: ["read"] });
+  if (!s.ok) return s;
+  const read = await config.storage.findMany(
+    "operatorAudit",
+    [
+      { field: "organizationId", op: "eq", value: input.organizationId },
+      ...(input.after === undefined
+        ? []
+        : [{ field: "id" as const, op: "gt" as const, value: input.after }]),
+      ...(input.action === undefined
+        ? []
+        : [{ field: "action" as const, op: "eq" as const, value: input.action }]),
+      ...(from === undefined
+        ? []
+        : [{ field: "createdAt" as const, op: "gte" as const, value: from }]),
+      ...(to === undefined ? [] : [{ field: "createdAt" as const, op: "lt" as const, value: to }]),
+    ],
+    { sort: { field: "id", dir: "asc" }, limit: limit + 1 },
+  );
+  const rows = read.slice(0, limit);
+  const memberIds = rows.filter(memberAct).map((r) => r.actorId);
+  const users = await findManyIn(config.storage, "user", "id", memberIds);
+  const emails = new Map(users.map((u) => [u.id, u.email]));
+  return ok({
+    rows: rows.map((r) => organizationView(r, emails)),
+    next: read.length > limit ? (rows.at(-1)?.id ?? null) : null,
+  });
 }

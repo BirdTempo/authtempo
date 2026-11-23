@@ -9,6 +9,7 @@ import {
   revokeInvitation,
   setActiveOrganization,
 } from "../../engine/invitations.js";
+import { listOrganizationAudit } from "../../engine/operator/audit.js";
 import {
   createOrganizationToken,
   listOrganizationTokens,
@@ -39,6 +40,7 @@ import {
   id,
   inviteBody,
   memberBody,
+  organizationAuditQuery,
   orgBody,
   orgTokenCreateBody,
   orgTokenRevokeBody,
@@ -51,6 +53,7 @@ import {
 import { json, readJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
+import { readQuery } from "./sso.js";
 
 export function organizationRoutes(config: ResolvedConfig): Route[] {
   if (!config.organizations) return [];
@@ -209,6 +212,31 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     getByOrg("/organizations/invitations", "invitations", (user, organizationId, ctx, session) =>
       listInvitations(ctx.config, { user, session, organizationId }),
     ),
+    {
+      // Plan 13b Task 6: the audit of one organization. A session only (spec 29 item 17): a
+      // bearer of an organization token holds no session, so it answers 401.
+      method: "GET",
+      path: "/organizations/audit",
+      key: "GET /organizations/audit",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const q = readQuery(ctx.url, organizationAuditQuery);
+        if (!q.ok) return send(respond(q), s.renewed);
+        const { organizationId, after, limit, action, from, to } = q.value;
+        const r = await listOrganizationAudit(ctx.config, {
+          session: s.resolved,
+          organizationId,
+          // exactOptionalPropertyTypes: pass only the keys the caller sent.
+          ...(after !== undefined && { after }),
+          ...(limit !== undefined && { limit: Number(limit) }),
+          ...(action !== undefined && { action }),
+          ...(from !== undefined && { from: new Date(from) }),
+          ...(to !== undefined && { to: new Date(to) }),
+        });
+        return send(respond(r), s.renewed);
+      },
+    },
     post("/organizations/invitations/revoke", revokeBody, null, (s, b, ctx) =>
       revokeInvitation(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
     ),

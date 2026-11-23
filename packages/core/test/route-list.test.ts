@@ -92,7 +92,7 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
     // Plan 13a Task 0 adds the 13 routes of the enterprise setup, not mounted yet.
-    // Plan 13b Task 0 adds GET /organizations/audit, not mounted yet.
+    // Plan 13b Task 0 adds GET /organizations/audit, and Task 6 mounts it.
     expect(listed.length).toBe(223);
   });
 

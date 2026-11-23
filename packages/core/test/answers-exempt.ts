@@ -854,4 +854,12 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route tests use an OIDC draft; publicConnection builds the SAML form of this field for every route, and test/sso/connections.test.ts proves it",
     }),
   ),
+  // Plan 13b Task 6: each writer of an organization row gives `data`.
+  {
+    key: "GET /organizations/audit",
+    field: "rows[].data",
+    form: "null",
+    reason:
+      "each writer of a row with an organizationId gives data with the organizationId (plan 13b Task 3), so no flow writes a row of an organization with null data; the field is nullable because the audit row allows it; organization-audit-read.test.ts proves the view",
+  },
 ];

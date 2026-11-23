@@ -46,10 +46,11 @@ describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () 
     // The insert of writeAuditIn, the list, and the read of the impersonation
     // targets (plan 12f Task 11). The fourth is the read of a user's stop
     // rows, which the sweep calls for a cascading delete (ruling 19 of plan
-    // 12o). The writers operatorAct, the stop rows of
+    // 12o). The fifth is the read of one organization's rows (plan 13b
+    // Task 6). The writers operatorAct, the stop rows of
     // ruling 43, and each act of plan 12d call writeAuditIn (plan 12d
     // deviation 3). So the writer holds one insert.
-    expect(allowed).toBe(4);
+    expect(allowed).toBe(5);
     expect(writer.match(/\.create\(\s*"operatorAudit",/g)?.length).toBe(1);
     expect(uses).toBe(allowed);
     // In ddl.ts, each use of the name is a key of MYSQL_STRINGS in the form
