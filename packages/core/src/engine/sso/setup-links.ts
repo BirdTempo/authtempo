@@ -13,12 +13,12 @@ import {
   type SetupStep,
   type SsoSetupLinkRow,
 } from "../../schema.js";
-import { findManyIn } from "../../storage/batch.js";
+import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
 import type { Where } from "../../storage/port.js";
 import { runAfter } from "../hooks.js";
 import { sendNotice } from "../notices.js";
 import { writeAuditIn } from "../operator/audit.js";
-import { isOwner, rankOf } from "../ranks.js";
+import { isOwner, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { tokenHint } from "../tokens.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { nextNotice } from "./expiry.js";
@@ -287,10 +287,10 @@ export async function revokeSetupLink(
 
 /**
  * The owner scan of a hand back (ruling R23 of plan 13a): every owner gets the notice, so the scan
- * reads all pages of the members of the organization. `pageSize` is one read. `maxPages` is a
- * safety bound (1000 pages, 100000 members at the default), not a rule: a scan that hits it
- * writes one warning line, and the owners after it get no mail. It is an object so a test sets a
- * small page.
+ * reads all pages of the member rows that can hold the owner rank (`belowOwnerRoles`). `pageSize`
+ * is one read. `maxPages` is a safety bound (1000 pages, 100000 rows at the default), not a rule:
+ * a scan that hits it writes one warning line, and the owners after it get no mail. It is an
+ * object so a test sets a small page.
  */
 export const SETUP_OWNER_SCAN = { pageSize: 100, maxPages: 1000 };
 
@@ -305,10 +305,31 @@ export interface OwnerScan {
 }
 
 /**
+ * The role names that the owner read leaves out (final review I1 of plan 13b): each name of the
+ * role table below the owner rank. A member row holds one name or a comma list (`ROLE_RE`), and
+ * the parts of a list have no fixed order. The port has no "contains" op, so a term
+ * `role in <owner names>` misses an owner such as `member,owner`. One `ne` term for each name
+ * below the owner rank is right for both forms: it drops only a row that holds exactly one of
+ * those names. A row that stays holds an owner name, a comma list, or a dynamic role, and
+ * `isOwner` checks it. A dynamic role never has the owner rank (see `ownerCount`).
+ *
+ * Null when the names are more than `IN_CHUNK`: D1 binds at most 100 parameters to a query (see
+ * `IN_CHUNK`), so the read then has no role term and reads all member rows. That is slower, and
+ * it misses no owner.
+ */
+function belowOwnerRoles(o: ResolvedOrganizations): string[] | null {
+  const names = new Set([...Object.keys(o.ranks), ...Object.keys(o.roles)]);
+  const below = [...names].filter((name) => !isOwner(o, rankOf(o.ranks, name)));
+  return below.length > IN_CHUNK ? null : below;
+}
+
+/**
  * The addresses of the owners of an organization: the members whose role holds the owner rank
- * (`isOwner`, the rule of the manager guard), in the order of the member id. A user with no
- * address gives null, and `sendNotice` skips it. `complete` is false when the safety bound ended
- * the scan. `owners` counts each owner that the scan found, also the owners past `bound.most`.
+ * (`isOwner`, the rule of the manager guard), in the order of the member id. The read leaves out
+ * each row with exactly one role below the owner rank (`belowOwnerRoles`), so `bound` counts the
+ * rows that can hold the owner rank, not all members. A user with no address gives null, and
+ * `sendNotice` skips it. `complete` is false when the safety bound ended the scan with rows still
+ * to read. `owners` counts each owner that the scan found, also the owners past `bound.most`.
  * The default bound is `SETUP_OWNER_SCAN`, which the hand back uses.
  */
 export async function ownerAddresses(
@@ -319,11 +340,13 @@ export async function ownerAddresses(
   const o = config.organizations;
   if (!o) return { addresses: [], complete: true, owners: 0 };
   const { pageSize, maxPages } = bound;
+  const below = belowOwnerRoles(o) ?? [];
   const ids: string[] = [];
   let after: string | null = null;
   let complete = false;
   for (let page = 0; page < maxPages; page++) {
     const where: Where<"member">[] = [{ field: "organizationId", op: "eq", value: organizationId }];
+    for (const name of below) where.push({ field: "role", op: "ne", value: name });
     if (after !== null) where.push({ field: "id", op: "gt", value: after });
     // One row more than the page tells a full last page from a cut one (plan 13b Task 12): with
     // `limit: pageSize`, an organization of exactly `pageSize` members on the last page looked cut.

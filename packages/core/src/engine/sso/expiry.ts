@@ -25,7 +25,11 @@ const HOUR_MS = 3_600_000;
 
 /** The due rows of one kind that one read of the sweep takes (plan 13b Task 10). */
 export const EXPIRY_PAGE = 5;
-/** The members that the owner read of one row scans: one page. */
+/**
+ * The member rows that the owner read of one row scans: one page. The read leaves out each row
+ * with exactly one role below the owner rank, so the page holds the owners, the comma lists, and
+ * the dynamic roles (final review I1 of plan 13b).
+ */
 export const EXPIRY_OWNER_PAGE = 100;
 /** The mails of one row at most. The event counts the owners past it in `ownersCut`. */
 export const EXPIRY_MAIL_MAX = 10;
@@ -257,8 +261,9 @@ async function claim(
  * with no end, an end in the past, or a closed link loses its notice date and sends nothing. The
  * read skips a disabled connection, which keeps its notice date (ruling R15). After an enable,
  * the next sweep sends the nearest due stage. The step reads one page of `EXPIRY_OWNER_PAGE`
- * members. An owner past that page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`. For
- * an open row, the owners get at most `EXPIRY_MAIL_MAX` mails, then the step emits `sso.expiring`
+ * member rows that can hold the owner rank: a row with exactly one role below the owner rank is
+ * not in the read. When more rows stay, the scan is cut: an owner past the page gets no mail, and
+ * the step writes `notice.mail_failed` with a `RangeError`. For an open row, the owners get at most `EXPIRY_MAIL_MAX` mails, then the step emits `sso.expiring`
  * and runs `hooks.sso.expiring`. Both run also while `account.notices` is off. The claim is the
  * record: a failed mail writes `notice.mail_failed`, and no sweep sends it again. The step stops
  * before a row whose calls do not fit `limit`, and that row waits for the next sweep. Each mail
@@ -309,8 +314,9 @@ export async function sweepExpiry(
     });
     meter.step(1);
     if (!won) continue;
-    // An owner past the one member page gets no mail, and `ownersCut` does not count that owner.
-    // This line, the same as the one of the hand back, records the loss.
+    // The scan is cut only when more than one page of rows can hold the owner rank. An owner past
+    // the page gets no mail, and `ownersCut` does not count that owner. This line, the same as the
+    // one of the hand back, records the loss.
     if (!owners.complete)
       config.observe.emit({
         name: "notice.mail_failed",

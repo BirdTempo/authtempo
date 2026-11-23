@@ -3,11 +3,13 @@ import { addMember, createOrganization } from "../src/engine/organizations.js";
 import {
   createSetupLink,
   handBack,
+  ownerAddresses,
   revokeSetupLink,
   SETUP_OWNER_SCAN,
 } from "../src/engine/sso/setup-links.js";
 import { openSetupSession, requireSetupSession } from "../src/engine/sso/setup-session.js";
 import { newId } from "../src/primitives/ids.js";
+import { IN_CHUNK } from "../src/storage/batch.js";
 import { recordAddress, recordCredential } from "./helpers.js";
 import { scimAuth } from "./scim/helpers.js";
 import { SSO_APP } from "./sso/helpers.js";
@@ -226,12 +228,57 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     expect(readyNotices(w)).toHaveLength(53);
   });
 
-  it("reads every page: an owner after 120 members still gets the notice", async () => {
+  // Final review I1: the read drops each row that holds exactly one role below the owner rank. A
+  // comma list stays in the read, because its parts have no fixed order. So the tests of the pages
+  // below fill the pages with comma lists below the owner rank.
+  it("reads the owners only: an owner after 5 single-role members is in the first page, and no warning line", async () => {
+    const { w } = await world();
+    const { s } = await session(w);
+    SETUP_OWNER_SCAN.pageSize = 2;
+    SETUP_OWNER_SCAN.maxPages = 1;
+    for (let i = 0; i < 5; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer");
+    await ownerRow(w, "late@acme.example", "owner");
+    await handBack(w.config, s);
+    expect(readyNotices(w).map((m) => m.to)).toEqual(["owner@acme.example", "late@acme.example"]);
+    const lines = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(lines).not.toContain("notice mail failed");
+  });
+
+  it("reads with no role term when the role names below the owner rank pass the D1 bound of 50", async () => {
+    const { w } = await world();
+    const o = w.config.organizations;
+    if (!o) throw new Error("no organizations");
+    const viewer = o.roles.viewer;
+    if (!viewer) throw new Error("no viewer role");
+    const ranks = { ...o.ranks };
+    const roles = { ...o.roles };
+    for (let i = 0; i <= IN_CHUNK; i++) {
+      ranks[`extra${i}`] = viewer.rank;
+      roles[`extra${i}`] = viewer;
+    }
+    const wide = { ...w.config, organizations: { ...o, ranks, roles } };
+    for (let i = 0; i < 3; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer");
+    await ownerRow(w, "late@acme.example", "owner");
+    const reads = vi.spyOn(w.config.storage, "findMany");
+    const roleTerms = () =>
+      reads.mock.calls
+        .filter(([model]) => model === "member")
+        .map(([, where]) => where.filter((t) => t.field === "role").length);
+    const owners = { addresses: ["owner@acme.example", "late@acme.example"], complete: true };
+    expect(await ownerAddresses(w.config, w.org)).toEqual({ ...owners, owners: 2 });
+    const narrow = roleTerms();
+    reads.mockClear();
+    expect(await ownerAddresses(wide, w.org)).toEqual({ ...owners, owners: 2 });
+    // The table of the test has 3 names below the owner rank; the wide table has 54.
+    expect([narrow, roleTerms()]).toEqual([[3], [0]]);
+  });
+
+  it("reads every page: an owner after 120 comma members still gets the notice", async () => {
     const { w, events } = await world();
     const { s } = await session(w);
     SETUP_OWNER_SCAN.pageSize = 2;
-    for (let i = 0; i < 120; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer");
-    await ownerRow(w, "late@acme.example", "owner");
+    for (let i = 0; i < 120; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer,member");
+    await ownerRow(w, "late@acme.example", "member,owner");
     await handBack(w.config, s);
     expect(readyNotices(w).map((m) => m.to)).toEqual(["owner@acme.example", "late@acme.example"]);
     expect(events).toHaveLength(1);
@@ -245,7 +292,7 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     SETUP_OWNER_SCAN.pageSize = 2;
     // The first owner holds position 1. Positions 3, 6, and 9 are the extra rows of the reads.
     for (let p = 2; p <= 9; p++)
-      await ownerRow(w, `p${p}@acme.example`, p % 3 === 0 ? "owner" : "viewer");
+      await ownerRow(w, `p${p}@acme.example`, p % 3 === 0 ? "owner" : "viewer,member");
     await handBack(w.config, s);
     expect(readyNotices(w).map((m) => m.to)).toEqual([
       "owner@acme.example",
@@ -260,7 +307,7 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     const { s } = await session(w);
     SETUP_OWNER_SCAN.pageSize = 2;
     SETUP_OWNER_SCAN.maxPages = 3;
-    for (let p = 2; p <= 5; p++) await ownerRow(w, `p${p}@acme.example`, "viewer");
+    for (let p = 2; p <= 5; p++) await ownerRow(w, `p${p}@acme.example`, "viewer,member");
     await ownerRow(w, "p6@acme.example", "owner");
     await handBack(w.config, s);
     expect(readyNotices(w).map((m) => m.to)).toEqual(["owner@acme.example", "p6@acme.example"]);
@@ -273,7 +320,7 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     const { s } = await session(w);
     SETUP_OWNER_SCAN.pageSize = 2;
     SETUP_OWNER_SCAN.maxPages = 2;
-    for (let i = 0; i < 5; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer");
+    for (let i = 0; i < 5; i++) await ownerRow(w, `viewer${i}@acme.example`, "viewer,member");
     await ownerRow(w, "late@acme.example", "owner");
     await handBack(w.config, s);
     expect(readyNotices(w).map((m) => m.to)).toEqual(["owner@acme.example"]);

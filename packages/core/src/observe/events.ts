@@ -897,9 +897,11 @@ export const EVENTS = {
     fields: { organizationId: ROW_ID, connectionId: ROW_ID, linkId: ROW_ID },
   },
   // One claimed expiry stage of a row (plan 13b Task 10), always emitted, also with no mail. The
-  // stage is 30, 7, or 1 days. `mails` counts the sent notices. `ownersCut` counts the owners of
-  // the one member page past the mail cap of one row. An owner past that page is not in the count:
-  // for that owner the sweep writes `notice.mail_failed` with a `RangeError`.
+  // stage is 30, 7, or 1 days. `mails` counts the sent notices. `ownersCut` counts the owners past
+  // the mail cap of one row, in the one page of 100 member rows that can hold the owner rank. A row
+  // with exactly one role below the owner rank is not in that page. Only when more than 100 rows
+  // can hold the owner rank is the scan cut: an owner past the page is not in the count, and the
+  // sweep writes `notice.mail_failed` with a `RangeError`.
   "sso.expiring": {
     level: "info",
     fields: {

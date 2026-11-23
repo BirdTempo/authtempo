@@ -381,9 +381,10 @@ describe("the expiry step of the sweep (plan 13b Task 10)", () => {
     expect(w.calls).toMatchObject([{ kind: "scim_token", id: token.value.id }]);
   });
 
-  it("owner past the page: 101 members, the owner on page 2 gets no mail, and one line says so", async () => {
+  it("owner past the page: 101 rows that can hold the owner rank, the owner on page 2 gets no mail, and one line says so", async () => {
     const w = await world();
-    // acme has its owner. 99 members and 1 late owner make 101: the late owner is on page 2.
+    // acme has its owner. 99 comma members and 1 late owner make 101: the late owner is on page 2.
+    // The read keeps a comma list (final review I1), so the comma members fill the page.
     for (let i = 0; i < 99; i++) {
       const user = await w.seedUser(`member${i}@acme.example`);
       w.clock.advance(1000);
@@ -394,7 +395,7 @@ describe("the expiry step of the sweep (plan 13b Task 10)", () => {
         updatedAt: now,
         organizationId: w.org,
         userId: user.id,
-        role: "member",
+        role: "member,viewer",
       });
     }
     await moreOwners(w, 1);

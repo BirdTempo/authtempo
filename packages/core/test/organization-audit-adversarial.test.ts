@@ -1046,10 +1046,43 @@ describe("the expiry notices under attack (plan 13b Task 12)", () => {
     LONG_TEST_MS,
   );
 
+  // Final review I1: the owner read drops each row that holds exactly one role below the owner
+  // rank. The page of 100 holds the rows that stay: an owner role, a comma list, or a dynamic role.
+  // A comma list of roles below the owner rank stays in the read, so it fills the page here.
   it("owner scan at 100 members: one page holds all, so no line says the scan was cut", async () => {
     const w = await sweepWorld();
-    // acme has its owner: 99 members more make 100.
-    await members(w, 99, "member", "member");
+    // acme has its owner: 98 comma members and 1 comma owner more make 100 rows in the read.
+    await members(w, 98, "member,viewer", "member");
+    await members(w, 1, "member,owner", "late");
+    const id = await samlRow(w);
+    moveTo(w, "2027-01-16T00:00:00.000Z");
+    const mails = await mailsOf(w, () => sweepExpired(w.config));
+    expect(mails.map((m) => m.to)).toEqual(["owner@acme.example", "late0@acme.example"]);
+    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, mails: 2, ownersCut: 0 }]);
+    expect(await w.events("notice.mail_failed")).toEqual([]);
+  });
+
+  it("owner scan past 100 members: an owner after 150 members gets the mail, and no line says the scan was cut", async () => {
+    const w = await sweepWorld();
+    await members(w, 150, "member", "member");
+    await members(w, 1, "owner", "late");
+    await members(w, 1, "viewer,owner", "comma");
+    const id = await samlRow(w);
+    moveTo(w, "2027-01-16T00:00:00.000Z");
+    const mails = await mailsOf(w, () => sweepExpired(w.config));
+    expect(mails.map((m) => m.to)).toEqual([
+      "owner@acme.example",
+      "late0@acme.example",
+      "comma0@acme.example",
+    ]);
+    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, mails: 3, ownersCut: 0 }]);
+    expect(await w.events("notice.mail_failed")).toEqual([]);
+  });
+
+  it("owner scan at 101 members with the owners in the first page: the mail goes, and no RangeError line", async () => {
+    const w = await sweepWorld();
+    // acme has its owner first: 100 members more make 101.
+    await members(w, 100, "member", "member");
     const id = await samlRow(w);
     moveTo(w, "2027-01-16T00:00:00.000Z");
     const mails = await mailsOf(w, () => sweepExpired(w.config));
@@ -1058,15 +1091,15 @@ describe("the expiry notices under attack (plan 13b Task 12)", () => {
     expect(await w.events("notice.mail_failed")).toEqual([]);
   });
 
-  it("owner scan at 101 members: the owner past the page gets no mail, and one line says so", async () => {
+  it("owner scan cut for real: 101 owners more than the page reads give 10 mails, a count of 90, and one RangeError line", async () => {
     const w = await sweepWorld();
-    await members(w, 99, "member", "member");
-    await members(w, 1, "owner", "late");
+    // acme has its owner: 101 owners more make 102 rows in the read, so the page of 100 is cut.
+    await members(w, 101, "owner", "extra");
     const id = await samlRow(w);
     moveTo(w, "2027-01-16T00:00:00.000Z");
     const mails = await mailsOf(w, () => sweepExpired(w.config));
-    expect(mails.map((m) => m.to)).toEqual(["owner@acme.example"]);
-    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, mails: 1, ownersCut: 0 }]);
+    expect(mails).toHaveLength(10);
+    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, mails: 10, ownersCut: 90 }]);
     expect(await w.events("notice.mail_failed")).toMatchObject([
       { event: "sso_expiring", errorName: "RangeError" },
     ]);
