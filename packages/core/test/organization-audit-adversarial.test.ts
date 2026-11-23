@@ -829,7 +829,9 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
     LONG_TEST_MS,
   );
 
-  it("permission loss: a demoted owner and a role that loses audit:read are refused at the next read", async () => {
+  // Ruling R20: a stored role never holds audit:read, so the owner cannot give it to a role, and
+  // a role cannot lose it. The demotion is the one way an owner loses the read.
+  it("permission loss: a demoted owner is refused at the next read, and no stored role gets audit:read", async () => {
     const w = await world();
     const second = await memberOf(w, w.owner.user, w.o1, "second@acme.example", "owner");
     expect((await read(w, w.owner.token, { organizationId: w.o1 })).status).toBe(200);
@@ -841,24 +843,16 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
     });
     expect(demoted.ok).toBe(true);
     expect(await read(w, w.owner.token, { organizationId: w.o1 })).toEqual(FORBIDDEN);
-    // A role of the owner with audit:read, then the same role without it.
-    const made = await createRole(w.config, {
-      user: second.user,
-      organizationId: w.o1,
-      name: "auditor",
-      rank: 3,
-      permissions: { audit: ["read"] },
-    });
-    expect(made.ok).toBe(true);
+    // An owner cannot store a role with audit:read, at the create or at the update.
+    const role = { user: second.user, organizationId: w.o1, name: "auditor" };
+    const made = await createRole(w.config, { ...role, rank: 3, permissions: { audit: ["read"] } });
+    expect(made).toMatchObject({ ok: false, code: "statement_not_grantable" });
+    expect(
+      (await createRole(w.config, { ...role, rank: 3, permissions: { member: ["read"] } })).ok,
+    ).toBe(true);
+    const grown = await updateRole(w.config, { ...role, permissions: { audit: ["read"] } });
+    expect(grown).toMatchObject({ ok: false, code: "statement_not_grantable" });
     const ann = await memberOf(w, second.user, w.o1, "ann@acme.example", "auditor");
-    expect((await read(w, ann.token, { organizationId: w.o1 })).status).toBe(200);
-    const cut = await updateRole(w.config, {
-      user: second.user,
-      organizationId: w.o1,
-      name: "auditor",
-      permissions: { member: ["read"] },
-    });
-    expect(cut.ok).toBe(true);
     expect(await read(w, ann.token, { organizationId: w.o1 })).toEqual(FORBIDDEN);
   });
 
@@ -873,7 +867,9 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
       rank: 1,
       permissions: { audit: ["read"] },
     });
-    expect(made).toMatchObject({ ok: false, code: "forbidden_rank" });
+    // The admin passes the rank checks at rank 1. The audit statement then answers first
+    // (ruling R20 of plan 13b), before the subset check.
+    expect(made).toMatchObject({ ok: false, code: "statement_not_grantable" });
     // A member of a custom role with no audit:read is refused too.
     const plain = await createRole(w.config, {
       user: w.owner.user,
