@@ -32,6 +32,8 @@ export const DEMO_EXEMPT = {
   dynamicRoles: "An organization tool, not a sign-in method.",
   teams: "An organization tool, not a sign-in method.",
   // Plan 12d: a domain proof needs a DNS record of the visitor's own domain.
+  // Plan 13a: a setup link serves an IT admin of an organization, not a visitor of the demo.
+  ssoSetup: "A setup link is for the IT admin of an organization, and the demo has none.",
   sso: "Enterprise SSO needs a domain that the visitor proves by DNS, and a sign-in provider of its own.",
   operatorSso: "An operator tool, not a sign-in method.",
   // Plan 12d Task 9b: a SCIM server needs a directory of the visitor's own.

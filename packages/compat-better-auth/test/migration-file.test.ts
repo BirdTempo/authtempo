@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import core0011D1 from "../../adapter-d1/migrations/0011_schema_v11.sql?raw";
 import core0012D1 from "../../adapter-d1/migrations/0012_schema_v12.sql?raw";
 import core0014D1 from "../../adapter-d1/migrations/0014_schema_v14.sql?raw";
+import core0017D1 from "../../adapter-d1/migrations/0017_schema_v17.sql?raw";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
@@ -18,6 +19,7 @@ import shipped0010 from "../migrations/d1/0010_compat_schema_v13.sql?raw";
 import shipped0011 from "../migrations/d1/0011_compat_schema_v14.sql?raw";
 import shipped0012 from "../migrations/d1/0012_compat_schema_v15.sql?raw";
 import shipped0013 from "../migrations/d1/0013_compat_schema_v16.sql?raw";
+import shipped0014 from "../migrations/d1/0014_compat_schema_v17.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -31,6 +33,7 @@ import shipped0010Before17 from "../migrations/d1-before-1.7/0010_compat_schema_
 import shipped0011Before17 from "../migrations/d1-before-1.7/0011_compat_schema_v14.sql?raw";
 import shipped0012Before17 from "../migrations/d1-before-1.7/0012_compat_schema_v15.sql?raw";
 import shipped0013Before17 from "../migrations/d1-before-1.7/0013_compat_schema_v16.sql?raw";
+import shipped0014Before17 from "../migrations/d1-before-1.7/0014_compat_schema_v17.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -45,6 +48,7 @@ import {
   compatMigration0011Sql,
   compatMigration0012Sql,
   compatMigration0013Sql,
+  compatMigration0014Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
@@ -53,6 +57,7 @@ import {
   MIGRATION_0011_NAME,
   MIGRATION_0012_NAME,
   MIGRATION_0013_NAME,
+  MIGRATION_0014_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
@@ -101,6 +106,16 @@ const ADDED_IN_11: ReadonlySet<string> = new Set([
 const columnsBefore11 = (model: Parameters<typeof columnsOf>[0]) =>
   model === "oauthClient" || model === "oauthToken"
     ? columnsOf(model).filter((c) => !ADDED_IN_11.has(c))
+    : columnsOf(model);
+
+/**
+ * The columns of a model before schema version 17. Migration 0014 (plan 13a)
+ * adds draft, version, pending, and setup_link_id last to three SSO tables.
+ */
+const ADDED_IN_17: ReadonlySet<string> = new Set(["draft", "version", "pending", "setup_link_id"]);
+const columnsBefore17 = (model: Parameters<typeof columnsOf>[0]) =>
+  model === "ssoConnection" || model === "ssoDomain" || model === "scimToken"
+    ? columnsOf(model).filter((c) => !ADDED_IN_17.has(c))
     : columnsOf(model);
 
 /** The ta tables in the database, by name. */
@@ -906,7 +921,7 @@ describe("migration 0011 (plan 12d)", () => {
       const cols = (
         db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
       ).map((c) => c.name);
-      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      expect({ model, cols }).toEqual({ model, cols: columnsBefore17(model) });
       const found = (db.prepare(`PRAGMA index_list(${TABLES[model]})`).all() as { name: string }[])
         .map((i) => i.name)
         .filter((name) => !name.startsWith("sqlite_autoindex_"))
@@ -1166,6 +1181,106 @@ describe("migration 0013 (plan 12p)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "13" },
       { key: "schema_version", value: "16" },
+    ]);
+  });
+});
+
+describe("migration 0014 (plan 13a)", () => {
+  /** The statements of a text, without comments, blank space, and the ta_meta version writes. */
+  const statementsOf = (text: string) =>
+    normalize(text)
+      .split(";")
+      .map((st) => st.trim())
+      .filter((st) => st !== "" && !st.startsWith("UPDATE ta_meta"));
+
+  it("ships both D1 files as the SQLite text of compatMigration0014Sql", () => {
+    const text = compatMigration0014Sql("sqlite");
+    expect(normalize(shipped0014)).toBe(normalize(text));
+    expect(normalize(shipped0014Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0013, and the step writes '14' and '17'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0014_NAME)).toBe(names.indexOf(MIGRATION_0013_NAME) + 1);
+    expect(MIGRATION_0014_NAME).toBe("0014_compat_schema_v17");
+    for (const dialect of ["postgres", "sqlite"] as const) {
+      const text = compatMigration0014Sql(dialect);
+      expect(text).toContain("UPDATE ta_meta SET value = '14' WHERE key = 'compat_better_auth';");
+      expect(text).toContain("UPDATE ta_meta SET value = '17' WHERE key = 'schema_version';");
+    }
+  });
+
+  it("holds core 0017's statements on Postgres and on D1", () => {
+    const pg = MIGRATIONS.find((m) => m.name === "0017_schema_v17");
+    expect(pg).toBeDefined();
+    expect(statementsOf(compatMigration0014Sql("postgres"))).toEqual(statementsOf(pg?.sql ?? ""));
+    expect(statementsOf(compatMigration0014Sql("sqlite"))).toEqual(statementsOf(core0017D1));
+  });
+
+  it("adds the setup columns and tables, and a connection of compat 13 reads as no draft at version 1", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+      shipped0011,
+      shipped0012,
+      shipped0013,
+    ])
+      db.exec(text);
+    // A connection, a domain, and a token as core 16 writes them.
+    db.exec(
+      `INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES ('c16', 1, 2, 'o1', 'oidc', 'Okta', 1, 1, 'member', '{}', 'sealed', 3, NULL, NULL)`,
+    );
+    db.exec(
+      `INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES ('t16', 1, 1, 'o1', 'Okta', 'h-t16', 'abcd', '["users"]', NULL, NULL)`,
+    );
+    db.exec(shipped0014);
+    for (const model of [
+      "ssoConnection",
+      "ssoDomain",
+      "scimToken",
+      "ssoSetupLink",
+      "ssoTestRun",
+      "ssoSetupSession",
+    ] as const) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+    }
+    expect(
+      db
+        .prepare(`SELECT draft, version, setup_link_id FROM ta_sso_connection WHERE id = 'c16'`)
+        .all(),
+    ).toEqual([{ draft: 0, version: 1, setup_link_id: null }]);
+    expect(
+      db.prepare(`SELECT pending, setup_link_id FROM ta_scim_token WHERE id = 't16'`).all(),
+    ).toEqual([{ pending: 0, setup_link_id: null }]);
+    const indexes = (table: string) =>
+      (db.prepare(`PRAGMA index_list(${table})`).all() as { name: string }[])
+        .map((i) => i.name)
+        .filter((name) => !name.startsWith("sqlite_autoindex_"))
+        .sort();
+    expect(indexes(TABLES.ssoSetupLink)).toEqual([
+      "ix_ta_sso_setup_link__organization_id",
+      "ux_ta_sso_setup_link__token_hash",
+    ]);
+    expect(indexes(TABLES.ssoTestRun)).toEqual(["ix_ta_sso_test_run__connection_id"]);
+    expect(indexes(TABLES.ssoSetupSession)).toEqual([
+      "ix_ta_sso_setup_session__link_id",
+      "ux_ta_sso_setup_session__token_hash",
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "14" },
+      { key: "schema_version", value: "17" },
     ]);
   });
 });

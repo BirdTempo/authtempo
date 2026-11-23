@@ -108,13 +108,26 @@ const PUBLIC_RUNS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Prose: two words or more, one space between each two. A word is letters with a capital at
+ * its start at most, then one mark of punctuation at most. The text starts with a capital or
+ * ends with a period. Core keeps help lines under keys with "secret" in the name, as
+ * `secret: "Core could not open the client secret. ..."` in step-help.ts (plan 13a Task 7).
+ * The rule keeps the hole small: a word with a digit, a capital inside it, a hyphen, or an
+ * underscore is no prose. So a random secret is no prose, and the run rules find a secret of
+ * 32 bytes inside prose. A passphrase of plain words in the form of a sentence stays a hole.
+ */
+const PROSE = /^[A-Za-z][a-z]*[.,;:!?]?(?: [A-Za-z][a-z]*[.,;:!?]?)+$/;
+const isProse = (value: string): boolean =>
+  PROSE.test(value) && (/^[A-Z]/.test(value) || value.endsWith("."));
+
+/**
  * Each credential form in `text`, after each public PEM block. The scan finds
  * five forms. The first is a token of a core prefix. The second is a hex run
  * of 32 characters or more, as a sandbox id. The third is a base64url run of
  * 43 characters or more with a digit, a capital, and a small letter. That is
  * 32 bytes or more, as a sandbox secret, quoted or not. The fourth is 32
  * bytes in standard base64 with its padding. The last is a string that a
- * name with "secret" in it takes, other than a bare prefix of core. The
+ * name with "secret" in it takes, other than a bare prefix of core or prose. The
  * bundle of core holds `CLIENT_SECRET_PREFIX = "cs_"` (plan 12e). The first
  * form finds each token of that prefix. A random value of 32 bytes in base64url
  * has all three kinds of character. So the rule of three misses almost none,
@@ -134,13 +147,14 @@ function credentials(text: string): string[] {
       found.push(m);
   found.push(...(open.match(/(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])/g) ?? []));
   // A string that a name with "secret" in it takes, as `name = "v"` or `name: "v"`.
-  // An empty string and a template with a value in it are no secret.
+  // An empty string, a template with a value in it, and prose (isProse) are no secret.
   const assigned = /[A-Za-z0-9_$]*secret[A-Za-z0-9_$]*["']?\s*[:=]\s*(["'`])([^"'`\n]*)\1/gi;
   for (const m of open.matchAll(assigned)) {
     const value = m[2] ?? "";
     if (
       value !== "" &&
       !value.includes("${") &&
+      !isProse(value) &&
       value !== DEMO_CLIENT_SECRET &&
       !PREFIXES.includes(value)
     )
@@ -236,6 +250,25 @@ describe("no secret in the demo", () => {
     const pem = `-----BEGIN CERTIFICATE-----\\nMIIB${"Q".repeat(60)}\\n-----END CERTIFICATE-----`;
     expect(credentials(`const root = "${pem}";`)).toEqual([]);
     expect(credentials(`const root = "${pem}"; const k = "${secret}";`)).toEqual([secret]);
+    // Prose that a key with "secret" in its name holds is no secret: the help line of core
+    // (step-help.ts, plan 13a Task 7). A secret of 32 bytes in that key is still found.
+    const help = "Core could not open the client secret. Enter the client secret again.";
+    expect(credentials(`secret: "${help}"`)).toEqual([]);
+    expect(credentials(`secret: "${secret}"`)).toEqual([secret]);
+    // A secret inside prose is still found: the run rule finds it, and a word with a digit
+    // or a capital inside it is no prose.
+    expect(credentials(`secret: "Use ${secret} now."`)).toEqual([secret, `Use ${secret} now.`]);
+    expect(credentials(`secret: "Use ${secret}"`)).toEqual([secret, `Use ${secret}`]);
+    expect(credentials(`secret: "Hunter2 again."`)).toEqual(["Hunter2 again."]);
+    expect(credentials(`secret: "Real valueX now."`)).toEqual(["Real valueX now."]);
+    expect(credentials(`secret: "Real-value now."`)).toEqual(["Real-value now."]);
+    // Plain words with no capital at the start and no period at the end are still found.
+    expect(credentials(`secret: "correct horse battery"`)).toEqual(["correct horse battery"]);
+    // One word is no prose, with a capital or a period.
+    expect(credentials(`secret: "Hunter."`)).toEqual(["Hunter."]);
+    // The hole that stays: a passphrase of plain words in the form of a sentence. A random
+    // secret of core or of the demo never has this form.
+    expect(credentials(`secret: "Correct horse battery staple."`)).toEqual([]);
   });
 
   it("has the config keys of this list only, with observability off", () => {

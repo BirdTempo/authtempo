@@ -78,6 +78,7 @@ import {
 import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js";
 import { PARAM_SEGMENT_RE } from "./http/route-key.js";
 import { ROUTES } from "./http/route-list.js";
+import type { SetupPageInput } from "./http/setup-page.js";
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
@@ -106,7 +107,7 @@ import { PASSKEY_HINTS, type PasskeyHint } from "./primitives/passkey-hints.js";
 import { isResourceUrl } from "./primitives/resource.js";
 import { hasControlChar } from "./primitives/text.js";
 import { secretParts } from "./redact.js";
-import type { SessionRow, UserRow } from "./schema.js";
+import { SETUP_TTL_HOURS_MAX, type SessionRow, type UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import type { SmsPort } from "./seams/sms.js";
@@ -1360,7 +1361,22 @@ export interface SsoConfig {
   fetch?: typeof fetch;
   /** Default 10 connections and 20 domains per organization. Each is a positive integer. */
   limits?: { connectionsPerOrganization?: number; domainsPerOrganization?: number };
+  /**
+   * The setup links of plan 13a (spec 6). Off when absent or `false`. It
+   * needs `organizations` and the notices of `account.notices`: the owners
+   * get a notice when a setup is ready. `ttlHours` is the default life of a
+   * link, 1 to 168, default 72. `page` replaces the setup page of core.
+   */
+  setup?: SsoSetupConfig | false;
 }
+
+/** `sso.setup` (plan 13a). */
+export interface SsoSetupConfig {
+  ttlHours?: number;
+  page?: (input: SetupPageInput) => string;
+}
+
+export type { DraftSummary, SetupPageInput, TestSummary } from "./http/setup-page.js";
 
 /** The SSO config after construction (plan 12d). */
 export interface ResolvedSso {
@@ -1369,6 +1385,8 @@ export interface ResolvedSso {
   dns: readonly DnsTxtPort[];
   fetch: typeof fetch;
   limits: { connectionsPerOrganization: number; domainsPerOrganization: number };
+  /** False: no setup link (plan 13a). `page` null: the page of core. */
+  setup: { ttlHours: number; page: ((input: SetupPageInput) => string) | null } | false;
 }
 
 /** The SCIM config (plan 12d Task 9, spec 30 item 17). */
@@ -2072,7 +2090,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       },
     ),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
-    sso: resolveSso(input.sso, organizations !== null),
+    sso: resolveSso(input.sso, organizations !== null, input.account?.notices === false),
     scim: resolveScim(input.scim, organizations),
     openapi,
     // The operator key resolved above, so `users` is true or absent here.
@@ -3090,6 +3108,11 @@ const SSO_KEYS: Readonly<Record<keyof SsoConfig, true>> = {
   dns: true,
   fetch: true,
   limits: true,
+  setup: true,
+};
+const SSO_SETUP_KEYS: Readonly<Record<keyof SsoSetupConfig, true>> = {
+  ttlHours: true,
+  page: true,
 };
 const SSO_LIMIT_KEYS: Readonly<Record<keyof NonNullable<SsoConfig["limits"]>, true>> = {
   connectionsPerOrganization: true,
@@ -3110,6 +3133,39 @@ function ssoLimit(value: unknown, key: string, fallback: number): number {
 }
 
 /**
+ * `sso.setup` (plan 13a). Off when absent or `false`. The setup sends a
+ * notice to the owners at the handback, so `account.notices: false` refuses
+ * it: an owner would never learn that a setup waits (pre-flight C10 of plan
+ * 13a). `sso` needs `organizations`, so the setup needs it too.
+ */
+function resolveSsoSetup(input: unknown, noticesOff: boolean): ResolvedSso["setup"] {
+  if (input === undefined || input === false) return false;
+  if (!isPlainObject(input)) throw new ConfigError("sso.setup must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(SSO_SETUP_KEYS, key))
+      throw new ConfigError(`sso.setup.${key} is not an option; core has ttlHours and page`);
+  if (noticesOff)
+    throw new ConfigError(
+      "sso.setup needs account.notices: the owners get a notice when a setup is ready",
+    );
+  const { ttlHours, page } = input as { ttlHours?: unknown; page?: unknown };
+  if (
+    ttlHours !== undefined &&
+    (typeof ttlHours !== "number" ||
+      !Number.isSafeInteger(ttlHours) ||
+      ttlHours < 1 ||
+      ttlHours > SETUP_TTL_HOURS_MAX)
+  )
+    throw new ConfigError(`sso.setup.ttlHours must be an integer from 1 to ${SETUP_TTL_HOURS_MAX}`);
+  if (page !== undefined && typeof page !== "function")
+    throw new ConfigError("sso.setup.page must be a function");
+  return {
+    ttlHours: typeof ttlHours === "number" ? ttlHours : 72,
+    page: (page as ((input: SetupPageInput) => string) | undefined) ?? null,
+  };
+}
+
+/**
  * `sso` (plan 12d). Off when absent or `false`. It needs `organizations`:
  * a domain and a connection belong to an organization. `dns` is required
  * and is never a default (ruling 15 of plan 12d): the app picks its
@@ -3119,13 +3175,14 @@ function ssoLimit(value: unknown, key: string, fallback: number): number {
 function resolveSso(
   input: SsoConfig | false | undefined,
   organizations: boolean,
+  noticesOff: boolean,
 ): ResolvedSso | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("sso must be an object or false");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(SSO_KEYS, key))
       throw new ConfigError(
-        `sso.${key} is not an option; core has oidc, saml, dns, fetch, and limits`,
+        `sso.${key} is not an option; core has oidc, saml, dns, fetch, limits, and setup`,
       );
   if (!organizations) throw new ConfigError("sso needs organizations");
   if (input.oidc !== undefined && input.oidc !== true)
@@ -3189,6 +3246,7 @@ function resolveSso(
       ),
       domainsPerOrganization: ssoLimit(l.domainsPerOrganization, "domainsPerOrganization", 20),
     },
+    setup: resolveSsoSetup(input.setup, noticesOff),
   };
 }
 

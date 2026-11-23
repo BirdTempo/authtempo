@@ -80,6 +80,7 @@ export interface DocumentationHost {
  * states its reason. Plan 11g adds spec.openapis.org, the first entry.
  * Plan 12e adds schemas.openid.net: a URL that is the name of a claim, not
  * a place that core calls.
+ * Plan 13a adds login.microsoftonline.com: an example issuer in a guide step.
  * unusedDocumentationHosts fails an entry that no core file names.
  */
 export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
@@ -92,6 +93,11 @@ export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
     host: "schemas.openid.net",
     reason:
       "the name of the back-channel logout event: a key of the events claim of a logout token (OIDC Back-Channel Logout 1.0 section 2.4, in packages/core/src/engine/oauth-logout.ts). No request goes to that host",
+  },
+  {
+    host: "login.microsoftonline.com",
+    reason:
+      "an example of the issuer URL in a step of the Entra guide (packages/core/src/sso/guides/entra.ts). The step tells the operator what to type in the Entra admin UI. Core sends no request to that host",
   },
 ];
 

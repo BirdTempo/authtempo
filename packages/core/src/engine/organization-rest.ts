@@ -16,8 +16,9 @@ import { deleteOrganizationsRest, organizationGroups, organizationList } from ".
  * credential (`deleteOrganizationsHead`), and the member rows. It writes one
  * verification row with this purpose for all of them. The sweep deletes the
  * rest (`deleteOrganizationsRest`): the SCIM Users and Groups, the teams,
- * the invitations, the tokens, and the roles. Each read of those rows needs
- * the organization row or a member row, which the act deleted. So no flow
+ * the invitations, the tokens, the roles, and the setup sessions and links
+ * (plan 13a, ruling R17). Each read of those rows needs the organization
+ * row or a member row, which the act deleted. So no flow
  * reaches them before the sweep. The one read that has no such step is the
  * pending invitation of an invited sign-up (`mayCreateUser`): it reads the
  * organization of the invitation too.
@@ -60,9 +61,12 @@ export async function deferOrganizationRest(
  * the session update (2 on D1: the undo read and the update), and the row
  * delete. A row with more than `IN_CHUNK` groups costs 3: the group read and
  * the two deletes of one chunk of groups. The row then waits for the next
- * sweep.
+ * sweep. Plan 13a (ruling R17) adds the setup session and setup link
+ * deletes: 15. Plan 13a Task 7 adds the test run delete: 16 (1 group read, 8 deletes up to the
+ * run delete, the member, group member, group and team member deletes, the 2 session calls, and
+ * the row delete).
  */
-export const ORGANIZATION_REST_CALLS = 13;
+export const ORGANIZATION_REST_CALLS = 16;
 
 /**
  * The sweep step of the pending rows of `ORGANIZATION_REST`, inside `limit`

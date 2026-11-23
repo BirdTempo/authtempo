@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROUTE_CONTRACT } from "../../src/http/contract/index.js";
 import { answerKinds, type RouteContract } from "../../src/http/contract/types.js";
-import { ROUTER_CODES, ROUTES, type RouteKey } from "../../src/http/route-list.js";
+import { ROUTER_CODES, type RouteKey } from "../../src/http/route-list.js";
 import { ANSWER_SHAPE_EXEMPT, ANSWERS_EXEMPT } from "../answers-exempt.js";
 import { shapePaths } from "../setup/answer-shape.js";
+import { MOUNTED_ROUTES, UNMOUNTED_ROUTES } from "../unmounted-routes.js";
 
 /**
  * The check run of plan 11g Task 5. The recorder of `test/setup/answers.ts`
@@ -58,12 +59,13 @@ function readRecords(): { files: string[]; records: AnswerRecord[]; old: string[
 }
 
 const { files, records, old } = readRecords();
-const keys = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
+// A route that no module mounts yet has no answer (plan 13a): the check skips it.
+const keys = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 const recorded = new Set(records.map((r) => r.key).filter((k) => k !== null));
 /** `"<key> <code>"` of every code that a record holds. */
 const answered = new Set(records.filter((r) => r.code !== null).map((r) => `${r.key} ${r.code}`));
-/** `"<key> <code>"` of every declared code of every route, the router's codes included. */
-const declared = ROUTES.flatMap((r) =>
+/** `"<key> <code>"` of every declared code of every mounted route, the router's codes included. */
+const declared = MOUNTED_ROUTES.flatMap((r) =>
   [...r.codes, ...r.oauthCodes, ...ROUTER_CODES].map((c) => `${r.method} ${r.path} ${c}`),
 );
 const exempt = new Set(ANSWERS_EXEMPT.map((row) => `${row.key} ${row.code}`));
@@ -84,6 +86,7 @@ function shapesOf(): { shapes: string[]; blocked: string[] } {
   const shapes: string[] = [];
   const blocked: string[] = [];
   for (const [key, c] of Object.entries(contract)) {
+    if (UNMOUNTED_ROUTES.has(key)) continue;
     for (const kind of answerKinds(c)) {
       if (kind.kind !== "json") continue;
       const status = kind.status ?? 200;

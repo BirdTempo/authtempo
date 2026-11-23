@@ -74,6 +74,10 @@ Each event has these fields too:
 | `operator.action` | info | `action: enum`, `actorKind: enum`, `auditId: id` | An operator act commits with its audit row. |
 | `operator.refused` | warn | `action?: enum`, `actorKind: enum`, `code: code` | The guard or `hooks.operator.beforeAction` refuses an operator act of a known actor. |
 | `scim.change` | info | `resource: enum`, `action: enum`, `organizationId: id`, `resourceId: id` | A SCIM write commits, beside `hooks.scim.afterChange`. |
+| `sso.setup_opened` | info | `linkId: id`, `organizationId: id` | An IT admin opens a setup link. The event holds no token and no cookie. |
+| `sso.setup_refused` | warn | `step: enum` | The setup refuses an open, a page load, a request of a setup session, a draft write, or a test start. The answer is the answer of no credential, so `step` is the only place that names the cause. |
+| `sso.test_run` | info | `connectionId: id`, `linkId?: id`, `outcome: enum`, `step?: enum` | A test run of a draft connection ends. `step` is set for a failed run. The event holds no address, no name, and no attribute. |
+| `sso.activated` | info | `organizationId: id`, `connectionId: id`, `linkId: id` | An owner activates a draft connection. |
 | `scim.owner_kept` | info | `scimUserId: id` | A SCIM deactivate keeps the member row of an owner. |
 | `sso.second_factor_idp` | info | `connectionId: id`, `claim: enum` | The provider of an SSO sign-in passed the second factor. `claim` names the list that matched, never its value. |
 
@@ -82,7 +86,7 @@ Each event has these fields too:
 | Event | Level | Fields | When |
 | --- | --- | --- | --- |
 | `limit.hit` | warn | `family: enum` | A limiter refuses a call. The event holds the family, never the key. |
-| `sweep` | info | `verificationExpired: count`, `verificationConsumed: count`, `invitations: count`, `sessions: count`, `pendingSessions: count`, `apiTokens: count`, `organizationTokens: count`, `trustedDevices: count`, `jwks: count`, `oauthTokens: count`, `oauthClients: count`, `totpSetups: count`, `limits: count`, `oauthDevices: count`, `oauthSessionLinks: count`, `oauthLogouts: count`, `oauthClientSecrets: count`, `ssoDomains: count`, `ssoPendingDomains: count`, `scimTokens: count`, `organizationRows: count`, `anonymousUsers: count`, `durationMs: durationMs` | `api.sweepExpired()` ends. Each count is a key of its answer. |
+| `sweep` | info | `verificationExpired: count`, `verificationConsumed: count`, `invitations: count`, `sessions: count`, `pendingSessions: count`, `apiTokens: count`, `organizationTokens: count`, `trustedDevices: count`, `jwks: count`, `oauthTokens: count`, `oauthClients: count`, `totpSetups: count`, `limits: count`, `oauthDevices: count`, `oauthSessionLinks: count`, `oauthLogouts: count`, `oauthClientSecrets: count`, `ssoDomains: count`, `ssoPendingDomains: count`, `scimTokens: count`, `ssoSetupRows: count`, `organizationRows: count`, `anonymousUsers: count`, `durationMs: durationMs` | `api.sweepExpired()` ends. Each count is a key of its answer. |
 | `observe.dropped` | warn | `buffer_full: count`, `sink_timeout: count`, `sink_threw: count` | The first event of a batch after a loss. Each count is the events lost since the last batch. |
 
 ### The fault events
@@ -210,14 +214,14 @@ An enum field takes only the values of its list. A long list names its count and
 | `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
 | `sms.not_sent.reason` | `capped`, `unavailable`, `timeout` |
 | `claim.mail_failed.method` | `magic_link`, `email_otp` |
-| `hook.copy_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
-| `hook.before_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
-| `hook.after_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.copy_failed.hook` | 49 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.before_failed.hook` | 49 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
+| `hook.after_failed.hook` | 49 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `user.patch_refused.what` | `a value that is not an object`, `a value that cannot be read`, `a value that is not a plain object`, `a field other than name and image`, `a name that breaks the name rule`, `an image that breaks the image rule` |
 | `session.patch_refused.what` | `a value that is not an object`, `a value that cannot be read`, `a value that is not a plain object`, `an ip that is not a string or null`, `a userAgent that is not a string or null`, `an activeOrganizationId that is not a string or null`, `field` |
 | `oauth.client_metadata_refused.why` | 28 values: the fetch guards, `status`, the type and size rules, and each rule of a member. |
 | `oauth.client_key_set_refused.why` | `no fetch`, `the fetch failed or timed out`, `not JSON`, `not a JSON object`, `status`, `not application/json or application/jwk-set+json`, `larger than 65536 bytes, not UTF-8, or not in time`, `no keys array`, `no public signing key` |
-| `operator.guard_refused.route` | 210 values: each route key of [Routes](/docs/reference/routes/), and `api` for a call of `auth.api`. |
+| `operator.guard_refused.route` | 223 values: each route key of [Routes](/docs/reference/routes/), and `api` for a call of `auth.api`. |
 | `operator.read.actor` | `secret`, `user`, `app` |
 | `operator.route_unauthorized.reason` | `secret_mismatch`, `secret_and_session`, `secret_not_accepted`, `no_session` |
 | `api_token.create.kind` | `tk`, `to` |
@@ -235,11 +239,14 @@ An enum field takes only the values of its list. A long list names its count and
 | `oauth.client_register.outcome` | `success`, `failure` |
 | `organization.change.action` | `create`, `update`, `delete`, `addMember`, `updateMemberRole`, `removeMember`, `invite`, `acceptInvitation`, `declineInvitation`, `revokeInvitation`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember` |
 | `organization.role_change.action` | `create`, `update`, `delete` |
-| `operator.action.action` | 31 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete` |
+| `operator.action.action` | 36 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete`, `sso_setup_link_create`, `sso_setup_link_open`, `sso_setup_link_revoke`, `sso_setup_link_activate`, `sso_test_run` |
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
-| `operator.refused.action` | 31 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete` |
+| `operator.refused.action` | 36 values, the action of each audit row. `ban`, `unban`, `platform_role_grant`, `platform_role_revoke`, `second_factor_disable`, `sessions_end_user`, `sessions_end_all`, `impersonation_start`, `impersonation_stop`, `create_admin`, `user_create`, `user_update`, `user_delete`, `sso_connection_create`, `sso_connection_update`, `sso_connection_delete`, `sso_domain_add`, `sso_domain_verify`, `sso_domain_update`, `sso_domain_delete`, `sso_domain_lost`, `sso_enforce_off`, `scim_token_create`, `scim_token_revoke`, `scim_user_create`, `scim_user_update`, `scim_user_deactivate`, `scim_user_delete`, `scim_group_create`, `scim_group_update`, `scim_group_delete`, `sso_setup_link_create`, `sso_setup_link_open`, `sso_setup_link_revoke`, `sso_setup_link_activate`, `sso_test_run` |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 104 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 110 values: each family of [Limits](/docs/reference/limits/). |
+| `sso.setup_refused.step` | 19 values: `open_token_form`, `open_link_invalid`, `open_ip_limit`, `open_link_limit`, `open_lost`, `page_ip_limit`, `session_cookie`, `session_ended`, `session_link`, `draft_step`, `draft_limit`, `test_caller`, `test_limit`, `test_site`, `test_credential`, `test_connection`, `test_link`, `test_setup_off`, `domain_row` |
+| `sso.test_run.outcome` | `passed`, `failed` |
+| `sso.test_run.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

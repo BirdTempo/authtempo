@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import mysql, { type RowDataPacket } from "mysql2/promise";
 import { afterEach, describe, expect, it } from "vitest";
+import { createMysqlAdapter } from "../src/index.js";
 import { statements as baseline } from "../src/migrations/0001_schema_v13.js";
 import {
   applyMysqlMigrations,
@@ -66,7 +67,7 @@ for (const server of MYSQL_SERVERS) {
       // The lock lets one runner apply every step; the other finds each step recorded.
       expect(results.flat()).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("16");
+      expect(await version(db)).toBe("17");
       expect(await applyMysqlMigrations(db.pool)).toEqual([]);
     });
 
@@ -84,12 +85,13 @@ for (const server of MYSQL_SERVERS) {
       expect(await version(db)).toBeNull();
       expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("16");
+      expect(await version(db)).toBe("17");
       // The third step made its table: a step recorded before it ran would leave it out.
       const tables = await db.q<RowDataPacket[]>`SELECT COUNT(*) AS n FROM information_schema.tables
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ta\\_%'`;
-      // 27 model tables of version 13, 6 of version 14, ta_meta, ta_limit, and ta_migrations.
-      expect(Number(tables[0]?.n)).toBe(36);
+      // 27 model tables of version 13, 6 of version 14, 3 of version 17, ta_meta, ta_limit, and
+      // ta_migrations.
+      expect(Number(tables[0]?.n)).toBe(39);
     });
 
     it("finishes a run that stopped between a step and its record", async () => {
@@ -99,14 +101,32 @@ for (const server of MYSQL_SERVERS) {
       const last = ALL_STEPS.length;
       // The stops include the version row of the baseline, and the ALTER of 0003 with the
       // user columns and their unique keys (plan 12i). They also include the column and the
-      // fill of 0004 (plan 12p), and the version update of the last file. The fill sets the
-      // same value when it runs again.
+      // fill of 0004 (plan 12p), the ALTER of 0005 with the three connection columns and the
+      // first new table of 0005 (plan 13a), and the version update of the last file. The fill
+      // sets the same value when it runs again.
       const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
       const proved = ALL_STEPS.indexOf("0004_schema_v16:1") + 1;
       const fill = ALL_STEPS.indexOf("0004_schema_v16:2") + 1;
+      const connectionColumns = ALL_STEPS.indexOf("0005_schema_v17:1") + 1;
+      const setupLink = ALL_STEPS.indexOf("0005_schema_v17:4") + 1;
       expect(userColumns).toBeGreaterThan(baseline.length);
-      expect([proved > userColumns, fill, last]).toEqual([true, proved + 1, fill + 1]);
-      for (const at of [2, baseline.length, userColumns, proved, fill, last]) {
+      expect([proved > userColumns, fill, connectionColumns, setupLink, last]).toEqual([
+        true,
+        proved + 1,
+        fill + 2,
+        connectionColumns + 3,
+        setupLink + 3,
+      ]);
+      for (const at of [
+        2,
+        baseline.length,
+        userColumns,
+        proved,
+        fill,
+        connectionColumns,
+        setupLink,
+        last,
+      ]) {
         db = await freshDatabase(server, { migrate: false });
         await stopAfter(db, at);
         // The step ran, and its record is missing.
@@ -116,7 +136,7 @@ for (const server of MYSQL_SERVERS) {
         const open = MYSQL_MIGRATIONS.slice(MYSQL_MIGRATIONS.findIndex((m) => m.name === file));
         expect(await applyMysqlMigrations(db.pool)).toEqual(open.map((m) => m.name));
         expect(await recorded(db)).toEqual(ALL_STEPS);
-        expect(await version(db)).toBe("16");
+        expect(await version(db)).toBe("17");
         expect(await readMysqlShape(db.pool)).toEqual(cleanShape);
         await db.close();
         db = null;
@@ -233,8 +253,10 @@ for (const server of MYSQL_SERVERS) {
         ["sn", "un"],
       ] as const)
         await session(id, userId);
-      expect(await applyMysqlMigrations(d.pool)).toEqual(["0004_schema_v16"]);
-      expect(await version(d)).toBe("16");
+      // The runner applies 0004 and the later files (0005 since plan 13a). No later file
+      // changes ta_session.
+      expect(await applyMysqlMigrations(d.pool)).toEqual(["0004_schema_v16", "0005_schema_v17"]);
+      expect(await version(d)).toBe("17");
       const rows = await d.q<RowDataPacket[]>`SELECT id, proved FROM ta_session ORDER BY id`;
       expect(rows.map((r) => [r.id, r.proved])).toEqual([
         ["sn", 0],
@@ -252,6 +274,116 @@ for (const server of MYSQL_SERVERS) {
       expect(late.map((r) => r.proved)).toEqual([0]);
     });
 
+    it("reads a connection of version 16 as no draft at version 1 after 0005 (plan 13a)", async () => {
+      const d = await freshDatabase(server, { migrate: false });
+      db = d;
+      const [first] = MYSQL_MIGRATIONS.find((m) => m.name === "0005_schema_v17")?.statements ?? [];
+      // The runner stops before the first step of 0005: the database is at version 16.
+      const stopped = await applyMysqlMigrationsWith(d.pool, async (conn, sql) => {
+        if (sql === first) throw new Error("stop before 0005");
+        await conn.query(sql);
+      }).catch((e: unknown) => e);
+      expect(stopped).toMatchObject({ message: "stop before 0005" });
+      expect(await version(d)).toBe("16");
+      // The rows of the SSO tables as a writer of version 16 makes them.
+      const config = { issuer: "https://idp.example.com", clientId: "c1" };
+      const connection = (id: string) =>
+        d.pool.query(
+          "INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles) VALUES (?, 1, 2, 'o1', 'oidc', 'Okta', 1, 1, 'member', ?, 'sealed', 3, NULL, NULL)",
+          [id, JSON.stringify(config)],
+        );
+      await connection("c16");
+      await d.pool.query(
+        "INSERT INTO ta_sso_domain (id, created_at, updated_at, organization_id, domain, challenge, claimed_domain, connection_id, enforce, include_subdomains, verified_at, checked_at, failures, first_failure_at, expires_at) VALUES ('d16', 1, 1, 'o1', 'example.com', 'ch', 'example.com', 'c16', 0, 0, 5, 5, 0, NULL, NULL)",
+      );
+      await d.pool.query(
+        "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES ('t16', 1, 1, 'o1', 'Okta', 'h-t16', 'abcd', '[\"users\"]', NULL, NULL)",
+      );
+      expect(await applyMysqlMigrations(d.pool)).toEqual(["0005_schema_v17"]);
+      expect(await version(d)).toBe("17");
+      // The new columns come last, in the field order of the schema. The defaults live here only.
+      const columnsOf = async (table: string, names: string[]) => {
+        const [rows] = await d.pool.query<RowDataPacket[]>(
+          "SELECT COLUMN_NAME AS c, IS_NULLABLE AS n, COLUMN_DEFAULT AS d, COLUMN_TYPE AS t FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+          [table],
+        );
+        return rows.slice(-names.length).map((r) => [r.c, r.n, r.d, r.t]);
+      };
+      expect(await columnsOf("ta_sso_connection", ["draft", "version", "setup_link_id"])).toEqual([
+        ["draft", "NO", "0", "tinyint(1)"],
+        ["version", "NO", "1", "int"],
+        ["setup_link_id", "YES", null, "text"],
+      ]);
+      expect(await columnsOf("ta_sso_domain", ["setup_link_id"])).toEqual([
+        ["setup_link_id", "YES", null, "text"],
+      ]);
+      expect(await columnsOf("ta_scim_token", ["pending", "setup_link_id"])).toEqual([
+        ["pending", "NO", "0", "tinyint(1)"],
+        ["setup_link_id", "YES", null, "text"],
+      ]);
+      // The gate passes. Each row keeps its values and reads the defaults.
+      const adapter = createMysqlAdapter(d.pool);
+      expect(
+        await adapter.findOne("ssoConnection", [{ field: "id", op: "eq", value: "c16" }]),
+      ).toEqual({
+        id: "c16",
+        createdAt: new Date(1),
+        updatedAt: new Date(2),
+        organizationId: "o1",
+        kind: "oidc",
+        label: "Okta",
+        enabled: true,
+        jit: true,
+        defaultRole: "member",
+        config,
+        clientSecret: "sealed",
+        secretVersion: 3,
+        mfa: null,
+        scimRoles: null,
+        draft: false,
+        version: 1,
+        setupLinkId: null,
+      });
+      expect(
+        await adapter.findOne("ssoDomain", [{ field: "id", op: "eq", value: "d16" }]),
+      ).toMatchObject({
+        domain: "example.com",
+        connectionId: "c16",
+        setupLinkId: null,
+      });
+      expect(
+        await adapter.findOne("scimToken", [{ field: "id", op: "eq", value: "t16" }]),
+      ).toMatchObject({
+        tokenHash: "h-t16",
+        scopes: ["users"],
+        pending: false,
+        setupLinkId: null,
+      });
+      // A writer of version 16 after the migration names no new column: the defaults fill it.
+      await connection("c16b");
+      expect(
+        await adapter.findOne("ssoConnection", [{ field: "id", op: "eq", value: "c16b" }]),
+      ).toMatchObject({
+        draft: false,
+        version: 1,
+        setupLinkId: null,
+      });
+      // The three setup tables exist with their keys.
+      const [keys] = await d.pool.query<RowDataPacket[]>(
+        "SELECT DISTINCT TABLE_NAME AS t, INDEX_NAME AS i FROM information_schema.statistics WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('ta_sso_setup_link', 'ta_sso_test_run', 'ta_sso_setup_session')",
+      );
+      expect(keys.map((r) => `${r.t} ${r.i}`).sort()).toEqual([
+        "ta_sso_setup_link PRIMARY",
+        "ta_sso_setup_link ix_ta_sso_setup_link__organization_id",
+        "ta_sso_setup_link ux_ta_sso_setup_link__token_hash",
+        "ta_sso_setup_session PRIMARY",
+        "ta_sso_setup_session ix_ta_sso_setup_session__link_id",
+        "ta_sso_setup_session ux_ta_sso_setup_session__token_hash",
+        "ta_sso_test_run PRIMARY",
+        "ta_sso_test_run ix_ta_sso_test_run__connection_id",
+      ]);
+    });
+
     it("holds the baseline record to its digest", () => {
       // The record 0001_schema_v13 is append-only. On 2026-10-21 its text was
       // schemaDdl(MYSQL). Schema 14 changes schemaDdl, and a compare with it
@@ -261,12 +393,13 @@ for (const server of MYSQL_SERVERS) {
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
       expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
       // Plan 12d appends the file of schema version 14 after it, plan 12i the file of 15,
-      // and plan 12p the file of 16.
+      // plan 12p the file of 16, and plan 13a the file of 17.
       expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual([
         "0001_schema_v13",
         "0002_schema_v14",
         "0003_schema_v15",
         "0004_schema_v16",
+        "0005_schema_v17",
       ]);
     });
 
@@ -287,6 +420,8 @@ for (const server of MYSQL_SERVERS) {
         ["0003_schema_v15", "d08a803c1d282c2f512b9f0acc857baca8e63ea382d22a2460a1f61d8b48a59e"],
         // Plan 12p Task 1 (2026-11-04): the proof mark of the session and its fill.
         ["0004_schema_v16", "56442d040411910b0b8da831efa1508c2a04fea5b002726e6145ccf9a98a71da"],
+        // Plan 13a Task 1 (2026-11-23): the setup tables and the draft columns.
+        ["0005_schema_v17", "3a2c5e3c1f0a92a98730757db31d0525c2a5b81175c9ca2b07d6e21cf7faec36"],
       ]);
     });
   });

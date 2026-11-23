@@ -40,7 +40,12 @@ import {
 } from "../engine/oauth-refusals.js";
 import { OPERATOR_ACTIONS } from "../engine/operator/actions.js";
 import type { OperatorActor } from "../engine/operator/guards.js";
-import { SSO_FAILED_STEPS, SSO_GUARD_STEPS, SSO_MFA_CLAIMS } from "../engine/sso/steps.js";
+import {
+  SETUP_REFUSAL_STEPS,
+  SSO_FAILED_STEPS,
+  SSO_GUARD_STEPS,
+  SSO_MFA_CLAIMS,
+} from "../engine/sso/steps.js";
 import { SWEEP_KEYS } from "../engine/sweep-keys.js";
 import { ERRORS, OAUTH_ERRORS } from "../errors.js";
 import { ROUTES, type RouteKey } from "../http/route-list.js";
@@ -844,6 +849,29 @@ export const EVENTS = {
     level: "info",
     fields: { connectionId: ROW_ID, claim: enumOf(SSO_MFA_CLAIMS) },
   },
+  // The setup flow of plan 13a (Task 12). The fields are row ids and closed lists only: no token,
+  // no address, no IP, and no text of an IdP. A refusal names its step because the answer of each
+  // refusal is the same as for no credential.
+  "sso.setup_opened": {
+    level: "info",
+    fields: { linkId: ROW_ID, organizationId: ROW_ID },
+  },
+  "sso.setup_refused": { level: "warn", fields: { step: enumOf(SETUP_REFUSAL_STEPS) } },
+  // The end of a test run. The step is a closed step of the real flow; the run has no other text.
+  "sso.test_run": {
+    level: "info",
+    fields: {
+      connectionId: ROW_ID,
+      linkId: OPTIONAL_ID,
+      outcome: enumOf(["passed", "failed"]),
+      step: { kind: "enum", values: SSO_FAILED_STEPS, optional: true },
+    },
+  },
+  // The activation of a draft connection (Task 8 emits it after its commit).
+  "sso.activated": {
+    level: "info",
+    fields: { organizationId: ROW_ID, connectionId: ROW_ID, linkId: ROW_ID },
+  },
   // A SCIM deactivate kept the member row of an owner (plan 12d Task 10).
   "scim.owner_kept": { level: "info", fields: { scimUserId: ROW_ID } },
   // Beside `hooks.scim.afterChange`, once per committed SCIM write.
@@ -1009,6 +1037,8 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "operator.beforeAction": "operator.refused",
   "operator.afterAction": "operator.action",
   "sso.beforeSignIn": REFUSAL_EXEMPT,
+  // Plan 13a: the `readyAt` of the link is the record of the handback. The events of Task 12 name no handback.
+  "sso.setupReady": NO_EVENT_EXEMPT,
   "scim.afterChange": "scim.change",
   "anonymous.beforeLink": REFUSAL_EXEMPT,
   // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.

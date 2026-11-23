@@ -1,5 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "noEmit": true, "rootDir": "." },
+  // The root is the repository: setup-delete-race.test.ts imports the setup engine of core from
+  // its source (ruling R22 of plan 13a). The public API has no mint of a setup link and no draft
+  // write yet. This config emits nothing, so the root changes the check of TS6059 only.
+  "compilerOptions": { "noEmit": true, "rootDir": "../.." },
   "include": ["src", "test"]
 }

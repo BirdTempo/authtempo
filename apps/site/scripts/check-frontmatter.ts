@@ -101,6 +101,7 @@ function endsHere(line: string, text: string): boolean {
 export function checkFrontmatter(
   pages: readonly Page[],
   read: (repoPath: string) => string | null,
+  tracked: ReadonlySet<string> | null = null,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-frontmatter",
@@ -129,6 +130,12 @@ export function checkFrontmatter(
       const text = read(path);
       if (text === null) {
         r.failures.push(`${p.path}: source ${path} does not exist`);
+        continue;
+      }
+      // A file that exists on this disk may be a private note that git ignores.
+      // A page that cites it points a reader at a file that the clone lacks.
+      if (tracked && !tracked.has(path)) {
+        r.failures.push(`${p.path}: source ${path} is not tracked by git`);
         continue;
       }
       if (section === undefined) continue;

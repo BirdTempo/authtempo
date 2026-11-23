@@ -17,6 +17,7 @@ import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, sessionOf } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
+import { UNMOUNTED_ROUTES } from "./unmounted-routes.js";
 
 const KEYS = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 /**
@@ -27,6 +28,11 @@ const KEYS = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 const DECLARING = ROUTES.filter((r) =>
   (r.codes as readonly string[]).includes("impersonation_session"),
 ).map((r) => `${r.method} ${r.path}` as RouteKey);
+/**
+ * The refusal rows: DECLARING without a route that no module mounts yet (plan 13a). Such a route
+ * answers 404 before any refusal. The two list tests below still read each key of ROUTES.
+ */
+const REFUSAL_ROWS = DECLARING.filter((k) => !UNMOUNTED_ROUTES.has(k));
 
 /** Every feature of core with the operator fixture: each route of ROUTES is mounted. */
 async function featureConfig(): Promise<Partial<AuthConfig>> {
@@ -60,7 +66,7 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
       impersonation: {},
     },
     // The domain routes of plan 12d mount with sso; no test here asks the resolver.
-    sso: { dns: [{ name: "none", txt: async () => [] }] },
+    sso: { dns: [{ name: "none", txt: async () => [] }], setup: {} },
     // The SCIM token routes and the SCIM server of plan 12d Task 9b.
     scim: {},
     // The username routes of plan 12i Task 2.
@@ -140,7 +146,7 @@ describe("the impersonation lists (plan 12f Task 11)", () => {
     expect(actorCookieName(w.auth.config)).toBe("__Host-tempo_session_actor");
   });
 
-  it.each([...DECLARING].sort())(
+  it.each([...REFUSAL_ROWS].sort())(
     "refuses every route of IMPERSONATION_REFUSED to an impersonation session: %s",
     async (key) => {
       const before = await dump();
@@ -151,7 +157,7 @@ describe("the impersonation lists (plan 12f Task 11)", () => {
     },
   );
 
-  it.each([...DECLARING].sort())(
+  it.each([...REFUSAL_ROWS].sort())(
     "refuses every route of IMPERSONATION_REFUSED to a bearer impersonation session: %s",
     async (key) => {
       const before = await dump();

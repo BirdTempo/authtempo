@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ROUTES } from "../src/http/route-list.js";
 import { createPostGate, createRouter, fetchMetadataRefuses } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createAuth, createMemoryAdapter, crossSiteRefusal } from "../src/index.js";
 import { BASE, everyFeature } from "./every-feature.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 const TRUSTED = "https://app.example.com";
 // "bogus" is a value that the Fetch standard does not define: the code refuses such a form and
@@ -60,12 +60,13 @@ describe("the router applies it on every POST route (plan 12b)", () => {
     { ...config, trustedOrigins: new Set([TRUSTED]) },
     coreRoutes(config),
   );
-  const posts = ROUTES.filter((r) => r.method === "POST").map((r) =>
+  // A route that no module mounts yet answers 404 before the rule (plan 13a): it is skipped.
+  const posts = MOUNTED_ROUTES.filter((r) => r.method === "POST").map((r) =>
     r.path.replace(":provider", "google"),
   );
 
   it("lists every POST route of ROUTES", () => {
-    expect(posts.length).toBe(ROUTES.filter((r) => r.method === "POST").length);
+    expect(posts.length).toBe(MOUNTED_ROUTES.filter((r) => r.method === "POST").length);
     expect(posts.length).toBeGreaterThan(40);
   });
 
@@ -164,7 +165,7 @@ describe("the router refuses before any handler runs (plan 12b)", () => {
 describe("crossSiteRefusal: the router's gate for POST paths beside core (plan 12a fix wave, F1)", () => {
   const config = { ...everyFeature(), trustedOrigins: new Set([TRUSTED]) };
   const gate = createPostGate(config, coreRoutes(config));
-  const posts = ROUTES.filter((r) => r.method === "POST").map((r) =>
+  const posts = MOUNTED_ROUTES.filter((r) => r.method === "POST").map((r) =>
     r.path.replace(":provider", "apple"),
   );
   const form = (path: string, origin: string | null = TRUSTED) =>

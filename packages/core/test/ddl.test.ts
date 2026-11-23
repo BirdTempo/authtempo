@@ -99,7 +99,8 @@ describe("schemaDdl (plan 12g)", () => {
     // Version 14 (plan 12d) adds 6 models with 13 named keys. Version 15
     // (plan 12i) adds the unique keys of user.username and user.phone, and
     // the index of user on isAnonymous and createdAt (ruling 25 H1).
-    expect(want).toHaveLength(67);
+    // Version 17 (plan 13a) adds 3 models with 5 named keys.
+    expect(want).toHaveLength(72);
     for (const d of DIALECTS) {
       const have = ddlKeys(d);
       expect({ dialect: d.name, keys: have }).toEqual({ dialect: d.name, keys: want });
@@ -136,13 +137,13 @@ describe("schemaDdl (plan 12g)", () => {
 
   it("ends with the version row", () => {
     expect(schemaDdl(SQLITE).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '16')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '17')",
     );
     expect(schemaDdl(POSTGRES).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '16')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '17')",
     );
     expect(schemaDdl(MYSQL).at(-1)).toBe(
-      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '16')",
+      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '17')",
     );
   });
 

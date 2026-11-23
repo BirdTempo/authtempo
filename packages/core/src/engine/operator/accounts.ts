@@ -413,7 +413,10 @@ async function lockUser(
  * and the audit row. On D1 the solo organizations cost 6 calls for any
  * count, and each organization that the user owns with another owner
  * costs 3. A user actor fits 1 solo organization and none of those; a
- * secret fits 1 solo organization and 3 (measured 2026-10-25).
+ * secret fits 1 solo organization and 3 (measured 2026-10-25). Plan 13a
+ * (ruling R19) puts the setup session and setup link deletes in the sweep
+ * of the rest, so the act and these limits stay (measured on the D1
+ * binding 2026-11-23, load averages 8.7 to 10.0 on 18 CPUs).
  */
 export async function deleteUser(
   config: ResolvedConfig,

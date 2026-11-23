@@ -31,6 +31,7 @@ const CONNECTION = {
   kind: "oidc",
   label: "Acme staff",
   enabled: true,
+  draft: false,
   jit: true,
   defaultRole: "member",
   mfa: null,
@@ -53,7 +54,67 @@ const SCIM_TOKEN = {
   createdAt: "2026-01-01T00:00:00.000Z",
   lastUsedAt: null,
   expiresAt: null,
+  pending: false,
 };
+
+/** One setup link as the route answers it (plan 13a Task 11). It holds no token and no hash. */
+const SETUP_LINK = {
+  id: "l1",
+  organizationId: "o1",
+  hint: "abcdefgh",
+  steps: ["domain", "connection"],
+  kinds: ["oidc"],
+  note: "Ada at IT",
+  createdBy: "u1",
+  expiresAt: "2026-01-08T00:00:00.000Z",
+  revokedAt: null,
+  endedAt: null,
+  openedAt: null,
+  readyAt: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const SETUP_PREVIEW = {
+  kind: "oidc",
+  issuerOrEntityId: "https://login.acme.example",
+  signInHost: "api.example.com",
+  fingerprints: [],
+  domains: ["acme.example"],
+  scim: null,
+};
+
+const SETUP_STATUS = {
+  link: {
+    id: "l1",
+    steps: ["domain", "connection"],
+    kinds: ["oidc"],
+    note: "Ada at IT",
+    expiresAt: "2026-01-08T00:00:00.000Z",
+    readyAt: null,
+  },
+  domains: [DOMAIN],
+  connection: CONNECTION,
+  scimToken: null,
+  test: {
+    outcome: "passed",
+    step: null,
+    help: "",
+    attributeNames: ["email"],
+    address: "ada@acme.example",
+    name: null,
+    domainClaimed: true,
+    current: true,
+  },
+};
+
+/** The draft of a setup session: the IdP values only. */
+const SETUP_DRAFT = {
+  kind: "oidc",
+  label: "Acme staff",
+  issuer: "https://login.acme.example",
+  clientId: "authtempo",
+  clientSecret: "s3cret",
+} as const;
 
 /**
  * One call of client.sso or client.scim.tokens: the route it must reach, the
@@ -207,6 +268,123 @@ const CASES: readonly Case[] = [
     answer: { ok: true },
     value: { ok: true },
   },
+  // Plan 13a Task 11: the setup links of a manager, then the calls of a setup session.
+  {
+    name: "sso.setupLinks.create",
+    run: (c) =>
+      c.sso.setupLinks.create({
+        organizationId: "o1",
+        steps: ["domain", "connection"],
+        kinds: ["oidc"],
+        note: "Ada at IT",
+        ttlHours: 24,
+      }),
+    route: "POST /sso/setup-links/create",
+    // The guard runs before the body read, so the organization travels in the query.
+    url: "/auth/sso/setup-links/create?organizationId=o1",
+    body: { steps: ["domain", "connection"], kinds: ["oidc"], note: "Ada at IT", ttlHours: 24 },
+    answer: { id: "l1", token: "sl_clear", expiresAt: "2026-01-08T00:00:00.000Z" },
+    value: { id: "l1", token: "sl_clear", expiresAt: "2026-01-08T00:00:00.000Z" },
+  },
+  {
+    name: "sso.setupLinks.list",
+    run: (c) => c.sso.setupLinks.list({ organizationId: "o1" }),
+    route: "GET /sso/setup-links/list",
+    url: "/auth/sso/setup-links/list?organizationId=o1",
+    body: undefined,
+    answer: { links: [SETUP_LINK] },
+    value: [SETUP_LINK],
+  },
+  {
+    name: "sso.setupLinks.get",
+    run: (c) => c.sso.setupLinks.get({ id: "l1" }),
+    route: "GET /sso/setup-links/get",
+    url: "/auth/sso/setup-links/get?id=l1",
+    body: undefined,
+    answer: { link: SETUP_LINK, preview: SETUP_PREVIEW },
+    value: { link: SETUP_LINK, preview: SETUP_PREVIEW },
+  },
+  {
+    name: "sso.setupLinks.revoke",
+    run: (c) => c.sso.setupLinks.revoke({ id: "l1" }),
+    route: "POST /sso/setup-links/revoke",
+    url: "/auth/sso/setup-links/revoke",
+    body: { id: "l1" },
+    answer: { ok: true },
+    value: { ok: true },
+  },
+  {
+    name: "sso.setupLinks.activate",
+    run: (c) => c.sso.setupLinks.activate({ id: "l1", version: 3 }),
+    route: "POST /sso/setup-links/activate",
+    url: "/auth/sso/setup-links/activate",
+    body: { id: "l1", version: 3 },
+    answer: { connection: CONNECTION },
+    value: CONNECTION,
+  },
+  {
+    name: "sso.setup.open",
+    run: (c) => c.sso.setup.open({ token: "sl_clear" }),
+    route: "POST /sso/setup/open",
+    url: "/auth/sso/setup/open",
+    body: { token: "sl_clear" },
+    answer: { linkId: "l1" },
+    value: { linkId: "l1" },
+  },
+  {
+    name: "sso.setup.status",
+    run: (c) => c.sso.setup.status({ run: "r1" }),
+    route: "GET /sso/setup/status",
+    url: "/auth/sso/setup/status?run=r1",
+    body: undefined,
+    answer: SETUP_STATUS,
+    value: SETUP_STATUS,
+  },
+  {
+    name: "sso.setup.domains.add",
+    run: (c) => c.sso.setup.domains.add({ domain: "acme.example" }),
+    route: "POST /sso/setup/domains/add",
+    url: "/auth/sso/setup/domains/add",
+    body: { domain: "acme.example" },
+    answer: { domain: DOMAIN },
+    value: DOMAIN,
+  },
+  {
+    name: "sso.setup.domains.verify",
+    run: (c) => c.sso.setup.domains.verify({ id: "d1" }),
+    route: "POST /sso/setup/domains/verify",
+    url: "/auth/sso/setup/domains/verify",
+    body: { id: "d1" },
+    answer: { domain: DOMAIN },
+    value: DOMAIN,
+  },
+  {
+    name: "sso.setup.connection",
+    run: (c) => c.sso.setup.connection(SETUP_DRAFT),
+    route: "POST /sso/setup/connection",
+    url: "/auth/sso/setup/connection",
+    body: SETUP_DRAFT,
+    answer: { connection: CONNECTION },
+    value: CONNECTION,
+  },
+  {
+    name: "sso.setup.scimToken",
+    run: (c) => c.sso.setup.scimToken(),
+    route: "POST /sso/setup/scim-token",
+    url: "/auth/sso/setup/scim-token",
+    body: undefined,
+    answer: { id: "s1", token: "sk_clear", scimBaseUrl: "https://api.example.com/auth/scim/v2" },
+    value: { id: "s1", token: "sk_clear", scimBaseUrl: "https://api.example.com/auth/scim/v2" },
+  },
+  {
+    name: "sso.setup.handback",
+    run: (c) => c.sso.setup.handback(),
+    route: "POST /sso/setup/handback",
+    url: "/auth/sso/setup/handback",
+    body: undefined,
+    answer: { ok: true },
+    value: { ok: true },
+  },
 ];
 
 /** A client whose fetch keeps each request and answers `status` with `body`. */
@@ -260,8 +438,88 @@ describe("client.sso and client.scim.tokens (plan 12d Task 13)", () => {
         (r.feature === "sso" || r.feature === "scim") &&
         ((r.auth as readonly string[]).includes("session") || r.path === "/sso/discover"),
     ).map((r) => `${r.method} ${r.path}`);
-    expect(owned.sort()).toEqual([...called].sort());
+    // Plan 13a Task 11: the twelve calls of the setup are the other rows of CASES, and
+    // the confirm page (a link that a browser opens) is the one setup route with no call.
+    const setup = ROUTES.filter((r) => r.feature === "ssoSetup" && r.path !== "/sso/setup").map(
+      (r) => `${r.method} ${r.path}`,
+    );
+    expect(setup).toHaveLength(12);
+    expect([...owned, ...setup].sort()).toEqual([...called].sort());
     expect(owned).toHaveLength(13);
+  });
+
+  it("asks for JSON on the setup status, and refuses a page as the answer", async () => {
+    let accept: string | null = null;
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      accept = new Request(input, init).headers.get("accept");
+      return Response.json(SETUP_STATUS);
+    }) as typeof globalThis.fetch;
+    const client = createClient({ baseURL: BASE_URL, fetch });
+    expect((await client.sso.setup.status()).ok).toBe(true);
+    // Core answers the page of the setup to any other Accept: the call must name JSON.
+    expect(accept).toBe("application/json");
+    // A page answer is not the contract: the client does not hand HTML to the app.
+    const page = createClient({
+      baseURL: BASE_URL,
+      fetch: (async () =>
+        new Response("<html></html>", {
+          headers: { "content-type": "text/html" },
+        })) as typeof globalThis.fetch,
+    });
+    expect(await page.sso.setup.status()).toEqual({ ok: false, code: "unexpected", status: 200 });
+  });
+
+  it("answers the refusals of a setup route with its own code", async () => {
+    const { client: forbidden } = answering(403, { error: "forbidden_rank" });
+    expect(await forbidden.sso.setupLinks.get({ id: "l1" })).toEqual({
+      ok: false,
+      code: "forbidden_rank",
+      status: 403,
+    });
+    const { client: notTested } = answering(409, { error: "setup_not_tested" });
+    expect(await notTested.sso.setupLinks.activate({ id: "l1", version: 1 })).toEqual({
+      ok: false,
+      code: "setup_not_tested",
+      status: 409,
+    });
+    // R28: a draft that changed after the preview answers `conflict`.
+    const { client: changed } = answering(409, { error: "conflict" });
+    expect(await changed.sso.setupLinks.activate({ id: "l1", version: 1 })).toEqual({
+      ok: false,
+      code: "conflict",
+      status: 409,
+    });
+    const { client: noCookie } = answering(401, { error: "unauthorized" });
+    expect(await noCookie.sso.setup.handback()).toEqual({
+      ok: false,
+      code: "unauthorized",
+      status: 401,
+    });
+  });
+
+  it("answers a typed error for each refusal code of the setup calls", async () => {
+    type C = ReturnType<typeof answering>["client"];
+    const create = (c: C) =>
+      c.sso.setupLinks.create({
+        organizationId: "o1",
+        steps: ["domain"],
+        kinds: ["oidc"],
+        note: "Ada at IT",
+      });
+    const calls: [string, number, (c: C) => Promise<unknown>][] = [
+      ["setup_link_invalid", 404, (c) => c.sso.setupLinks.revoke({ id: "l1" })],
+      ["setup_link_limit", 409, create],
+      ["domain_limit", 409, (c) => c.sso.setup.domains.add({ domain: "acme.example" })],
+      ["domain_taken", 409, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["domain_unverified", 400, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["token_expired", 400, (c) => c.sso.setup.domains.verify({ id: "d1" })],
+      ["invalid_body", 400, (c) => c.sso.setup.scimToken()],
+      ["rate_limited", 429, (c) => c.sso.setup.handback()],
+    ];
+    for (const [code, status, run] of calls) {
+      const { client } = answering(status, { error: code });
+      expect(await run(client), code).toEqual({ ok: false, code, status });
+    }
   });
 
   it("sends no key for an optional field the caller did not set", async () => {

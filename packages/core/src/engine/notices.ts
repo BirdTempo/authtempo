@@ -25,7 +25,15 @@ export type NoticeEvent =
   // plan 12i: the phone is a way in (spec 32 item 5).
   | "phone_changed"
   // plan 12f: a platform operator opened a session on the account, for support.
-  | "impersonation_started";
+  | "impersonation_started"
+  // plan 13a: the notices of an organization's SSO setup, to each owner.
+  | SetupNoticeEvent;
+
+/**
+ * The notices of plan 13a. They tell an owner about the organization, not
+ * about a way in to the account, so they have their own text.
+ */
+export type SetupNoticeEvent = "sso_setup_ready" | "sso_activated";
 
 /** What a notice mail builder gets. Core sends the mail to `email`, whatever `to` the builder answers. */
 export interface NoticeMailInput {
@@ -40,10 +48,18 @@ export interface NoticeMailInput {
   provider?: string;
   /** The new address of `email_changed`. */
   newEmail?: string;
+  /**
+   * The setup link of `sso_setup_ready` and `sso_activated`: its id and the note of its maker
+   * (the IT contact). Never the link token or its hash. The note is text of a manager: a builder
+   * that renders HTML must escape it.
+   */
+  setup?: { linkId: string; note: string };
 }
 
-/** The first line of each notice but the impersonation notice, which has its own text. */
-const WHAT: Readonly<Record<Exclude<NoticeEvent, "impersonation_started">, string>> = {
+/** The first line of each notice but the impersonation and setup notices, which have their own text. */
+const WHAT: Readonly<
+  Record<Exclude<NoticeEvent, "impersonation_started" | SetupNoticeEvent>, string>
+> = {
   password_changed: "Your password was changed.",
   password_reset: "Your password was reset.",
   email_changed: "The email address of your account was changed.",
@@ -73,6 +89,25 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
         `If you did not ask for support, contact ${input.appName}.`,
       ].join("\n"),
     };
+  // The two setup notices (plan 13a). They name the link by its id and note, and hold no token.
+  if (input.event === "sso_setup_ready" || input.event === "sso_activated") {
+    const lines = [
+      input.event === "sso_setup_ready"
+        ? "The SSO setup of your organization is ready for an owner."
+        : "An owner turned on the SSO setup of your organization.",
+    ];
+    if (input.setup !== undefined) {
+      lines.push(`Setup link: ${input.setup.linkId}.`, `Note: ${input.setup.note}`);
+    }
+    if (input.event === "sso_setup_ready")
+      lines.push("Open the SSO page of your organization to test and turn on the connection.");
+    lines.push(`Time: ${input.at.toISOString()}.`);
+    return {
+      to: input.email,
+      subject: `SSO setup notice for ${input.appName}`,
+      text: lines.join("\n"),
+    };
+  }
   const lines = [WHAT[input.event]];
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);
   if (input.provider !== undefined) lines.push(`The provider is ${input.provider}.`);

@@ -36,6 +36,7 @@ const COMPAT = [
   "0011_compat_schema_v14",
   "0012_compat_schema_v15",
   "0013_compat_schema_v16",
+  "0014_compat_schema_v17",
 ];
 
 /** The libSQL server of this file. migrate-sqlite.test.ts empties its own server at the same time. */
@@ -112,7 +113,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
       tables: "compat",
       dryRun: false,
       before: null,
-      after: 16,
+      after: 17,
       pending: COMPAT,
       applied: COMPAT,
       copied: [],
@@ -121,15 +122,15 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
     });
     expect(linesOf(r.stderr)[0]).toBe(`opening ${file}`);
     expect(metaRows()).toEqual([
-      { key: "compat_better_auth", value: "13" },
-      { key: "schema_version", value: "16" },
+      { key: "compat_better_auth", value: "14" },
+      { key: "schema_version", value: "17" },
     ]);
     expect(records()).toEqual(COMPAT);
     const again = migrate(["--json"]);
     expect(again.status, again.stderr).toBe(0);
     expect(JSON.parse(again.stdout)).toMatchObject({
-      before: 16,
-      after: 16,
+      before: 17,
+      after: 17,
       pending: [],
       applied: [],
     });
@@ -140,7 +141,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
     execOnFile(BEFORE_17);
     const r = migrate(["--before-1.7", "--json"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(JSON.parse(r.stdout)).toMatchObject({ before: null, after: 16, applied: COMPAT });
+    expect(JSON.parse(r.stdout)).toMatchObject({ before: null, after: 17, applied: COMPAT });
     expect(rowsOf("SELECT name FROM pragma_table_info('account')").map((c) => c.name)).toContain(
       "issuer",
     );
@@ -151,7 +152,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
     ).toHaveLength(1);
     const again = migrate(["--before-1.7", "--json"]);
     expect(again.status, again.stderr).toBe(0);
-    expect(JSON.parse(again.stdout)).toMatchObject({ before: 16, pending: [], applied: [] });
+    expect(JSON.parse(again.stdout)).toMatchObject({ before: 17, pending: [], applied: [] });
   });
 
   it("stops on tables from before 1.7 without --before-1.7, and writes nothing", () => {
@@ -193,7 +194,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
     expect(r.status, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({
       before: 5,
-      after: 16,
+      after: 17,
       pending: COMPAT.slice(2),
       applied: COMPAT.slice(2),
     });
@@ -203,13 +204,13 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
   it("stops on a newer database before any write", () => {
     execOnFile(BETTER_AUTH);
     expect(migrate().status).toBe(0);
-    execOnFile(readFileSync(join(PKG, "test/fixtures/sqlite/0017_future.sql"), "utf8"));
+    execOnFile(readFileSync(join(PKG, "test/fixtures/sqlite/0018_future.sql"), "utf8"));
     const before = readFileSync(file);
     const r = migrate();
     expect(r.status).toBe(2);
     expect(r.stdout).toBe("");
     expect(linesOf(r.stderr).at(-1)).toBe(
-      "stopped: the database is at version 17; this CLI knows version 16; use a newer CLI",
+      "stopped: the database is at version 18; this CLI knows version 17; use a newer CLI",
     );
     expect(readFileSync(file).equals(before)).toBe(true);
   });
@@ -272,21 +273,21 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
         target: "sqlite",
         tables: "compat",
         before: null,
-        after: 16,
+        after: 17,
         pending: COMPAT,
         applied: COMPAT,
       });
       expect(linesOf(r.stderr)[0]).toBe(`connecting to ${LIBSQL_URL.replace(/^\w+:\/\//, "")}`);
       const meta = await client.execute("SELECT key, value FROM ta_meta ORDER BY key");
       expect(meta.rows.map((row) => ({ key: row.key, value: row.value }))).toEqual([
-        { key: "compat_better_auth", value: "13" },
-        { key: "schema_version", value: "16" },
+        { key: "compat_better_auth", value: "14" },
+        { key: "schema_version", value: "17" },
       ]);
       const names = await client.execute("SELECT name FROM ta_migrations ORDER BY name");
       expect(names.rows.map((row) => row.name)).toEqual(COMPAT);
       const again = run();
       expect(again.status, again.stderr).toBe(0);
-      expect(JSON.parse(again.stdout)).toMatchObject({ before: 16, pending: [], applied: [] });
+      expect(JSON.parse(again.stdout)).toMatchObject({ before: 17, pending: [], applied: [] });
     } finally {
       client.close();
     }

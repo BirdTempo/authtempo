@@ -64,6 +64,8 @@ export interface SamlChecked {
   assertionId: string;
   /** The later of the two `NotOnOrAfter` values plus the skew: the life of the replay row. */
   validUntil: Date;
+  /** The names of the attributes of the Assertion, never their values (plan 13a Task 7). */
+  attributeNames: string[];
   profile: SsoProfile;
 }
 
@@ -328,6 +330,7 @@ function checkAssertion(root: XmlElement, assertion: XmlElement, expect: SamlExp
   return {
     assertionId,
     validUntil: new Date(Math.max(notOnOrAfter, dataNotOnOrAfter) + skew),
+    attributeNames: [...attributes.keys()],
     profile: {
       subject: subjectValue,
       email,

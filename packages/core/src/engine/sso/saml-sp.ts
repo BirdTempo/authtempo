@@ -16,11 +16,12 @@ import { checkResponse, NS_SAML, NS_SAMLP, type SamlStep } from "../../saml/asse
 import { importVerifyKey, readCertificate, strictBase64 } from "../../saml/der.js";
 import { NS_DSIG } from "../../saml/dsig.js";
 import { childElements, parseXml, textOf, XML_LIMITS, type XmlElement } from "../../saml/xml.js";
-import type { SsoConnectionRow } from "../../schema.js";
+import type { SsoConnectionRow, SsoTestRunRow } from "../../schema.js";
 import { StorageError } from "../../storage/port.js";
 import type { SignInChallenge } from "../second-factor.js";
 import { acsUrl, type SamlStored, spEntityId } from "./connections.js";
 import { resolveSsoUser, type SsoSignedIn } from "./resolve.js";
+import { failTestRun, passTestRun, pendingRun, type SsoTestDone } from "./test-run-store.js";
 
 /**
  * The SAML service provider of one connection (plan 12d Task 8, spec 30
@@ -76,6 +77,8 @@ interface SamlRequestData {
   requestId: string;
   next: string;
   bindHash: string;
+  /** The pending test run of this request. Only a test start writes it (plan 13a Task 7). */
+  testRunId?: string;
 }
 
 /**
@@ -140,6 +143,7 @@ export async function startSaml(
   config: ResolvedConfig,
   row: SsoConnectionRow,
   input: { next?: string | undefined; ip: string | null },
+  runId?: string,
 ): Promise<Result<{ location: string; bindToken: string }>> {
   const c = samlConfig(row);
   const now = config.clock.now();
@@ -160,6 +164,7 @@ export async function startSaml(
     requestId,
     next: safeNext(input.next),
     bindHash: await sha256Hex(bindToken),
+    ...(runId === undefined ? {} : { testRunId: runId }),
   };
   await config.storage.create("verification", {
     id: newId(now),
@@ -248,7 +253,25 @@ export interface SamlComplete {
 export async function completeSaml(
   outer: ResolvedConfig,
   input: SamlComplete,
-): Promise<Result<SsoSignedIn | SignInChallenge>> {
+): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
+  const trace: SamlTrace = { run: null, step: null };
+  const r = await runSaml(outer, input, trace);
+  // As the OIDC callback: a failed test run ends in a `failed` row with a closed step.
+  if (r.ok || trace.run === null) return r;
+  return ok({ test: await failTestRun(outer, trace.run, trace.step ?? "request") });
+}
+
+/** What the ACS learns on its way: the pending test run of its request row, and the last refused step. */
+interface SamlTrace {
+  run: SsoTestRunRow | null;
+  step: SamlStep | null;
+}
+
+async function runSaml(
+  outer: ResolvedConfig,
+  input: SamlComplete,
+  trace: SamlTrace,
+): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
   if (!(await limit(outer, "sso-acs:ip", ipKey(input.ip), ACS_LIMIT))) return fail("rate_limited");
   const sso = outer.sso;
   if (!sso?.saml) return fail("sso_not_configured");
@@ -256,7 +279,10 @@ export async function completeSaml(
   // The bearer values of the post: each event of the act scrubs them (plan 12d on 12h).
   const config = withSecrets(outer, [...form.getAll("SAMLResponse"), ...form.getAll("RelayState")]);
   const id = input.connectionId;
-  const no = (step: SamlStep) => refused(config, id, step, input.ip);
+  const no = (step: SamlStep) => {
+    trace.step = step;
+    return refused(config, id, step, input.ip);
+  };
   const responses = form.getAll("SAMLResponse");
   const states = form.getAll("RelayState");
   const [encoded] = responses;
@@ -278,11 +304,25 @@ export async function completeSaml(
     return no("request");
   // A spent row: the second post of one Response. No signature check runs for it.
   if (row.consumedAt !== null) return no("request_spent");
+  // The binding holds, so this browser started the test. Only now may a failure end its run.
+  if (data.testRunId !== undefined) {
+    const run = await pendingRun(config, data.testRunId);
+    if (!run || run.connectionId !== id) return no("request");
+    trace.run = run;
+  }
 
   const connection = await config.storage.findOne("ssoConnection", [
     { field: "id", op: "eq", value: id },
   ]);
-  if (!connection?.enabled || connection.kind !== "saml") return fail("sso_not_configured");
+  // A real sign-in needs `enabled`: a connection that is off signs in no one. A test run reads
+  // a draft too, and it opens no session. The run names the organization that it tested.
+  if (
+    !connection ||
+    (!trace.run && !connection.enabled) ||
+    connection.kind !== "saml" ||
+    (trace.run && connection.organizationId !== trace.run.organizationId)
+  )
+    return fail("sso_not_configured");
   const c = samlConfig(connection);
   const xml = strictBase64(encoded, XML_SPACE);
   if (xml === null) return no("form");
@@ -333,6 +373,16 @@ export async function completeSaml(
     if (err instanceof StorageError && err.code === "unique_violation") return no("replay");
     throw err;
   }
+  // A test run stops here. It never reaches the sign-in resolution (plan 13a Task 7).
+  if (trace.run)
+    return ok({
+      test: await passTestRun(
+        config,
+        trace.run,
+        checked.value.profile,
+        checked.value.attributeNames,
+      ),
+    });
   return resolveSsoUser(config, connection, checked.value.profile, {
     next: safeNext(data.next),
     ip: input.ip,

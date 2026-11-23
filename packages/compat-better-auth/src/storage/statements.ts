@@ -267,6 +267,11 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "scimUser",
   "scimGroup",
   "scimGroupMember",
+  // Plan 13a Task 0b: core's own tables of schema version 17. The compat
+  // migration of that version (Task 1) creates them.
+  "ssoSetupLink",
+  "ssoTestRun",
+  "ssoSetupSession",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

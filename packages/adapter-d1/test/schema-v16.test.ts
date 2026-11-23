@@ -105,7 +105,9 @@ describe("schema version 16 on D1 (plan 12p)", () => {
       { id: "sv", proved: 1 },
       { id: "sv2", proved: 1 },
     ]);
-    // The gate passes: the adapter reads the database at version 16 and gives a boolean.
+    // The adapter reads only a database of the current version: apply the later migrations first (0017 since plan 13a).
+    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
+    // The gate passes: the adapter reads the rows of version 15 and gives a boolean.
     const db = createD1Adapter(env.STAGED);
     expect(await db.findOne("session", [{ field: "id", op: "eq", value: "sv" }])).toMatchObject({
       userId: "uv",
@@ -172,8 +174,10 @@ describe("schema version 16 on D1 (plan 12p)", () => {
         session("d1", "ud", db),
       ]);
     }
-    // The copy takes the shipped file, as wrangler d1 migrations apply runs it.
-    await applyD1Migrations(env.PAGED_COPY, env.TEST_MIGRATIONS);
+    // The copy takes the shipped file, as wrangler d1 migrations apply runs it. It stops at 0016,
+    // as the hand fill does (0017 since plan 13a).
+    const through0016 = env.TEST_MIGRATIONS.slice(0, i0016 + 1);
+    await applyD1Migrations(env.PAGED_COPY, through0016);
     // By hand: the count, the column, the pages until no row changes, the version, the mark.
     expect(await env.PAGED.prepare(count).first("sessions")).toBe(7);
     await env.PAGED.prepare(column).run();
@@ -204,7 +208,7 @@ describe("schema version 16 on D1 (plan 12p)", () => {
     ).toEqual(["a1", "a2", "a3", "a4", "b1", "b2", "b3"]);
     // The mark holds the name that the runner reads, so a new run skips 0016. A run of
     // 0016 again would fail with duplicate column name: proved.
-    await applyD1Migrations(env.PAGED, env.TEST_MIGRATIONS);
+    await applyD1Migrations(env.PAGED, through0016);
     expect(await rows(env.PAGED, "SELECT name FROM d1_migrations ORDER BY id")).toEqual(
       await rows(env.PAGED_COPY, "SELECT name FROM d1_migrations ORDER BY id"),
     );
@@ -214,10 +218,14 @@ describe("schema version 16 on D1 (plan 12p)", () => {
   });
 
   it("migrates a database with no session", async () => {
-    // test/setup.ts applies every shipped file to env.DB, which holds no row.
+    // test/setup.ts applies every shipped file to env.DB, which holds no row. env.DB holds every
+    // migration (0017 since plan 13a), so read the version that 0016 itself writes.
+    const m0016 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0016_"));
     expect(
-      await env.DB.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").first("value"),
-    ).toBe("16");
+      m0016?.queries.some((q) =>
+        q.includes("UPDATE ta_meta SET value = '16' WHERE key = 'schema_version'"),
+      ),
+    ).toBe(true);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM ta_session").first("n")).toBe(0);
     expect((await columns(env.DB, "ta_session")).at(-1)).toMatchObject({
       name: "proved",

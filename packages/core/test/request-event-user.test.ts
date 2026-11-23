@@ -24,6 +24,7 @@ import {
 import { observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 // Plan 12n decision 17 (spec 31): the `request` event names the user of the
 // session that a step of the request resolved. It names no user when no
@@ -129,7 +130,8 @@ describe("the user of the request event (plan 12n decision 17)", () => {
 
 /** The contract of each route, by key. */
 const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
-const KEYS = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
+// A route that no module mounts yet resolves no session (plan 13a): the walk skips it.
+const KEYS = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 const entryOf = (key: RouteKey) => {
   const entry = ROUTES.find((r) => `${r.method} ${r.path}` === key);
   if (!entry) throw new Error(`no entry ${key}`);
@@ -190,7 +192,7 @@ async function walkWorld() {
       users: true,
       impersonation: {},
     },
-    sso: { dns: [{ name: "none", txt: async () => [] }] },
+    sso: { dns: [{ name: "none", txt: async () => [] }], setup: {} },
     scim: {},
     openapi: true,
     username: {},

@@ -1,8 +1,8 @@
-// authtempo schema version 16, dialect sqlite, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 17, dialect sqlite, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
-//   tables: { external: ["ta_user", "ta_identity", "ta_session", "ta_verification", "ta_passkey", "ta_organization", "ta_member", "ta_invitation", "ta_password", "ta_api_token", "ta_totp", "ta_trusted_device", "ta_jwk", "ta_oauth_client", "ta_oauth_consent", "ta_oauth_token", "ta_oauth_device", "ta_oauth_subject", "ta_oauth_session_client", "ta_oauth_logout", "ta_second_factor", "ta_operator_audit", "ta_organization_role", "ta_team", "ta_team_member", "ta_organization_token", "ta_moved_token", "ta_sso_connection", "ta_sso_domain", "ta_scim_token", "ta_scim_user", "ta_scim_group", "ta_scim_group_member"] },
+//   tables: { external: ["ta_user", "ta_identity", "ta_session", "ta_verification", "ta_passkey", "ta_organization", "ta_member", "ta_invitation", "ta_password", "ta_api_token", "ta_totp", "ta_trusted_device", "ta_jwk", "ta_oauth_client", "ta_oauth_consent", "ta_oauth_token", "ta_oauth_device", "ta_oauth_subject", "ta_oauth_session_client", "ta_oauth_logout", "ta_second_factor", "ta_operator_audit", "ta_organization_role", "ta_team", "ta_team_member", "ta_organization_token", "ta_moved_token", "ta_sso_connection", "ta_sso_domain", "ta_scim_token", "ta_scim_user", "ta_scim_group", "ta_scim_group_member", "ta_sso_setup_link", "ta_sso_test_run", "ta_sso_setup_session"] },
 // Externally managed tables are a Preview feature in Prisma 7.10 (read 2026-10-22).
 // Keep ta_meta, ta_limit, and ta_migrations out of each Prisma migration too.
 
@@ -611,6 +611,9 @@ model TaSsoConnection {
   mfa String? @map("mfa")
   /// JSON text
   scimRoles String? @map("scim_roles")
+  draft Boolean @map("draft")
+  version Int @map("version")
+  setupLinkId String? @map("setup_link_id")
 
   @@index([organizationId], map: "ix_ta_sso_connection__organization_id")
   @@map("ta_sso_connection")
@@ -638,6 +641,7 @@ model TaSsoDomain {
   firstFailureAt BigInt? @map("first_failure_at")
   /// epoch milliseconds
   expiresAt BigInt? @map("expires_at")
+  setupLinkId String? @map("setup_link_id")
 
   @@unique([organizationId, domain], map: "ux_ta_sso_domain__organization_id__domain")
   @@unique([claimedDomain], map: "ux_ta_sso_domain__claimed_domain")
@@ -662,6 +666,8 @@ model TaScimToken {
   expiresAt BigInt? @map("expires_at")
   /// epoch milliseconds
   lastUsedAt BigInt? @map("last_used_at")
+  pending Boolean @map("pending")
+  setupLinkId String? @map("setup_link_id")
 
   @@unique([tokenHash], map: "ux_ta_scim_token__token_hash")
   @@index([organizationId], map: "ix_ta_scim_token__organization_id")
@@ -721,4 +727,78 @@ model TaScimGroupMember {
   @@unique([groupId, scimUserId], map: "ux_ta_scim_group_member__group_id__scim_user_id")
   @@index([scimUserId], map: "ix_ta_scim_group_member__scim_user_id")
   @@map("ta_scim_group_member")
+}
+
+model TaSsoSetupLink {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  /// hash
+  tokenHash String @map("token_hash")
+  hint String @map("hint")
+  /// JSON text
+  steps String @map("steps")
+  /// JSON text
+  kinds String @map("kinds")
+  note String @map("note")
+  createdBy String @map("created_by")
+  /// epoch milliseconds
+  expiresAt BigInt @map("expires_at")
+  /// epoch milliseconds
+  revokedAt BigInt? @map("revoked_at")
+  /// epoch milliseconds
+  endedAt BigInt? @map("ended_at")
+  /// epoch milliseconds
+  openedAt BigInt? @map("opened_at")
+  /// epoch milliseconds
+  readyAt BigInt? @map("ready_at")
+
+  @@unique([tokenHash], map: "ux_ta_sso_setup_link__token_hash")
+  @@index([organizationId], map: "ix_ta_sso_setup_link__organization_id")
+  @@map("ta_sso_setup_link")
+}
+
+model TaSsoTestRun {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  connectionId String @map("connection_id")
+  linkId String? @map("link_id")
+  outcome String @map("outcome")
+  step String? @map("step")
+  /// JSON text
+  attributeNames String @map("attribute_names")
+  domainClaimed Boolean @map("domain_claimed")
+  draftVersion Int @map("draft_version")
+
+  @@index([connectionId], map: "ix_ta_sso_test_run__connection_id")
+  @@map("ta_sso_test_run")
+}
+
+model TaSsoSetupSession {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  linkId String @map("link_id")
+  organizationId String @map("organization_id")
+  /// hash
+  tokenHash String @map("token_hash")
+  /// epoch milliseconds
+  lastSeenAt BigInt @map("last_seen_at")
+  /// epoch milliseconds
+  expiresAt BigInt @map("expires_at")
+  /// epoch milliseconds
+  endedAt BigInt? @map("ended_at")
+
+  @@unique([tokenHash], map: "ux_ta_sso_setup_session__token_hash")
+  @@index([linkId], map: "ix_ta_sso_setup_session__link_id")
+  @@map("ta_sso_setup_session")
 }

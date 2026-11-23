@@ -714,6 +714,13 @@ export async function deleteOrganizationRows(tx: StorageAdapter, id: string): Pr
  * plan 12d): ten deletes of IN_CHUNK group ids. On the D1 binding the route
  * sent 23 queries with 50 groups, 20 of them with no group (2026-10-24). So
  * ten deletes fit the 50 queries of D1 Free with room for a due refresh.
+ * Plan 13a (ruling R17) adds the setup session and setup link deletes to
+ * the rest: 2 queries more in this route. On the D1 binding the organization
+ * delete of the SCIM Groups test sent 33 queries, 31 before (2026-11-23,
+ * load 6, 18 CPUs). Plan 13a Task 7 adds the delete of the SSO test runs to
+ * the rest: 1 query more. On the D1 binding the same test sent 34 queries,
+ * 33 before (three runs of 2026-11-23, load averages 7 to 40, 18 CPUs). So
+ * the ten deletes still fit 50.
  */
 export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
 
@@ -795,6 +802,11 @@ export async function deleteOrganizationsHead(
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R17): the setup links and setup sessions are not here.
+  // The open and each setup session request read the organization row
+  // (setup-session.ts), so no flow reaches them after this step. They go in
+  // `deleteOrganizationsRest`, and the act of an account delete costs no
+  // more D1 queries than before plan 13a. The test runs go there too (plan 13a Task 7).
 }
 
 /**
@@ -819,6 +831,16 @@ export async function deleteOrganizationsRest(
   // The tokens and the role rows of the organization have no use without it (plan 12k).
   await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a (ruling R17): each read of the setup rows needs the organization
+  // row (setup-session.ts). The links go before their sessions, in the order
+  // of each setup write: the organization row, the link row, then the session
+  // rows (ruling R22, `lockSetupRows`). The reverse order made a deadlock.
+  await tx.delete("ssoSetupLink", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoSetupSession", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 13a Task 7: the test runs hold ids and names of attributes only. They need no organization
+  // row to read, because the connection delete in the head already stops a start and a callback.
+  // They go after the link, in the order of the start (ruling R22).
+  await tx.delete("ssoTestRun", [{ field: "organizationId", op: "in", value: list }]);
   // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", [{ field: "organizationId", op: "in", value: list }]);
   // The scimGroupMember rows come after the member rows, as in a group write (ruling 59 M1).

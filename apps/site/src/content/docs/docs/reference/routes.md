@@ -24,7 +24,7 @@ sources:
 - With a `baseURL` list, a request to an origin outside the list answers 421 `host_not_allowed` before any route. In each rule, `baseURL` is the entry of the request's origin.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
 - A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, as does the `invalid_body` of an SSO or SCIM manager write. `not_ready` also carries `reason`, and `sso_required` carries `detail`. So does the `conflict` of a sign-up confirm that lost its claim.
-- A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
+- A request body past the cap of its route answers 413 [`body_too_large`](/docs/reference/errors/#body_too_large), and no parse runs. The cap is 65536 bytes, except 262144 bytes for `POST /social/apple/callback`, and 4194304 bytes for `POST /sso/setup/connection`, and 8388608 bytes for `POST /sso/connections/create` and `POST /sso/connections/update`. A JSON body nested deeper than 16 or with more than 4096 items outside its strings answers 400 [`invalid_body`](/docs/reference/errors/#invalid_body), and no parse runs. A form body of more than 128 pairs gets the refusal of a bad form of its route, and no parse runs. The SCIM routes answer their own SCIM 413 past 1048576 bytes. A SCIM body nested deeper than 16 or with more than 65536 items answers SCIM 400 `invalidSyntax`, and no parse runs.
 - The body reads of the routes with a cap above 65536 bytes hold at most 16777216 bytes at once in one isolate. The reads of signed-in users hold at most 8388608 bytes of it, and every other read at most 8388608 bytes. One IP holds at most 4194304 bytes, and so does the one client with no IP. A user may hold the cap of its read, with one large read at a time. A client is its IP before a session and its user after one. A read past that answers 503 [`body_busy`](/docs/reference/errors/#body_busy) with `Retry-After: 1`, and no parse runs. The SCIM routes answer their own SCIM 503.
 - Such a read that gets no bytes for 10 s answers 408 [`body_timeout`](/docs/reference/errors/#body_timeout). So does a read that runs past the time of its cap at 131072 bytes per second, at least 10 s. For a signed-in user the rate is 262144 bytes per second. No parse runs. The SCIM routes answer their own SCIM 408.
 - An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
@@ -192,7 +192,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, and SCIM rows go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted. More than 50 solo organizations answer `delete_too_large`. On D1, a delete that cannot fit 50 queries answers it too. With 1 to 50 solo organizations, the user can own at most 2 organizations with another owner, and with none at most 4. A refusal changes nothing |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Its teams, invitations, tokens, roles, SCIM rows, and SSO setup links and setup sessions go at the next sweep. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted. More than 50 solo organizations answer `delete_too_large`. On D1, a delete that cannot fit 50 queries answers it too. With 1 to 50 solo organizations, the user can own at most 2 organizations with another owner, and with none at most 4. A refusal changes nothing |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
@@ -1662,7 +1662,7 @@ The manager guard runs these steps in order. An impersonation session answers `f
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
-| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, `endpoints`, and `tokenEndpointAuthMethod`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. No answer holds the client secret or its sealed value |
+| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `draft`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, `endpoints`, and `tokenEndpointAuthMethod`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. No answer holds the client secret or its sealed value |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-sso-connections-create"><code>POST /sso/connections/create</code></h3>
@@ -1679,9 +1679,9 @@ The manager guard runs these steps in order. An impersonation session answers `f
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
-| Input | Query `{ id }`; JSON `{ organizationId?, kind?, label?, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. Each field of the create for the kind of the connection takes its rule. `kind` and `organizationId` never change. A new `clientSecret` is sealed again under the current app secret. `enabled: false` answers `invalid_body` while an enforced domain routes to the connection |
+| Input | Query `{ id }`; JSON `{ organizationId?, kind?, label?, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. Each field of the create for the kind of the connection takes its rule. `kind` and `organizationId` never change. A new `clientSecret` is sealed again under the current app secret. `enabled: false` answers `invalid_body` while an enforced domain routes to the connection. `enabled: true` on a draft answers `setup_not_tested` |
 | Answer | `{ connection }` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`setup_not_tested`](/docs/reference/errors/#setup_not_tested), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-connections-delete"><code>POST /sso/connections/delete</code></h3>
 
@@ -1708,7 +1708,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Field | Value |
 | --- | --- |
 | Needs | Nothing. It counts on `sso-start:ip:<ip>`, 30 per 15 minutes |
-| Input | Query `{ next? }` |
+| Input | Query `{ next?, test? }`. `test=1` starts a test run of a draft connection, for a setup session of the link that made the draft, or for a manager. A test start refuses a request that the browser marks `cross-site` or `same-site`, and a request with no `Sec-Fetch-Site` header passes. It counts on `setup-test:connection:<connectionId>`, 20 per hour. A refusal other than the limit answers 404 for a setup session |
 | Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. For SAML, the 302 goes to the `ssoUrl` with `SAMLRequest` and `RelayState`, by the HTTP-Redirect binding. For OIDC, the redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`sso_failed`](/docs/reference/errors/#sso_failed) |
 
@@ -1718,7 +1718,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | --- | --- |
 | Needs | Nothing. The callback reads the binding cookie |
 | Input | Query `{ code?, state?, error? }`. They come from the provider of the connection |
-| Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Then the address must be in a verified domain of the connection's organization. A known identity signs in its user, a user at the address gets the identity, and with `jit` a new user is created. The person gets a member row with the connection's `defaultRole`. A user with the second factor on gets the challenge page, unless the provider asserts a value of the connection's `mfa` list. Then a 302 to `next` with the session cookie. A failure redirects to `/?auth_error=<code>` |
+| Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Then the address must be in a verified domain of the connection's organization. A known identity signs in its user, a user at the address gets the identity, and with `jit` a new user is created. The person gets a member row with the connection's `defaultRole`. A user with the second factor on gets the challenge page, unless the provider asserts a value of the connection's `mfa` list. Then a 302 to `next` with the session cookie. A test run of a setup session stops before the sign-in and answers 303 to the status page, `/sso/setup/status?run=<id>`. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
 
 <h3 id="post-sso-connectionid-acs"><code>POST /sso/:connectionId/acs</code></h3>
@@ -1727,7 +1727,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | --- | --- |
 | Needs | Nothing. It counts on `sso-acs:ip:<ip>`, 60 per 15 minutes. The provider posts the form cross-site, so the Origin and Fetch Metadata rules skip this route. The request row and the binding cookie bind the post to the browser of the start |
 | Input | Form `{ SAMLResponse, RelayState }`. Each key comes once, and the form holds at most 1 081 519 bytes. `SAMLResponse` is the base64 of the Response, by the HTTP-POST binding |
-| Answer | The `RelayState` names the request row of a start of this connection, and the binding cookie must match. The Response then passes the checks in order. First come the parse, the wrapping guard, and the signature of the Assertion. The signature of the Response follows when it has one. Then come the status, the `Destination`, the issuer, and the conditions with the clock skew. Last come the audience, the bearer confirmation with `InResponseTo`, the `AuthnStatement`, the subject, and the address. The request row is spent once, and the Assertion ID is kept until its `NotOnOrAfter`, so a replay fails. Then the resolution of the OIDC callback runs. A `SessionNotOnOrAfter` caps the session, also through each sliding refresh. A failure redirects to `/?auth_error=<code>` |
+| Answer | The `RelayState` names the request row of a start of this connection, and the binding cookie must match. The Response then passes the checks in order. First come the parse, the wrapping guard, and the signature of the Assertion. The signature of the Response follows when it has one. Then come the status, the `Destination`, the issuer, and the conditions with the clock skew. Last come the audience, the bearer confirmation with `InResponseTo`, the `AuthnStatement`, the subject, and the address. The request row is spent once, and the Assertion ID is kept until its `NotOnOrAfter`, so a replay fails. Then the resolution of the OIDC callback runs. A `SessionNotOnOrAfter` caps the session, also through each sliding refresh. A test run of a setup session stops before the sign-in and answers 303 to the status page, `/sso/setup/status?run=<id>`. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
 
 <h3 id="get-sso-connectionid-metadata"><code>GET /sso/:connectionId/metadata</code></h3>
@@ -1738,6 +1738,125 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Input | None |
 | Answer | `application/samlmetadata+xml`: one `EntityDescriptor` whose `entityID` is this URL, with one `SPSSODescriptor` (`AuthnRequestsSigned="false"`, `WantAssertionsSigned="true"`) and one HTTP-POST `AssertionConsumerService` at the ACS URL. It is not signed. An id that names no SAML connection answers 404 |
 | Errors | [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
+
+The setup link routes exist when the config sets `sso.setup`. Read [Set up SSO with a setup link](/docs/guides/sso-setup-link/) for the steps and [Setup link reference](/docs/reference/sso-setup/) for the config and the rules. An owner of an organization, or a platform operator, mints a setup link. The IT admin of the organization opens it and fills in drafts: a domain, a connection, and a SCIM token. Nothing goes live until the owner activates the link.
+
+<h3 id="post-sso-setup-links-create"><code>POST /sso/setup-links/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }`; JSON `{ steps, kinds, ttlHours?, note }` |
+| Answer | `{ id, token, expiresAt }`. The token leaves core this one time |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_limit`](/docs/reference/errors/#setup_link_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-links-list"><code>GET /sso/setup-links/list</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ links }`. No link holds its token or its hash |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-links-get"><code>GET /sso/setup-links/get</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ id }` |
+| Answer | `{ link, preview }`. `preview` is what an activation makes live, or `null` when the link has no draft connection. `preview.version` is the version of the draft. It moves with each change of the draft, of a domain of the link, and of the pending SCIM token. Send it to the activation |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-links-revoke"><code>POST /sso/setup-links/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The link opens no more |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-links-activate"><code>POST /sso/setup-links/activate</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id, version }`. `version` is the `preview.version` that the owner read. It is an integer of 1 or more |
+| Answer | The connection, made live. The `version` must equal the version of the draft now, and a passed test run of that draft must exist. When the link holder changed the draft, a domain, or the pending SCIM token after the preview, the answer is `conflict` and nothing goes live. Read the preview again |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`setup_not_tested`](/docs/reference/errors/#setup_not_tested), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup"><code>GET /sso/setup</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | Query `{ token }`. Each load counts on `setup-page:ip:<ip>`, 60 per hour. A refusal emits `sso.setup_refused` with the step `page_ip_limit` |
+| Answer | The confirm page, as HTML. It changes nothing, so a mail scanner that opens the link opens no session |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-open"><code>POST /sso/setup/open</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | JSON or form `{ token }`. Each try counts on `setup-open:ip:<ip>`, 60 per hour. Each open of a live link counts on `setup-open:link:<linkId>`, 20 per hour. A success emits `sso.setup_opened`. A refusal emits `sso.setup_refused` with its step |
+| Answer | JSON: `{ linkId }`. A form: the first page of the setup. It sets the cookie `__Host-tempo_setup` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`setup_link_invalid`](/docs/reference/errors/#setup_link_invalid), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-domains-add"><code>POST /sso/setup/domains/add</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ domain }` |
+| Answer | The domain row, as a draft of the link |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-domains-verify"><code>POST /sso/setup/domains/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ id }` |
+| Answer | The domain row, after the DNS check |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-connection"><code>POST /sso/setup/connection</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | JSON `{ kind, label, issuer?, clientId?, clientSecret?, scope?, endpoints?, tokenEndpointAuthMethod?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }` |
+| Answer | The draft connection. It takes the values of the provider only. The owner sets `enabled`, `jit`, `defaultRole`, `mfa`, and `scimRoles` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-scim-token"><code>POST /sso/setup/scim-token</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | None |
+| Answer | `{ id, token, scimBaseUrl }`. The pending SCIM token leaves core this one time |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-setup-handback"><code>POST /sso/setup/handback</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | None |
+| Answer | `{ ok: true }`. The link is ready for the owner |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-setup-status"><code>GET /sso/setup/status</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The setup session cookie. It holds the setup session that `POST /sso/setup/open` opens |
+| Input | Query `{ run?, step?, idp? }`. `step` names a page of the setup, and `idp` names a guide |
+| Answer | An HTML page of the setup, with the guide, the draft, and the result of the test run `run`. The JSON answer holds the link, the drafts of the session, and that result. No live row and no secret |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## SCIM
 
@@ -1751,7 +1870,7 @@ The three token routes run the steps of the SSO manager routes: a session, the c
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
-| Answer | `{ tokens }`: the newest 100 tokens, oldest first. The sweep deletes each expired token. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
+| Answer | `{ tokens }`: the newest 100 tokens, oldest first. The sweep deletes each expired token. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, `expiresAt`, and `pending`. A pending token of a setup link opens no directory, but it holds a live slot. No answer holds the token or its hash |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-scim-tokens-create"><code>POST /scim/tokens/create</code></h3>

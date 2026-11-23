@@ -13,7 +13,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 16 needs the migrations up to `0016_schema_v16`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 17 needs the migrations up to `0017_schema_v17`.
 
 ## Before you start
 
@@ -39,8 +39,9 @@ sources:
 | 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
 | 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the back-channel sign-out message names the issuer that the client saw (plan 12i Task 18). |
 | 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`. It is true when the session came after the proof of its address. It is also true when the user has no address and is not anonymous. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A fill sets it from the user of each live session (plan 12p). |
+| 17 | `0017_schema_v17` | `ta_sso_setup_link`, `ta_sso_test_run`, `ta_sso_setup_session`. It also adds `draft`, `version`, and `setup_link_id` to `ta_sso_connection`, `pending` and `setup_link_id` to `ta_scim_token`, and `setup_link_id` to `ta_sso_domain`. This is the schema of the setup link. |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 16.
+`SCHEMA_VERSION` of `@authtempo/core` is 17.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -266,6 +267,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0011_compat_schema_v14` | The six tables of version 14. Better Auth's `ssoProvider` table and the tables of its SCIM plugin stay as they are. The text names `ta_` tables only, so it is the same for every naming. |
 | `0012_compat_schema_v15` | The columns of Better Auth's username, phone number, and anonymous plugins on `user`. They are `username`, `displayUsername`, `phoneNumber`, `phoneNumberVerified`, and `isAnonymous` (default false), with a unique key on `username` and on `phoneNumber`. On Postgres it adds each column only when it is absent. It adds `taDiscoverable`, `taPrf`, and `taLargeBlob` to `passkey`, and `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`. Better Auth's `user.email` stays NOT NULL. The text names the user and passkey tables, so tables with other names take the text of `compatMigration0012Sql`. |
 | `0013_compat_schema_v16` | `taProved` on `session`, which holds `proved`. NOT NULL with the default false. The fill sets true on each session whose user has a verified address. A placeholder address of Better Auth counts as no address. The text names the session and user tables, so tables with other names take the text of `compatMigration0013Sql`. |
+| `0014_compat_schema_v17` | The three tables of version 17, and the columns that version 17 adds to `ta_sso_connection`, `ta_sso_domain`, and `ta_scim_token`, with the same defaults. The text names `ta_` tables only, so it is the same for every naming. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

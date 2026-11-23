@@ -605,7 +605,7 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
   const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [48, 48, 47]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 31]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 34]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
@@ -902,14 +902,29 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * read of the outbox. Plan 12f2 (verify-12f2-r10 Low A, 2026-10-25): the
  * size check keeps no route limiter, so the page of the operator scene
  * ends 2 more impersonation sessions: 49, and the last sweep sends 35.
+ * Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7
+ * to 10.0 on 18 CPUs): the rest of the organization deletes the setup
+ * sessions and the setup links, so the sweep with the rest row sends 2
+ * queries more. The acts do not change.
+ * Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to
+ * 40 on 18 CPUs; a query count does not change with the load): the rest also
+ * deletes the SSO test runs, so the rest of each organization sends 1 query
+ * more. The plain scene sweeps in 33, was 32. The sweeps of each operator
+ * scene send 1 query more in total: the first sweep sends 47, was 48, and
+ * the last sweep sends 2 more. The due and confirm scenes measure the same
+ * counts as before. The acts do not change.
+ *
+ * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
+ * sweep runs when `sso` is on and sends 3 idle queries as the last step. The last sweep of each
+ * scene with `sso` sends 3 more. The plain scene has no `sso`, so it stays.
  */
 const SOLO_COUNTS = {
-  plain: [42, [30]],
-  due: [44, [31]],
-  confirm: [45, [31]],
-  operator: [49, [48, 48, 48, 35]],
-  operatorConfirm0: [48, [48, 48, 48, 39]],
-  operatorConfirm3: [48, [48, 48, 48, 41]],
+  plain: [42, [33]],
+  due: [44, [36]],
+  confirm: [45, [36]],
+  operator: [49, [47, 48, 48, 42]],
+  operatorConfirm0: [48, [47, 48, 48, 46]],
+  operatorConfirm3: [48, [47, 48, 48, 48]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**

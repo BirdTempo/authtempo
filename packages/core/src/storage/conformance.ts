@@ -29,6 +29,9 @@ import type {
   SessionRow,
   SsoConnectionRow,
   SsoDomainRow,
+  SsoSetupLinkRow,
+  SsoSetupSessionRow,
+  SsoTestRunRow,
   TeamMemberRow,
   TeamRow,
   TotpRow,
@@ -3321,6 +3324,9 @@ export function runAdapterConformance(
         secretVersion: 1,
         mfa: { amr: ["mfa"], acr: [] },
         scimRoles: { Admins: "admin" },
+        draft: false,
+        version: 1,
+        setupLinkId: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -3338,6 +3344,7 @@ export function runAdapterConformance(
         failures: 0,
         firstFailureAt: null,
         expiresAt: later,
+        setupLinkId: null,
         createdAt: at,
         updatedAt: at,
       });
@@ -3350,6 +3357,8 @@ export function runAdapterConformance(
         scopes: ["scim.users.read", "scim.groups.write"],
         expiresAt: later,
         lastUsedAt: null,
+        pending: false,
+        setupLinkId: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -3416,6 +3425,8 @@ export function runAdapterConformance(
           failures: 2,
           firstFailureAt: at,
           expiresAt: null,
+          // Plan 13a: a domain that a setup link added.
+          setupLinkId: "sl1",
         };
         const bare: SsoConnectionRow = {
           ...connection,
@@ -3428,6 +3439,10 @@ export function runAdapterConformance(
           secretVersion: 3,
           mfa: null,
           scimRoles: null,
+          // Plan 13a: a draft of a setup link after three changes.
+          draft: true,
+          version: 4,
+          setupLinkId: "sl1",
         };
         const user1 = scimUser("su1", "o1", "u1", "ada@acme.example");
         const user2: ScimUserRow = {
@@ -3443,6 +3458,15 @@ export function runAdapterConformance(
         await db.create("ssoDomain", claimed);
         await db.create("ssoDomain", domain("d2", "o2"));
         await db.create("scimToken", scimToken);
+        // Plan 13a: a pending token of a setup link.
+        const pendingToken: ScimTokenRow = {
+          ...scimToken,
+          id: "st3",
+          tokenHash: "sh3",
+          pending: true,
+          setupLinkId: "sl1",
+        };
+        await db.create("scimToken", pendingToken);
         await db.create("scimUser", user1);
         await db.create("scimUser", user2);
         await db.create("scimGroup", scimGroup);
@@ -3456,6 +3480,7 @@ export function runAdapterConformance(
           at.getTime(),
         );
         expect(await db.findOne("scimToken", byId("st1"))).toEqual(scimToken);
+        expect(await db.findOne("scimToken", byId("st3"))).toEqual(pendingToken);
         expect(await db.findOne("scimUser", byId("su1"))).toEqual(user1);
         expect(await db.findOne("scimUser", byId("su2"))).toEqual(user2);
         expect(await db.findOne("scimGroup", byId("sg1"))).toEqual(scimGroup);
@@ -3544,6 +3569,158 @@ export function runAdapterConformance(
             { field: "purpose", op: "eq", value: "saml-assertion" },
           ]),
         ).toHaveLength(1);
+      });
+    });
+
+    describe("setup models (schema version 17, plan 13a)", () => {
+      const at = new Date("2026-11-23T00:00:00.000Z");
+      const later = new Date(at.getTime() + 72 * 3_600_000);
+      const byId = (id: string) => [{ field: "id" as const, op: "eq" as const, value: id }];
+      const link: SsoSetupLinkRow = {
+        id: "sl1",
+        organizationId: "o1",
+        tokenHash: "lh1",
+        hint: "abcdefgh",
+        steps: ["domain", "connection", "directory"],
+        kinds: ["oidc", "saml"],
+        note: "Pat at Acme IT",
+        createdBy: "u1",
+        expiresAt: later,
+        revokedAt: null,
+        endedAt: null,
+        openedAt: null,
+        readyAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const run: SsoTestRunRow = {
+        id: "tr1",
+        organizationId: "o1",
+        connectionId: "c1",
+        linkId: "sl1",
+        outcome: "failed",
+        step: "signature",
+        attributeNames: ["email", "name"],
+        domainClaimed: false,
+        draftVersion: 2,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const session: SsoSetupSessionRow = {
+        id: "ss1",
+        linkId: "sl1",
+        organizationId: "o1",
+        tokenHash: "sth1",
+        lastSeenAt: at,
+        expiresAt: new Date(at.getTime() + 8 * 3_600_000),
+        endedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+
+      it("round-trips the three models", async () => {
+        // An app's link that an IT admin opened and handed back, and an owner revoked.
+        const revoked: SsoSetupLinkRow = {
+          ...link,
+          id: "sl2",
+          tokenHash: "lh2",
+          steps: ["domain"],
+          kinds: ["saml"],
+          createdBy: "admin-app",
+          openedAt: at,
+          readyAt: at,
+          revokedAt: later,
+        };
+        // A link that an owner activated after the handback.
+        const activated: SsoSetupLinkRow = {
+          ...link,
+          id: "sl3",
+          tokenHash: "lh3",
+          openedAt: at,
+          readyAt: at,
+          endedAt: later,
+        };
+        // A manager's run that passed: no link and no step.
+        const passed: SsoTestRunRow = {
+          ...run,
+          id: "tr2",
+          linkId: null,
+          outcome: "passed",
+          step: null,
+          attributeNames: [],
+          domainClaimed: true,
+          draftVersion: 1,
+        };
+        const ended: SsoSetupSessionRow = {
+          ...session,
+          id: "ss2",
+          tokenHash: "sth2",
+          // A second open ended it one hour in.
+          endedAt: new Date(at.getTime() + 3_600_000),
+        };
+        await db.create("ssoSetupLink", link);
+        await db.create("ssoSetupLink", revoked);
+        await db.create("ssoSetupLink", activated);
+        await db.create("ssoTestRun", run);
+        await db.create("ssoTestRun", passed);
+        await db.create("ssoSetupSession", session);
+        await db.create("ssoSetupSession", ended);
+        expect(await db.findOne("ssoSetupLink", byId("sl1"))).toEqual(link);
+        expect(await db.findOne("ssoSetupLink", byId("sl2"))).toEqual(revoked);
+        expect(await db.findOne("ssoSetupLink", byId("sl3"))).toEqual(activated);
+        expect(await db.findOne("ssoTestRun", byId("tr1"))).toEqual(run);
+        expect(await db.findOne("ssoTestRun", byId("tr2"))).toEqual(passed);
+        expect(await db.findOne("ssoSetupSession", byId("ss1"))).toEqual(session);
+        expect(await db.findOne("ssoSetupSession", byId("ss2"))).toEqual(ended);
+      });
+
+      it("refuses a second link or setup session with one token hash", async () => {
+        await db.create("ssoSetupLink", link);
+        await expect(db.create("ssoSetupLink", { ...link, id: "sl2" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["tokenHash"],
+        });
+        await db.create("ssoSetupSession", session);
+        await expect(db.create("ssoSetupSession", { ...session, id: "ss2" })).rejects.toMatchObject(
+          { code: "unique_violation", fields: ["tokenHash"] },
+        );
+        expect(await db.findMany("ssoSetupLink", [])).toHaveLength(1);
+        expect(await db.findMany("ssoSetupSession", [])).toHaveLength(1);
+      });
+
+      it("spends a draft version once", async () => {
+        const draft: SsoConnectionRow = {
+          id: "c1",
+          organizationId: "o1",
+          kind: "oidc",
+          label: "Acme IdP",
+          enabled: false,
+          jit: true,
+          defaultRole: "member",
+          config: { issuer: "https://idp.acme.example" },
+          clientSecret: null,
+          secretVersion: 1,
+          mfa: null,
+          scimRoles: null,
+          draft: true,
+          version: 1,
+          setupLinkId: "sl1",
+          createdAt: at,
+          updatedAt: at,
+        };
+        await db.create("ssoConnection", draft);
+        const change = () =>
+          db.update("ssoConnection", [...byId("c1"), { field: "version", op: "eq", value: 1 }], {
+            version: 2,
+          });
+        expect(await change()).toBe(1);
+        expect(await change()).toBe(0);
+        expect(
+          await db.findMany("ssoConnection", [
+            { field: "setupLinkId", op: "eq", value: "sl1" },
+            { field: "draft", op: "eq", value: true },
+          ]),
+        ).toMatchObject([{ id: "c1", version: 2 }]);
       });
     });
   });

@@ -94,7 +94,10 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12f2 Task 5 adds the update and the delete of operatorUsers: 117.
       // Plan 12f2 Task 3 adds the two routes of the invitation confirm: 119.
       // Plan 12f2 Task 5 adds the create of operatorUsers in its second wave: 120.
-      expect(checked).toBe(120);
+      // Plan 13a adds the thirteen routes of ssoSetup: the five of the setup links and the
+      // eight of the setup session. The demo turns ssoSetup off (DEMO_EXEMPT.ssoSetup), so
+      // 120 became 133 (run of 2026-11-23).
+      expect(checked).toBe(133);
     },
     LONG_TEST_MS,
   );

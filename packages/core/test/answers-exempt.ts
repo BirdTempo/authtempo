@@ -1,4 +1,5 @@
-import { ROUTES, type RouteKey } from "../src/http/route-list.js";
+import type { RouteKey } from "../src/http/route-list.js";
+import { MOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /** One declared code of one route that no test of core answers, with the reason (plan 11g Task 5). */
 export interface AnswersExempt {
@@ -7,8 +8,11 @@ export interface AnswersExempt {
   readonly reason: string;
 }
 
-/** The key of each entry of `ROUTES`. */
-const KEYS = ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
+/**
+ * The key of each entry of `ROUTES` that a module mounts. The check holds no
+ * code of a route that no module mounts yet (plan 13a), so it needs no row.
+ */
+const KEYS = MOUNTED_ROUTES.map((r) => `${r.method} ${r.path}` as RouteKey);
 
 /** One row per key of `keys` for `code`, with `reason`. */
 function rows(code: string, reason: string, keys: readonly RouteKey[]): AnswersExempt[] {
@@ -192,12 +196,36 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /multi-session/switch",
   // Plan 12f2 Task 3: the invitation confirm with operator.users off.
   "POST /user/invite/confirm",
+  // Plan 13a Task 3: the two setup routes with sso.setup off (sso-setup-routes.test.ts).
+  "GET /sso/setup",
+  "POST /sso/setup/open",
+  // Plan 13a Task 11: the setup routes with sso.setup off, and a link id that names no row.
+  "GET /sso/setup-links/get",
+  "POST /sso/setup-links/activate",
+  "POST /sso/setup-links/create",
+  "POST /sso/setup-links/revoke",
+  "POST /sso/setup/connection",
+  "POST /sso/setup/domains/add",
+  "POST /sso/setup/domains/verify",
+  "POST /sso/setup/handback",
+  "POST /sso/setup/scim-token",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
 const ORIGIN_ANSWERED: readonly RouteKey[] = [
+  // Plan 13a Task 11: a cross-site post to each setup write (sso-setup-routes.test.ts and the router sweep).
+  "POST /sso/setup-links/activate",
+  "POST /sso/setup-links/create",
+  "POST /sso/setup-links/revoke",
+  "POST /sso/setup/connection",
+  "POST /sso/setup/domains/add",
+  "POST /sso/setup/domains/verify",
+  "POST /sso/setup/handback",
+  "POST /sso/setup/scim-token",
   // Plan 12f2 Task 3: the form post of the invitation page.
   "POST /user/invite/confirm",
+  // Plan 13a Task 3: a cross-site post to the open of a setup link (sso-setup-routes.test.ts).
+  "POST /sso/setup/open",
   "POST /handoff/continue",
   "POST /handoff/redeem",
   "POST /identities/unlink",
@@ -356,6 +384,23 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...routerRows("internal", ROUTER_REASON, INTERNAL_ANSWERED),
   ...routerRows("origin_not_trusted", ROUTER_REASON, ORIGIN_ANSWERED),
   ...routerRows("not_found", ROUTER_REASON, NOT_FOUND_ANSWERED),
+  // The confirm page reads no row, so it cannot tell a bad link: the open answers it, and a scanner learns nothing.
+  ...rows(
+    "setup_link_invalid",
+    "the page reads no row by design (spec 6.1 item 5); sso-setup-routes.test.ts proves the answer at the open",
+    ["GET /sso/setup"],
+  ),
+  // Plan 13a Task 11. The activate answers `setup_link_invalid` only when two activations race for one link.
+  ...rows(
+    "setup_link_invalid",
+    "the get and the revoke read the row, so a gone link is not_found; the activate test answers it for a second activation",
+    ["GET /sso/setup-links/get", "POST /sso/setup-links/revoke"],
+  ),
+  ...rows(
+    "conflict",
+    "a draft write that loses its compare-and-set round; no single request causes it. sso-setup-drafts.test.ts proves the engine path. The domain add has a route test: sso-setup-session-routes.test.ts",
+    ["POST /sso/setup/connection"],
+  ),
 
   // `conflict` needs a lost compare-and-set round, which no request can cause on its own.
   ...rows(
@@ -757,6 +802,56 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       form: "null",
       reason:
         "every member has a verified address: the organization create, the member add, and the invitation accept need one, and no route takes an address away; address-less.test.ts proves the engine reads",
+    }),
+  ),
+  // Plan 13a Task 11: the setup routes answer one shape in their route tests. The other forms
+  // need a draft of the other kind, a passed test run, or a domain in its other state, and
+  // the engine tests prove those reads.
+  ...(
+    [
+      ["POST /sso/setup/domains/add", "domain.record", "null"],
+      ["POST /sso/setup/domains/add", "domain.expiresAt", "null"],
+      ["POST /sso/setup/domains/verify", "domain.verifiedAt", "null"],
+      ["POST /sso/setup/domains/verify", "domain.checkedAt", "null"],
+      ["GET /sso/setup/status", "domains[].record", "null"],
+      ["GET /sso/setup/status", "domains[].verifiedAt", "null"],
+      ["GET /sso/setup/status", "domains[].checkedAt", "null"],
+      ["GET /sso/setup/status", "domains[].connectionId", "null"],
+      ["GET /sso/setup/status", "domains[].expiresAt", "null"],
+    ] as const
+  ).map(
+    ([key, field, form]): AnswerShapeExempt => ({
+      key,
+      field,
+      form,
+      reason:
+        "the route tests answer the other form of this field: a domain in its other state needs a verify or a time step; sso-setup-drafts.test.ts proves the engine read of this form",
+    }),
+  ),
+  {
+    key: "POST /sso/setup-links/activate",
+    field: "connection.oidc.endpoints",
+    form: "null",
+    reason:
+      "the activate test must run the real test run, which needs fixed endpoints on the draft; the route test of POST /sso/setup/connection answers null endpoints for a draft with discovery, and publicConnection builds the field the same for each route",
+  },
+  // The connection of a SAML draft: the route tests use an OIDC draft (test/sso-setup-adversarial
+  // answers the activate route with a SAML draft, so its rows are gone). publicConnection builds
+  // this shape for each route, and test/sso/connections.test.ts (the SAML create, the lines that
+  // read `oidc` undefined, `subjectAttribute: null`, and `attributes.name: null`) proves it.
+  ...(
+    [
+      ["GET /sso/setup/status", "connection.oidc", "absent"],
+      ["GET /sso/setup/status", "connection.saml.subjectAttribute", "null"],
+      ["GET /sso/setup/status", "connection.saml.attributes.name", "null"],
+    ] as const
+  ).map(
+    ([key, field, form]): AnswerShapeExempt => ({
+      key,
+      field,
+      form,
+      reason:
+        "the route tests use an OIDC draft; publicConnection builds the SAML form of this field for every route, and test/sso/connections.test.ts proves it",
     }),
   ),
 ];

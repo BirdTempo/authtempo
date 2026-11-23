@@ -299,7 +299,7 @@ const MEASURED = {
     mint: [4, 1],
     read: [6, 1],
   },
-  sweeps: [48, 28],
+  sweeps: [48, 31],
   get: 5,
   list: 5,
   delete: 13,
@@ -534,9 +534,9 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
  * ends them with 2 queries each.
  */
 const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
-  0: [49, 10, 0, [48, 29]],
-  7: [49, 2, 4, [48, 43]],
-  20: [49, 2, 4, [48, 49, 43]],
+  0: [49, 10, 0, [48, 32]],
+  7: [49, 2, 4, [48, 46]],
+  20: [49, 2, 4, [48, 49, 46]],
 };
 
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";

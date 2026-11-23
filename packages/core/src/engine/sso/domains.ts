@@ -13,9 +13,9 @@ import type { Meter } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { auditDraft, operatorAct, operatorActed, writeAuditIn } from "../operator/audit.js";
 import { type OperatorActor, requireScope } from "../operator/guards.js";
-import { lockOrganization } from "../teams.js";
 import type { DnsTxtPort } from "./dns.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
+import { bumpSetupDraft, lockSetupRows } from "./setup-live.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
@@ -72,7 +72,7 @@ function recordOf(row: Pick<SsoDomainRow, "domain" | "challenge">): {
 }
 
 /** The answer form of a row. It never holds the challenge outside the record to publish. */
-function summary(row: SsoDomainRow): SsoDomainSummary {
+export function summary(row: SsoDomainRow): SsoDomainSummary {
   const verified = row.claimedDomain !== null;
   return {
     id: row.id,
@@ -238,7 +238,12 @@ export async function domainOrganization(
 export async function addDomain(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { organizationId: string; domain: string } & SsoActMeta,
+  input: {
+    organizationId: string;
+    domain: string;
+    /** The setup link that adds the domain (plan 13a). A new row keeps it; a retry keeps the row's own. */
+    setupLinkId?: string;
+  } & SsoActMeta,
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
@@ -253,18 +258,31 @@ export async function addDomain(
   let added: Result<Added>;
   try {
     added = await config.storage.transaction(async (tx): Promise<Result<Added>> => {
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel add (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel add (the 12k
+      // limit form). A setup link must be live at the write: a revoke or an activation before
+      // this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        input.setupLinkId === undefined ? null : { id: input.setupLinkId, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       const held = await tx.findOne("ssoDomain", [
         { field: "organizationId", op: "eq", value: organization.id },
         { field: "domain", op: "eq", value: domain },
       ]);
+      // A link reaches its own rows only. A row of the manager or of another link is `conflict`:
+      // it is not shown, and its challenge does not change.
+      if (held && input.setupLinkId !== undefined && held.setupLinkId !== input.setupLinkId)
+        return fail("conflict");
       if (held?.claimedDomain != null) return ok({ row: held, audit: null });
       let row: SsoDomainRow;
+      // Each write of a row of a setup link moves the version of its draft (ruling R32). The
+      // draft row comes before the domain rows (ruling 35). Each bump comes after the last
+      // refusal of its branch.
       if (held) {
+        if (held.setupLinkId !== null) await bumpSetupDraft(tx, held.setupLinkId, now);
         row = { ...held, challenge, expiresAt, updatedAt: now };
         const n = await tx.update(
           "ssoDomain",
@@ -289,6 +307,7 @@ export async function addDomain(
           { limit },
         );
         if (rows.length >= limit) return fail("domain_limit");
+        if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, now);
         row = {
           id: newId(now),
           createdAt: now,
@@ -305,6 +324,7 @@ export async function addDomain(
           failures: 0,
           firstFailureAt: null,
           expiresAt,
+          setupLinkId: input.setupLinkId ?? null,
         };
         await tx.create("ssoDomain", row);
       }
@@ -331,7 +351,7 @@ export async function addDomain(
 export async function verifyDomain(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { id: string } & SsoActMeta,
+  input: { id: string; setupLinkId?: string } & SsoActMeta,
 ): Promise<Result<SsoDomainSummary>> {
   return verifyDomainWith(config, actor, input, "own");
 }
@@ -356,7 +376,7 @@ export async function verifyDomain(
 export async function verifyDomainWith(
   config: ResolvedConfig,
   actor: SsoActor,
-  input: { id: string } & SsoActMeta,
+  input: { id: string; setupLinkId?: string } & SsoActMeta,
   record: "own" | "compat",
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
@@ -365,6 +385,9 @@ export async function verifyDomainWith(
     { field: "id", op: "eq", value: input.id },
   ]);
   if (!row) return fail("not_found");
+  // A setup link proves its own rows only: no other row reaches the limiter or the DNS check.
+  if (input.setupLinkId !== undefined && row.setupLinkId !== input.setupLinkId)
+    return fail("not_found");
   if (
     !(await limit(
       config,
@@ -398,9 +421,21 @@ export async function verifyDomainWith(
     expiresAt: null,
     updatedAt: at,
   };
-  let audit: OperatorAuditRow | null;
+  let audit: OperatorAuditRow | null | "ended";
   try {
     audit = await config.storage.transaction(async (tx) => {
+      // A setup link must be live at the claim: a revoke or an activation before this fails it.
+      // The organization row comes before the link row (ruling R22 of plan 13a).
+      if (
+        input.setupLinkId !== undefined &&
+        !(await lockSetupRows(tx, row.organizationId, { id: input.setupLinkId, now: at })).ok
+      )
+        return "ended" as const;
+      // A claim by a setup session changes what the preview shows (ruling R32). The draft row
+      // comes before the domain row (ruling 35): `deleteConnection` and the activation take the
+      // connection row first, so a bump after the domain write could deadlock with them. If a
+      // parallel verify claimed the row first, the version moves with no change: it is safe.
+      if (input.setupLinkId !== undefined) await bumpSetupDraft(tx, input.setupLinkId, at);
       const n = await tx.update(
         "ssoDomain",
         [
@@ -418,6 +453,7 @@ export async function verifyDomainWith(
     if (e instanceof StorageError && e.code === "unique_violation") return fail("domain_taken");
     throw e;
   }
+  if (audit === "ended") return fail("unauthorized");
   if (audit === null) {
     const current = await config.storage.findOne("ssoDomain", [
       { field: "id", op: "eq", value: row.id },
@@ -503,7 +539,7 @@ const ENFORCE_REFUSED: Result<never> = {
 /**
  * Locks the connection row that `row` routes to, in the caller's
  * transaction, and answers false when no such connection of the domain's
- * organization exists. The update writes `organizationId` with its own
+ * organization exists, or when the connection is a draft. The update writes `organizationId` with its own
  * value, so no field changes: the form of `lockOrganization` (ruling 34 of
  * plan 12d). On Postgres a parallel `deleteConnection` or `updateConnection`
  * waits at this lock, and so does this update at theirs. The organization
@@ -519,6 +555,9 @@ async function lockConnection(tx: StorageAdapter, row: SsoDomainRow): Promise<bo
     [
       { field: "id", op: "eq", value: row.connectionId },
       { field: "organizationId", op: "eq", value: row.organizationId },
+      // A draft of a setup link takes no route here (spec 3 item 1, ruling R10 of plan 13a).
+      // Only the activation of the link routes a domain to it, in its own transaction.
+      { field: "draft", op: "eq", value: false },
     ],
     { organizationId: row.organizationId },
   );
@@ -548,6 +587,12 @@ export async function deleteDomain(
     async (tx): Promise<Result<OperatorAuditRow>> => {
       const row = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
       if (!row) return fail("not_found");
+      // The owner removes a domain that a setup link added: the preview changes (ruling R32).
+      // Chosen: the owner-side write bumps too, so no writer of the preview skips the bump.
+      // The draft row comes before the domain row (ruling 35), as in `deleteConnection`.
+      // Owner acts that change the preview with no bump (`updateDomain`, `enforceOff`, the revoke
+      // of the pending token, `deleteConnection`) only reduce what goes live: out of scope.
+      if (row.setupLinkId !== null) await bumpSetupDraft(tx, row.setupLinkId, now);
       const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
       const draft = ssoDraft(actor, "sso_domain_delete", {

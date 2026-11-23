@@ -1355,6 +1355,135 @@ export function compatMigration0013Sql(dialect: "postgres" | "sqlite", n: Names)
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0014_NAME = "0014_compat_schema_v17";
+
+/** The core statements of migration 0014, by dialect: core 0017's text for the setup tables and columns. */
+const COMPAT_0014_CORE: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `ALTER TABLE ta_sso_connection ADD COLUMN draft boolean NOT NULL DEFAULT false;
+ALTER TABLE ta_sso_connection ADD COLUMN version integer NOT NULL DEFAULT 1;
+ALTER TABLE ta_sso_connection ADD COLUMN setup_link_id text;
+ALTER TABLE ta_sso_domain ADD COLUMN setup_link_id text;
+ALTER TABLE ta_scim_token ADD COLUMN pending boolean NOT NULL DEFAULT false;
+ALTER TABLE ta_scim_token ADD COLUMN setup_link_id text;
+CREATE TABLE ta_sso_setup_link (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  organization_id text NOT NULL,
+  token_hash text NOT NULL,
+  hint text NOT NULL,
+  steps jsonb NOT NULL,
+  kinds jsonb NOT NULL,
+  note text NOT NULL,
+  created_by text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  ended_at timestamptz,
+  opened_at timestamptz,
+  ready_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_sso_setup_link__token_hash ON ta_sso_setup_link (token_hash);
+CREATE INDEX ix_ta_sso_setup_link__organization_id ON ta_sso_setup_link (organization_id);
+CREATE TABLE ta_sso_test_run (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  organization_id text NOT NULL,
+  connection_id text NOT NULL,
+  link_id text,
+  outcome text NOT NULL,
+  step text,
+  attribute_names jsonb NOT NULL,
+  domain_claimed boolean NOT NULL,
+  draft_version integer NOT NULL
+);
+CREATE INDEX ix_ta_sso_test_run__connection_id ON ta_sso_test_run (connection_id);
+CREATE TABLE ta_sso_setup_session (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  link_id text NOT NULL,
+  organization_id text NOT NULL,
+  token_hash text NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  ended_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_sso_setup_session__token_hash ON ta_sso_setup_session (token_hash);
+CREATE INDEX ix_ta_sso_setup_session__link_id ON ta_sso_setup_session (link_id);`,
+  sqlite: `ALTER TABLE ta_sso_connection ADD COLUMN draft INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ta_sso_connection ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE ta_sso_connection ADD COLUMN setup_link_id TEXT;
+ALTER TABLE ta_sso_domain ADD COLUMN setup_link_id TEXT;
+ALTER TABLE ta_scim_token ADD COLUMN pending INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ta_scim_token ADD COLUMN setup_link_id TEXT;
+CREATE TABLE ta_sso_setup_link (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  organization_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hint TEXT NOT NULL,
+  steps TEXT NOT NULL,
+  kinds TEXT NOT NULL,
+  note TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  ended_at INTEGER,
+  opened_at INTEGER,
+  ready_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_sso_setup_link__token_hash ON ta_sso_setup_link (token_hash);
+CREATE INDEX ix_ta_sso_setup_link__organization_id ON ta_sso_setup_link (organization_id);
+CREATE TABLE ta_sso_test_run (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  organization_id TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  link_id TEXT,
+  outcome TEXT NOT NULL,
+  step TEXT,
+  attribute_names TEXT NOT NULL,
+  domain_claimed INTEGER NOT NULL,
+  draft_version INTEGER NOT NULL
+);
+CREATE INDEX ix_ta_sso_test_run__connection_id ON ta_sso_test_run (connection_id);
+CREATE TABLE ta_sso_setup_session (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  link_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  ended_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_sso_setup_session__token_hash ON ta_sso_setup_session (token_hash);
+CREATE INDEX ix_ta_sso_setup_session__link_id ON ta_sso_setup_session (link_id);`,
+};
+
+/**
+ * Migration 0014 (plan 13a): core's schema version 17, the enterprise
+ * setup. Core 17 adds the models `ssoSetupLink`, `ssoTestRun`, and
+ * `ssoSetupSession`, and the fields `draft`, `version`, and `setupLinkId` of
+ * `ssoConnection`, `setupLinkId` of `ssoDomain`, and `pending` and
+ * `setupLinkId` of `scimToken`. Each is core's own table in this database
+ * (`CORE_TABLE_MODELS`), so the text is the statements of core 0017, as 0011
+ * holds core 0014. The defaults give a row of compat 13 no draft, version 1,
+ * and not pending. The text names `ta_` tables only, so it is the same for
+ * every naming and for both D1 variants. Append-only.
+ */
+export function compatMigration0014Sql(dialect: "postgres" | "sqlite"): string {
+  return `${[
+    COMPAT_0014_CORE[dialect],
+    "UPDATE ta_meta SET value = '17' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '14' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /**
  * The names of the compat migrations, in order (plan 11c). Each name is the
  * file name, without `.sql`, under `migrations/d1/` and
@@ -1375,6 +1504,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0011_NAME,
   MIGRATION_0012_NAME,
   MIGRATION_0013_NAME,
+  MIGRATION_0014_NAME,
 ];
 
 /**
@@ -1397,6 +1527,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   () => compatMigration0011Sql("postgres"),
   (names) => compatMigration0012Sql("postgres", names),
   (names) => compatMigration0013Sql("postgres", names),
+  () => compatMigration0014Sql("postgres"),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(
@@ -1444,6 +1575,8 @@ const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[
   (names) => compatMigration0012Sql("sqlite", names),
   // Plan 12p: core's schema version 16, the same text for both variants.
   (names) => compatMigration0013Sql("sqlite", names),
+  // Plan 13a: core's schema version 17, the same text for both variants.
+  () => compatMigration0014Sql("sqlite"),
 ];
 if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

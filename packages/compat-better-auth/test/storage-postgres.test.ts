@@ -160,6 +160,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
         "0011_compat_schema_v14",
         "0012_compat_schema_v15",
         "0013_compat_schema_v16",
+        "0014_compat_schema_v17",
       ]);
       expect(await s.migrate()).toEqual([]);
     } finally {
@@ -211,8 +212,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 16; a new core version needs migration 0014 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(16);
+  it("serves core schema version 17; a new core version needs migration 0015 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(17);
   });
 
   it("names only columns the table field list knows", () => {
@@ -652,6 +653,10 @@ describe("the compat migration on postgres", () => {
         "ta_second_factor",
         "ta_sso_connection",
         "ta_sso_domain",
+        // Core's setup tables (migration 0014, plan 13a).
+        "ta_sso_setup_link",
+        "ta_sso_setup_session",
+        "ta_sso_test_run",
         "ta_totp",
         "ta_trusted_device",
         // Better Auth's own tables of its teams option, which the fixture lacks (migration 0010, Task 11).
@@ -659,8 +664,8 @@ describe("the compat migration on postgres", () => {
         "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "13" },
-        { key: "schema_version", value: "16" },
+        { key: "compat_better_auth", value: "14" },
+        { key: "schema_version", value: "17" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -685,6 +690,9 @@ describe("the compat migration on postgres", () => {
         "scimUser",
         "scimGroup",
         "scimGroupMember",
+        "ssoSetupLink",
+        "ssoTestRun",
+        "ssoSetupSession",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -723,6 +731,9 @@ describe("the compat migration on postgres", () => {
         "scimUser",
         "scimGroup",
         "scimGroupMember",
+        "ssoSetupLink",
+        "ssoTestRun",
+        "ssoSetupSession",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -776,6 +787,9 @@ describe("the compat migration on postgres", () => {
         "scimUser",
         "scimGroup",
         "scimGroupMember",
+        "ssoSetupLink",
+        "ssoTestRun",
+        "ssoSetupSession",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",

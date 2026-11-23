@@ -28,6 +28,8 @@ export const SWEEP_KEYS: Readonly<Record<keyof SweepResult, true>> = {
   ssoDomains: true,
   ssoPendingDomains: true,
   scimTokens: true,
+  // The count of plan 13a, ruling R30.
+  ssoSetupRows: true,
   organizationRows: true,
   // The count of plan 12i Task 6.
   anonymousUsers: true,

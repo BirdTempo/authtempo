@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
-import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
+import { ERRORS, GUIDES, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { STORAGE_ERROR_CODES } from "@authtempo/core/errors";
 import { EVENTS, LIMIT_FAMILIES } from "@authtempo/core/observe";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
@@ -53,6 +53,7 @@ import { checkFeed } from "./check-feed.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
+import { checkGuidePages } from "./check-guide-pages.ts";
 import { checkIcons } from "./check-icons.ts";
 import { checkLimits, DYNAMIC_LIMITS } from "./check-limits.ts";
 import { checkLinks } from "./check-links.ts";
@@ -199,7 +200,15 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     name: "check-links",
     run: () => checkLinks(new Map([...distPages(), ...distSvgs()]), distFiles()),
   },
-  { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
+  {
+    // A source must be a file that git tracks, so no page cites a private note.
+    // A copy with no git gives no list, and the rule is then off (the other checks run on).
+    name: "check-frontmatter",
+    run: () => {
+      const tracked = trackedFiles(REPO);
+      return checkFrontmatter(docsPages(), readRepoFile, "files" in tracked ? tracked.files : null);
+    },
+  },
   // Each root page has the layout and its entry of the collection `site` (plan 11b).
   // The row names MINIMUM_ENTRIES, so it is the one tie to ruling 9 of the plan 11b lane.
   {
@@ -294,6 +303,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         EVENTS,
         Object.keys(FIELD_KINDS),
       ),
+  },
+  // Plan 13a Task 15: one page for each IdP guide of GUIDES, the date and each
+  // unconfirmed mark on the built page, and no price on a new page.
+  {
+    name: "check-guide-pages",
+    run: () =>
+      checkGuidePages({
+        guides: GUIDES,
+        sources: new Map(docsPages().map((p) => [p.path, p.source])),
+        built: distPageOrEmpty,
+        extra: ["/docs/guides/sso-setup-link/", "/docs/reference/sso-setup/"],
+      }),
   },
   {
     name: "check-limits",

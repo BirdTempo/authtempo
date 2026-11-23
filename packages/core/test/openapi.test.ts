@@ -103,7 +103,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
-    expect(keys.length).toBe(209);
+    // Plan 13a Task 0 adds the 13 routes of the enterprise setup.
+    expect(keys.length).toBe(222);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -212,8 +213,9 @@ describe("openApiDocument (plan 11g)", () => {
     // adds the two bodies of the passkey-first sign-up: 117. Plan 12f2 Task 5
     // adds the bodies of the operator update and delete: 119. Plan 12f2
     // Task 3 adds the body of the invitation confirm: 120. Plan 12f2 Task 5
-    // adds the body of the operator create: 121.
-    expect(bodies.length).toBe(121);
+    // adds the body of the operator create: 121. Plan 13a Task 0 adds the
+    // seven bodies of the enterprise setup: 128.
+    expect(bodies.length).toBe(128);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -277,6 +279,8 @@ describe("openApiDocument (plan 11g)", () => {
       clientSecretBasic: ["clientSecretBasic"],
       dpopAccessToken: ["oauthDpop"],
       scimToken: ["scimToken"],
+      // Plan 13a: the cookie of a setup session.
+      setupSession: ["setupCookie"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -465,7 +469,9 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12f2 Task 3 adds the answer, the body, and the query of the invitation confirm.
     // Plan 12f2 Task 5 adds the answer and the body of the operator create.
     // Plan 12l adds the two queries of the SSO connection writes.
-    expect([answers, bodies, queries]).toEqual([158, 121, 35]);
+    // Plan 13a Task 0 adds the 12 JSON answers, the 7 bodies, and the 5 queries of the
+    // enterprise setup (the run of the status page is the fifth). GET /sso/setup answers a page.
+    expect([answers, bodies, queries]).toEqual([170, 128, 40]);
   });
 
   it("lists the not_found of the related origins document, which it answers on another host (final fix wave item 29)", () => {

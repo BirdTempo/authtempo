@@ -16,6 +16,8 @@ import {
 import { TWO_FACTOR_TOKEN_RE } from "../src/engine/second-factor.js";
 import { createSession } from "../src/engine/sessions.js";
 import { createConnection } from "../src/engine/sso/connections.js";
+import { createSetupLink } from "../src/engine/sso/setup-links.js";
+import { openSetupSession } from "../src/engine/sso/setup-session.js";
 import { USER_INVITE_TOKEN_RE } from "../src/engine/user-invite.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
@@ -31,6 +33,7 @@ import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./help
 import { basicHeader, pkce, requestIdOf } from "./oauth-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { codeNow, enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
+import { UNMOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /** The contract table, read as a plain record. */
 const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
@@ -139,7 +142,7 @@ function world(secretHash = "0".repeat(64)) {
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The domain routes and the SAML ACS of plan 12d; no test of this file asks the resolver.
-    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
+    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }], setup: {} },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
     // The username routes of plan 12i Task 2.
@@ -353,6 +356,20 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
     },
   );
   if (!connection.ok) throw new Error(connection.code);
+  // A setup link of that organization, opened: the cookie that the setup session rows send (plan 13a
+  // Task 11). The link holds the SAML kind, the only kind that this world has on.
+  const link = await createSetupLink(
+    w.auth.config,
+    { kind: "app", name: "contract" },
+    { organizationId: bossOrg, steps: ["domain", "connection"], kinds: ["saml"], note: "contract" },
+  );
+  if (!link.ok) throw new Error(link.code);
+  const opened = await openSetupSession(w.auth.config, link.value.token, {
+    ip: "1.1.1.1",
+    userAgent: "contract",
+  });
+  if (!opened.ok) throw new Error(opened.code);
+  const setupCookie = { cookie: opened.value.cookie.split(";")[0] ?? "" };
   const bob = await w.auth.seedUser("bob@example.com");
   const id = "x".repeat(26);
   const rows: BodyRow[] = [
@@ -804,6 +821,62 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /sso/domains/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The open of a setup link (plan 13a Task 3): no session. The valid body is a token of the
+    // right form that names no link, so it answers 404 setup_link_invalid past the parse.
+    {
+      key: "POST /sso/setup/open",
+      body: { token: `sl_${"A".repeat(43)}` },
+      refused: INVALID_BODY,
+    },
+    // The setup links (plan 13a Task 11). A manager sends them. The body is read before the guard,
+    // so a refused body answers invalid_body, and the valid revoke and activate name no row.
+    {
+      key: "POST /sso/setup-links/create",
+      path: `/sso/setup-links/create?organizationId=${encodeURIComponent(bossOrg)}`,
+      body: { steps: ["domain"], kinds: ["saml"], note: "Ada" },
+      session: true,
+      headers: manager,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /sso/setup-links/revoke",
+      body: { id },
+      session: true,
+      headers: manager,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /sso/setup-links/activate",
+      body: { id, version: 1 },
+      session: true,
+      headers: manager,
+      refused: INVALID_BODY,
+    },
+    // The writes of a setup session: its cookie is the credential, and the body is read after it.
+    {
+      key: "POST /sso/setup/domains/add",
+      body: { domain: "contract.example" },
+      headers: setupCookie,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /sso/setup/domains/verify",
+      body: { id },
+      headers: setupCookie,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /sso/setup/connection",
+      body: {
+        kind: "saml",
+        label: "Draft",
+        idpEntityId: idp.entityId,
+        ssoUrl: "https://idp.example/sso",
+        certificates: [idp.certificatePem],
+      },
+      headers: setupCookie,
+      refused: INVALID_BODY,
+    },
     // The connection rows of plan 12d Task 3. Their query names the row, so the guard runs
     // before the read (plan 12l), and the manager sends them. The valid create answers
     // not_found past the parse, since OIDC is off; the valid update changes the connection.
@@ -930,7 +1003,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
-    expect(keys.length).toBe(209);
+    // Plan 13a Task 0 adds the 13 contracts of the enterprise setup, not mounted yet.
+    expect(keys.length).toBe(222);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -947,8 +1021,9 @@ describe("the route contract (plan 11g)", () => {
     // username, so 23 became 24. Plan 12i Task 5 adds the module phone: 25.
     // Plan 12i Task 6 adds the module anonymous: 26. Plan 12i Task 11 adds
     // the module multi-session: 27. Plan 12f2 Task 3 adds the module user-invite: 28.
-    expect(modules.length).toBe(28);
-    expect([...mounted].sort()).toEqual(keys);
+    // Plan 13a Task 3 adds the module sso-setup: 29.
+    expect(modules.length).toBe(29);
+    expect([...mounted].sort()).toEqual(keys.filter((k) => !UNMOUNTED_ROUTES.has(k)));
   });
 
   it("holds a hand-read query to its schema", async () => {
@@ -1500,8 +1575,9 @@ describe("the route contract (plan 11g)", () => {
   it("uses the contract's schema in the route", async () => {
     const w = world(await sha256Hex(OPERATOR_SECRET));
     const { rows, cookie } = await validBodies(w);
+    // A route that no module mounts yet has no row: no request can reach it (plan 13a).
     const withBody = Object.entries(CONTRACT)
-      .filter(([, c]) => c.body?.parsedBy === "zod")
+      .filter(([key, c]) => c.body?.parsedBy === "zod" && !UNMOUNTED_ROUTES.has(key))
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
@@ -1518,7 +1594,9 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds the bodies of the operator update and delete.
     // Plan 12f2 Task 3 adds the body of the invitation confirm.
     // Plan 12f2 Task 5 adds the body of the operator create.
-    expect(withBody.length).toBe(112);
+    // Plan 13a Task 3 mounts the open of a setup link: 113.
+    // Plan 13a Task 11 mounts three link writes and three setup session writes: 119.
+    expect(withBody.length).toBe(119);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1550,7 +1628,9 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds the refused bodies of the operator update and delete: 108.
     // Plan 12f2 Task 3 adds the refused body of the invitation confirm.
     // Plan 12f2 Task 5 adds the refused body of the operator create: 110.
-    expect(refusals).toBe(110);
+    // Plan 13a Task 3 adds the refused body of the setup open: 111.
+    // Plan 13a Task 11 adds the refused bodies of the six writes: 117.
+    expect(refusals).toBe(117);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1580,7 +1660,9 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 5 adds the two operator bodies to json.
     // Plan 12f2 Task 3 adds the invitation confirm to both.
     // Plan 12f2 Task 5 adds the operator create to json.
-    expect(counts).toEqual({ json: 102, both: 11, form: 8 });
+    // Plan 13a Task 0 adds six setup bodies to json, and the open of a setup link to both.
+    // Plan 13a Task 11 mounts the routes, and the media of the bodies do not change.
+    expect(counts).toEqual({ json: 108, both: 12, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

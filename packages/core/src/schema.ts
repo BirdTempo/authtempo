@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export interface BaseRow {
   id: string;
@@ -213,6 +213,14 @@ export type VerificationPurpose =
    * fails while the row lives.
    */
   | "saml-assertion"
+  /**
+   * The address and the name that one test run of a draft read (plan 13a
+   * Task 7). The run row holds neither, so this row carries them to the
+   * result page of the person who ran the test. The identifier is the run
+   * id. The valueHash is the SHA-256 hex of `sso-test-result:<run id>`. The
+   * data is { address, name }. It lives 15 minutes, and the sweep deletes it.
+   */
+  | "sso-test-result"
   /**
    * The latest expiry of one session: a SAML `SessionNotOnOrAfter` (ruling
    * 38 Q1 of plan 12d). The session create writes it in its own handle.
@@ -643,6 +651,12 @@ export const SSO_AUDIT_ACTIONS = [
   "scim_group_create",
   "scim_group_update",
   "scim_group_delete",
+  // Plan 13a: the setup link and the test run.
+  "sso_setup_link_create",
+  "sso_setup_link_open",
+  "sso_setup_link_revoke",
+  "sso_setup_link_activate",
+  "sso_test_run",
 ] as const;
 
 /**
@@ -751,6 +765,15 @@ export interface SsoConnectionRow extends BaseRow {
   mfa: SsoMfaList | null;
   /** The SCIM group name to role map (design 9.4). Null: no map. */
   scimRoles: Record<string, string> | null;
+  /**
+   * True: a setup link made the row and no owner activated it (plan 13a). A
+   * draft signs no user in. The default false lives in migration 0017 only.
+   */
+  draft: boolean;
+  /** One more for each change of a draft. A test run binds to it. The default 1 lives in migration 0017 only. */
+  version: number;
+  /** The setup link that made the row. Null: an act of the manager or the app. */
+  setupLinkId: string | null;
 }
 
 /** One email domain that one organization claims by a DNS proof (plan 12d). */
@@ -772,6 +795,8 @@ export interface SsoDomainRow extends BaseRow {
   /** The first failed recheck of the row of failures, so the loss rule reads the span. */
   firstFailureAt: Date | null;
   expiresAt: Date | null;
+  /** The setup link that added the domain (plan 13a). Null: an act of the manager or the app. */
+  setupLinkId: string | null;
 }
 
 /** The scopes of a SCIM token (plan 12d). */
@@ -792,6 +817,14 @@ export interface ScimTokenRow extends BaseRow {
   scopes: ScimScope[];
   expiresAt: Date | null;
   lastUsedAt: Date | null;
+  /**
+   * True: a setup link made the token and no owner activated it (plan 13a).
+   * A pending token authenticates no request. The default false lives in
+   * migration 0017 only.
+   */
+  pending: boolean;
+  /** The setup link that made the token. Null: an act of the manager or the app. */
+  setupLinkId: string | null;
 }
 
 /** The SCIM view of one user in one organization (plan 12d, RFC 7643 4.1). */
@@ -829,6 +862,79 @@ export interface ScimGroupMemberRow extends BaseRow {
   scimUserId: string;
 }
 
+/** The steps that a setup link can give to the IT admin (plan 13a, spec 6.1). */
+export const SETUP_STEPS = ["domain", "connection", "directory"] as const;
+export type SetupStep = (typeof SETUP_STEPS)[number];
+
+/**
+ * The longest life of a setup link, in hours: 7 days (spec 6.1). The config
+ * check and the route contract read this one value.
+ */
+export const SETUP_TTL_HOURS_MAX = 168;
+
+/** The outcomes of a test run (plan 13a, spec 6.4). */
+export const TEST_RUN_OUTCOMES = ["passed", "failed", "pending"] as const;
+export type TestRunOutcome = (typeof TEST_RUN_OUTCOMES)[number];
+
+/**
+ * One setup link of one organization (plan 13a, spec 6.1). The owner gives
+ * the link to an IT admin, who makes draft rows through it.
+ */
+export interface SsoSetupLinkRow extends BaseRow {
+  organizationId: string;
+  /** SHA-256 hex of the clear `sl_` token. The clear token is never stored. */
+  tokenHash: string;
+  /** The characters after the prefix, so a list tells the links apart. */
+  hint: string;
+  steps: SetupStep[];
+  kinds: ("oidc" | "saml")[];
+  /** The name of the IT contact, 1 to 80 characters. */
+  note: string;
+  /** The user id or the app name of the maker. */
+  createdBy: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  /**
+   * The activation ended the link. The hand back does not: it sets `readyAt`, and the link
+   * stays live until the owner activates or revokes it, or it expires.
+   */
+  endedAt: Date | null;
+  openedAt: Date | null;
+  /** The IT admin handed the drafts back to the owners. */
+  readyAt: Date | null;
+}
+
+/**
+ * One test sign-in against a draft connection (plan 13a, spec 6.4). It holds
+ * no attribute value and no address.
+ */
+export interface SsoTestRunRow extends BaseRow {
+  organizationId: string;
+  connectionId: string;
+  /** The setup link of the run. Null: a manager ran the test. */
+  linkId: string | null;
+  outcome: TestRunOutcome;
+  /** The named step of a refusal. Null: no refusal. */
+  step: string | null;
+  /** The names of the attributes that came, never their values. */
+  attributeNames: string[];
+  /** True: a verified domain of the organization claims the address. */
+  domainClaimed: boolean;
+  /** The `version` of the draft that the run tested. */
+  draftVersion: number;
+}
+
+/** One setup session of one setup link (plan 13a, spec 6.2). Cookie `__Host-tempo_setup`. */
+export interface SsoSetupSessionRow extends BaseRow {
+  linkId: string;
+  organizationId: string;
+  /** SHA-256 hex of the clear session token. The clear token is never stored. */
+  tokenHash: string;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  endedAt: Date | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -863,6 +969,9 @@ export interface Models {
   scimUser: ScimUserRow;
   scimGroup: ScimGroupRow;
   scimGroupMember: ScimGroupMemberRow;
+  ssoSetupLink: SsoSetupLinkRow;
+  ssoTestRun: SsoTestRunRow;
+  ssoSetupSession: SsoSetupSessionRow;
 }
 
 export type ModelName = keyof Models;
@@ -1338,6 +1447,11 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       secretVersion: { type: "integer" },
       mfa: { type: "json", nullable: true },
       scimRoles: { type: "json", nullable: true },
+      // Plan 13a. NOT NULL; the defaults false and 1 live in migration 0017 only: a field here
+      // has no default, and core writes every field on each insert.
+      draft: { type: "boolean" },
+      version: { type: "integer" },
+      setupLinkId: { type: "string", nullable: true },
     },
     unique: [],
     indexes: [["organizationId"]],
@@ -1359,6 +1473,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       failures: { type: "integer" },
       firstFailureAt: { type: "date", nullable: true },
       expiresAt: { type: "date", nullable: true },
+      setupLinkId: { type: "string", nullable: true },
     },
     unique: [["organizationId", "domain"], ["claimedDomain"]],
     indexes: [["connectionId"]],
@@ -1374,6 +1489,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       scopes: { type: "json" },
       expiresAt: { type: "date", nullable: true },
       lastUsedAt: { type: "date", nullable: true },
+      // Plan 13a. NOT NULL; the default false lives in migration 0017 only.
+      pending: { type: "boolean" },
+      setupLinkId: { type: "string", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["organizationId"]],
@@ -1424,5 +1542,55 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["groupId", "scimUserId"]],
     indexes: [["scimUserId"]],
+  },
+  // A setup link of one organization (plan 13a). No userId field: `createdBy` can name the app.
+  ssoSetupLink: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      tokenHash: { type: "string" },
+      hint: { type: "string" },
+      steps: { type: "json" },
+      kinds: { type: "json" },
+      note: { type: "string" },
+      createdBy: { type: "string" },
+      expiresAt: { type: "date" },
+      revokedAt: { type: "date", nullable: true },
+      endedAt: { type: "date", nullable: true },
+      openedAt: { type: "date", nullable: true },
+      readyAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["organizationId"]],
+  },
+  // One test sign-in against a draft connection (plan 13a). No value and no address of the user.
+  ssoTestRun: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      connectionId: { type: "string" },
+      linkId: { type: "string", nullable: true },
+      outcome: { type: "string" },
+      step: { type: "string", nullable: true },
+      attributeNames: { type: "json" },
+      domainClaimed: { type: "boolean" },
+      draftVersion: { type: "integer" },
+    },
+    unique: [],
+    indexes: [["connectionId"]],
+  },
+  // One setup session of one setup link (plan 13a). No userId field: the IT admin has no account.
+  ssoSetupSession: {
+    fields: {
+      ...base,
+      linkId: { type: "string" },
+      organizationId: { type: "string" },
+      tokenHash: { type: "string" },
+      lastSeenAt: { type: "date" },
+      expiresAt: { type: "date" },
+      endedAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["linkId"]],
   },
 };

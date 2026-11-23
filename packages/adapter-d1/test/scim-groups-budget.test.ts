@@ -484,7 +484,12 @@ describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d
  * delete binds the 100 ids.
  */
 // The route reads the session once since ruling 78 of plan 12d (2026-10-24): 31, was 32.
-const MEASURED_ORGANIZATION_DELETE = { delete: 31 };
+// Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7 to 10.0 on
+// 18 CPUs): the delete also deletes the setup sessions and the setup links: 33, was 31.
+// Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
+// a query count does not change with the load): the delete also deletes the SSO test runs:
+// 34, was 33.
+const MEASURED_ORGANIZATION_DELETE = { delete: 34 };
 /**
  * The account delete of the sole member of an organization with SCIM
  * Groups (ruling 78 of plan 12d, 2026-10-24). Before, it answered
@@ -496,7 +501,15 @@ const ACCOUNT_DELETE_GROUPS = 120;
 // Plan 12f2 ends the own sessions of the delete in a page (ruling 1 of plan 12f2, B1). With
 // no session.afterEnd hook the page sends 2 queries more than endSessions: the run of
 // 2026-10-25 at the move of 12f2 onto main gives 38, was 36.
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [24, 24, 34] };
+// Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7 to 10.0 on
+// 18 CPUs): the rest of the organization deletes the setup sessions and the setup links.
+// The act stays 38, and the sweeps are 23, 23, and 35, were 24, 24, and 34.
+// Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
+// a query count does not change with the load): the rest also deletes the SSO test runs,
+// so the last sweep sends 36, was 35. The act stays 38.
+// Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
+// sweep sends 3 idle queries when `sso` is on, so the sweeps are 26, 26, and 39.
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [26, 26, 39] };
 const GROUPS = 500;
 
 /**

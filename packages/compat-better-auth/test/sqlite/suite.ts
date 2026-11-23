@@ -37,6 +37,8 @@ const ALL_NAMES = [
   "0012_compat_schema_v15",
   // Plan 12p: core's schema version 16.
   "0013_compat_schema_v16",
+  // Plan 13a: core's schema version 17.
+  "0014_compat_schema_v17",
 ];
 
 const shippedD1 = (name: string) =>
@@ -120,8 +122,8 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
       expect(firstRun).toEqual(ALL_NAMES);
       expect(await compat().migrate()).toEqual([]);
       expect(await metaRows(main)).toEqual([
-        { key: "compat_better_auth", value: "13" },
-        { key: "schema_version", value: "16" },
+        { key: "compat_better_auth", value: "14" },
+        { key: "schema_version", value: "17" },
       ]);
       const record = await main.driver.db.prepare("SELECT name FROM ta_migrations").all();
       expect(record.results.map((r) => r.name)).toEqual(ALL_NAMES);
@@ -218,8 +220,8 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
             .first("name"),
         ).toBe("ux_account__issuer__account_id");
         expect(await metaRows(old)).toEqual([
-          { key: "compat_better_auth", value: "13" },
-          { key: "schema_version", value: "16" },
+          { key: "compat_better_auth", value: "14" },
+          { key: "schema_version", value: "17" },
         ]);
         // The two 0010 variants make other team tables (12g fix wave, ledger
         // line 49). "before-1.7" makes them in the 1.4.21 form, then adds
@@ -253,8 +255,8 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
         const s = betterAuthSchemaStorage({ dialect: "sqlite", driver: d1Flow.driver });
         expect(await s.migrate()).toEqual(ALL_NAMES.slice(2));
         expect(await metaRows(d1Flow)).toEqual([
-          { key: "compat_better_auth", value: "13" },
-          { key: "schema_version", value: "16" },
+          { key: "compat_better_auth", value: "14" },
+          { key: "schema_version", value: "17" },
         ]);
         await expect(s.storage.findOne("user", [eq("id", "x")])).resolves.toBeNull();
       } finally {

@@ -6,8 +6,9 @@ import { SCHEMA_VERSION, schema } from "../src/schema.js";
 // reads of the field are in the conformance suite, so every adapter runs them.
 
 describe("schema version 16 (plan 12p)", () => {
-  it("is schema version 16", () => {
-    expect(SCHEMA_VERSION).toBe(16);
+  it("is schema version 16 or a later version", () => {
+    // Plan 13a moves the version to 17: test/schema-v17.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(16);
   });
 
   it("adds proved to the session as its last field, a boolean that is never null", () => {

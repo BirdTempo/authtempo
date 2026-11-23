@@ -98,6 +98,8 @@ wrangler d1 execute my-app --remote --command "INSERT INTO d1_migrations (name) 
 
 After the mark, `wrangler d1 migrations apply` and `authtempo migrate` skip `0016_schema_v16`. The table and its columns `id`, `name`, and `applied_at` come from the migrations code of wrangler 4.148.0, read 2026-11-04. Wrangler writes the file name with `.sql` in `name`.
 
+Version 17 (plan 13a, 2026-11-23) is the enterprise setup. It adds the tables `ta_sso_setup_link`, `ta_sso_test_run`, and `ta_sso_setup_session`. `ta_sso_connection` gets `draft` (NOT NULL, default 0), `version` (NOT NULL, default 1), and `setup_link_id`. `ta_sso_domain` gets `setup_link_id`. `ta_scim_token` gets `pending` (NOT NULL, default 0) and `setup_link_id`. A row of version 16 reads as no draft, at version 1, with no setup link, and not pending. The file adds columns and tables and changes no row. Apply `0017_schema_v17` before you deploy a core at version 17; the adapter refuses a database at version 16.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

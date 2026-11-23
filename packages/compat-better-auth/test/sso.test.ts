@@ -1281,6 +1281,67 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     const idp = new URL(start.headers.get("location") ?? "");
     expect(idp.searchParams.get("redirect_uri")).toBe(`${B}/api/auth/sso/${id}/callback`);
   });
+
+  it("hides a draft of a setup link from GET /sso/providers (plan 13a, ruling R11)", async () => {
+    const app = await owned();
+    const reg = await app.register({
+      providerId: "acme-oidc",
+      issuer: "https://idp.acme.example",
+      domain: "acme.example",
+      oidcConfig: OIDC,
+    });
+    expect(reg.status).toBe(200);
+    // Task 4 writes a draft as a connection that is off, with `draft` and the id of its link.
+    const now = new Date();
+    const linkId = crypto.randomUUID();
+    await app.database.storage.create("ssoSetupLink", {
+      id: linkId,
+      createdAt: now,
+      updatedAt: now,
+      organizationId: app.organizationId,
+      tokenHash: linkId.replaceAll("-", "").padEnd(64, "0"),
+      hint: "abcd",
+      steps: ["connection"],
+      kinds: ["oidc"],
+      note: "IT contact",
+      createdBy: "test",
+      expiresAt: new Date(now.getTime() + 72 * 3_600_000),
+      revokedAt: null,
+      endedAt: null,
+      openedAt: now,
+      readyAt: null,
+    });
+    const draft = await app.auth.tempo.api.sso?.connections.create({
+      actor: { kind: "app", name: "test" },
+      organizationId: app.organizationId,
+      kind: "oidc",
+      label: "acme-draft",
+      enabled: false,
+      issuer: "https://idp.acme.example",
+      clientId: "acme-client",
+      clientSecret: "acme-secret-value",
+      endpoints: {
+        authorizeUrl: OIDC.authorizationEndpoint,
+        tokenUrl: OIDC.tokenEndpoint,
+        jwksUrl: OIDC.jwksEndpoint,
+      },
+    });
+    if (!draft?.ok) throw new Error("no draft");
+    const n = await app.database.storage.update(
+      "ssoConnection",
+      [{ field: "id", op: "eq", value: draft.value.id }],
+      { draft: true, setupLinkId: linkId },
+    );
+    expect(n).toBe(1);
+    // Two ids of one millisecond sort at random, so the check sorts the pairs.
+    expect((await connectionsOf(app)).map((c) => `${c.label} ${c.draft}`).sort()).toEqual([
+      "acme-draft true",
+      "acme-oidc false",
+    ]);
+    const list = await app.read("/sso/providers", app.owner.cookie);
+    const { providers } = (await list.json()) as { providers: Record<string, unknown>[] };
+    expect([list.status, providers.map((p) => p.providerId)]).toEqual([200, ["acme-oidc"]]);
+  });
 });
 
 const DAY_MS = 86_400_000;

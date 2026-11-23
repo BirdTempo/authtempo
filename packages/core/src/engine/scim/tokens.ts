@@ -12,7 +12,7 @@ import type { OperatorAuditRow, ScimScope, ScimTokenRow } from "../../schema.js"
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "../sso/domains.js";
 import { type SsoActor, ssoDraft } from "../sso/guard.js";
-import { lockOrganization } from "../teams.js";
+import { bumpSetupDraft, lockSetupRows } from "../sso/setup-live.js";
 import { tokenHint } from "../tokens.js";
 
 /**
@@ -80,6 +80,12 @@ export interface ScimTokenSummary {
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /**
+   * True for a pending token of a setup link (plan 13a). It opens no
+   * directory until an owner activates the link, but it holds a live slot
+   * of `SCIM_TOKENS_LIVE_MAX`.
+   */
+  pending: boolean;
 }
 
 /** The answer form of a row. It names each field, so the hash never reaches an answer. */
@@ -92,6 +98,7 @@ function publicScimToken(row: ScimTokenRow): ScimTokenSummary {
     createdAt: row.createdAt.toISOString(),
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     expiresAt: row.expiresAt?.toISOString() ?? null,
+    pending: row.pending,
   };
 }
 
@@ -133,6 +140,11 @@ export async function createScimToken(
     expiresInDays?: number | undefined;
   },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). The row is then a pending token of that link. The
+   * transaction removes the earlier pending token of the link first, so a link holds one.
+   */
+  pendingFor?: string,
 ): Promise<Result<{ token: string; id: string; hint: string }>> {
   const on = scimOn(config);
   if (!on.ok) return on;
@@ -163,14 +175,22 @@ export async function createScimToken(
     scopes: scopes.value,
     expiresAt: typeof days === "number" ? new Date(now.getTime() + days * DAY_MS) : null,
     lastUsedAt: null,
+    // A token of the manager or the app is live (plan 13a). Only a setup link makes a pending one.
+    pending: pendingFor !== undefined,
+    setupLinkId: pendingFor ?? null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel create (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel create (the 12k
+      // limit form). A pending token needs its link live at the write: a revoke or an activation
+      // before this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        pendingFor === undefined ? null : { id: pendingFor, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       // The port has no OR: the tokens with no expiry, then the tokens that expire after now.
       const at = { field: "organizationId", op: "eq", value: organization.id } as const;
       const live = [
@@ -181,8 +201,10 @@ export async function createScimToken(
           limit: SCIM_TOKENS_LIVE_MAX,
         })),
       ];
-      if (live.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
-      await tx.create("scimToken", row);
+      // The old pending token of the link goes when the new one is written, so it makes no slot.
+      // A refusal below leaves it: the delete comes after the checks.
+      const slots = live.filter((t) => !(t.pending && t.setupLinkId === pendingFor));
+      if (slots.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
       const draft = ssoDraft(actor, "scim_token_create", {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name, scopes: row.scopes },
@@ -190,6 +212,15 @@ export async function createScimToken(
         userAgent: meta.userAgent ?? null,
       });
       if (!draft.ok) return draft;
+      if (pendingFor !== undefined) {
+        // The pending token is in the preview: the version moves (ruling R32).
+        await bumpSetupDraft(tx, pendingFor, now);
+        await tx.delete("scimToken", [
+          { field: "setupLinkId", op: "eq", value: pendingFor },
+          { field: "pending", op: "eq", value: true },
+        ]);
+      }
+      await tx.create("scimToken", row);
       return ok(await writeAuditIn(tx, draft.value, now));
     },
   );
@@ -288,9 +319,10 @@ const BEARER_RE = /^Bearer ([^ ]+)$/i;
 /**
  * The auth check of each SCIM route (plan 12d Task 9 Behavior 3, deviation
  * 18). The order: the form of the header and the token, then one lookup by
- * the SHA-256 of the token, then the expiry. A failure at any step counts
- * once on `scim-auth:ip:<ip>` and answers 401, or 429 when that count is
- * refused. A pass counts on `scim:token:<id>` and never on the IP key; a
+ * the SHA-256 of the token, then the expiry. The lookup finds no pending
+ * token of a setup link (plan 13a), so it fails as an unknown token. A
+ * failure at any step counts once on `scim-auth:ip:<ip>` and answers 401,
+ * or 429 when that count is refused. A pass counts on `scim:token:<id>` and never on the IP key; a
  * refused count answers 429. `lastUsedAt` moves by one conditional update,
  * only when it is null or older than 60 seconds. A caller that
  * `scimRequestAs` set skips the token steps and counts on its own key.
@@ -314,6 +346,8 @@ export async function authenticateScim(
   if (token === undefined || !SCIM_TOKEN_RE.test(token)) return failed();
   const row = await config.storage.findOne("scimToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
+    // A pending token of a setup link opens no directory until an owner activates it (plan 13a).
+    { field: "pending", op: "eq", value: false },
   ]);
   const now = config.clock.now();
   if (!row || (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())) return failed();

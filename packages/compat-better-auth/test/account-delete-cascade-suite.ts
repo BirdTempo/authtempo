@@ -265,6 +265,21 @@ export function pendingOf(storage: StorageAdapter, userId: string) {
 }
 
 /**
+ * Runs the sweep until no rest row of a solo organization stays. The solo
+ * owner deletes of the suite leave such rows in the shared database, and
+ * each sweep with a rest row keeps calls for it. A scene that measures the
+ * calls of one sweep starts with none, so the count is of its own rows.
+ */
+export async function sweepRests(storage: StorageAdapter): Promise<void> {
+  const rests = () =>
+    storage.findMany("verification", [{ field: "purpose", op: "eq", value: "organization-rest" }]);
+  for (let i = 0; (await rests()).length > 0; i++) {
+    if (i >= 10) throw new Error("the sweep makes no progress on the rest rows");
+    await operatorEngine(storage, new Date()).auth.api.sweepExpired();
+  }
+}
+
+/**
  * Core on `storage` with the impersonation tool on, at the fixed time `at`.
  * `acted` takes each row that `operator.afterAction` gets.
  */
@@ -499,6 +514,7 @@ export function accountDeleteCascadeSuite(open: () => Promise<CascadeStore>): vo
     // sessions of 2 operators. The cascade takes the 40 past the page, so the
     // row owes 40 stop rows. One sweep of 50 calls writes fewer.
     const store = await open();
+    await sweepRests(store.database.storage);
     const scene = await impersonatedUser(store.database, 501, 40, 2);
     expect(scene.impersonations).toHaveLength(40);
     const at = new Date();

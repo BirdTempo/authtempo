@@ -106,8 +106,8 @@ const SCIM_GROUP_CALLS = 2;
  * - 9: the solo organizations keep 6 calls of 15 in the act: the
  *   organization, connection, domain, and SCIM token deletes, the member
  *   delete with its count, and one pending row. The SCIM Users and Groups,
- *   the teams, the invitations, the tokens, the roles, the team members, and
- *   the active organization of the sessions go at the sweep
+ *   the teams, the invitations, the tokens, the roles, the team members,
+ *   and the active organization of the sessions go at the sweep
  *   (organization-rest.ts). So a solo organization with SCIM Groups goes
  *   with the account too.
  *
@@ -139,6 +139,17 @@ const SCIM_GROUP_CALLS = 2;
  * recount 1. With no size check the self delete of a due refresh passed 50
  * at 3 such organizations (51), so a size check refuses it (ruling 10 M1 of
  * plan 12f2).
+ *
+ * Plan 13a first put the setup session and setup link deletes in
+ * `deleteOrganizationsHead` (ruling R6). On the D1 binding each scene with
+ * a solo organization then sent 2 queries more, and a user actor fit no
+ * solo organization. Ruling R17 moves the 2 deletes to the sweep
+ * (`deleteOrganizationsRest`), and the setup open and each setup request
+ * read the organization row. So the act sends the counts above again. The
+ * sweep step of one solo organization costs 2 more (`ORGANIZATION_REST_CALLS`
+ * 15). The run of 2026-11-23 on the D1 binding (load 6, 18 CPUs): each act
+ * at its old pin, the organization delete route 33, and the worst sweep 43
+ * (the operator confirm with 3 SCIM Groups).
  */
 
 /**
@@ -172,8 +183,9 @@ export const DELETE_KEEP = SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
  * The statements of the solo organizations in the act when one or more go,
  * for any count (rulings 30 and 78 of plan 12d): the organization,
  * connection, domain, and SCIM token deletes, the member delete with its
- * count, and one pending row. The operator delete reads it to refuse a
- * delete that cannot fit its budget.
+ * count, and one pending row. The setup rows of plan 13a go at the sweep
+ * (ruling R17). The operator delete reads it to refuse a delete that cannot
+ * fit its budget.
  */
 const SOLO_CALLS = 6;
 

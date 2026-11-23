@@ -39,9 +39,16 @@ export const BODY_CAP_FLOOR = 65_536;
  * bytes (`POST /reauth`). The SSO writes read the body after the session
  * check, the limit of the user, and the manager guard (`managedLargeCall`
  * in routes/sso.ts, plan 12l).
+ *
+ * `POST /sso/setup/connection` (plan 13a Task 11, ruling R5): the draft takes the IdP fields of
+ * the connection write and no owner key (`mfa` and `scimRoles` are owner keys). Its largest body
+ * is 2 332 941 bytes (`idpMetadata` and `certificates`), so the next power of two is 4 MiB. The
+ * route reads the body after the setup cookie check (`setupSessionRoute`), so a caller with no
+ * live cookie reads no byte. Its reads count on the client of the address, as an anonymous read.
  */
 export const BODY_CAPS: Readonly<Partial<Record<RouteKey, number>>> = Object.freeze({
   "POST /social/apple/callback": 262_144,
+  "POST /sso/setup/connection": 4_194_304,
   "POST /sso/connections/create": 8_388_608,
   "POST /sso/connections/update": 8_388_608,
 });

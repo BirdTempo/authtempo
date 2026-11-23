@@ -107,6 +107,8 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `holdClaim`, `releaseClaim` | The hold of the claim of a user, for a writer that is no claim, such as the importer. `holdClaim` takes a transaction, a user id, and a clock. It is the first statement of a claim. On Postgres and MySQL it is an update of the unverified user row. On a store with no isolation it is the claim lease, and then a read of the flag of the user. Call it after the user row exists in the transaction. It returns the expiry of its lease, or null on an isolated store. Then write, then call `releaseClaim` in the same transaction with that value, with no hook between the two calls. `releaseClaim` deletes the lease by its id and that expiry. It answers false when its lease is gone or a claim took it, and the writer then deletes its own rows. A claim of the user meanwhile waits, or answers 409 `conflict` on D1. A lease row of the user, live or stale, throws `ClaimLostError` with `held`. A verified user throws `ClaimLostError` with no `held`. Unlike a claim, the hold takes no stale lease: a claim can run past the life of its lease. A writer that stops leaves the lease. A claim takes it after 60 seconds. The app's scheduled sweep deletes the lease at its first run 60 seconds or more after its write. |
 | `validTokenName`, `validMetadata` | The create rules of a token. A name holds 1 to 80 characters and no control character. Metadata is a plain object whose JSON is at most 4096 bytes. The Better Auth key move reads them. |
 | `checkCaptcha` | The captcha check of one flow, after its per-IP limit and before its per-email limits. It answers null when the flow goes on. An `api` call with no `captchaToken` skips it, so an app that proxies a browser request through `api` must pass the browser's token. |
+| `fillGuide` | Takes a resolved config, an `IdpGuide`, and a connection id. It answers a `FilledGuide`: the steps of the guide with the real SP values of that connection, and the real start URL in `launch`. The SCIM token is never in a step, so its value is null. |
+| `guideOf` | Takes an id and answers the `IdpGuide` of that id, or null. |
 
 ## Classes and constants
 
@@ -144,6 +146,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `PROVIDER_NAME_RE`, `ROLE_RE`, `TWO_FACTOR_TOKEN_RE` | The patterns of a provider name, a role, and a second factor challenge. |
 | `PRESET_PROVIDER_NAMES`, `COMING_PRESET_NAMES` | The names of the social presets, and the names kept for coming presets. A list entry takes neither. The second list may be empty. |
 | `LAST_METHODS` | The values of the last method cookie and of the `via` of a sign-in answer. `social:<provider>` is the other form. |
+| `GUIDES` | The setup guides of the providers: `okta`, `entra`, `google-workspace`, `generic-saml`, and `generic-oidc`. Each is one typed record, which the setup pages and the docs read. |
 
 ## Types
 
@@ -169,7 +172,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `Username`, `UsernameSet`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart`, `AccountDelete` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft`, `OperatorUser`, `OperatorCreateUser`, `FirstSignIn` |
-| Enterprise SSO | `SsoApi`, `SsoAppActor`, `SsoConfig`, `SsoDomainSummary`, `SsoConnectionSummary`, `ConnectionInput`, `ConnectionFields`, `SsoMfaInput`, `DnsTxtPort`, `dohCloudflare`, `dohGoogle`, `DOH_BODY_MAX` |
+| Enterprise SSO | `SsoApi`, `SsoAppActor`, `SsoConfig`, `SsoSetupConfig`, `SetupPageInput`, `renderSetupPage`, `DraftSummary`, `TestSummary`, `SetupPreview`, `previewSetup`, `activateSetup`, `startTestRun`, `lastPassedRun`, `testRunResult`, `SsoDomainSummary`, `SsoConnectionSummary`, `ConnectionInput`, `ConnectionFields`, `SsoMfaInput`, `DnsTxtPort`, `dohCloudflare`, `dohGoogle`, `DOH_BODY_MAX`, `IdpGuide`, `GuideStep`, `SpField`, `FilledGuide`, `FilledStep` |
 | SCIM | `ScimApi`, `ScimConfig`, `ScimScope`, `ScimTokenSummary`, `SCIM_SCOPES`, `SCIM_TOKEN_PREFIX` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
 | Organizations | `Statements`, `RoleTable`, `PermissionInput`, `RoleSummary`, `SlugStatus`, `SLUG_CHECK_PER_USER`, `TeamSummary`, `TeamMemberSummary`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |

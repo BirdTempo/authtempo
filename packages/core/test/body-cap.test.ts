@@ -57,6 +57,7 @@ import { FAST } from "./password-helpers.js";
 import { SSO_APP, ssoAuth } from "./sso/helpers.js";
 import { type Manager, managerSession } from "./sso/manager-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
+import { UNMOUNTED_ROUTES } from "./unmounted-routes.js";
 
 /**
  * The request body limits of core (rulings 43 and 46 of the 12j lane). The
@@ -218,7 +219,16 @@ const OPEN_NODES: Readonly<Record<string, string>> = {
 
 describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
   it("derives the cap of each route as the next power of two above its largest valid body, at least 64 KiB", () => {
-    const rows = largestBodies();
+    // A route that no module mounts reads no body (plan 13a). Task 11 mounted the last of them,
+    // so the setup connection route is in the rows with its cap of 4 MiB (ruling R5).
+    const all = largestBodies();
+    const rows = all.filter((r) => !UNMOUNTED_ROUTES.has(r.key));
+    expect(rows).toHaveLength(all.length);
+    expect(
+      rows
+        .filter((r) => derivedCap(r.bytes) > BODY_CAP_FLOOR && r.key.includes("/setup/"))
+        .map((r) => [r.key, derivedCap(r.bytes)]),
+    ).toEqual([["POST /sso/setup/connection", 4_194_304]]);
     const table = rows.map((r) => ({ ...r, cap: bodyCapOf(r.key as RouteKey) }));
     const perCap = new Map<number, number>();
     for (const r of table) perCap.set(r.cap, (perCap.get(r.cap) ?? 0) + 1);
@@ -249,8 +259,9 @@ describe("the request body cap (rulings 43 and 46 of the 12j lane)", () => {
     expect(REQUEST_BODY_MAX).toBe(Math.max(...table.map((r) => r.cap)));
     expect(perCap).toEqual(
       new Map([
-        [65_536, rows.length - 3],
+        [65_536, rows.length - 4],
         [262_144, 1],
+        [4_194_304, 1],
         [8_388_608, 2],
       ]),
     );

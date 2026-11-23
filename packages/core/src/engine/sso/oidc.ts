@@ -15,7 +15,7 @@ import { newId } from "../../primitives/ids.js";
 import { readCapped } from "../../primitives/read-capped.js";
 import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { SsoConnectionRow } from "../../schema.js";
+import type { SsoConnectionRow, SsoTestRunRow } from "../../schema.js";
 import { discover, type OidcEndpoints, oidcProvider } from "../../social/oidc.js";
 import { buildQuery, type OidcProvider, stringClaim } from "../../social/provider.js";
 import type { SignInChallenge } from "../second-factor.js";
@@ -25,7 +25,9 @@ import { connectionSecret, type OidcStored, tokenAuthOf } from "./connections.js
 import { kindOn } from "./discover.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
+import { setupRefused } from "./setup-events.js";
 import type { OidcStep } from "./steps.js";
+import { failTestRun, passTestRun, pendingRun, type SsoTestDone } from "./test-run-store.js";
 
 /**
  * The OIDC sign-in of one SSO connection (plan 12d Task 4, spec 30 item 6).
@@ -72,6 +74,16 @@ interface SsoStateData {
   bindHash: string;
   next: string;
   connectionId: string;
+  /** The pending test run that this state belongs to. Only a test start writes it (plan 13a Task 7). */
+  testRunId?: string;
+}
+
+/**
+ * What a test start does before the state row (plan 13a Task 7): it checks who may test this
+ * row, then writes the pending run row. The start of a real sign-in has no such step.
+ */
+export interface SsoTestStart {
+  prepare(row: SsoConnectionRow): Promise<Result<{ runId: string }>>;
 }
 
 /** The callback of an OIDC connection: `SocialComplete` with the connection id in place of the provider. */
@@ -266,6 +278,27 @@ async function liveConnection(
 }
 
 /**
+ * The connection row of a test run: any state, a draft too, but the kind must be on. Core
+ * writes no session from a test run, so a row that is off is safe to test.
+ */
+async function testConnection(
+  config: ResolvedConfig,
+  connectionId: string,
+): Promise<Result<{ sso: ResolvedSso; row: SsoConnectionRow }>> {
+  const sso = config.sso;
+  if (!sso) return fail("sso_not_configured");
+  const row = await config.storage.findOne("ssoConnection", [
+    { field: "id", op: "eq", value: connectionId },
+  ]);
+  if (!row || !kindOn(sso, row.kind)) {
+    // Only a test start reads here. The answer is the one of no credential, so the event names it.
+    setupRefused(config, "test_connection");
+    return fail("sso_not_configured");
+  }
+  return ok({ sso, row });
+}
+
+/**
  * The start of an SSO sign-in (plan 12d Task 4 Behavior 4). The limit
  * `sso-start:ip` comes first, so it bounds the discovery reads. The row
  * must exist and be enabled, else `sso_not_configured`. The state row has
@@ -275,15 +308,45 @@ async function liveConnection(
  */
 export async function startSso(
   config: ResolvedConfig,
-  input: { connectionId: string; next?: string | undefined; ip: string | null },
+  input: {
+    connectionId: string;
+    next?: string | undefined;
+    ip: string | null;
+    /** A test run of a draft (plan 13a Task 7). Only `startTestRun` passes it. */
+    test?: SsoTestStart;
+  },
 ): Promise<Result<{ location: string; bindToken: string }>> {
   if (!(await limit(config, "sso-start:ip", ipKey(input.ip), START_LIMIT)))
     return fail("rate_limited");
-  const live = await liveConnection(config, input.connectionId);
-  if (!live.ok) return live;
-  const { sso, row } = live.value;
+  // A test run reads a connection in any state, a draft too. A real sign-in needs `enabled`.
+  const found = input.test
+    ? await testConnection(config, input.connectionId)
+    : await liveConnection(config, input.connectionId);
+  if (!found.ok) return found;
+  const { sso, row } = found.value;
+  let runId: string | undefined;
+  if (input.test) {
+    const prepared = await input.test.prepare(row);
+    if (!prepared.ok) return prepared;
+    runId = prepared.value.runId;
+  }
+  const started = await beginSso(config, sso, row, input, runId);
+  // A start that fails after the run row is written leaves no run: the person sees no IdP page.
+  if (!started.ok && runId !== undefined)
+    await config.storage.delete("ssoTestRun", [{ field: "id", op: "eq", value: runId }]);
+  return started;
+}
+
+/** The part of the start after the limit and the connection: the AuthnRequest or the OIDC state. */
+async function beginSso(
+  config: ResolvedConfig,
+  sso: ResolvedSso,
+  row: SsoConnectionRow,
+  input: { next?: string | undefined; ip: string | null },
+  runId: string | undefined,
+): Promise<Result<{ location: string; bindToken: string }>> {
   // A SAML connection sends an AuthnRequest (plan 12d Task 8).
-  if (row.kind === "saml") return startSaml(config, row, input);
+  if (row.kind === "saml") return startSaml(config, row, input, runId);
   const provider = await providerOf(config, sso, row);
   // A refusal after the open of the secret scrubs it (ruling 83 l2b of plan 12d).
   if (!provider.ok)
@@ -299,6 +362,7 @@ export async function startSso(
     bindHash: await sha256Hex(bindToken),
     next: safeNext(input.next),
     connectionId: row.id,
+    ...(runId === undefined ? {} : { testRunId: runId }),
   };
   await config.storage.create("verification", {
     id: newId(now),
@@ -373,9 +437,35 @@ export async function completeSsoOidc(
   config: ResolvedConfig,
   input: SsoOidcComplete,
   seam: SsoOidcSeam = {},
-): Promise<Result<SsoSignedIn | SignInChallenge>> {
+): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
+  const trace: OidcTrace = { run: null, step: null };
+  const r = await runOidc(config, input, seam, trace);
+  // A real sign-in, or a test run that passed, answers as it is. A test run that failed ends in
+  // a `failed` row with the closed step of the failure. The page of the run shows the help line.
+  if (r.ok || trace.run === null) return r;
+  // `oauth_denied` is a refusal at the IdP, the step `code`. Any other failure with no step is a
+  // connection that changed after the start, the step `state_connection`.
+  const step = trace.step ?? (r.code === "oauth_denied" ? "code" : "state_connection");
+  return ok({ test: await failTestRun(config, trace.run, step) });
+}
+
+/** What the callback learns on its way: the pending test run of its state, and the last refused step. */
+interface OidcTrace {
+  run: SsoTestRunRow | null;
+  step: OidcStep | null;
+}
+
+async function runOidc(
+  config: ResolvedConfig,
+  input: SsoOidcComplete,
+  seam: SsoOidcSeam,
+  trace: OidcTrace,
+): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
   const id = input.connectionId;
-  const no = (step: OidcStep) => refused(config, id, step, input.ip);
+  const no = (step: OidcStep) => {
+    trace.step = step;
+    return refused(config, id, step, input.ip);
+  };
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return no("state");
   const now = config.clock.now();
@@ -401,25 +491,40 @@ export async function completeSsoOidc(
   if (!data || typeof data.verifier !== "string") return no("state");
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash))
     return no("binding");
+  // The binding holds, so this browser started the test. Only now may a failure end its run: a
+  // stolen state with no binding cookie cannot fail the run of another person.
+  if (data.testRunId !== undefined) {
+    const run = await pendingRun(config, data.testRunId);
+    if (!run || run.connectionId !== id) return no("state");
+    trace.run = run;
+  }
   if (input.error) {
     config.observe.emit({ name: "sso.denied", connectionId: id, ip: input.ip });
     return fail("oauth_denied");
   }
   if (!input.code) return no("code");
-  const live = await liveConnection(config, id);
+  const live = trace.run ? await testConnection(config, id) : await liveConnection(config, id);
   if (!live.ok) return live;
   const { sso, row: connection } = live.value;
+  // The run names the organization of the connection that it tested.
+  if (trace.run && connection.organizationId !== trace.run.organizationId)
+    return fail("sso_not_configured");
   // A state row of `sso:<id>` comes from an OIDC start; a kind change is not possible (Task 3).
   if (connection.kind !== "oidc") return fail("sso_not_configured");
   const provider = await providerOf(config, sso, connection);
   // The discovery refusals come after the open of the secret: they scrub it (ruling 83 l2b).
-  if (!provider.ok)
+  if (!provider.ok) {
+    trace.step = provider.step;
     return refused(withSecrets(config, [provider.secret]), id, provider.step, input.ip);
+  }
   const p = provider.value;
   // From here each event of the request scrubs the opened client secret too (plan 12d on 12h).
   const scrubbed = withSecrets(config, [provider.secret]);
   // The refusals from here emit through the scrub of the opened secret too (ruling 81 l2).
-  const refuse = (step: OidcStep) => refused(scrubbed, id, step, input.ip);
+  const refuse = (step: OidcStep) => {
+    trace.step = step;
+    return refused(scrubbed, id, step, input.ip);
+  };
   // Each IdP call goes through `sso.fetch` with its byte cap (plan 12d), the JWKS read too.
   const token = await exchangeProviderCode(
     scrubbed,
@@ -451,6 +556,10 @@ export async function completeSsoOidc(
   const profile = profileOf(claims);
   if (!profile) return refuse("subject");
   seam.onProfile?.(profile);
+  // A test run stops here. It never reaches the sign-in resolution: no user, identity, session,
+  // SCIM row, sign-in audit row, or `sign_in` event (plan 13a Task 7).
+  if (trace.run)
+    return ok({ test: await passTestRun(config, trace.run, profile, Object.keys(claims)) });
   return resolveSsoUser(scrubbed, connection, profile, {
     next: safeNext(data.next),
     ip: input.ip,

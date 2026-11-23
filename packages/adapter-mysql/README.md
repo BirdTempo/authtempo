@@ -71,7 +71,11 @@ held an older version. `0002_schema_v14` adds the SSO and SCIM tables of
 schema version 14. `0003_schema_v15` makes `ta_user.email` nullable and
 adds the username, the phone, the anonymous flag, and the passkey flags of
 schema version 15. `0004_schema_v16` adds `ta_session.proved` and fills it
-from the user of each session. MySQL commits each DDL statement at once. So the
+from the user of each session. `0005_schema_v17` adds the three setup tables of
+schema version 17, `draft`, `version`, and `setup_link_id` to
+`ta_sso_connection`, `setup_link_id` to `ta_sso_domain`, and `pending` and
+`setup_link_id` to `ta_scim_token`. A row of version 16 reads as no draft, at
+version 1, with no setup link, and not pending. MySQL commits each DDL statement at once. So the
 runner records each statement as a step in `ta_migrations`, and after a
 failure it resumes at the first step with no record. The last step writes the
 version. A step and its record are two statements. After a stop between the

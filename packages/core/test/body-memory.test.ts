@@ -187,7 +187,9 @@ describe("the memory of the body read path (ruling 46 of the 12j lane)", () => {
       { body?: unknown },
     ][])
       if (contract.body !== undefined && !byCap.has(bodyCapOf(key))) byCap.set(bodyCapOf(key), key);
-    expect([...byCap.keys()].sort((a, b) => a - b)).toEqual([65_536, 262_144, 8_388_608]);
+    expect([...byCap.keys()].sort((a, b) => a - b)).toEqual([
+      65_536, 262_144, 4_194_304, 8_388_608,
+    ]);
     const jobs: [string, string][] = [
       ...[...byCap.values()].flatMap((route) =>
         SHAPES.map((shape): [string, string] => [route, shape]),

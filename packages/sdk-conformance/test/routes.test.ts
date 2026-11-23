@@ -9,6 +9,12 @@ import { describe, expect, it } from "vitest";
 const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   {
     method: "GET",
+    path: "/sso/setup",
+    reason:
+      "the confirm page of the setup link; a browser opens it, and the client calls open from the page (plan 13a)",
+  },
+  {
+    method: "GET",
     path: "/magic-link/verify",
     reason: "the page of the mailed link; a browser opens it",
   },

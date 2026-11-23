@@ -17,12 +17,12 @@ import { writeAuditIn } from "../operator/audit.js";
 import { isOwner } from "../organizations.js";
 import { roleRowDef } from "../permissions.js";
 import { holdsRolePart, ROLE_RE, rankOf } from "../ranks.js";
-import { lockOrganization } from "../teams.js";
 import { kindOn as kindIsOn } from "./discover.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
 import { importIdpMetadata } from "./saml-sp.js";
+import { lockSetupRows } from "./setup-live.js";
 
 /**
  * The OIDC and SAML connections of an organization (plan 12d Task 3, spec
@@ -176,6 +176,11 @@ export interface SsoConnectionSummary {
   kind: "oidc" | "saml";
   label: string;
   enabled: boolean;
+  /**
+   * True for a draft of a setup link (plan 13a). A draft signs in no one,
+   * and only the activation of the link makes it live.
+   */
+  draft: boolean;
   jit: boolean;
   defaultRole: string;
   /** Every key of the list, an empty list for a key with no value. */
@@ -224,6 +229,7 @@ export function publicConnection(
     kind: row.kind,
     label: row.label,
     enabled: row.enabled,
+    draft: row.draft,
     jit: row.jit,
     defaultRole: row.defaultRole,
     mfa: row.mfa
@@ -686,6 +692,12 @@ export async function createConnection(
   actor: SsoActor,
   input: ConnectionFields & { organizationId: string; kind: "oidc" | "saml"; label: string },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). It makes the row the one draft of that link:
+   * `draft` true, `enabled` false, `setupLinkId` set. The count of the link is checked in the
+   * transaction that holds the organization lock, so two parallel writes make one draft.
+   */
+  draftFor?: string,
 ): Promise<Result<SsoConnectionSummary>> {
   // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
   const config = withSecrets(outer, [input.clientSecret]);
@@ -736,7 +748,7 @@ export async function createConnection(
     organizationId: input.organizationId,
     kind,
     label: f.label,
-    enabled: f.enabled ?? true,
+    enabled: draftFor === undefined ? (f.enabled ?? true) : false,
     jit: f.jit ?? true,
     defaultRole: f.defaultRole ?? DEFAULT_ROLE,
     config: { ...stored },
@@ -745,14 +757,23 @@ export async function createConnection(
     secretVersion: config.keyring.current,
     mfa: f.mfa ?? null,
     scimRoles: f.scimRoles ?? null,
+    // A create of the manager or the app is live (plan 13a). Only a setup link makes a draft.
+    draft: draftFor !== undefined,
+    version: 1,
+    setupLinkId: draftFor ?? null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
-      const organization = await tx.findOne("organization", [
-        { field: "id", op: "eq", value: input.organizationId },
-      ]);
-      // The lock holds the count below against a parallel create (the 12k limit form).
-      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      // The lock of the organization holds the count below against a parallel create (the 12k
+      // limit form). A draft needs its link live at the write: a revoke or an activation before
+      // this fails it. The organization row comes before the link row (ruling R22 of plan 13a).
+      const locked = await lockSetupRows(
+        tx,
+        input.organizationId,
+        draftFor === undefined ? null : { id: draftFor, now },
+      );
+      if (!locked.ok) return locked;
+      const organization = locked.value;
       const fault = await roleFault(
         config,
         tx,
@@ -767,6 +788,13 @@ export async function createConnection(
         { limit },
       );
       if (held.length >= limit) return fail("connection_limit");
+      if (draftFor !== undefined) {
+        const own = await tx.findOne("ssoConnection", [
+          { field: "setupLinkId", op: "eq", value: draftFor },
+          { field: "draft", op: "eq", value: true },
+        ]);
+        if (own) return fail("conflict");
+      }
       await tx.create("ssoConnection", row);
       const draft = connectionDraft(actor, "sso_connection_create", row, f.changed, meta);
       if (!draft.ok) return draft;
@@ -798,7 +826,11 @@ export async function connectionOrganization(
  * sealed again under the current version. `enabled: false` answers
  * `invalid_body` while an enforced domain routes to the connection. Such a
  * domain with no way in through SSO would lock its staff out, so the owner
- * turns `enforce` off first. One transaction checks the roles. It writes
+ * turns `enforce` off first. `enabled: true` on a draft of a setup link
+ * answers `setup_not_tested` (plan 13a, pre-flight C7): only the activation
+ * of the link clears `draft`, after a passed test of the draft. Each change
+ * of a draft adds 1 to its `version`; a row that is no draft keeps it. One
+ * transaction checks the roles. It writes
  * the row only when its `updatedAt` is the one read, else `conflict`. Then
  * it checks the enforced domains, and it writes one `sso_connection_update`
  * audit row with the changed keys.
@@ -808,6 +840,12 @@ export async function updateConnection(
   actor: SsoActor,
   input: ConnectionFields & { id: string },
   meta: SsoActMeta = {},
+  /**
+   * The id of a setup link (plan 13a Task 4). The write then changes the draft of that link
+   * only: the row must be a draft of the link at the read and at the write, else
+   * `unauthorized`, and the link must be live in the transaction.
+   */
+  draftFor?: string,
 ): Promise<Result<SsoConnectionSummary>> {
   // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
   const config = withSecrets(outer, [input.clientSecret]);
@@ -817,6 +855,8 @@ export async function updateConnection(
     { field: "id", op: "eq", value: input.id },
   ]);
   if (!held) return fail("not_found");
+  if (draftFor !== undefined && (!held.draft || held.setupLinkId !== draftFor))
+    return fail("unauthorized");
   const on = kindOn(sso.value, held.kind);
   if (!on.ok) return on;
   if (
@@ -827,8 +867,12 @@ export async function updateConnection(
   const fields = checkFields(config, held.kind, input as unknown as Record<string, unknown>);
   if (!fields.ok) return fields;
   const f = fields.value;
+  if (held.draft && f.enabled === true) return fail("setup_not_tested");
   const now = config.clock.now();
   const changes: Partial<SsoConnectionRow> = { updatedAt: now };
+  // Each change of a draft adds 1 to its version (spec 5 item 5, ruling R9 of plan 13a).
+  // A passed test holds the version it tested, so a change after the test makes it stale.
+  if (held.draft) changes.version = held.version + 1;
   if (f.label !== undefined) changes.label = f.label;
   if (f.enabled !== undefined) changes.enabled = f.enabled;
   if (f.jit !== undefined) changes.jit = f.jit;
@@ -844,6 +888,12 @@ export async function updateConnection(
   const row: SsoConnectionRow = { ...held, ...changes };
   const updated = await config.storage
     .transaction(async (tx): Promise<Result<OperatorAuditRow>> => {
+      // A draft needs its link live at the write. The organization row comes before the link row
+      // (ruling R22 of plan 13a). A write of the manager holds no link, so it takes no such lock.
+      if (draftFor !== undefined) {
+        const locked = await lockSetupRows(tx, held.organizationId, { id: draftFor, now });
+        if (!locked.ok) return locked;
+      }
       if (f.defaultRole !== undefined || f.scimRoles !== undefined) {
         const fault = await roleFault(
           config,
@@ -858,6 +908,14 @@ export async function updateConnection(
         [
           { field: "id", op: "eq", value: held.id },
           { field: "updatedAt", op: "eq", value: held.updatedAt },
+          // An activation between the read and this write clears `draft`: the write then changes
+          // no row, and a live connection never gets a draft write.
+          ...(draftFor === undefined
+            ? []
+            : ([
+                { field: "draft", op: "eq", value: true },
+                { field: "setupLinkId", op: "eq", value: draftFor },
+              ] as const)),
         ],
         changes,
       );
@@ -923,6 +981,9 @@ export async function deleteConnection(
       if (!row) return fail("not_found");
       const n = await tx.delete("ssoConnection", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
+      // The test runs of the connection go with it (plan 13a Task 7): they hold names only, and
+      // no page reads them after the connection is gone. One more call on D1 (ruling R20d).
+      await tx.delete("ssoTestRun", [{ field: "connectionId", op: "eq", value: row.id }]);
       await tx.update("ssoDomain", [{ field: "connectionId", op: "eq", value: row.id }], {
         connectionId: null,
         enforce: false,

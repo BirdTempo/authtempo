@@ -382,7 +382,13 @@ async function sweepAll(sent: MailMessage[]) {
 // no outbox row, and the operator delete reads the memberships before its
 // act (ruling 30 of plan 12d). The page of each act ends whole sessions,
 // so no act reaches 50 exactly. The runs of 2026-10-25 give these counts.
-const LOAD_COUNTS = { act: 49, inAct: 8, sweeps: [48, 48, 48, 48, 36] };
+// Plan 13a (ruling R19, run of 2026-11-23 on the binding, load averages 8.7 to 10.0 on
+// 18 CPUs): the rest of the organization deletes the setup sessions and the setup links,
+// so the last sweep sends 38, was 36. The act does not change.
+// Plan 13a Task 7 (three runs of 2026-11-23 on the binding, load averages 7 to 40 on 18 CPUs;
+// a query count does not change with the load): the rest also deletes the SSO test runs, so
+// the last sweep sends 39, was 38. The act does not change.
+const LOAD_COUNTS = { act: 49, inAct: 8, sweeps: [48, 48, 48, 48, 39] };
 const OPERATOR_COUNTS = { act: 48, inAct: 4, sweeps: [48, 48, 39] };
 
 /**

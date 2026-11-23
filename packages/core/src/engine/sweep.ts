@@ -14,6 +14,7 @@ import {
   sweepOrganizationRest,
 } from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
+import { SETUP_SWEEP_CALLS, sweepSetupRows } from "./sso/setup-retention.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -57,6 +58,12 @@ export interface SweepResult {
   ssoPendingDomains: number;
   /** SCIM tokens past `expiresAt` (plan 12d). A token with no expiry is never swept. 0 while `scim` is off. */
   scimTokens: number;
+  /**
+   * Setup links and setup sessions that expired more than 30 days ago, and test runs older than
+   * 30 days (plan 13a, ruling R30). A link takes its `note` and its pending SCIM token with it.
+   * 0 while `sso` is off. It also runs while only `sso.setup` is off.
+   */
+  ssoSetupRows: number;
   /**
    * Organizations that an account delete took, whose teams, invitations,
    * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
@@ -515,6 +522,16 @@ export async function sweepExpired(
     "pending end",
     endPendingRows(config, ends, meter, budget - anonymousShare),
   );
+  // The setup links, sessions and test runs past their retention (plan 13a, ruling R30). It
+  // runs when `sso` is on, not only `sso.setup`: an app that turned `sso.setup` off keeps the
+  // rows of the links that it minted before (ruling R33). It comes after every step that a
+  // user waits for: a row past 30 days waits for no flow, so it takes only the calls that stay
+  // (5 at most), and the next sweep does it when no call stays. It keeps the share of the
+  // anonymous step.
+  const setupFits = config.sso && meter.used + SETUP_SWEEP_CALLS <= budget - anonymousShare;
+  const setupSwept = setupFits ? await sweepSetupRows(storage, now) : { rows: 0, calls: 0 };
+  const ssoSetupRows = setupSwept.rows;
+  meter.step(setupSwept.calls);
   // Last, in its share and every call that the steps above left. An anonymous user past its
   // days has no live session, so it waits for no other step.
   const anonymousUsers = config.anonymous
@@ -541,6 +558,7 @@ export async function sweepExpired(
     ssoDomains,
     ssoPendingDomains,
     scimTokens,
+    ssoSetupRows,
     organizationRows,
     anonymousUsers,
   };

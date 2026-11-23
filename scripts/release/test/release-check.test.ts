@@ -140,7 +140,7 @@ describe("release-check", () => {
     const report = await check({ exec: f.exec });
     expect(report.failures).toEqual([]);
     expect(releaseCheckLine(report)).toBe(
-      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=10 of 10 dry-run=PASS load=1.50 failures=0",
+      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=11 of 11 dry-run=PASS load=1.50 failures=0",
     );
     expect(report.notes).toContain(
       "check-security-policy: PASS sections=7 rows=0 channels=2 failures=0",
@@ -191,7 +191,7 @@ describe("release-check", () => {
     const f = fakeExec({ "evidence run": () => ok(cached) });
     const report = await check({ exec: f.exec });
     expect(releaseCheckLine(report)).toBe(
-      "release-check: FAIL tasks=33 of 33 cached=1 packages=5 of 5 checks=0 of 10 dry-run=not-run load=1.50 failures=1",
+      "release-check: FAIL tasks=33 of 33 cached=1 packages=5 of 5 checks=0 of 11 dry-run=not-run load=1.50 failures=1",
     );
   });
 
@@ -298,7 +298,7 @@ describe("release-check", () => {
     ]);
     // Each check runs, so the run names each failing check; the dry run does not start.
     expect(checks.calls).toEqual(["evidence run (echo)", ...CHECKS.map((c) => c.name), "proof"]);
-    expect(releaseCheckLine(r3)).toMatch(/ checks=8 of 10 dry-run=not-run /);
+    expect(releaseCheckLine(r3)).toMatch(/ checks=9 of 11 dry-run=not-run /);
 
     const dry = fakeExec({
       "dry-run": () => ({
@@ -328,7 +328,7 @@ describe("release-check", () => {
     const report = await check({ exec: f.exec, osv: false, dryRun: false });
     expect(report.failures).toEqual([]);
     expect(releaseCheckLine(report)).toBe(
-      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=9 of 10 dry-run=not-run load=1.50 failures=0",
+      "release-check: PASS tasks=33 of 33 cached=0 packages=5 of 5 checks=10 of 11 dry-run=not-run load=1.50 failures=0",
     );
     expect(report.notes).toContain("not run: check-osv (--no-osv)");
     expect(report.notes).toContain("not run: dry run (--no-dry-run)");

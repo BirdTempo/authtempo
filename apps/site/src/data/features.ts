@@ -164,6 +164,13 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     icon: "organization",
     guide: "/docs/guides/scim/",
   },
+  // Task 15 writes the full page. The setup link ships with plan 13a.
+  ssoSetup: {
+    title: "SSO setup link",
+    line: "An IT admin of an organization sets up SSO and SCIM from one link. The setup link ships with plan 13a.",
+    icon: "organization",
+    guide: "/docs/guides/sso/",
+  },
   tokens: {
     title: "API tokens",
     line: "A script or a CLI calls your routes with an API token.",

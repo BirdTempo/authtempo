@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkResources, DEMO_PATH } from "../../../apps/site/scripts/check-resources.ts";
 import { RESOURCES_EMPTY } from "../../../apps/site/src/data/unpublished.ts";
+import { MAX_AGE_DAYS } from "../src/check-guides.ts";
 import { checkTag } from "../src/check-tag.ts";
 import { CI_BASE } from "../src/check-workflows.ts";
 import { COPY_DRY_RUN, shellLine } from "../src/lib/release-copy.ts";
@@ -630,5 +631,40 @@ describe("docs/release/RUNBOOK.md", () => {
     const named = [...(line ?? "").matchAll(/`(@authtempo\/[^`]+)`/g)].map((m) => m[1]).sort();
     expect(named).toEqual(floor);
     expect(line).toContain("It is 22 for the other packages.");
+  });
+
+  // Plan 13a Task 15. The owner-run items of the enterprise setup. Each item
+  // says what breaks when the owner skips it, and the date check names its
+  // limit by the value that the code consumes.
+  describe("Owner-run items of the enterprise setup", () => {
+    const part = section(TEXT, "Owner-run items of the enterprise setup");
+    const items = part.split("\n").filter((l) => /^\d+\. /.test(l));
+
+    it("has one item for each of Okta, Entra ID, and Google Workspace, and one for the date check", () => {
+      for (const name of ["Okta", "Entra ID", "Google Workspace"])
+        expect(
+          items.filter((i) => i.includes(name)),
+          name,
+        ).toHaveLength(1);
+      expect(items.filter((i) => i.includes("check-guides"))).toHaveLength(1);
+    });
+
+    it("asks for the proof of each tile launch and of each unconfirmed label", () => {
+      for (const name of ["Okta", "Entra ID", "Google Workspace"]) {
+        const item = items.find((i) => i.includes(name)) ?? "";
+        expect(item, name).toContain("tile");
+        expect(item, name).toContain("unconfirmed");
+      }
+    });
+
+    it("says in each item what breaks when the owner skips it", () => {
+      expect(items).toHaveLength(4);
+      for (const item of items) expect(item).toContain("If you skip it,");
+    });
+
+    it("names the age limit that check-guides enforces", () => {
+      const item = items.find((i) => i.includes("check-guides")) ?? "";
+      expect(item).toContain(`${MAX_AGE_DAYS} days`);
+    });
   });
 });

@@ -37,6 +37,7 @@ export const ScimTokenJson = z.strictObject({
   createdAt: z.iso.datetime(),
   lastUsedAt: z.iso.datetime().nullable(),
   expiresAt: z.iso.datetime().nullable(),
+  pending: z.boolean(),
 });
 
 /** The answer of a create: the clear token, the one time it leaves core. */

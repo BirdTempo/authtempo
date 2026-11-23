@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SETUP_STEPS, SETUP_TTL_HOURS_MAX } from "../../schema.js";
 import type { RouteKey } from "../route-list.js";
 import { id } from "./organizations.js";
 import { OkAnswer } from "./shapes.js";
@@ -17,7 +18,11 @@ export const acsBody = z.object({ SAMLResponse: z.string(), RelayState: z.string
  * by hand. The app payload `data` of the social start (plan 12i Task 19)
  * does not ride an SSO sign-in, so this query does not offer it.
  */
-export const ssoStartQuery = z.object({ next: z.string().max(2048).optional() });
+export const ssoStartQuery = z.object({
+  next: z.string().max(2048).optional(),
+  // `1`: the test start of a draft by a setup session or a manager (plan 13a Task 7).
+  test: z.literal("1").optional(),
+});
 
 // Strict: a key that core does not read answers invalid_body.
 export const domainListQuery = z.strictObject({ organizationId: id });
@@ -114,6 +119,7 @@ export const ConnectionJson = z.strictObject({
   kind: z.enum(["oidc", "saml"]),
   label: z.string(),
   enabled: z.boolean(),
+  draft: z.boolean(),
   jit: z.boolean(),
   defaultRole: z.string(),
   mfa: z
@@ -170,6 +176,167 @@ const discoverAnswer = z.union([
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
 
+/** The kinds of a connection, in the order of the schema. */
+const kinds = z.enum(["oidc", "saml"]);
+
+/**
+ * The mint of a setup link (plan 13a, spec 6.1). The engine holds the kinds
+ * to the kinds that `sso` has on. The bounds of `ttlHours` are the bounds of
+ * `sso.setup.ttlHours`.
+ */
+export const setupLinkCreateQuery = z.strictObject({ organizationId: id });
+/** True when no value of `list` comes twice. */
+const eachOnce = (list: readonly string[]) => new Set(list).size === list.length;
+/** A repeated step or kind answers invalid_body: a link names each one once. */
+export const setupLinkCreateBody = z.strictObject({
+  steps: z
+    .array(z.enum(SETUP_STEPS))
+    .min(1)
+    .max(SETUP_STEPS.length)
+    .refine(eachOnce, "each step once"),
+  kinds: z.array(kinds).min(1).max(2).refine(eachOnce, "each kind once"),
+  ttlHours: z.number().int().min(1).max(SETUP_TTL_HOURS_MAX).optional(),
+  note: z.string().min(1).max(80),
+});
+/** The answer of the mint: the clear token, once. */
+const setupLinkCreateAnswer = z.strictObject({
+  id: z.string(),
+  token: z.string(),
+  expiresAt: z.iso.datetime(),
+});
+export const setupLinkListQuery = z.strictObject({ organizationId: id });
+export const setupLinkIdQuery = z.strictObject({ id });
+export const setupLinkIdBody = z.strictObject({ id });
+/**
+ * The activation names the draft version that the owner read in the preview (R28). The link
+ * holder can change the draft after the preview, so an activation with no version, or with
+ * another version, must not turn the draft on: the engine answers `conflict`.
+ */
+export const setupActivateBody = z.strictObject({ id, version: z.number().int().min(1) });
+
+/** One setup link. It never holds the token or its hash. */
+export const SetupLinkJson = z.strictObject({
+  id: z.string(),
+  organizationId: z.string(),
+  hint: z.string(),
+  steps: z.array(z.enum(SETUP_STEPS)),
+  kinds: z.array(kinds),
+  note: z.string(),
+  createdBy: z.string(),
+  expiresAt: z.iso.datetime(),
+  revokedAt: z.iso.datetime().nullable(),
+  endedAt: z.iso.datetime().nullable(),
+  openedAt: z.iso.datetime().nullable(),
+  readyAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+/**
+ * What an activation makes live (spec 6.5 item 2). Null: the link has no
+ * draft connection yet. A fingerprint is the SHA-256 hex of a certificate. The `version` is the
+ * draft version that the owner sends back in the activation (R28).
+ */
+const SetupPreviewJson = z.strictObject({
+  kind: kinds,
+  version: z.number().int(),
+  issuerOrEntityId: z.string(),
+  signInHost: z.string(),
+  fingerprints: z.array(z.string()),
+  domains: z.array(z.string()),
+  scim: z.strictObject({ name: z.string(), scopes: z.array(z.string()) }).nullable(),
+});
+
+/** The token of a setup link, in the query of the confirm page and the body of the open. */
+const setupToken = z.string().min(1).max(256);
+export const setupPageQuery = z.strictObject({ token: setupToken });
+export const setupOpenBody = z.strictObject({ token: setupToken });
+
+/** The pages of the setup (plan 13a Task 9). The type of `SetupPageInput.step` is built from this list. */
+export const SETUP_PAGE_STEPS = [
+  "idp",
+  "domain",
+  "connect",
+  "test",
+  "directory",
+  "handback",
+  "confirm",
+] as const;
+
+/** A domain of a setup session: the organization is the organization of the link. */
+export const setupDomainAddBody = z.strictObject({ domain: z.string().min(1).max(253) });
+
+/**
+ * The draft connection of a setup session. It takes the IdP values only: the
+ * owner sets `enabled`, `jit`, `defaultRole`, `mfa`, and `scimRoles`.
+ */
+export const setupConnectionBody = z.strictObject({
+  kind: kinds,
+  label: text,
+  issuer: connectionFields.issuer,
+  clientId: connectionFields.clientId,
+  clientSecret: connectionFields.clientSecret,
+  scope: connectionFields.scope,
+  endpoints: connectionFields.endpoints,
+  tokenEndpointAuthMethod: connectionFields.tokenEndpointAuthMethod,
+  idpMetadata: connectionFields.idpMetadata,
+  idpEntityId: connectionFields.idpEntityId,
+  ssoUrl: connectionFields.ssoUrl,
+  certificates: connectionFields.certificates,
+  subjectAttribute: connectionFields.subjectAttribute,
+  attributes: connectionFields.attributes,
+});
+
+/** The pending SCIM token of a setup session: the clear token, once. */
+const setupScimTokenAnswer = z.strictObject({
+  id: z.string(),
+  token: z.string(),
+  scimBaseUrl: z.string(),
+});
+
+/**
+ * The query of the status page. `run` is the test run whose result the page
+ * shows: the ACS of a test sign-in answers 303 to it (pre-flight C9 of plan 13a).
+ */
+export const setupStatusQuery = z.strictObject({
+  run: id.optional(),
+  // The page of the setup and the guide of the IdP (plan 13a Task 9). Both are choices of the
+  // person: a step that the link does not hold, or an id with no guide, falls back to the default.
+  step: z.enum(SETUP_PAGE_STEPS).optional(),
+  idp: z.string().min(1).max(40).optional(),
+});
+
+/**
+ * The result of one test run of the draft (plan 13a Task 11). Null while the session has no run,
+ * or when the run of the query is not a run of this link. `address` and `name` come from the IdP,
+ * so a client treats each as hostile text. `current` is false for a run of an older draft version.
+ */
+const setupTestJson = z.strictObject({
+  outcome: z.enum(["passed", "failed", "pending"]),
+  step: z.string().nullable(),
+  help: z.string(),
+  attributeNames: z.array(z.string()),
+  address: z.string().nullable(),
+  name: z.string().nullable(),
+  domainClaimed: z.boolean(),
+  current: z.boolean(),
+});
+
+/** What a setup session sees: its link and its own drafts, never a live row or a secret. */
+const setupStatusAnswer = z.strictObject({
+  link: z.strictObject({
+    id: z.string(),
+    steps: z.array(z.enum(SETUP_STEPS)),
+    kinds: z.array(kinds),
+    note: z.string(),
+    expiresAt: z.iso.datetime(),
+    readyAt: z.iso.datetime().nullable(),
+  }),
+  domains: z.array(DomainJson),
+  connection: ConnectionJson.nullable(),
+  scimToken: z.strictObject({ id: z.string(), hint: z.string() }).nullable(),
+  test: setupTestJson.nullable(),
+});
+
 /** The contract of `routes/sso.ts` (plan 12d Tasks 2 and 3). */
 export const SSO_CONTRACT = {
   "GET /sso/domains": {
@@ -223,10 +390,74 @@ export const SSO_CONTRACT = {
   "GET /sso/:connectionId/callback": {
     query: { schema: callbackQuery, parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
+    // A test run (plan 13a Task 7, C9): a 303 to the status page of the run, `?run=<id>`.
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
   },
   "POST /sso/:connectionId/acs": {
     body: { schema: acsBody, media: ["form"], parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
+    // A test run (plan 13a Task 7, C9): a 303 to the status page of the run, `?run=<id>`.
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
   },
   "GET /sso/:connectionId/metadata": { answer: { kind: "metadata", standard: "saml-metadata" } },
+  // Plan 13a: the setup links, behind the manager guard.
+  "POST /sso/setup-links/create": {
+    query: { schema: setupLinkCreateQuery, parsedBy: "zod" },
+    body: jsonBody(setupLinkCreateBody),
+    answer: { kind: "json", schema: setupLinkCreateAnswer },
+  },
+  "GET /sso/setup-links/list": {
+    query: { schema: setupLinkListQuery, parsedBy: "zod" },
+    answer: { kind: "json", schema: z.strictObject({ links: z.array(SetupLinkJson) }) },
+  },
+  "GET /sso/setup-links/get": {
+    query: { schema: setupLinkIdQuery, parsedBy: "zod" },
+    answer: {
+      kind: "json",
+      schema: z.strictObject({ link: SetupLinkJson, preview: SetupPreviewJson.nullable() }),
+    },
+  },
+  "POST /sso/setup-links/revoke": {
+    body: jsonBody(setupLinkIdBody),
+    answer: { kind: "json", schema: OkAnswer },
+  },
+  "POST /sso/setup-links/activate": {
+    body: jsonBody(setupActivateBody),
+    answer: { kind: "json", schema: connectionAnswer },
+  },
+  // The confirm page changes nothing: a mail scanner can open the link (spec 6.1 item 5).
+  "GET /sso/setup": {
+    query: { schema: setupPageQuery, parsedBy: "zod" },
+    answer: { kind: "html" },
+  },
+  // JSON: the answer. A form of the confirm page: the first page of the setup.
+  "POST /sso/setup/open": {
+    body: { schema: setupOpenBody, media: ["json", "form"], parsedBy: "zod" },
+    answer: { kind: "json", schema: z.strictObject({ linkId: z.string() }) },
+    alt: { kind: "html" },
+  },
+  "POST /sso/setup/domains/add": {
+    body: jsonBody(setupDomainAddBody),
+    answer: { kind: "json", schema: domainAnswer },
+  },
+  "POST /sso/setup/domains/verify": {
+    body: jsonBody(domainIdBody),
+    answer: { kind: "json", schema: domainAnswer },
+  },
+  "POST /sso/setup/connection": {
+    body: jsonBody(setupConnectionBody),
+    answer: { kind: "json", schema: connectionAnswer },
+  },
+  "POST /sso/setup/scim-token": {
+    answer: { kind: "json", schema: setupScimTokenAnswer },
+  },
+  "POST /sso/setup/handback": {
+    answer: { kind: "json", schema: OkAnswer },
+  },
+  "GET /sso/setup/status": {
+    query: { schema: setupStatusQuery, parsedBy: "zod" },
+    answer: { kind: "json", schema: setupStatusAnswer },
+    // The page of the setup (plan 13a Task 9). The JSON answer is for the client call (Task 11).
+    alt: { kind: "html" },
+  },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

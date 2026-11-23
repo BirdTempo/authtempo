@@ -38,6 +38,15 @@ describe("checkFrontmatter", () => {
     expect(r.failures).toEqual(["docs/x.md: source docs/gone.md does not exist"]);
   });
 
+  it("refuses a source that exists but git does not track (a private note stays out of a page)", () => {
+    const tracked = new Set(["docs/spec.md", "packages/core/README.md"]);
+    expect(checkFrontmatter([page(GOOD)], read, tracked).failures).toEqual([]);
+    const note = GOOD.replace("docs/spec.md 8.2", "docs/private.md");
+    const reads = (p: string) => (p === "docs/private.md" ? "# x\n" : read(p));
+    const r = checkFrontmatter([page(note)], reads, tracked);
+    expect(r.failures).toEqual(["docs/x.md: source docs/private.md is not tracked by git"]);
+  });
+
   it("refuses a source heading that the file does not have (plan 11a, Review Focus 3)", () => {
     const r = checkFrontmatter([page(GOOD.replace('"Passwords"', '"Pass words"'))], read);
     expect(r.failures).toEqual([
