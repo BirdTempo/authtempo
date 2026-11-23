@@ -7,7 +7,13 @@ import type { OrganizationRoleRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { organizationAuditDraft, writeAuditIn } from "./operator/audit.js";
 import { standing } from "./organizations.js";
-import { grantCheck, roleRowDef, type Standing } from "./permissions.js";
+import {
+  grantCheck,
+  namesUnstorable,
+  roleRowDef,
+  type Standing,
+  storedPermissions,
+} from "./permissions.js";
 import { type ResolvedOrganizations, ROLE_RE } from "./ranks.js";
 import { lockOrganization } from "./teams.js";
 
@@ -97,8 +103,10 @@ function storableName(o: ResolvedOrganizations, name: string): boolean {
 /**
  * Rules 2 and 3 for the rank and the permissions of a role that the caller
  * writes. The rank is an integer from 1 to the caller's rank and below the
- * owner rank (`invalid_body`). The permissions are known names
- * (`invalid_body`) and a subset of the caller's (`forbidden_rank`).
+ * owner rank (`invalid_body`). The permissions name no resource that a
+ * stored role never grants (`statement_not_grantable`, ruling R20 of plan
+ * 13b), are known names (`invalid_body`), and are a subset of the caller's
+ * (`forbidden_rank`).
  */
 function grantableDef(
   o: ResolvedOrganizations,
@@ -111,6 +119,8 @@ function grantableDef(
   if (rank > caller.rank) return fail("invalid_body");
   // A dynamic role never has the owner rank, so the last-owner rule reads the config only.
   if (rank >= (o.ranks.owner ?? 0)) return fail("invalid_body");
+  // Before the subset check: the owner holds `audit:read`, and still cannot store it.
+  if (namesUnstorable(permissions)) return fail("statement_not_grantable");
   if (statementFault(permissions, o.statements) !== null) return fail("invalid_body");
   const set = union(permissions as Statements);
   if (!isSubset(set, caller.granted)) return fail("forbidden_rank");
@@ -331,11 +341,13 @@ export async function updateRole(
   const row = await findRole(config, input.organizationId, input.name);
   if (!row) return fail("not_found");
   if (!grantCheck(s.value, rowStanding(sc.o, row))) return fail("forbidden_rank");
+  // A row from before schema 18 can name `audit`: an update with no permissions
+  // writes the row back without it (ruling R20 of plan 13b).
   const def = grantableDef(
     sc.o,
     s.value,
     input.rank ?? row.rank,
-    input.permissions ?? row.permissions,
+    input.permissions ?? storedPermissions(row.permissions),
   );
   if (!def.ok) return def;
   // A row with a bad shape grants nothing, so each field of it changes.

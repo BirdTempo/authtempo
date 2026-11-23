@@ -75,7 +75,7 @@ In the `ranks` form, a role holds an action when its rank is at least the rank o
 | `organization:delete` | `owner` |
 | `audit:read` | `owner` |
 
-A slug change needs `organization:update` and the owner rank too. The audit shows the acts of each member, so only the owner rank reads it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it.
+A slug change needs `organization:update` and the owner rank too. The audit shows the acts of each member, so only the owner rank reads it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. A stored role never holds `audit:read` (rule 3 of the dynamic roles).
 
 ### The grant and touch rules
 
@@ -90,7 +90,7 @@ With `organizations.dynamicRoles`, each organization stores its own roles beside
 
 1. A name is one role name. It is not a config role, the platform role, or `owner`. A taken name answers `role_taken`.
 2. A rank is from 1 to the caller's rank, and below the owner rank.
-3. The actions are known names and a subset of the caller's actions.
+3. The actions are known names and a subset of the caller's actions. They never name `audit`, also for the owner: a create or an update with it answers `statement_not_grantable`. A row from before schema 18 can hold an app statement that was named `audit`. Core leaves that statement out of the row, and the row keeps its other actions.
 4. The list and the get need `ac:read`. The create, the update, and the delete need `ac:create`, `ac:update`, and `ac:delete`, and a fresh session.
 5. A delete answers `role_in_use` while a member or a pending invitation holds the role. A create answers the same while one holds the name.
 6. Core keeps no cache. A narrow applies at the next request.
@@ -122,6 +122,7 @@ Core has no OR connector. To accept either of two actions, write two checks.
 - [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller lacks the action, or the role to grant has more actions than the caller.
 - [`invalid_body`](/docs/reference/errors/#invalid_body): an unknown action, a name of the config, or a rank above the caller or at the owner rank.
 - [`role_taken`](/docs/reference/errors/#role_taken): the organization already stores a role of that name.
+- [`statement_not_grantable`](/docs/reference/errors/#statement_not_grantable): a stored role named `audit`. Remove it. Only the owner rank reads the audit.
 - [`role_in_use`](/docs/reference/errors/#role_in_use): a member or a pending invitation holds the role. Change those roles first.
 - [`role_limit`](/docs/reference/errors/#role_limit): the organization stores `maxPerOrganization` roles. Delete one first.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): a role write needs a fresh session. Re-authenticate, then send it again.

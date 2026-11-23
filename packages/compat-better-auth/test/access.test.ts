@@ -615,6 +615,43 @@ describe("the access control shim (spec 29 item 18)", () => {
       }
     });
 
+    // Plan 13b, ruling R20: before core 18 an app could name its own resource `audit` and
+    // store it in a role row. Core 18 owns `audit`, so it ignores that key of a stored row.
+    it("ignores audit in a Better Auth era row, so its holder cannot read the audit (ruling R20)", async () => {
+      const { pg, auth, person, owner, organizationId } = await era();
+      try {
+        await insertRow(pg, organizationId, "auditor", '{"project":["read"],"audit":["read"]}');
+        const pat = await person("pat@example.com");
+        const added = await auth.tempo.api.addMember({
+          user: (owner.caller as SessionCaller).user,
+          organizationId,
+          userId: (pat.caller as SessionCaller).user.id,
+          role: "auditor",
+        });
+        expect(added.ok).toBe(true);
+        const read = (token: string) =>
+          auth.handler(
+            new Request(`${BASE}/api/auth/organizations/audit?organizationId=${organizationId}`, {
+              headers: { authorization: `Bearer ${token}` },
+            }),
+          );
+        const byPat = await read(pat.token);
+        expect({ status: byPat.status, body: await byPat.json() }).toMatchObject({
+          status: 403,
+          body: { error: "forbidden_rank" },
+        });
+        // The row keeps its other action, and its text stays Better Auth's.
+        expect(await auth.tempo.permissionsOf(pat.caller, organizationId)).toMatchObject({
+          ok: true,
+          value: { permissions: { project: ["read"] } },
+        });
+        expect(await textOf(pg, "auditor")).toBe('{"project":["read"],"audit":["read"]}');
+        expect((await read(owner.token)).status).toBe(200);
+      } finally {
+        await pg.close();
+      }
+    });
+
     it("lets the holder of a Better Auth era row that invites list the members and the invitations", async () => {
       const { pg, auth, person, clientOf, owner, organizationId } = await era();
       try {

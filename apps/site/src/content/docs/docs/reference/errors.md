@@ -784,6 +784,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create). |
 
+<h3 id="statement_not_grantable"><code>statement_not_grantable</code> 400</h3>
+
+- **Meaning:** The `permissions` of a stored role name `audit`. A stored role never holds it, also when the owner writes it. The audit shows the IP and the user agent of each member, so only the owner rank reads it.
+- **Do:** Remove `audit` from `permissions`, then send the request again. In the `roles` form, list `audit:read` in a role of the config.
+
+| Routes |
+| --- |
+| [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create), [`POST /organizations/roles/update`](/docs/reference/routes/#post-organizations-roles-update). |
+
 <h3 id="team_limit"><code>team_limit</code> 409</h3>
 
 - **Meaning:** The organization holds `organizations.limits.teamsPerOrganization` teams.

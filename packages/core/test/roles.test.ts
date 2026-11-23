@@ -968,6 +968,123 @@ describe("dynamic roles (plan 12k Task 4)", () => {
   });
 });
 
+// Plan 13b, ruling R20: the audit shows the IP and the user agent of each member, so only the
+// owner rank reads it. A stored role never grants core `audit`: a write refuses it, and a read
+// of a stored row leaves it out.
+describe("stored roles and core audit (plan 13b, ruling R20)", () => {
+  const audit = (w: ReturnType<typeof world>, organizationId: string, token: string) =>
+    w.auth.handle(get(`/auth/organizations/audit?organizationId=${organizationId}`, bearer(token)));
+
+  it("refuses a create or an update of a stored role that names audit, also by the owner", async () => {
+    const w = world();
+    const { ada, organizationId } = await acme(w);
+    const h = bearer(await w.session("ada@example.com"));
+    const refused = { status: 400, body: { error: "statement_not_grantable" } };
+    expect(
+      await json(
+        await w.auth.handle(
+          post(
+            `${P}/create`,
+            { organizationId, name: "auditor", rank: 1, permissions: { audit: ["read"] } },
+            h,
+          ),
+        ),
+      ),
+    ).toEqual(refused);
+    expect(
+      await w.auth.api.createRole({
+        user: ada,
+        organizationId,
+        name: "support",
+        permissions: { member: ["read"], audit: ["read"] },
+      }),
+    ).toMatchObject({ ok: false, code: "statement_not_grantable", status: 400 });
+    const support = mustOk(
+      await w.auth.api.createRole({
+        user: ada,
+        organizationId,
+        name: "support",
+        permissions: { member: ["read"] },
+      }),
+    );
+    expect(
+      await json(
+        await w.auth.handle(
+          post(
+            `${P}/update`,
+            { organizationId, name: "support", permissions: { member: ["read"], audit: ["read"] } },
+            h,
+          ),
+        ),
+      ),
+    ).toEqual(refused);
+    expect(await w.storage.findMany("organizationRole", [])).toEqual([
+      expect.objectContaining({ id: support.id, permissions: { member: ["read"] } }),
+    ]);
+  });
+
+  it("ignores audit in a stored row from before schema 18, and the owner still reads", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const make = async (name: string) =>
+      mustOk(
+        await w.auth.api.createRole({
+          user: ada,
+          organizationId,
+          name,
+          rank: 1,
+          permissions: { member: ["read"] },
+        }),
+      );
+    const support = await make("support");
+    const exporter = await make("exporter");
+    mustOk(
+      await w.auth.api.updateMemberRole({
+        user: ada,
+        organizationId,
+        userId: carol.id,
+        role: "member,support,exporter",
+      }),
+    );
+    // Before schema 18 an app could name its own statement `audit` and store it in a role row.
+    // The upgrade renames the statement in the config, and the rows stay as they were.
+    await w.storage.update("organizationRole", [{ field: "id", op: "eq", value: support.id }], {
+      permissions: { member: ["read"], audit: ["read"] },
+    });
+    await w.storage.update("organizationRole", [{ field: "id", op: "eq", value: exporter.id }], {
+      permissions: { member: ["read"], audit: ["export"] },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const carolToken = await w.session("carol@example.com");
+    expect(await json(await audit(w, organizationId, carolToken))).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+    const carolCaller = await w.caller(carolToken);
+    expect(
+      await w.auth.hasPermission(carolCaller, { organizationId, permissions: { audit: ["read"] } }),
+    ).toBe(false);
+    // Each row keeps its other rights: a row with another audit action is no bad row.
+    expect(await w.auth.permissionsOf(carolCaller, organizationId)).toEqual({
+      ok: true,
+      value: { role: "member,support,exporter", permissions: { member: ["read"], ac: ["read"] } },
+    });
+    expect(warn).not.toHaveBeenCalled();
+    expect(
+      mustOk(await w.auth.api.listRoles({ user: ada, organizationId })).map((r) => r.permissions),
+    ).toEqual([{ member: ["read"] }, { member: ["read"] }]);
+    // An update that names no permissions writes the row back with no audit.
+    mustOk(await w.auth.api.updateRole({ user: ada, organizationId, name: "support", rank: 2 }));
+    expect(
+      (await w.storage.findOne("organizationRole", [{ field: "id", op: "eq", value: support.id }]))
+        ?.permissions,
+    ).toEqual({ member: ["read"] });
+    // The owner rank reads the audit.
+    const adaToken = await w.session("ada@example.com");
+    expect((await audit(w, organizationId, adaToken)).status).toBe(200);
+  });
+});
+
 describe("the dynamicRoles config (plan 12k Task 4)", () => {
   const resolve = (dynamicRoles: unknown) =>
     resolveConfig({

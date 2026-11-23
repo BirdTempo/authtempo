@@ -7,7 +7,7 @@ Compat migration 0015 serves core's schema version 18. It adds `organization_id`
 
 Apply 0015 before you deploy core at version 18.
 
-The shim refuses a Better Auth `ac` resource named `audit`, as it refuses `apiToken`. Core 18 owns `audit`, the organization audit. Give the app's resource another name.
+The shim refuses a Better Auth `ac` resource named `audit`, as it refuses `apiToken`. Core 18 owns `audit`, the organization audit. Give the app's resource another name. Core ignores the `audit` key of each stored row of `organizationRole.permission`, so an old dynamic role grants no `audit:read`. A role create or update that names `audit` answers `INVALID_RESOURCE`.
 
 The role `owner` now holds core's `audit:read`, as core's owner rank does. So an owner reads `GET /organizations/audit`, and each other role gets `forbidden_rank`. A role statement that names `audit` is refused at start.
 

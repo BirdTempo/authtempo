@@ -127,6 +127,10 @@ export const BETTER_AUTH_CODES = {
   role_in_use: "ROLE_IS_ASSIGNED_TO_MEMBERS",
   role_limit: "TOO_MANY_ROLES",
   role_taken: "ROLE_NAME_IS_ALREADY_TAKEN",
+  // Plan 13b ruling R20: a stored role names core `audit`. Better Auth 1.7.2's name for
+  // a resource that a stored role cannot hold (dist/plugins/organization/error-codes.mjs:58,
+  // read 2026-11-24 in a local pnpm store). The status stays core's, 400.
+  statement_not_grantable: "INVALID_RESOURCE",
   // Plan 12k Task 11. Better Auth 1.7.2's own names
   // (dist/plugins/organization/error-codes.mjs:32, :41, :33, read
   // 2026-10-21). Better Auth answers 400, 403, and 400; the status stays
