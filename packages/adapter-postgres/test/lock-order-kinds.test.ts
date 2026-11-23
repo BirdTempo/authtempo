@@ -1291,10 +1291,15 @@ const SITES: Record<string, readonly string[] | string> = {
     "an invitation accept that raises a member",
   ],
   "invitations setActiveOrganization": ["a set of the active organization"],
+  // Plan 13b Task 4: the delete and its audit row commit together. The audit row is of no kind,
+  // and the Postgres schema has no foreign key, so its insert locks no other row.
+  "invitations revokeInvitation": "one kind: the delete of the invitation row, then its audit row",
   "oauth-client-store deleteClient": "no kind: oauth rows only",
   "oauth-clients refreshCimdRow": "no kind: oauth rows only",
   "oauth-grants revokeGrant": "no kind: oauth rows only",
   "organization-tokens mintOrganizationToken": ["an organization token create"],
+  // Plan 13b Task 5: the delete and its audit row commit together.
+  "organization-tokens revokeOrganizationToken": "no kind: the token row, then its audit row",
   "organizations ownerWrite": [
     "an owner removal",
     "an operator removal with an impersonation",
@@ -1347,6 +1352,8 @@ const SITES: Record<string, readonly string[] | string> = {
   // Plan 12i Task 5: the set of a phone, the compare-and-set of updateProfile, then the spend.
   "phone writePhone": "one kind: the compare-and-set of the user row, then the spend of the code",
   "roles createRole": ["a role create"],
+  // Plan 13b Task 5: the update and its audit row commit together.
+  "roles updateRole": "no kind: the compare-and-set of the role row, then its audit row",
   "roles deleteRole": "no kind: reads of member and invitation rows, then the role row",
   "second-factor-methods enableMethod":
     "the user hold, then addMethod: the steps of enableTotp in a second factor enable",
@@ -1503,7 +1510,11 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // the start of a test run (prepare) and its pass (passTestRun): 93 (2026-11-23).
     // Plan 13a Task 8 adds the activation (activateSetup), and Task 10 the hand back
     // (handBack): 95 (2026-11-23). Tasks 9 and 12 add no site.
-    expect(found.length).toBe(95);
+    // Plan 13b puts an audit row in the transaction of each organization act. Task 4 adds
+    // the revoke of an invitation (revokeInvitation). Task 5 adds the revoke of an
+    // organization token (revokeOrganizationToken) and the update of a role (updateRole):
+    // 98 (2026-11-24).
+    expect(found.length).toBe(98);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {
