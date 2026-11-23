@@ -1,4 +1,4 @@
-import { AUDIT_HELP, AUDIT_LIST_HELP } from "./audit.js";
+import { AUDIT_EXPORT_HELP, AUDIT_HELP, AUDIT_LIST_HELP } from "./audit.js";
 import { ROOT_HELP } from "./authtempo.js";
 import { CHECK_HELP } from "./check.js";
 import { CREATE_ADMIN_HELP } from "./create-admin.js";
@@ -61,6 +61,7 @@ export const HELP: readonly HelpText[] = [
   SESSIONS_END_ALL_HELP,
   AUDIT_HELP,
   AUDIT_LIST_HELP,
+  AUDIT_EXPORT_HELP,
   CREATE_ADMIN_HELP,
   GENERATE_HELP,
   UPGRADE_HELP,

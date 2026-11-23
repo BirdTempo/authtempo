@@ -339,7 +339,9 @@ function auditRow(v: unknown): AuditRowJson | null {
     !isNullableString(r.targetUserId) ||
     !isString(r.reason) ||
     !isNullableString(r.ip) ||
-    !isNullableString(r.userAgent)
+    !isNullableString(r.userAgent) ||
+    // A deployment before schema version 18 answers no organizationId (plan 13b).
+    (r.organizationId !== undefined && !isNullableString(r.organizationId))
   )
     return null;
   if (r.data !== null && (typeof r.data !== "object" || Array.isArray(r.data))) return null;
@@ -355,6 +357,7 @@ function auditRow(v: unknown): AuditRowJson | null {
     data: r.data as Record<string, unknown> | null,
     ip: r.ip,
     userAgent: r.userAgent,
+    organizationId: r.organizationId ?? null,
   };
 }
 
@@ -569,4 +572,40 @@ export function auditLine(r: AuditRowJson): string[] {
     r.targetUserId ?? "-",
     r.reason,
   ];
+}
+
+/** The CSV columns of `audit export`, in order (plan 13b Task 8). The header line holds these names. */
+export const AUDIT_CSV_COLUMNS = [
+  "id",
+  "createdAt",
+  "actorKind",
+  "actorId",
+  "action",
+  "targetUserId",
+  "organizationId",
+  "reason",
+  "data",
+  "ip",
+  "userAgent",
+] as const satisfies readonly (keyof AuditRowJson)[];
+
+/**
+ * The first characters of a formula in a spreadsheet. A cell that starts
+ * with one gets a leading `'` (the OWASP CSV injection rule), so a
+ * spreadsheet shows the text and runs no formula.
+ */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
+/** One CSV cell (RFC 4180): the formula guard, then quotes when the cell holds a comma, a quote, or a line break. */
+function csvCell(value: string): string {
+  const safe = FORMULA_START.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+}
+
+/** One audit row as one CSV record. A null is an empty cell, and `data` is JSON text. */
+export function auditCsvRecord(r: AuditRowJson): string {
+  return AUDIT_CSV_COLUMNS.map((c) => {
+    const v = r[c];
+    return csvCell(v === null ? "" : typeof v === "string" ? v : JSON.stringify(v));
+  }).join(",");
 }

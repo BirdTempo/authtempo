@@ -254,7 +254,9 @@ export const GENERATE_JSON_KEYS = {
 /**
  * The document of a command that has subcommands only (plan 12f): `users`,
  * `sessions`, and `audit` with no subcommand. Such a run is a usage error,
- * so its document holds the two run keys only.
+ * so its document holds the two run keys only. `audit export` (plan 13b)
+ * takes no `--json`, because stdout holds the export. Its stop document
+ * also holds the two run keys only.
  */
 export type GroupJson = RunKeys;
 export const GROUP_JSON_KEYS = { exit: true, stopped: true } as const satisfies Record<
@@ -408,6 +410,12 @@ export interface AuditRowJson {
   data: Record<string, unknown> | null;
   ip: string | null;
   userAgent: string | null;
+  /**
+   * The organization of the act (plan 13b). Null for an operator act on a
+   * user, for a row from before schema version 18, and for a deployment
+   * before 18, which answers no such key.
+   */
+  organizationId: string | null;
 }
 
 /** `authtempo audit list --json` (plan 12f): the rows, and the cursor of the next page. */
@@ -562,6 +570,7 @@ export const STOP_JSON = {
   "sessions end-all": { ended: 0, calls: 0, more: false, exit: 2, stopped: null },
   audit: { exit: 2, stopped: null },
   "audit list": { rows: [], next: null, exit: 2, stopped: null },
+  "audit export": { exit: 2, stopped: null },
   "create-admin": { userId: "", created: false, auditId: "", exit: 2, stopped: null },
   generate: {
     format: "",
@@ -610,6 +619,7 @@ export const STOP_JSON = {
   "sessions end-all": SessionsEndAllJson;
   audit: GroupJson;
   "audit list": AuditListJson;
+  "audit export": GroupJson;
   "create-admin": CreateAdminJson;
   generate: GenerateJson;
   upgrade: UpgradeJson;
