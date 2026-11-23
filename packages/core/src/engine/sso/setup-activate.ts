@@ -270,7 +270,7 @@ export async function activateSetup(
         updatedAt: now,
       });
       const drafts = [
-        ssoDraft(actor, "sso_setup_link_activate", {
+        ssoDraft(actor, "sso_setup_link_activate", link.organizationId, {
           targetUserId: null,
           data: {
             organizationId: link.organizationId,
@@ -282,7 +282,7 @@ export async function activateSetup(
           ip: meta.ip ?? null,
           userAgent: meta.userAgent ?? null,
         }),
-        ssoDraft(actor, "sso_connection_update", {
+        ssoDraft(actor, "sso_connection_update", link.organizationId, {
           targetUserId: null,
           data: {
             organizationId: link.organizationId,

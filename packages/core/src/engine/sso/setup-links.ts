@@ -22,6 +22,7 @@ import { isOwner, rankOf } from "../ranks.js";
 import { tokenHint } from "../tokens.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { recheckSsoManager, type SsoActor, ssoDraft } from "./guard.js";
+import { setupActorName } from "./setup-drafts.js";
 import { lockSetupRows } from "./setup-live.js";
 import type { SetupSession } from "./setup-session.js";
 
@@ -198,7 +199,7 @@ export async function createSetupLink(
       );
       if (live.length >= SETUP_LINKS_LIVE_MAX) return fail("setup_link_limit");
       await tx.create("ssoSetupLink", row);
-      const draft = ssoDraft(actor, "sso_setup_link_create", {
+      const draft = ssoDraft(actor, "sso_setup_link_create", row.organizationId, {
         targetUserId: null,
         data: {
           organizationId: row.organizationId,
@@ -241,7 +242,7 @@ export async function revokeSetupLink(
   if (!link) return fail("not_found");
   const still = await recheckSsoManager(config, actor, link.organizationId);
   if (!still.ok) return still;
-  const draft = ssoDraft(actor, "sso_setup_link_revoke", {
+  const draft = ssoDraft(actor, "sso_setup_link_revoke", link.organizationId, {
     targetUserId: null,
     data: { organizationId: link.organizationId, linkId: link.id },
     ip: meta.ip ?? null,
@@ -363,15 +364,29 @@ async function noticeOwners(config: ResolvedConfig, link: SsoSetupLinkRow): Prom
  * mails go one by one before the hook, and a hook has no time limit, so a slow port or hook
  * delays the answer, not the commit. The delivery is at most once: a crash between the commit and
  * the mail loses both, and a second hand back is a no-op. A second hand back changes nothing and
- * sends nothing. The contract has no audit action for it, so it writes no audit row: the link row
- * keeps `readyAt`.
+ * sends nothing. The first hand back writes one `sso_setup_link_ready` audit row in the same
+ * transaction, with the app actor of the link (plan 13b, owner decision 1). A second writes none.
  */
 export async function handBack(config: ResolvedConfig, auth: SetupSession): Promise<Result<void>> {
   const setup = setupOn(config);
   if (!setup.ok) return setup;
   const { link } = auth;
+  const draft = ssoDraft(
+    { kind: "app", name: setupActorName(link.id) },
+    "sso_setup_link_ready",
+    link.organizationId,
+    {
+      targetUserId: null,
+      data: { organizationId: link.organizationId, linkId: link.id },
+      ip: null,
+      userAgent: null,
+    },
+  );
+  if (!draft.ok) return draft;
   const now = config.clock.now();
-  const first = await config.storage.transaction(async (tx): Promise<Result<boolean>> => {
+  // The audit row of the first hand back, or null for a second.
+  type Ready = OperatorAuditRow | null;
+  const first = await config.storage.transaction(async (tx): Promise<Result<Ready>> => {
     // The lock update holds the link live. The update below tests `readyAt`, so a second hand back writes nothing.
     const held = await lockSetupRows(tx, link.organizationId, { id: link.id, now });
     if (!held.ok) return held;
@@ -384,10 +399,11 @@ export async function handBack(config: ResolvedConfig, auth: SetupSession): Prom
       ],
       { readyAt: now, updatedAt: now },
     );
-    return ok(n > 0);
+    return ok(n > 0 ? await writeAuditIn(tx, draft.value, now) : null);
   });
   if (!first.ok) return first;
   if (!first.value) return ok(undefined);
+  await afterAudit(config, first.value);
   await noticeOwners(config, link);
   await runAfter(
     config.observe,

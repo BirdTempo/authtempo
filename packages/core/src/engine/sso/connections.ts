@@ -665,7 +665,7 @@ function connectionDraft(
   changed: string[],
   meta: SsoActMeta,
 ) {
-  return ssoDraft(actor, action, {
+  return ssoDraft(actor, action, row.organizationId, {
     targetUserId: null,
     data: { organizationId: row.organizationId, connectionId: row.id, kind: row.kind, changed },
     ip: meta.ip ?? null,

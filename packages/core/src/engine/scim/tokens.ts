@@ -208,7 +208,7 @@ export async function createScimToken(
       // A refusal below leaves it: the delete comes after the checks.
       const slots = live.filter((t) => !(t.pending && t.setupLinkId === pendingFor));
       if (slots.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
-      const draft = ssoDraft(actor, "scim_token_create", {
+      const draft = ssoDraft(actor, "scim_token_create", row.organizationId, {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name, scopes: row.scopes },
         ip: meta.ip ?? null,
@@ -301,7 +301,7 @@ export async function revokeScimToken(
       if (!row) return fail("not_found");
       const n = await tx.delete("scimToken", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
-      const draft = ssoDraft(actor, "scim_token_revoke", {
+      const draft = ssoDraft(actor, "scim_token_revoke", row.organizationId, {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name: row.name },
         ip: meta.ip ?? null,

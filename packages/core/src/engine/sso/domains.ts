@@ -328,7 +328,7 @@ export async function addDomain(
         };
         await tx.create("ssoDomain", row);
       }
-      const draft = ssoDraft(actor, "sso_domain_add", {
+      const draft = ssoDraft(actor, "sso_domain_add", organization.id, {
         targetUserId: null,
         data: { organizationId: organization.id, domainId: row.id, domain },
         ip: input.ip ?? null,
@@ -404,7 +404,7 @@ export async function verifyDomainWith(
   const expect = record === "own" ? ownExpect(row) : await compatExpect(config, row);
   if (expect === null || !(await everyPortGives(config, sso.value.dns, row, expect)))
     return fail("domain_unverified");
-  const draft = ssoDraft(actor, "sso_domain_verify", {
+  const draft = ssoDraft(actor, "sso_domain_verify", row.organizationId, {
     targetUserId: null,
     data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
     ip: input.ip ?? null,
@@ -509,7 +509,7 @@ export async function updateDomain(
       { ...changes, updatedAt: now },
     );
     if (n === 0) return fail("conflict");
-    const draft = ssoDraft(actor, "sso_domain_update", {
+    const draft = ssoDraft(actor, "sso_domain_update", row.organizationId, {
       targetUserId: null,
       data: {
         organizationId: row.organizationId,
@@ -595,7 +595,7 @@ export async function deleteDomain(
       if (row.setupLinkId !== null) await bumpSetupDraft(tx, row.setupLinkId, now);
       const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
-      const draft = ssoDraft(actor, "sso_domain_delete", {
+      const draft = ssoDraft(actor, "sso_domain_delete", row.organizationId, {
         targetUserId: null,
         data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
         ip: input.ip ?? null,
@@ -635,7 +635,10 @@ export async function listDomains(
  * the scope `sso` of a secret actor, then runs through `operatorAct` with
  * the action `sso_enforce_off` and the operator's reason. A secret actor
  * and a platform operator user both pass. The row keeps its claim and its
- * route; only `enforce` turns off.
+ * route; only `enforce` turns off. The audit row names the organization in
+ * its column. The row of an operator user holds `data.platform: true`: an
+ * operator act on an organization shows as `platform` (plan 13b, owner
+ * decision 4).
  */
 export async function enforceOff(
   config: ResolvedConfig,
@@ -654,12 +657,19 @@ export async function enforceOff(
     action: "sso_enforce_off",
     targetUserId: null,
     reason: input.reason,
-    data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
+    data: {
+      organizationId: row.organizationId,
+      domainId: row.id,
+      domain: row.domain,
+      // A secret row always shows as platform, so only a user row needs the flag.
+      ...(actor.kind === "user" ? { platform: true } : {}),
+    },
     ip: input.ip,
     userAgent: input.userAgent,
   });
   if (!draft.ok) return draft;
-  return operatorAct(config, draft.value, async (tx) => {
+  const organizationDraft = { ...draft.value, organizationId: row.organizationId };
+  return operatorAct(config, organizationDraft, async (tx) => {
     const now = config.clock.now();
     const n = await tx.update(
       "ssoDomain",
@@ -856,7 +866,7 @@ async function rowProven(
  * one proves again. The organization proves it again with the new record.
  */
 async function loseDomain(config: ResolvedConfig, row: SsoDomainRow, now: Date): Promise<void> {
-  const draft = ssoDraft(SWEEP_ACTOR, "sso_domain_lost", {
+  const draft = ssoDraft(SWEEP_ACTOR, "sso_domain_lost", row.organizationId, {
     targetUserId: null,
     data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
     ip: null,

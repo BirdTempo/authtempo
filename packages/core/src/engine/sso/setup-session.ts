@@ -121,7 +121,7 @@ export async function openSetupSession(
     setupRefused(config, "open_link_limit");
     return fail("rate_limited");
   }
-  const draft = ssoDraft(OPEN_ACTOR, "sso_setup_link_open", {
+  const draft = ssoDraft(OPEN_ACTOR, "sso_setup_link_open", link.organizationId, {
     targetUserId: null,
     data: { organizationId: link.organizationId, linkId: link.id },
     ip: meta.ip ?? null,

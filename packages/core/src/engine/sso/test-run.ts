@@ -95,7 +95,7 @@ async function prepare(
   }
   const now = config.clock.now();
   const runId = newId(now);
-  const audit = ssoDraft(actor, "sso_test_run", {
+  const audit = ssoDraft(actor, "sso_test_run", row.organizationId, {
     targetUserId: null,
     data: {
       organizationId: row.organizationId,

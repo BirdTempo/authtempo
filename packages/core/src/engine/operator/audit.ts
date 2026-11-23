@@ -8,6 +8,7 @@ import type {
   OperatorAction,
   OperatorAuditRow,
   ORGANIZATION_AUDIT_ACTIONS,
+  ORGANIZATION_VISIBLE_ACTIONS,
   SessionRow,
   SSO_AUDIT_ACTIONS,
   UserRow,
@@ -135,12 +136,6 @@ export function auditDraft(
   const named = actor.kind === "app" ? checkActor(actor) : ok(true);
   if (!named.ok) return named;
   const actorId = actor.kind === "user" ? actor.user.id : actor.name;
-  const userAgent =
-    input.userAgent === null
-      ? null
-      : Array.from(removeRefusedChars(wellFormed(input.userAgent)))
-          .slice(0, USER_AGENT_MAX)
-          .join("");
   return ok({
     actorKind: actor.kind,
     actorId,
@@ -149,10 +144,69 @@ export function auditDraft(
     reason: input.reason,
     data: input.data,
     ip: auditIp(input.ip),
-    userAgent,
-    // Plan 13b: the writers of an organization act set it (Tasks 3 to 5).
+    userAgent: auditUserAgent(input.userAgent),
+    // An operator act on a user names no organization (plan 13b, owner decision 4).
+    // `organizationAuditDraft` sets it for an act of an organization.
     organizationId: null,
   });
+}
+
+/** The user agent of a row: the rule of `auditDraft`. */
+function auditUserAgent(userAgent: string | null): string | null {
+  return userAgent === null
+    ? null
+    : Array.from(removeRefusedChars(wellFormed(userAgent)))
+        .slice(0, USER_AGENT_MAX)
+        .join("");
+}
+
+/**
+ * The actions of an act of an organization that have a fixed reason (plan 13b). The operator
+ * gives the reason of `sso_enforce_off`, so it is not one of them.
+ */
+export type OrganizationAuditAction = Exclude<
+  (typeof ORGANIZATION_VISIBLE_ACTIONS)[number],
+  "sso_enforce_off"
+>;
+
+/**
+ * The draft of one act of an organization (plan 13b Task 3). The row names the organization in
+ * its column, and the reason is the fixed text of the action. A SCIM token is named by its
+ * name. `platform` marks the act of a platform operator through the manager guard: such a row
+ * has the actor kind `user`, so `data.platform: true` tells the organization audit that the
+ * actor is no member. The flag goes only on a user actor. An app name outside the rule of
+ * `checkActor` answers `invalid_body`. The IP and the user agent follow `auditDraft`.
+ */
+export function organizationAuditDraft(
+  actor: AuditActor | { kind: "scim"; tokenName: string },
+  organizationId: string,
+  input: {
+    action: OrganizationAuditAction;
+    targetUserId: string | null;
+    data: Record<string, unknown> | null;
+    ip: string | null;
+    userAgent: string | null;
+    platform?: boolean;
+  },
+): Result<OperatorAuditDraft> {
+  const { platform, ...fields } = input;
+  const reason = ORGANIZATION_ROW_REASON[input.action];
+  const data =
+    platform === true && actor.kind === "user" ? { ...fields.data, platform: true } : fields.data;
+  if (actor.kind === "scim")
+    return ok({
+      actorKind: "scim",
+      actorId: actor.tokenName,
+      action: fields.action,
+      targetUserId: fields.targetUserId,
+      reason,
+      data,
+      ip: auditIp(fields.ip),
+      userAgent: auditUserAgent(fields.userAgent),
+      organizationId,
+    });
+  const draft = auditDraft(actor, { ...fields, reason, data });
+  return draft.ok ? ok({ ...draft.value, organizationId }) : draft;
 }
 
 /**
@@ -259,6 +313,12 @@ export const ORGANIZATION_AUDIT_REASON: Readonly<
   organization_role_create: "an organization created a role",
   organization_role_update: "an organization changed a role",
   organization_role_delete: "an organization deleted a role",
+};
+
+/** The fixed reason of each action of `organizationAuditDraft`. */
+const ORGANIZATION_ROW_REASON: Readonly<Record<OrganizationAuditAction, string>> = {
+  ...SSO_AUDIT_REASON,
+  ...ORGANIZATION_AUDIT_REASON,
 };
 
 /**
