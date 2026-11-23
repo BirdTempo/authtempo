@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { checkPreRelease, type PreReleaseInput } from "../scripts/check-pre-release.ts";
 import {
@@ -248,12 +247,20 @@ describe("the quotes of docs/release/RUNBOOK.md", () => {
     const rows = JSON.parse(json.body) as SupportRow[];
     const [row] = rows;
     expect(rows).toHaveLength(1);
-    // The minor of FIRST_RELEASE, current, from the schema version of core.
+    // The row records the FIRST release: its minor is the minor of FIRST_RELEASE, and its
+    // `schemaFrom` is the one of the first row of release/support.json. It does not follow
+    // SCHEMA_VERSION: the schema moves after the first release (0.1 shipped at 16, and the schema
+    // is 17 later), and RUNBOOK is append-only. A new minor adds its own row to support.json, and
+    // check-support holds that row to SCHEMA_VERSION. The status stays `current` here: the sample
+    // is the row as written on the release day, and a later minor changes the status in the file.
     const facts = readRepoFile("scripts/release/src/lib/release-facts.ts") ?? "";
     const first = /^export const FIRST_RELEASE = "(\d+\.\d+)\.\d+";$/m.exec(facts)?.[1];
+    const [shipped] = JSON.parse(readRepoFile("release/support.json") ?? "[]") as SupportRow[];
+    expect(shipped).toBeDefined();
     expect(row?.minor).toBe(first);
+    expect(row?.minor).toBe(shipped?.minor);
     expect(row?.status).toBe("current");
-    expect(row?.schemaFrom).toEqual([SCHEMA_VERSION]);
+    expect(row?.schemaFrom).toEqual(shipped?.schemaFrom);
     // The table is the form that the rehearsal writes from the row (ruling 65 of plan 12j).
     expect(table.body.trimEnd()).toBe(supportTable(rows));
     // SECURITY.md after the edits: the table in the place of the first text, and no other text.
