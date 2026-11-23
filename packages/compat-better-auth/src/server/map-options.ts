@@ -1,5 +1,6 @@
 import {
   type AuthConfig,
+  CORE_STATEMENTS,
   defaultSignInPage,
   type HandleOptions,
   isIpLiteral,
@@ -13,7 +14,7 @@ import { type DomainRecordOf, PROVIDER_ID_RE, withDomainRecord } from "@authtemp
 import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
 import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
-import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
+import { CORE_AUDIT, CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
 import type {
   ApiKeyOptions,
   BetterAuthOptions,
@@ -383,6 +384,16 @@ export function movedKeyPrefixesOf(options: BetterAuthOptions): string[] {
 type OrganizationsConfig = Extract<AuthConfig["organizations"], object>;
 
 /**
+ * The role of core's owner rank (plan 13b decision 2, ruling R10). Core gives
+ * `audit:read` to the owner rank only. A Better Auth role cannot list `audit`,
+ * because checkOptions refuses it. So the shim gives this role core's actions
+ * of `audit`, and no other role gets them. The actions come from
+ * `CORE_STATEMENTS`, so the shim holds no copy of the list. Core exports no
+ * derivation of the ranks form, so the role name is the one fact here.
+ */
+const OWNER_ROLE = "owner";
+
+/**
  * `ac`, `roles`, and `dynamicAccessControl` on core's organizations (plan 12k
  * Task 10, spec 29 item 18). `ac.statements` without the seven core resources
  * is the app's own statements; `apiKey` is core's `apiToken`. Each role gets
@@ -404,10 +415,19 @@ function accessConfig(
   const ranks = o.roles ? (options.authtempo?.roleRanks ?? {}) : DEFAULT_ROLE_RANKS;
   const table = o.roles ?? defaultRoles;
   const roles = Object.fromEntries(
-    Object.entries(table).map(([name, r]) => [
-      name,
-      { rank: ranks[name] ?? 0, permissions: corePermissionsOf(r.statements) },
-    ]),
+    Object.entries(table).map(([name, r]) => {
+      const permissions = corePermissionsOf(r.statements);
+      return [
+        name,
+        {
+          rank: ranks[name] ?? 0,
+          permissions:
+            name === OWNER_ROLE
+              ? { ...permissions, [CORE_AUDIT]: [...CORE_STATEMENTS.audit] }
+              : permissions,
+        },
+      ];
+    }),
   );
   const dynamic = o.dynamicAccessControl;
   return {

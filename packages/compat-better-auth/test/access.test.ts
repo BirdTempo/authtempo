@@ -6,7 +6,7 @@ import {
   createPbkdf2PasswordHash,
   systemClock,
 } from "@authtempo/core";
-import type { Statements } from "@authtempo/core/access";
+import { CORE_STATEMENTS, type Statements } from "@authtempo/core/access";
 import { describe, expect, it } from "vitest";
 import {
   adminAc,
@@ -21,6 +21,7 @@ import { createAuthClient, organizationClient } from "../src/client/index.js";
 import { BetterAuthCompatError } from "../src/compat-error.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, organization } from "../src/plugins.js";
+import { CORE_AUDIT, CORE_RESOURCES } from "../src/role-map.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
@@ -185,9 +186,10 @@ describe("the access control shim (spec 29 item 18)", () => {
     const mapped = organizationsOf(
       options({ ac, roles, dynamicAccessControl: { enabled: true } }, { roleRanks }),
     ).config.organizations;
-    // The six core resources and apiKey (core's apiToken) leave the app's own statements.
+    // The seven core resources and apiKey (core's apiToken) leave the app's own statements.
     expect(mapped?.statements).toEqual({ project: ["read", "write", "delete"] });
     expect(mapped?.ranks).toBeUndefined();
+    // The role owner holds core's audit read, as core's owner rank does (ruling R10 of plan 13b).
     expect(mapped?.roles).toEqual({
       owner: {
         rank: 4,
@@ -199,6 +201,7 @@ describe("the access control shim (spec 29 item 18)", () => {
           ac: ["create", "read", "update", "delete"],
           project: ["read", "write", "delete"],
           apiToken: ["read"],
+          audit: ["read"],
         },
       },
       admin: {
@@ -243,10 +246,18 @@ describe("the access control shim (spec 29 item 18)", () => {
           invitation: ["read", "create", "cancel"],
           team: ["create", "update", "delete"],
           ac: ["create", "read", "update", "delete"],
+          audit: ["read"],
         },
       },
       member: { rank: 1, permissions: { ac: ["read"], member: ["read"] } },
     });
+  });
+
+  it("holds the resources of core's CORE_STATEMENTS in CORE_RESOURCES, each one", () => {
+    // role-map.ts imports nothing, so it keeps its own list. This test ties the list to core.
+    expect([...CORE_RESOURCES].sort()).toEqual(Object.keys(CORE_STATEMENTS).sort());
+    expect(CORE_RESOURCES).toHaveLength(7);
+    expect(CORE_RESOURCES).toContain(CORE_AUDIT);
   });
 
   it("refuses a role with no rank in authtempo.roleRanks", () => {
@@ -329,13 +340,51 @@ describe("the access control shim (spec 29 item 18)", () => {
     ).toEqual([
       "plugins[organization].ac.statements.audit: audit is a core resource of authtempo, the organization audit; give the app's resource another name (spec 29 item 18)",
     ]);
-    // A role that names audit would get core's audit read in silence.
-    const auditRole = { owner: ac.newRole({ audit: ["read"] }) };
-    expect(
-      checkOptions(options({ ac, roles: auditRole }, { roleRanks: { owner: 1 } })).refusals,
-    ).toEqual([
-      "plugins[organization].roles.owner.statements.audit: audit is a core resource of authtempo, the organization audit; give the app's resource another name (spec 29 item 18)",
+    // A role statement never grants audit: the role owner holds its read already (ruling R10).
+    const auditRoles = {
+      owner: ac.newRole({ audit: ["read"] }),
+      member: ac.newRole({ audit: ["read"] }),
+    };
+    const given2 = options({ ac, roles: auditRoles }, { roleRanks: { member: 1, owner: 2 } });
+    expect(checkOptions(given2).refusals).toEqual([
+      "plugins[organization].roles.member.statements.audit: audit is core's organization audit; the role owner holds audit:read, and no role statement can grant it (spec 29 item 18)",
+      "plugins[organization].roles.owner.statements.audit: audit is core's organization audit; the role owner holds audit:read, and no role statement can grant it (spec 29 item 18)",
     ]);
+    expect(() => betterAuth(given2)).toThrow(BetterAuthCompatError);
+  });
+
+  it("lets the role owner read the organization audit, and refuses each other role (ruling R10 of plan 13b)", async () => {
+    // Core's owner rank holds audit:read (decision 2 of plan 13b). A Better Auth role cannot list
+    // audit, so the shim gives the read to the role owner, and to no other role.
+    const { auth, person } = app(memory(), { ac, roles });
+    const owner = await person("owner@example.com");
+    const pat = await person("pat@example.com");
+    const created = await auth.tempo.api.createOrganization({
+      user: (owner.caller as SessionCaller).user,
+      slug: "acme",
+      name: "Acme",
+    });
+    if (!created.ok) throw new Error(created.code);
+    const organizationId = created.value.organization.id;
+    const added = await auth.tempo.api.addMember({
+      user: (owner.caller as SessionCaller).user,
+      organizationId,
+      userId: (pat.caller as SessionCaller).user.id,
+      role: "admin",
+    });
+    expect(added.ok).toBe(true);
+    const read = (token: string) =>
+      auth.handler(
+        new Request(`${BASE}/api/auth/organizations/audit?organizationId=${organizationId}`, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+    const byOwner = await read(owner.token);
+    expect(byOwner.status).toBe(200);
+    // The admin is the rank below owner, and it does not hold the audit.
+    const byAdmin = await read(pat.token);
+    expect(byAdmin.status).toBe(403);
+    expect(await byAdmin.json()).toMatchObject({ error: "forbidden_rank" });
   });
 
   it("refuses an ac resource or action that core's name rule refuses", () => {

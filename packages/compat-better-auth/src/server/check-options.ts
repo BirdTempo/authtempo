@@ -334,6 +334,13 @@ const CORE_TOKEN_NAME = `${CORE_KEY} is core's name of Better Auth's apiKey; nam
 const CORE_AUDIT_NAME = `${CORE_AUDIT} is a core resource of authtempo, the organization audit; give the app's resource another name ${ITEM_18}`;
 
 /**
+ * A role statement never grants core's audit (ruling R10 of plan 13b). The
+ * option map gives `audit:read` to the role owner, as core's owner rank holds
+ * it, and to no other role.
+ */
+const CORE_AUDIT_GRANT = `${CORE_AUDIT} is core's organization audit; the role owner holds audit:read, and no role statement can grant it ${ITEM_18}`;
+
+/**
  * `ac`: the object of `createAccessControl` from `better-auth/plugins/access`
  * (this package's `./plugins/access`). Its own resources become core's
  * `organizations.statements`, so each name follows core's name rule. A core
@@ -406,7 +413,7 @@ const roleTable: Rule = (v, p, out) =>
       if (Object.hasOwn(x.statements, CORE_KEY))
         refuse(out, `${path}.statements.${CORE_KEY}`, CORE_TOKEN_NAME);
       if (Object.hasOwn(x.statements, CORE_AUDIT))
-        refuse(out, `${path}.statements.${CORE_AUDIT}`, CORE_AUDIT_NAME);
+        refuse(out, `${path}.statements.${CORE_AUDIT}`, CORE_AUDIT_GRANT);
     }
   });
 

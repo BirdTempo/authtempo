@@ -9,4 +9,6 @@ Apply 0015 before you deploy core at version 18.
 
 The shim refuses a Better Auth `ac` resource named `audit`, as it refuses `apiToken`. Core 18 owns `audit`, the organization audit. Give the app's resource another name.
 
+The role `owner` now holds core's `audit:read`, as core's owner rank does. So an owner reads `GET /organizations/audit`, and each other role gets `forbidden_rank`. A role statement that names `audit` is refused at start.
+
 The CLI knows schema version 18 and compat version 15. `authtempo migrate --target d1 --tables compat` copies 0015, and `authtempo generate` writes the new columns.
