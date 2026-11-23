@@ -4,11 +4,12 @@ import { hookRefusal } from "../src/engine/hooks.js";
 import { acceptInvitation, inviteMember, revokeInvitation } from "../src/engine/invitations.js";
 import { ORGANIZATION_AUDIT_REASON } from "../src/engine/operator/audit.js";
 import { createOrganizationToken } from "../src/engine/organization-tokens.js";
-import { addMember, removeMember } from "../src/engine/organizations.js";
+import { addMember, removeMember, updateMemberRole } from "../src/engine/organizations.js";
 import { createScimToken } from "../src/engine/scim/tokens.js";
 import { createConnection } from "../src/engine/sso/connections.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { post, recordCredential } from "./helpers.js";
+import { operatorFixture } from "./operator-helpers.js";
 import { SCIM_APP, scim, scimAuth } from "./scim/helpers.js";
 import { type FakeIdToken, fakeFetch, fakeJwt } from "./social-helpers.js";
 import { SSO_APP } from "./sso/helpers.js";
@@ -65,14 +66,31 @@ function invitationToken(w: W, email: string): string {
   return recordCredential(m[1]);
 }
 
-/** The audit rows of `o1` with an action of the member and invitation acts, in id order. */
-async function memberRows(w: W) {
-  const rows = await w.storage.findMany(
+/** The audit rows of `organizationId` with an action of the organization acts, in id order. */
+async function rowsOf(storage: StorageAdapter, organizationId: string) {
+  const rows = await storage.findMany(
     "operatorAudit",
-    [{ field: "organizationId", op: "eq", value: w.o1 }],
+    [{ field: "organizationId", op: "eq", value: organizationId }],
     { sort: { field: "id", dir: "asc" } },
   );
   return rows.filter((r) => r.action.startsWith("organization_"));
+}
+
+/** The audit rows of `o1` with an action of the member and invitation acts, in id order. */
+const memberRows = (w: W) => rowsOf(w.storage, w.o1);
+
+/**
+ * Runs `other` one time, just before the next transaction of `storage` opens. So `other` is a
+ * second request that commits after the reads of an act and before its transaction. D1 has no
+ * lock, so this order can occur.
+ */
+function raceBefore(storage: StorageAdapter, other: () => Promise<unknown>): void {
+  const transaction = storage.transaction.bind(storage);
+  storage.transaction = (async (fn: Parameters<StorageAdapter["transaction"]>[0]) => {
+    storage.transaction = transaction;
+    await other();
+    return transaction(fn);
+  }) as StorageAdapter["transaction"];
 }
 
 /** A store whose `create` of the audit row throws, inside a transaction and outside it. */
@@ -405,5 +423,215 @@ describe("the audit rows of the member and invitation acts (plan 13b Task 4)", (
       }),
     ]);
     expect(rows.filter((r) => r.action === "organization_token_revoke")).toEqual([]);
+  });
+});
+
+/** `o1` with Bo as a member (role `member`), added through `addMember`. */
+async function withBo() {
+  const w = await world();
+  const bo = await verifiedSession(w, "bo@acme.example");
+  const added = await addMember(w.config, {
+    user: w.owner.user,
+    organizationId: w.o1,
+    userId: bo.user.id,
+    role: "member",
+  });
+  if (!added.ok) throw new Error(added.code);
+  return { w, bo };
+}
+
+/** An invitation of `email` to `o1` by its owner, through `inviteMember`. Answers its id. */
+async function invited(w: W, email: string): Promise<string> {
+  const made = await inviteMember(w.config, {
+    user: w.owner.user,
+    organizationId: w.o1,
+    email,
+    role: "member",
+  });
+  if (!made.ok) throw new Error(made.code);
+  return made.value.id;
+}
+
+const invitationOf = (w: W, id: string) =>
+  w.storage.findOne("invitation", [{ field: "id", op: "eq", value: id }]);
+
+/** The config of `w` with an audit insert that throws. */
+const failing = (w: W) => ({ ...w.config, storage: auditCreateFails(w.config.storage) });
+
+describe("an audit insert that throws rolls back each act (plan 13b Task 4, review I1)", () => {
+  it("audit throw, role change: the role stays, and no role change row stays", async () => {
+    const { w, bo } = await withBo();
+    const before = await memberRows(w);
+    await expect(
+      updateMemberRole(failing(w), {
+        user: w.owner.user,
+        organizationId: w.o1,
+        userId: bo.user.id,
+        role: "admin",
+      }),
+    ).rejects.toThrow("the audit insert failed");
+    expect((await memberOf(w, bo.user.id))?.role).toBe("member");
+    expect(await memberRows(w)).toEqual(before);
+  });
+
+  it("audit throw, remove: the member stays, and no remove row stays", async () => {
+    const { w, bo } = await withBo();
+    const before = await memberRows(w);
+    await expect(
+      removeMember(failing(w), {
+        user: w.owner.user,
+        organizationId: w.o1,
+        userId: bo.user.id,
+      }),
+    ).rejects.toThrow("the audit insert failed");
+    expect(await memberOf(w, bo.user.id)).not.toBeNull();
+    expect(await memberRows(w)).toEqual(before);
+  });
+
+  it("audit throw, invite: no invitation and no invitation create row stay", async () => {
+    const w = await world();
+    await expect(
+      inviteMember(failing(w), {
+        user: w.owner.user,
+        organizationId: w.o1,
+        email: "di@acme.example",
+        role: "member",
+      }),
+    ).rejects.toThrow("the audit insert failed");
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
+    expect(await memberRows(w)).toEqual([]);
+  });
+
+  it("audit throw, accept: no member stays, the invitation stays pending, and no accept row stays", async () => {
+    const w = await world();
+    const id = await invited(w, "cy@acme.example");
+    const cy = await verifiedSession(w, "cy@acme.example");
+    const before = await memberRows(w);
+    await expect(
+      acceptInvitation(failing(w), {
+        user: cy.user,
+        session: cy.session,
+        token: invitationToken(w, "cy@acme.example"),
+        ip: null,
+      }),
+    ).rejects.toThrow("the audit insert failed");
+    expect(await memberOf(w, cy.user.id)).toBeNull();
+    expect((await invitationOf(w, id))?.acceptedAt).toBeNull();
+    expect(await memberRows(w)).toEqual(before);
+  });
+
+  it("audit throw, revoke: the invitation stays, and no revoke row stays", async () => {
+    const w = await world();
+    const id = await invited(w, "di@acme.example");
+    const before = await memberRows(w);
+    await expect(
+      revokeInvitation(failing(w), {
+        user: w.owner.user,
+        organizationId: w.o1,
+        invitationId: id,
+      }),
+    ).rejects.toThrow("the audit insert failed");
+    expect(await invitationOf(w, id)).not.toBeNull();
+    expect(await memberRows(w)).toEqual(before);
+  });
+});
+
+describe("an act that its transaction refuses writes no row (plan 13b Task 4, review I2)", () => {
+  it("refused add, already_member: an add of a member writes no second add row", async () => {
+    const { w, bo } = await withBo();
+    const before = await memberRows(w);
+    const again = await addMember(w.config, {
+      user: w.owner.user,
+      organizationId: w.o1,
+      userId: bo.user.id,
+      role: "admin",
+    });
+    expect(again).toMatchObject({ ok: false, code: "already_member" });
+    expect(await memberRows(w)).toEqual(before);
+  });
+
+  it("refused add, member_limit: an add at membersPerOrganization writes no row", async () => {
+    // The owner and Bo fill a limit of 2.
+    const w = await world({ organizations: { limits: { membersPerOrganization: 2 } } });
+    const bo = await verifiedSession(w, "bo@acme.example");
+    const cy = await verifiedSession(w, "cy@acme.example");
+    const add = (userId: string) =>
+      addMember(w.config, { user: w.owner.user, organizationId: w.o1, userId, role: "member" });
+    expect((await add(bo.user.id)).ok).toBe(true);
+    const before = await memberRows(w);
+    expect(await add(cy.user.id)).toMatchObject({ ok: false, code: "member_limit" });
+    expect(await memberOf(w, cy.user.id)).toBeNull();
+    expect(await memberRows(w)).toEqual(before);
+  });
+
+  it("zero-row role change: a role change after a parallel change answers conflict and writes no row", async () => {
+    const { w, bo } = await withBo();
+    const change = (role: string) =>
+      updateMemberRole(w.config, {
+        user: w.owner.user,
+        organizationId: w.o1,
+        userId: bo.user.id,
+        role,
+      });
+    // A second request changes the role after this act read it.
+    raceBefore(w.config.storage, () => change("admin"));
+    expect(await change("viewer")).toMatchObject({ ok: false, code: "conflict" });
+    expect((await memberOf(w, bo.user.id))?.role).toBe("admin");
+    expect((await memberRows(w)).map((r) => [r.action, r.data])).toEqual([
+      ["organization_member_add", { role: "member" }],
+      ["organization_member_role_change", { from: "member", to: "admin" }],
+    ]);
+  });
+
+  it("zero-row remove: a remove after a parallel role change answers conflict and writes no row", async () => {
+    const { w, bo } = await withBo();
+    raceBefore(w.config.storage, () =>
+      updateMemberRole(w.config, {
+        user: w.owner.user,
+        organizationId: w.o1,
+        userId: bo.user.id,
+        role: "admin",
+      }),
+    );
+    const removed = await removeMember(w.config, {
+      user: w.owner.user,
+      organizationId: w.o1,
+      userId: bo.user.id,
+    });
+    expect(removed).toMatchObject({ ok: false, code: "conflict" });
+    expect(await memberOf(w, bo.user.id)).not.toBeNull();
+    expect((await memberRows(w)).map((r) => r.action)).toEqual([
+      "organization_member_add",
+      "organization_member_role_change",
+    ]);
+  });
+
+  it("refused leave with a role loss: the last owner of the platform organization leaves, and no row is written", async () => {
+    // Root is the one member of the platform organization, with the platform role.
+    const { auth, root, platformOrg } = await operatorFixture({ role: null });
+    // The leave takes the platform role, so it runs the role-loss path. The owner count in its
+    // transaction refuses it.
+    const left = await removeMember(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: root.id,
+    });
+    expect(left).toMatchObject({ ok: false, code: "last_owner" });
+    expect(await rowsOf(auth.storage, platformOrg.id)).toEqual([]);
+  });
+
+  it("zero-row revoke: a revoke after a parallel revoke answers not_found and writes no second row", async () => {
+    const w = await world();
+    const id = await invited(w, "di@acme.example");
+    const revoke = () =>
+      revokeInvitation(w.config, { user: w.owner.user, organizationId: w.o1, invitationId: id });
+    // A second request revokes the invitation after this act read it.
+    raceBefore(w.config.storage, revoke);
+    expect(await revoke()).toMatchObject({ ok: false, code: "not_found" });
+    expect(await invitationOf(w, id)).toBeNull();
+    expect((await memberRows(w)).map((r) => r.action)).toEqual([
+      "organization_invitation_create",
+      "organization_invitation_revoke",
+    ]);
   });
 });
