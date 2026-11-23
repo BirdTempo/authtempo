@@ -13,7 +13,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 17 needs the migrations up to `0017_schema_v17`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 18 needs the migrations up to `0018_schema_v18`.
 
 ## Before you start
 
@@ -40,8 +40,9 @@ sources:
 | 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the back-channel sign-out message names the issuer that the client saw (plan 12i Task 18). |
 | 16 | `0016_schema_v16` | No table. It adds `proved` to `ta_session`. It is true when the session came after the proof of its address. It is also true when the user has no address and is not anonymous. Core sets it once, at the creation of the session. Only the confirm of a change of address changes it later, to true on the session it keeps. A fill sets it from the user of each live session (plan 12p). |
 | 17 | `0017_schema_v17` | `ta_sso_setup_link`, `ta_sso_test_run`, `ta_sso_setup_session`. It also adds `draft`, `version`, and `setup_link_id` to `ta_sso_connection`, `pending` and `setup_link_id` to `ta_scim_token`, and `setup_link_id` to `ta_sso_domain`. This is the schema of the setup link. |
+| 18 | `0018_schema_v18` | No table. It adds `organization_id` to `ta_operator_audit`, the status and expiry columns to `ta_sso_connection`, and `expiry_stage` and `expiry_notice_at` to `ta_scim_token` and `ta_sso_setup_link`. This is the schema of the organization audit and the expiry notices. |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 17.
+`SCHEMA_VERSION` of `@authtempo/core` is 18.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -147,6 +148,19 @@ wrangler d1 execute my-app --remote --command "INSERT INTO d1_migrations (name) 
 ```
 
 After the mark, `wrangler d1 migrations apply` and `authtempo migrate` skip `0016_schema_v16`. The table and its columns `id`, `name`, and `applied_at` come from the migrations code of wrangler 4.148.0, read 2026-11-04. Wrangler writes the file name with `.sql` in `name`.
+
+Version 18 comes from the `0018_schema_v18` migration of D1 and Postgres, from `0006_schema_v18` on MySQL, and from `0015_compat_schema_v18` in the compatibility package. It adds no table. Each new column is nullable, with no default and no fill. An audit row is append-only, so the migration changes no row of `ta_operator_audit`.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `operatorAudit.organizationId` | `ta_operator_audit.organization_id` | string, nullable | The organization of the act, with an index on (`organization_id`, `id`). Null on a row from before version 18, and on an operator act on a user. [The organization audit](/docs/guides/organization-audit/) reads only rows that hold it. |
+| `ssoConnection.certificateEndsAt` | `ta_sso_connection.certificate_ends_at` | date, nullable | The latest `notAfter` of the SAML certificates of the connection. Null on an OIDC connection. |
+| `ssoConnection.expiryStage`, `ssoConnection.expiryNoticeAt` | `ta_sso_connection.expiry_stage`, `ta_sso_connection.expiry_notice_at` | integer or date, nullable | The last expiry notice that the sweep claimed (30, 7, or 1 days), and the time when the next notice is due. An index on `expiry_notice_at` serves the sweep. |
+| `ssoConnection.lastSuccessAt`, `ssoConnection.lastFailureAt`, `ssoConnection.lastFailureStep` | `ta_sso_connection.last_success_at`, `ta_sso_connection.last_failure_at`, `ta_sso_connection.last_failure_step` | date or string, nullable | The last sign-in that passed, the last sign-in that failed, and the step that failed. Core writes each at most once an hour. |
+| `scimToken.expiryStage`, `scimToken.expiryNoticeAt` | `ta_scim_token.expiry_stage`, `ta_scim_token.expiry_notice_at` | integer or date, nullable | The expiry notice of a SCIM token, as on `ssoConnection`, with an index on `expiry_notice_at`. |
+| `ssoSetupLink.expiryStage`, `ssoSetupLink.expiryNoticeAt` | `ta_sso_setup_link.expiry_stage`, `ta_sso_setup_link.expiry_notice_at` | integer or date, nullable | The expiry notice of a setup link, as on `ssoConnection`, with an index on `expiry_notice_at`. A setup link lives at most 168 hours, so it gets only the 1-day notice. |
+
+A row of version 17 reads null in each new column. A SAML connection gets its certificate end and its notice date at its next sign-in or its next certificate write. A SCIM token gets its notice date at its next SCIM call. A setup link of version 17 gets no notice. Until the fill, the sweep sends no notice for that row. An audit row of version 17 keeps a null `organizationId`, so the organization audit starts at version 18 and holds no older row.
 
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 

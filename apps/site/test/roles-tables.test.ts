@@ -53,7 +53,7 @@ describe("the tables of the roles guide", () => {
     const page = Object.fromEntries(
       rows.map(([resource = "", actions = ""]) => [names(resource)[0] ?? "", names(actions)]),
     );
-    expect(Object.keys(page)).toHaveLength(6);
+    expect(Object.keys(page)).toHaveLength(7);
     expect(page).toEqual(CORE_STATEMENTS);
   });
 

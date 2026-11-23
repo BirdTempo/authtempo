@@ -5,6 +5,7 @@ type: reference
 sources:
   - packages/core/src/config.ts
   - packages/core/src/engine/sso/setup-links.ts
+  - packages/core/src/engine/sso/expiry.ts
   - packages/core/src/sso/guides/index.ts
   - packages/client/src/client.ts
 ---
@@ -72,9 +73,58 @@ The server API has no `setupLinks` call. A server holds no setup cookie and no m
 
 A notice is a mail. A failed mail writes one log line, and the change stays. An owner with no address gets no mail.
 
+## The connection status
+
+Each connection of [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections) holds `status`. `api.sso.connections.list` answers the same `SsoConnectionStatus`.
+
+| Field | What it holds |
+| --- | --- |
+| `lastSuccessAt` | The time of the last real sign-in that passed, or null. |
+| `lastFailureAt` | The time of the last real sign-in that failed, or null. |
+| `lastFailureStep` | The step of that failure, or null. |
+| `certificateEndsAt` | The end of the SAML certificates: the latest `notAfter`. Null on an OIDC connection. |
+| `expiryStage` | The last expiry notice that the sweep claimed: 30, 7, or 1. Null before the first notice. |
+
+- Core writes `lastSuccessAt`, or `lastFailureAt` and `lastFailureStep`, at most once an hour for each field. A test run writes none of them.
+- The write keeps `updatedAt`, so it does not change the lock of a manager update.
+- A failed write never fails the sign-in. It emits `sso.status_write_failed` and writes the line `authtempo: sso status write failed`.
+- A connection from before schema version 18 holds null in each field. Its first real sign-in after the upgrade fills the certificate end and the notice date.
+
+## The expiry notices
+
+The sweep tells the owners when an SSO credential ends soon. The step is `ssoExpiryNotices` of [the sweep](/docs/guides/sweep/). Without a scheduled sweep, no notice goes out.
+
+| Kind | The end | The stages |
+| --- | --- | --- |
+| `saml_certificate` | The latest `notAfter` of the certificates of an enabled SAML connection | 30, 7, and 1 days |
+| `scim_token` | `expiresAt` of a SCIM token. A token with no expiry gets no notice | 30, 7, and 1 days |
+| `setup_link` | `expiresAt` of a live setup link. A link lives at most 168 hours | 1 day only |
+
+For each stage of a row, the sweep does these steps in this order:
+
+1. It claims the stage with one conditional write on the row. Of two sweeps at once, only one wins, so the owners get one notice.
+2. It mails the `sso_expiring` notice to the owners: each member whose role holds the owner rank. At most 10 owners get a mail.
+3. It emits the event `sso.expiring`.
+4. It runs `hooks.sso.expiring({ organizationId, kind, id, at })`.
+
+- A late sweep sends one notice for the smallest due stage, and skips the larger stages.
+- The claim is the record. A failed mail writes `notice.mail_failed` with `sso_expiring`. No sweep sends that mail again.
+- The owner read scans the first 100 members. An owner past them gets no mail. With more than 100 members, the step writes `notice.mail_failed` with a `RangeError`.
+- `ownersCut` of the event counts the owners past the 10 mails.
+- With `account.notices` off, no mail goes out. The event and the hook still run.
+- A write of new certificates starts the stages again from the new end.
+- A draft gets no notice. Its notice date starts at the activation.
+- A disabled connection gets no notice, and keeps its notice date. After an enable, the next sweep sends the nearest due stage.
+- A revoked or ended setup link, and a row whose end is past, loses its notice date and gets no notice.
+- `hooks.sso` needs `sso`. With `scim` alone, a SCIM token gets the mail and the event, and no hook.
+- A row from before schema version 18 gets its dates at its next use. A SAML connection gets them at its next sign-in or certificate write. A SCIM token gets them at its next SCIM call. A setup link from before version 18 gets no notice.
+
+Warning: a mail goes through your mail supplier, which can drop it. Do not use the mail as the only signal. Use `hooks.sso.expiring` or the event `sso.expiring` as the signal that you own. Send it to your own alert or ticket system.
+
 ## The events, the limits, and the errors
 
 - The events are `sso.setup_opened` and `sso.setup_refused`. See [Events](/docs/reference/events/).
+- The expiry events are `sso.expiring` and `sweep.sso_expiry_stopped`. The status event is `sso.status_write_failed`.
 - Each limit has the key `setup-open`, `setup-page`, `setup-draft`, `setup-status`, or `setup-test`. See [Limits](/docs/reference/limits/).
 - The codes `setup_link_invalid`, `setup_link_limit`, and `setup_not_tested` are in [Errors](/docs/reference/errors/).
 

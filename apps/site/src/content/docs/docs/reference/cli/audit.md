@@ -1,6 +1,6 @@
 ---
 title: authtempo audit
-description: The subcommand of authtempo audit. It reads the audit rows of the operator acts of a deployment.
+description: The subcommands of authtempo audit. They read the audit rows of a deployment, or export the rows of one organization.
 type: reference
 sources:
   - packages/cli/src/commands/audit.ts
@@ -29,6 +29,7 @@ authtempo audit list https://api.example.com
 | Subcommand | What it does | Page |
 | --- | --- | --- |
 | `authtempo audit list` | Lists the audit rows of the operator acts by id. | [authtempo audit list](/docs/reference/cli/audit-list/) |
+| `authtempo audit export` | Writes the audit rows of one organization as NDJSON or CSV. | [authtempo audit export](/docs/reference/cli/audit-export/) |
 
 `authtempo audit` with no subcommand is a usage error. With `--json` it prints `{ exit, stopped }`.
 
@@ -45,4 +46,5 @@ authtempo audit list https://api.example.com
 ## Next
 
 - [authtempo audit list](/docs/reference/cli/audit-list/)
+- [authtempo audit export](/docs/reference/cli/audit-export/)
 - [Routes](/docs/reference/routes/#operator-user-tools)

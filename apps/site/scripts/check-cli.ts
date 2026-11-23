@@ -5,10 +5,13 @@ import { type CheckReport, requireCounts } from "./lib/report.ts";
 const SITE_ORIGIN = "https://authtempo.com";
 const CLI_PAGES = `${SITE_ORIGIN}/docs/reference/cli/`;
 
-/** The values of a closed set such as `<d1|postgres>`, or null for an open placeholder. */
+/**
+ * The values of a closed set such as `<d1|postgres>`, or a bare one such as `ndjson|csv`
+ * (`audit export --format`), or null for an open placeholder.
+ */
 function closedSet(value: string | null): string[] | null {
-  const m = /^<([^<>]+\|[^<>]+)>$/.exec(value ?? "");
-  return m ? (m[1] ?? "").split("|") : null;
+  const m = /^(?:<([^<>]+\|[^<>]+)>|([^<>\s]+\|[^<>\s]+))$/.exec(value ?? "");
+  return m ? (m[1] ?? m[2] ?? "").split("|") : null;
 }
 
 function shown(value: string | null): string {

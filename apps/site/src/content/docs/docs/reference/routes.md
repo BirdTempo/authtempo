@@ -894,6 +894,15 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Answer | `{ invitations }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
+<h3 id="get-organizations-audit"><code>GET /organizations/audit</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The user holds `audit:read` in the organization: the rank `owner`, or a role of `roles` that lists it. An organization token gets `unauthorized` |
+| Input | Query `{ organizationId, after?, limit?, action?, from?, to? }`. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer. `action` is one action of the organization audit. `from` and `to` are ISO times: `from` counts, `to` does not, and `from` comes before `to` |
+| Answer | `{ rows, next }`: the audit rows of the organization by `id` ascending, oldest first. A row has `id`, `at`, `actor`, `action`, `targetUserId`, `data`, `ip`, and `userAgent`. `actor` is `{ kind, id, email }`, and `kind` is `member`, `platform`, `scim`, or `app`. Only a `member` row holds `ip` and `userAgent`. `next` is the last id when one more row exists, else null. [The organization audit](/docs/guides/organization-audit/) tells what a row shows |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
 <h3 id="post-organizations-invitations-revoke"><code>POST /organizations/invitations/revoke</code></h3>
 
 | Field | Value |
@@ -1417,8 +1426,8 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Field | Value |
 | --- | --- |
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `audit`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
-| Input | Query { targetUserId?, after?, limit? }. `targetUserId` reads one user's rows. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
-| Answer | `{ rows, next }`: the audit rows by `id` ascending, oldest first. A row has `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`. `actorId` names a secret by its name, never by the secret. `next` is the last id of a full page, else null |
+| Input | Query { targetUserId?, organizationId?, after?, limit? }. `targetUserId` reads one user's rows. `organizationId` reads the rows of one organization from schema version 18; an operator act on a user names no organization. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
+| Answer | `{ rows, next }`: the audit rows by `id` ascending, oldest first. A row has `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `organizationId`, `reason`, `data`, `ip`, and `userAgent`. `actorId` names a secret by its name, never by the secret. `next` is the last id of a full page, else null |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-user-invite-confirm"><code>GET /user/invite/confirm</code></h3>
@@ -1662,7 +1671,7 @@ The manager guard runs these steps in order. An impersonation session answers `f
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
-| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `draft`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, `endpoints`, and `tokenEndpointAuthMethod`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. No answer holds the client secret or its sealed value |
+| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `draft`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, `endpoints`, and `tokenEndpointAuthMethod`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. Each connection of this list also holds `status`: `lastSuccessAt`, `lastFailureAt`, `lastFailureStep`, `certificateEndsAt`, and `expiryStage` (30, 7, 1, or null). [The SSO setup reference](/docs/reference/sso-setup/#the-connection-status) tells each field. No answer holds the client secret or its sealed value |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-sso-connections-create"><code>POST /sso/connections/create</code></h3>

@@ -38,7 +38,7 @@ import test from "../../../../../samples/guides/roles.test.ts?raw";
 
 ### Statements
 
-A statement set maps a resource to a list of actions, such as `{ project: ["read", "write"] }`. A resource or an action name matches `^[a-z][a-zA-Z0-9-]{0,31}$`. Core owns six resources:
+A statement set maps a resource to a list of actions, such as `{ project: ["read", "write"] }`. A resource or an action name matches `^[a-z][a-zA-Z0-9-]{0,31}$`. Core owns seven resources:
 
 | Resource | Actions |
 | --- | --- |
@@ -48,6 +48,7 @@ A statement set maps a resource to a list of actions, such as `{ project: ["read
 | `team` | `create`, `update`, `delete` |
 | `ac` | `read`, `create`, `update`, `delete` (the stored roles) |
 | `apiToken` | `read`, `create`, `update`, `revoke` (the organization tokens) |
+| `audit` | `read` ([the organization audit](/docs/guides/organization-audit/)) |
 
 `organizations.statements` adds the resources of your app. `createAuth` refuses a core name, a bad name, an empty list, and a repeated action.
 
@@ -72,8 +73,9 @@ In the `ranks` form, a role holds an action when its rank is at least the rank o
 | `ac:create`, `ac:update`, `ac:delete` | `admin` |
 | `apiToken:read`, `apiToken:create`, `apiToken:update`, `apiToken:revoke` | `admin` |
 | `organization:delete` | `owner` |
+| `audit:read` | `owner` |
 
-A slug change needs `organization:update` and the owner rank too.
+A slug change needs `organization:update` and the owner rank too. The audit shows the acts of each member, so only the owner rank reads it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it.
 
 ### The grant and touch rules
 

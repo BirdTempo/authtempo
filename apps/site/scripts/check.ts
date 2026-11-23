@@ -305,7 +305,8 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       ),
   },
   // Plan 13a Task 15: one page for each IdP guide of GUIDES, the date and each
-  // unconfirmed mark on the built page, and no price on a new page.
+  // unconfirmed mark on the built page, and no price on a new page. Plan 13b adds
+  // its two new pages to `extra`, so the price rule reads them too.
   {
     name: "check-guide-pages",
     run: () =>
@@ -313,7 +314,12 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         guides: GUIDES,
         sources: new Map(docsPages().map((p) => [p.path, p.source])),
         built: distPageOrEmpty,
-        extra: ["/docs/guides/sso-setup-link/", "/docs/reference/sso-setup/"],
+        extra: [
+          "/docs/guides/sso-setup-link/",
+          "/docs/reference/sso-setup/",
+          "/docs/guides/organization-audit/",
+          "/docs/reference/cli/audit-export/",
+        ],
       }),
   },
   {

@@ -28,6 +28,7 @@ describe("delete expired rows", () => {
       "scimTokens",
       "sessions",
       "ssoDomains",
+      "ssoExpiryNotices",
       "ssoPendingDomains",
       "ssoSetupRows",
       "totpSetups",
