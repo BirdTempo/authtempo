@@ -20,6 +20,7 @@ import { resolveSocialUser } from "../social.js";
 import { normalizeEmail } from "../users.js";
 import { publicConnection, type SsoConnectionSummary } from "./connections.js";
 import { inOrganizationDomains } from "./domains.js";
+import { noteSignIn } from "./expiry.js";
 
 /**
  * The person that an IdP names after its checks (plan 12d Task 5). The OIDC
@@ -301,6 +302,8 @@ export async function resolveSsoUser(
   );
   if (!resolved.ok) return refused(config, connection, resolved.code, input.ip, resolved);
   const { user, after } = resolved.value;
+  // The IdP part passed and the user row committed: the status of the connection (plan 13b).
+  await noteSignIn(config, connection, null);
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
@@ -357,6 +360,12 @@ function refused(
   ip: string | null,
   result?: Result<never>,
 ): Result<never> {
-  config.observe.emit({ name: "sso.refused", connectionId: connection.id, code, ip });
+  config.observe.emit({
+    name: "sso.refused",
+    connectionId: connection.id,
+    organizationId: connection.organizationId,
+    code,
+    ip,
+  });
   return result ?? fail(code);
 }

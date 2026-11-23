@@ -763,14 +763,32 @@ export const EVENTS = {
   "sso.guard_refused": fault("error", "authtempo: sso guard refused", {
     step: enumOf(SSO_GUARD_STEPS),
   }),
-  "sso.failed": fault("error", "authtempo: sso failed", {
+  // The organization of the connection (plan 13b, C9) is in the event, not in the line: the
+  // line stays as it was before plan 13b. A refusal before the row read has no organization.
+  "sso.failed": fault(
+    "error",
+    "authtempo: sso failed",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID, step: enumOf(SSO_FAILED_STEPS) },
+    {
+      args: (e) => ["authtempo: sso failed", shown(e, "connectionId"), shown(e, "step")],
+    },
+  ),
+  "sso.denied": fault(
+    "error",
+    "authtempo: sso denied",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID },
+    { args: (e) => ["authtempo: sso denied", shown(e, "connectionId")] },
+  ),
+  "sso.refused": fault(
+    "error",
+    "authtempo: sso refused",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID, code: { kind: "code" } },
+    { args: (e) => ["authtempo: sso refused", shown(e, "connectionId"), shown(e, "code")] },
+  ),
+  // The status write of a sign-in threw (plan 13b Task 9). The sign-in keeps its result.
+  "sso.status_write_failed": fault("error", "authtempo: sso status write failed", {
     connectionId: ROW_ID,
-    step: enumOf(SSO_FAILED_STEPS),
-  }),
-  "sso.denied": fault("error", "authtempo: sso denied", { connectionId: ROW_ID }),
-  "sso.refused": fault("error", "authtempo: sso refused", {
-    connectionId: ROW_ID,
-    code: { kind: "code" },
+    errorName: ERROR_NAME,
   }),
   "saml.certificate_expired": fault("warn", "authtempo: saml certificate expired", {
     connectionId: ROW_ID,

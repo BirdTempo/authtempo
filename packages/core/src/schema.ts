@@ -809,7 +809,10 @@ export interface SsoConnectionRow extends BaseRow {
   version: number;
   /** The setup link that made the row. Null: an act of the manager or the app. */
   setupLinkId: string | null;
-  /** The earliest `notAfter` of the SAML certificates (plan 13b). Null: OIDC, or no certificate. */
+  /**
+   * The latest `notAfter` of the SAML certificates (plan 13b, owner decision 8): during a
+   * rollover the new certificate keeps sign-in working. Null: OIDC, or no certificate.
+   */
   certificateEndsAt: Date | null;
   /** The last expiry stage that sent a notice: 30, 7, or 1 days (plan 13b). Null: none yet. */
   expiryStage: number | null;

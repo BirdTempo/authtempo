@@ -20,6 +20,7 @@ import type { SsoConnectionRow, SsoTestRunRow } from "../../schema.js";
 import { StorageError } from "../../storage/port.js";
 import type { SignInChallenge } from "../second-factor.js";
 import { acsUrl, type SamlStored, spEntityId } from "./connections.js";
+import { noteSignIn } from "./expiry.js";
 import { resolveSsoUser, type SsoSignedIn } from "./resolve.js";
 import { failTestRun, passTestRun, pendingRun, type SsoTestDone } from "./test-run-store.js";
 
@@ -84,15 +85,24 @@ interface SamlRequestData {
 /**
  * The one fault event of a refused step (Global Constraints of plan 12d):
  * the connection id and the step. The IP is an address input, so only the
- * include rule writes it (plan 12h).
+ * include rule writes it (plan 12h). A step after the read of the connection
+ * also names its organization (plan 13b, C9).
  */
 function refused(
   config: ResolvedConfig,
   connectionId: string,
+  organizationId: string | undefined,
   step: SamlStep,
   ip: string | null,
 ): Result<never> {
-  config.observe.emit({ name: "sso.failed", connectionId, step, ip });
+  // An absent organization adds no key: the check of the event rejects an undefined id.
+  config.observe.emit({
+    name: "sso.failed",
+    connectionId,
+    ...(organizationId === undefined ? {} : { organizationId }),
+    step,
+    ip,
+  });
   return fail("sso_failed");
 }
 
@@ -254,17 +264,27 @@ export async function completeSaml(
   outer: ResolvedConfig,
   input: SamlComplete,
 ): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
-  const trace: SamlTrace = { run: null, step: null };
+  const trace: SamlTrace = { run: null, step: null, connection: null };
   const r = await runSaml(outer, input, trace);
+  if (r.ok) return r;
+  // A real sign-in that failed at a step of the connection writes its status (plan 13b Task 9).
+  // A test run writes only its own row.
+  if (trace.run === null) {
+    if (trace.connection && trace.step) await noteSignIn(outer, trace.connection, trace.step);
+    return r;
+  }
   // As the OIDC callback: a failed test run ends in a `failed` row with a closed step.
-  if (r.ok || trace.run === null) return r;
   return ok({ test: await failTestRun(outer, trace.run, trace.step ?? "request") });
 }
 
-/** What the ACS learns on its way: the pending test run of its request row, and the last refused step. */
+/**
+ * What the ACS learns on its way: the pending test run of its request row, the last refused
+ * step, and the connection after its check.
+ */
 interface SamlTrace {
   run: SsoTestRunRow | null;
   step: SamlStep | null;
+  connection: SsoConnectionRow | null;
 }
 
 async function runSaml(
@@ -281,7 +301,7 @@ async function runSaml(
   const id = input.connectionId;
   const no = (step: SamlStep) => {
     trace.step = step;
-    return refused(config, id, step, input.ip);
+    return refused(config, id, trace.connection?.organizationId, step, input.ip);
   };
   const responses = form.getAll("SAMLResponse");
   const states = form.getAll("RelayState");
@@ -323,6 +343,7 @@ async function runSaml(
     (trace.run && connection.organizationId !== trace.run.organizationId)
   )
     return fail("sso_not_configured");
+  trace.connection = connection;
   const c = samlConfig(connection);
   const xml = strictBase64(encoded, XML_SPACE);
   if (xml === null) return no("form");

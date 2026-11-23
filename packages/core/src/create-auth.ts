@@ -248,6 +248,7 @@ import {
   createConnection,
   deleteConnection,
   listConnections,
+  type SsoConnectionListed,
   type SsoConnectionSummary,
   setRoleMap,
   updateConnection,
@@ -467,11 +468,11 @@ export interface SsoApi {
    * answer holds the client secret or its sealed value.
    */
   connections: {
-    /** The connections of an organization, oldest first. */
+    /** The connections of an organization, oldest first, each with its status (plan 13b). */
     list(input: {
       actor: SsoAppActor;
       organizationId: string;
-    }): Promise<Result<SsoConnectionSummary[]>>;
+    }): Promise<Result<SsoConnectionListed[]>>;
     /** Adds a connection. An OIDC client secret is sealed under the current app secret. */
     create(input: { actor: SsoAppActor } & ConnectionInput): Promise<Result<SsoConnectionSummary>>;
     /** Changes the fields of a connection. `kind` and `organizationId` never change. */

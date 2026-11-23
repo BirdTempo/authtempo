@@ -21,6 +21,7 @@ import { writeAuditIn } from "../operator/audit.js";
 import { isOwner, rankOf } from "../ranks.js";
 import { tokenHint } from "../tokens.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
+import { nextNotice } from "./expiry.js";
 import { recheckSsoManager, type SsoActor, ssoDraft } from "./guard.js";
 import { setupActorName } from "./setup-drafts.js";
 import { lockSetupRows } from "./setup-live.js";
@@ -176,9 +177,9 @@ export async function createSetupLink(
     endedAt: null,
     openedAt: null,
     readyAt: null,
-    // Plan 13b: Task 9 sets the expiry fields.
+    // Plan 13b Task 9: a link lives at most 168 hours, so it gets the notice of 1 day at most.
     expiryStage: null,
-    expiryNoticeAt: null,
+    expiryNoticeAt: nextNotice(new Date(now.getTime() + hours * HOUR_MS), null, now, now),
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

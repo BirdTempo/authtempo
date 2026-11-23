@@ -174,8 +174,7 @@ describe("the connection routes (plan 12d Task 3)", () => {
     ]);
   });
 
-  it("answers each listed connection with a status of five nulls (plan 13b Task 0)", async () => {
-    // Task 9 fills the status from the row. Until then each field is null.
+  it("answers each listed connection with the status of its row (plan 13b Task 9)", async () => {
     const w = await routeWorld();
     const made = await createConnection(w.auth.config, SSO_APP, {
       ...oidcBody(),
@@ -183,6 +182,27 @@ describe("the connection routes (plan 12d Task 3)", () => {
       kind: "oidc",
     });
     if (!made.ok) throw new Error(made.code);
+    const idp = await createTestIdp({ alg: "rsa" });
+    const saml = await createConnection(w.auth.config, SSO_APP, {
+      organizationId: w.org,
+      kind: "saml",
+      label: "SAML IdP",
+      idpEntityId: idp.entityId,
+      ssoUrl: "https://idp.example/sso",
+      certificates: [idp.certificatePem],
+    });
+    if (!saml.ok) throw new Error(saml.code);
+    // The values that a passed sign-in, a failed sign-in, and the sweep of the 30-day notice write.
+    await w.auth.storage.update(
+      "ssoConnection",
+      [{ field: "id", op: "eq", value: saml.value.id }],
+      {
+        lastSuccessAt: new Date("2026-03-01T09:00:00.000Z"),
+        lastFailureAt: new Date("2026-03-02T10:00:00.000Z"),
+        lastFailureStep: "signature",
+        expiryStage: 30,
+      },
+    );
     const [status, body] = await send(
       w,
       "GET",
@@ -192,18 +212,32 @@ describe("the connection routes (plan 12d Task 3)", () => {
     );
     expect(status).toBe(200);
     const listed = body.connections as { id: string; status: unknown }[];
-    expect(listed.map((c) => [c.id, c.status])).toEqual([
-      [
-        made.value.id,
-        {
-          lastSuccessAt: null,
-          lastFailureAt: null,
-          lastFailureStep: null,
-          certificateEndsAt: null,
-          expiryStage: null,
-        },
-      ],
-    ]);
+    // Two ids of one millisecond have a random order, so the test keys the status by id.
+    expect(listed).toHaveLength(2);
+    expect(Object.fromEntries(listed.map((c) => [c.id, c.status]))).toEqual(
+      Object.fromEntries([
+        [
+          made.value.id,
+          {
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            lastFailureStep: null,
+            certificateEndsAt: null,
+            expiryStage: null,
+          },
+        ],
+        [
+          saml.value.id,
+          {
+            lastSuccessAt: "2026-03-01T09:00:00.000Z",
+            lastFailureAt: "2026-03-02T10:00:00.000Z",
+            lastFailureStep: "signature",
+            certificateEndsAt: "2045-01-01T00:00:00.000Z",
+            expiryStage: 30,
+          },
+        ],
+      ]),
+    );
   });
 
   it("answers the refusals of the guard, the input, and the limit", async () => {
