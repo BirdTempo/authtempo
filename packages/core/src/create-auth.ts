@@ -970,8 +970,14 @@ export interface AuthApi {
     user: UserRow;
     organizationId: string;
   }): Promise<Result<InvitationSummary[]>>;
+  /**
+   * `session` (plan 13b, ruling R16): the session of the caller, as the route passes it. A
+   * session of an impersonation writes the operator as the actor of the audit row, with
+   * `platform: true`. Without it, the row names `user` as the actor.
+   */
   revokeInvitation(input: {
     user: UserRow;
+    session?: SessionRow;
     organizationId: string;
     invitationId: string;
   }): Promise<Result<{ ok: true }>>;

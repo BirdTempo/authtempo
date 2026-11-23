@@ -927,6 +927,42 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
     ]);
   });
 
+  // Plan 13b Task 12, ruling R16: the in-process cancel follows the rule of the core route. An
+  // act in an impersonation names the operator, with `platform: true` (spec 6.6 item 5).
+  it("cancelInvitation in an impersonation writes the operator as the actor, with platform true", async () => {
+    const db = memoryDatabase();
+    const a = await adminApp(db);
+    const ann = await a.user("ann@example.com");
+    const made = await a.call("/organizations/create", { slug: "acme", name: "Acme" }, ann.cookie);
+    expect(made.status).toBe(200);
+    const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
+    const inv = await a.auth.api.createInvitation({
+      body: { email: "x@example.com", role: "member", organizationId: orgId },
+      headers: new Headers({ cookie: ann.cookie }),
+    });
+    const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+    expect(start.status).toBe(200);
+    const imp = `${COOKIE_NAME}=${setCookie(start, COOKIE_NAME)}`;
+    const canceled = await a.auth.api.cancelInvitation({
+      body: { invitationId: inv.id },
+      headers: new Headers({ cookie: imp }),
+    });
+    expect(canceled.status).toBe("canceled");
+    const rows = await db.storage.findMany("operatorAudit", [
+      { field: "action", op: "eq", value: "organization_invitation_revoke" },
+    ]);
+    expect(
+      rows.map((r) => [
+        r.organizationId,
+        r.actorKind,
+        r.actorId,
+        r.data?.platform,
+        r.ip,
+        r.userAgent,
+      ]),
+    ).toEqual([[orgId, "user", a.opId, true, null, null]]);
+  });
+
   it("answers Better Auth's refusals of an impersonation, and the bearer form", async () => {
     const a = await adminApp(memoryDatabase());
     const ann = await a.user("ann@example.com");

@@ -95,6 +95,17 @@ function readCsv(text: string): string[][] {
 const expectedCell = (value: string) =>
   (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value).replaceAll("\r", "?");
 
+/**
+ * The cells of the record of `r`, in the order of the columns. The null rule: a null is an empty
+ * cell. An empty string is an empty cell too, so the CSV does not tell a null from an empty
+ * string. Only the JSON form keeps the difference. `data` is JSON text.
+ */
+const sourceCells = (r: Record<string, unknown>) =>
+  AUDIT_CSV_COLUMNS.map((c) => {
+    const v = r[c];
+    return expectedCell(v === null ? "" : typeof v === "string" ? v : JSON.stringify(v));
+  });
+
 async function exportCsv(
   fetch: (url: string, init: RequestInit) => Promise<Response>,
   organization = ORG,
@@ -125,10 +136,61 @@ describe("authtempo audit export under attack (plan 13b Task 12)", () => {
         // The data cell is JSON text: it starts with `{`, and JSON escapes each CR and LF.
         const want = column === "data" ? JSON.stringify(value) : expectedCell(probe);
         expect(cells[at], label).toBe(want);
+        // Each other cell equals its source too.
+        expect(cells, label).toEqual(sourceCells(r));
         // No cell starts with a formula lead.
         for (const cell of cells)
           expect(/^[=+\-@\t\r]/.test(cell), `${label}: ${cell}`).toBe(false);
       }
+  });
+
+  it("nulls: each nullable field null gives an empty cell, the same cell as an empty string", async () => {
+    // The parser of the CLI takes a null in each of the five fields, so the stub sends each one.
+    // An organization export of a real core has data and the organization in each row.
+    const nulls = row({
+      targetUserId: null,
+      organizationId: null,
+      data: null,
+      ip: null,
+      userAgent: null,
+    });
+    const empties = row({
+      id: "01J8Z3Q4R5S6T7V8W9X0Y1ROW2",
+      targetUserId: "",
+      organizationId: "",
+      ip: "",
+      userAgent: "",
+    });
+    const fetch = async () => Response.json({ rows: [nulls, empties], next: null });
+    const { code, io } = await exportCsv(fetch);
+    expect(code, io.stderr.join("\n")).toBe(0);
+    const [, first, second] = readCsv(io.stdout.join("\n"));
+    expect(first).toEqual([
+      "01J8Z3Q4R5S6T7V8W9X0Y1ROW1",
+      AT,
+      "user",
+      "01J8Z3Q4R5S6T7V8W9X0Y1USR1",
+      "organization_member_add",
+      "",
+      "",
+      "member added",
+      "",
+      "",
+      "",
+    ]);
+    expect(second).toEqual([
+      "01J8Z3Q4R5S6T7V8W9X0Y1ROW2",
+      AT,
+      "user",
+      "01J8Z3Q4R5S6T7V8W9X0Y1USR1",
+      "organization_member_add",
+      "",
+      "",
+      "member added",
+      '{"role":"member"}',
+      "",
+      "",
+    ]);
   });
 
   it("round trip: a real core writes a formula in the user agent through its routes, and the export quotes it", async () => {
@@ -214,16 +276,46 @@ describe("authtempo audit export under attack (plan 13b Task 12)", () => {
       agents[2] ?? "",
     );
     await act("/organizations/members/remove", { userId: bo.user.id }, agents[3] ?? "");
+    // An in-process revoke has no IP, no user agent, and no target: a real row with three nulls.
+    const dee = await auth.api.inviteMember({
+      user: ada.user,
+      organizationId,
+      email: "dee@example.com",
+      role: "member",
+    });
+    if (!dee.ok) throw new Error(dee.code);
+    const revoked = await auth.api.revokeInvitation({
+      user: ada.user,
+      organizationId,
+      invitationId: dee.value.id,
+    });
+    expect(revoked.ok).toBe(true);
     const fetch = async (url: string, init: RequestInit) => auth.handle(new Request(url, init));
     const { code, io } = await exportCsv(fetch, organizationId);
     expect(code, io.stderr.join("\n")).toBe(0);
     const records = readCsv(io.stdout.join("\n")).slice(1);
     const at = (c: (typeof AUDIT_CSV_COLUMNS)[number]) => AUDIT_CSV_COLUMNS.indexOf(c);
-    expect(records.map((r) => [r[at("action")], r[at("userAgent")], r[at("ip")]])).toEqual([
-      ["organization_member_add", `'${agents[0]}`, "203.0.113.9"],
-      ["organization_member_role_change", `'${agents[1]}`, "203.0.113.9"],
-      ["organization_invitation_create", `'${agents[2]}`, "203.0.113.9"],
-      ["organization_member_remove", `'${agents[3]}`, "203.0.113.9"],
+    expect(
+      records.map((r) => [r[at("action")], r[at("userAgent")], r[at("ip")], r[at("targetUserId")]]),
+    ).toEqual([
+      ["organization_member_add", `'${agents[0]}`, "203.0.113.9", bo.user.id],
+      ["organization_member_role_change", `'${agents[1]}`, "203.0.113.9", bo.user.id],
+      ["organization_invitation_create", `'${agents[2]}`, "203.0.113.9", ""],
+      ["organization_member_remove", `'${agents[3]}`, "203.0.113.9", bo.user.id],
+      ["organization_invitation_create", "", "", ""],
+      ["organization_invitation_revoke", "", "", ""],
     ]);
+    // Each cell of each record equals its source: the JSON row of the operator route.
+    const source = await auth.handle(
+      new Request(`${BASE}/auth/operator/audit?organizationId=${organizationId}&limit=100`, {
+        headers: { authorization: `Operator ${AUDITOR}` },
+      }),
+    );
+    expect(source.status).toBe(200);
+    const rows = ((await source.json()) as { rows: Record<string, unknown>[] }).rows;
+    expect(rows.map((r) => [r.targetUserId, r.ip, r.userAgent]).slice(-1)).toEqual([
+      [null, null, null],
+    ]);
+    expect(records).toEqual(rows.map(sourceCells));
   });
 });

@@ -446,6 +446,9 @@ export function createApi(
       unwrap(
         await auth.api.revokeInvitation({
           user: s.user,
+          // The session, as the core route passes it (ruling R16 of plan 13b). In an impersonation
+          // the audit row then names the operator with `platform: true`, not the member.
+          session: s.session,
           organizationId: row.organizationId,
           invitationId: row.id,
         }),

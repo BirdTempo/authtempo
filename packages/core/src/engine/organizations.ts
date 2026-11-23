@@ -83,6 +83,11 @@ export interface AuditMeta {
  * IP and no user agent (spec 6.6 item 5). Without this, the IP and the user agent of the operator
  * showed as an act of the member. The rules of impersonation allow some of these routes, for
  * example the revoke and the accept of an invitation.
+ *
+ * Ruling R17 of plan 13b: the row of an impersonated act names the operator only. No field
+ * names the impersonated user. Do not add one, in `data` or in `targetUserId`: the owner reads
+ * both, and the field would show the owner which user an operator acted as. The operator finds
+ * that user from the `impersonation_start` row of the operator audit and the time.
  */
 export function memberAuditDraft(
   caller: Pick<UserRow, "id">,

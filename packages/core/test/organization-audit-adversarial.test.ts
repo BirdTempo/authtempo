@@ -13,18 +13,31 @@ import {
   updateMemberRole,
 } from "../src/engine/organizations.js";
 import { createRole, deleteRole, updateRole } from "../src/engine/roles.js";
-import { createScimToken } from "../src/engine/scim/tokens.js";
+import { createScimToken, revokeScimToken } from "../src/engine/scim/tokens.js";
 import { revokeSession } from "../src/engine/session-list.js";
 import { resolveSession } from "../src/engine/sessions.js";
-import { updateConnection } from "../src/engine/sso/connections.js";
-import { addDomain } from "../src/engine/sso/domains.js";
+import {
+  createConnection,
+  deleteConnection,
+  updateConnection,
+} from "../src/engine/sso/connections.js";
+import { addDomain, deleteDomain, enforceOff, updateDomain } from "../src/engine/sso/domains.js";
 import { requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
-import { createSetupLink, revokeSetupLink } from "../src/engine/sso/setup-links.js";
+import { activateSetup } from "../src/engine/sso/setup-activate.js";
+import { saveDraftConnection } from "../src/engine/sso/setup-drafts.js";
+import { createSetupLink, handBack, revokeSetupLink } from "../src/engine/sso/setup-links.js";
+import { openSetupSession, requireSetupSession } from "../src/engine/sso/setup-session.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
-import { type ModelName, schema, type UserRow } from "../src/schema.js";
+import { ok } from "../src/result.js";
+import {
+  type ModelName,
+  ORGANIZATION_VISIBLE_ACTIONS,
+  schema,
+  type UserRow,
+} from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { createTestIdp } from "../src/testing/saml-idp.js";
 import {
@@ -43,8 +56,10 @@ import {
 } from "./operator-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { SCIM_APP, scim, scimAuth } from "./scim/helpers.js";
+import { type FakeIdToken, fakeFetch, fakeJwt } from "./social-helpers.js";
 import { SSO_APP, ssoAuth, verifiedDomain } from "./sso/helpers.js";
 import { samlConnection } from "./sso/saml-helpers.js";
+import { endpointsOf, issuerOf } from "./sso/sign-in-helpers.js";
 import { enrolled, PASSWORD } from "./totp-helpers.js";
 
 // Plan 13b Task 12: the adversarial proofs of the organization audit and the expiry notices.
@@ -56,6 +71,8 @@ const META = {
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
+const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
+const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const RANKS = { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 };
 const LOG_METHODS = ["error", "info", "warn", "log", "debug"] as const;
 const FORBIDDEN = { status: 403, body: { error: "forbidden_rank" } };
@@ -79,9 +96,9 @@ function logLines(): string[] {
  * Two organizations: `o1` of `owner@acme.example` and `o2` of `owner@beta.example`, each owner
  * with a second factor. The `ranks` form with dynamic roles, the operator tools, the
  * impersonation, SCIM, SAML, and the setup links are on. One operator secret has the scopes
- * `audit`, `sso`, and `users`. A sink keeps each event.
+ * `audit`, `sso`, and `users`. A sink keeps each event. `extra` replaces a key of the config.
  */
-async function world() {
+async function world(extra: Partial<AuthConfig> = {}) {
   const batches: AuthEvent[][] = [];
   const w = ssoAuth({
     password: { hash: FAST, uniformSignUp: false },
@@ -105,6 +122,7 @@ async function world() {
       impersonation: {},
     },
     observe: { sink: { write: (b) => void batches.push([...b]) } },
+    ...extra,
   });
   const owner = (await enrolled(w, "owner@acme.example")).session;
   const other = (await enrolled(w, "owner@beta.example")).session;
@@ -219,6 +237,75 @@ async function impersonate(w: W, operatorToken: string, userId: string): Promise
   if (started.status !== 200) throw new Error(`the start answered ${started.status}`);
   const line = started.headers.getSetCookie().find((s) => s.startsWith("__Host-tempo_session="));
   return recordCredential(line?.slice("__Host-tempo_session=".length).split(";")[0] ?? "");
+}
+
+const OIDC = {
+  kind: "oidc",
+  label: "Acme Okta",
+  issuer: issuerOf("acme"),
+  clientId: "acme-client",
+  clientSecret: "idp-client-secret-0123456789",
+  endpoints: endpointsOf("acme"),
+} as const;
+
+/** A setup session of `o1` through the real link, the open, and the check of the cookie. */
+async function setupSession(w: W, actor: SsoActor, note: string) {
+  const made = await createSetupLink(
+    w.config,
+    actor,
+    { organizationId: w.o1, steps: ["connection"], kinds: ["oidc"], note },
+    META,
+  );
+  if (!made.ok) throw new Error(made.code);
+  const opened = await openSetupSession(w.config, made.value.token, META);
+  if (!opened.ok) throw new Error(opened.code);
+  const cookie = opened.value.cookie.split(";")[0] ?? "";
+  const checked = await requireSetupSession(
+    w.config,
+    new Request("https://auth.example/auth/sso/setup/status", { headers: { cookie } }),
+  );
+  if (!checked.ok) throw new Error(checked.code);
+  return {
+    ...checked.value,
+    cookie,
+    linkId: made.value.id,
+    secrets: [recordCredential(made.value.token), recordCredential(cookie.split("=")[1] ?? "")],
+  };
+}
+
+/** A whole OIDC test run of the draft of a setup session that passes. The draft id. */
+async function passedTest(
+  w: W,
+  idTokens: Record<string, FakeIdToken>,
+  s: Awaited<ReturnType<typeof setupSession>>,
+) {
+  const saved = await saveDraftConnection(w.config, s, OIDC);
+  if (!saved.ok) throw new Error(saved.code);
+  const id = saved.value.id;
+  const started = await w.handle(get(`/auth/sso/${id}/start?test=1`, { cookie: s.cookie }));
+  const url = new URL(started.headers.get("location") ?? "");
+  const code = "adversarial-code-1";
+  idTokens[code] = {
+    audience: "acme-client",
+    issuer: issuerOf("acme"),
+    claims: {
+      sub: "t-1",
+      email: "tess@acme.example",
+      name: "Tess",
+      nonce: url.searchParams.get("nonce") ?? "",
+    },
+  };
+  const bind = started.headers
+    .getSetCookie()
+    .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+    ?.split(";")[0];
+  const q = new URLSearchParams({ code, state: url.searchParams.get("state") ?? "" });
+  await w.handle(get(`/auth/sso/${id}/callback?${q}`, { cookie: bind ?? "" }));
+  const run = await w.storage.findOne("ssoTestRun", [
+    { field: "connectionId", op: "eq", value: id },
+  ]);
+  if (run?.outcome !== "passed") throw new Error(`the test run is ${run?.outcome}`);
+  return id;
 }
 
 /**
@@ -399,14 +486,25 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
   });
 
   it(
-    "leak scan and append-only: a scene of each act and a sweep; no address in data, no token, no hash, no audit update or delete",
+    "leak scan and append-only: a scene of each visible action and a sweep; no address in data, no token, no hash, no audit update or delete",
     async () => {
-      const w = await world();
+      const idTokens: Record<string, FakeIdToken> = {};
+      const idp = fakeFetch((call) =>
+        Response.json({ id_token: call.form.code, token_type: "Bearer" }),
+      );
+      // OIDC on a fake IdP for the test run, SCIM groups as roles for the group acts, and a
+      // session of 60 days: the domain loss needs 31 days and three failed rechecks.
+      const w = await world({
+        scim: { groups: "roles" },
+        sso: { saml: true, oidc: true, setup: {}, fetch: idp.fetchFn } as SsoConfig,
+        jwt: fakeJwt(idTokens),
+        session: { ttlDays: 60 },
+      });
       const writes = countAuditWrites(w.config.storage);
-      const tokens: string[] = [];
+      const tokens: string[] = [w.owner.token];
       const owner = await guarded(w, w.owner.token, w.o1);
-      await verifiedDomain(w, w.o1);
-      await domainOf(w, owner, w.o1, "two.acme.example");
+      const domainId = await verifiedDomain(w, w.o1);
+      const twoId = await domainOf(w, owner, w.o1, "two.acme.example");
       const bo = await memberOf(w, w.owner.user, w.o1, "bo@acme.example", "member");
       const base = { user: w.owner.user, session: w.owner.session, organizationId: w.o1, ...META };
       expect(
@@ -487,8 +585,105 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
       expect((await banUser(w.config, act)).ok).toBe(true);
       expect((await unbanUser(w.config, act)).ok).toBe(true);
       expect((await removeMember(w.config, { ...base, userId: bo.user.id })).ok).toBe(true);
+      // The connection acts of the owner.
+      const conn = await createConnection(w.config, owner, { ...OIDC, organizationId: w.o1 }, META);
+      if (!conn.ok) throw new Error(conn.code);
+      const connId = conn.value.id;
+      expect((await updateConnection(w.config, owner, { id: connId, enabled: false })).ok).toBe(
+        true,
+      );
+      expect((await deleteConnection(w.config, owner, { id: connId })).ok).toBe(true);
+      // The domain acts: an update and a delete by the owner, and enforce off by a platform operator.
+      expect(
+        (await updateDomain(w.config, owner, { id: domainId, includeSubdomains: true })).ok,
+      ).toBe(true);
+      expect((await deleteDomain(w.config, owner, { id: twoId, ...META })).ok).toBe(true);
+      const operator = await platformOperator(w);
+      tokens.push(operator.token);
+      const platform = await guarded(w, operator.token, w.o1);
+      if (platform.kind !== "platform") throw new Error(`the guard gave ${platform.kind}`);
+      const off = await enforceOff(
+        w.config,
+        { kind: "user", user: platform.user, session: platform.session },
+        { domainId, reason: "the IdP is down", ...META },
+      );
+      expect(off.ok).toBe(true);
+      // The SCIM acts on the user and on a group, then the revoke of the directory token.
+      const ada = ((await created.json()) as { id: string }).id;
+      const put = await scim(w, directory.value.token, "PUT", `/Users/${ada}`, {
+        schemas: [USER_URN],
+        userName: "ada@acme.example",
+        displayName: "Ada L",
+      });
+      expect(put.status).toBe(200);
+      const deactivated = await scim(w, directory.value.token, "PATCH", `/Users/${ada}`, {
+        schemas: [PATCH_URN],
+        Operations: [{ op: "replace", path: "active", value: false }],
+      });
+      expect(deactivated.status).toBe(200);
+      expect((await scim(w, directory.value.token, "DELETE", `/Users/${ada}`)).status).toBe(204);
+      const group = await scim(w, directory.value.token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: "Staff",
+      });
+      expect(group.status).toBe(201);
+      const groupId = ((await group.json()) as { id: string }).id;
+      const renamed = await scim(w, directory.value.token, "PUT", `/Groups/${groupId}`, {
+        schemas: [GROUP_URN],
+        displayName: "Staff 2",
+      });
+      expect(renamed.status).toBe(200);
+      expect((await scim(w, directory.value.token, "DELETE", `/Groups/${groupId}`)).status).toBe(
+        204,
+      );
+      expect((await revokeScimToken(w.config, SCIM_APP, { id: directory.value.id })).ok).toBe(true);
+      // The setup acts: an open, a test run, and an activation; then a hand back of a second link.
+      const s = await setupSession(w, owner, "Ann at Acme IT");
+      tokens.push(...s.secrets);
+      const draftId = await passedTest(w, idTokens, s);
+      const draft = await w.storage.findOne("ssoConnection", [
+        { field: "id", op: "eq", value: draftId },
+      ]);
+      const activated = await activateSetup(
+        w.config,
+        owner,
+        s.linkId,
+        draft?.version ?? 0,
+        async () => ok(undefined),
+        META,
+      );
+      expect(activated.ok).toBe(true);
+      const back = await setupSession(w, SSO_APP, "Bea at Acme IT");
+      tokens.push(...back.secrets);
+      expect(await handBack(w.config, back)).toEqual(ok(undefined));
+      // D2: an invitation revoke by an operator who acts as the owner.
+      const eve = await inviteMember(w.config, {
+        ...base,
+        email: "eve@acme.example",
+        role: "member",
+      });
+      if (!eve.ok) throw new Error(eve.code);
+      const as = await impersonate(w, operator.token, w.owner.user.id);
+      tokens.push(as);
+      const revoked = await w.handle(
+        post(
+          "/auth/organizations/invitations/revoke",
+          { organizationId: w.o1, invitationId: eve.value.id },
+          { ...cookie(as), "user-agent": "operator-console", "cf-connecting-ip": "203.0.113.99" },
+        ),
+      );
+      expect(revoked.status).toBe(200);
+      // The domain loss: 31 days on, the records are gone, and three rechecks fail.
+      w.clock.advance(31 * DAY_MS);
+      for (const answers of [w.answers.a, w.answers.b])
+        for (const name of Object.keys(answers)) answers[name] = [];
+      for (const hours of [0, 36, 36]) {
+        w.clock.advance(hours * HOUR_MS);
+        await sweepExpired(w.config);
+      }
       const answer = await page(w, w.owner.token, { organizationId: w.o1, limit: "100" });
-      expect(answer.rows.map((r) => r.action)).toEqual([
+      const actions = answer.rows.map((r) => r.action);
+      expect(actions).toEqual([
         "sso_domain_add",
         "sso_domain_verify",
         "sso_domain_add",
@@ -508,7 +703,35 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
         "sso_setup_link_create",
         "sso_setup_link_revoke",
         "organization_member_remove",
+        "sso_connection_create",
+        "sso_connection_update",
+        "sso_connection_delete",
+        "sso_domain_update",
+        "sso_domain_delete",
+        "sso_enforce_off",
+        "scim_user_update",
+        "scim_user_deactivate",
+        "scim_user_delete",
+        "scim_group_create",
+        "scim_group_update",
+        "scim_group_delete",
+        "scim_token_revoke",
+        "sso_setup_link_create",
+        "sso_setup_link_open",
+        // The save of the draft, then the test run, then the activation of the link and the draft.
+        "sso_connection_create",
+        "sso_test_run",
+        "sso_setup_link_activate",
+        "sso_connection_update",
+        "sso_setup_link_create",
+        "sso_setup_link_open",
+        "sso_setup_link_ready",
+        "organization_invitation_create",
+        "organization_invitation_revoke",
+        "sso_domain_lost",
       ]);
+      // The guard: the scene holds each visible action, so a new action needs a row of the scene.
+      expect([...new Set(actions)].sort()).toEqual([...ORGANIZATION_VISIBLE_ACTIONS].sort());
       const operatorPage = await getRaw(
         w,
         "/operator/audit",
@@ -527,7 +750,9 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
         "bo@acme.example",
         "cy@acme.example",
         "di@acme.example",
+        "eve@acme.example",
         "ada@acme.example",
+        "tess@acme.example",
         OPERATOR_EMAIL,
       ];
       for (const row of stored)

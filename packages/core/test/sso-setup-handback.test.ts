@@ -237,6 +237,37 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     expect(events).toHaveLength(1);
   });
 
+  // Plan 13b Task 12 (review M1): each read takes one row more than the page. The cursor is the
+  // last row of the page, not the extra row, so the extra row is the first row of the next page.
+  it("reads the extra row again: an owner at each third position gets the notice", async () => {
+    const { w } = await world();
+    const { s } = await session(w);
+    SETUP_OWNER_SCAN.pageSize = 2;
+    // The first owner holds position 1. Positions 3, 6, and 9 are the extra rows of the reads.
+    for (let p = 2; p <= 9; p++)
+      await ownerRow(w, `p${p}@acme.example`, p % 3 === 0 ? "owner" : "viewer");
+    await handBack(w.config, s);
+    expect(readyNotices(w).map((m) => m.to)).toEqual([
+      "owner@acme.example",
+      "p3@acme.example",
+      "p6@acme.example",
+      "p9@acme.example",
+    ]);
+  });
+
+  it("ends complete at an exact page multiple: 6 members in 3 pages of 2, and no warning line", async () => {
+    const { w } = await world();
+    const { s } = await session(w);
+    SETUP_OWNER_SCAN.pageSize = 2;
+    SETUP_OWNER_SCAN.maxPages = 3;
+    for (let p = 2; p <= 5; p++) await ownerRow(w, `p${p}@acme.example`, "viewer");
+    await ownerRow(w, "p6@acme.example", "owner");
+    await handBack(w.config, s);
+    expect(readyNotices(w).map((m) => m.to)).toEqual(["owner@acme.example", "p6@acme.example"]);
+    const lines = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(lines).not.toContain("notice mail failed");
+  });
+
   it("writes one warning line and still runs the hook when the safety bound ends the scan", async () => {
     const { w, events } = await world();
     const { s } = await session(w);
