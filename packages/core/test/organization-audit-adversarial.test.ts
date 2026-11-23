@@ -9,6 +9,7 @@ import {
 import {
   addMember,
   createOrganization,
+  listMembers,
   removeMember,
   updateMemberRole,
 } from "../src/engine/organizations.js";
@@ -482,6 +483,53 @@ describe("the organization audit under attack (plan 13b Task 12)", () => {
       operator.userId,
       true,
       ip,
+    ]);
+  });
+
+  // Ruling R19 (narrows R17): the accept row of an impersonation shows `platform` as the actor. Its
+  // target is the new member, the impersonated user. The member list shows that user to the owner,
+  // so the target tells the owner no new fact. No other field names the user.
+  it("impersonation accept: the actor is platform, and the one field that names the user is the target, a member the list shows", async () => {
+    const w = await world();
+    const cy = (await enrolled(w, "cy@acme.example")).session;
+    const invited = await inviteMember(w.config, {
+      user: w.owner.user,
+      organizationId: w.o1,
+      email: "cy@acme.example",
+      role: "member",
+    });
+    if (!invited.ok) throw new Error(invited.code);
+    const mail = w.mail.findLast((m) => m.to === "cy@acme.example")?.text ?? "";
+    const token = recordCredential(/invitation=(inv_[A-Za-z0-9_-]+)/.exec(mail)?.[1] ?? "");
+    const operator = await platformOperator(w);
+    const as = await impersonate(w, operator.token, cy.user.id);
+    const res = await w.handle(
+      post("/auth/organizations/invitations/accept", { token }, { ...cookie(as) }),
+    );
+    expect(res.status).toBe(200);
+    const view = (await page(w, w.owner.token, { organizationId: w.o1 })).rows.find(
+      (r) => r.action === "organization_invitation_accept",
+    );
+    if (!view) throw new Error("no accept row");
+    expect([view.actor, view.targetUserId, view.ip, view.userAgent]).toEqual([
+      { kind: "platform", id: null, email: null },
+      cy.user.id,
+      null,
+      null,
+    ]);
+    // No other field of the row names the user: not the data, not the actor.
+    expect(JSON.stringify({ ...view, targetUserId: null })).not.toContain(cy.user.id);
+    // The target is a member that the owner sees in the member list.
+    const members = await listMembers(w.config, { user: w.owner.user, organizationId: w.o1 });
+    if (!members.ok) throw new Error(members.code);
+    expect(members.value.map((m) => m.userId)).toContain(cy.user.id);
+    const stored = (await storedOf(w, w.o1)).find(
+      (r) => r.action === "organization_invitation_accept",
+    );
+    expect(stored && [stored.actorId, stored.data?.platform, stored.targetUserId]).toEqual([
+      operator.userId,
+      true,
+      cy.user.id,
     ]);
   });
 

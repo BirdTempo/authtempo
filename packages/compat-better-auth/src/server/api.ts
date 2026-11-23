@@ -430,6 +430,9 @@ export function createApi(
       const v = unwrap(
         await auth.api.inviteMember({
           user: s.user,
+          // Ruling R18 of plan 13b: core refuses an impersonation session here with
+          // `impersonation_session`, as its invite route does.
+          session: s.session,
           organizationId,
           email: body.email,
           role: body.role,

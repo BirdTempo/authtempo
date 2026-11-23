@@ -336,7 +336,7 @@ import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import type { PasskeyHint } from "./primitives/passkey-hints.js";
-import { fail, type Result } from "./result.js";
+import { fail, ok, type Result } from "./result.js";
 import type { ScimScope, SessionRow, UserRow } from "./schema.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
@@ -958,9 +958,14 @@ export interface AuthApi {
     userId: string;
     revokeTokens?: boolean;
   }): Promise<Result<{ ok: true }>>;
-  /** `teamIds` (plan 12k): the teams that the accept adds the person to, at most 20, each a team of the organization. */
+  /**
+   * `teamIds` (plan 12k): the teams that the accept adds the person to, at most 20, each a team of
+   * the organization. `session` (plan 13b, ruling R18): the session of the caller. A session of an
+   * impersonation gets `impersonation_session`, as `POST /organizations/invite` answers it.
+   */
   inviteMember(input: {
     user: UserRow;
+    session?: SessionRow;
     organizationId: string;
     email: string;
     role: string;
@@ -1609,7 +1614,12 @@ export function createAuth(input: AuthConfig): Auth {
       addMember: (i) => addMember(config, i),
       updateMemberRole: (i) => updateMemberRole(config, i),
       removeMember: (i) => removeMember(config, i),
-      inviteMember: (i) => inviteMember(config, i),
+      // Ruling R18 of plan 13b: the router refuses `POST /organizations/invite` to an
+      // impersonation session, so the in-process door refuses that session with the same code.
+      inviteMember: async (i) => {
+        const refused = i.session ? refuseImpersonation({ session: i.session }) : ok(true);
+        return refused.ok ? inviteMember(config, i) : fail(refused.code);
+      },
       listInvitations: (i) => listInvitations(config, i),
       revokeInvitation: (i) => revokeInvitation(config, i),
       acceptInvitation: (i) => acceptInvitation(config, i),

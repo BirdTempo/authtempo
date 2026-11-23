@@ -144,20 +144,20 @@ describe("authtempo audit export under attack (plan 13b Task 12)", () => {
       }
   });
 
-  it("nulls: each nullable field null gives an empty cell, the same cell as an empty string", async () => {
-    // The parser of the CLI takes a null in each of the five fields, so the stub sends each one.
-    // An organization export of a real core has data and the organization in each row.
-    const nulls = row({
-      targetUserId: null,
-      organizationId: null,
-      data: null,
-      ip: null,
-      userAgent: null,
-    });
+  it("nulls: each null field of a reachable row gives an empty cell, the same cell as an empty string", async () => {
+    // The row of an in-process revoke, as core writes it: no target, no IP, no user agent. Each
+    // row of an organization export has the organization and an object in `data`, so the stub
+    // sends no null there. The round trip below takes the same row from a real core.
+    const revoke = {
+      action: "organization_invitation_revoke",
+      reason: "an organization revoked an invitation",
+      data: { invitationId: "01J8Z3Q4R5S6T7V8W9X0Y1INV1" },
+    };
+    const nulls = row({ ...revoke, targetUserId: null, ip: null, userAgent: null });
     const empties = row({
+      ...revoke,
       id: "01J8Z3Q4R5S6T7V8W9X0Y1ROW2",
       targetUserId: "",
-      organizationId: "",
       ip: "",
       userAgent: "",
     });
@@ -165,32 +165,21 @@ describe("authtempo audit export under attack (plan 13b Task 12)", () => {
     const { code, io } = await exportCsv(fetch);
     expect(code, io.stderr.join("\n")).toBe(0);
     const [, first, second] = readCsv(io.stdout.join("\n"));
-    expect(first).toEqual([
-      "01J8Z3Q4R5S6T7V8W9X0Y1ROW1",
+    const cells = (id: string) => [
+      id,
       AT,
       "user",
       "01J8Z3Q4R5S6T7V8W9X0Y1USR1",
-      "organization_member_add",
+      "organization_invitation_revoke",
+      "",
+      ORG,
+      "an organization revoked an invitation",
+      '{"invitationId":"01J8Z3Q4R5S6T7V8W9X0Y1INV1"}',
       "",
       "",
-      "member added",
-      "",
-      "",
-      "",
-    ]);
-    expect(second).toEqual([
-      "01J8Z3Q4R5S6T7V8W9X0Y1ROW2",
-      AT,
-      "user",
-      "01J8Z3Q4R5S6T7V8W9X0Y1USR1",
-      "organization_member_add",
-      "",
-      "",
-      "member added",
-      '{"role":"member"}',
-      "",
-      "",
-    ]);
+    ];
+    expect(first).toEqual(cells("01J8Z3Q4R5S6T7V8W9X0Y1ROW1"));
+    expect(second).toEqual(cells("01J8Z3Q4R5S6T7V8W9X0Y1ROW2"));
   });
 
   it("round trip: a real core writes a formula in the user agent through its routes, and the export quotes it", async () => {

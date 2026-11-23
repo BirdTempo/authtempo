@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
+import { createAuth } from "../src/create-auth.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { HookRefusal } from "../src/engine/hooks.js";
 import { mintSessionJwt, verifySessionJwt } from "../src/engine/jwt.js";
@@ -21,6 +22,7 @@ import {
   operatorHeader,
   sessionOf,
 } from "./operator-helpers.js";
+import { FAST } from "./password-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
 
 const MINUTE_MS = 60_000;
@@ -476,6 +478,59 @@ describe("the impersonation (plan 12f Task 11)", () => {
         userAgent: null,
       }),
     ).toEqual({ ok: false, code: "impersonation_session", status: 403 });
+  });
+
+  // Ruling R18 of plan 13b: the router refuses `POST /organizations/invite` to an impersonation
+  // session. `auth.api.inviteMember` with that session refuses it with the same code.
+  it("refuses an impersonation session at the in-process invite, as the invite route does", async () => {
+    const w = await world();
+    // The in-process door: an app on the same storage and clock, as in the JWT doors test.
+    const app = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: w.auth.storage,
+      mail: { send: async () => {} },
+      clock: w.auth.clock,
+      password: { hash: FAST, uniformSignUp: false },
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+    });
+    const made = await app.api.createOrganization({
+      user: w.target.user,
+      slug: "ada-co",
+      name: "Ada Co",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const organizationId = made.value.organization.id;
+    const token = await started(w);
+    const impersonation = await sessionOf(w.auth, token);
+    const invite = { user: w.target.user, organizationId, role: "member" };
+    const refused = await app.api.inviteMember({
+      ...invite,
+      session: impersonation.session,
+      email: "x@example.com",
+    });
+    expect(refused).toEqual({ ok: false, code: "impersonation_session", status: 403 });
+    const route = await w.handle(
+      post(
+        "/auth/organizations/invite",
+        { organizationId, email: "y@example.com", role: "member" },
+        { cookie: sessionCookie(token) },
+      ),
+    );
+    expect([route.status, await route.json()]).toEqual([403, { error: "impersonation_session" }]);
+    expect(await w.auth.storage.findMany("invitation", [])).toEqual([]);
+    // The user's own session invites.
+    const own = await app.api.inviteMember({
+      ...invite,
+      session: w.target.session,
+      email: "z@example.com",
+    });
+    expect(own.ok).toBe(true);
   });
 
   it("ends the impersonation sessions of an operator at a ban and at a revoke of the role", async () => {

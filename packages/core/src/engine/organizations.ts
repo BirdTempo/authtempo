@@ -84,10 +84,13 @@ export interface AuditMeta {
  * showed as an act of the member. The rules of impersonation allow some of these routes, for
  * example the revoke and the accept of an invitation.
  *
- * Ruling R17 of plan 13b: the row of an impersonated act names the operator only. No field
- * names the impersonated user. Do not add one, in `data` or in `targetUserId`: the owner reads
- * both, and the field would show the owner which user an operator acted as. The operator finds
- * that user from the `impersonation_start` row of the operator audit and the time.
+ * Rulings R17 and R19 of plan 13b: the actor of an impersonated act shows as `platform`. No
+ * field names the impersonated user, with one exception: the `targetUserId` of the
+ * `organization_invitation_accept` row. That target is the new member, and the member list shows
+ * that user to the owner, so it tells the owner no new fact. Do not add another field that names
+ * the user, in `data` or in `targetUserId`. The owner reads both, and the field would show the
+ * owner which user an operator acted as. The operator finds that user from the
+ * `impersonation_start` row of the operator audit and the time.
  */
 export function memberAuditDraft(
   caller: Pick<UserRow, "id">,

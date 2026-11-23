@@ -6,6 +6,7 @@ import {
 } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { adminClient, CLIENT_USER_KEYS, createAuthClient } from "../src/client/index.js";
+import { BETTER_AUTH_CODES } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { admin, organization } from "../src/plugins.js";
 import {
@@ -961,6 +962,42 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
         r.userAgent,
       ]),
     ).toEqual([[orgId, "user", a.opId, true, null, null]]);
+  });
+
+  // Plan 13b Task 12, ruling R18: core refuses `POST /organizations/invite` to an impersonation
+  // session. The in-process createInvitation refuses it the same way, with core's code
+  // `impersonation_session` (Better Auth's FORBIDDEN), and writes no invitation and no audit row.
+  it("createInvitation in an impersonation refuses as the invite route does, and writes nothing", async () => {
+    const db = memoryDatabase();
+    const a = await adminApp(db);
+    const ann = await a.user("ann@example.com");
+    const made = await a.call("/organizations/create", { slug: "acme", name: "Acme" }, ann.cookie);
+    expect(made.status).toBe(200);
+    const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
+    const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+    expect(start.status).toBe(200);
+    const imp = `${COOKIE_NAME}=${setCookie(start, COOKIE_NAME)}`;
+    const route = await json(
+      await a.call(
+        "/organizations/invite",
+        { organizationId: orgId, email: "x@example.com", role: "member" },
+        imp,
+      ),
+    );
+    expect(route).toEqual({ status: 403, body: { error: "impersonation_session" } });
+    const call = await thrown(
+      a.auth.api.createInvitation({
+        body: { email: "y@example.com", role: "member", organizationId: orgId },
+        headers: new Headers({ cookie: imp }),
+      }),
+    );
+    // The same core code, in the APIError form of each server call of the shim.
+    expect(call).toMatchObject({ status: 403, code: BETTER_AUTH_CODES.impersonation_session });
+    expect(await db.storage.findMany("invitation", [])).toEqual([]);
+    const rows = await db.storage.findMany("operatorAudit", [
+      { field: "action", op: "eq", value: "organization_invitation_create" },
+    ]);
+    expect(rows).toEqual([]);
   });
 
   it("answers Better Auth's refusals of an impersonation, and the bearer form", async () => {
