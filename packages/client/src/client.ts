@@ -176,8 +176,14 @@ export type OAuthGrantJSON = Omit<OAuthGrantSummary, "createdAt"> & { createdAt:
 export type SsoDomainJSON = SsoDomainSummary;
 /** One SSO connection of an organization (plan 12d). No answer holds the client secret. */
 export type SsoConnectionJSON = SsoConnectionSummary;
-/** One connection of the list, with the status of its last sign-ins and its certificate end (plan 13b). */
-export type SsoConnectionListedJSON = AnswerOf<"GET /sso/connections">["connections"][number];
+/**
+ * One connection of the list, with the status of its last sign-ins and its certificate end
+ * (plan 13b). It is an `SsoConnectionJSON` too, so an app that typed the list with that type
+ * before 13b still compiles.
+ */
+export type SsoConnectionListedJSON = SsoConnectionJSON & {
+  status: AnswerOf<"GET /sso/connections">["connections"][number]["status"];
+};
 /** One SCIM token of an organization (plan 12d). Never the token, never its hash. */
 export type ScimTokenJSON = ScimTokenSummary;
 /**
@@ -789,13 +795,17 @@ export interface Client {
      * the owner holds by default. A row from before schema version 18 is not in it.
      */
     audit: {
-      /** One page. Pass `next` as `after` to read the page after it. `next` is null on the last page. */
+      /**
+       * One page. Pass `next` as `after` to read the page after it. `next` is null on the last page.
+       * A 200 with no list of `rows`, or with no `next`, answers `unexpected` with status 200.
+       */
       list(
         input: OrganizationAuditQuery,
       ): Promise<ClientResult<{ rows: OrganizationAuditView[]; next: string | null }>>;
       /**
        * Every row of the query, page by page with `limit` 100. It holds one page at a time.
-       * A failed page throws its `ClientFailure`, after the rows of the pages before it.
+       * A failed page throws its `ClientFailure`, after the rows of the pages before it. A 200
+       * that is not a page fails too: it throws `unexpected` with status 200.
        */
       export(
         input: Omit<OrganizationAuditQuery, "after" | "limit">,
@@ -1350,6 +1360,13 @@ function isWebURL(v: unknown): v is string {
   }
 }
 const isLinkStart = (v: unknown): v is { url: string } => isRecord(v) && isWebURL(v.url);
+/**
+ * A page of the organization audit (plan 13b). The export reads `rows` and follows `next`, so
+ * a page with no list of rows, or with no `next` of the contract, is not a page: a missing
+ * `next` must not end an export early with no failure.
+ */
+const isAuditPage = (v: unknown): v is { rows: OrganizationAuditView[]; next: string | null } =>
+  isRecord(v) && Array.isArray(v.rows) && (typeof v.next === "string" || v.next === null);
 
 export function createClient(options: ClientOptions): Client {
   const call = createRawTransport(options);
@@ -1783,17 +1800,16 @@ export function createClient(options: ClientOptions): Client {
     from,
     to,
   }) =>
-    send<{ rows: OrganizationAuditView[]; next: string | null }>(
-      "organizations.audit.list",
-      undefined,
-      {
+    shaped(
+      send<unknown>("organizations.audit.list", undefined, {
         organizationId,
         ...(limit !== undefined ? { limit: String(limit) } : {}),
         ...(after !== undefined ? { after } : {}),
         ...(action !== undefined ? { action } : {}),
         ...(from !== undefined ? { from } : {}),
         ...(to !== undefined ? { to } : {}),
-      },
+      }),
+      isAuditPage,
     );
   const audit: Client["organizations"]["audit"] = {
     list: auditList,

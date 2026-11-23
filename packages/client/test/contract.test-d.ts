@@ -1,7 +1,7 @@
 import type { AnswerOf, BodyOf, QueryOf } from "@authtempo/core/openapi";
 import type { RouteKey } from "@authtempo/core/routes";
 import type { CLIENT_CALLS, ClientCall, ClientOperation, Selected } from "../src/calls.js";
-import type { Client } from "../src/client.js";
+import type { Client, SsoConnectionJSON, SsoConnectionListedJSON } from "../src/client.js";
 import type { ClientResult } from "../src/result.js";
 
 /**
@@ -585,6 +585,15 @@ export const NOT_COMPARED = [
 /** The two lists name every operation of the table, and no other. */
 export type _covered = Expect<
   Equal<Compared | (typeof NOT_COMPARED)[number]["operation"], ClientOperation>
+>;
+
+/**
+ * A listed connection is a connection (plan 13b fix round 1, M1). Before 13b,
+ * `sso.connections.list` answered `SsoConnectionJSON[]`. An app that keeps that
+ * type for the list still compiles under `exactOptionalPropertyTypes`.
+ */
+export type _listedIsConnection = Expect<
+  SsoConnectionListedJSON[] extends SsoConnectionJSON[] ? true : false
 >;
 
 /**

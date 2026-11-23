@@ -1,7 +1,13 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { createClient, type OrganizationAuditView } from "../src/client.js";
+import {
+  createClient,
+  type OrganizationAuditQuery,
+  type OrganizationAuditView,
+} from "../src/client.js";
 
 const BASE = "https://api.example.com";
+const FROM = "2026-11-01T00:00:00.000Z";
+const TO = "2026-11-23T00:00:00.000Z";
 
 /** One audit row with the id `a<n>`, zero-padded, so the ids sort in row order. */
 function row(n: number): OrganizationAuditView {
@@ -107,5 +113,89 @@ describe("the organization audit through the client (plan 13b)", () => {
     }
     expect(seen).toEqual(rows(1, 10).map((r) => r.id));
     expect(urls).toHaveLength(1);
+  });
+
+  // Fix round 1 (I1): each filter that `list` sends, alone, with the exact query.
+  it.each<{ filter: string; input: OrganizationAuditQuery; query: string }>([
+    {
+      filter: "limit",
+      input: { organizationId: "o1", limit: 5 },
+      query: "organizationId=o1&limit=5",
+    },
+    {
+      filter: "action",
+      input: { organizationId: "o1", action: "organization_member_add" },
+      query: "organizationId=o1&action=organization_member_add",
+    },
+    {
+      filter: "from",
+      input: { organizationId: "o1", from: FROM },
+      query: `organizationId=o1&from=${encodeURIComponent(FROM)}`,
+    },
+    {
+      filter: "to",
+      input: { organizationId: "o1", to: TO },
+      query: `organizationId=o1&to=${encodeURIComponent(TO)}`,
+    },
+  ])("lists with the filter $filter in the query", async ({ input, query }) => {
+    const { urls, client } = pages([{ query, status: 200, body: { rows: [], next: null } }]);
+    const r = await client.organizations.audit.list(input);
+    expect(urls).toEqual([`GET ${BASE}/auth/organizations/audit?${query}`]);
+    expect(r).toEqual({ ok: true, value: { rows: [], next: null } });
+  });
+
+  it("exports with the filters action, from, and to on each page", async () => {
+    const filters = `&action=organization_member_add&from=${encodeURIComponent(FROM)}&to=${encodeURIComponent(TO)}`;
+    const filtered = THREE_PAGES.map((p) => ({ ...p, query: `${p.query}${filters}` }));
+    const { urls, client } = pages(filtered);
+    const seen: string[] = [];
+    const query = {
+      organizationId: "o1",
+      action: "organization_member_add",
+      from: FROM,
+      to: TO,
+    } as const;
+    for await (const r of client.organizations.audit.export(query)) seen.push(r.id);
+    expect(seen).toHaveLength(207);
+    expect(urls).toEqual(filtered.map((p) => `GET ${BASE}/auth/organizations/audit?${p.query}`));
+  });
+
+  // Fix round 1 (M2): a 200 that is not a page is `unexpected` with status 200 (the plan 11d rule).
+  it("answers unexpected for a 200 whose rows are not a list", async () => {
+    const { client } = pages([
+      { query: "organizationId=o1", status: 200, body: { rows: "a0001", next: null } },
+    ]);
+    const r = await client.organizations.audit.list({ organizationId: "o1" });
+    expect(r).toEqual({ ok: false, code: "unexpected", status: 200 });
+  });
+
+  it("throws unexpected, with no row, when page 1 has no rows", async () => {
+    const [first] = THREE_PAGES;
+    if (!first) throw new Error("no page");
+    const { client } = pages([{ query: first.query, status: 200, body: { next: null } }]);
+    const seen: string[] = [];
+    const run = async () => {
+      for await (const r of client.organizations.audit.export({ organizationId: "o1" }))
+        seen.push(r.id);
+    };
+    await expect(run()).rejects.toEqual({ ok: false, code: "unexpected", status: 200 });
+    expect(seen).toEqual([]);
+  });
+
+  it("yields the rows of page 1, then throws unexpected when page 2 has no next", async () => {
+    const [first, second] = THREE_PAGES;
+    if (!first || !second) throw new Error("no page");
+    const { urls, client } = pages([
+      first,
+      { query: second.query, status: 200, body: { rows: rows(101, 200) } },
+    ]);
+    const seen: string[] = [];
+    const run = async () => {
+      for await (const r of client.organizations.audit.export({ organizationId: "o1" }))
+        seen.push(r.id);
+    };
+    await expect(run()).rejects.toEqual({ ok: false, code: "unexpected", status: 200 });
+    expect(seen).toEqual(rows(1, 100).map((r) => r.id));
+    expect(urls).toHaveLength(2);
   });
 });
