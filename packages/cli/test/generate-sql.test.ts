@@ -109,14 +109,14 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
     // The runner records each step. The baseline 0001_schema_v13 has 30 steps, and
     // 0002_schema_v14 of plan 12d has 7. 0003_schema_v15 of plan 12i has 6, and
     // 0004_schema_v16 of plan 12p has 3. 0005_schema_v17 of plan 13a has 7, and
-    // 0006_schema_v18 of plan 13b has 5.
+    // 0006_schema_v18 of plan 13b has 9: each column and each key is a step (final review M3).
     expect(rows.slice(1).map((s) => /VALUES \('([^']+)', (\d+),/.exec(s)?.slice(1))).toEqual([
       ...Array.from({ length: 30 }, (_, i) => ["0001_schema_v13", String(i + 1)]),
       ...Array.from({ length: 7 }, (_, i) => ["0002_schema_v14", String(i + 1)]),
       ...Array.from({ length: 6 }, (_, i) => ["0003_schema_v15", String(i + 1)]),
       ...Array.from({ length: 3 }, (_, i) => ["0004_schema_v16", String(i + 1)]),
       ...Array.from({ length: 7 }, (_, i) => ["0005_schema_v17", String(i + 1)]),
-      ...Array.from({ length: 5 }, (_, i) => ["0006_schema_v18", String(i + 1)]),
+      ...Array.from({ length: 9 }, (_, i) => ["0006_schema_v18", String(i + 1)]),
     ]);
 
     const server = MYSQL_SERVERS[0];

@@ -103,18 +103,34 @@ for (const server of MYSQL_SERVERS) {
       // user columns and their unique keys (plan 12i). They also include the column and the
       // fill of 0004 (plan 12p), the ALTER of 0005 with the three connection columns and the
       // first new table of 0005 (plan 13a). They also include the ALTER of 0006 with the audit
-      // column and its key (plan 13b), and the version update of the last file. The fill sets
-      // the same value when it runs again.
+      // column and the ALTER with its key (plan 13b), and the version update of the last file.
+      // 0006 adds each column and each key in separate steps (final review M3 of plan 13b): 8
+      // ALTER steps and the version update. The fill sets the same value when it runs again.
       const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
       const proved = ALL_STEPS.indexOf("0004_schema_v16:1") + 1;
       const fill = ALL_STEPS.indexOf("0004_schema_v16:2") + 1;
       const connectionColumns = ALL_STEPS.indexOf("0005_schema_v17:1") + 1;
       const setupLink = ALL_STEPS.indexOf("0005_schema_v17:4") + 1;
       const auditColumn = ALL_STEPS.indexOf("0006_schema_v18:1") + 1;
+      const auditKey = ALL_STEPS.indexOf("0006_schema_v18:2") + 1;
       expect(userColumns).toBeGreaterThan(baseline.length);
-      expect([proved > userColumns, fill, connectionColumns, setupLink, auditColumn, last]).toEqual(
-        [true, proved + 1, fill + 2, connectionColumns + 3, setupLink + 4, auditColumn + 4],
-      );
+      expect([
+        proved > userColumns,
+        fill,
+        connectionColumns,
+        setupLink,
+        auditColumn,
+        auditKey,
+        last,
+      ]).toEqual([
+        true,
+        proved + 1,
+        fill + 2,
+        connectionColumns + 3,
+        setupLink + 4,
+        auditColumn + 1,
+        auditColumn + 8,
+      ]);
       for (const at of [
         2,
         baseline.length,
@@ -124,6 +140,7 @@ for (const server of MYSQL_SERVERS) {
         connectionColumns,
         setupLink,
         auditColumn,
+        auditKey,
         last,
       ]) {
         db = await freshDatabase(server, { migrate: false });
@@ -436,8 +453,10 @@ for (const server of MYSQL_SERVERS) {
         ["0004_schema_v16", "56442d040411910b0b8da831efa1508c2a04fea5b002726e6145ccf9a98a71da"],
         // Plan 13a Task 1 (2026-11-23): the setup tables and the draft columns.
         ["0005_schema_v17", "3a2c5e3c1f0a92a98730757db31d0525c2a5b81175c9ca2b07d6e21cf7faec36"],
-        // Plan 13b Task 1 (2026-11-23): the audit organization and the expiry columns.
-        ["0006_schema_v18", "9b44c51033fc0637c419af65e308542a527c6ad37511b2652083cfb708a70d60"],
+        // Plan 13b Task 1 (2026-11-23): the audit organization and the expiry columns. Final
+        // review M3 (2026-11-24) split each column and its key into two steps before 0006 left
+        // the plan branch. No database outside the tests ran the old text.
+        ["0006_schema_v18", "b33605e324dafa9de464c6640a91181f5e0bf5bab94858cc7cc05069e6cec47b"],
       ]);
     });
   });

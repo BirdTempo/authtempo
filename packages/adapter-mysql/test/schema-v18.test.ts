@@ -69,7 +69,27 @@ describe("the 0006 text of schema version 18 (plan 13b)", () => {
     );
     expect(writes).toEqual([]);
   });
+
+  it("adds each column and each key in separate statements (final review M3)", () => {
+    // A key has no INSTANT algorithm. An ALTER with a column and a key runs INPLACE, and InnoDB
+    // rebuilds the table for the column. Alone, the column add is INSTANT, and the key is built
+    // in place with no rebuild.
+    const both = (M0006?.statements ?? []).filter(
+      (s) => s.includes("ADD COLUMN") && s.includes("ADD KEY"),
+    );
+    expect(both).toEqual([]);
+    expect(M0006?.statements.filter((s) => s.includes("ADD KEY"))).toHaveLength(4);
+  });
 });
+
+/** The row versions of the instant column adds of a table: 0 after a rebuild. */
+async function rowVersionsOf(pool: Pool, table: string): Promise<number> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT TOTAL_ROW_VERSIONS AS v FROM information_schema.INNODB_TABLES WHERE NAME = CONCAT(DATABASE(), '/', ?)",
+    [table],
+  );
+  return Number(rows[0]?.v);
+}
 
 for (const server of MYSQL_SERVERS) {
   describe(`schema version 18 on MySQL ${server.version} (plan 13b)`, () => {
@@ -104,8 +124,18 @@ for (const server of MYSQL_SERVERS) {
       expect(stopped).toMatchObject({ message: "stop before 0006" });
       expect(await versionOf(d.pool)).toBe("17");
       for (const q of ROWS_OF_VERSION_17) await d.pool.query(q);
+      const before: Record<string, number> = {};
+      for (const table of Object.keys(NEW_COLUMNS))
+        before[table] = await rowVersionsOf(d.pool, table);
       expect(await applyMysqlMigrations(d.pool)).toEqual(["0006_schema_v18"]);
       expect(await versionOf(d.pool)).toBe("18");
+      // Final review M3: each column add of 0006 is INSTANT, so each table gets one row version
+      // more. A rebuild sets the count to 0. The key steps after it keep the count.
+      for (const table of Object.keys(NEW_COLUMNS))
+        expect({ table, versions: await rowVersionsOf(d.pool, table) }).toEqual({
+          table,
+          versions: (before[table] ?? 0) + 1,
+        });
       const adapter = createMysqlAdapter(d.pool);
       expect(
         await adapter.findOne("operatorAudit", [{ field: "id", op: "eq", value: "a17" }]),

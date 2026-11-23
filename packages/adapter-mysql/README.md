@@ -80,7 +80,17 @@ version 1, with no setup link, and not pending. `0006_schema_v18` adds
 result columns to `ta_sso_connection`, and `expiry_stage` and
 `expiry_notice_at` to `ta_scim_token` and `ta_sso_setup_link`, each with a key
 on `expiry_notice_at`. Each new column is nullable with no default, so a row of
-version 17 reads null in each. No step changes an audit row. MySQL commits each DDL statement at once. So the
+version 17 reads null in each. No step changes an audit row.
+
+Rule for a column and a key: add them in two statements. A key has no
+INSTANT algorithm, so one ALTER with both runs INPLACE, and InnoDB rebuilds
+the table for the column. The time of a rebuild grows with the rows, and
+`ta_operator_audit` only grows. Alone, the column add is INSTANT, with no
+copy of a row. The key is then built in place with no rebuild, and writes
+go on during the build. `0006_schema_v18` follows this rule. Its test reads
+the row versions of InnoDB to prove that no table was rebuilt.
+
+MySQL commits each DDL statement at once. So the
 runner records each statement as a step in `ta_migrations`, and after a
 failure it resumes at the first step with no record. The last step writes the
 version. A step and its record are two statements. After a stop between the
