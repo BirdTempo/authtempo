@@ -8,6 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { OrganizationTokenRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type ProofCaller, provedAddress } from "./address.js";
+import { organizationAuditDraft, writeAuditIn } from "./operator/audit.js";
 import { type OrganizationSummary, publicOrganization, standing } from "./organizations.js";
 import { effectiveIn } from "./permissions.js";
 import type { ResolvedSession } from "./sessions.js";
@@ -189,8 +190,8 @@ async function creatorIn(config: ResolvedConfig, row: OrganizationTokenRow): Pro
  * Storage calls: three findOne of `standing`, then the transaction. In it run
  * one update (the lock) and one findOne of the member row. Then the role read
  * of `effectiveIn` runs, none for a role of the config. Last run one delete of
- * the expired rows, one findMany (the count), and one create. One limiter
- * call runs before every storage call.
+ * the expired rows, one findMany (the count), one create, and the create of
+ * the audit row (plan 13b). One limiter call runs before every storage call.
  */
 export function createOrganizationToken(
   config: ResolvedConfig,
@@ -260,6 +261,15 @@ async function mintOrganizationToken(
     createdAt: now,
     updatedAt: now,
   };
+  // The hint names the token in the audit; the token and its hash never go in a row (plan 13b).
+  const draft = organizationAuditDraft({ kind: "user", user }, organizationId, {
+    action: "organization_token_create",
+    targetUserId: null,
+    data: { tokenId: row.id, hint: row.hint, permissions: row.permissions },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return draft;
   const made = await config.storage.transaction(async (tx): Promise<Result<true>> => {
     // False: the organization went after the standing read.
     if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
@@ -287,6 +297,8 @@ async function mintOrganizationToken(
     );
     if (held.length >= ORGANIZATION_TOKEN_CAP) return fail("organization_token_limit");
     await tx.create("organizationToken", row);
+    // The last statement: the token and its row commit together, or neither does.
+    await writeAuditIn(tx, draft.value, now);
     return ok(true);
   });
   if (!made.ok) return made;
@@ -396,7 +408,9 @@ export async function updateOrganizationToken(
  * Deletes a token of the organization, for a verified member with
  * `apiToken:revoke`. The creator has no right of their own. A token of
  * another organization answers `not_found`. Storage calls: three findOne of
- * `standing` and one delete.
+ * `standing`, then one transaction with one delete and the create of the
+ * audit row (plan 13b). On D1 the delete in a transaction is still one
+ * statement (DELETE ... RETURNING), so the row adds one statement.
  */
 export async function revokeOrganizationToken(
   config: ResolvedConfig,
@@ -406,11 +420,25 @@ export async function revokeOrganizationToken(
   if (!provedAddress(input)) return fail("email_unverified");
   const s = await standing(config, input.user, input.organizationId, REVOKE);
   if (!s.ok) return s;
-  const n = await config.storage.delete("organizationToken", [
-    { field: "id", op: "eq", value: input.id },
-    { field: "organizationId", op: "eq", value: input.organizationId },
-  ]);
-  if (n === 0) return fail("not_found");
+  const draft = organizationAuditDraft({ kind: "user", user: input.user }, input.organizationId, {
+    action: "organization_token_revoke",
+    targetUserId: null,
+    data: { tokenId: input.id },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return draft;
+  const done = await config.storage.transaction(async (tx): Promise<Result<true>> => {
+    const n = await tx.delete("organizationToken", [
+      { field: "id", op: "eq", value: input.id },
+      { field: "organizationId", op: "eq", value: input.organizationId },
+    ]);
+    // Zero rows: nothing was written, so the answer needs no undo.
+    if (n === 0) return fail("not_found");
+    await writeAuditIn(tx, draft.value, config.clock.now());
+    return ok(true);
+  });
+  if (!done.ok) return done;
   config.observe.emit({
     name: "api_token.revoke",
     kind: "to",

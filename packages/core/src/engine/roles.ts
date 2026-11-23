@@ -5,6 +5,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRoleRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { organizationAuditDraft, writeAuditIn } from "./operator/audit.js";
 import { standing } from "./organizations.js";
 import { grantCheck, roleRowDef, type Standing } from "./permissions.js";
 import { type ResolvedOrganizations, ROLE_RE } from "./ranks.js";
@@ -71,6 +72,11 @@ function rowStanding(o: ResolvedOrganizations, row: OrganizationRoleRow): Standi
 /** One part of the role rule: `ROLE_RE` with no comma. */
 function oneRoleName(name: string): boolean {
   return typeof name === "string" && ROLE_RE.test(name) && !name.includes(",");
+}
+
+/** True when two sets grant the same names. */
+function sameSet(a: Statements, b: Statements): boolean {
+  return isSubset(a, b) && isSubset(b, a);
 }
 
 /**
@@ -233,6 +239,14 @@ export async function createRole(
     createdAt: now,
     updatedAt: now,
   };
+  const draft = organizationAuditDraft({ kind: "user", user: input.user }, input.organizationId, {
+    action: "organization_role_create",
+    targetUserId: null,
+    data: { roleId: row.id, name: row.name, rank: row.rank },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return draft;
   try {
     const written = await config.storage.transaction(async (tx): Promise<Result<true>> => {
       // False: the organization went after the standing read.
@@ -253,6 +267,8 @@ export async function createRole(
       );
       if (held.length >= sc.max) return fail("role_limit");
       await tx.create("organizationRole", row);
+      // The last statement: the role and its audit row commit together (plan 13b).
+      await writeAuditIn(tx, draft.value, now);
       return ok(true);
     });
     if (!written.ok) return written;
@@ -285,6 +301,11 @@ export async function createRole(
  * The write compares `updatedAt` with the read and sets a new stamp. So an
  * update that read the row before a parallel update answers `conflict`, and
  * never writes back a set that the other update narrowed.
+ *
+ * The update and its audit row run in one transaction (plan 13b). The row
+ * names the changed fields, never their values. On D1 an update in a
+ * transaction sends a read for the undo too, so the act sends two more
+ * statements than before 13b, not one.
  */
 export async function updateRole(
   config: ResolvedConfig,
@@ -311,22 +332,42 @@ export async function updateRole(
     input.permissions ?? row.permissions,
   );
   if (!def.ok) return def;
+  // A row with a bad shape grants nothing, so each field of it changes.
+  const before = roleRowDef(sc.o, row);
+  const changed = [
+    ...(before?.rank === def.value.rank ? [] : ["rank"]),
+    ...(before && sameSet(before.permissions, def.value.permissions) ? [] : ["permissions"]),
+  ];
+  const draft = organizationAuditDraft({ kind: "user", user: input.user }, input.organizationId, {
+    action: "organization_role_update",
+    targetUserId: null,
+    data: { roleId: row.id, changed },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return draft;
   // One millisecond past the read, so the stamp changes even when the clock has not moved.
   const now = new Date(Math.max(config.clock.now().getTime(), row.updatedAt.getTime() + 1));
-  const n = await config.storage.update(
-    "organizationRole",
-    [
-      { field: "id", op: "eq", value: row.id },
-      { field: "updatedAt", op: "eq", value: row.updatedAt },
-    ],
-    {
-      rank: def.value.rank,
-      permissions: def.value.permissions,
-      updatedAt: now,
-    },
-  );
+  const written = await config.storage.transaction(async (tx): Promise<boolean> => {
+    const n = await tx.update(
+      "organizationRole",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "updatedAt", op: "eq", value: row.updatedAt },
+      ],
+      {
+        rank: def.value.rank,
+        permissions: def.value.permissions,
+        updatedAt: now,
+      },
+    );
+    // Zero rows: nothing was written, so the answer needs no undo.
+    if (n === 0) return false;
+    await writeAuditIn(tx, draft.value, config.clock.now());
+    return true;
+  });
   // Zero rows: another update or a delete ran after the read.
-  if (n === 0)
+  if (!written)
     return (await findRole(config, input.organizationId, input.name))
       ? fail("conflict")
       : fail("not_found");
@@ -351,7 +392,8 @@ export async function updateRole(
  * Rule 5: `role_in_use` while a member row of the organization or a pending
  * invitation holds the name as a part of its role string.
  *
- * Cost: three storage calls in one transaction (see `heldInside`). A grant
+ * Cost: four storage calls in one transaction (see `heldInside`), the last
+ * the create of the audit row (plan 13b). A grant
  * of the name that a parallel request makes after the check holds a part
  * that no table names. A later create of the name answers `role_in_use` for
  * it, so the part never gets rights.
@@ -368,11 +410,22 @@ export async function deleteRole(
   const row = await findRole(config, input.organizationId, input.name);
   if (!row) return fail("not_found");
   if (!grantCheck(s.value, rowStanding(sc.o, row))) return fail("forbidden_rank");
+  const draft = organizationAuditDraft({ kind: "user", user: input.user }, input.organizationId, {
+    action: "organization_role_delete",
+    targetUserId: null,
+    data: { roleId: row.id, name: row.name },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return draft;
   const now = config.clock.now();
   const done = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
     if (await heldInside(tx, input.organizationId, input.name, now)) return fail("role_in_use");
     const n = await tx.delete("organizationRole", [{ field: "id", op: "eq", value: row.id }]);
-    return n === 0 ? fail("not_found") : ok({ ok: true as const });
+    if (n === 0) return fail("not_found");
+    // The last statement: the delete and its audit row commit together (plan 13b).
+    await writeAuditIn(tx, draft.value, now);
+    return ok({ ok: true as const });
   });
   if (done.ok)
     config.observe.emit({
