@@ -27,8 +27,9 @@ describe("schema version 12 (plan 12f)", () => {
   });
 
   it("defines the audit model with its two indexes", () => {
-    // The fields of spec 26 item 8, in that order.
-    expect(Object.entries(schema.operatorAudit.fields)).toEqual([
+    // The fields of spec 26 item 8, in that order. Plan 13b appends organizationId and its
+    // index: test/schema-v18.test.ts holds them.
+    expect(Object.entries(schema.operatorAudit.fields).slice(0, 11)).toEqual([
       ["id", { type: "string" }],
       ["createdAt", { type: "date" }],
       ["updatedAt", { type: "date" }],
@@ -42,7 +43,7 @@ describe("schema version 12 (plan 12f)", () => {
       ["userAgent", { type: "string", nullable: true }],
     ]);
     expect(schema.operatorAudit.unique).toEqual([]);
-    expect(schema.operatorAudit.indexes).toEqual([["targetUserId"], ["actorId"]]);
+    expect(schema.operatorAudit.indexes.slice(0, 2)).toEqual([["targetUserId"], ["actorId"]]);
   });
 
   it("keeps the audit model out of the user's child models", () => {

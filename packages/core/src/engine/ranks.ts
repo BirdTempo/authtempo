@@ -101,6 +101,8 @@ export const ACTION_ROLE: {
   team: { create: "admin", update: "admin", delete: "admin" },
   ac: { read: "viewer", create: "admin", update: "admin", delete: "admin" },
   apiToken: { read: "admin", create: "admin", update: "admin", revoke: "admin" },
+  // Plan 13b: the audit shows the acts of each member, so only an owner reads it.
+  audit: { read: "owner" },
 };
 
 /**

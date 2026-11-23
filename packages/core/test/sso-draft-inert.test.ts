@@ -69,6 +69,8 @@ async function setupLink(w: ScimWorld): Promise<string> {
     endedAt: null,
     openedAt: now,
     readyAt: null,
+    expiryStage: null,
+    expiryNoticeAt: null,
   });
   return id;
 }

@@ -761,6 +761,13 @@ export async function createConnection(
     draft: draftFor !== undefined,
     version: 1,
     setupLinkId: draftFor ?? null,
+    // Plan 13b: Task 9 sets the certificate end and the expiry fields; a sign-in sets the status.
+    certificateEndsAt: null,
+    expiryStage: null,
+    expiryNoticeAt: null,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    lastFailureStep: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

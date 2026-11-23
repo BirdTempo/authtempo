@@ -72,6 +72,8 @@ export const searchQuery = z.strictObject({
 export const userQuery = z.strictObject({ userId: operatorId });
 export const auditQuery = z.strictObject({
   targetUserId: operatorId.optional(),
+  // Plan 13b: the rows of one organization.
+  organizationId: operatorId.optional(),
   after: operatorId.optional(),
   limit: pageLimit.optional(),
 });
@@ -189,6 +191,8 @@ const OperatorAuditJson = z.strictObject({
   data: z.record(z.string(), z.unknown()).nullable(),
   ip: z.string().nullable(),
   userAgent: z.string().nullable(),
+  /** The organization of the act (plan 13b). Null for an operator act on a user. */
+  organizationId: z.string().nullable(),
 });
 
 /** The answer of each write but create-admin and the session ends: the id of its audit row. */

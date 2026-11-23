@@ -43,8 +43,9 @@ describe("the hook map", () => {
       }
     }
     // 44 of plan 12h, sso.beforeSignIn and scim.afterChange of plan 12d, and
-    // the two anonymous points of plan 12i, and sso.setupReady of plan 13a.
-    expect(HOOK_NAMES).toHaveLength(49);
+    // the two anonymous points of plan 12i, sso.setupReady of plan 13a, and sso.expiring of
+    // plan 13b.
+    expect(HOOK_NAMES).toHaveLength(50);
   });
 
   it("has no row for a hook point that does not exist", () => {

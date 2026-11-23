@@ -1,5 +1,6 @@
 import type { MailMessage, ResolvedConfig } from "../config.js";
 import { isIpLiteral } from "../limiter/ip-key.js";
+import type { ExpiryKind, ExpiryStage } from "../schema.js";
 
 /**
  * The credential-change notices (plan 12a, spec 8.15; ASVS 5.0.0 6.3.7).
@@ -27,7 +28,9 @@ export type NoticeEvent =
   // plan 12f: a platform operator opened a session on the account, for support.
   | "impersonation_started"
   // plan 13a: the notices of an organization's SSO setup, to each owner.
-  | SetupNoticeEvent;
+  | SetupNoticeEvent
+  // plan 13b: a SAML certificate, a SCIM token, or a setup link ends soon. To each owner.
+  | "sso_expiring";
 
 /**
  * The notices of plan 13a. They tell an owner about the organization, not
@@ -54,11 +57,20 @@ export interface NoticeMailInput {
    * that renders HTML must escape it.
    */
   setup?: { linkId: string; note: string };
+  /**
+   * The row of `sso_expiring` (plan 13b): its kind, its id, its label, its end, and the stage in
+   * days. Never a token, a hash, or a certificate. The label is text of a manager: a builder
+   * that renders HTML must escape it.
+   */
+  expiring?: { kind: ExpiryKind; id: string; label: string; at: Date; days: ExpiryStage };
 }
 
-/** The first line of each notice but the impersonation and setup notices, which have their own text. */
+/**
+ * The first line of each notice but the impersonation, setup, and expiry notices, which have
+ * their own text.
+ */
 const WHAT: Readonly<
-  Record<Exclude<NoticeEvent, "impersonation_started" | SetupNoticeEvent>, string>
+  Record<Exclude<NoticeEvent, "impersonation_started" | SetupNoticeEvent | "sso_expiring">, string>
 > = {
   password_changed: "Your password was changed.",
   password_reset: "Your password was reset.",
@@ -107,6 +119,16 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
       subject: `SSO setup notice for ${input.appName}`,
       text: lines.join("\n"),
     };
+  }
+  // The expiry notice (plan 13b). It names the row by its id and label, and holds no token.
+  if (input.event === "sso_expiring") {
+    const lines = ["An SSO credential of your organization ends soon."];
+    if (input.expiring !== undefined)
+      lines.push(
+        `${input.expiring.label} (${input.expiring.id}) ends at ${input.expiring.at.toISOString()}.`,
+      );
+    lines.push(`Time: ${input.at.toISOString()}.`);
+    return { to: input.email, subject: `SSO notice for ${input.appName}`, text: lines.join("\n") };
   }
   const lines = [WHAT[input.event]];
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);

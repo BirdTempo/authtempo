@@ -178,6 +178,9 @@ export async function createScimToken(
     // A token of the manager or the app is live (plan 13a). Only a setup link makes a pending one.
     pending: pendingFor !== undefined,
     setupLinkId: pendingFor ?? null,
+    // Plan 13b: Task 9 sets the expiry fields.
+    expiryStage: null,
+    expiryNoticeAt: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

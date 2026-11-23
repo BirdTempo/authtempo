@@ -226,6 +226,8 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /organizations/update": "It writes the fields of the organization; it moves no member.",
   "GET /organizations/members": READ,
   "GET /organizations/invitations": READ,
+  // Plan 13b: the audit of an organization is a read, as the invitation list is.
+  "GET /organizations/audit": READ,
   "POST /organizations/invitations/revoke": "It ends an invitation; it gives no role.",
   "POST /organizations/invitations/accept":
     "It adds the user by an invitation to the user's address, as the user can.",

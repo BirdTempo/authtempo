@@ -175,6 +175,9 @@ export async function createSetupLink(
     endedAt: null,
     openedAt: null,
     readyAt: null,
+    // Plan 13b: Task 9 sets the expiry fields.
+    expiryStage: null,
+    expiryNoticeAt: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

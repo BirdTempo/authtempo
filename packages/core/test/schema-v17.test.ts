@@ -44,12 +44,14 @@ function linkRow(now: Date, tokenHash: string): SsoSetupLinkRow {
     endedAt: null,
     openedAt: null,
     readyAt: null,
+    expiryStage: null,
+    expiryNoticeAt: null,
   };
 }
 
 describe("schema version 17 (plan 13a)", () => {
-  it("version: is schema version 17", () => {
-    expect(SCHEMA_VERSION).toBe(17);
+  it("version: is schema version 17 or later", () => {
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
   });
 
   it("draft default: a connection insert with no draft reads back as live, version 1", async () => {

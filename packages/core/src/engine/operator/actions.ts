@@ -45,6 +45,20 @@ const ACTIONS: Readonly<Record<OperatorAction, true>> = {
   sso_setup_link_revoke: true,
   sso_setup_link_activate: true,
   sso_test_run: true,
+  // Plan 13b: the hand back of a setup link (owner decision 1).
+  sso_setup_link_ready: true,
+  // The actions of plan 13b (ORGANIZATION_AUDIT_ACTIONS of the schema).
+  organization_member_add: true,
+  organization_member_remove: true,
+  organization_member_role_change: true,
+  organization_invitation_create: true,
+  organization_invitation_accept: true,
+  organization_invitation_revoke: true,
+  organization_token_create: true,
+  organization_token_revoke: true,
+  organization_role_create: true,
+  organization_role_update: true,
+  organization_role_delete: true,
 };
 
 export const OPERATOR_ACTIONS: readonly OperatorAction[] = Object.freeze(

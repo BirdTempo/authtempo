@@ -1451,6 +1451,15 @@ export const ROUTES = Object.freeze([
     codes: ["unauthorized", "invalid_body", "forbidden_rank"],
     oauthCodes: [],
   },
+  // The organization audit (plan 13b): the codes of the invitation list, and no new code.
+  {
+    method: "GET",
+    path: "/organizations/audit",
+    feature: "organizations",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body", "forbidden_rank"],
+    oauthCodes: [],
+  },
   {
     method: "POST",
     path: "/organizations/invitations/revoke",

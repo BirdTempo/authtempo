@@ -30,6 +30,9 @@ export const CORE_STATEMENTS = Object.freeze({
   team: Object.freeze(["create", "update", "delete"] as const),
   ac: Object.freeze(["read", "create", "update", "delete"] as const),
   apiToken: Object.freeze(["read", "create", "update", "revoke"] as const),
+  // Plan 13b: the organization audit. The `ranks` form gives it to owner only; a role of the
+  // `roles` form holds it only when the app lists it.
+  audit: Object.freeze(["read"] as const),
 });
 
 /** A plain object whose own values are lists of strings. */

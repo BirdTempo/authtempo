@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SETUP_STEPS, SETUP_TTL_HOURS_MAX } from "../../schema.js";
+import { EXPIRY_STAGES, SETUP_STEPS, SETUP_TTL_HOURS_MAX } from "../../schema.js";
 import type { RouteKey } from "../route-list.js";
 import { id } from "./organizations.js";
 import { OkAnswer } from "./shapes.js";
@@ -157,6 +157,22 @@ export const ConnectionJson = z.strictObject({
 });
 
 const connectionAnswer = z.strictObject({ connection: ConnectionJson });
+
+/**
+ * The status of one connection in the list (plan 13b): the last sign-in that passed, the last
+ * that failed and its step, the end of the SAML certificates, and the last expiry stage that
+ * sent a notice. A test sign-in changes none of them.
+ */
+export const ConnectionStatusJson = z.strictObject({
+  lastSuccessAt: z.iso.datetime().nullable(),
+  lastFailureAt: z.iso.datetime().nullable(),
+  lastFailureStep: z.string().nullable(),
+  certificateEndsAt: z.iso.datetime().nullable(),
+  expiryStage: z.literal(EXPIRY_STAGES).nullable(),
+});
+
+/** One connection of the list: the connection and its status (plan 13b). */
+const ConnectionListJson = ConnectionJson.extend({ status: ConnectionStatusJson });
 
 /**
  * The body of the discovery (plan 12d Task 4). Not strict: a form may carry
@@ -361,7 +377,7 @@ export const SSO_CONTRACT = {
   },
   "GET /sso/connections": {
     query: { schema: connectionListQuery, parsedBy: "zod" },
-    answer: { kind: "json", schema: z.strictObject({ connections: z.array(ConnectionJson) }) },
+    answer: { kind: "json", schema: z.strictObject({ connections: z.array(ConnectionListJson) }) },
   },
   "POST /sso/connections/create": {
     query: { schema: connectionCreateQuery, parsedBy: "zod" },

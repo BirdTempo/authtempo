@@ -155,6 +155,8 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
     64,
     "a user id, or the name of an operator secret: at most 32 of [a-z0-9_-] (config.ts)",
   ),
+  // Schema version 18 (plan 13b): the organization of an audit row, for the organization read.
+  "operatorAudit.organizationId": ascii(64, ROW_ID),
   "organizationRole.id": ascii(64, ROW_ID),
   "organizationRole.organizationId": ascii(64, ROW_ID),
   "organizationRole.name": ascii(

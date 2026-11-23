@@ -11,4 +11,14 @@ export const EVENTS_EXEMPT: readonly { name: EventName; reason: string }[] = [
     reason:
       "createAuth writes this line at construction through writeConstructionLine, with or without a sink, and no observer gets it (deviation 7 of plan 12h). default-lines.test.ts pins its text.",
   },
+  {
+    name: "sso.expiring",
+    reason:
+      "Plan 13b Task 0 adds the name only. The expiry step of the sweep (Task 10) writes it, and Task 10 removes this row.",
+  },
+  {
+    name: "sweep.sso_expiry_stopped",
+    reason:
+      "Plan 13b Task 0 adds the name only. The expiry step of the sweep (Task 10) writes it, and Task 10 removes this row.",
+  },
 ];

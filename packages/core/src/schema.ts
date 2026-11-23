@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export interface BaseRow {
   id: string;
@@ -629,7 +629,8 @@ export type OperatorAction =
   | "user_create"
   | "user_update"
   | "user_delete"
-  | (typeof SSO_AUDIT_ACTIONS)[number];
+  | (typeof SSO_AUDIT_ACTIONS)[number]
+  | (typeof ORGANIZATION_AUDIT_ACTIONS)[number];
 
 /** The audit actions of plan 12d (spec 30 item 22). 12f's `OperatorAction` is their union with its own. */
 export const SSO_AUDIT_ACTIONS = [
@@ -657,6 +658,35 @@ export const SSO_AUDIT_ACTIONS = [
   "sso_setup_link_revoke",
   "sso_setup_link_activate",
   "sso_test_run",
+  // Plan 13b (owner decision 1): the IT admin handed the drafts back to the owners.
+  "sso_setup_link_ready",
+] as const;
+
+/**
+ * The audit actions of the acts of an organization on its members, invitations, tokens, and
+ * roles (plan 13b, spec 6.6 item 3). Each row of these acts names its organization.
+ */
+export const ORGANIZATION_AUDIT_ACTIONS = [
+  "organization_member_add",
+  "organization_member_remove",
+  "organization_member_role_change",
+  "organization_invitation_create",
+  "organization_invitation_accept",
+  "organization_invitation_revoke",
+  "organization_token_create",
+  "organization_token_revoke",
+  "organization_role_create",
+  "organization_role_update",
+  "organization_role_delete",
+] as const;
+
+/**
+ * The actions that the organization audit shows to an owner (plan 13b). The operator acts on a
+ * user are not in it: a ban or an impersonation stays in the operator audit only.
+ */
+export const ORGANIZATION_VISIBLE_ACTIONS = [
+  ...SSO_AUDIT_ACTIONS,
+  ...ORGANIZATION_AUDIT_ACTIONS,
 ] as const;
 
 /**
@@ -678,6 +708,11 @@ export interface OperatorAuditRow extends BaseRow {
   data: Record<string, unknown> | null;
   ip: string | null;
   userAgent: string | null;
+  /**
+   * The organization of the act (plan 13b). Null: an operator act on a user, or a row from
+   * before schema version 18. No migration fills it.
+   */
+  organizationId: string | null;
 }
 
 /** A role that one organization stored (plan 12k). */
@@ -774,6 +809,18 @@ export interface SsoConnectionRow extends BaseRow {
   version: number;
   /** The setup link that made the row. Null: an act of the manager or the app. */
   setupLinkId: string | null;
+  /** The earliest `notAfter` of the SAML certificates (plan 13b). Null: OIDC, or no certificate. */
+  certificateEndsAt: Date | null;
+  /** The last expiry stage that sent a notice: 30, 7, or 1 days (plan 13b). Null: none yet. */
+  expiryStage: number | null;
+  /** The time of the next expiry notice (plan 13b). Null: no notice is due. The sweep reads it. */
+  expiryNoticeAt: Date | null;
+  /** The last sign-in through the connection that passed (plan 13b). */
+  lastSuccessAt: Date | null;
+  /** The last sign-in through the connection that failed (plan 13b). */
+  lastFailureAt: Date | null;
+  /** The step of the last failure (plan 13b). A step name, never a message of the IdP. */
+  lastFailureStep: string | null;
 }
 
 /** One email domain that one organization claims by a DNS proof (plan 12d). */
@@ -825,6 +872,10 @@ export interface ScimTokenRow extends BaseRow {
   pending: boolean;
   /** The setup link that made the token. Null: an act of the manager or the app. */
   setupLinkId: string | null;
+  /** The last expiry stage that sent a notice: 30, 7, or 1 days (plan 13b). Null: none yet. */
+  expiryStage: number | null;
+  /** The time of the next expiry notice (plan 13b). Null: no notice is due. The sweep reads it. */
+  expiryNoticeAt: Date | null;
 }
 
 /** The SCIM view of one user in one organization (plan 12d, RFC 7643 4.1). */
@@ -902,7 +953,19 @@ export interface SsoSetupLinkRow extends BaseRow {
   openedAt: Date | null;
   /** The IT admin handed the drafts back to the owners. */
   readyAt: Date | null;
+  /** The last expiry stage that sent a notice: 30, 7, or 1 days (plan 13b). Null: none yet. */
+  expiryStage: number | null;
+  /** The time of the next expiry notice (plan 13b). Null: no notice is due. The sweep reads it. */
+  expiryNoticeAt: Date | null;
 }
+
+/** The rows whose end the sweep tells the owners of (plan 13b). */
+export const EXPIRY_KINDS = ["saml_certificate", "scim_token", "setup_link"] as const;
+export type ExpiryKind = (typeof EXPIRY_KINDS)[number];
+
+/** The days before an end that each send one notice, the earliest first (plan 13b). */
+export const EXPIRY_STAGES = [30, 7, 1] as const;
+export type ExpiryStage = (typeof EXPIRY_STAGES)[number];
 
 /**
  * One test sign-in against a draft connection (plan 13a, spec 6.4). It holds
@@ -1357,10 +1420,13 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       data: { type: "json", nullable: true },
       ip: { type: "string", nullable: true },
       userAgent: { type: "string", nullable: true },
+      // Plan 13b. Null for an operator act on a user and for each row from before version 18.
+      organizationId: { type: "string", nullable: true },
     },
     unique: [],
-    // targetUserId: the audit of one user. actorId: the acts of one operator.
-    indexes: [["targetUserId"], ["actorId"]],
+    // targetUserId: the audit of one user. actorId: the acts of one operator. organizationId and
+    // id: the audit of one organization (plan 13b); one index serves the filter and the order.
+    indexes: [["targetUserId"], ["actorId"], ["organizationId", "id"]],
   },
   // A role that one organization stored (plan 12k). Never the owner rank; never a name of the config.
   organizationRole: {
@@ -1452,9 +1518,17 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       draft: { type: "boolean" },
       version: { type: "integer" },
       setupLinkId: { type: "string", nullable: true },
+      // Plan 13b: the expiry notice and the status of the last sign-in.
+      certificateEndsAt: { type: "date", nullable: true },
+      expiryStage: { type: "integer", nullable: true },
+      expiryNoticeAt: { type: "date", nullable: true },
+      lastSuccessAt: { type: "date", nullable: true },
+      lastFailureAt: { type: "date", nullable: true },
+      lastFailureStep: { type: "string", nullable: true },
     },
     unique: [],
-    indexes: [["organizationId"]],
+    // expiryNoticeAt: the sweep reads the rows whose notice is due (plan 13b).
+    indexes: [["organizationId"], ["expiryNoticeAt"]],
   },
   // A claimed email domain (plan 12d). The unique key on claimedDomain gives a domain to one
   // organization; a null claimedDomain is no claim, so many rows can hold it.
@@ -1492,9 +1566,13 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       // Plan 13a. NOT NULL; the default false lives in migration 0017 only.
       pending: { type: "boolean" },
       setupLinkId: { type: "string", nullable: true },
+      // Plan 13b: the expiry notice.
+      expiryStage: { type: "integer", nullable: true },
+      expiryNoticeAt: { type: "date", nullable: true },
     },
     unique: [["tokenHash"]],
-    indexes: [["organizationId"]],
+    // expiryNoticeAt: the sweep reads the rows whose notice is due (plan 13b).
+    indexes: [["organizationId"], ["expiryNoticeAt"]],
   },
   // The SCIM view of one user (plan 12d). Its userId field makes it a user child model, so the
   // account delete removes it.
@@ -1559,9 +1637,13 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       endedAt: { type: "date", nullable: true },
       openedAt: { type: "date", nullable: true },
       readyAt: { type: "date", nullable: true },
+      // Plan 13b: the expiry notice.
+      expiryStage: { type: "integer", nullable: true },
+      expiryNoticeAt: { type: "date", nullable: true },
     },
     unique: [["tokenHash"]],
-    indexes: [["organizationId"]],
+    // expiryNoticeAt: the sweep reads the rows whose notice is due (plan 13b).
+    indexes: [["organizationId"], ["expiryNoticeAt"]],
   },
   // One test sign-in against a draft connection (plan 13a). No value and no address of the user.
   ssoTestRun: {

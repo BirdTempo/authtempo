@@ -104,9 +104,10 @@ describe("schema version 14 (plan 12d)", () => {
         model,
         base: BASE,
       });
+    // Plan 13b adds the index on expiryNoticeAt to ssoConnection and scimToken.
     expect([schema.ssoConnection.unique, schema.ssoConnection.indexes]).toEqual([
       [],
-      [["organizationId"]],
+      [["organizationId"], ["expiryNoticeAt"]],
     ]);
     expect([schema.ssoDomain.unique, schema.ssoDomain.indexes]).toEqual([
       [["organizationId", "domain"], ["claimedDomain"]],
@@ -114,7 +115,7 @@ describe("schema version 14 (plan 12d)", () => {
     ]);
     expect([schema.scimToken.unique, schema.scimToken.indexes]).toEqual([
       [["tokenHash"]],
-      [["organizationId"]],
+      [["organizationId"], ["expiryNoticeAt"]],
     ]);
     expect([schema.scimUser.unique, schema.scimUser.indexes]).toEqual([
       [
@@ -169,6 +170,8 @@ describe("schema version 14 (plan 12d)", () => {
       "sso_setup_link_revoke",
       "sso_setup_link_activate",
       "sso_test_run",
+      // Plan 13b (owner decision 1).
+      "sso_setup_link_ready",
     ]);
     for (const action of SSO_AUDIT_ACTIONS)
       expect({ action, count: OPERATOR_ACTIONS.filter((a) => a === action).length }).toEqual({
@@ -176,7 +179,7 @@ describe("schema version 14 (plan 12d)", () => {
         count: 1,
       });
     // 10 of plan 12f, 18 of plan 12d, 3 of plan 12f2 (user_create, user_update, user_delete),
-    // and 5 of plan 13a.
-    expect(OPERATOR_ACTIONS).toHaveLength(36);
+    // 5 of plan 13a, and 12 of plan 13b (11 organization acts and sso_setup_link_ready).
+    expect(OPERATOR_ACTIONS).toHaveLength(48);
   });
 });

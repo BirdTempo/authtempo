@@ -7,6 +7,7 @@ import { fail, ok, type Result } from "../../result.js";
 import type {
   OperatorAction,
   OperatorAuditRow,
+  ORGANIZATION_AUDIT_ACTIONS,
   SessionRow,
   SSO_AUDIT_ACTIONS,
   UserRow,
@@ -73,6 +74,24 @@ export interface OperatorAuditDraft {
   data: Record<string, unknown> | null;
   ip: string | null;
   userAgent: string | null;
+  /** The organization of the act (plan 13b). Null for an operator act on a user. */
+  organizationId: string | null;
+}
+
+/**
+ * One row of the organization audit, as `GET /organizations/audit` answers it (plan 13b).
+ * `ip` and `userAgent` are null for each actor but a member.
+ */
+export interface OrganizationAuditView {
+  id: string;
+  /** `createdAt`, ISO. */
+  at: string;
+  actor: { kind: "member" | "platform" | "scim" | "app"; id: string | null; email: string | null };
+  action: string;
+  targetUserId: string | null;
+  data: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
 }
 
 /**
@@ -131,6 +150,8 @@ export function auditDraft(
     data: input.data,
     ip: auditIp(input.ip),
     userAgent,
+    // Plan 13b: the writers of an organization act set it (Tasks 3 to 5).
+    organizationId: null,
   });
 }
 
@@ -216,6 +237,28 @@ export const SSO_AUDIT_REASON: Readonly<Record<(typeof SSO_AUDIT_ACTIONS)[number
   sso_setup_link_revoke: "an organization revoked an SSO setup link",
   sso_setup_link_activate: "an organization activated an SSO setup",
   sso_test_run: "a test sign-in ran against a draft SSO connection",
+  // Plan 13b (owner decision 1): the hand back.
+  sso_setup_link_ready: "an IT admin handed an SSO setup back to the owners",
+};
+
+/**
+ * The fixed reason of each audit action of an organization act (plan 13b). A member gives no
+ * reason, so the row holds this text.
+ */
+export const ORGANIZATION_AUDIT_REASON: Readonly<
+  Record<(typeof ORGANIZATION_AUDIT_ACTIONS)[number], string>
+> = {
+  organization_member_add: "an organization added a member",
+  organization_member_remove: "an organization removed a member",
+  organization_member_role_change: "an organization changed the role of a member",
+  organization_invitation_create: "an organization invited a person",
+  organization_invitation_accept: "a person accepted an invitation",
+  organization_invitation_revoke: "an organization revoked an invitation",
+  organization_token_create: "an organization created a token",
+  organization_token_revoke: "an organization revoked a token",
+  organization_role_create: "an organization created a role",
+  organization_role_update: "an organization changed a role",
+  organization_role_delete: "an organization deleted a role",
 };
 
 /**
@@ -404,6 +447,8 @@ export async function writeStopRow(
         cause: stops.cause,
         ...(endedAt === undefined ? {} : { endedAt }),
       },
+      // An operator act on a user names no organization (plan 13b).
+      organizationId: null,
       ip: null,
       userAgent: null,
     },

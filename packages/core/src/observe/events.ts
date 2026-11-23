@@ -53,7 +53,7 @@ import type { UnauthorizedReason } from "../http/routes/operator.js";
 import { LIMIT_FAMILIES } from "../limiter/limit.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
-import { AUDIT_ACTOR_KINDS, type SecondFactorMethod } from "../schema.js";
+import { AUDIT_ACTOR_KINDS, EXPIRY_KINDS, type SecondFactorMethod } from "../schema.js";
 import type { AuthEvent } from "./port.js";
 
 export interface FieldSpec {
@@ -747,6 +747,12 @@ export const EVENTS = {
     "authtempo: the sweep anonymous step stopped",
     SWEEP_STOP,
   ),
+  // The expiry step of plan 13b (Task 10).
+  "sweep.sso_expiry_stopped": fault(
+    "error",
+    "authtempo: the sweep sso expiry step stopped",
+    SWEEP_STOP,
+  ),
   // The clean-up of an anonymous upgrade after its commit (plan 12i Task 7, ruling 36 L2).
   "anonymous.cleanup_failed": fault("error", "authtempo: the anonymous upgrade cleanup failed", {
     rowId: ROW_ID,
@@ -871,6 +877,20 @@ export const EVENTS = {
   "sso.activated": {
     level: "info",
     fields: { organizationId: ROW_ID, connectionId: ROW_ID, linkId: ROW_ID },
+  },
+  // One claimed expiry stage of a row (plan 13b Task 10), always emitted, also with no mail. The
+  // stage is 30, 7, or 1 days. `mails` counts the sent notices. `ownersCut` counts the owners past
+  // the mail cap of one row, so 0 means each owner got a mail.
+  "sso.expiring": {
+    level: "info",
+    fields: {
+      kind: enumOf(EXPIRY_KINDS),
+      rowId: ROW_ID,
+      organizationId: ROW_ID,
+      stage: COUNT,
+      mails: COUNT,
+      ownersCut: COUNT,
+    },
   },
   // A SCIM deactivate kept the member row of an owner (plan 12d Task 10).
   "scim.owner_kept": { level: "info", fields: { scimUserId: ROW_ID } },
@@ -1039,6 +1059,8 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "sso.beforeSignIn": REFUSAL_EXEMPT,
   // Plan 13a: the `readyAt` of the link is the record of the handback. The events of Task 12 name no handback.
   "sso.setupReady": NO_EVENT_EXEMPT,
+  // Plan 13b: the sweep emits the event and runs the hook after the claim of each stage.
+  "sso.expiring": "sso.expiring",
   "scim.afterChange": "scim.change",
   "anonymous.beforeLink": REFUSAL_EXEMPT,
   // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.

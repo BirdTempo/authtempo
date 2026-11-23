@@ -92,7 +92,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
     // Plan 13a Task 0 adds the 13 routes of the enterprise setup, not mounted yet.
-    expect(listed.length).toBe(222);
+    // Plan 13b Task 0 adds GET /organizations/audit, not mounted yet.
+    expect(listed.length).toBe(223);
   });
 
   it("lists only routes that no module mounts as unmounted (plan 13a)", () => {
@@ -375,9 +376,10 @@ describe("ROUTES (plan 11a)", () => {
       const after = new Set(coreRoutes(resolveConfig({ ...first, ...delta })).map(templated));
       const [from, to] = off ? [after, before] : [before, after];
       const changed = [...to].filter((k) => !from.has(k)).sort();
-      const tagged = ROUTES.filter((r) => features.includes(r.feature)).map(
-        (r) => `${r.method} ${r.path}`,
-      );
+      // A listed route that no module mounts yet (test/unmounted-routes.ts) is not served.
+      const tagged = ROUTES.filter((r) => features.includes(r.feature))
+        .map((r) => `${r.method} ${r.path}`)
+        .filter((k) => !UNMOUNTED_ROUTES.has(k));
       expect(changed).toEqual(tagged.sort());
       // The change only adds (or, for `off`, only removes): no route of another feature moves.
       expect([...from].filter((k) => !to.has(k))).toEqual([]);

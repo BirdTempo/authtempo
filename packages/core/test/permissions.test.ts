@@ -526,6 +526,8 @@ describe("the permission routes (plan 12k Task 3)", () => {
           team: ["create", "update", "delete"],
           ac: ["read", "create", "update", "delete"],
           apiToken: ["read", "create", "update", "revoke"],
+          // Plan 13b: the default owner reads the organization audit.
+          audit: ["read"],
         },
       },
     });
