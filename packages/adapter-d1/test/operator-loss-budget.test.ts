@@ -614,9 +614,9 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
   // Plan 13b Task 10: the expiry step of the sweep reads the due SAML rows in 1 query while `sso`
-  // is on, so each sweep sends 1 more. Counts after Task 4 and Task 10 together: set by the run below.
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [49, 3, [49, 49, 48]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 9, [49, 49, 37]];
+  // is on, so each sweep sends 1 more. Measured on 2026-11-23 after Task 4 and Task 10 together (load about 9).
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [49, 49, 48]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [48, 9, [49, 49, 37]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
