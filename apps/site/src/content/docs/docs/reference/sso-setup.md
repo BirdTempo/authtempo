@@ -110,7 +110,8 @@ For each stage of a row, the sweep does these steps in this order:
 - A late sweep sends one notice for the smallest due stage, and skips the larger stages.
 - The claim is the record. A failed mail writes `notice.mail_failed` with `sso_expiring`. No sweep sends that mail again.
 - The owner read skips each member that holds exactly one role below the owner rank. It reads one page of 100 of the other members. These are the owners, the members with a comma list of roles, and the members with a dynamic role.
-- The size of the organization does not cut the scan. Only more than 100 such members cut it. Then an owner past the page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`.
+- More than 50 role names below the owner rank pass the parameter bound of D1. Then the read skips no member, and any 100 members fill the page.
+- More than 100 members that the read keeps cut the scan. Then an owner past the page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`.
 - `ownersCut` of the event counts the owners past the 10 mails.
 - With `account.notices` off, no mail goes out. The event and the hook still run.
 - A write of new certificates starts the stages again from the new end.
