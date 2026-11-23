@@ -209,6 +209,7 @@ describe("sweepExpired", () => {
       ssoPendingDomains: 0,
       scimTokens: 0,
       ssoSetupRows: 0,
+      ssoExpiryNotices: 0,
       organizationRows: 0,
       anonymousUsers: 0,
     });
@@ -252,6 +253,7 @@ describe("sweepExpired", () => {
       ssoPendingDomains: 0,
       scimTokens: 0,
       ssoSetupRows: 0,
+      ssoExpiryNotices: 0,
       organizationRows: 0,
       anonymousUsers: 0,
     });

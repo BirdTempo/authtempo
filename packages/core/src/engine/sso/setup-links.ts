@@ -295,18 +295,30 @@ export async function revokeSetupLink(
 export const SETUP_OWNER_SCAN = { pageSize: 100, maxPages: 1000 };
 
 /**
+ * The bound of one owner scan. `pageSize` and `maxPages` bound the member reads. `most` bounds
+ * the addresses that the scan reads (plan 13b Task 10): the owners past it are counted, not read.
+ */
+export interface OwnerScan {
+  pageSize: number;
+  maxPages: number;
+  most?: number;
+}
+
+/**
  * The addresses of the owners of an organization: the members whose role holds the owner rank
  * (`isOwner`, the rule of the manager guard), in the order of the member id. A user with no
  * address gives null, and `sendNotice` skips it. `complete` is false when the safety bound ended
- * the scan.
+ * the scan. `owners` counts each owner that the scan found, also the owners past `bound.most`.
+ * The default bound is `SETUP_OWNER_SCAN`, which the hand back uses.
  */
-async function ownerAddresses(
+export async function ownerAddresses(
   config: ResolvedConfig,
   organizationId: string,
-): Promise<{ addresses: (string | null)[]; complete: boolean }> {
+  bound: OwnerScan = SETUP_OWNER_SCAN,
+): Promise<{ addresses: (string | null)[]; complete: boolean; owners: number }> {
   const o = config.organizations;
-  if (!o) return { addresses: [], complete: true };
-  const { pageSize, maxPages } = SETUP_OWNER_SCAN;
+  if (!o) return { addresses: [], complete: true, owners: 0 };
+  const { pageSize, maxPages } = bound;
   const ids: string[] = [];
   let after: string | null = null;
   let complete = false;
@@ -324,9 +336,10 @@ async function ownerAddresses(
     }
     after = members[members.length - 1]?.id ?? null;
   }
-  const users = await findManyIn(config.storage, "user", "id", ids);
+  const read = ids.slice(0, bound.most ?? ids.length);
+  const users = await findManyIn(config.storage, "user", "id", read);
   const byId = new Map(users.map((u) => [u.id, u.email]));
-  return { addresses: ids.map((id) => byId.get(id) ?? null), complete };
+  return { addresses: read.map((id) => byId.get(id) ?? null), complete, owners: ids.length };
 }
 
 /**

@@ -1,0 +1,5 @@
+---
+"@authtempo/core": minor
+---
+
+The sweep sends the expiry notices of SAML certificates, SCIM tokens, and setup links, 30, 7, and 1 days before the end. A setup link gets the notice of 1 day only. The sweep claims each stage with one conditional update before it sends, so two sweeps at once send it one time. Each owner gets one mail, at most 10 for each row. Then the sweep emits `sso.expiring` and runs `hooks.sso.expiring`, also while `account.notices` is off. A failed mail writes `notice.mail_failed`, and no sweep sends it again. The step reads at most 5 rows of each kind, in the calls that stay, and each mail counts as one call. `SweepResult` gets `ssoExpiryNotices`. A storage fault of the step writes `sweep.sso_expiry_stopped`. On D1 the sweep sends 1 more query for each kind that is on.

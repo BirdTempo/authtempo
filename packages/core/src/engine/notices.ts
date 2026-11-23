@@ -86,6 +86,24 @@ const WHAT: Readonly<
   phone_changed: "The phone number of your account was changed.",
 };
 
+/** The name of each row of the expiry notice. */
+const EXPIRY_NAME: Readonly<Record<ExpiryKind, string>> = {
+  saml_certificate: "The SAML certificate of the connection",
+  scim_token: "The SCIM token",
+  setup_link: "The SSO setup link",
+};
+
+/**
+ * What an owner does before the end. A SAML certificate past its end still verifies (saml-sp.ts),
+ * so the text says when the sign-ins stop.
+ */
+const EXPIRY_STEP: Readonly<Record<ExpiryKind, string>> = {
+  saml_certificate:
+    "Sign-ins go on after this date until the IdP signs with a certificate that is not uploaded. Upload the new certificate of the IdP before it changes.",
+  scim_token: "Make a new SCIM token and put it in the directory before this date.",
+  setup_link: "Make a new setup link if the IT contact still needs one.",
+};
+
 /** The default notices. `account.notices.mail` replaces them. */
 export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
   const subject = `Security notice for your ${input.appName} account`;
@@ -120,13 +138,18 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
       text: lines.join("\n"),
     };
   }
-  // The expiry notice (plan 13b). It names the row by its id and label, and holds no token.
+  // The expiry notice (plan 13b). It names the kind, the label, the id, the end, and the days.
+  // It holds no token, no hash, and no certificate.
   if (input.event === "sso_expiring") {
     const lines = ["An SSO credential of your organization ends soon."];
-    if (input.expiring !== undefined)
+    const e = input.expiring;
+    if (e !== undefined) {
+      const days = e.days === 1 ? "1 day" : `${e.days} days`;
       lines.push(
-        `${input.expiring.label} (${input.expiring.id}) ends at ${input.expiring.at.toISOString()}.`,
+        `${EXPIRY_NAME[e.kind]} "${e.label}" (${e.id}) ends in ${days}, at ${e.at.toISOString()}.`,
+        EXPIRY_STEP[e.kind],
       );
+    }
     lines.push(`Time: ${input.at.toISOString()}.`);
     return { to: input.email, subject: `SSO notice for ${input.appName}`, text: lines.join("\n") };
   }
@@ -151,15 +174,16 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
  * the filtered error name. The flow then answers its success: the change is
  * committed, and a notice must not undo it. The line holds no address and
  * no error message, because app code sets both. A user with no address
- * (plan 12i) gets no notice, and the call writes no line.
+ * (plan 12i) gets no notice, and the call writes no line. The answer is
+ * true when the mail port took the mail (plan 13b counts the sent notices).
  */
 export async function sendNotice(
   config: ResolvedConfig,
   input: Omit<NoticeMailInput, "appName" | "at" | "email"> & { email: string | null },
-): Promise<void> {
+): Promise<boolean> {
   const notices = config.account.notices;
   const { email } = input;
-  if (!notices || email === null) return;
+  if (!notices || email === null) return false;
   try {
     const message = notices.mail({
       ...input,
@@ -169,7 +193,9 @@ export async function sendNotice(
     });
     // To the user's address, whatever the builder wrote.
     await config.mail.send({ ...message, to: email });
+    return true;
   } catch (e) {
     config.observe.emit({ name: "notice.mail_failed", event: input.event, errorName: e });
+    return false;
   }
 }

@@ -613,8 +613,10 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       session: { slidingRefreshDays: 0.05 },
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [48, 48, 47]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [48, 9, [48, 48, 36]];
+  // Plan 13b Task 10: the expiry step of the sweep reads the due SAML rows in 1 query while `sso`
+  // is on, so each sweep sends 1 more. Counts after Task 4 and Task 10 together: set by the run below.
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [49, 3, [49, 49, 48]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 9, [49, 49, 37]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
@@ -926,14 +928,18 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
  * sweep runs when `sso` is on and sends 3 idle queries as the last step. The last sweep of each
  * scene with `sso` sends 3 more. The plain scene has no `sso`, so it stays.
+ *
+ * Plan 13b Task 10 (run of 2026-11-23, 22:46, load 16.3 8.9 8.3): the expiry step of the sweep
+ * reads the due SAML rows in 1 query while `sso` is on. Each sweep of a scene with `sso` sends 1
+ * more. The plain scene has no `sso`, so it stays. The acts do not change.
  */
 const SOLO_COUNTS = {
   plain: [42, [33]],
-  due: [44, [36]],
-  confirm: [45, [36]],
-  operator: [49, [47, 48, 48, 42]],
-  operatorConfirm0: [48, [47, 48, 48, 46]],
-  operatorConfirm3: [48, [47, 48, 48, 48]],
+  due: [44, [37]],
+  confirm: [45, [37]],
+  operator: [49, [48, 49, 49, 43]],
+  operatorConfirm0: [48, [48, 49, 49, 47]],
+  operatorConfirm3: [48, [48, 49, 49, 49]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**

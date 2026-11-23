@@ -143,10 +143,14 @@ describe("the sweep of the setup rows on D1 (plan 13a, ruling R33)", () => {
     // The setup step is 3 queries when no link ended (the read of the links, the sessions, the
     // runs) and 5 when a page ended (plus the pending tokens and the links). That is
     // `SETUP_SWEEP_CALLS` of core, so the meter of the sweep counts the worst case.
+    // Plan 13b Task 10 (measured 2026-11-23, 22:44, load 5.62 5.59 7.26): the expiry step reads
+    // the due rows of each kind that is on, 1 query each. `off` has `scim` only: 19 becomes 20.
+    // `idle` and `full` have `sso`, `sso.setup`, and `scim`: 23 and 25 become 26 and 28. A seeded
+    // row has no notice date, so the read finds no row.
     expect({ off: off.queries, idle: idle.queries, full: full.queries }).toEqual({
-      off: 19,
-      idle: 23,
-      full: 25,
+      off: 20,
+      idle: 26,
+      full: 28,
     });
     expect(full.queries - idle.queries).toBe(2);
     expect(full.queries).toBeLessThan(50);
