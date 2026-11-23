@@ -263,7 +263,7 @@ describe("the hand back of a setup link (plan 13a Task 10)", () => {
     const roleTerms = () =>
       reads.mock.calls
         .filter(([model]) => model === "member")
-        .map(([, where]) => where.filter((t) => t.field === "role").length);
+        .map(([, where]) => where.filter((t) => String(t.field) === "role").length);
     const owners = { addresses: ["owner@acme.example", "late@acme.example"], complete: true };
     expect(await ownerAddresses(w.config, w.org)).toEqual({ ...owners, owners: 2 });
     const narrow = roleTerms();
