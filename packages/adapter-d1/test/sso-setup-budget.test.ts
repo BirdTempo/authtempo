@@ -36,6 +36,9 @@ const BIND = "__Secure-tempo_session_oauth=";
  * So the bump is 1 + 2 = 3 statements, and the domain writes, which come before the draft in this
  * scene, send 1 more (the read only). The counts are the same in each run. The scene also puts
  * the token before the test run now.
+ * The hand back step is new in plan 13b Task 3: 15, measured 2026-11-23 21:57 on the lane
+ * machine, load 11.8 to 12.9, with migration 0018 in the tree. 1 of the 15 is the INSERT of the
+ * `sso_setup_link_ready` audit row in the hand back transaction: with no audit row the step sends 14.
  */
 const PINS: Record<string, number> = {
   mint: 15,
@@ -47,6 +50,7 @@ const PINS: Record<string, number> = {
   testCallback: 12,
   scimToken: 19,
   status: 13,
+  handBack: 15,
   preview: 18,
   activate: 38,
 };
@@ -281,6 +285,11 @@ describe("the queries of each step of the SSO setup scene on D1 (plan 13a Task 1
     const status = await measure(get("/sso/setup/status", cookie));
     expect(status.res.status).toBe(200);
     got.status = status.queries;
+
+    // The IT admin hands the link back: the owners get the notice (plan 13b Task 3).
+    const handedBack = await measure(post("/sso/setup/handback", {}, cookie));
+    expect(handedBack.res.status).toBe(200);
+    got.handBack = handedBack.queries;
 
     const preview = await measure(get(`/sso/setup-links/get?id=${linkId}`, boss.cookie));
     expect(preview.res.status).toBe(200);

@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { banUser } from "../src/engine/operator/ban.js";
 import { addMember } from "../src/engine/organizations.js";
-import { createScimToken } from "../src/engine/scim/tokens.js";
+import { createScimToken, revokeScimToken } from "../src/engine/scim/tokens.js";
 import { resolveSession } from "../src/engine/sessions.js";
-import { createConnection } from "../src/engine/sso/connections.js";
-import { deleteDomain, enforceOff } from "../src/engine/sso/domains.js";
+import {
+  createConnection,
+  deleteConnection,
+  updateConnection,
+} from "../src/engine/sso/connections.js";
+import {
+  addDomain,
+  deleteDomain,
+  enforceOff,
+  updateDomain,
+  verifyDomain,
+} from "../src/engine/sso/domains.js";
 import { requireSsoManager, type SsoActor } from "../src/engine/sso/guard.js";
 import { activateSetup } from "../src/engine/sso/setup-activate.js";
 import { saveDraftConnection } from "../src/engine/sso/setup-drafts.js";
@@ -26,6 +36,7 @@ import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 const META = { ip: recordAddress("198.51.100.9"), userAgent: "organization-audit-column-test" };
 const SECRET = "idp-client-secret-0123456789";
 const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
+const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
 const BIND = "__Secure-tempo_session_oauth";
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -51,6 +62,8 @@ async function world() {
     Response.json({ id_token: call.form.code, token_type: "Bearer" }),
   );
   const w = await scimAuth({
+    // Groups as roles, so the SCIM group writes run (review M1).
+    scim: { groups: "roles" },
     sso: { oidc: true, setup: {}, fetch: idp.fetchFn },
     jwt: fakeJwt(tokens),
     operator: { users: true },
@@ -253,9 +266,91 @@ describe("the organization column on the existing writers (plan 13b Task 3)", ()
     const rows = await auditOf(w, "sso_setup_link_ready");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
+      actorKind: "app",
+      actorId: `setup.${s.linkId.toLowerCase()}`,
       organizationId: w.o1,
       data: { organizationId: w.o1, linkId: s.linkId },
     });
+  });
+
+  // Review M1: each other writer of `ssoDraft` and `draftOf` names the organization of its data.
+  it("each other writer: the column equals data.organizationId", async () => {
+    const w = await world();
+    const added = await addDomain(w.config, SSO_APP, {
+      organizationId: w.o1,
+      domain: "beta.example",
+    });
+    if (!added.ok || added.value.record === null) throw new Error("no beta record");
+    const { name, value } = added.value.record;
+    w.answers.a[name] = [value];
+    w.answers.b[name] = [value];
+    expect((await verifyDomain(w.config, SSO_APP, { id: added.value.id })).ok).toBe(true);
+    const routed = await updateDomain(w.config, SSO_APP, {
+      id: added.value.id,
+      includeSubdomains: true,
+    });
+    expect(routed.ok).toBe(true);
+    const made = await createConnection(w.config, SSO_APP, { ...OIDC, organizationId: w.o1 });
+    if (!made.ok) throw new Error(made.code);
+    const id = made.value.id;
+    expect((await updateConnection(w.config, SSO_APP, { id, enabled: false })).ok).toBe(true);
+    expect((await deleteConnection(w.config, SSO_APP, { id })).ok).toBe(true);
+    const token = await createScimToken(w.config, SCIM_APP, {
+      organizationId: w.o1,
+      name: "dir-1",
+    });
+    if (!token.ok) throw new Error(token.code);
+    recordCredential(token.value.token);
+    const group = await scim(w, token.value.token, "POST", "/Groups", {
+      schemas: [GROUP_URN],
+      displayName: "Staff",
+    });
+    expect(group.status).toBe(201);
+    const groupId = ((await group.json()) as { id: string }).id;
+    const put = await scim(w, token.value.token, "PUT", `/Groups/${groupId}`, {
+      schemas: [GROUP_URN],
+      displayName: "Staff 2",
+    });
+    expect(put.status).toBe(200);
+    expect((await scim(w, token.value.token, "DELETE", `/Groups/${groupId}`)).status).toBe(204);
+    const revoked = await revokeScimToken(w.config, SCIM_APP, { id: token.value.id });
+    expect(revoked.ok).toBe(true);
+    // The second row of an activation: the draft connection goes live.
+    const s = await setupSession(w, SSO_APP);
+    const draftId = await passedTest(w, s);
+    const draft = await w.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: draftId },
+    ]);
+    const activated = await activateSetup(
+      w.config,
+      SSO_APP,
+      s.linkId,
+      draft?.version ?? 0,
+      async () => ok(undefined),
+      META,
+    );
+    expect(activated.ok).toBe(true);
+    const actions = [
+      "sso_domain_add",
+      "sso_domain_verify",
+      "sso_domain_update",
+      "sso_connection_update",
+      "sso_connection_delete",
+      "scim_token_create",
+      "scim_token_revoke",
+      "scim_group_create",
+      "scim_group_update",
+      "scim_group_delete",
+    ];
+    const rows = await w.storage.findMany("operatorAudit", [
+      { field: "action", op: "in", value: actions },
+    ]);
+    expect(new Set(rows.map((r) => r.action))).toEqual(new Set(actions));
+    // Two connection updates: the disable, and the activation of the draft.
+    expect(rows.filter((r) => r.action === "sso_connection_update")).toHaveLength(2);
+    for (const row of rows)
+      expect([row.action, row.organizationId]).toEqual([row.action, row.data?.organizationId]);
+    for (const row of rows) expect([row.action, row.organizationId]).toEqual([row.action, w.o1]);
   });
 
   it("operator act: ban a member of o1", async () => {
@@ -276,9 +371,23 @@ describe("the organization column on the existing writers (plan 13b Task 3)", ()
       userAgent: null,
     });
     expect(banned.ok).toBe(true);
-    const [row] = await auditOf(w, "ban");
-    expect(row?.targetUserId).toBe(member.user.id);
-    expect(row?.organizationId).toBeNull();
+    // Review M3: a platform operator user is the actor of decision 4. The member is banned, so
+    // the operator bans the owner of o1.
+    const operator = await platformActor(w);
+    if (operator.kind !== "platform") throw new Error("no platform actor");
+    const second = await banUser(w.config, {
+      actor: { kind: "user", user: operator.user, session: operator.session },
+      userId: w.owner.user.id,
+      reason: "the owner broke the rules",
+      ip: null,
+      userAgent: null,
+    });
+    expect(second.ok).toBe(true);
+    const rows = await auditOf(w, "ban");
+    expect(rows.map((r) => [r.actorKind, r.targetUserId, r.organizationId])).toEqual([
+      ["app", member.user.id, null],
+      ["user", w.owner.user.id, null],
+    ]);
   });
 
   // Owner decision 4: an operator act on an organization shows as `platform` in its audit.
