@@ -11,10 +11,13 @@ import { findManyIn } from "../storage/batch.js";
 import { StorageError, type Where } from "../storage/port.js";
 import { provedAddress } from "./address.js";
 import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
+import { writeAuditIn } from "./operator/audit.js";
 import {
+  type AuditMeta,
   type Caller,
   grantable,
   type MemberSummary,
+  memberAuditDraft,
   membership,
   type OrganizationSummary,
   publicOrganization,
@@ -102,7 +105,8 @@ async function inviteTeams(
 
 export async function inviteMember(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; email: string; role: string; teamIds?: string[] },
+  input: Caller &
+    AuditMeta & { organizationId: string; email: string; role: string; teamIds?: string[] },
 ): Promise<Result<InvitationSummary>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
@@ -141,6 +145,13 @@ export async function inviteMember(
   const hooks = config.hooks.organization;
   const organization = publicOrganization(s.value.organization);
   const pendingLimit = o.limits.pendingInvitationsPerOrganization;
+  // The row names the invitation by its id, never by the address (plan 13b).
+  const draft = memberAuditDraft(input.user, input.organizationId, input, {
+    action: "organization_invitation_create",
+    targetUserId: null,
+    data: { invitationId: row.id, role: input.role },
+  });
+  if (!draft.ok) return draft;
   const written = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
       if (pendingLimit !== null) {
@@ -172,6 +183,8 @@ export async function inviteMember(
         { field: "acceptedAt", op: "eq", value: null },
       ]);
       await tx.create("invitation", row);
+      // The audit row is the last statement of the transaction (plan 13b).
+      await writeAuditIn(tx, draft.value, now);
       return ok(true);
     }),
   );
@@ -225,13 +238,19 @@ export async function listInvitations(
 
 export async function revokeInvitation(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; invitationId: string },
+  input: Caller & AuditMeta & { organizationId: string; invitationId: string },
 ): Promise<Result<{ ok: true }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
   if (!provedAddress(input)) return fail("email_unverified");
   const s = await adminStanding(config, input, "revoke");
   if (!s.ok) return s;
+  const draft = memberAuditDraft(input.user, input.organizationId, input, {
+    action: "organization_invitation_revoke",
+    targetUserId: null,
+    data: { invitationId: input.invitationId },
+  });
+  if (!draft.ok) return draft;
   // The organization id is in the where, so an admin of another organization cannot reach this row.
   const where = [
     { field: "id", op: "eq", value: input.invitationId },
@@ -240,7 +259,13 @@ export async function revokeInvitation(
   // Read first, for the after hook's event.
   const row = await config.storage.findOne("invitation", [...where]);
   if (!row) return fail("not_found");
-  if ((await config.storage.delete("invitation", [...where])) === 0) return fail("not_found");
+  // The delete and its audit row commit together (plan 13b). A delete of zero rows writes no row.
+  const deleted = await config.storage.transaction(async (tx) => {
+    if ((await tx.delete("invitation", [...where])) === 0) return false;
+    await writeAuditIn(tx, draft.value, config.clock.now());
+    return true;
+  });
+  if (!deleted) return fail("not_found");
   await runAfter(
     config.observe,
     "organization.afterRevokeInvitation",
@@ -295,7 +320,7 @@ type Accepted =
 
 export async function acceptInvitation(
   config: ResolvedConfig,
-  input: Caller & { token: string; ip: string | null },
+  input: Caller & { token: string; ip: string | null; userAgent?: string | null },
 ): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
@@ -320,6 +345,13 @@ export async function acceptInvitation(
   const memberLimit = o.limits.membersPerOrganization;
   const teamLimit = o.limits.membersPerTeam;
   const teamIds = o.teams ? (inv.teamIds ?? []) : [];
+  // The invitee is the actor and the target. The row names the invitation by its id (plan 13b).
+  const draft = memberAuditDraft(input.user, inv.organizationId, input, {
+    action: "organization_invitation_accept",
+    targetUserId: input.user.id,
+    data: { invitationId: inv.id, role: inv.role },
+  });
+  if (!draft.ok) return draft;
   let accepted: Accepted = null;
   try {
     accepted = await config.storage.transaction(async (tx): Promise<Accepted> => {
@@ -466,38 +498,44 @@ export async function acceptInvitation(
           createdAt: now,
           updatedAt: now,
         });
-      if (existing) {
-        if (raise) {
-          await tx.update("member", [{ field: "id", op: "eq", value: existing.id }], {
-            role: inv.role,
-            updatedAt: now,
-          });
-          return {
-            row: { ...existing, role: inv.role, updatedAt: now },
-            created: false,
-            raised: { previousRole: existing.role, by: raisedBy },
-          };
-        }
-        return { row: existing, created: false, raised: null };
+      let done: Accepted;
+      if (existing && raise) {
+        await tx.update("member", [{ field: "id", op: "eq", value: existing.id }], {
+          role: inv.role,
+          updatedAt: now,
+        });
+        done = {
+          row: { ...existing, role: inv.role, updatedAt: now },
+          created: false,
+          raised: { previousRole: existing.role, by: raisedBy },
+        };
+      } else if (existing) done = { row: existing, created: false, raised: null };
+      else {
+        const row: MemberRow = {
+          id: newId(now),
+          organizationId: inv.organizationId,
+          userId: input.user.id,
+          role: inv.role,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await tx.create("member", row);
+        await userStays(tx, row.userId);
+        // D1 has no lock. An account delete removes a solo organization's row
+        // before its members. So this read sees it gone, or that delete sees
+        // the new member and answers conflict (plan 12a Task 11).
+        if (
+          !(await tx.findOne("organization", [
+            { field: "id", op: "eq", value: row.organizationId },
+          ]))
+        )
+          stopWith("conflict");
+        done = { row, created: true, raised: null };
       }
-      const row: MemberRow = {
-        id: newId(now),
-        organizationId: inv.organizationId,
-        userId: input.user.id,
-        role: inv.role,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await tx.create("member", row);
-      await userStays(tx, row.userId);
-      // D1 has no lock. An account delete removes a solo organization's row
-      // before its members. So this read sees it gone, or that delete sees
-      // the new member and answers conflict (plan 12a Task 11).
-      if (
-        !(await tx.findOne("organization", [{ field: "id", op: "eq", value: row.organizationId }]))
-      )
-        stopWith("conflict");
-      return { row, created: true, raised: null };
+      // Each accept that consumed the token writes its audit row as the last statement of the
+      // transaction (plan 13b). It is the one row of the accept: a raise writes no role row.
+      await writeAuditIn(tx, draft.value, now);
+      return done;
     });
   } catch (err) {
     if (err instanceof HookStop) return err.result;

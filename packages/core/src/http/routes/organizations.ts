@@ -72,6 +72,11 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
+  /** The caller's IP and user agent, for the audit row of a member or invitation act (plan 13b). */
+  const meta = (ctx: RouteContext) => ({
+    ip: ctx.ip,
+    userAgent: ctx.request.headers.get("user-agent"),
+  });
 
   /** A POST route: session, a checked body, one engine call, the answer under `key` (or the value itself when `key` is null). */
   const post = <T, V, P extends RoutePath<"POST">>(
@@ -179,10 +184,15 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       listMembers(ctx.config, { user, session, organizationId }),
     ),
     post("/organizations/members/add", memberBody, "member", (s, b, ctx) =>
-      addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b, ...meta(ctx) }),
     ),
     post("/organizations/members/role", memberBody, "member", (s, b, ctx) =>
-      updateMemberRole(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      updateMemberRole(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ...meta(ctx),
+      }),
     ),
     post("/organizations/members/remove", removeBody, null, async (s, b, ctx) => {
       // The revoke of tokens changes credentials, so it needs a fresh session (plan 12k), before any write.
@@ -196,6 +206,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         organizationId: b.organizationId,
         userId: b.userId,
         ...(b.revokeTokens !== undefined && { revokeTokens: b.revokeTokens }),
+        ...meta(ctx),
       });
     }),
     post("/organizations/invite", inviteBody, "invitation", (s, b, ctx) =>
@@ -207,6 +218,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         email: b.email,
         role: b.role,
         ...(b.teamIds !== undefined && { teamIds: b.teamIds }),
+        ...meta(ctx),
       }),
     ),
     getByOrg("/organizations/invitations", "invitations", (user, organizationId, ctx, session) =>
@@ -238,7 +250,12 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       },
     },
     post("/organizations/invitations/revoke", revokeBody, null, (s, b, ctx) =>
-      revokeInvitation(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      revokeInvitation(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ...meta(ctx),
+      }),
     ),
     // Accept answers { organization, member } as the engine returns it.
     post("/organizations/invitations/accept", tokenBody, null, (s, b, ctx) =>
@@ -246,7 +263,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         user: s.user,
         session: s.resolved.session,
         token: b.token,
-        ip: ctx.ip,
+        ...meta(ctx),
       }),
     ),
     {

@@ -23,7 +23,7 @@ import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post, sessionFor } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, OPERATOR_ROWS, post, sessionFor } from "./helpers.js";
 import {
   approvedDevice,
   authorized,
@@ -507,7 +507,7 @@ describe("the ban (plan 12f Task 6)", () => {
       code: "operator_required",
       status: 403,
     });
-    expect(await f.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await f.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     const secret = { kind: "secret", name: "support", scopes: ["users"] } as const;
     expect((await api.users.ban({ ...input, actor: secret, userId: other.user.id })).ok).toBe(true);
     // A secret with no users scope is refused.
@@ -524,7 +524,10 @@ describe("the ban (plan 12f Task 6)", () => {
     });
     // The refusals write no row: the one row is the ban by the secret.
     expect(
-      (await f.auth.storage.findMany("operatorAudit", [])).map((r) => [r.action, r.actorId]),
+      (await f.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).map((r) => [
+        r.action,
+        r.actorId,
+      ]),
     ).toEqual([["ban", "support"]]);
   });
 
@@ -565,7 +568,7 @@ describe("the ban (plan 12f Task 6)", () => {
     expect(armed).toBe(false);
     const row = await storage.findOne("user", [{ field: "id", op: "eq", value: other.user.id }]);
     expect([row?.bannedAt, row?.banReason, row?.banUntil]).toEqual([null, null, null]);
-    expect((await storage.findMany("operatorAudit", [])).map((r) => r.action)).toEqual([
+    expect((await storage.findMany("operatorAudit", OPERATOR_ROWS)).map((r) => r.action)).toEqual([
       "platform_role_grant",
     ]);
   });
@@ -678,7 +681,7 @@ describe("the ban (plan 12f Task 6)", () => {
     const until = new Date(w.clock.now().getTime() + 60 * MINUTE_MS).toISOString();
     const r = await ban(w, s.user.id, until);
     if (!r.ok) throw new Error(r.code);
-    expect(await w.storage.findMany("operatorAudit", [])).toEqual([
+    expect(await w.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([
       expect.objectContaining({
         id: r.value.auditId,
         actorKind: "app",
@@ -1015,7 +1018,7 @@ describe("the ban (plan 12f Task 6)", () => {
     expect(
       await w.storage.findOne("user", [{ field: "id", op: "eq", value: s.user.id }]),
     ).toMatchObject({ name: "Other 5", bannedAt: null, banReason: null, banUntil: null });
-    expect(await w.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     expect(await sessionIds()).toEqual(before);
     expect(w.ended.slice(endedBefore)).toEqual([]);
     expect(w.updates.slice(updatesBefore)).toEqual(Array(5).fill("before:ban:open"));

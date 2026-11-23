@@ -1507,7 +1507,7 @@ async function writeChange(
           // D1 has no lock, so a group write can still land after the read above. The
           // round then runs again too, with a new read of the member row. With a claim,
           // the delete of the organization tokens below takes them, so it runs once.
-          if (removes && member && (await removeMemberIn(tx, member, !claimed)) === 0)
+          if (removes && member && (await removeMemberIn(tx, member, !claimed)).members === 0)
             throw new LostRound(undefined);
           await writeUser();
           if (claimed) {

@@ -10,7 +10,7 @@ import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { seedPlatform, tokenFromMail } from "./helpers.js";
+import { OPERATOR_ROWS, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
@@ -101,7 +101,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     expect(await auth.storage.findMany("password", [])).toEqual([]);
     expect(await auth.storage.findMany("identity", [])).toEqual([]);
     expect(await auth.storage.findMany("session", [])).toEqual([]);
-    const rows = await auth.storage.findMany("operatorAudit", []);
+    const rows = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: made.value.auditId,
@@ -203,7 +203,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     );
     expect(await auth.storage.findMany("organization", [])).toHaveLength(1);
     expect(events).toEqual(["beforeAdd:operator:operator", "afterAdd:operator:operator"]);
-    const rows = await auth.storage.findMany("operatorAudit", [], {
+    const rows = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS, {
       sort: { field: "id", dir: "asc" },
     });
     expect(rows.map((r) => [r.targetUserId, r.data])).toEqual([
@@ -214,7 +214,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     const again = await createAdmin(auth, APP, "ada@example.com");
     expect(again.ok && again.value.created).toBe(false);
     expect(await auth.storage.findMany("member", [])).toHaveLength(3);
-    expect(await auth.storage.findMany("operatorAudit", [])).toHaveLength(3);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toHaveLength(3);
   });
 
   it("refuses a banned user with account_banned", async () => {
@@ -238,7 +238,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     expect(actions).toEqual([]);
     expect(await platform(auth)).toBeNull();
     expect(await auth.storage.findMany("member", [])).toEqual([]);
-    const rows = await auth.storage.findMany("operatorAudit", []);
+    const rows = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
     expect(rows.map((r) => r.action)).toEqual(["ban"]);
   });
 
@@ -279,7 +279,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
     expect(actions).toEqual(["create_admin", "ban", "create_admin"]);
     expect(await platform(auth)).toBeNull();
     expect(await auth.storage.findMany("member", [])).toEqual([]);
-    const rows = await auth.storage.findMany("operatorAudit", []);
+    const rows = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
     expect(rows.map((r) => r.action)).toEqual(["ban"]);
     // A parallel createAdmin makes the platform organization after the read.
     between = () => createAdmin(auth, APP, "root@example.com");
@@ -291,7 +291,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
       [org?.id, root?.id, "owner,operator"],
     ]);
     expect(await userByEmail(auth, ADMIN)).toBeNull();
-    const after = await auth.storage.findMany("operatorAudit", []);
+    const after = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
     expect(after.map((r) => [r.action, r.targetUserId, r.data])).toEqual([
       ["ban", ada.user.id, { until: null }],
       ["create_admin", root?.id, { created: true, organizationCreated: true }],
@@ -323,7 +323,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
       status: 403,
     });
     expect(await userByEmail(auth, ADMIN)).toBeNull();
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("is off with no platformRole or no operator.users", async () => {
@@ -361,7 +361,7 @@ describe("createAdmin (plan 12f Task 8)", () => {
       expect(await api.platformRole.revoke({ ...act, userId: ada.user.id })).toEqual(off);
       expect(await userByEmail(auth, ADMIN)).toBeNull();
       expect(await auth.storage.findMany("member", [])).toEqual([]);
-      expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+      expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     }
   });
 

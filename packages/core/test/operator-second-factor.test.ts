@@ -10,7 +10,7 @@ import {
 import { passwordSignIn } from "../src/engine/password.js";
 import { setupTotp } from "../src/engine/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { sessionFor } from "./helpers.js";
+import { OPERATOR_ROWS, sessionFor } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
@@ -57,7 +57,7 @@ function disable(auth: OperatorAuth, userId: string, extra: Record<string, unkno
 const offMails = (auth: OperatorAuth) =>
   auth.mail.filter((m) => m.text.startsWith("A second factor was turned off"));
 
-const auditRows = (auth: OperatorAuth) => auth.storage.findMany("operatorAudit", []);
+const auditRows = (auth: OperatorAuth) => auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
 
 const signIn = (auth: OperatorAuth) =>
   passwordSignIn(auth.config, { email: EMAIL, password: PASSWORD, ip: "9.9.9.9", userAgent: "ua" });

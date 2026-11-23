@@ -14,7 +14,7 @@ import { destroySession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, OPERATOR_ROWS, post } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   operatorFixture,
@@ -93,7 +93,7 @@ async function started(w: World): Promise<string> {
 }
 
 const auditRows = (w: World) =>
-  w.auth.storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } });
+  w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS, { sort: { field: "id", dir: "asc" } });
 
 describe("the impersonation (plan 12f Task 11)", () => {
   it("starts and stops an impersonation with the cookie swap", async () => {

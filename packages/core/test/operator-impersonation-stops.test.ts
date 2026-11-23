@@ -23,7 +23,7 @@ import { sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { get, post, tokenFromMail } from "./helpers.js";
+import { get, OPERATOR_ROWS, post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
@@ -527,6 +527,10 @@ describe("the order of the audit rows in one millisecond (ruling 58 Q4 of plan 1
   it("lists two acts and their stop rows in write order, 100 times on a fixed clock", async () => {
     // Every request passes: 300 starts on one clock would fill the start limit.
     const w = await world({ limiter: { allow: async () => true } });
+    // The rows of the setup: its member add writes one (plan 13b Task 4). They come first.
+    const setup = (
+      await w.auth.storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } })
+    ).map((r) => r.id);
     // The ids of the audit rows in the order of their writes, inside and outside a transaction.
     const written: string[] = [];
     const record = <T extends { create: StorageAdapter["create"] }>(handle: T): T => {
@@ -574,9 +578,9 @@ describe("the order of the audit rows in one millisecond (ruling 58 Q4 of plan 1
       if (page.value.next === null) break;
       after = page.value.next;
     }
-    expect(listed).toEqual(written);
+    expect(listed).toEqual([...setup, ...written]);
     const actions = (
-      await w.auth.storage.findMany("operatorAudit", [], {
+      await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS, {
         sort: { field: "id", dir: "asc" },
       })
     ).map((r) => r.action);
