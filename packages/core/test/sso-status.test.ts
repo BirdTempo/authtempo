@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SsoConfig } from "../src/config.js";
 import { createScimToken } from "../src/engine/scim/tokens.js";
-import { listConnections } from "../src/engine/sso/connections.js";
+import { listConnections, updateConnection } from "../src/engine/sso/connections.js";
+import { noteSignIn } from "../src/engine/sso/expiry.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { parseXml } from "../src/saml/xml.js";
 import { attrOf, createTestIdp } from "../src/testing/saml-idp.js";
@@ -213,6 +214,28 @@ describe("the status of a connection (plan 13b Task 9)", () => {
     ]).toEqual([[[organizationId, "id_token"]], "id_token", w.clock.now()]);
   });
 
+  it("status race: two status writes from one read in one hour change one row, and the first step stays", async () => {
+    const w = await world();
+    moveTo(w, at(10));
+    // Two parallel sign-ins read the row before either one writes.
+    const stale = await rowOf(w);
+    const writes = vi.spyOn(w.config.storage, "update");
+    await noteSignIn(w.config, stale, "signature");
+    moveTo(w, at(10, 5));
+    await noteSignIn(w.config, stale, "audience");
+    const changed = await Promise.all(
+      writes.mock.results
+        .filter((_, i) => writes.mock.calls[i]?.[0] === "ssoConnection")
+        .map((r) => r.value as Promise<number>),
+    );
+    const row = await rowOf(w);
+    expect([changed, row.lastFailureAt?.toISOString(), row.lastFailureStep]).toEqual([
+      [1, 0],
+      at(10),
+      "signature",
+    ]);
+  });
+
   it("keeps the sign-in when the status write throws, and writes one fault event", async () => {
     const w = await world();
     const update = w.config.storage.update.bind(w.config.storage);
@@ -246,6 +269,32 @@ describe("the expiry fields of a row from before schema 18 (plan 13b Task 9, dec
       row.expiryStage,
       row.expiryNoticeAt?.toISOString(),
     ]).toEqual([1, "2045-01-01T00:00:00.000Z", null, "2044-12-02T00:00:00.000Z"]);
+  });
+
+  it("keeps the new end when the manager changes the certificates between the read and the fill", async () => {
+    const w = await world();
+    await w.storage.update("ssoConnection", [{ field: "id", op: "eq", value: w.connectionId }], {
+      certificateEndsAt: null,
+      expiryStage: null,
+      expiryNoticeAt: null,
+    });
+    // A sign-in reads the row from before schema 18, with the old certificate.
+    const stale = await rowOf(w);
+    const fresh = await createTestIdp({
+      alg: "rsa",
+      certificateNotAfter: new Date("2030-06-01T00:00:00.000Z"),
+    });
+    const changed = await updateConnection(w.config, SSO_APP, {
+      id: w.connectionId,
+      certificates: [fresh.certificatePem],
+    });
+    if (!changed.ok) throw new Error(changed.code);
+    await noteSignIn(w.config, stale, "signature");
+    const row = await rowOf(w);
+    expect([row.certificateEndsAt?.toISOString(), row.expiryNoticeAt?.toISOString()]).toEqual([
+      "2030-06-01T00:00:00.000Z",
+      "2030-05-02T00:00:00.000Z",
+    ]);
   });
 
   it("fills the notice of a SCIM token at its first call, in the update of lastUsedAt", async () => {

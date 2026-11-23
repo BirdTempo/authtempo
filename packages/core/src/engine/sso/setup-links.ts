@@ -161,6 +161,8 @@ export async function createSetupLink(
   if (!still.ok) return still;
   const now = config.clock.now();
   const token = randomToken(SETUP_LINK_PREFIX);
+  // One end for the row and its notice date, so the two cannot drift apart.
+  const expiresAt = new Date(now.getTime() + hours * HOUR_MS);
   const row: SsoSetupLinkRow = {
     id: newId(now),
     createdAt: now,
@@ -172,14 +174,14 @@ export async function createSetupLink(
     kinds,
     note,
     createdBy: makerOf(actor),
-    expiresAt: new Date(now.getTime() + hours * HOUR_MS),
+    expiresAt,
     revokedAt: null,
     endedAt: null,
     openedAt: null,
     readyAt: null,
     // Plan 13b Task 9: a link lives at most 168 hours, so it gets the notice of 1 day at most.
     expiryStage: null,
-    expiryNoticeAt: nextNotice(new Date(now.getTime() + hours * HOUR_MS), null, now, now),
+    expiryNoticeAt: nextNotice(expiresAt, null, now, now),
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {

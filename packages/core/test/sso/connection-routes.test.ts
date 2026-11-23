@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
+import { markFresh } from "../../src/engine/fresh.js";
 import { createOrganization } from "../../src/engine/organizations.js";
 import { createConnection } from "../../src/engine/sso/connections.js";
 import { addDomain } from "../../src/engine/sso/domains.js";
@@ -182,7 +183,11 @@ describe("the connection routes (plan 12d Task 3)", () => {
       kind: "oidc",
     });
     if (!made.ok) throw new Error(made.code);
-    const idp = await createTestIdp({ alg: "rsa" });
+    const DAY_MS = 86_400_000;
+    const t0 = w.auth.clock.now().getTime();
+    const iso = (days: number) => new Date(t0 + days * DAY_MS).toISOString();
+    // The certificate ends 40 days after the create, so the 30-day notice is due at day 10.
+    const idp = await createTestIdp({ alg: "rsa", certificateNotAfter: new Date(iso(40)) });
     const saml = await createConnection(w.auth.config, SSO_APP, {
       organizationId: w.org,
       kind: "saml",
@@ -192,15 +197,21 @@ describe("the connection routes (plan 12d Task 3)", () => {
       certificates: [idp.certificatePem],
     });
     if (!saml.ok) throw new Error(saml.code);
-    // The values that a passed sign-in, a failed sign-in, and the sweep of the 30-day notice write.
+    // At day 15: the values that a passed sign-in at day 12, a failed sign-in at day 14, and the
+    // sweep of the 30-day notice wrote.
+    w.auth.clock.advance(15 * DAY_MS);
+    // The owner re-authenticates at day 15: the manager routes need a fresh session.
+    if (!(await markFresh(w.auth.config, w.owner.session.id)).ok) throw new Error("not fresh");
     await w.auth.storage.update(
       "ssoConnection",
       [{ field: "id", op: "eq", value: saml.value.id }],
       {
-        lastSuccessAt: new Date("2026-03-01T09:00:00.000Z"),
-        lastFailureAt: new Date("2026-03-02T10:00:00.000Z"),
+        lastSuccessAt: new Date(iso(12)),
+        lastFailureAt: new Date(iso(14)),
         lastFailureStep: "signature",
         expiryStage: 30,
+        // After the 30-day notice the next one is the 7-day notice, at day 33.
+        expiryNoticeAt: new Date(iso(33)),
       },
     );
     const [status, body] = await send(
@@ -229,10 +240,10 @@ describe("the connection routes (plan 12d Task 3)", () => {
         [
           saml.value.id,
           {
-            lastSuccessAt: "2026-03-01T09:00:00.000Z",
-            lastFailureAt: "2026-03-02T10:00:00.000Z",
+            lastSuccessAt: iso(12),
+            lastFailureAt: iso(14),
             lastFailureStep: "signature",
-            certificateEndsAt: "2045-01-01T00:00:00.000Z",
+            certificateEndsAt: iso(40),
             expiryStage: 30,
           },
         ],
