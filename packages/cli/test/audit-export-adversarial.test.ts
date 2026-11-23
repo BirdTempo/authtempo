@@ -23,7 +23,10 @@ const PW = "correct horse battery";
 const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
 const hash = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
-/** Each probe: the formula leads of the OWASP rule, CR, LF, CRLF, a quote, and a comma. */
+/**
+ * Each probe: the formula leads of the OWASP rule, CR, LF, CRLF, a quote, a comma, and a lead
+ * after a `;` or a line break, which a reader with `;` as its separator reads as a field start.
+ */
 const PROBES = [
   "=1+1",
   "+1",
@@ -36,6 +39,10 @@ const PROBES = [
   "a\r\nb",
   'a"b',
   "a,b",
+  "a;=1",
+  'a;"=1',
+  "a\n=1",
+  "a;",
 ];
 
 /** One row of `GET /operator/audit`, with the keys of the answer schema. */
@@ -88,12 +95,15 @@ function readCsv(text: string): string[][] {
 }
 
 /**
- * The cell that a spreadsheet reads for `value`: a leading `'` before a formula lead, and each CR
- * as `?`. The output scrub turns each control character of a line into `?` (ruling R14). A tab
- * stays.
+ * The cell that a spreadsheet reads for `value`: a `'` after each `;`, CR, or LF that a formula
+ * lead, a quote, or the cell end follows (ruling R29), then a leading `'` before a formula lead,
+ * and each CR as `?`. The output scrub turns each control character of a line into `?` (ruling
+ * R14). A tab stays.
  */
-const expectedCell = (value: string) =>
-  (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value).replaceAll("\r", "?");
+const expectedCell = (value: string) => {
+  const split = value.replace(/([;\r\n])(?=[=+\-@\t\r"]|$)/g, "$1'");
+  return (/^[=+\-@\t\r]/.test(split) ? `'${split}` : split).replaceAll("\r", "?");
+};
 
 /**
  * The cells of the record of `r`, in the order of the columns. The null rule: a null is an empty
@@ -133,8 +143,9 @@ describe("authtempo audit export under attack (plan 13b Task 12)", () => {
         const cells = records[1] ?? [];
         expect(cells, label).toHaveLength(AUDIT_CSV_COLUMNS.length);
         const at = AUDIT_CSV_COLUMNS.indexOf(column);
-        // The data cell is JSON text: it starts with `{`, and JSON escapes each CR and LF.
-        const want = column === "data" ? JSON.stringify(value) : expectedCell(probe);
+        // The data cell is JSON text: it starts with `{`, and JSON escapes each CR and LF. A `;`
+        // in it still gets the guard.
+        const want = expectedCell(column === "data" ? JSON.stringify(value) : probe);
         expect(cells[at], label).toBe(want);
         // Each other cell equals its source too.
         expect(cells, label).toEqual(sourceCells(r));

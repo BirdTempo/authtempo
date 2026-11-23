@@ -597,14 +597,29 @@ export const AUDIT_CSV_COLUMNS = [
 const FORMULA_START = /^[=+\-@\t\r]/;
 
 /**
+ * A `;`, a carriage return, or a line feed that a formula lead, a quote, or
+ * the cell end follows. See csvCell.
+ */
+const SPLIT_BEFORE_LEAD = /([;\r\n])(?=[=+\-@\t\r"]|$)/g;
+
+/**
  * One CSV cell (RFC 4180): the formula guard, then quotes when the cell holds
- * a comma, a quote, a line break, or a `;`. A spreadsheet with `;` as its list
- * separator (de-DE, fr-FR) splits an unquoted line at `;`, and the part after
- * it can start with a formula lead (ruling R23 of plan 13b).
+ * a comma, a quote, or a line break.
+ *
+ * Quotes do not stop the formula. A spreadsheet with `;` as its list separator
+ * (de-DE, fr-FR) splits the line at each `;` and reads a quote in the middle
+ * of a field as text. So the text after a `;` starts a field, and the text
+ * after a line break starts a record (rulings R23 and R29 of plan 13b). Thus
+ * a `'` goes after each `;`, carriage return, and line feed that a lead
+ * follows. A `'` also goes before a quote or the cell end there: a field that
+ * starts with a quote puts that reader in quote mode, and it then splits the
+ * rest of the file at other places. The start of the cell gets the same guard
+ * last, so a cell that starts with a carriage return gets it too.
  */
 function csvCell(value: string): string {
-  const safe = FORMULA_START.test(value) ? `'${value}` : value;
-  return /[",;\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+  const split = value.replace(SPLIT_BEFORE_LEAD, "$1'");
+  const safe = FORMULA_START.test(split) ? `'${split}` : split;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** One audit row as one CSV record. A null is an empty cell, and `data` is JSON text. */

