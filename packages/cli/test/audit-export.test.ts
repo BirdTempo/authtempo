@@ -141,6 +141,16 @@ describe("authtempo audit export (plan 13b Task 8)", () => {
     expect(io.stderr).toEqual([NOTE]);
   });
 
+  it("csv line break: a cell with a line break and no comma or quote gets quotes", async () => {
+    const first = [row("a1", { reason: "first line\nsecond line" })];
+    const s = stub(first, []);
+    const { code, io } = await run(["--organization", ORG, "--format", "csv"], s.fetch);
+    expect(code, io.stderr.join("\n")).toBe(0);
+    expect(io.stdout).toHaveLength(3);
+    expect(io.stdout[1]?.endsWith(',"first line')).toBe(true);
+    expect(readCsv(io.stdout.join("\n"))).toEqual([HEADER.split(","), ...first.map(cellsOf)]);
+  });
+
   it("injection: a cell that starts with a formula character gets a leading quote", async () => {
     const formula = '=HYPERLINK("x")';
     const s = stub([row("a1", { userAgent: formula })], []);
@@ -205,5 +215,42 @@ describe("authtempo audit export (plan 13b Task 8)", () => {
       expect(io.stdout.length, format).toBeGreaterThan(1);
       for (const line of [...io.stdout, ...io.stderr]) expect(line, format).not.toContain(SECRET);
     }
+  });
+
+  it("secret with a quote: no output line holds the secret, its JSON form, or its CSV form", async () => {
+    // The secret rule allows each visible ASCII character, so a secret can hold a quote.
+    const quoted = 'operator-"quoted"-0123456789abcdef-0123';
+    // The data cell holds JSON text in CSV quotes, so the fourth form is the CSV form of the JSON form.
+    const json = JSON.stringify(quoted).slice(1, -1);
+    const forms = [quoted, json, quoted.replaceAll('"', '""'), json.replaceAll('"', '""')];
+    for (const format of ["ndjson", "csv"]) {
+      const first = [row("a1", { reason: quoted, data: { note: quoted } })];
+      const s = stub(first, [row("a2", { userAgent: quoted })]);
+      const io = fakeIo({ env: { AUTHTEMPO_OPERATOR_SECRET: quoted }, fetch: s.fetch });
+      const code = await main(
+        ["audit", "export", BASE, "--organization", ORG, "--format", format],
+        io,
+      );
+      expect(code, format).toBe(0);
+      expect(io.stdout.length, format).toBeGreaterThan(1);
+      for (const line of [...io.stdout, ...io.stderr])
+        for (const form of forms) expect(line, format).not.toContain(form);
+    }
+  });
+
+  it("older deployment: an invalid_body for well formed ids names the schema version, not the ids", async () => {
+    const answer = async () => Response.json({ error: "invalid_body" }, { status: 400 });
+    const { code, io } = await run(["--organization", ORG, "--format", "ndjson"], answer);
+    expect(code).toBe(2);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr.at(-1)).toBe(
+      "stopped: the deployment refused a value (invalid_body): the deployment can be at a schema version before 18, where the organization audit starts",
+    );
+    // An id longer than 64 characters: the text names the id rule.
+    const long = await run(["--organization", "x".repeat(65), "--format", "ndjson"], answer);
+    expect(long.code).toBe(2);
+    expect(long.io.stderr.at(-1)).toBe(
+      "stopped: the deployment refused a value (invalid_body): --organization and --after are ids of at most 64 characters",
+    );
   });
 });

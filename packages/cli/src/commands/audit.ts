@@ -101,6 +101,16 @@ const EXPORT_OPTIONS = {
 const FORMATS = ["ndjson", "csv"] as const;
 
 /**
+ * An id that core takes: 1 to 64 characters (`operatorId` of the core
+ * operator contract, which core does not export). This rule is stricter: it
+ * takes visible ASCII only. When each id has this shape, the likely cause of
+ * an `invalid_body` is a deployment before schema version 18: its audit query
+ * has no `organizationId`. So the stop message names the schema version, not
+ * an id.
+ */
+const ID_SHAPE = /^[\x21-\x7e]{1,64}$/;
+
+/**
  * `authtempo audit export <base url>` (plan 13b Task 8). It reads every
  * page of `GET /operator/audit?organizationId=<id>` with the operator
  * secret (decision 3: spec 29 item 17 keeps tokens out of
@@ -133,7 +143,9 @@ async function runExport(argv: string[], ctx: Ctx): Promise<number> {
       method: "GET",
       query: { organizationId },
       scope: "audit",
-      invalid: "--organization and --after are ids of at most 64 characters",
+      invalid: [organizationId, values.after].every((id) => id === undefined || ID_SHAPE.test(id))
+        ? "the deployment can be at a schema version before 18, where the organization audit starts"
+        : "--organization and --after are ids of at most 64 characters",
     },
     all,
     rule,
