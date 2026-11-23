@@ -1,4 +1,4 @@
-// authtempo schema version 17, dialect mysql, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 18, dialect mysql, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -456,10 +456,12 @@ export const taOperatorAudit = mysqlTable(
     data: json("data"),
     ip: text("ip"),
     userAgent: text("user_agent"),
+    organizationId: varchar("organization_id", { length: 64 }),
   },
   (t) => [
     index("ix_ta_operator_audit__target_user_id").on(t.targetUserId),
     index("ix_ta_operator_audit__actor_id").on(t.actorId),
+    index("ix_ta_operator_audit__organization_id__id").on(t.organizationId, t.id),
   ],
 );
 
@@ -574,9 +576,16 @@ export const taSsoConnection = mysqlTable(
     draft: boolean("draft").notNull(),
     version: int("version").notNull(),
     setupLinkId: text("setup_link_id"),
+    certificateEndsAt: epochMs("certificate_ends_at"),
+    expiryStage: int("expiry_stage"),
+    expiryNoticeAt: epochMs("expiry_notice_at"),
+    lastSuccessAt: epochMs("last_success_at"),
+    lastFailureAt: epochMs("last_failure_at"),
+    lastFailureStep: text("last_failure_step"),
   },
   (t) => [
     index("ix_ta_sso_connection__organization_id").on(t.organizationId),
+    index("ix_ta_sso_connection__expiry_notice_at").on(t.expiryNoticeAt),
   ],
 );
 
@@ -622,10 +631,13 @@ export const taScimToken = mysqlTable(
     lastUsedAt: epochMs("last_used_at"),
     pending: boolean("pending").notNull(),
     setupLinkId: text("setup_link_id"),
+    expiryStage: int("expiry_stage"),
+    expiryNoticeAt: epochMs("expiry_notice_at"),
   },
   (t) => [
     uniqueIndex("ux_ta_scim_token__token_hash").on(t.tokenHash),
     index("ix_ta_scim_token__organization_id").on(t.organizationId),
+    index("ix_ta_scim_token__expiry_notice_at").on(t.expiryNoticeAt),
   ],
 );
 
@@ -704,10 +716,13 @@ export const taSsoSetupLink = mysqlTable(
     endedAt: epochMs("ended_at"),
     openedAt: epochMs("opened_at"),
     readyAt: epochMs("ready_at"),
+    expiryStage: int("expiry_stage"),
+    expiryNoticeAt: epochMs("expiry_notice_at"),
   },
   (t) => [
     uniqueIndex("ux_ta_sso_setup_link__token_hash").on(t.tokenHash),
     index("ix_ta_sso_setup_link__organization_id").on(t.organizationId),
+    index("ix_ta_sso_setup_link__expiry_notice_at").on(t.expiryNoticeAt),
   ],
 );
 

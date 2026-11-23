@@ -1,4 +1,4 @@
-// authtempo schema version 17, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 18, dialect postgres, authtempo CLI <version>. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
@@ -402,9 +402,11 @@ model TaOperatorAudit {
   data Json? @map("data")
   ip String? @map("ip")
   userAgent String? @map("user_agent")
+  organizationId String? @map("organization_id")
 
   @@index([targetUserId], map: "ix_ta_operator_audit__target_user_id")
   @@index([actorId], map: "ix_ta_operator_audit__actor_id")
+  @@index([organizationId, id], map: "ix_ta_operator_audit__organization_id__id")
   @@map("ta_operator_audit")
 }
 
@@ -504,8 +506,15 @@ model TaSsoConnection {
   draft Boolean @map("draft")
   version Int @map("version")
   setupLinkId String? @map("setup_link_id")
+  certificateEndsAt DateTime? @map("certificate_ends_at") @db.Timestamptz(6)
+  expiryStage Int? @map("expiry_stage")
+  expiryNoticeAt DateTime? @map("expiry_notice_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+  lastFailureAt DateTime? @map("last_failure_at") @db.Timestamptz(6)
+  lastFailureStep String? @map("last_failure_step")
 
   @@index([organizationId], map: "ix_ta_sso_connection__organization_id")
+  @@index([expiryNoticeAt], map: "ix_ta_sso_connection__expiry_notice_at")
   @@map("ta_sso_connection")
 }
 
@@ -547,9 +556,12 @@ model TaScimToken {
   lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
   pending Boolean @map("pending")
   setupLinkId String? @map("setup_link_id")
+  expiryStage Int? @map("expiry_stage")
+  expiryNoticeAt DateTime? @map("expiry_notice_at") @db.Timestamptz(6)
 
   @@unique([tokenHash], map: "ux_ta_scim_token__token_hash")
   @@index([organizationId], map: "ix_ta_scim_token__organization_id")
+  @@index([expiryNoticeAt], map: "ix_ta_scim_token__expiry_notice_at")
   @@map("ta_scim_token")
 }
 
@@ -618,9 +630,12 @@ model TaSsoSetupLink {
   endedAt DateTime? @map("ended_at") @db.Timestamptz(6)
   openedAt DateTime? @map("opened_at") @db.Timestamptz(6)
   readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
+  expiryStage Int? @map("expiry_stage")
+  expiryNoticeAt DateTime? @map("expiry_notice_at") @db.Timestamptz(6)
 
   @@unique([tokenHash], map: "ux_ta_sso_setup_link__token_hash")
   @@index([organizationId], map: "ix_ta_sso_setup_link__organization_id")
+  @@index([expiryNoticeAt], map: "ix_ta_sso_setup_link__expiry_notice_at")
   @@map("ta_sso_setup_link")
 }
 

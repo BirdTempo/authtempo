@@ -308,6 +308,36 @@ describe("the access control shim (spec 29 item 18)", () => {
     ]);
   });
 
+  it("refuses an ac resource named audit, as it refuses apiToken (plan 13b)", () => {
+    // Core 18 owns the resource audit (owner decision 2 of plan 13b). An app resource of that name
+    // would give a role core's organization audit in silence.
+    const own = createAccessControl({ ...defaultStatements, audit: ["view"] });
+    const given = options(
+      { ac: own, roles: { owner: own.newRole({}) } },
+      { roleRanks: { owner: 1 } },
+    );
+    expect(checkOptions(given).refusals).toEqual([
+      "plugins[organization].ac.statements.audit: audit is a core resource of authtempo, the organization audit; give the app's resource another name (spec 29 item 18)",
+    ]);
+    expect(() => betterAuth(given)).toThrow(BetterAuthCompatError);
+    // The action of core's audit is refused too, so no ac grants it.
+    const read = createAccessControl({ ...defaultStatements, audit: ["read"] });
+    expect(
+      checkOptions(
+        options({ ac: read, roles: { owner: read.newRole({}) } }, { roleRanks: { owner: 1 } }),
+      ).refusals,
+    ).toEqual([
+      "plugins[organization].ac.statements.audit: audit is a core resource of authtempo, the organization audit; give the app's resource another name (spec 29 item 18)",
+    ]);
+    // A role that names audit would get core's audit read in silence.
+    const auditRole = { owner: ac.newRole({ audit: ["read"] }) };
+    expect(
+      checkOptions(options({ ac, roles: auditRole }, { roleRanks: { owner: 1 } })).refusals,
+    ).toEqual([
+      "plugins[organization].roles.owner.statements.audit: audit is a core resource of authtempo, the organization audit; give the app's resource another name (spec 29 item 18)",
+    ]);
+  });
+
   it("refuses an ac resource or action that core's name rule refuses", () => {
     const bad = createAccessControl({
       ...defaultStatements,
@@ -759,8 +789,8 @@ describe("the access control shim (spec 29 item 18)", () => {
           expect(
             await pg.sql.unsafe(`SELECT key, value FROM ta_meta ORDER BY key`).then((r) => [...r]),
           ).toEqual([
-            { key: "compat_better_auth", value: "14" },
-            { key: "schema_version", value: "17" },
+            { key: "compat_better_auth", value: "15" },
+            { key: "schema_version", value: "18" },
           ]);
         } finally {
           await pg.close();
@@ -777,7 +807,7 @@ describe("the access control shim (spec 29 item 18)", () => {
       const shipped = Object.keys(files)
         .sort()
         .map((k) => files[k] as string);
-      expect(shipped.length).toBe(14);
+      expect(shipped.length).toBe(15);
       for (const withTable of [true, false]) {
         const db = new DatabaseSync(":memory:");
         db.exec("PRAGMA foreign_keys = ON;");
@@ -815,8 +845,8 @@ describe("the access control shim (spec 29 item 18)", () => {
           ),
         ).toThrow(/UNIQUE constraint failed/);
         expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
-          { key: "compat_better_auth", value: "14" },
-          { key: "schema_version", value: "17" },
+          { key: "compat_better_auth", value: "15" },
+          { key: "schema_version", value: "18" },
         ]);
       }
     });

@@ -39,8 +39,8 @@ it("reads a version 10 client and token row with every default after 0008 on Pos
       `INSERT INTO ta_oauth_token (id, created_at, updated_at, token_hash, family_id, user_id, client_id, scopes, resource, expires_at, used_at) VALUES ('t10', now(), now(), 'h10', 'f10', 'u10', 'cl_10', '["offline_access"]'::jsonb, 'https://api.example.com/mcp', now() + interval '1 day', NULL)`,
     );
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    // The runner applies 0008 and each later migration. 0009 to 0014 come from plans 12f, 12k,
-    // 12d, 12i, 12p, and 13a.
+    // The runner applies 0008 and each later migration. 0009 to 0015 come from plans 12f, 12k,
+    // 12d, 12i, 12p, 13a, and 13b.
     expect(await s.migrate()).toEqual([
       "0008_compat_schema_v11",
       "0009_compat_schema_v12",
@@ -49,6 +49,7 @@ it("reads a version 10 client and token row with every default after 0008 on Pos
       "0012_compat_schema_v15",
       "0013_compat_schema_v16",
       "0014_compat_schema_v17",
+      "0015_compat_schema_v18",
     ]);
     const client = await s.storage.findOne("oauthClient", [
       { field: "id", op: "eq", value: "cl_10" },

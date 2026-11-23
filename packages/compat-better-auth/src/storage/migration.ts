@@ -1484,6 +1484,62 @@ export function compatMigration0014Sql(dialect: "postgres" | "sqlite"): string {
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0015_NAME = "0015_compat_schema_v18";
+
+/** The core statements of migration 0015, by dialect: core 0018's text for the audit and expiry columns. */
+const COMPAT_0015_CORE: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `ALTER TABLE ta_operator_audit ADD COLUMN organization_id text;
+ALTER TABLE ta_sso_connection ADD COLUMN certificate_ends_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_notice_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_success_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_step text;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_notice_at timestamptz;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_notice_at timestamptz;
+CREATE INDEX ix_ta_operator_audit__organization_id__id ON ta_operator_audit (organization_id, id);
+CREATE INDEX ix_ta_sso_connection__expiry_notice_at ON ta_sso_connection (expiry_notice_at);
+CREATE INDEX ix_ta_scim_token__expiry_notice_at ON ta_scim_token (expiry_notice_at);
+CREATE INDEX ix_ta_sso_setup_link__expiry_notice_at ON ta_sso_setup_link (expiry_notice_at);`,
+  sqlite: `ALTER TABLE ta_operator_audit ADD COLUMN organization_id TEXT;
+ALTER TABLE ta_sso_connection ADD COLUMN certificate_ends_at INTEGER;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_stage INTEGER;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_notice_at INTEGER;
+ALTER TABLE ta_sso_connection ADD COLUMN last_success_at INTEGER;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_at INTEGER;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_step TEXT;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_stage INTEGER;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_notice_at INTEGER;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_stage INTEGER;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_notice_at INTEGER;
+CREATE INDEX ix_ta_operator_audit__organization_id__id ON ta_operator_audit (organization_id, id);
+CREATE INDEX ix_ta_sso_connection__expiry_notice_at ON ta_sso_connection (expiry_notice_at);
+CREATE INDEX ix_ta_scim_token__expiry_notice_at ON ta_scim_token (expiry_notice_at);
+CREATE INDEX ix_ta_sso_setup_link__expiry_notice_at ON ta_sso_setup_link (expiry_notice_at);`,
+};
+
+/**
+ * Migration 0015 (plan 13b): core's schema version 18, the organization
+ * audit and the expiry notices. Core 18 adds no model. It adds
+ * `organizationId` to `operatorAudit`, the expiry and health fields to
+ * `ssoConnection`, and `expiryStage` and `expiryNoticeAt` to `scimToken` and
+ * `ssoSetupLink`. Each is core's own table in this database
+ * (`CORE_TABLE_MODELS`), so the text is the statements of core 0018, as 0014
+ * holds core 0017. Each new column is nullable with no default, and the text
+ * changes no row: an audit row is append-only. The text names `ta_` tables
+ * only, so it is the same for every naming and for both D1 variants.
+ * Append-only.
+ */
+export function compatMigration0015Sql(dialect: "postgres" | "sqlite"): string {
+  return `${[
+    COMPAT_0015_CORE[dialect],
+    "UPDATE ta_meta SET value = '18' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '15' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /**
  * The names of the compat migrations, in order (plan 11c). Each name is the
  * file name, without `.sql`, under `migrations/d1/` and
@@ -1505,6 +1561,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0012_NAME,
   MIGRATION_0013_NAME,
   MIGRATION_0014_NAME,
+  MIGRATION_0015_NAME,
 ];
 
 /**
@@ -1528,6 +1585,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   (names) => compatMigration0012Sql("postgres", names),
   (names) => compatMigration0013Sql("postgres", names),
   () => compatMigration0014Sql("postgres"),
+  () => compatMigration0015Sql("postgres"),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(
@@ -1577,6 +1635,8 @@ const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[
   (names) => compatMigration0013Sql("sqlite", names),
   // Plan 13a: core's schema version 17, the same text for both variants.
   () => compatMigration0014Sql("sqlite"),
+  // Plan 13b: core's schema version 18, the same text for both variants.
+  () => compatMigration0015Sql("sqlite"),
 ];
 if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

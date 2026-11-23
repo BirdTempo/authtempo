@@ -15,6 +15,7 @@ import {
 import { movedPrefixFault } from "@authtempo/core/credentials";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import {
+  CORE_AUDIT,
   CORE_KEY,
   CORE_RESOURCES,
   corePermissionsOf,
@@ -327,6 +328,12 @@ const plainObject = (v: unknown): v is Record<string, unknown> => {
 const CORE_TOKEN_NAME = `${CORE_KEY} is core's name of Better Auth's apiKey; name the resource apiKey ${ITEM_18}`;
 
 /**
+ * An app that names core's `audit` itself would give a role core's
+ * organization audit in silence (plan 13b), so the name is refused as `apiToken` is.
+ */
+const CORE_AUDIT_NAME = `${CORE_AUDIT} is a core resource of authtempo, the organization audit; give the app's resource another name ${ITEM_18}`;
+
+/**
  * `ac`: the object of `createAccessControl` from `better-auth/plugins/access`
  * (this package's `./plugins/access`). Its own resources become core's
  * `organizations.statements`, so each name follows core's name rule. A core
@@ -348,6 +355,10 @@ const accessControl: Rule = (v, p, out) => {
     const at = `${p}.statements.${given}`;
     if (given === CORE_KEY) {
       refuse(out, at, CORE_TOKEN_NAME);
+      continue;
+    }
+    if (given === CORE_AUDIT) {
+      refuse(out, at, CORE_AUDIT_NAME);
       continue;
     }
     const resource = toCoreName(given);
@@ -391,8 +402,12 @@ const roleTable: Rule = (v, p, out) =>
     const x = r as { statements?: unknown; authorize?: unknown } | null;
     if (typeof x?.authorize !== "function" || !plainObject(x.statements))
       refuse(out, path, `expected a role of ac.newRole(statements) ${ITEM_18}`);
-    else if (Object.hasOwn(x.statements, CORE_KEY))
-      refuse(out, `${path}.statements.${CORE_KEY}`, CORE_TOKEN_NAME);
+    else {
+      if (Object.hasOwn(x.statements, CORE_KEY))
+        refuse(out, `${path}.statements.${CORE_KEY}`, CORE_TOKEN_NAME);
+      if (Object.hasOwn(x.statements, CORE_AUDIT))
+        refuse(out, `${path}.statements.${CORE_AUDIT}`, CORE_AUDIT_NAME);
+    }
   });
 
 /** `dynamicAccessControl`: core's dynamic roles. Each refusal names spec 29 item 18. */

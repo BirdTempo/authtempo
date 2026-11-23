@@ -1310,6 +1310,8 @@ describe("the sso plugin (plan 12d Task 14)", () => {
       endedAt: null,
       openedAt: now,
       readyAt: null,
+      expiryStage: null,
+      expiryNoticeAt: null,
     });
     const draft = await app.auth.tempo.api.sso?.connections.create({
       actor: { kind: "app", name: "test" },

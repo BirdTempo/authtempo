@@ -107,25 +107,25 @@ it("stops before any write on a database with no schema", async () => {
 it("stops before any write on a database one version below", async () => {
   await applyOneVersionBelow(db.sql);
   const before = await rowCounts();
-  expect(before.ta_migrations).toBe("16");
+  expect(before.ta_migrations).toBe("17");
   const r = run();
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    `stopped: the database is at version 16; this CLI writes version 17; ${MIGRATE_FIRST}`,
+    `stopped: the database is at version 17; this CLI writes version 18; ${MIGRATE_FIRST}`,
   );
   expect(await rowCounts()).toEqual(before);
 });
 
 it("stops before any write on a database one version above", async () => {
   await applyPostgresMigrations(db.sql);
-  await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0018_future.sql"), "utf8"));
+  await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0019_future.sql"), "utf8"));
   const before = await rowCounts();
   const r = run();
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    "stopped: the database is at version 18; this CLI knows version 17; use a newer CLI; nothing was written",
+    "stopped: the database is at version 19; this CLI knows version 18; use a newer CLI; nothing was written",
   );
   expect(await rowCounts()).toEqual(before);
 });
@@ -137,7 +137,7 @@ it("names --tables compat in the stop of a compat import", async () => {
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    "stopped: the database is at version 16; this CLI writes version 17; run authtempo migrate --target postgres --tables compat first; nothing was written",
+    "stopped: the database is at version 17; this CLI writes version 18; run authtempo migrate --target postgres --tables compat first; nothing was written",
   );
   expect(await rowCounts()).toEqual(before);
 });
@@ -183,7 +183,7 @@ it("stops a dry run too", async () => {
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    `stopped: the database is at version 16; this CLI writes version 17; ${MIGRATE_FIRST}`,
+    `stopped: the database is at version 17; this CLI writes version 18; ${MIGRATE_FIRST}`,
   );
 });
 
@@ -207,18 +207,18 @@ describe("importGate and the two table sets", () => {
   const FIX = "run authtempo migrate --target postgres --tables compat first; nothing was written";
 
   it("stops a compat import on compat tables below or above the package's version", () => {
-    expect(stopOf(17, "compat", 0, 13)).toBe(
-      `the compat tables are at version 13; this CLI writes version 14; ${FIX}`,
+    expect(stopOf(18, "compat", 0, 14)).toBe(
+      `the compat tables are at version 14; this CLI writes version 15; ${FIX}`,
     );
-    expect(stopOf(17, "compat", 0, 15)).toBe(
-      "the compat tables are at version 15; this CLI knows version 14; use a newer CLI; nothing was written",
+    expect(stopOf(18, "compat", 0, 16)).toBe(
+      "the compat tables are at version 16; this CLI knows version 15; use a newer CLI; nothing was written",
     );
-    expect(stopOf(17, "compat", 0, 14)).toBeNull();
+    expect(stopOf(18, "compat", 0, 15)).toBeNull();
   });
 
   it("names the other table set when the database holds only one", () => {
-    expect(stopOf(17, "compat", 17, 0)).toBe(CORE_ONLY);
-    expect(stopOf(17, "core", 0, 14)).toBe(COMPAT_ONLY);
+    expect(stopOf(18, "compat", 18, 0)).toBe(CORE_ONLY);
+    expect(stopOf(18, "core", 0, 15)).toBe(COMPAT_ONLY);
   });
 
   it("names the compat set in the stop of a core import on a database with no schema", () => {
@@ -229,10 +229,10 @@ describe("importGate and the two table sets", () => {
   });
 
   it("reads the core version first, and passes a core import on core's tables", () => {
-    expect(stopOf(16, "compat", 16, 0)).toBe(
-      `the database is at version 16; this CLI writes version 17; ${FIX}`,
+    expect(stopOf(17, "compat", 17, 0)).toBe(
+      `the database is at version 17; this CLI writes version 18; ${FIX}`,
     );
-    expect(stopOf(17, "core", 17, 0)).toBeNull();
+    expect(stopOf(18, "core", 18, 0)).toBeNull();
   });
 });
 

@@ -384,7 +384,7 @@ type OrganizationsConfig = Extract<AuthConfig["organizations"], object>;
 
 /**
  * `ac`, `roles`, and `dynamicAccessControl` on core's organizations (plan 12k
- * Task 10, spec 29 item 18). `ac.statements` without the six core resources
+ * Task 10, spec 29 item 18). `ac.statements` without the seven core resources
  * is the app's own statements; `apiKey` is core's `apiToken`. Each role gets
  * its statements as core's permissions with Better Auth's list reads, and its
  * rank from `authtempo.roleRanks`. With no `roles`, Better Auth's three
