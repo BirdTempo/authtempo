@@ -193,13 +193,22 @@ async function readDue(storage: StorageAdapter, kind: ExpiryKind, now: Date): Pr
     noticeAt: r.expiryNoticeAt,
   });
   switch (kind) {
+    // A disabled connection signs no user in, so the read skips it: no mail, no event, no hook,
+    // and no write (ruling R15). It keeps its `expiryNoticeAt`, so an enable gets the nearest
+    // stage at the next sweep. A skip in the loop would keep the row first in each read, and 5
+    // such rows would stop the notices of every other connection. A draft is never enabled.
     case "saml_certificate":
-      return (await storage.findMany("ssoConnection", [due], opts)).map((r) => ({
+      return (
+        await storage.findMany(
+          "ssoConnection",
+          [due, { field: "enabled", op: "eq", value: true }],
+          opts,
+        )
+      ).map((r) => ({
         ...base(r),
         label: r.label,
         end: r.certificateEndsAt,
-        // A draft or a disabled connection signs no user in, so it sends no notice (ruling R13).
-        closed: r.draft || !r.enabled,
+        closed: false,
       }));
     case "scim_token":
       return (await storage.findMany("scimToken", [due], opts)).map((r) => ({
@@ -245,9 +254,10 @@ async function claim(
 /**
  * The expiry step of the sweep for one kind (plan 13b Task 10, spec 6.7 item 2). It reads at
  * most `EXPIRY_PAGE` due rows, and for each row it claims the due stage before it sends. A row
- * with no end, an end in the past, a closed link, or a draft or disabled connection loses its
- * notice date and sends nothing. The step reads one page of `EXPIRY_OWNER_PAGE` members. An owner
- * past that page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`. For
+ * with no end, an end in the past, or a closed link loses its notice date and sends nothing. The
+ * read skips a disabled connection, which keeps its notice date (ruling R15). After an enable,
+ * the next sweep sends the nearest due stage. The step reads one page of `EXPIRY_OWNER_PAGE`
+ * members. An owner past that page gets no mail, and the step writes `notice.mail_failed` with a `RangeError`. For
  * an open row, the owners get at most `EXPIRY_MAIL_MAX` mails, then the step emits `sso.expiring`
  * and runs `hooks.sso.expiring`. Both run also while `account.notices` is off. The claim is the
  * record: a failed mail writes `notice.mail_failed`, and no sweep sends it again. The step stops

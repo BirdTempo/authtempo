@@ -453,16 +453,48 @@ describe("the expiry step of the sweep (plan 13b Task 10)", () => {
     expect(models).toEqual(["ssoConnection", "scimToken"]);
   });
 
-  it("disabled: a due connection that is off gets no mail, and its expiryNoticeAt goes to null (ruling R13)", async () => {
+  it("disabled: a due connection that is off sends nothing and keeps its date; enabled again, it gets the nearest stage (ruling R15)", async () => {
     const w = await world();
     const id = await samlRow(w);
     const off = await updateConnection(w.config, SSO_APP, { id, enabled: false });
     expect(off.ok).toBe(true);
     moveTo(w, STAGE_30);
-    const mails = await mailsOf(w, () => sweepExpired(w.config));
-    expect([mails, w.calls]).toEqual([[], []]);
-    expect(stageOf(await connection(w, id))).toEqual([null, null]);
+    const quiet = await mailsOf(w, async () => {
+      expect((await sweepExpired(w.config)).ssoExpiryNotices).toBe(0);
+    });
+    expect([quiet, w.calls]).toEqual([[], []]);
+    expect(stageOf(await connection(w, id))).toEqual([null, STAGE_30]);
     expect(await w.events("sso.expiring")).toEqual([]);
+    // 5 days before the end the owner turns it on again: the sweep sends the stage of 7 days only.
+    moveTo(w, "2027-02-10T00:00:00.000Z");
+    const on = await updateConnection(w.config, SSO_APP, { id, enabled: true });
+    expect(on.ok).toBe(true);
+    const mails = await mailsOf(w, async () => {
+      expect((await sweepExpired(w.config)).ssoExpiryNotices).toBe(1);
+    });
+    expect(mails).toHaveLength(1);
+    expect(mails[0]?.text).toContain("7 days");
+    expect(stageOf(await connection(w, id))).toEqual([7, "2027-02-14T00:00:00.000Z"]);
+    expect(await w.events("sso.expiring")).toMatchObject([{ rowId: id, stage: 7, mails: 1 }]);
+    expect(w.calls.map((c) => c.id)).toEqual([id]);
+  });
+
+  it("disabled first: 5 due disabled connections do not stop the notice of an enabled one", async () => {
+    const w = await world();
+    for (const [i, slug] of ["beta", "gamma", "delta", "omega", "sigma"].entries()) {
+      const org = await seedOrganization(w, slug);
+      await verifiedDomain(w, org, `${slug}.example`);
+      const id = await samlRow(w, org, `https://idp.example/${i}`);
+      expect((await updateConnection(w.config, SSO_APP, { id, enabled: false })).ok).toBe(true);
+    }
+    // The last connection has the same notice date and the largest id: it is last in the sort.
+    const id = await samlRow(w);
+    moveTo(w, STAGE_30);
+    const mails = await mailsOf(w, async () => {
+      expect((await sweepExpired(w.config)).ssoExpiryNotices).toBe(1);
+    });
+    expect(mails.map((m) => m.to)).toEqual(["owner@acme.example"]);
+    expect(w.calls.map((c) => c.id)).toEqual([id]);
   });
 
   it("names the token and the link in the notice, with no token, and stops one kind on a storage fault", async () => {
