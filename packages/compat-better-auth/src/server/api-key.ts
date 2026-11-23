@@ -401,7 +401,10 @@ export function apiKeyApi(
       if (body.metadata !== undefined)
         throw compatApiError("NOT_SUPPORTED", "core keeps the metadata of a token's create");
       refillPair(body);
-      const user = await actor(headers, body.userId);
+      // A call with headers passes its session, as the route does: core refuses an
+      // impersonation session (ruling R21 of plan 13b). A server call names its user.
+      const { user, session } = await actorOf(headers, body.userId);
+      const caller = session ? { user, session: session.session } : { user };
       const rateLimit = windowOf(body);
       const narrow = {
         ...(body.name !== undefined ? { name: checkName(body.name) } : {}),
@@ -431,7 +434,7 @@ export function apiKeyApi(
         const { permissions, ...rest } = narrow;
         const t = unwrapKey(
           await auth.api.organizationTokens.update({
-            user,
+            ...caller,
             organizationId,
             id: body.keyId,
             ...rest,
@@ -441,16 +444,25 @@ export function apiKeyApi(
         );
         return toApiKey(t, organizationId);
       }
-      const t = unwrapKey(await auth.api.tokens.update({ user, id: body.keyId, ...narrow }), false);
+      const t = unwrapKey(
+        await auth.api.tokens.update({ ...caller, id: body.keyId, ...narrow }),
+        false,
+      );
       return toApiKey(t, user.id);
     },
 
     async deleteApiKey({ body, headers }) {
-      const user = await actor(headers, undefined);
+      const { user, session } = await actorOf(headers, undefined);
       if (organization) {
         const organizationId = await organizationOf(body.keyId);
+        // The session, as the route passes it: core refuses an impersonation session (ruling R21).
         unwrapKey(
-          await auth.api.organizationTokens.revoke({ user, organizationId, id: body.keyId }),
+          await auth.api.organizationTokens.revoke({
+            user,
+            ...(session ? { session: session.session } : {}),
+            organizationId,
+            id: body.keyId,
+          }),
           true,
         );
       } else unwrapKey(await auth.api.tokens.revoke({ user, id: body.keyId }), false);

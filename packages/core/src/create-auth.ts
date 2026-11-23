@@ -646,7 +646,11 @@ export interface OAuthClientsApi {
 
 /** API tokens (plan 8b). Present in every deployment: tokens need no config key. */
 export interface TokensApi {
-  /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
+  /**
+   * Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). A session of an
+   * impersonation gets `impersonation_session`, as `POST /tokens` answers it (plan 13b, ruling R21).
+   * So does a session row of an impersonation at `update`.
+   */
   create(input: ApiTokenCreate): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>>;
   list(input: { user: UserRow }): Promise<Result<ApiTokenSummary[]>>;
   revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
@@ -672,6 +676,8 @@ export interface TokensApi {
  * Only a person manages one: `create` needs `apiToken:create`, `list`
  * `apiToken:read`, `update` `apiToken:update`, and `revoke` `apiToken:revoke`.
  * `create` and `update` apply no fresh rule: call `api.session.requireFresh` first.
+ * `create`, `update`, and `revoke` give `impersonation_session` to a session of an
+ * impersonation, as their routes do (plan 13b, ruling R21).
  */
 export interface OrganizationTokensApi {
   /** The set is required and a subset of the creator's set; `{}` grants nothing. The cap is 50 live tokens. */
@@ -684,8 +690,13 @@ export interface OrganizationTokensApi {
   }): Promise<Result<OrganizationTokenSummary[]>>;
   /** Narrows only, as `tokens.update`: a smaller set, an earlier expiry, a new name, a window, or a lower quota. */
   update(input: OrganizationTokenUpdate): Promise<Result<OrganizationTokenSummary>>;
+  /**
+   * `session` (plan 13b, ruling R21): the session of the caller. A session of an
+   * impersonation gets `impersonation_session`, as `POST /organizations/tokens/revoke` answers it.
+   */
   revoke(input: {
     user: UserRow;
+    session?: SessionRow;
     organizationId: string;
     id: string;
   }): Promise<Result<{ ok: true }>>;
@@ -1198,6 +1209,21 @@ function refusesImpersonation<I extends { session: Pick<ResolvedSession, "sessio
   };
 }
 
+/**
+ * `refusesImpersonation` for a call whose input takes the session row as an
+ * option (plan 13b, rulings R18 and R21). A row with `actorId` gets
+ * `impersonation_session`, as the route answers. An input with no session
+ * runs: the app named the user itself, and its route refuses.
+ */
+function refusesImpersonationRow<I extends { session?: SessionRow | undefined }, R>(
+  run: (input: I) => Promise<Result<R>>,
+): (input: I) => Promise<Result<R>> {
+  return async (input) => {
+    const refused = input.session ? refuseImpersonation({ session: input.session }) : ok(true);
+    return refused.ok ? run(input) : fail(refused.code);
+  };
+}
+
 /** The gate of each Auth, for `crossSiteRefusal`. A WeakMap keeps it off the Auth type. */
 const gates = new WeakMap<Auth, (request: Request) => Response | null>();
 
@@ -1616,10 +1642,7 @@ export function createAuth(input: AuthConfig): Auth {
       removeMember: (i) => removeMember(config, i),
       // Ruling R18 of plan 13b: the router refuses `POST /organizations/invite` to an
       // impersonation session, so the in-process door refuses that session with the same code.
-      inviteMember: async (i) => {
-        const refused = i.session ? refuseImpersonation({ session: i.session }) : ok(true);
-        return refused.ok ? inviteMember(config, i) : fail(refused.code);
-      },
+      inviteMember: refusesImpersonationRow((i) => inviteMember(config, i)),
       listInvitations: (i) => listInvitations(config, i),
       revokeInvitation: (i) => revokeInvitation(config, i),
       acceptInvitation: (i) => acceptInvitation(config, i),
@@ -1644,18 +1667,20 @@ export function createAuth(input: AuthConfig): Auth {
         const ended = await destroySession(config, token);
         if (ended) await deliverLogouts(config, ended.userId);
       },
+      // Ruling R21 of plan 13b: the router refuses each token write below to an impersonation
+      // session (a token outlives the impersonation), so the in-process door refuses it too.
       tokens: {
-        create: (i) => createApiToken(config, i),
+        create: refusesImpersonation((i) => createApiToken(config, i)),
         list: (i) => listApiTokens(config, i),
         revoke: (i) => revokeApiToken(config, i),
-        update: (i) => updateApiToken(config, i),
+        update: refusesImpersonationRow((i) => updateApiToken(config, i)),
         current: (i) => currentApiToken(config, i),
       },
       organizationTokens: {
-        create: (i) => createOrganizationToken(config, i),
+        create: refusesImpersonation((i) => createOrganizationToken(config, i)),
         list: (i) => listOrganizationTokens(config, i),
-        update: (i) => updateOrganizationToken(config, i),
-        revoke: (i) => revokeOrganizationToken(config, i),
+        update: refusesImpersonationRow((i) => updateOrganizationToken(config, i)),
+        revoke: refusesImpersonationRow((i) => revokeOrganizationToken(config, i)),
         current: (i) => currentOrganizationToken(config, i),
       },
       session: {
