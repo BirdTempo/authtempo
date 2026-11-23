@@ -53,6 +53,7 @@ The delete runs one transaction with its audit row. A refusal writes nothing and
 - The act ends a page of the sessions. The sweep ends the rest with the reason `account_deleted`.
 - The user gets the notice mail `account_deleted` at the old address, unless `account.notices` is false. The notice holds no IP of the operator. A user with no address gets no notice.
 - The audit rows of the user stay. Each holds the user id, the reason, and `data`, and no address. Core has no retention rule for them, so your app sets one.
+- The audit row of each organization act of the user also keeps the IP and the user agent of that act. Examples are an invitation, a role change, and a token write. The delete does not remove them, and the owner of the organization still sees them in the organization audit. To erase them, run this statement on your store after the delete commits: `UPDATE ta_operator_audit SET ip = NULL, user_agent = NULL WHERE actor_kind = 'user' AND actor_id = '<user id>'`. The rows stay, so the owner still sees each act, with no IP and no user agent.
 - The controls of the self delete do not apply: `account.delete`, `account.deleteConfirm`, and the fresh rule of the person.
 
 ## The limits
