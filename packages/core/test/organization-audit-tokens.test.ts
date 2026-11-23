@@ -6,8 +6,11 @@ import {
 } from "../src/engine/organization-tokens.js";
 import { addMember, createOrganization, removeMember } from "../src/engine/organizations.js";
 import { createRole, deleteRole, updateRole } from "../src/engine/roles.js";
+import { createRouter } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { makeAuth, recordCredential, sessionFor } from "./helpers.js";
+import type { StorageAdapter } from "../src/storage/port.js";
+import { makeAuth, post, recordAddress, recordCredential, sessionFor } from "./helpers.js";
 
 // Plan 13b Task 5: the token and role acts of an organization each write one audit row in their
 // transaction. The organization is `o1` and its owner is `u1`.
@@ -55,6 +58,26 @@ async function lead(w: W) {
   });
   if (!made.ok) throw new Error(made.code);
   return made.value;
+}
+
+/** The storage of `inner`, but each create of an audit row throws, in a transaction too. */
+function auditCreateFails(inner: StorageAdapter): StorageAdapter {
+  const wrap = (s: StorageAdapter): StorageAdapter =>
+    new Proxy(s, {
+      get(target, prop, receiver) {
+        if (prop === "create")
+          return (model: string, data: unknown) => {
+            if (model === "operatorAudit") throw new Error("the audit insert failed");
+            return (target.create as (m: string, d: unknown) => unknown)(model, data);
+          };
+        if (prop === "transaction")
+          return (fn: (tx: StorageAdapter) => Promise<unknown>) =>
+            target.transaction((tx) => fn(wrap(tx)));
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  return wrap(inner);
 }
 
 /** The fields of a row that each act of this task shares: the actor `u1`, the column `o1`, no target. */
@@ -197,5 +220,92 @@ describe("the audit rows of the token and role acts (plan 13b Task 5)", () => {
     expect(await w.storage.findMany("organizationToken", [])).toEqual([]);
     // The member remove row of Task 4 names the tokens; the token act writes no row of its own.
     expect(await w.auditOf("organization_token_revoke")).toEqual([]);
+  });
+
+  it("route acts: each of the five rows holds the IP and the user agent of the request", async () => {
+    const w = await world();
+    const handle = createRouter(w.config, coreRoutes(w.config));
+    const { token } = await sessionFor(w.config, w.u1);
+    const ip = recordAddress("203.0.113.7");
+    const userAgent = recordAddress("AuditAgent/1.0");
+    const headers = {
+      cookie: `${w.config.cookieName}=${token}`,
+      "cf-connecting-ip": ip,
+      "user-agent": userAgent,
+    };
+    const call = async (path: string, body: unknown) => {
+      const res = await handle(post(`/auth${path}`, body, headers));
+      expect(res.status, path).toBe(200);
+      return res.json() as Promise<Record<string, unknown>>;
+    };
+    const organizationId = w.o1;
+    const made = (await call("/organizations/tokens", {
+      organizationId,
+      name: "ci",
+      permissions: {},
+    })) as { token: string; apiToken: { id: string } };
+    recordCredential(made.token);
+    await call("/organizations/tokens/revoke", { organizationId, id: made.apiToken.id });
+    const role = { organizationId, name: "lead" };
+    await call("/organizations/roles/create", { ...role, rank: 1, permissions: {} });
+    await call("/organizations/roles/update", { ...role, rank: 2 });
+    await call("/organizations/roles/delete", role);
+    for (const action of [
+      "organization_token_create",
+      "organization_token_revoke",
+      "organization_role_create",
+      "organization_role_update",
+      "organization_role_delete",
+    ]) {
+      const rows = await w.auditOf(action);
+      expect(rows, action).toHaveLength(1);
+      expect({ action, ip: rows[0]?.ip, userAgent: rows[0]?.userAgent }).toEqual({
+        action,
+        ip,
+        userAgent,
+      });
+    }
+  });
+
+  it("compat create: the row of createOrganizationTokenFor has no IP and no user agent", async () => {
+    const w = await world();
+    const made = await createOrganizationTokenFor(w.config, {
+      user: w.u1,
+      organizationId: w.o1,
+      name: "compat",
+      permissions: {},
+    });
+    if (!made.ok) throw new Error(made.code);
+    recordCredential(made.value.token);
+    const [row] = await w.auditOf("organization_token_create");
+    expect({ ip: row?.ip, userAgent: row?.userAgent }).toEqual({ ip: null, userAgent: null });
+  });
+
+  describe("audit throw: the audit insert throws, so the act rolls back and no row stays", () => {
+    it("token revoke: the token stays", async () => {
+      const w = await world();
+      const made = await mint(w);
+      const config = { ...w.config, storage: auditCreateFails(w.config.storage) };
+      await expect(
+        revokeOrganizationToken(config, { user: w.u1, organizationId: w.o1, id: made.apiToken.id }),
+      ).rejects.toThrow("the audit insert failed");
+      const tokens = await w.storage.findMany("organizationToken", []);
+      expect(tokens.map((t) => t.id)).toEqual([made.apiToken.id]);
+      expect(await w.auditOf("organization_token_revoke")).toEqual([]);
+    });
+
+    it("role update: the role keeps its old rank", async () => {
+      const w = await world();
+      const role = await lead(w);
+      const config = { ...w.config, storage: auditCreateFails(w.config.storage) };
+      await expect(
+        updateRole(config, { user: w.u1, organizationId: w.o1, name: "lead", rank: 2 }),
+      ).rejects.toThrow("the audit insert failed");
+      const row = await w.storage.findOne("organizationRole", [
+        { field: "id", op: "eq", value: role.id },
+      ]);
+      expect(row?.rank).toBe(1);
+      expect(await w.auditOf("organization_role_update")).toEqual([]);
+    });
   });
 });

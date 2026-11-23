@@ -74,6 +74,12 @@ function oneRoleName(name: string): boolean {
   return typeof name === "string" && ROLE_RE.test(name) && !name.includes(",");
 }
 
+/** The caller's IP and user agent, for the audit row of a role act (plan 13b). The route passes them. Absent: null. */
+interface CallerAddress {
+  ip?: string | null | undefined;
+  userAgent?: string | null | undefined;
+}
+
 /** True when two sets grant the same names. */
 function sameSet(a: Statements, b: Statements): boolean {
   return isSubset(a, b) && isSubset(b, a);
@@ -214,7 +220,7 @@ async function heldInside(
  */
 export async function createRole(
   config: ResolvedConfig,
-  input: {
+  input: CallerAddress & {
     user: UserRow;
     organizationId: string;
     name: string;
@@ -243,8 +249,8 @@ export async function createRole(
     action: "organization_role_create",
     targetUserId: null,
     data: { roleId: row.id, name: row.name, rank: row.rank },
-    ip: null,
-    userAgent: null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
   });
   if (!draft.ok) return draft;
   try {
@@ -309,7 +315,7 @@ export async function createRole(
  */
 export async function updateRole(
   config: ResolvedConfig,
-  input: {
+  input: CallerAddress & {
     user: UserRow;
     organizationId: string;
     name: string;
@@ -342,8 +348,8 @@ export async function updateRole(
     action: "organization_role_update",
     targetUserId: null,
     data: { roleId: row.id, changed },
-    ip: null,
-    userAgent: null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
   });
   if (!draft.ok) return draft;
   // One millisecond past the read, so the stamp changes even when the clock has not moved.
@@ -400,7 +406,7 @@ export async function updateRole(
  */
 export async function deleteRole(
   config: ResolvedConfig,
-  input: { user: UserRow; organizationId: string; name: string },
+  input: CallerAddress & { user: UserRow; organizationId: string; name: string },
 ): Promise<Result<{ ok: true }>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
@@ -414,8 +420,8 @@ export async function deleteRole(
     action: "organization_role_delete",
     targetUserId: null,
     data: { roleId: row.id, name: row.name },
-    ip: null,
-    userAgent: null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
   });
   if (!draft.ok) return draft;
   const now = config.clock.now();

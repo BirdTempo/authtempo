@@ -33,6 +33,11 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
     return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
+  /** The caller's IP and user agent, for the audit row of a role write (plan 13b). */
+  const address = (ctx: RouteContext) => ({
+    ip: ctx.ip,
+    userAgent: ctx.request.headers.get("user-agent"),
+  });
 
   /** A write: session, the fresh rule, a checked body, one engine call, the answer under `key` (or the value itself when `key` is null). */
   const write = <T, V, P extends RoutePath<"POST">>(
@@ -101,6 +106,7 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
         name: b.name,
         permissions: b.permissions,
         ...(b.rank !== undefined && { rank: b.rank }),
+        ...address(ctx),
       }),
     ),
     write("/organizations/roles/update", roleUpdateBody, "role", (user, b, ctx) =>
@@ -110,10 +116,11 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
         name: b.name,
         ...(b.rank !== undefined && { rank: b.rank }),
         ...(b.permissions !== undefined && { permissions: b.permissions }),
+        ...address(ctx),
       }),
     ),
     write("/organizations/roles/delete", roleNameBody, null, (user, b, ctx) =>
-      deleteRole(ctx.config, { user, ...b }),
+      deleteRole(ctx.config, { user, ...b, ...address(ctx) }),
     ),
   ];
 }

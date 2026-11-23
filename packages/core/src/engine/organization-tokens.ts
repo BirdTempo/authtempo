@@ -116,14 +116,22 @@ export interface OrganizationTokenCreate {
   rateLimit?: LimitWindow | null | undefined;
   /** In process only. Null or absent: no quota. */
   quota?: TokenQuota | null | undefined;
+  /** The caller's IP, for the audit row (plan 13b). The route passes it. Absent: null. */
+  ip?: string | null | undefined;
+  /** The caller's user agent, for the audit row (plan 13b). The route passes it. Absent: null. */
+  userAgent?: string | null | undefined;
 }
 
 /**
  * The organization token create of a caller with no session (plan 12p): the
  * server call of a compat package, which names its user. It keeps the user
- * row's rule. The app checks the person's session before it calls.
+ * row's rule. The app checks the person's session before it calls. The
+ * request is not the member's, so the audit row has no IP and no user agent.
  */
-export type OrganizationTokenCreateFor = Omit<OrganizationTokenCreate, "session"> & {
+export type OrganizationTokenCreateFor = Omit<
+  OrganizationTokenCreate,
+  "session" | "ip" | "userAgent"
+> & {
   user: UserRow;
 };
 
@@ -209,7 +217,12 @@ export function createOrganizationTokenFor(
   config: ResolvedConfig,
   input: OrganizationTokenCreateFor,
 ): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>> {
-  return mintOrganizationToken(config, { user: input.user }, input);
+  // A compat call may hold more keys than its type: the row takes no IP and no agent from it.
+  return mintOrganizationToken(
+    config,
+    { user: input.user },
+    { ...input, ip: null, userAgent: null },
+  );
 }
 
 async function mintOrganizationToken(
@@ -266,8 +279,8 @@ async function mintOrganizationToken(
     action: "organization_token_create",
     targetUserId: null,
     data: { tokenId: row.id, hint: row.hint, permissions: row.permissions },
-    ip: null,
-    userAgent: null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
   });
   if (!draft.ok) return draft;
   const made = await config.storage.transaction(async (tx): Promise<Result<true>> => {
@@ -414,7 +427,15 @@ export async function updateOrganizationToken(
  */
 export async function revokeOrganizationToken(
   config: ResolvedConfig,
-  input: { user: UserRow; session?: SessionRow | undefined; organizationId: string; id: string },
+  input: {
+    user: UserRow;
+    session?: SessionRow | undefined;
+    organizationId: string;
+    id: string;
+    /** The caller's IP and user agent, for the audit row (plan 13b). The route passes them. Absent: null. */
+    ip?: string | null | undefined;
+    userAgent?: string | null | undefined;
+  },
 ): Promise<Result<{ ok: true }>> {
   if (!config.organizations) return fail("not_found");
   if (!provedAddress(input)) return fail("email_unverified");
@@ -424,8 +445,8 @@ export async function revokeOrganizationToken(
     action: "organization_token_revoke",
     targetUserId: null,
     data: { tokenId: input.id },
-    ip: null,
-    userAgent: null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
   });
   if (!draft.ok) return draft;
   const done = await config.storage.transaction(async (tx): Promise<Result<true>> => {

@@ -302,6 +302,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         permissions: b.permissions,
         ...(b.expiresInDays !== undefined && { expiresInDays: b.expiresInDays }),
         ...(b.metadata != null && { metadata: b.metadata }),
+        ip: ctx.ip,
+        userAgent: ctx.request.headers.get("user-agent"),
       });
     }),
     getByOrg("/organizations/tokens", "tokens", (user, organizationId, ctx, session) =>
@@ -324,7 +326,13 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       });
     }),
     post("/organizations/tokens/revoke", orgTokenRevokeBody, null, (s, b, ctx) =>
-      revokeOrganizationToken(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      revokeOrganizationToken(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ip: ctx.ip,
+        userAgent: ctx.request.headers.get("user-agent"),
+      }),
     ),
     {
       // A script learns which organization it acts for. A `to_` bearer only: any
