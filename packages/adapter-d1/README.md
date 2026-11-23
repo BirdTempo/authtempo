@@ -100,6 +100,8 @@ After the mark, `wrangler d1 migrations apply` and `authtempo migrate` skip `001
 
 Version 17 (plan 13a, 2026-11-23) is the enterprise setup. It adds the tables `ta_sso_setup_link`, `ta_sso_test_run`, and `ta_sso_setup_session`. `ta_sso_connection` gets `draft` (NOT NULL, default 0), `version` (NOT NULL, default 1), and `setup_link_id`. `ta_sso_domain` gets `setup_link_id`. `ta_scim_token` gets `pending` (NOT NULL, default 0) and `setup_link_id`. A row of version 16 reads as no draft, at version 1, with no setup link, and not pending. The file adds columns and tables and changes no row. Apply `0017_schema_v17` before you deploy a core at version 17; the adapter refuses a database at version 16.
 
+Version 18 (plan 13b, 2026-11-23) is the organization audit and the expiry notices. `ta_operator_audit` gets `organization_id`, with an index on `organization_id` and `id`. `ta_sso_connection` gets `certificate_ends_at`, `expiry_stage`, `expiry_notice_at`, `last_success_at`, `last_failure_at`, and `last_failure_step`. `ta_scim_token` and `ta_sso_setup_link` get `expiry_stage` and `expiry_notice_at`. Each of these three tables gets an index on `expiry_notice_at`. Each new column is nullable, with no default and no fill: a row of version 17 reads null in each. An audit row from before version 18 keeps a null `organization_id`. Apply `0018_schema_v18` before you deploy a core at version 18; the adapter refuses a database at version 17.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

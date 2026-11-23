@@ -26,6 +26,7 @@ describe("schema version 12 on D1 (plan 12f)", () => {
       notnull: 0,
       dflt_value: null,
     });
+    // Plan 13b adds organization_id after user_agent.
     expect((await columns("ta_operator_audit")).map((c) => c.name)).toEqual([
       "id",
       "created_at",
@@ -38,6 +39,7 @@ describe("schema version 12 on D1 (plan 12f)", () => {
       "data",
       "ip",
       "user_agent",
+      "organization_id",
     ]);
     // env.DB holds every migration (0013 since plan 12k), so read the version that 0012 itself writes.
     const m0012 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0012_"));

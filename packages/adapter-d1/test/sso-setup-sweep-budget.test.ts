@@ -100,6 +100,8 @@ async function seed(n: number, ago: number) {
       endedAt: null,
       openedAt: null,
       readyAt: null,
+      expiryStage: null,
+      expiryNoticeAt: null,
     });
     await storage.create("scimToken", {
       id: `tok-${String(i).padStart(3, "0")}`,
@@ -114,6 +116,8 @@ async function seed(n: number, ago: number) {
       lastUsedAt: null,
       pending: true,
       setupLinkId: id,
+      expiryStage: null,
+      expiryNoticeAt: null,
     });
   }
 }

@@ -105,7 +105,7 @@ describe("schema version 16 on D1 (plan 12p)", () => {
       { id: "sv", proved: 1 },
       { id: "sv2", proved: 1 },
     ]);
-    // The adapter reads only a database of the current version: apply the later migrations first (0017 since plan 13a).
+    // The adapter reads only a database of the current version: apply the later migrations first (0018 since plan 13b).
     await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
     // The gate passes: the adapter reads the rows of version 15 and gives a boolean.
     const db = createD1Adapter(env.STAGED);
@@ -175,7 +175,7 @@ describe("schema version 16 on D1 (plan 12p)", () => {
       ]);
     }
     // The copy takes the shipped file, as wrangler d1 migrations apply runs it. It stops at 0016,
-    // as the hand fill does (0017 since plan 13a).
+    // as the hand fill does (0018 since plan 13b).
     const through0016 = env.TEST_MIGRATIONS.slice(0, i0016 + 1);
     await applyD1Migrations(env.PAGED_COPY, through0016);
     // By hand: the count, the column, the pages until no row changes, the version, the mark.
@@ -219,7 +219,7 @@ describe("schema version 16 on D1 (plan 12p)", () => {
 
   it("migrates a database with no session", async () => {
     // test/setup.ts applies every shipped file to env.DB, which holds no row. env.DB holds every
-    // migration (0017 since plan 13a), so read the version that 0016 itself writes.
+    // migration (0018 since plan 13b), so read the version that 0016 itself writes.
     const m0016 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0016_"));
     expect(
       m0016?.queries.some((q) =>

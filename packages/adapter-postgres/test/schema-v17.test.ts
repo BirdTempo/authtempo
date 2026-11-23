@@ -73,6 +73,8 @@ describe("schema version 17 on Postgres (plan 13a)", () => {
           column_default: null,
         },
       ]);
+      // The gate asks for the current version, so the later files go on first (0018 since plan 13b).
+      for (const m of MIGRATIONS.slice(i0017 + 1)) await a.unsafe(m.sql);
       // The gate passes. Each row keeps its values and reads the defaults.
       const db = createPostgresAdapter(a);
       expect(await db.findOne("ssoConnection", [{ field: "id", op: "eq", value: "c16" }])).toEqual({
@@ -93,6 +95,12 @@ describe("schema version 17 on Postgres (plan 13a)", () => {
         draft: false,
         version: 1,
         setupLinkId: null,
+        certificateEndsAt: null,
+        expiryStage: null,
+        expiryNoticeAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureStep: null,
       });
       expect(
         await db.findOne("ssoDomain", [{ field: "id", op: "eq", value: "d16" }]),
@@ -109,14 +117,16 @@ describe("schema version 17 on Postgres (plan 13a)", () => {
     const { a, close } = await freshSchema();
     try {
       for (const m of MIGRATIONS) await a.unsafe(m.sql);
-      const version = await a.unsafe<{ value: string }[]>(
-        "SELECT value FROM ta_meta WHERE key = 'schema_version'",
+      // The later files move the version on (0018 since plan 13b), so read what 0017 writes.
+      expect(MIGRATIONS.find((m) => m.name === "0017_schema_v17")?.sql).toContain(
+        "UPDATE ta_meta SET value = '17' WHERE key = 'schema_version'",
       );
-      expect(version[0]?.value).toBe("17");
       const indexes = await a.unsafe<{ tablename: string; indexname: string }[]>(
         "SELECT tablename, indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename IN ('ta_sso_setup_link', 'ta_sso_test_run', 'ta_sso_setup_session') ORDER BY tablename, indexname",
       );
       expect(indexes.map((r) => `${r.tablename} ${r.indexname}`)).toEqual([
+        // 0018 adds the index of the expiry sweep (plan 13b).
+        "ta_sso_setup_link ix_ta_sso_setup_link__expiry_notice_at",
         "ta_sso_setup_link ix_ta_sso_setup_link__organization_id",
         "ta_sso_setup_link ta_sso_setup_link_pkey",
         "ta_sso_setup_link ux_ta_sso_setup_link__token_hash",
