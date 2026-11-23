@@ -75,7 +75,7 @@ In the `ranks` form, a role holds an action when its rank is at least the rank o
 | `organization:delete` | `owner` |
 | `audit:read` | `owner` |
 
-A slug change needs `organization:update` and the owner rank too. The audit shows the acts of each member, so only the owner rank reads it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. A stored role never holds `audit:read` (rule 3 of the dynamic roles).
+A slug change needs `organization:update` and the owner rank too. The audit shows the acts of each member, so in the `ranks` form only a role at the owner rank reads it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. A stored role never holds `audit:read` (rule 3 of the dynamic roles).
 
 ### The grant and touch rules
 

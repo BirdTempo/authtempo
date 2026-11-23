@@ -22,7 +22,7 @@ sources:
 ## Steps
 
 1. Apply the migrations of schema version 18 with [`authtempo migrate`](/docs/reference/cli/migrate/). The audit of an organization starts at version 18. It holds no row from before the upgrade.
-2. Let the owner read. The owner rank holds `audit:read`, and no other rank holds it. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. [Roles and permissions](/docs/guides/roles-and-permissions/) gives the forms.
+2. Let the owner read. The owner rank holds `audit:read`. A stored role never holds `audit:read`. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. [Roles and permissions](/docs/guides/roles-and-permissions/) gives the forms.
 3. Read one page in the session of the owner. Call `client.organizations.audit.list({ organizationId })`, or the route below. Pass `next` as `after` to read the next page. `next` is null on the last page.
 4. Read every row with `client.organizations.audit.export({ organizationId })`. It reads pages of 100 rows, one page at a time, and stops when you stop the loop.
 5. Narrow the read with `action`, `from`, and `to`. `from` counts, `to` does not, and `from` must be before `to`.
