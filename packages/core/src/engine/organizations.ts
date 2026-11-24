@@ -5,7 +5,7 @@ import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.js";
-import { findManyIn, IN_CHUNK } from "../storage/batch.js";
+import { findManyIn, findManyList, IN_CHUNK } from "../storage/batch.js";
 import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { byAddressThenId, type ProofCaller, provedAddress } from "./address.js";
@@ -223,7 +223,10 @@ export function verified(caller: ProofCaller): Result<true> {
   return provedAddress(caller) ? ok(true) : fail("email_unverified");
 }
 
-/** A dynamic role never has the owner rank (Task 4), so the last-owner rule reads the config only. */
+/**
+ * A dynamic role never has the owner rank (Task 4), so the last-owner rule
+ * reads the config only. `ownerCounts` keeps the same rule for a list.
+ */
 async function ownerCount(
   storage: StorageAdapter,
   o: ResolvedOrganizations,
@@ -1024,14 +1027,30 @@ export async function organizationsOfDelete(
   return ok(plan);
 }
 
-/** The number of owners of one organization, read through `storage` (the account delete's recount). */
-export async function ownersOf(
+/**
+ * The number of owners of each organization of `organizationIds`, read
+ * through `storage` (the account delete's recount, plan 13c Task 1). One
+ * `findManyList` reads the member rows of all of them: 1 statement for each
+ * list chunk, and none for an empty list. It counts by the rule of
+ * `ownerCount`. The map has a key for each id: an organization with no
+ * owner row, or with no member row, counts 0, so a caller that checks each
+ * key sees it. With organizations off, each id counts 0.
+ */
+export async function ownerCounts(
   config: ResolvedConfig,
   storage: StorageAdapter,
-  organizationId: string,
-): Promise<number> {
+  organizationIds: readonly string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>(organizationIds.map((id) => [id, 0]));
   const o = on(config);
-  return o ? ownerCount(storage, o, organizationId) : 0;
+  if (!o || organizationIds.length === 0) return counts;
+  const ownerRank = o.ranks.owner ?? Number.POSITIVE_INFINITY;
+  for (const m of await findManyList(storage, "member", "organizationId", organizationIds)) {
+    const n = counts.get(m.organizationId);
+    if (n !== undefined && rankOf(o.ranks, m.role) >= ownerRank)
+      counts.set(m.organizationId, n + 1);
+  }
+  return counts;
 }
 
 async function summaries(config: ResolvedConfig, members: MemberRow[]): Promise<MemberSummary[]> {

@@ -6,7 +6,7 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRow, SessionRow, UserRow } from "../schema.js";
-import { IN_CHUNK } from "../storage/batch.js";
+import { IN_CHUNK, listCalls } from "../storage/batch.js";
 import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
@@ -31,7 +31,7 @@ import {
   deleteOrganizationsHead,
   organizationList,
   organizationsOfDelete,
-  ownersOf,
+  ownerCounts,
   publicOrganization,
 } from "./organizations.js";
 import { unchanged } from "./profile.js";
@@ -150,6 +150,15 @@ const SCIM_GROUP_CALLS = 2;
  * 15). The run of 2026-11-23 on the D1 binding (load 6, 18 CPUs): each act
  * at its old pin, the organization delete route 33, and the worst sweep 43
  * (the operator confirm with 3 SCIM Groups).
+ *
+ * Plan 13c Task 1 reads the owner recount of all organizations that the
+ * user owns with another owner in one statement (`ownerCounts`). So each
+ * such organization adds 2 (the owner lock), and the recount adds 1 for
+ * all of them (`listCalls`). The run of 2026-11-24 21:44 on the D1 binding
+ * (load 2.7, 18 CPUs): with 1 solo organization the direct self delete
+ * takes 3 and the confirm 2; with none, the direct takes 6 and the confirm
+ * 5. The next organization comes to 51 or 52 with no size check, so the
+ * size check refuses it.
  */
 
 /**
@@ -435,7 +444,8 @@ async function runDelete(
   // On a store with a per-invocation query limit (D1), a delete whose least
   // work cannot fit the budget answers delete_too_large before any delete
   // (ruling 1 of plan 12f2, Q3; ruling 10 M1). Each organization that the
-  // user owns with another owner costs 3 calls, so the check counts them.
+  // user owns with another owner costs 2 calls, and 1 recount read serves
+  // all of them (plan 13c Task 1), so the check counts them.
   const sized = config.storage.queryLimitPerInvocation === true;
   // The count of the user's sessions that the delete ended (plan 12h Task 5).
   const counted = { sessions: 0 };
@@ -678,15 +688,18 @@ export async function deleteAccountRows(
   const cascades = config.storage.userDeleteCascades === true;
   const readsStops = cascades && proof.stops !== null;
   // The least calls after this point, at the worst. First the owner lock (a
-  // batch of 2 on D1) and the recount of each organization that the user
-  // owns with another owner. Then the user delete, the solo organizations,
-  // and the deletes of the invitations and the member rows of the user. Last
-  // the read of the impersonation sessions on a cascading store, the least
-  // of each page of sessions, and `keep`. The pending-end row with stops
-  // takes the call of the last delete, so it needs no call more. The size
-  // check comes before the scimUser locks, which D1 does not have.
+  // batch of 2 on D1) of each organization that the user owns with another
+  // owner, and 1 recount read for all of them (`listCalls`: 1 for up to
+  // `LIST_MAX` ids, plan 13c Task 1). Then the user delete, the solo
+  // organizations, and the deletes of the invitations and the member rows of
+  // the user. Last the read of the impersonation sessions on a cascading
+  // store, the least of each page of sessions, and `keep`. The pending-end
+  // row with stops takes the call of the last delete, so it needs no call
+  // more. The size check comes before the scimUser locks, which D1 does not
+  // have.
   const least =
-    3 * owned.length +
+    2 * owned.length +
+    (owned.length > 0 ? listCalls(owned.map((x) => x.id)) : 0) +
     1 +
     (going.length > 0 ? SOLO_CALLS : 0) +
     2 +
@@ -765,8 +778,16 @@ export async function deleteAccountRows(
   await tx.delete("member", [{ field: "userId", op: "eq", value: user.id }]);
   if (solo.length > 0) await deferOrganizationRest(tx, config, solo, now);
   // D1 has no lock: the recount catches an owner removal that passed the lock.
-  for (const organization of owned)
-    if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
+  // One read takes the owners of all the organizations (plan 13c Task 1). An
+  // organization with no member row left counts 0, not absent.
+  if (owned.length > 0) {
+    const owners = await ownerCounts(
+      config,
+      tx,
+      owned.map((x) => x.id),
+    );
+    if (owned.some((x) => (owners.get(x.id) ?? 0) < 1)) stopWith("conflict");
+  }
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together (ruling 42 of plan 12f). The lock read of
   // `hold` came first. Each set ends in a page inside the call budget of the

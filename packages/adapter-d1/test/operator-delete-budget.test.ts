@@ -406,9 +406,12 @@ const LOAD_SOLOS = 1;
  * of 2 on D1, and the recount. So the next one passes the budget. Since the
  * move onto main a plain membership costs no call. The organization rule
  * reads in 3 calls for up to 50 memberships (ruling 30 of plan 12d). Until
- * the move each membership cost 2 reads, and 3 fit.
+ * the move each membership cost 2 reads, and 3 fit. Plan 13c Task 1 reads
+ * the recount of all of them in one statement: each costs 2, and the
+ * recount 1 for all. The run of 2026-11-24 21:44 on the binding (load 2.7,
+ * 18 CPUs): 4 fit, and with no check 5 sent 51 calls, so 5 refuse.
  */
-const EDGE_OWNED = 3;
+const EDGE_OWNED = 4;
 
 /**
  * The solo organizations that the operator delete of the load takes for a
@@ -694,7 +697,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     const r = await act(sent, (auth) =>
       auth.api.operator.users.delete({ actor, userId, ...REASON }),
     );
-    // The owned organization adds its owner lock and its recount, 3 calls.
+    // The owned organization adds its owner lock (2) and the one recount read (1), 3 calls.
     expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
     expect(r.refused).toBe(0);
     expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);

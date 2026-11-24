@@ -1128,9 +1128,16 @@ describe("the account delete of a solo organization's owner through the route on
  * does not run. Since verify-12f2-r10 Low A (2026-10-25) it keeps none,
  * so the confirm fits 2 in 50 and refuses 3: its edge is exact too. The
  * pins are the queries of the act that fits.
+ *
+ * Plan 13c Task 1 reads the recount of all shared organizations in one
+ * statement. So each shared organization costs 2 (the owner lock), and the
+ * recount 1 for all. The run of 2026-11-24 21:44 on the binding (load 2.7,
+ * 18 CPUs): the direct delete fits 3 in 50 and the confirm fits 2 in 49.
+ * With no check, the direct delete of 4 sent 52 and the confirm of 3 sent
+ * 51. So both refuse the next one, and the confirm edge is exact.
  */
-const OWNED_EDGE = { direct: 2, confirm: 2 } as const;
-const OWNED_COUNTS = { direct: 49, confirm: 50 } as const;
+const OWNED_EDGE = { direct: 3, confirm: 2 } as const;
+const OWNED_COUNTS = { direct: 50, confirm: 49 } as const;
 
 /**
  * The edge of the same scene with no solo organization (item 12f2 (4) of
@@ -1139,9 +1146,13 @@ const OWNED_COUNTS = { direct: 49, confirm: 50 } as const;
  * a co-owner of 4, and 50 for the confirm. Both refuse 5 with
  * `delete_too_large`. So the edge is 4, as O-12f2-1 of the plan index gives
  * by arithmetic. The solo organization costs as much as 2 shared ones.
+ * After plan 13c Task 1 (one recount read, run of 2026-11-24 21:44, load
+ * 2.7, 18 CPUs) the direct delete fits 6 in 50 and the confirm fits 5 in 49.
+ * With no check, the direct delete of 7 sent 52 and the confirm of 6 sent
+ * 51. The solo organization now costs as much as 3 shared ones.
  */
-const SHARED_EDGE = { direct: 4, confirm: 4 } as const;
-const SHARED_COUNTS = { direct: 49, confirm: 50 } as const;
+const SHARED_EDGE = { direct: 6, confirm: 5 } as const;
+const SHARED_COUNTS = { direct: 50, confirm: 49 } as const;
 
 describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () => {
   beforeEach(async () => {
@@ -1284,16 +1295,18 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
    * (verify-12f2-r10 Low B). The meter then counts more than the act sends,
    * so the check takes the count of the act's own statements. Each term of
    * that count is exact, so a scene whose least work comes to exactly 51
-   * refuses, and a scene of exactly 50 passes. The direct delete with the
-   * impersonation tool off and 3 shared organizations comes to 51; with 2
-   * it sends 48. The confirm with the tool on and 2 shared ones comes to
-   * 50. A confirm scene of exactly 51 has no form here: each shared
-   * organization costs 3, and the other steps are the spend and the tool.
+   * refuses, and a scene of exactly 50 passes. After plan 13c Task 1 each
+   * shared organization costs 2, and the recount 1 for all (run of
+   * 2026-11-24 21:44 on the binding, load 2.7, 18 CPUs). The direct delete
+   * with the impersonation tool off and 4 shared organizations comes to 51;
+   * with 2 it sends 47. The confirm with the tool off and 3 shared ones
+   * comes to 50. The confirm with the tool on and 3 shared ones comes to 51,
+   * and the edge test of `OWNED_EDGE` refuses it.
    */
   const NOISE = 10;
 
-  it("refuses beside a parallel invocation a direct delete whose least work comes to 51, and passes 48", async () => {
-    const over = await coOwner("direct", 3, false);
+  it("refuses beside a parallel invocation a direct delete whose least work comes to 51, and passes 47", async () => {
+    const over = await coOwner("direct", 4, false);
     const before = await store();
     const refused = await over.beside(NOISE);
     expect([refused.status, refused.body.error]).toEqual([409, "delete_too_large"]);
@@ -1303,14 +1316,14 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
     const fits = await coOwner("direct", 2, false);
     const r = await fits.beside(NOISE);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.queries).toBe(48);
+    expect(r.queries).toBe(47);
   });
 
   it("passes beside a parallel invocation a confirm whose least work comes to exactly 50", async () => {
-    const w = await coOwner("confirm", 2);
+    const w = await coOwner("confirm", 3, false);
     const r = await w.beside(NOISE);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.queries).toBe(OWNED_COUNTS.confirm);
+    expect(r.queries).toBe(50);
     expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(w.userId).first()).toBe(
       null,
     );
