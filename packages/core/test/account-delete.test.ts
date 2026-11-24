@@ -37,7 +37,7 @@ import { enableTotp, setupTotp, verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { base32Decode } from "../src/primitives/totp.js";
-import type { UserRow } from "../src/schema.js";
+import type { Models, UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -107,7 +107,12 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
 }
 
 /** The rows of `model` that name `userId`. */
-function childRows(w: World, model: (typeof USER_CHILD_MODELS)[number], userId: string) {
+/** The rows of `model` that name the user. A literal model gives its own row type. */
+function childRows<M extends (typeof USER_CHILD_MODELS)[number]>(
+  w: World,
+  model: M,
+  userId: string,
+): Promise<Models[M][]> {
   // Each model of the list has a `userId` field; the port's types cannot see that over a union.
   return w.auth.storage.findMany(model, [{ field: "userId", op: "eq", value: userId }] as never);
 }
