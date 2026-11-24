@@ -28,7 +28,7 @@ const NAMED_IN = [
 ];
 
 describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () => {
-  it("names the audit model only in the allowed files, and only a create and a read in the writer", async () => {
+  it("names the audit model only in the allowed files, and in the writer only inserts, reads, and one size read", async () => {
     const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
     const src = new URL("../src/", import.meta.url);
     const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));

@@ -739,8 +739,9 @@ export async function deleteAccountRows(
   // owner, and 1 recount read for all of them (`listCalls`: 1 for up to
   // `LIST_MAX` ids, plan 13c Task 1). Then the user delete, the solo
   // organizations, the deletes of the invitations and the member rows of the
-  // user, and the insert of the leave rows (plan 13c Task 2). Last the read of the impersonation sessions on a cascading
-  // store, the least of each page of sessions, and `keep`. The pending-end
+  // user, and the insert of the leave rows (plan 13c Task 2). Last the read of
+  // the impersonation sessions on a cascading store, the least of each page of
+  // sessions, and `keep`. The pending-end
   // row with stops takes the call of the last delete, so it needs no call
   // more. The size check comes before the scimUser locks, which D1 does not
   // have.

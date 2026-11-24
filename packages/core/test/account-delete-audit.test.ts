@@ -96,22 +96,32 @@ const leaveRow = (w: W, organizationId: string, role: string) => ({
 
 /**
  * A store that calls `onInsert` for each insert of audit rows, inside a transaction and
- * outside it. A throw of `onInsert` is the throw of the insert.
+ * outside it. A throw of `onInsert` is the throw of the insert. After the first insert,
+ * `afterInsert` gets the method and the model of each later call: a throw there is the throw
+ * of a later step of the delete.
  */
-function auditInserts(inner: StorageAdapter, onInsert: (rows: number) => void): StorageAdapter {
+function auditInserts(
+  inner: StorageAdapter,
+  onInsert: (rows: number) => void,
+  afterInsert: (method: string, model: string) => void = () => {},
+): StorageAdapter {
+  let inserted = false;
   const wrap = (s: StorageAdapter): StorageAdapter =>
     new Proxy(s, {
       get(target, prop, receiver) {
-        if (prop === "createMany" || prop === "create")
-          return (model: string, rows: unknown) => {
-            if (model === "operatorAudit") onInsert(Array.isArray(rows) ? rows.length : 1);
-            return (target[prop] as (m: string, r: unknown) => unknown).call(target, model, rows);
-          };
         if (prop === "transaction")
           return (fn: (tx: StorageAdapter) => Promise<unknown>) =>
             target.transaction((tx) => fn(wrap(tx)));
         const value = Reflect.get(target, prop, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const [model, rows] = args;
+          if (model === "operatorAudit" && (prop === "create" || prop === "createMany")) {
+            onInsert(Array.isArray(rows) ? rows.length : 1);
+            inserted = true;
+          } else if (inserted && typeof model === "string") afterInsert(String(prop), model);
+          return value.apply(target, args);
+        };
       },
     });
   return wrap(inner);
@@ -129,10 +139,16 @@ describe("the leave rows of a self account delete (plan 13c Task 2)", () => {
     });
     const leaves = rows.filter((r) => r.action === REMOVE);
     expect(leaves).toHaveLength(2);
-    expect(leaves.find((r) => r.organizationId === w.o1)).toMatchObject(
-      leaveRow(w, w.o1, "member"),
-    );
-    expect(leaves.find((r) => r.organizationId === w.o2)).toMatchObject(leaveRow(w, w.o2, "admin"));
+    // The full row: a field more than these, in the row or in `data`, fails.
+    const full = (organizationId: string) => {
+      const row = leaves.find((r) => r.organizationId === organizationId);
+      if (!row) throw new Error(`no row for ${organizationId}`);
+      const { id, createdAt, updatedAt, ...rest } = row;
+      expect([typeof id, createdAt, updatedAt]).toEqual(["string", expect.any(Date), createdAt]);
+      return rest;
+    };
+    expect(full(w.o1)).toStrictEqual(leaveRow(w, w.o1, "member"));
+    expect(full(w.o2)).toStrictEqual(leaveRow(w, w.o2, "admin"));
     // The solo organization goes with the account and gets no row.
     expect(rows.filter((r) => r.organizationId === o3)).toEqual([]);
   });
@@ -279,15 +295,85 @@ describe("the leave rows of a self account delete (plan 13c Task 2)", () => {
       get(`/auth/organizations/audit?${query}`, { authorization: `Bearer ${w.a.token}` }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      rows: { action: string; actor: { kind: string; id: string | null }; ip: string | null }[];
-    };
+    const body = (await res.json()) as { rows: Record<string, unknown>[] };
     expect(body.rows).toHaveLength(1);
-    expect(body.rows[0]).toMatchObject({
+    // The full view: the address is null because the user is gone (organization-audit.mdx).
+    expect(body.rows[0]).toStrictEqual({
+      id: expect.any(String),
+      at: expect.any(String),
+      actor: { kind: "member", id: w.mo.user.id, email: null },
       action: REMOVE,
-      actor: { kind: "member", id: w.mo.user.id },
+      targetUserId: w.mo.user.id,
+      data: { role: "member", self: true, accountDelete: true },
       ip: null,
       userAgent: null,
     });
+  });
+
+  it("T2-9 the rows go in the order of the organization ids, not of the member rows", async () => {
+    const w = await world();
+    // Mo joins the organization with the higher id first, so the member rows come in the
+    // order high, low.
+    const ownerOf = new Map([
+      [w.o1, w.a.user],
+      [w.o2, w.b.user],
+    ]);
+    const [low, high] = [w.o1, w.o2].sort();
+    if (!low || !high) throw new Error("no organization");
+    for (const id of [high, low])
+      await join(w.auth, ownerOf.get(id) ?? w.a.user, id, w.mo.user.id, "member");
+    const mine = await w.auth.storage.findMany("member", [
+      { field: "userId", op: "eq", value: w.mo.user.id },
+    ]);
+    expect(mine.map((m) => m.organizationId)).toEqual([high, low]);
+    const rows = await rowsAfter(w, async () => {
+      const done = await deleteAccount(w.auth.config, { session: w.mo, ip: null, userAgent: null });
+      expect(done.ok).toBe(true);
+    });
+    // `rowsAfter` reads by audit id, which follows the order of the insert.
+    expect(rows.filter((r) => r.action === REMOVE).map((r) => r.organizationId)).toEqual([
+      low,
+      high,
+    ]);
+  });
+
+  it("T2-10 a later step throws after the insert: the user, the member rows, the sessions, and no row stay", async () => {
+    const w = await world();
+    await join(w.auth, w.a.user, w.o1, w.mo.user.id, "member");
+    await join(w.auth, w.b.user, w.o2, w.mo.user.id, "owner");
+    const byUser = [{ field: "userId", op: "eq", value: w.mo.user.id }] as const;
+    const sessions = await w.auth.storage.findMany("session", [...byUser]);
+    expect(sessions.length).toBeGreaterThan(0);
+    let inserts = 0;
+    const after: string[] = [];
+    const config = {
+      ...w.auth.config,
+      storage: auditInserts(
+        w.auth.config.storage,
+        () => void inserts++,
+        (method, model) => {
+          after.push(`${method} ${model}`);
+          // The first write of a session after the insert: the page of the sessions.
+          if (model === "session" && !/^(find|count)/.test(method))
+            throw new Error("a later step failed");
+        },
+      ),
+    };
+    const rows = await rowsAfter(w, async () => {
+      await expect(
+        deleteAccount(config, { session: w.mo, ip: null, userAgent: null }),
+      ).rejects.toThrow("a later step failed");
+    });
+    // The insert ran, and the throw came after it.
+    expect(inserts).toBe(1);
+    expect(after.some((x) => x.endsWith(" session"))).toBe(true);
+    expect(rows).toEqual([]);
+    expect(
+      await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: w.mo.user.id }]),
+    ).not.toBeNull();
+    expect(await w.auth.storage.findMany("member", [...byUser])).toHaveLength(2);
+    expect((await w.auth.storage.findMany("session", [...byUser])).map((s) => s.id)).toEqual(
+      sessions.map((s) => s.id),
+    );
   });
 });
