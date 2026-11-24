@@ -26,10 +26,31 @@ function lineOf(text: string, line: string): number {
 
 /** Replaces the one place of `from` in `text`. A change that does not apply throws. */
 function swap(text: string, from: string, to: string): string {
-  const at = text.indexOf(from);
-  if (at === -1 || text.indexOf(from, at + 1) !== -1)
+  // ci.yml holds the job leaks after the job check, and the two jobs share lines
+  // (the checkout, the setup of Node, runs-on). The swap reads the head of the
+  // text only, so a test of the job check meets each of its lines once. The tests
+  // of the job leaks use swapLeaks.
+  const cut = text.indexOf(LEAKS_JOB);
+  const head = cut === -1 ? text : text.slice(0, cut);
+  const tail = cut === -1 ? "" : text.slice(cut);
+  const at = head.indexOf(from);
+  if (at === -1 || head.indexOf(from, at + 1) !== -1)
     throw new Error(`the text holds ${from} not exactly once`);
-  return text.slice(0, at) + to + text.slice(at + from.length);
+  return head.slice(0, at) + to + head.slice(at + from.length) + tail;
+}
+
+/** The start of the job leaks in ci.yml. */
+const LEAKS_JOB = "\n  leaks:\n";
+
+/** Replaces the one place of `from` in the job leaks of ci.yml. */
+function swapLeaks(text: string, from: string, to: string): string {
+  const cut = text.indexOf(LEAKS_JOB);
+  if (cut === -1) throw new Error("the text holds no job leaks");
+  const tail = text.slice(cut);
+  const at = tail.indexOf(from);
+  if (at === -1 || tail.indexOf(from, at + 1) !== -1)
+    throw new Error(`the job leaks holds ${from} not exactly once`);
+  return text.slice(0, cut) + tail.slice(0, at) + to + tail.slice(at + from.length);
 }
 
 /** The files and the root scripts of the tree, as the entry reads them. */
@@ -67,7 +88,7 @@ describe("check-workflows", () => {
   it("passes the real files", () => {
     const r = check(CI, RELEASE);
     expect(r.failures).toEqual([]);
-    expect(summaryLine(r)).toBe("check-workflows: PASS files=2 uses=10 pinned=10 failures=0");
+    expect(summaryLine(r)).toBe("check-workflows: PASS files=2 uses=12 pinned=12 failures=0");
   });
 
   it("holds each pin to the read of 2026-10-20", () => {
@@ -120,8 +141,8 @@ describe("check-workflows", () => {
       check(CI, swap(RELEASE, CHECKOUT + HISTORY, `actions/checkout@v5${HISTORY}`)).counts,
     ).toEqual({
       files: 2,
-      uses: 10,
-      pinned: 9,
+      uses: 12,
+      pinned: 11,
     });
   });
 
@@ -336,6 +357,30 @@ describe("check-workflows", () => {
     ]);
   });
 
+  it("holds the secret scan to its job leaks", () => {
+    const run = "      - run: node scripts/secret-scan.mjs\n";
+    // The scan that does not run, or runs a script that is not there.
+    expect(ciFailures(swapLeaks(CI, run, ""))).toEqual([
+      "ci.yml: jobs.leaks: 2 steps, not the 3 steps of the rule",
+    ]);
+    expect(
+      ciFailures(swapLeaks(CI, run, "      - run: node scripts/secret-scan.mjs --x\n")),
+    ).toEqual(["ci.yml: jobs.leaks: step 3 is not node scripts/secret-scan.mjs"]);
+    // A scan with the continue-on-error key finds a leak and passes.
+    expect(ciFailures(swapLeaks(CI, run, `${run}        continue-on-error: true\n`))).toEqual([
+      "ci.yml: jobs.leaks step 3: the key continue-on-error is not in the rule of the step",
+    ]);
+    // A shallow checkout scans one commit.
+    expect(ciFailures(swapLeaks(CI, "          fetch-depth: 0\n", ""))).not.toEqual([]);
+    // The job needs its own time limit.
+    expect(ciFailures(swapLeaks(CI, "    timeout-minutes: 10\n", ""))).toEqual([
+      "ci.yml: jobs.leaks: timeout-minutes is not a whole number of minutes above 0",
+    ]);
+    // The script and the rules that the job reads are in the tree.
+    expect(existsSync(`${root}scripts/secret-scan.mjs`)).toBe(true);
+    expect(existsSync(`${root}.gitleaks.toml`)).toBe(true);
+  });
+
   it("fails a removed, an added, or a moved step", () => {
     const tag =
       '      - name: Check the tag\n        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"\n';
@@ -343,7 +388,7 @@ describe("check-workflows", () => {
       "release.yml: jobs.check: 15 steps, not the 16 steps of the rule",
     );
     expect(ciFailures(swap(CI, "\n  check:\n", "\n  test:\n"))).toContain(
-      "ci.yml: the jobs are not check",
+      "ci.yml: the jobs are not check, leaks",
     );
     const install = "      - run: pnpm install --frozen-lockfile\n";
     const gate = `      - run: pnpm release:check --no-osv --no-dry-run --base ${CI_BASE}\n`;
@@ -762,7 +807,7 @@ describe("check-workflows", () => {
 
   it("reads the two files of the tree", () => {
     expect(entry(root)).toEqual({
-      lines: ["check-workflows: PASS files=2 uses=10 pinned=10 failures=0"],
+      lines: ["check-workflows: PASS files=2 uses=12 pinned=12 failures=0"],
       code: 0,
     });
   });

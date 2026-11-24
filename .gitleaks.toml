@@ -1,0 +1,43 @@
+# The rules of the secret scan in CI (job "secrets" of .github/workflows/ci.yml).
+# The scan runs the default rules of gitleaks over the whole history. Without
+# this file, the scan reports 621 findings on 2026-11-24. Each one is a test
+# value, a fixture, a documented example value, or a false match. A finding
+# outside the lists below fails the job. Add a rule here only after you read
+# the value and know that it guards nothing.
+title = "authtempo secret scan"
+
+[extend]
+useDefault = true
+
+# Test values. A test needs a fake secret, a fake token, and a fake key to
+# prove that the code rejects, hashes, or redacts it. The scan read 2026-11-24:
+# 618 of 621 findings are in these paths.
+[[allowlists]]
+description = "test code, fixtures, samples, docs, and the proof scripts of the examples"
+paths = [
+  '''(^|/)test/''',
+  '''(^|/)fixtures/''',
+  '''\.test\.[cm]?[jt]sx?$''',
+  '''^apps/site/samples/''',
+  '''^apps/site/src/content/''',
+  '''^docs/''',
+  '''\.mdx?$''',
+  # Test support that ships with a package, and the test configs of the examples.
+  '''(^|/)testing/''',
+  '''^packages/legacy-hashes/src/testing\.ts$''',
+  '''(^|/)typetest/''',
+  '''^examples/[^/]+/vitest\.config\.ts$''',
+]
+
+# Source files with a value that guards nothing: a recording SMS sink, a
+# conformance test secret, and an import line that matches the LinkedIn rule.
+[[allowlists]]
+description = "known false matches in three source files and two proof scripts"
+condition = "AND"
+paths = [
+  '''^packages/core/src/limiter/phone-cap\.ts$''',
+  '''^packages/core/src/storage/refresh-race-conformance\.ts$''',
+  '''^packages/core/src/config\.ts$''',
+  '''^examples/next/proof/next-start\.mjs$''',
+  '''^scripts/example-proof\.mjs$''',
+]
