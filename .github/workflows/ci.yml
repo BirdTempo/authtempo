@@ -78,3 +78,28 @@ jobs:
       - run: pnpm release:check --no-osv --no-dry-run --base "origin/${GITHUB_BASE_REF:-main}"
         env:
           TURBO_CONCURRENCY: "2"
+
+  # The secret scan. It reads the whole history, so a secret that a pull request
+  # adds, and a secret that an old commit holds, both fail the job. Without this
+  # job, a committed key reaches main with no check. The scanner is a pinned
+  # binary with a checked hash (scripts/secret-scan.mjs). The rules are in
+  # .gitleaks.toml. It has its own job, so a failed scan does not hide the
+  # result of the release checks, and the other way round.
+  leaks:
+    runs-on: ubuntu-24.04
+    # The scan of the history took 2 seconds on 2026-11-24. The limit is the
+    # guard of a hung download.
+    timeout-minutes: 10
+    steps:
+      # The full history. The default checkout holds one commit, and the scan
+      # then reads one commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Node of the tech stack, for the script.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.10.0"
+          package-manager-cache: false
+      - run: node scripts/secret-scan.mjs

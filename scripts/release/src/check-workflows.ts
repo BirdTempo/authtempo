@@ -288,6 +288,12 @@ const JOBS: Record<string, Record<string, Job>> = {
         },
       ],
     },
+    // The secret scan of the whole history. No pnpm and no install: the script
+    // needs only Node and the git history.
+    leaks: {
+      keys: ["runs-on", "timeout-minutes", "steps"],
+      steps: [checkout(true), NODE, { run: "node scripts/secret-scan.mjs" }],
+    },
   },
   [WORKFLOW_FILE]: {
     check: {
