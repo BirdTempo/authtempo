@@ -6,6 +6,7 @@ import core0011D1 from "../../adapter-d1/migrations/0011_schema_v11.sql?raw";
 import core0012D1 from "../../adapter-d1/migrations/0012_schema_v12.sql?raw";
 import core0014D1 from "../../adapter-d1/migrations/0014_schema_v14.sql?raw";
 import core0017D1 from "../../adapter-d1/migrations/0017_schema_v17.sql?raw";
+import core0018D1 from "../../adapter-d1/migrations/0018_schema_v18.sql?raw";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
@@ -20,6 +21,7 @@ import shipped0011 from "../migrations/d1/0011_compat_schema_v14.sql?raw";
 import shipped0012 from "../migrations/d1/0012_compat_schema_v15.sql?raw";
 import shipped0013 from "../migrations/d1/0013_compat_schema_v16.sql?raw";
 import shipped0014 from "../migrations/d1/0014_compat_schema_v17.sql?raw";
+import shipped0015 from "../migrations/d1/0015_compat_schema_v18.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -34,6 +36,7 @@ import shipped0011Before17 from "../migrations/d1-before-1.7/0011_compat_schema_
 import shipped0012Before17 from "../migrations/d1-before-1.7/0012_compat_schema_v15.sql?raw";
 import shipped0013Before17 from "../migrations/d1-before-1.7/0013_compat_schema_v16.sql?raw";
 import shipped0014Before17 from "../migrations/d1-before-1.7/0014_compat_schema_v17.sql?raw";
+import shipped0015Before17 from "../migrations/d1-before-1.7/0015_compat_schema_v18.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -49,6 +52,7 @@ import {
   compatMigration0012Sql,
   compatMigration0013Sql,
   compatMigration0014Sql,
+  compatMigration0015Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
@@ -58,6 +62,7 @@ import {
   MIGRATION_0012_NAME,
   MIGRATION_0013_NAME,
   MIGRATION_0014_NAME,
+  MIGRATION_0015_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
@@ -115,8 +120,28 @@ const columnsBefore11 = (model: Parameters<typeof columnsOf>[0]) =>
 const ADDED_IN_17: ReadonlySet<string> = new Set(["draft", "version", "pending", "setup_link_id"]);
 const columnsBefore17 = (model: Parameters<typeof columnsOf>[0]) =>
   model === "ssoConnection" || model === "ssoDomain" || model === "scimToken"
-    ? columnsOf(model).filter((c) => !ADDED_IN_17.has(c))
-    : columnsOf(model);
+    ? columnsBefore18(model).filter((c) => !ADDED_IN_17.has(c))
+    : columnsBefore18(model);
+
+/**
+ * The columns of a model before schema version 18. Migration 0015 (plan 13b)
+ * adds its columns last to four tables.
+ */
+const ADDED_IN_18: Readonly<Partial<Record<Parameters<typeof columnsOf>[0], readonly string[]>>> = {
+  operatorAudit: ["organization_id"],
+  ssoConnection: [
+    "certificate_ends_at",
+    "expiry_stage",
+    "expiry_notice_at",
+    "last_success_at",
+    "last_failure_at",
+    "last_failure_step",
+  ],
+  scimToken: ["expiry_stage", "expiry_notice_at"],
+  ssoSetupLink: ["expiry_stage", "expiry_notice_at"],
+};
+const columnsBefore18 = (model: Parameters<typeof columnsOf>[0]) =>
+  columnsOf(model).filter((c) => !(ADDED_IN_18[model] ?? []).includes(c));
 
 /** The ta tables in the database, by name. */
 const taTables = (db: DatabaseSync) =>
@@ -634,7 +659,7 @@ describe("migration 0009 (plan 12f)", () => {
     const cols = (
       db.prepare("PRAGMA table_info(ta_operator_audit)").all() as { name: string }[]
     ).map((c) => c.name);
-    expect(cols).toEqual(columnsOf("operatorAudit"));
+    expect(cols).toEqual(columnsBefore18("operatorAudit"));
     const indexes = (db.prepare("PRAGMA index_list(ta_operator_audit)").all() as { name: string }[])
       .map((i) => i.name)
       // The primary key's own index has a name of SQLite.
@@ -1254,7 +1279,7 @@ describe("migration 0014 (plan 13a)", () => {
       const cols = (
         db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
       ).map((c) => c.name);
-      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      expect({ model, cols }).toEqual({ model, cols: columnsBefore18(model) });
     }
     expect(
       db
@@ -1281,6 +1306,132 @@ describe("migration 0014 (plan 13a)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "14" },
       { key: "schema_version", value: "17" },
+    ]);
+  });
+});
+
+describe("migration 0015 (plan 13b)", () => {
+  /** The statements of a text, without comments, blank space, and the ta_meta version writes. */
+  const statementsOf = (text: string) =>
+    normalize(text)
+      .split(";")
+      .map((st) => st.trim())
+      .filter((st) => st !== "" && !st.startsWith("UPDATE ta_meta"));
+
+  it("ships both D1 files as the SQLite text of compatMigration0015Sql", () => {
+    const text = compatMigration0015Sql("sqlite");
+    expect(normalize(shipped0015)).toBe(normalize(text));
+    expect(normalize(shipped0015Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0014, and the step writes '15' and '18'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0015_NAME)).toBe(names.indexOf(MIGRATION_0014_NAME) + 1);
+    expect(MIGRATION_0015_NAME).toBe("0015_compat_schema_v18");
+    for (const dialect of ["postgres", "sqlite"] as const) {
+      const text = compatMigration0015Sql(dialect);
+      expect(text).toContain("UPDATE ta_meta SET value = '15' WHERE key = 'compat_better_auth';");
+      expect(text).toContain("UPDATE ta_meta SET value = '18' WHERE key = 'schema_version';");
+    }
+  });
+
+  it("holds core 0018's statements on Postgres and on D1, and changes no audit row", () => {
+    const pg = MIGRATIONS.find((m) => m.name === "0018_schema_v18");
+    expect(pg).toBeDefined();
+    expect(statementsOf(compatMigration0015Sql("postgres"))).toEqual(statementsOf(pg?.sql ?? ""));
+    expect(statementsOf(compatMigration0015Sql("sqlite"))).toEqual(statementsOf(core0018D1));
+    for (const dialect of ["postgres", "sqlite"] as const)
+      expect(compatMigration0015Sql(dialect)).not.toMatch(/UPDATE\s+ta_operator_audit/i);
+  });
+
+  it("adds the audit, expiry, and status columns on a store of compat 14, keeps each old value, and changes no Better Auth table", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+      shipped0011,
+      shipped0012,
+      shipped0013,
+      shipped0014,
+    ])
+      db.exec(text);
+    // An audit row, a connection, a token, and a link as core 17 writes them.
+    db.exec(
+      `INSERT INTO ta_operator_audit (id, created_at, updated_at, actor_kind, actor_id, action, target_user_id, reason, data, ip, user_agent) VALUES ('a17', 1, 1, 'operator', 'op', 'sso_enforce_off', NULL, 'r', '{"organizationId":"o1"}', NULL, NULL)`,
+    );
+    db.exec(
+      `INSERT INTO ta_sso_connection (id, created_at, updated_at, organization_id, kind, label, enabled, jit, default_role, config, client_secret, secret_version, mfa, scim_roles, draft, version, setup_link_id) VALUES ('c17', 1, 2, 'o1', 'saml', 'Okta', 1, 1, 'member', '{}', NULL, 1, NULL, NULL, 0, 4, 'l17')`,
+    );
+    db.exec(
+      `INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at, pending, setup_link_id) VALUES ('t17', 1, 1, 'o1', 'Okta', 'h-t17', 'abcd', '["users"]', 9, 5, 0, NULL)`,
+    );
+    db.exec(
+      `INSERT INTO ta_sso_setup_link (id, created_at, updated_at, organization_id, token_hash, hint, steps, kinds, note, created_by, expires_at, revoked_at, ended_at, opened_at, ready_at) VALUES ('l17', 1, 1, 'o1', 'h-l17', 'wxyz', '["saml"]', '["saml"]', 'IT', 'u1', 7, NULL, NULL, NULL, NULL)`,
+    );
+    /** The SQL of each table and index that is not a ta_ table, by name. */
+    const betterAuth = () =>
+      db
+        .prepare(
+          `SELECT type, name, sql FROM sqlite_master WHERE tbl_name NOT LIKE 'ta\\_%' ESCAPE '\\' ORDER BY type, name`,
+        )
+        .all();
+    const before = betterAuth();
+    expect(before.length).toBeGreaterThan(0);
+    const rowsOf = (table: string, id: string) =>
+      db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Record<string, unknown>;
+    const old = {
+      audit: rowsOf("ta_operator_audit", "a17"),
+      connection: rowsOf("ta_sso_connection", "c17"),
+      token: rowsOf("ta_scim_token", "t17"),
+      link: rowsOf("ta_sso_setup_link", "l17"),
+    };
+    db.exec(shipped0015);
+    for (const model of ["operatorAudit", "ssoConnection", "scimToken", "ssoSetupLink"] as const) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
+      ).map((c) => c.name);
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+    }
+    expect(rowsOf("ta_operator_audit", "a17")).toEqual({ ...old.audit, organization_id: null });
+    expect(rowsOf("ta_sso_connection", "c17")).toEqual({
+      ...old.connection,
+      certificate_ends_at: null,
+      expiry_stage: null,
+      expiry_notice_at: null,
+      last_success_at: null,
+      last_failure_at: null,
+      last_failure_step: null,
+    });
+    expect(rowsOf("ta_scim_token", "t17")).toEqual({
+      ...old.token,
+      expiry_stage: null,
+      expiry_notice_at: null,
+    });
+    expect(rowsOf("ta_sso_setup_link", "l17")).toEqual({
+      ...old.link,
+      expiry_stage: null,
+      expiry_notice_at: null,
+    });
+    const indexInfo = (name: string) =>
+      (db.prepare(`PRAGMA index_info(${name})`).all() as { name: string }[]).map((c) => c.name);
+    expect(indexInfo("ix_ta_operator_audit__organization_id__id")).toEqual([
+      "organization_id",
+      "id",
+    ]);
+    for (const table of ["ta_sso_connection", "ta_scim_token", "ta_sso_setup_link"])
+      expect(indexInfo(`ix_${table}__expiry_notice_at`)).toEqual(["expiry_notice_at"]);
+    expect(betterAuth()).toEqual(before);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "15" },
+      { key: "schema_version", value: "18" },
     ]);
   });
 });

@@ -4,17 +4,23 @@ import { isOperatorReason } from "../../operator-secret.js";
 import { newMonotonicId } from "../../primitives/ids.js";
 import { hasControlChar, removeRefusedChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
-import type {
-  OperatorAction,
-  OperatorAuditRow,
-  SessionRow,
-  SSO_AUDIT_ACTIONS,
-  UserRow,
+import {
+  type OperatorAction,
+  type OperatorAuditRow,
+  type ORGANIZATION_AUDIT_ACTIONS,
+  ORGANIZATION_VISIBLE_ACTIONS,
+  type SessionRow,
+  type SSO_AUDIT_ACTIONS,
+  type UserRow,
 } from "../../schema.js";
+import { findManyIn } from "../../storage/batch.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore } from "../hooks.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
-import { endedList } from "../sessions.js";
+// organizations.ts imports this file too. The cycle is safe: each side reads the other only
+// inside a function, never at module load.
+import { standing } from "../organizations.js";
+import { endedList, type ResolvedSession } from "../sessions.js";
 import { checkActor, type OperatorActor, requireScope } from "./guards.js";
 
 // The reason rule lives in the entry @authtempo/core/operator-secret, so the CLI reads the same rule (ruling 40).
@@ -73,6 +79,24 @@ export interface OperatorAuditDraft {
   data: Record<string, unknown> | null;
   ip: string | null;
   userAgent: string | null;
+  /** The organization of the act (plan 13b). Null for an operator act on a user. */
+  organizationId: string | null;
+}
+
+/**
+ * One row of the organization audit, as `GET /organizations/audit` answers it (plan 13b).
+ * `ip` and `userAgent` are null for each actor but a member.
+ */
+export interface OrganizationAuditView {
+  id: string;
+  /** `createdAt`, ISO. */
+  at: string;
+  actor: { kind: "member" | "platform" | "scim" | "app"; id: string | null; email: string | null };
+  action: string;
+  targetUserId: string | null;
+  data: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
 }
 
 /**
@@ -116,12 +140,6 @@ export function auditDraft(
   const named = actor.kind === "app" ? checkActor(actor) : ok(true);
   if (!named.ok) return named;
   const actorId = actor.kind === "user" ? actor.user.id : actor.name;
-  const userAgent =
-    input.userAgent === null
-      ? null
-      : Array.from(removeRefusedChars(wellFormed(input.userAgent)))
-          .slice(0, USER_AGENT_MAX)
-          .join("");
   return ok({
     actorKind: actor.kind,
     actorId,
@@ -130,8 +148,69 @@ export function auditDraft(
     reason: input.reason,
     data: input.data,
     ip: auditIp(input.ip),
-    userAgent,
+    userAgent: auditUserAgent(input.userAgent),
+    // An operator act on a user names no organization (plan 13b, owner decision 4).
+    // `organizationAuditDraft` sets it for an act of an organization.
+    organizationId: null,
   });
+}
+
+/** The user agent of a row: the rule of `auditDraft`. */
+function auditUserAgent(userAgent: string | null): string | null {
+  return userAgent === null
+    ? null
+    : Array.from(removeRefusedChars(wellFormed(userAgent)))
+        .slice(0, USER_AGENT_MAX)
+        .join("");
+}
+
+/**
+ * The actions of an act of an organization that have a fixed reason (plan 13b). The operator
+ * gives the reason of `sso_enforce_off`, so it is not one of them.
+ */
+export type OrganizationAuditAction = Exclude<
+  (typeof ORGANIZATION_VISIBLE_ACTIONS)[number],
+  "sso_enforce_off"
+>;
+
+/**
+ * The draft of one act of an organization (plan 13b Task 3). The row names the organization in
+ * its column, and the reason is the fixed text of the action. A SCIM token is named by its
+ * name. `platform` marks the act of a platform operator through the manager guard: such a row
+ * has the actor kind `user`, so `data.platform: true` tells the organization audit that the
+ * actor is no member. The flag goes only on a user actor. An app name outside the rule of
+ * `checkActor` answers `invalid_body`. The IP and the user agent follow `auditDraft`.
+ */
+export function organizationAuditDraft(
+  actor: AuditActor | { kind: "scim"; tokenName: string },
+  organizationId: string,
+  input: {
+    action: OrganizationAuditAction;
+    targetUserId: string | null;
+    data: Record<string, unknown> | null;
+    ip: string | null;
+    userAgent: string | null;
+    platform?: boolean;
+  },
+): Result<OperatorAuditDraft> {
+  const { platform, ...fields } = input;
+  const reason = ORGANIZATION_ROW_REASON[input.action];
+  const data =
+    platform === true && actor.kind === "user" ? { ...fields.data, platform: true } : fields.data;
+  if (actor.kind === "scim")
+    return ok({
+      actorKind: "scim",
+      actorId: actor.tokenName,
+      action: fields.action,
+      targetUserId: fields.targetUserId,
+      reason,
+      data,
+      ip: auditIp(fields.ip),
+      userAgent: auditUserAgent(fields.userAgent),
+      organizationId,
+    });
+  const draft = auditDraft(actor, { ...fields, reason, data });
+  return draft.ok ? ok({ ...draft.value, organizationId }) : draft;
 }
 
 /**
@@ -216,6 +295,34 @@ export const SSO_AUDIT_REASON: Readonly<Record<(typeof SSO_AUDIT_ACTIONS)[number
   sso_setup_link_revoke: "an organization revoked an SSO setup link",
   sso_setup_link_activate: "an organization activated an SSO setup",
   sso_test_run: "a test sign-in ran against a draft SSO connection",
+  // Plan 13b (owner decision 1): the hand back.
+  sso_setup_link_ready: "an IT admin handed an SSO setup back to the owners",
+};
+
+/**
+ * The fixed reason of each audit action of an organization act (plan 13b). A member gives no
+ * reason, so the row holds this text.
+ */
+export const ORGANIZATION_AUDIT_REASON: Readonly<
+  Record<(typeof ORGANIZATION_AUDIT_ACTIONS)[number], string>
+> = {
+  organization_member_add: "an organization added a member",
+  organization_member_remove: "an organization removed a member",
+  organization_member_role_change: "an organization changed the role of a member",
+  organization_invitation_create: "an organization invited a person",
+  organization_invitation_accept: "a person accepted an invitation",
+  organization_invitation_revoke: "an organization revoked an invitation",
+  organization_token_create: "an organization created a token",
+  organization_token_revoke: "an organization revoked a token",
+  organization_role_create: "an organization created a role",
+  organization_role_update: "an organization changed a role",
+  organization_role_delete: "an organization deleted a role",
+};
+
+/** The fixed reason of each action of `organizationAuditDraft`. */
+const ORGANIZATION_ROW_REASON: Readonly<Record<OrganizationAuditAction, string>> = {
+  ...SSO_AUDIT_REASON,
+  ...ORGANIZATION_AUDIT_REASON,
 };
 
 /**
@@ -404,6 +511,8 @@ export async function writeStopRow(
         cause: stops.cause,
         ...(endedAt === undefined ? {} : { endedAt }),
       },
+      // An operator act on a user names no organization (plan 13b).
+      organizationId: null,
       ip: null,
       userAgent: null,
     },
@@ -487,13 +596,21 @@ function idInput(value: unknown): boolean {
  * reads one user's rows through its index.
  * `after` is the `next` of the page before. `limit` is 1 to 100, default
  * 50. `next` is the last id when the page is full, else null; so one
- * empty page comes after a full last page. Needs `operator.users` (else
- * `not_found`, as the user reads), an actor that passes `checkActor`, and
- * the scope `audit`.
+ * empty page comes after a full last page. `organizationId` reads the rows
+ * of one organization through its index (plan 13b); an operator act on a
+ * user names no organization, so the filter leaves it out. Needs
+ * `operator.users` (else `not_found`, as the user reads), an actor that
+ * passes `checkActor`, and the scope `audit`.
  */
 export async function listAudit(
   config: ResolvedConfig,
-  input: { actor: OperatorActor; targetUserId?: string; after?: string; limit?: number },
+  input: {
+    actor: OperatorActor;
+    targetUserId?: string;
+    organizationId?: string;
+    after?: string;
+    limit?: number;
+  },
 ): Promise<Result<{ rows: OperatorAuditRow[]; next: string | null }>> {
   if (!config.operator?.users) return fail("not_found");
   const named = checkActor(input.actor);
@@ -502,13 +619,17 @@ export async function listAudit(
   if (!scoped.ok) return scoped;
   const limit = input.limit ?? PAGE.default;
   if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max) return fail("invalid_body");
-  if (!idInput(input.targetUserId) || !idInput(input.after)) return fail("invalid_body");
+  if (!idInput(input.targetUserId) || !idInput(input.organizationId) || !idInput(input.after))
+    return fail("invalid_body");
   const rows = await config.storage.findMany(
     "operatorAudit",
     [
       ...(input.targetUserId === undefined
         ? []
         : [{ field: "targetUserId" as const, op: "eq" as const, value: input.targetUserId }]),
+      ...(input.organizationId === undefined
+        ? []
+        : [{ field: "organizationId" as const, op: "eq" as const, value: input.organizationId }]),
       ...(input.after === undefined
         ? []
         : [{ field: "id" as const, op: "gt" as const, value: input.after }]),
@@ -516,4 +637,110 @@ export async function listAudit(
     { sort: { field: "id", dir: "asc" }, limit },
   );
   return ok({ rows, next: rows.length === limit ? (rows.at(-1)?.id ?? null) : null });
+}
+
+/** A date input: absent, or a valid `Date`. */
+function dateInput(value: unknown): boolean {
+  return value === undefined || (value instanceof Date && !Number.isNaN(value.getTime()));
+}
+
+/** True for the act of a member: a user actor with no `data.platform` flag (plan 13b). */
+function memberAct(row: OperatorAuditRow): boolean {
+  return row.actorKind === "user" && row.data?.platform !== true;
+}
+
+/**
+ * The view of one row for the members of its organization (plan 13b, the view rule of Task 6).
+ * A member act shows the user id, the current address, the IP, and the user agent. `email` is
+ * null when the user row is gone; the row stays. The organization sees no detail of the
+ * platform: the act of a platform operator (`data.platform`) and of an operator secret shows
+ * `platform` with no id, no IP, and no user agent. A directory act shows the token name, and an
+ * app act the app name, with no IP and no user agent.
+ */
+function organizationView(
+  row: OperatorAuditRow,
+  emails: ReadonlyMap<string, string | null>,
+): OrganizationAuditView {
+  const member = memberAct(row);
+  const actor: OrganizationAuditView["actor"] = member
+    ? { kind: "member", id: row.actorId, email: emails.get(row.actorId) ?? null }
+    : row.actorKind === "scim" || row.actorKind === "app"
+      ? { kind: row.actorKind, id: row.actorId, email: null }
+      : { kind: "platform", id: null, email: null };
+  return {
+    id: row.id,
+    at: row.createdAt.toISOString(),
+    actor,
+    action: row.action,
+    targetUserId: row.targetUserId,
+    data: row.data,
+    ip: member ? row.ip : null,
+    userAgent: member ? row.userAgent : null,
+  };
+}
+
+/**
+ * The audit rows of one organization, oldest first, for its members (plan 13b Task 6). The
+ * caller needs `audit:read` in the organization: the owner of the `ranks` form, or a role of the
+ * `roles` form that lists it. A missing organization answers `not_found`, and a non-member or a
+ * missing permission `forbidden_rank`, as `GET /organizations/invitations` does.
+ *
+ * One read takes `limit + 1` rows through the index `[organizationId, id]`. `next` is the last id
+ * of the page only when one more row exists, so no empty page comes after the last one. `action`,
+ * `from` (inclusive), and `to` (exclusive) narrow the read. A row with a null `organizationId`
+ * (a row of version 17 or older) is never in the answer. Then one read of the users of the
+ * member actors (`findManyIn`, 50 ids for each statement) gives each current address.
+ * `limit` is 1 to 100, default 50; a bad input answers `invalid_body`.
+ */
+export async function listOrganizationAudit(
+  config: ResolvedConfig,
+  input: {
+    session: Pick<ResolvedSession, "user" | "session">;
+    organizationId: string;
+    after?: string;
+    limit?: number;
+    action?: string;
+    from?: Date;
+    to?: Date;
+  },
+): Promise<Result<{ rows: OrganizationAuditView[]; next: string | null }>> {
+  if (!config.organizations) return fail("not_found");
+  const limit = input.limit ?? PAGE.default;
+  if (!Number.isInteger(limit) || limit < 1 || limit > PAGE.max) return fail("invalid_body");
+  if (input.organizationId === undefined || !idInput(input.organizationId))
+    return fail("invalid_body");
+  if (!idInput(input.after) || !dateInput(input.from) || !dateInput(input.to))
+    return fail("invalid_body");
+  const visible: readonly string[] = ORGANIZATION_VISIBLE_ACTIONS;
+  if (input.action !== undefined && !visible.includes(input.action)) return fail("invalid_body");
+  const { from, to } = input;
+  if (from !== undefined && to !== undefined && from.getTime() >= to.getTime())
+    return fail("invalid_body");
+  const s = await standing(config, input.session.user, input.organizationId, { audit: ["read"] });
+  if (!s.ok) return s;
+  const read = await config.storage.findMany(
+    "operatorAudit",
+    [
+      { field: "organizationId", op: "eq", value: input.organizationId },
+      ...(input.after === undefined
+        ? []
+        : [{ field: "id" as const, op: "gt" as const, value: input.after }]),
+      ...(input.action === undefined
+        ? []
+        : [{ field: "action" as const, op: "eq" as const, value: input.action }]),
+      ...(from === undefined
+        ? []
+        : [{ field: "createdAt" as const, op: "gte" as const, value: from }]),
+      ...(to === undefined ? [] : [{ field: "createdAt" as const, op: "lt" as const, value: to }]),
+    ],
+    { sort: { field: "id", dir: "asc" }, limit: limit + 1 },
+  );
+  const rows = read.slice(0, limit);
+  const memberIds = rows.filter(memberAct).map((r) => r.actorId);
+  const users = await findManyIn(config.storage, "user", "id", memberIds);
+  const emails = new Map(users.map((u) => [u.id, u.email]));
+  return ok({
+    rows: rows.map((r) => organizationView(r, emails)),
+    next: read.length > limit ? (rows.at(-1)?.id ?? null) : null,
+  });
 }

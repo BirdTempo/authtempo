@@ -156,6 +156,8 @@ describe("the operator audit row (plan 12f Task 4)", () => {
       data: { until: null },
       ip: "203.0.113.7",
       userAgent: "curl/8.9",
+      // An act on a user names no organization (plan 13b).
+      organizationId: null,
     });
     // afterAction gets the stored row once, after the commit.
     expect(seen).toEqual([row]);

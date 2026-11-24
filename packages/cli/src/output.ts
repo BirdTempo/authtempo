@@ -29,11 +29,16 @@ export function guarded(io: Io): Ctx {
     prompt: (question) => io.prompt(clean(question, secrets)),
     addSecret(value) {
       for (const p of secretParts(value)) {
-        secrets.add(p);
         // A --json line holds the JSON form of a string. A " or a \ of the
         // secret is escaped there, so the scrub also needs that form.
         const escaped = JSON.stringify(p).slice(1, -1);
-        if (escaped !== p) secrets.add(escaped);
+        // A CSV cell of `audit export` doubles each ", and its data cell holds
+        // JSON text in CSV quotes. The operator secret rule allows a ", so the
+        // scrub also needs the CSV form of the two forms above.
+        for (const form of [p, escaped]) {
+          secrets.add(form);
+          secrets.add(form.replaceAll('"', '""'));
+        }
       }
     },
   };

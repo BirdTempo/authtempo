@@ -37,10 +37,9 @@ import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
 import { endFamilies, familyEnds } from "../oauth-family.js";
 import { endAllAccessPage, markAllAccessEnd } from "../operator/access-end.js";
 import {
-  auditDraft,
   impersonationStops,
   type OperatorAuditDraft,
-  SSO_AUDIT_REASON,
+  organizationAuditDraft,
   writeAuditIn,
 } from "../operator/audit.js";
 import { writesPlatformRole } from "../operator/guards.js";
@@ -753,9 +752,9 @@ export type ScimWriteAction =
   | "scim_group_delete";
 
 /**
- * The audit draft of a SCIM write: the token by its name, or the app by its
- * name. The reason is the fixed text of the action (`SSO_AUDIT_REASON`). A
- * group write names no user.
+ * The audit draft of a SCIM write of the caller's organization: the token by
+ * its name, or the app by its name (`organizationAuditDraft`, plan 13b). The
+ * reason is the fixed text of the action. A group write names no user.
  */
 export function draftOf(
   caller: ScimUserCaller,
@@ -763,29 +762,13 @@ export function draftOf(
   targetUserId: string | null,
   data: Record<string, unknown>,
 ): OperatorAuditDraft {
-  const reason = SSO_AUDIT_REASON[action];
-  if ("actor" in caller) {
-    const d = auditDraft(caller.actor, {
-      action,
-      reason,
-      targetUserId,
-      data,
-      ip: null,
-      userAgent: null,
-    });
-    if (!d.ok) stopWith(d.code);
-    return d.value;
-  }
-  return {
-    actorKind: "scim",
-    actorId: caller.tokenName,
-    action,
-    targetUserId,
-    reason,
-    data,
-    ip: null,
-    userAgent: null,
-  };
+  const d = organizationAuditDraft(
+    "actor" in caller ? caller.actor : { kind: "scim", tokenName: caller.tokenName },
+    caller.organizationId,
+    { action, targetUserId, data, ip: null, userAgent: null },
+  );
+  if (!d.ok) stopWith(d.code);
+  return d.value;
 }
 
 /** The meter of one SCIM call: the calls before it, and the ready check of the storage. */
@@ -1524,7 +1507,7 @@ async function writeChange(
           // D1 has no lock, so a group write can still land after the read above. The
           // round then runs again too, with a new read of the member row. With a claim,
           // the delete of the organization tokens below takes them, so it runs once.
-          if (removes && member && (await removeMemberIn(tx, member, !claimed)) === 0)
+          if (removes && member && (await removeMemberIn(tx, member, !claimed)).members === 0)
             throw new LostRound(undefined);
           await writeUser();
           if (claimed) {

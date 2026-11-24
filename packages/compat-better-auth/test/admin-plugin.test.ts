@@ -5,7 +5,10 @@ import {
   systemClock,
 } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
+import { createAccessControl, defaultStatements } from "../src/access.js";
+import { apiKey } from "../src/api-key.js";
 import { adminClient, CLIENT_USER_KEYS, createAuthClient } from "../src/client/index.js";
+import { BETTER_AUTH_CODES } from "../src/errors.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { admin, organization } from "../src/plugins.js";
 import {
@@ -20,7 +23,12 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import { COOKIE_NAME, SESSION_KEYS } from "../src/server/shapes.js";
-import type { AdminOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
+import type {
+  AdminOptions,
+  ApiKeyServerApi,
+  BetterAuthOptions,
+  CompatDatabase,
+} from "../src/types.js";
 import { adminApp, cookieOf, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
@@ -858,6 +866,7 @@ const setCookie = (res: Response, name: string) => {
 const ACTOR = `${COOKIE_NAME}_actor`;
 const IMPERSONATE = "/admin/impersonate-user";
 const STOP = "/admin/stop-impersonating";
+const KEY_ACTIONS = ["create", "read", "update", "delete"] as const;
 
 describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
   it("maps impersonate-user and stop-impersonating onto core's impersonation, with Better Auth's shapes", async () => {
@@ -926,6 +935,145 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
       { action: "impersonation_stop", ...by, reason: `better-auth admin plugin ${STOP}` },
     ]);
   });
+
+  // Plan 13b Task 12, ruling R16: the in-process cancel follows the rule of the core route. An
+  // act in an impersonation names the operator, with `platform: true` (spec 6.6 item 5).
+  it("cancelInvitation in an impersonation writes the operator as the actor, with platform true", async () => {
+    const db = memoryDatabase();
+    const a = await adminApp(db);
+    const ann = await a.user("ann@example.com");
+    const made = await a.call("/organizations/create", { slug: "acme", name: "Acme" }, ann.cookie);
+    expect(made.status).toBe(200);
+    const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
+    const inv = await a.auth.api.createInvitation({
+      body: { email: "x@example.com", role: "member", organizationId: orgId },
+      headers: new Headers({ cookie: ann.cookie }),
+    });
+    const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+    expect(start.status).toBe(200);
+    const imp = `${COOKIE_NAME}=${setCookie(start, COOKIE_NAME)}`;
+    const canceled = await a.auth.api.cancelInvitation({
+      body: { invitationId: inv.id },
+      headers: new Headers({ cookie: imp }),
+    });
+    expect(canceled.status).toBe("canceled");
+    const rows = await db.storage.findMany("operatorAudit", [
+      { field: "action", op: "eq", value: "organization_invitation_revoke" },
+    ]);
+    expect(
+      rows.map((r) => [
+        r.organizationId,
+        r.actorKind,
+        r.actorId,
+        r.data?.platform,
+        r.ip,
+        r.userAgent,
+      ]),
+    ).toEqual([[orgId, "user", a.opId, true, null, null]]);
+  });
+
+  // Plan 13b Task 12, ruling R18: core refuses `POST /organizations/invite` to an impersonation
+  // session. The in-process createInvitation refuses it the same way, with core's code
+  // `impersonation_session` (Better Auth's FORBIDDEN), and writes no invitation and no audit row.
+  it("createInvitation in an impersonation refuses as the invite route does, and writes nothing", async () => {
+    const db = memoryDatabase();
+    const a = await adminApp(db);
+    const ann = await a.user("ann@example.com");
+    const made = await a.call("/organizations/create", { slug: "acme", name: "Acme" }, ann.cookie);
+    expect(made.status).toBe(200);
+    const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
+    const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+    expect(start.status).toBe(200);
+    const imp = `${COOKIE_NAME}=${setCookie(start, COOKIE_NAME)}`;
+    const route = await json(
+      await a.call(
+        "/organizations/invite",
+        { organizationId: orgId, email: "x@example.com", role: "member" },
+        imp,
+      ),
+    );
+    expect(route).toEqual({ status: 403, body: { error: "impersonation_session" } });
+    const call = await thrown(
+      a.auth.api.createInvitation({
+        body: { email: "y@example.com", role: "member", organizationId: orgId },
+        headers: new Headers({ cookie: imp }),
+      }),
+    );
+    // The same core code, in the APIError form of each server call of the shim.
+    expect(call).toMatchObject({ status: 403, code: BETTER_AUTH_CODES.impersonation_session });
+    expect(await db.storage.findMany("invitation", [])).toEqual([]);
+    const rows = await db.storage.findMany("operatorAudit", [
+      { field: "action", op: "eq", value: "organization_invitation_create" },
+    ]);
+    expect(rows).toEqual([]);
+  });
+
+  // Plan 13b, ruling R21: core refuses `POST /tokens`, `POST /tokens/update`, and the three
+  // organization token writes to an impersonation session. The key calls of the shim pass the
+  // session of the headers, so core refuses them the same way. No key outlives the
+  // impersonation, and no audit row names the member for an act of the operator.
+  it.each(["organization", "user"] as const)(
+    "createApiKey, updateApiKey, and deleteApiKey in an impersonation refuse as the token routes do (%s keys)",
+    async (references) => {
+      const db = memoryDatabase();
+      // The owner manages the organization's keys: Better Auth's `apiKey` statement, as an app sets it.
+      const ac = createAccessControl({ ...defaultStatements, apiKey: KEY_ACTIONS });
+      const keyRoles = {
+        owner: ac.newRole({ ...defaultStatements, apiKey: [...KEY_ACTIONS] }),
+        admin: ac.newRole({ ...defaultStatements, apiKey: [...KEY_ACTIONS] }),
+        member: ac.newRole({ apiKey: [] }),
+      };
+      const a = await adminApp(db, {
+        plugins: [apiKey({ references })],
+        org: {
+          plugin: organization({ ac, roles: keyRoles, sendInvitationEmail: async () => {} }),
+          roleRanks: { member: 2, admin: 3, owner: 4 },
+        },
+      });
+      const ann = await a.user("ann@example.com");
+      const made = await a.call(
+        "/organizations/create",
+        { slug: "acme", name: "Acme" },
+        ann.cookie,
+      );
+      expect(made.status).toBe(200);
+      const orgId = ((await made.json()) as { organization: { id: string } }).organization.id;
+      const body = references === "organization" ? { organizationId: orgId } : {};
+      // `adminApp` takes its plugins as a plain list, so its type does not see the key calls.
+      const keys = a.auth.api as unknown as ApiKeyServerApi;
+      const own = await keys.createApiKey({
+        body: { name: "own", ...body },
+        headers: new Headers({ cookie: ann.cookie }),
+      });
+      const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+      expect(start.status).toBe(200);
+      const imp = new Headers({ cookie: `${COOKIE_NAME}=${setCookie(start, COOKIE_NAME)}` });
+      const model = references === "organization" ? "organizationToken" : "apiToken";
+      const tokensBefore = await db.storage.findMany(model, []);
+      const auditBefore = await db.storage.findMany("operatorAudit", []);
+      const refused = { status: 403, code: BETTER_AUTH_CODES.impersonation_session };
+      const calls = {
+        create: await thrown(keys.createApiKey({ body: { name: "x", ...body }, headers: imp })),
+        update: await thrown(
+          keys.updateApiKey({ body: { keyId: own.id, name: "y" }, headers: imp }),
+        ),
+        // Core's route of a user token revoke takes an impersonation session, so only the
+        // organization key delete refuses.
+        ...(references === "organization"
+          ? {
+              delete: await thrown(keys.deleteApiKey({ body: { keyId: own.id }, headers: imp })),
+            }
+          : {}),
+      };
+      expect(calls).toMatchObject({
+        create: refused,
+        update: refused,
+        ...(references === "organization" ? { delete: refused } : {}),
+      });
+      expect(await db.storage.findMany(model, [])).toEqual(tokensBefore);
+      expect(await db.storage.findMany("operatorAudit", [])).toEqual(auditBefore);
+    },
+  );
 
   it("answers Better Auth's refusals of an impersonation, and the bearer form", async () => {
     const a = await adminApp(memoryDatabase());

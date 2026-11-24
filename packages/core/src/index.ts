@@ -248,6 +248,8 @@ export type {
 export type {
   ConnectionFields,
   ConnectionInput,
+  SsoConnectionListed,
+  SsoConnectionStatus,
   SsoConnectionSummary,
   SsoMfaInput,
 } from "./engine/sso/connections.js";

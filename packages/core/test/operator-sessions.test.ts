@@ -10,7 +10,7 @@ import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, LONG_TEST_MS, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, LONG_TEST_MS, makeAuth, OPERATOR_ROWS, post } from "./helpers.js";
 import { authorized, exchange, pkce, REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, sessionOf } from "./operator-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
@@ -117,7 +117,7 @@ const sessionsOf = (storage: StorageAdapter, userId?: string) =>
   );
 
 const auditRows = (storage: StorageAdapter) =>
-  storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } });
+  storage.findMany("operatorAudit", OPERATOR_ROWS, { sort: { field: "id", dir: "asc" } });
 
 /**
  * Counts each storage call on `storage`, also inside a transaction, and

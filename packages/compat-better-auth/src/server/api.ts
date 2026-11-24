@@ -430,6 +430,9 @@ export function createApi(
       const v = unwrap(
         await auth.api.inviteMember({
           user: s.user,
+          // Ruling R18 of plan 13b: core refuses an impersonation session here with
+          // `impersonation_session`, as its invite route does.
+          session: s.session,
           organizationId,
           email: body.email,
           role: body.role,
@@ -446,6 +449,9 @@ export function createApi(
       unwrap(
         await auth.api.revokeInvitation({
           user: s.user,
+          // The session, as the core route passes it (ruling R16 of plan 13b). In an impersonation
+          // the audit row then names the operator with `platform: true`, not the member.
+          session: s.session,
           organizationId: row.organizationId,
           invitationId: row.id,
         }),

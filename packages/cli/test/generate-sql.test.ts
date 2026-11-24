@@ -19,7 +19,7 @@ import { freshDatabase } from "./support/pg.js";
 // adapter's own migrations build.
 
 /** The names of the shipped SQLite and Postgres migrations, typed here. */
-const CORE = Array.from({ length: 17 }, (_, i) => {
+const CORE = Array.from({ length: 18 }, (_, i) => {
   const n = String(i + 1);
   return `${n.padStart(4, "0")}_schema_v${n}`;
 });
@@ -79,7 +79,7 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
         db.close();
       }
       const doc = dryRun("sqlite", ["--file", file]);
-      expect(doc).toMatchObject({ before: 17, pending: [], applied: [] });
+      expect(doc).toMatchObject({ before: 18, pending: [], applied: [] });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -96,7 +96,7 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
       await db.sql.unsafe(text);
       expect(withoutDefaults(await readPostgresShape(db.sql))).toEqual(expectedPostgresShape());
       const doc = dryRun("postgres", ["--url-env", "TEST_DB_URL"], { TEST_DB_URL: db.url });
-      expect(doc).toMatchObject({ before: 17, pending: [], applied: [] });
+      expect(doc).toMatchObject({ before: 18, pending: [], applied: [] });
     } finally {
       await db.drop();
     }
@@ -108,13 +108,15 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
     expect(rows[0]).toMatch(/^CREATE TABLE IF NOT EXISTS `ta_migrations` \(/);
     // The runner records each step. The baseline 0001_schema_v13 has 30 steps, and
     // 0002_schema_v14 of plan 12d has 7. 0003_schema_v15 of plan 12i has 6, and
-    // 0004_schema_v16 of plan 12p has 3. 0005_schema_v17 of plan 13a has 7.
+    // 0004_schema_v16 of plan 12p has 3. 0005_schema_v17 of plan 13a has 7, and
+    // 0006_schema_v18 of plan 13b has 9: each column and each key is a step (final review M3).
     expect(rows.slice(1).map((s) => /VALUES \('([^']+)', (\d+),/.exec(s)?.slice(1))).toEqual([
       ...Array.from({ length: 30 }, (_, i) => ["0001_schema_v13", String(i + 1)]),
       ...Array.from({ length: 7 }, (_, i) => ["0002_schema_v14", String(i + 1)]),
       ...Array.from({ length: 6 }, (_, i) => ["0003_schema_v15", String(i + 1)]),
       ...Array.from({ length: 3 }, (_, i) => ["0004_schema_v16", String(i + 1)]),
       ...Array.from({ length: 7 }, (_, i) => ["0005_schema_v17", String(i + 1)]),
+      ...Array.from({ length: 9 }, (_, i) => ["0006_schema_v18", String(i + 1)]),
     ]);
 
     const server = MYSQL_SERVERS[0];
@@ -124,7 +126,7 @@ describe("authtempo generate --format sql (plan 12g Task 7)", () => {
       for (const statement of statementsOf(text)) await pool.query(statement);
       expect(withoutDefaults(await readMysqlShape(pool))).toEqual(expectedMysqlShape());
       const doc = dryRun("mysql", ["--url-env", "MYSQL_URL"], { MYSQL_URL: db.url });
-      expect(doc).toMatchObject({ before: 17, pending: [], applied: [] });
+      expect(doc).toMatchObject({ before: 18, pending: [], applied: [] });
     } finally {
       await pool.end();
       await db.drop();

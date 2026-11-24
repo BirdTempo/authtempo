@@ -256,6 +256,8 @@ export const CLIENT_CALLS = [
     method: "GET",
     path: "/organizations/tokens/current",
   },
+  // Plan 13b Task 7: the audit of one organization. The export calls this row once for each page.
+  { operation: "organizations.audit.list", method: "GET", path: "/organizations/audit" },
   { operation: "tokens.create", method: "POST", path: "/tokens" },
   { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },

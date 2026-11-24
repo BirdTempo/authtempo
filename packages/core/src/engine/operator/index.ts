@@ -45,10 +45,14 @@ import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
  */
 export interface OperatorApi {
   audit: {
-    /** The audit rows by `id` ascending, 1 to 100 per page. Needs the scope `audit`. */
+    /**
+     * The audit rows by `id` ascending, 1 to 100 per page. Needs the scope `audit`.
+     * `organizationId` reads the rows of one organization (plan 13b).
+     */
     list(input: {
       actor: OperatorActor;
       targetUserId?: string;
+      organizationId?: string;
       after?: string;
       limit?: number;
     }): Promise<Result<{ rows: OperatorAuditRow[]; next: string | null }>>;

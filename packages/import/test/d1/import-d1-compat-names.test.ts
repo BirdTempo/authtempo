@@ -10,6 +10,7 @@ import {
   compatMigration0012Sql,
   compatMigration0013Sql,
   compatMigration0014Sql,
+  compatMigration0015Sql,
   resolveNames,
 } from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
@@ -102,6 +103,8 @@ await env.DB.batch(
 );
 // 0014 names ta_ tables only, so its text is the same for every naming (plan 13a).
 await env.DB.batch(statements(compatMigration0014Sql("sqlite")).map((s) => env.DB.prepare(s)));
+// 0015 names ta_ tables only, so its text is the same for every naming (plan 13b).
+await env.DB.batch(statements(compatMigration0015Sql("sqlite")).map((s) => env.DB.prepare(s)));
 
 const count = async (table: string) =>
   (await env.DB.prepare(`SELECT count(*) AS n FROM "${table}"`).first<number>("n")) ?? -1;

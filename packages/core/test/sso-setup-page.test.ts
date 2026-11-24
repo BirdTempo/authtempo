@@ -449,6 +449,7 @@ const DRAFT = {
   clientId: "acme-client",
   ssoUrl: null,
   idpEntityId: null,
+  certificateEndsAt: null,
 };
 const TEST = {
   outcome: "passed" as const,

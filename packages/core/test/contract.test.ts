@@ -1004,7 +1004,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12f2 Task 3 adds the GET and the POST of /user/invite/confirm.
     // Plan 12f2 Task 5 adds POST /operator/users/create in its second wave.
     // Plan 13a Task 0 adds the 13 contracts of the enterprise setup, not mounted yet.
-    expect(keys.length).toBe(222);
+    // Plan 13b Task 0 adds GET /organizations/audit, and Task 6 mounts it.
+    expect(keys.length).toBe(223);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());

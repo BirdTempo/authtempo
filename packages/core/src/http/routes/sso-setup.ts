@@ -249,6 +249,7 @@ async function pageInput(
       clientId: c.oidc?.clientId ?? null,
       ssoUrl: c.saml?.ssoUrl ?? null,
       idpEntityId: c.saml?.idpEntityId ?? null,
+      certificateEndsAt: draftRow.certificateEndsAt?.toISOString() ?? null,
     };
   }
 

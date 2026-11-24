@@ -92,16 +92,52 @@ export async function effectiveIn(
 }
 
 /**
+ * The core resources that a stored role never grants (ruling R20 of plan 13b).
+ * The audit shows the IP and the user agent of each member, so only a role of
+ * the config holds `audit:read`: the owner rank of the `ranks` form, or a role
+ * that the app lists in the `roles` form. A role write that names one answers
+ * `statement_not_grantable`.
+ */
+export const UNSTORABLE_RESOURCES: readonly string[] = Object.freeze(["audit"]);
+
+/** True when a permissions value is an object with an own key of `UNSTORABLE_RESOURCES`. */
+export function namesUnstorable(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    UNSTORABLE_RESOURCES.some((name) => Object.hasOwn(value, name))
+  );
+}
+
+/**
+ * The permissions of a stored row with no key of `UNSTORABLE_RESOURCES`. A row
+ * from before schema 18 can hold an app statement named `audit`, and a compat
+ * row can hold any text. Each such key is left out, so the row keeps its other
+ * rights and never grants core `audit:read`. A value that is not a plain object
+ * stays as it is, and `statementFault` refuses it.
+ */
+export function storedPermissions(value: unknown): unknown {
+  if (!namesUnstorable(value) || Array.isArray(value)) return value;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  return Object.fromEntries(
+    Object.entries(value as object).filter(([name]) => !UNSTORABLE_RESOURCES.includes(name)),
+  );
+}
+
+/**
  * The rank and the permissions of a stored role row, or null when its shape
  * is bad. A bad shape is permissions that fail `statementFault`, or a rank
- * that is not a safe integer from 1 to below the owner rank.
+ * that is not a safe integer from 1 to below the owner rank. The check and the
+ * grant read `storedPermissions` of the row.
  */
 export function roleRowDef(o: ResolvedOrganizations, row: OrganizationRoleRow): RoleDef | null {
   const ownerRank = o.ranks.owner ?? 0;
   if (typeof row.rank !== "number" || !Number.isSafeInteger(row.rank)) return null;
   if (row.rank < 1 || row.rank >= ownerRank) return null;
-  if (statementFault(row.permissions, o.statements) !== null) return null;
-  return { rank: row.rank, permissions: union(row.permissions as Statements) };
+  const permissions = storedPermissions(row.permissions);
+  if (statementFault(permissions, o.statements) !== null) return null;
+  return { rank: row.rank, permissions: union(permissions as Statements) };
 }
 
 /** A caller grants a role only when its rank is at most the caller's and its statements are a subset of the caller's. */

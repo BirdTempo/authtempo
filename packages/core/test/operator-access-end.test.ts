@@ -6,7 +6,7 @@ import { sweepExpired } from "../src/engine/sweep.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL, LONG_TEST_MS } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, LONG_TEST_MS, OPERATOR_ROWS } from "./helpers.js";
 import { OPERATOR_SECRETS, type OperatorAuth, operatorFixture } from "./operator-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
@@ -151,7 +151,7 @@ describe("the ban and the revoke inside the call budget (rulings 44 and 45 of pl
       expect(pending.map((p) => [p.identifier, p.data?.reason])).toEqual([[ada.userId, "banned"]]);
       // The row lives 3650 days from the fixture clock (2026-01-01), far past any session.
       expect(pending[0]?.expiresAt.toISOString().slice(0, 10)).toBe("2035-12-30");
-      const audit = await w.auth.storage.findMany("operatorAudit", []);
+      const audit = await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
       expect(audit.map((a) => [a.action, a.targetUserId])).toEqual([["ban", ada.userId]]);
       // The sweep ends every left session with its hook, and deletes the row.
       const swept = await sweepAll(w);
@@ -240,7 +240,7 @@ describe("the ban and the revoke inside the call budget (rulings 44 and 45 of pl
       expect(await sessionsOf(w, bob.userId)).toBe(0);
       expect(w.endings).toHaveLength(total);
       expect(new Set(w.endings.map((e) => e.reason))).toEqual(new Set(["operator"]));
-      const audit = await w.auth.storage.findMany("operatorAudit", []);
+      const audit = await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
       expect(audit.map((a) => a.action)).toEqual([
         "platform_role_grant",
         "platform_role_revoke",

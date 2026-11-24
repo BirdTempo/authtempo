@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
+import { markFresh } from "../../src/engine/fresh.js";
 import { createOrganization } from "../../src/engine/organizations.js";
 import { createConnection } from "../../src/engine/sso/connections.js";
 import { addDomain } from "../../src/engine/sso/domains.js";
@@ -172,6 +173,82 @@ describe("the connection routes (plan 12d Task 3)", () => {
       ["sso_connection_update", "user", IP, "manager/2"],
       ["sso_connection_delete", "user", IP, "manager/2"],
     ]);
+  });
+
+  it("answers each listed connection with the status of its row (plan 13b Task 9)", async () => {
+    const w = await routeWorld();
+    const made = await createConnection(w.auth.config, SSO_APP, {
+      ...oidcBody(),
+      organizationId: w.org,
+      kind: "oidc",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const DAY_MS = 86_400_000;
+    const t0 = w.auth.clock.now().getTime();
+    const iso = (days: number) => new Date(t0 + days * DAY_MS).toISOString();
+    // The certificate ends 40 days after the create, so the 30-day notice is due at day 10.
+    const idp = await createTestIdp({ alg: "rsa", certificateNotAfter: new Date(iso(40)) });
+    const saml = await createConnection(w.auth.config, SSO_APP, {
+      organizationId: w.org,
+      kind: "saml",
+      label: "SAML IdP",
+      idpEntityId: idp.entityId,
+      ssoUrl: "https://idp.example/sso",
+      certificates: [idp.certificatePem],
+    });
+    if (!saml.ok) throw new Error(saml.code);
+    // At day 15: the values that a passed sign-in at day 12, a failed sign-in at day 14, and the
+    // sweep of the 30-day notice wrote.
+    w.auth.clock.advance(15 * DAY_MS);
+    // The owner re-authenticates at day 15: the manager routes need a fresh session.
+    if (!(await markFresh(w.auth.config, w.owner.session.id)).ok) throw new Error("not fresh");
+    await w.auth.storage.update(
+      "ssoConnection",
+      [{ field: "id", op: "eq", value: saml.value.id }],
+      {
+        lastSuccessAt: new Date(iso(12)),
+        lastFailureAt: new Date(iso(14)),
+        lastFailureStep: "signature",
+        expiryStage: 30,
+        // After the 30-day notice the next one is the 7-day notice, at day 33.
+        expiryNoticeAt: new Date(iso(33)),
+      },
+    );
+    const [status, body] = await send(
+      w,
+      "GET",
+      `/sso/connections?organizationId=${w.org}`,
+      null,
+      w.owner.token,
+    );
+    expect(status).toBe(200);
+    const listed = body.connections as { id: string; status: unknown }[];
+    // Two ids of one millisecond have a random order, so the test keys the status by id.
+    expect(listed).toHaveLength(2);
+    expect(Object.fromEntries(listed.map((c) => [c.id, c.status]))).toEqual(
+      Object.fromEntries([
+        [
+          made.value.id,
+          {
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            lastFailureStep: null,
+            certificateEndsAt: null,
+            expiryStage: null,
+          },
+        ],
+        [
+          saml.value.id,
+          {
+            lastSuccessAt: iso(12),
+            lastFailureAt: iso(14),
+            lastFailureStep: "signature",
+            certificateEndsAt: iso(40),
+            expiryStage: 30,
+          },
+        ],
+      ]),
+    );
   });
 
   it("answers the refusals of the guard, the input, and the limit", async () => {

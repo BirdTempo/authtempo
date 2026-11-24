@@ -182,7 +182,10 @@ describe("the queries of one SAML ACS post on D1 (plan 12d Task 8)", () => {
     // Update 2026-11-05 by plan 12q: each post opens a session, and its cap read adds one
     // query (+1).
     // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
-    expect({ created, known, capped }).toEqual({ created: 24, known: 16, capped: 17 });
+    // Update 2026-11-23 by plan 13b Task 9: the first post writes the status of the connection
+    // (+1). The next posts are inside the hour of the first, so they write none.
+    // Measured 2026-11-23 22:02 CST on the owner's Mac (Mac17,14), load 2.57 8.20 10.03.
+    expect({ created, known, capped }).toEqual({ created: 25, known: 16, capped: 17 });
     for (const n of [created, known, capped]) expect(n).toBeLessThanOrEqual(50);
   }, 120_000);
 

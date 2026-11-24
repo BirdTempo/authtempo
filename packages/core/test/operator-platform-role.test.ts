@@ -13,7 +13,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { d1Like } from "./d1-like.js";
-import { emailOf, get, post, seedPlatform, tokenFromMail } from "./helpers.js";
+import { emailOf, get, OPERATOR_ROWS, post, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
   consentPost,
@@ -315,7 +315,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(answer).toEqual({ ok: false, code: "conflict", status: 409 });
     expect(state.deleted).toEqual({ ok: true, value: { ok: true } });
     expect(await platformMember(auth, platformOrg.id, ada.user.id)).toBeNull();
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("writes the back-channel logout of each linked client at the revoke, and the sweep sends it (ruling 37)", async () => {
@@ -404,7 +404,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     expect(await resolveSession(auth.config, ada.token)).not.toBeNull();
     expect(events).toEqual([]);
-    const rows = await auth.storage.findMany("operatorAudit", []);
+    const rows = await auth.storage.findMany("operatorAudit", OPERATOR_ROWS);
     expect(rows.map((r) => [r.id, r.action])).toEqual([
       [revoked.value.auditId, "platform_role_revoke"],
     ]);
@@ -428,7 +428,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     expect(await platformMember(auth, platformOrg.id, ada.user.id)).toBeNull();
     expect(events).toEqual([]);
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("keeps the last owner of the platform organization", async () => {
@@ -458,7 +458,7 @@ describe("the platform role (plan 12f Task 8)", () => {
       role: "operator",
     });
     expect(await resolveSession(auth.config, rootSession.token)).not.toBeNull();
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     // A rest below the owner rank also leaves no owner: "member" stays of "member,operator".
     const member = await updateMemberRole(auth.config, {
       user: root,
@@ -471,7 +471,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await platformMember(auth, platformOrg.id, root.id)).toMatchObject({
       role: "member,operator",
     });
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   /**
@@ -500,13 +500,13 @@ describe("the platform role (plan 12f Task 8)", () => {
     const target = path === "lock" ? ada.user.id : root.id;
     parallel.userId = target;
     parallel.role = path === "lock" ? "admin,operator" : "owner,operator,admin";
-    const audited = (await auth.storage.findMany("operatorAudit", [])).length;
+    const audited = (await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).length;
     const answer = await revoke(auth, target);
     return {
       answer,
       role: (await platformMember(auth, platformOrg.id, target))?.role,
       operator: await isPlatformOperator(auth.config, target),
-      rows: (await auth.storage.findMany("operatorAudit", [])).length - audited,
+      rows: (await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).length - audited,
       session: (await resolveSession(auth.config, ada.token)) !== null,
     };
   }
@@ -551,7 +551,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     expect(await platformMember(auth, platformOrg.id, user.id)).toBeNull();
     expect(events).toEqual([]);
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("refuses a banned target with account_banned", async () => {
@@ -603,7 +603,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await grant(auth, ada.user.id)).toEqual(none);
     expect(await revoke(auth, ada.user.id)).toEqual(none);
     expect(await auth.storage.findMany("member", [])).toEqual([]);
-    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("needs the scope users of a secret actor", async () => {

@@ -19,6 +19,8 @@ export interface DraftSummary {
   clientId: string | null;
   ssoUrl: string | null;
   idpEntityId: string | null;
+  /** The latest end of the SAML certificates as an ISO time (plan 13b Task 9). Null for OIDC. */
+  certificateEndsAt: string | null;
 }
 
 /**
@@ -212,6 +214,7 @@ function draftBlock(input: SetupPageInput): string {
   } else {
     rows.push(["IdP entity ID", draft.idpEntityId ?? ""], ["IdP sign-on URL", draft.ssoUrl ?? ""]);
     rows.push(["ACS URL", values.acsUrl], ["Entity ID", values.entityId]);
+    rows.push(["Certificate ends", draft.certificateEndsAt ?? ""]);
   }
   const list = rows
     .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd><code>${escapeHtml(v)}</code></dd>`)

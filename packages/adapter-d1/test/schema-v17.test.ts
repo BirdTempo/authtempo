@@ -68,6 +68,8 @@ describe("schema version 17 on D1 (plan 13a)", () => {
       { name: "pending", type: "INTEGER", notnull: 1, dflt_value: "0" },
       { name: "setup_link_id", type: "TEXT", notnull: 0, dflt_value: null },
     ]);
+    // The gate asks for the current version, so the later files go on first (0018 since plan 13b).
+    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
     // The gate passes. Each row keeps its values and reads the defaults.
     const db = createD1Adapter(env.STAGED);
     expect(await db.findOne("ssoConnection", [{ field: "id", op: "eq", value: "c16" }])).toEqual({
@@ -88,6 +90,12 @@ describe("schema version 17 on D1 (plan 13a)", () => {
       draft: false,
       version: 1,
       setupLinkId: null,
+      certificateEndsAt: null,
+      expiryStage: null,
+      expiryNoticeAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureStep: null,
     });
     expect(await db.findOne("ssoDomain", [{ field: "id", op: "eq", value: "d16" }])).toMatchObject({
       domain: "example.com",
@@ -114,9 +122,16 @@ describe("schema version 17 on D1 (plan 13a)", () => {
   });
 
   it("makes the three setup tables with their keys on a fresh database", async () => {
-    // test/setup.ts applies every shipped file to env.DB.
-    expect(await version(env.DB)).toBe("17");
+    // test/setup.ts applies every shipped file to env.DB. The 0017 file writes version 17.
+    const m0017 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0017_"));
+    expect(
+      m0017?.queries.some((q) =>
+        q.includes("UPDATE ta_meta SET value = '17' WHERE key = 'schema_version'"),
+      ),
+    ).toBe(true);
     expect(await indexes(env.DB, "ta_sso_setup_link")).toEqual([
+      // 0018 adds the index of the expiry sweep (plan 13b).
+      "ix_ta_sso_setup_link__expiry_notice_at",
       "ix_ta_sso_setup_link__organization_id",
       "ux_ta_sso_setup_link__token_hash",
     ]);

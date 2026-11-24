@@ -29,7 +29,9 @@ export const cookieOf = (res: Response) =>
  * through Better Auth's two paths unless `factor` is false. `slug` is
  * the platform organization as the app writes it. `extra` adds plugins.
  * `sessionMaxPerUser` sets core's cap of the sessions of one user (plan 12q):
- * a worst page needs more than the default of 100.
+ * a worst page needs more than the default of 100. `org` replaces the default
+ * organization plugin and gives the ranks of its roles, for a test that needs
+ * roles with more statements.
  */
 export function adminShim(
   database: CompatDatabase,
@@ -37,6 +39,7 @@ export function adminShim(
   slug = "platform-co",
   extra: readonly BetterAuthPlugin[] = [],
   sessionMaxPerUser?: number,
+  org?: { plugin: BetterAuthPlugin; roleRanks: Record<string, number> },
 ) {
   return betterAuth({
     baseURL: BASE,
@@ -46,6 +49,7 @@ export function adminShim(
       passwordHash: fast,
       platformOrganization: slug,
       ...(sessionMaxPerUser === undefined ? {} : { sessionMaxPerUser }),
+      ...(org === undefined ? {} : { roleRanks: org.roleRanks }),
     },
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: {
@@ -54,7 +58,7 @@ export function adminShim(
       },
     },
     plugins: [
-      organization({ sendInvitationEmail: async () => {} }),
+      org?.plugin ?? organization({ sendInvitationEmail: async () => {} }),
       twoFactor({ accountLockout: { enabled: false } }),
       admin({}),
       ...extra,
@@ -81,10 +85,18 @@ export async function adminApp(
     slug?: string;
     plugins?: readonly BetterAuthPlugin[];
     sessionMaxPerUser?: number;
+    org?: { plugin: BetterAuthPlugin; roleRanks: Record<string, number> };
   } = {},
 ) {
   const links: string[] = [];
-  const auth = adminShim(database, links, opts.slug, opts.plugins, opts.sessionMaxPerUser);
+  const auth = adminShim(
+    database,
+    links,
+    opts.slug,
+    opts.plugins,
+    opts.sessionMaxPerUser,
+    opts.org,
+  );
   const send = (method: string, path: string, body: unknown, cookie: string) =>
     auth.handler(
       new Request(`${BASE}/api/auth${path}`, {

@@ -92,8 +92,8 @@ folder holds is not copied again. A copy above that version with another
 text stops the run with exit 2 before any write, and the line names the
 file. The copied files hold Better Auth's default table and column names.
 The shipped 0001, 0006, 0007, 0009, 0010, 0012, and 0013 fail on other names with
-`no such table`. An app with other names writes its own fourteen files. It copies
-0002 to 0005, 0008, 0011, and 0014 as shipped. It writes 0001 from
+`no such table`. An app with other names writes its own fifteen files. It copies
+0002 to 0005, 0008, 0011, 0014, and 0015 as shipped. It writes 0001 from
 `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
 tables from before 1.7. It writes 0006 from
 `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
@@ -112,7 +112,7 @@ Better Auth's username, phone number, or anonymous plugin need an own
 0012 without the `ADD COLUMN` line of each column that they hold, and
 without the unique key that they hold. The
 app applies its own files with `wrangler d1 migrations apply <database>`
-before this command. Then the compat version is 14, and the command copies
+before this command. Then the compat version is 15, and the command copies
 nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
 its table `d1_migrations` (`migrations_table`).

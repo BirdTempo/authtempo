@@ -92,7 +92,7 @@ export interface ApiKeyMoveInput {
   rateLimitEnabled: boolean;
   /**
    * The app's own statements in Better Auth's names, as its `ac` holds them.
-   * Core's six resources are always known. Absent: only those.
+   * Core's seven resources are always known. Absent: only those.
    */
   statements?: Record<string, readonly string[]>;
 }

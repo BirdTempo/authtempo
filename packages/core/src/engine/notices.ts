@@ -1,5 +1,6 @@
 import type { MailMessage, ResolvedConfig } from "../config.js";
 import { isIpLiteral } from "../limiter/ip-key.js";
+import type { ExpiryKind, ExpiryStage } from "../schema.js";
 
 /**
  * The credential-change notices (plan 12a, spec 8.15; ASVS 5.0.0 6.3.7).
@@ -27,7 +28,9 @@ export type NoticeEvent =
   // plan 12f: a platform operator opened a session on the account, for support.
   | "impersonation_started"
   // plan 13a: the notices of an organization's SSO setup, to each owner.
-  | SetupNoticeEvent;
+  | SetupNoticeEvent
+  // plan 13b: a SAML certificate, a SCIM token, or a setup link ends soon. To each owner.
+  | "sso_expiring";
 
 /**
  * The notices of plan 13a. They tell an owner about the organization, not
@@ -54,11 +57,20 @@ export interface NoticeMailInput {
    * that renders HTML must escape it.
    */
   setup?: { linkId: string; note: string };
+  /**
+   * The row of `sso_expiring` (plan 13b): its kind, its id, its label, its end, and the stage in
+   * days. Never a token, a hash, or a certificate. The label is text of a manager: a builder
+   * that renders HTML must escape it.
+   */
+  expiring?: { kind: ExpiryKind; id: string; label: string; at: Date; days: ExpiryStage };
 }
 
-/** The first line of each notice but the impersonation and setup notices, which have their own text. */
+/**
+ * The first line of each notice but the impersonation, setup, and expiry notices, which have
+ * their own text.
+ */
 const WHAT: Readonly<
-  Record<Exclude<NoticeEvent, "impersonation_started" | SetupNoticeEvent>, string>
+  Record<Exclude<NoticeEvent, "impersonation_started" | SetupNoticeEvent | "sso_expiring">, string>
 > = {
   password_changed: "Your password was changed.",
   password_reset: "Your password was reset.",
@@ -72,6 +84,24 @@ const WHAT: Readonly<
   account_deleted: "Your account was deleted.",
   username_changed: "The username of your account was changed.",
   phone_changed: "The phone number of your account was changed.",
+};
+
+/** The name of each row of the expiry notice. */
+const EXPIRY_NAME: Readonly<Record<ExpiryKind, string>> = {
+  saml_certificate: "The SAML certificate of the connection",
+  scim_token: "The SCIM token",
+  setup_link: "The SSO setup link",
+};
+
+/**
+ * What an owner does before the end. A SAML certificate past its end still verifies (saml-sp.ts),
+ * so the text says when the sign-ins stop.
+ */
+const EXPIRY_STEP: Readonly<Record<ExpiryKind, string>> = {
+  saml_certificate:
+    "Sign-ins go on after this date until the IdP signs with a certificate that is not uploaded. Upload the new certificate of the IdP before it changes.",
+  scim_token: "Make a new SCIM token and put it in the directory before this date.",
+  setup_link: "Make a new setup link if the IT contact still needs one.",
 };
 
 /** The default notices. `account.notices.mail` replaces them. */
@@ -108,6 +138,21 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
       text: lines.join("\n"),
     };
   }
+  // The expiry notice (plan 13b). It names the kind, the label, the id, the end, and the days.
+  // It holds no token, no hash, and no certificate.
+  if (input.event === "sso_expiring") {
+    const lines = ["An SSO credential of your organization ends soon."];
+    const e = input.expiring;
+    if (e !== undefined) {
+      const days = e.days === 1 ? "1 day" : `${e.days} days`;
+      lines.push(
+        `${EXPIRY_NAME[e.kind]} "${e.label}" (${e.id}) ends in ${days}, at ${e.at.toISOString()}.`,
+        EXPIRY_STEP[e.kind],
+      );
+    }
+    lines.push(`Time: ${input.at.toISOString()}.`);
+    return { to: input.email, subject: `SSO notice for ${input.appName}`, text: lines.join("\n") };
+  }
   const lines = [WHAT[input.event]];
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);
   if (input.provider !== undefined) lines.push(`The provider is ${input.provider}.`);
@@ -129,15 +174,16 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
  * the filtered error name. The flow then answers its success: the change is
  * committed, and a notice must not undo it. The line holds no address and
  * no error message, because app code sets both. A user with no address
- * (plan 12i) gets no notice, and the call writes no line.
+ * (plan 12i) gets no notice, and the call writes no line. The answer is
+ * true when the mail port took the mail (plan 13b counts the sent notices).
  */
 export async function sendNotice(
   config: ResolvedConfig,
   input: Omit<NoticeMailInput, "appName" | "at" | "email"> & { email: string | null },
-): Promise<void> {
+): Promise<boolean> {
   const notices = config.account.notices;
   const { email } = input;
-  if (!notices || email === null) return;
+  if (!notices || email === null) return false;
   try {
     const message = notices.mail({
       ...input,
@@ -147,7 +193,9 @@ export async function sendNotice(
     });
     // To the user's address, whatever the builder wrote.
     await config.mail.send({ ...message, to: email });
+    return true;
   } catch (e) {
     config.observe.emit({ name: "notice.mail_failed", event: input.event, errorName: e });
+    return false;
   }
 }

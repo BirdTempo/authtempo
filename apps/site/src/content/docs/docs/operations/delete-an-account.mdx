@@ -53,6 +53,9 @@ The delete runs one transaction with its audit row. A refusal writes nothing and
 - The act ends a page of the sessions. The sweep ends the rest with the reason `account_deleted`.
 - The user gets the notice mail `account_deleted` at the old address, unless `account.notices` is false. The notice holds no IP of the operator. A user with no address gets no notice.
 - The audit rows of the user stay. Each holds the user id, the reason, and `data`, and no address. Core has no retention rule for them, so your app sets one.
+- The audit row of each organization act of the user also keeps the IP and the user agent of that act. Examples are an invitation, a role change, and a token write. This delete and the self delete (`POST /user/delete`) do not remove them. The owner of the organization still sees them in the organization audit.
+- To erase them, run this statement in `user.afterDelete`: `UPDATE ta_operator_audit SET ip = NULL, user_agent = NULL WHERE actor_kind = 'user' AND actor_id = ?`. That hook runs after the commit of each delete, the self delete too. An example on D1, with your database binding as `db`: `hooks: { user: { afterDelete: async ({ user }) => { await db.prepare("UPDATE ta_operator_audit SET ip = NULL, user_agent = NULL WHERE actor_kind = 'user' AND actor_id = ?").bind(user.id).run(); } } }`. The rows stay, so the owner still sees each act, with no IP and no user agent.
+- The statement clears each row where the user is the actor. For a former platform operator, that includes the rows of each operator act of the user. The rows stay, but their IP and user agent go. To keep them, do not run the statement for a user who was a platform operator.
 - The controls of the self delete do not apply: `account.delete`, `account.deleteConfirm`, and the fresh rule of the person.
 
 ## The limits

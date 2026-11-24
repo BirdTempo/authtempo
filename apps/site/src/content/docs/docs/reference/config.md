@@ -202,8 +202,8 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `organizations.ranks` | map of role to number | `{ viewer: 1, member: 2, admin: 3, owner: 4 }` | Positive integers. Must name `owner`. A role name holds no comma. Core derives the permissions of each role. Not with `roles`. |
-| `organizations.roles` | map of role to `{ rank, permissions }` | none | Each rank a positive integer. Must name `owner`. A role name holds no comma. Each permission is a known resource and action. Not with `ranks`. |
-| `organizations.statements` | map of resource to action list | none | The app's own resources beside the core ones. A core resource name, a bad name, an empty list, and a repeated action are refused. |
+| `organizations.roles` | map of role to `{ rank, permissions }` | none | Each rank a positive integer. Must name `owner`. A role name holds no comma. Each permission is a known resource and action. A role holds `audit:read` only when its `permissions` list it, the `owner` role too. Not with `ranks`. |
+| `organizations.statements` | map of resource to action list | none | The app's own resources beside the core ones. The core resources are `organization`, `member`, `invitation`, `team`, `ac`, `apiToken`, and `audit`. A core resource name, a bad name, an empty list, and a repeated action are refused. |
 | `organizations.reservedSlugs` | string list | `admin`, `api`, `auth`, `internal`, `operator`, `ops`, `platform`, `system`, `www` | Each entry must be a slug. |
 | `organizations.platformOrganization` | string | none | A slug. Core reserves it. |
 | `organizations.platformRole` | string | none | A role of `ranks` or `roles`. It needs `platformOrganization`. |
@@ -400,7 +400,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.user` | `UserHooks` | none | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, and `afterVerify`. [Run your code at a hook point](/docs/guides/hooks/) gives the order. |
 | `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`, `sso`, or `scim`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit, also the rows of SSO and SCIM; send the row to a separate system there. |
-| `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
+| `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. `expiring` runs once for each expiry notice that the sweep claims, also while `account.notices` is off. See [the expiry notices](/docs/reference/sso-setup/#the-expiry-notices). |
 | `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
 | `hooks.anonymous` | `AnonymousHooks` | none | Needs `anonymous`. A sign-in from a browser with a live anonymous session replaces the anonymous user. `beforeLink` runs in the sign-in's transaction and can refuse it. `afterLink` runs after the commit, before the anonymous user goes. Move data only when `proof` is `verified`. |
 

@@ -65,6 +65,9 @@ export const ERRORS = {
   role_in_use: 409,
   role_limit: 409,
   role_taken: 409,
+  // plan 13b ruling R20: a stored role names a core statement that only a role of the
+  // config grants (`audit`). The audit shows the IP of each member, so only the owner rank reads it.
+  statement_not_grantable: 400,
   // plan 12k: teams
   team_limit: 409,
   team_member_limit: 409,

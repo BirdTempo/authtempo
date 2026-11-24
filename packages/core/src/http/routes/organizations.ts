@@ -9,6 +9,7 @@ import {
   revokeInvitation,
   setActiveOrganization,
 } from "../../engine/invitations.js";
+import { listOrganizationAudit } from "../../engine/operator/audit.js";
 import {
   createOrganizationToken,
   listOrganizationTokens,
@@ -39,6 +40,7 @@ import {
   id,
   inviteBody,
   memberBody,
+  organizationAuditQuery,
   orgBody,
   orgTokenCreateBody,
   orgTokenRevokeBody,
@@ -51,6 +53,7 @@ import {
 import { json, readJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
+import { readQuery } from "./sso.js";
 
 export function organizationRoutes(config: ResolvedConfig): Route[] {
   if (!config.organizations) return [];
@@ -69,6 +72,11 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
+  /** The caller's IP and user agent, for the audit row of a member or invitation act (plan 13b). */
+  const meta = (ctx: RouteContext) => ({
+    ip: ctx.ip,
+    userAgent: ctx.request.headers.get("user-agent"),
+  });
 
   /** A POST route: session, a checked body, one engine call, the answer under `key` (or the value itself when `key` is null). */
   const post = <T, V, P extends RoutePath<"POST">>(
@@ -176,10 +184,15 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       listMembers(ctx.config, { user, session, organizationId }),
     ),
     post("/organizations/members/add", memberBody, "member", (s, b, ctx) =>
-      addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      addMember(ctx.config, { user: s.user, session: s.resolved.session, ...b, ...meta(ctx) }),
     ),
     post("/organizations/members/role", memberBody, "member", (s, b, ctx) =>
-      updateMemberRole(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      updateMemberRole(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ...meta(ctx),
+      }),
     ),
     post("/organizations/members/remove", removeBody, null, async (s, b, ctx) => {
       // The revoke of tokens changes credentials, so it needs a fresh session (plan 12k), before any write.
@@ -193,6 +206,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         organizationId: b.organizationId,
         userId: b.userId,
         ...(b.revokeTokens !== undefined && { revokeTokens: b.revokeTokens }),
+        ...meta(ctx),
       });
     }),
     post("/organizations/invite", inviteBody, "invitation", (s, b, ctx) =>
@@ -204,13 +218,44 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         email: b.email,
         role: b.role,
         ...(b.teamIds !== undefined && { teamIds: b.teamIds }),
+        ...meta(ctx),
       }),
     ),
     getByOrg("/organizations/invitations", "invitations", (user, organizationId, ctx, session) =>
       listInvitations(ctx.config, { user, session, organizationId }),
     ),
+    {
+      // Plan 13b Task 6: the audit of one organization. A session only (spec 29 item 17): a
+      // bearer of an organization token holds no session, so it answers 401.
+      method: "GET",
+      path: "/organizations/audit",
+      key: "GET /organizations/audit",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const q = readQuery(ctx.url, organizationAuditQuery);
+        if (!q.ok) return send(respond(q), s.renewed);
+        const { organizationId, after, limit, action, from, to } = q.value;
+        const r = await listOrganizationAudit(ctx.config, {
+          session: s.resolved,
+          organizationId,
+          // exactOptionalPropertyTypes: pass only the keys the caller sent.
+          ...(after !== undefined && { after }),
+          ...(limit !== undefined && { limit: Number(limit) }),
+          ...(action !== undefined && { action }),
+          ...(from !== undefined && { from: new Date(from) }),
+          ...(to !== undefined && { to: new Date(to) }),
+        });
+        return send(respond(r), s.renewed);
+      },
+    },
     post("/organizations/invitations/revoke", revokeBody, null, (s, b, ctx) =>
-      revokeInvitation(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      revokeInvitation(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ...meta(ctx),
+      }),
     ),
     // Accept answers { organization, member } as the engine returns it.
     post("/organizations/invitations/accept", tokenBody, null, (s, b, ctx) =>
@@ -218,7 +263,7 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         user: s.user,
         session: s.resolved.session,
         token: b.token,
-        ip: ctx.ip,
+        ...meta(ctx),
       }),
     ),
     {
@@ -274,6 +319,8 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         permissions: b.permissions,
         ...(b.expiresInDays !== undefined && { expiresInDays: b.expiresInDays }),
         ...(b.metadata != null && { metadata: b.metadata }),
+        ip: ctx.ip,
+        userAgent: ctx.request.headers.get("user-agent"),
       });
     }),
     getByOrg("/organizations/tokens", "tokens", (user, organizationId, ctx, session) =>
@@ -296,7 +343,13 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       });
     }),
     post("/organizations/tokens/revoke", orgTokenRevokeBody, null, (s, b, ctx) =>
-      revokeOrganizationToken(ctx.config, { user: s.user, session: s.resolved.session, ...b }),
+      revokeOrganizationToken(ctx.config, {
+        user: s.user,
+        session: s.resolved.session,
+        ...b,
+        ip: ctx.ip,
+        userAgent: ctx.request.headers.get("user-agent"),
+      }),
     ),
     {
       // A script learns which organization it acts for. A `to_` bearer only: any

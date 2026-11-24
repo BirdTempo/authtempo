@@ -2,7 +2,7 @@ import { ERRORS, type ErrorCode } from "../errors.js";
 import type { Observer } from "../observe/observer.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { Result } from "../result.js";
-import type { OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
+import type { ExpiryKind, OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
 import type { InvitationSummary } from "./invitations.js";
 import type { OperatorAuditDraft } from "./operator/audit.js";
 import type { MemberSummary, OrganizationSummary } from "./organizations.js";
@@ -629,6 +629,13 @@ export interface SsoHooks {
    * handback stays. Only a handback runs it, so only `sso.setup` runs it.
    */
   setupReady?(e: { organizationId: string; linkId: string }): Awaitable<void>;
+  /**
+   * Once for each expiry stage of a row, after the sweep claims the stage (plan 13b): a SAML
+   * certificate, a SCIM token, or a setup link ends at `at`. It runs also when
+   * `account.notices` is false. A throw writes one log line, and the claim stays. The call
+   * budget does not count the work of this hook. One sweep runs it at most 15 times.
+   */
+  expiring?(e: { organizationId: string; kind: ExpiryKind; id: string; at: Date }): Awaitable<void>;
 }
 
 /**
@@ -744,6 +751,7 @@ export const OPERATOR_HOOK_POINTS: Readonly<Record<keyof OperatorHooks, true>> =
 export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
   beforeSignIn: true,
   setupReady: true,
+  expiring: true,
 };
 
 export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {

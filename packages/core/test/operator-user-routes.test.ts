@@ -9,7 +9,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
-import { post, recordCredential, settled } from "./helpers.js";
+import { OPERATOR_ROWS, post, recordCredential, settled } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
@@ -114,7 +114,7 @@ const userOf = (w: World, id: string) =>
   w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
 
 const auditRows = (w: World) =>
-  w.auth.storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } });
+  w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS, { sort: { field: "id", dir: "asc" } });
 
 /** The JSON body of a 200, held to the route's contract: the parse succeeds and changes nothing. */
 async function fitted(key: string, res: Response): Promise<Record<string, unknown>> {

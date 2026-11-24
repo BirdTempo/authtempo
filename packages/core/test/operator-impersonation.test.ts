@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
+import { createAuth } from "../src/create-auth.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { HookRefusal } from "../src/engine/hooks.js";
 import { mintSessionJwt, verifySessionJwt } from "../src/engine/jwt.js";
@@ -14,13 +15,14 @@ import { destroySession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, OPERATOR_ROWS, post } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   operatorFixture,
   operatorHeader,
   sessionOf,
 } from "./operator-helpers.js";
+import { FAST } from "./password-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
 
 const MINUTE_MS = 60_000;
@@ -93,7 +95,7 @@ async function started(w: World): Promise<string> {
 }
 
 const auditRows = (w: World) =>
-  w.auth.storage.findMany("operatorAudit", [], { sort: { field: "id", dir: "asc" } });
+  w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS, { sort: { field: "id", dir: "asc" } });
 
 describe("the impersonation (plan 12f Task 11)", () => {
   it("starts and stops an impersonation with the cookie swap", async () => {
@@ -476,6 +478,160 @@ describe("the impersonation (plan 12f Task 11)", () => {
         userAgent: null,
       }),
     ).toEqual({ ok: false, code: "impersonation_session", status: 403 });
+  });
+
+  // Ruling R18 of plan 13b: the router refuses `POST /organizations/invite` to an impersonation
+  // session. `auth.api.inviteMember` with that session refuses it with the same code.
+  it("refuses an impersonation session at the in-process invite, as the invite route does", async () => {
+    const w = await world();
+    // The in-process door: an app on the same storage and clock, as in the JWT doors test.
+    const app = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: w.auth.storage,
+      mail: { send: async () => {} },
+      clock: w.auth.clock,
+      password: { hash: FAST, uniformSignUp: false },
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+    });
+    const made = await app.api.createOrganization({
+      user: w.target.user,
+      slug: "ada-co",
+      name: "Ada Co",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const organizationId = made.value.organization.id;
+    const token = await started(w);
+    const impersonation = await sessionOf(w.auth, token);
+    const invite = { user: w.target.user, organizationId, role: "member" };
+    const refused = await app.api.inviteMember({
+      ...invite,
+      session: impersonation.session,
+      email: "x@example.com",
+    });
+    expect(refused).toEqual({ ok: false, code: "impersonation_session", status: 403 });
+    const route = await w.handle(
+      post(
+        "/auth/organizations/invite",
+        { organizationId, email: "y@example.com", role: "member" },
+        { cookie: sessionCookie(token) },
+      ),
+    );
+    expect([route.status, await route.json()]).toEqual([403, { error: "impersonation_session" }]);
+    expect(await w.auth.storage.findMany("invitation", [])).toEqual([]);
+    // The user's own session invites.
+    const own = await app.api.inviteMember({
+      ...invite,
+      session: w.target.session,
+      email: "z@example.com",
+    });
+    expect(own.ok).toBe(true);
+  });
+
+  // Ruling R21 of plan 13b: the router refuses `POST /tokens`, `POST /tokens/update`, and the
+  // three organization token writes to an impersonation session. The in-process calls refuse
+  // that session with the same code, so no token outlives the impersonation, and no audit row
+  // names the member for an act of the operator.
+  it("refuses an impersonation session at the in-process token writes, as the token routes do", async () => {
+    const w = await world();
+    const app = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: w.auth.storage,
+      mail: { send: async () => {} },
+      clock: w.auth.clock,
+      password: { hash: FAST, uniformSignUp: false },
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+    });
+    const made = await app.api.createOrganization({
+      user: w.target.user,
+      slug: "ada-co",
+      name: "Ada Co",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const organizationId = made.value.organization.id;
+    // The user's own session makes one token of each kind, so the update and the revoke have a row.
+    const ownTk = await app.api.tokens.create({ session: w.target, name: "own" });
+    const ownTo = await app.api.organizationTokens.create({
+      session: w.target,
+      organizationId,
+      name: "own",
+      permissions: {},
+    });
+    if (!ownTk.ok || !ownTo.ok) throw new Error("the own session made no token");
+    const token = await started(w);
+    const impersonation = await sessionOf(w.auth, token);
+    const tokensBefore = await w.auth.storage.findMany("apiToken", []);
+    const orgTokensBefore = await w.auth.storage.findMany("organizationToken", []);
+    const auditBefore = await auditRows(w);
+    const refused = { ok: false, code: "impersonation_session", status: 403 };
+    const answers = {
+      create: await app.api.tokens.create({ session: impersonation, name: "x" }),
+      update: await app.api.tokens.update({
+        user: w.target.user,
+        session: impersonation.session,
+        id: ownTk.value.apiToken.id,
+        name: "y",
+      }),
+      organizationCreate: await app.api.organizationTokens.create({
+        session: impersonation,
+        organizationId,
+        name: "x",
+        permissions: {},
+        ip: "203.0.113.9",
+        userAgent: "operator-browser",
+      }),
+      organizationUpdate: await app.api.organizationTokens.update({
+        user: w.target.user,
+        session: impersonation.session,
+        organizationId,
+        id: ownTo.value.apiToken.id,
+        name: "y",
+      }),
+      organizationRevoke: await app.api.organizationTokens.revoke({
+        user: w.target.user,
+        session: impersonation.session,
+        organizationId,
+        id: ownTo.value.apiToken.id,
+      }),
+    };
+    expect(answers).toEqual({
+      create: refused,
+      update: refused,
+      organizationCreate: refused,
+      organizationUpdate: refused,
+      organizationRevoke: refused,
+    });
+    // No token row changed, and no audit row names the member for the operator's act.
+    expect(await w.auth.storage.findMany("apiToken", [])).toEqual(tokensBefore);
+    expect(await w.auth.storage.findMany("organizationToken", [])).toEqual(orgTokensBefore);
+    expect(await auditRows(w)).toEqual(auditBefore);
+    // The user's own session still changes and revokes its tokens.
+    const ownUpdate = await app.api.organizationTokens.update({
+      user: w.target.user,
+      session: w.target.session,
+      organizationId,
+      id: ownTo.value.apiToken.id,
+      name: "z",
+    });
+    expect(ownUpdate.ok).toBe(true);
+    const ownRevoke = await app.api.organizationTokens.revoke({
+      user: w.target.user,
+      session: w.target.session,
+      organizationId,
+      id: ownTo.value.apiToken.id,
+    });
+    expect(ownRevoke).toEqual({ ok: true, value: { ok: true } });
   });
 
   it("ends the impersonation sessions of an operator at a ban and at a revoke of the role", async () => {

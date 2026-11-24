@@ -1,0 +1,17 @@
+ALTER TABLE ta_operator_audit ADD COLUMN organization_id text;
+ALTER TABLE ta_sso_connection ADD COLUMN certificate_ends_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_sso_connection ADD COLUMN expiry_notice_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_success_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_at timestamptz;
+ALTER TABLE ta_sso_connection ADD COLUMN last_failure_step text;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_scim_token ADD COLUMN expiry_notice_at timestamptz;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_stage integer;
+ALTER TABLE ta_sso_setup_link ADD COLUMN expiry_notice_at timestamptz;
+CREATE INDEX ix_ta_operator_audit__organization_id__id ON ta_operator_audit (organization_id, id);
+CREATE INDEX ix_ta_sso_connection__expiry_notice_at ON ta_sso_connection (expiry_notice_at);
+CREATE INDEX ix_ta_scim_token__expiry_notice_at ON ta_scim_token (expiry_notice_at);
+CREATE INDEX ix_ta_sso_setup_link__expiry_notice_at ON ta_sso_setup_link (expiry_notice_at);
+UPDATE ta_meta SET value = '18' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '15' WHERE key = 'compat_better_auth';

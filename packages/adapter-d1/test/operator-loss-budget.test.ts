@@ -353,9 +353,12 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * and [49, 11, [47, 47, 26]]. The run of 2026-10-25 at the move of 12f2
  * onto main gives the counts of main again: the act of this scene keeps the
  * calls of the page of 12f2.
+ * Plan 13b Task 4 (run of 2026-11-23 on the binding, load 14.9 11.1 9.8): the removal writes its
+ * audit row after the page, and the page keeps 1 call for it. So the page ends 1 session fewer,
+ * and the sweep ends it: [47, 10, [47, 47, 28]] became [46, 9, [47, 47, 30]].
  */
 const DELETE_COUNTS: [number, number, number[]] = [46, 3, [47, 47, 44]];
-const REMOVE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 28]];
+const REMOVE_COUNTS: [number, number, number[]] = [46, 9, [47, 47, 30]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
@@ -498,9 +501,13 @@ async function auditorPart(setup: Auth, byToken: string, email: string) {
  * Task 10 onto Task 8, run of 2026-10-22) keeps 2 more calls, so each page
  * ends 1 session fewer. Since ruling 78 of plan 12d (run of 2026-10-24),
  * the handler takes the session row of the router: 1 query fewer each.
+ * Plan 13b Task 4 (run of 2026-11-23 on the binding, load 14.9 11.1 9.8): each write writes its
+ * audit row after the page, and the page keeps 1 call for it. The removal page ends 1 session
+ * fewer, and the sweep ends it: [47, 9, [47, 47, 32]] became [46, 8, [47, 47, 34]]. The role
+ * change page has room for the insert: [46, 10, ...] became [47, 10, ...].
  */
-const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [47, 9, [47, 47, 32]];
-const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [46, 10, [47, 47, 30]];
+const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [46, 8, [47, 47, 34]];
+const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 30]];
 
 describe("the losses of an operator outside the operator acts on D1 (ruling 63 of plan 12f)", () => {
   beforeEach(async () => {
@@ -596,7 +603,9 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * and 1 from the client link delete. So the delete sends 47 and ends 1
    * impersonation session, and the removal sends 49. Ruling 79 of plan 12d
    * (same day) takes 1 session read from `endSessions`: the delete sends 48
-   * and ends 2 impersonation sessions.
+   * and ends 2 impersonation sessions. Plan 13b Task 4 (run of 2026-11-23, load 14.9 11.1
+   * 9.8): the removal keeps 1 call for its audit row, so its page ends 1 session fewer:
+   * [49, 10, [48, 48, 34]] became [48, 9, [48, 48, 36]].
    */
   const dueWithSaml = async () =>
     ({
@@ -604,8 +613,10 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       session: { slidingRefreshDays: 0.05 },
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [48, 48, 47]];
-  const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 34]];
+  // Plan 13b Task 10: the expiry step of the sweep reads the due SAML rows in 1 query while `sso`
+  // is on, so each sweep sends 1 more. Measured on 2026-11-23 after Task 4 and Task 10 together (load about 9).
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [49, 49, 48]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [48, 9, [49, 49, 37]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
     const sent: MailMessage[] = [];
@@ -917,14 +928,18 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
  * sweep runs when `sso` is on and sends 3 idle queries as the last step. The last sweep of each
  * scene with `sso` sends 3 more. The plain scene has no `sso`, so it stays.
+ *
+ * Plan 13b Task 10 (run of 2026-11-23, 22:46, load 16.3 8.9 8.3): the expiry step of the sweep
+ * reads the due SAML rows in 1 query while `sso` is on. Each sweep of a scene with `sso` sends 1
+ * more. The plain scene has no `sso`, so it stays. The acts do not change.
  */
 const SOLO_COUNTS = {
   plain: [42, [33]],
-  due: [44, [36]],
-  confirm: [45, [36]],
-  operator: [49, [47, 48, 48, 42]],
-  operatorConfirm0: [48, [47, 48, 48, 46]],
-  operatorConfirm3: [48, [47, 48, 48, 48]],
+  due: [44, [37]],
+  confirm: [45, [37]],
+  operator: [49, [48, 49, 49, 43]],
+  operatorConfirm0: [48, [48, 49, 49, 47]],
+  operatorConfirm3: [48, [48, 49, 49, 49]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**
@@ -1362,13 +1377,15 @@ describe("the self delete of a co-owner on D1 (ruling 10 M1 of plan 12f2)", () =
  * run one at a time on Postgres and MySQL. The hold costs 3 queries on D1.
  * Before it the grant to a member made 9 and 17, and the role change 13.
  * The grant to a new row held the user before, so its counts stay.
+ * Plan 13b Task 4 (run of 2026-11-23 on the binding, load 14.9 11.1 9.8): the role change writes
+ * its audit row, 1 insert. So it sends 17.
  */
 const GAIN_COUNTS: Record<string, number> = {
   "secret member": 12,
   "user member": 20,
   "secret new": 12,
   "user new": 20,
-  "role change": 16,
+  "role change": 17,
 };
 
 describe("the writes that add the platform role part on D1 (ruling 6 of plan 12f2)", () => {

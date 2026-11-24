@@ -12,6 +12,7 @@ import { systemClock } from "../src/primitives/clock.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
+import type { Where } from "../src/storage/port.js";
 
 export const BASE_URL = "https://api.example.com";
 
@@ -79,6 +80,16 @@ export function settled(
  * pool tests use the same limit (apps/demo/test/test-time.ts).
  */
 export const LONG_TEST_MS = 20_000;
+
+/**
+ * The filter of the operator audit rows that name no organization: the operator acts on a user
+ * (plan 13b decision 4). Since plan 13b Task 4, a member add or a role change in a setup also
+ * writes a row. That row names its organization, so this filter keeps it out of a test that
+ * counts the operator acts.
+ */
+export const OPERATOR_ROWS: Where<"operatorAudit">[] = [
+  { field: "organizationId", op: "eq", value: null },
+];
 
 export function makeAuth(overrides: Partial<AuthConfig> = {}) {
   let current = new Date("2026-01-01T00:00:00.000Z");

@@ -19,7 +19,14 @@ import {
   stopWith,
 } from "./hooks.js";
 import { endImpersonationsPage } from "./operator/access-end.js";
-import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
+import {
+  type ImpersonationStops,
+  impersonationStops,
+  type OperatorAuditDraft,
+  type OrganizationAuditAction,
+  organizationAuditDraft,
+  writeAuditIn,
+} from "./operator/audit.js";
 import { holdsPlatformRole, writesPlatformRole } from "./operator/guards.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
@@ -55,6 +62,54 @@ export interface Caller {
    * with no session.
    */
   session?: SessionRow | undefined;
+}
+
+/**
+ * The meta of a member or invitation act through a route: the caller's IP and user agent, for
+ * the audit row of the act (plan 13b). An app call passes neither, and the row holds null.
+ */
+export interface AuditMeta {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/**
+ * The audit draft of a member or invitation act of `caller` in `organizationId` (plan 13b Task
+ * 4). The caller is the actor. The IP and the user agent come from `meta`. `data` holds ids and
+ * roles, never an address.
+ *
+ * A session of an impersonation (`session.actorId` not null) makes the operator the actor, with
+ * `platform: true` (plan 13b Task 12). The organization audit then shows a platform act with no
+ * IP and no user agent (spec 6.6 item 5). Without this, the IP and the user agent of the operator
+ * showed as an act of the member. The rules of impersonation allow some of these routes, for
+ * example the revoke and the accept of an invitation.
+ *
+ * Rulings R17 and R19 of plan 13b: the actor of an impersonated act shows as `platform`. No
+ * field names the impersonated user, with one exception: the `targetUserId` of the
+ * `organization_invitation_accept` row. That target is the new member, and the member list shows
+ * that user to the owner, so it tells the owner no new fact. Do not add another field that names
+ * the user, in `data` or in `targetUserId`. The owner reads both, and the field would show the
+ * owner which user an operator acted as. The operator finds that user from the
+ * `impersonation_start` row of the operator audit and the time.
+ */
+export function memberAuditDraft(
+  caller: Pick<UserRow, "id">,
+  organizationId: string,
+  meta: AuditMeta & { session?: Pick<SessionRow, "actorId"> | undefined },
+  input: {
+    action: OrganizationAuditAction;
+    targetUserId: string | null;
+    data: Record<string, unknown>;
+  },
+): Result<OperatorAuditDraft> {
+  const operatorId = meta.session?.actorId ?? null;
+  const actor = operatorId === null ? caller : { id: operatorId };
+  return organizationAuditDraft({ kind: "user", user: actor }, organizationId, {
+    ...input,
+    ip: meta.ip ?? null,
+    userAgent: meta.userAgent ?? null,
+    platform: operatorId !== null,
+  });
 }
 
 export interface OrganizationSummary {
@@ -240,13 +295,15 @@ export async function ownerLock(
  * lock of the organization row, in the lock order of user-hold.ts (ruling 43
  * of plan 12k). The locks of that user's sessions come next (ruling 49): a
  * removal writes them after the member and team member deletes. The hold
- * writes no new value, so a refusal after it still changes nothing.
+ * writes no new value, so a refusal after it still changes nothing. `audit` writes the audit
+ * row of the act after a write that took effect (`withRoleLoss`).
  */
 async function ownerWrite(
   config: ResolvedConfig,
   o: ResolvedOrganizations,
   organization: OrganizationRow,
   write: (tx: StorageAdapter) => Promise<number>,
+  audit: (tx: StorageAdapter) => Promise<unknown>,
   loss: RoleLoss | null = null,
   hold: string | null = null,
 ): Promise<Result<true>> {
@@ -265,6 +322,7 @@ async function ownerWrite(
         return ownerLock(t, o, organization, write, now);
       },
       (r) => r.ok,
+      audit,
     ),
   );
 }
@@ -307,6 +365,9 @@ const MEMBER_WRITE_CALLS_BEFORE = 12;
 /** The worst case of the member write in `withRoleLoss`: the owner lock, the write, and the recount. */
 const MEMBER_WRITE_WORST = 5;
 
+/** The calls of the audit row of a member write: one insert (`writeAuditIn`, plan 13b). */
+const AUDIT_ROW_CALLS = 1;
+
 /**
  * The loss of a member write, or null when the write keeps the platform
  * role. `roleReads` is the count of the role row reads of `effectiveIn`
@@ -342,6 +403,9 @@ async function roleLossOf(
  * pending-end row, and the sweep ends them (ruling 63 of plan 12f). Until
  * then the doors refuse them (`impersonationLoss`). No logout goes inline
  * (ruling 37): an impersonation session has no client link.
+ *
+ * After a write that took effect, `audit` writes the audit row of the act as the last statement
+ * of the transaction (plan 13b). The page keeps `AUDIT_ROW_CALLS` for it.
  */
 async function withRoleLoss<T>(
   tx: StorageAdapter,
@@ -349,8 +413,13 @@ async function withRoleLoss<T>(
   now: Date,
   work: (tx: StorageAdapter) => Promise<T>,
   wrote: (value: T) => boolean,
+  audit: (tx: StorageAdapter) => Promise<unknown>,
 ): Promise<T> {
-  if (!loss) return work(tx);
+  if (!loss) {
+    const value = await work(tx);
+    if (wrote(value)) await audit(tx);
+    return value;
+  }
   loss.count = 0;
   const meter = meterOf(tx, loss.before);
   await holdUser(loss.config.observe, tx, loss.userId);
@@ -360,8 +429,8 @@ async function withRoleLoss<T>(
   meter.step(2);
   const value = await work(tx);
   meter.step(MEMBER_WRITE_WORST);
-  // No call after the commit reads the storage, so the page keeps none.
-  if (wrote(value))
+  // No call after the commit reads the storage. The page keeps the insert of the audit row.
+  if (wrote(value)) {
     loss.count = (
       await endImpersonationsPage(
         tx,
@@ -371,11 +440,13 @@ async function withRoleLoss<T>(
         now,
         meter,
         OPERATOR_CALL_BUDGET,
-        0,
+        AUDIT_ROW_CALLS,
         "impersonation_end",
         loss.stops,
       )
     ).ended;
+    await audit(tx);
+  }
   return value;
 }
 
@@ -1029,7 +1100,7 @@ export async function grantable(
 
 export async function addMember(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; userId: string; role: string },
+  input: Caller & AuditMeta & { organizationId: string; userId: string; role: string },
 ): Promise<Result<MemberSummary>> {
   const o = on(config);
   if (!o) return fail("not_found");
@@ -1054,17 +1125,27 @@ export async function addMember(
     updatedAt: now,
   };
   const organization = publicOrganization(s.value.organization);
+  const draft = memberAuditDraft(input.user, input.organizationId, input, {
+    action: "organization_member_add",
+    targetUserId: target.id,
+    data: { role: input.role },
+  });
+  if (!draft.ok) return draft;
   try {
     const written = await hookGuard(() =>
-      config.storage.transaction((tx) =>
-        addMemberIn(config, tx, o, {
+      config.storage.transaction(async (tx) => {
+        const added = await addMemberIn(config, tx, o, {
           organization: s.value.organization,
           member,
           user: target,
           by: input.user,
           via: "add",
-        }),
-      ),
+        });
+        // The audit row is the last statement of the transaction (plan 13b). The shared add
+        // writes none, so a SCIM or SSO join writes no member row (owner decision 5).
+        if (added.ok) await writeAuditIn(tx, draft.value, now);
+        return added;
+      }),
     );
     if (!written.ok) return written;
   } catch (err) {
@@ -1190,7 +1271,7 @@ export async function addMemberIn(
 
 export async function updateMemberRole(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; userId: string; role: string },
+  input: Caller & AuditMeta & { organizationId: string; userId: string; role: string },
 ): Promise<Result<MemberSummary>> {
   const o = on(config);
   if (!o) return fail("not_found");
@@ -1266,10 +1347,18 @@ export async function updateMemberRole(
     !writesPlatformRole(config, s.value.organization, target.member.role)
       ? input.userId
       : null;
+  const draft = memberAuditDraft(input.user, input.organizationId, input, {
+    action: "organization_member_role_change",
+    targetUserId: user.id,
+    data: { from: target.member.role, to: input.role },
+  });
+  if (!draft.ok) return draft;
+  // The audit row of the change, the last statement of the transaction (plan 13b).
+  const audit = (tx: StorageAdapter) => writeAuditIn(tx, draft.value, now);
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value.rank))
-      return ownerWrite(config, o, s.value.organization, setRole, loss, gain);
+      return ownerWrite(config, o, s.value.organization, setRole, audit, loss, gain);
     // A zero-row update writes nothing, so the commit changes nothing.
     const n = await config.storage.transaction((tx) =>
       withRoleLoss(
@@ -1281,6 +1370,7 @@ export async function updateMemberRole(
           return setRole(t);
         },
         (rows) => rows > 0,
+        audit,
       ),
     );
     return n === 0 ? fail("conflict") : ok(true);
@@ -1316,18 +1406,19 @@ export async function updateMemberRole(
  * the membership, with no team hook (plan 12k). The active organization is
  * a choice, not a right, so it goes in the same write. With `revokeTokens`
  * the organization tokens that the person created go too. The answer is the
- * count of member rows deleted.
+ * count of member rows deleted and the count of tokens deleted. The audit row
+ * of a removal names the token count (plan 13b).
  */
 export async function removeMemberIn(
   tx: StorageAdapter,
   member: MemberRow,
   revokeTokens: boolean,
-): Promise<number> {
+): Promise<{ members: number; tokens: number }> {
   const n = await tx.delete("member", [
     { field: "id", op: "eq", value: member.id },
     { field: "role", op: "eq", value: member.role },
   ]);
-  if (n === 0) return 0;
+  if (n === 0) return { members: 0, tokens: 0 };
   await dropMemberTeams(tx, member.organizationId, member.userId);
   await tx.update(
     "session",
@@ -1337,12 +1428,13 @@ export async function removeMemberIn(
     ],
     { activeOrganizationId: null },
   );
-  if (revokeTokens)
-    await tx.delete("organizationToken", [
-      { field: "organizationId", op: "eq", value: member.organizationId },
-      { field: "createdById", op: "eq", value: member.userId },
-    ]);
-  return n;
+  const tokens = revokeTokens
+    ? await tx.delete("organizationToken", [
+        { field: "organizationId", op: "eq", value: member.organizationId },
+        { field: "createdById", op: "eq", value: member.userId },
+      ])
+    : 0;
+  return { members: n, tokens };
 }
 
 /** The second right of `revokeTokens` (deviation 9 of plan 12k): a creator has no right of their own on a token. */
@@ -1367,7 +1459,7 @@ const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
  */
 export async function removeMember(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; userId: string; revokeTokens?: boolean },
+  input: Caller & AuditMeta & { organizationId: string; userId: string; revokeTokens?: boolean },
 ): Promise<Result<{ ok: true }>> {
   const o = on(config);
   if (!o) return fail("not_found");
@@ -1409,6 +1501,14 @@ export async function removeMember(
     by: input.user,
     via,
   };
+  const draft = memberAuditDraft(input.user, input.organizationId, input, {
+    action: "organization_member_remove",
+    targetUserId: target.member.userId,
+    data: { role: target.member.role, self },
+  });
+  if (!draft.ok) return draft;
+  // The count of tokens that the removal deleted, for the audit row.
+  let revoked = 0;
   // The writes of the removal are removeMemberIn, after the before hook.
   const drop = async (storage: StorageAdapter) => {
     // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
@@ -1421,8 +1521,20 @@ export async function removeMember(
       hooks.beforeRemoveMember,
       event,
     );
-    return removeMemberIn(storage, target.member, revokeTokens);
+    const deleted = await removeMemberIn(storage, target.member, revokeTokens);
+    revoked = deleted.tokens;
+    return deleted.members;
   };
+  // The audit row of the removal, the last statement of the transaction (plan 13b). With
+  // `revokeTokens` it names the count of the revoked tokens, and no token row is written.
+  const audit = (tx: StorageAdapter) =>
+    writeAuditIn(
+      tx,
+      revokeTokens
+        ? { ...draft.value, data: { ...draft.value.data, revokedTokens: revoked } }
+        : draft.value,
+      now,
+    );
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).
   const loss = await roleLossOf(
@@ -1435,7 +1547,7 @@ export async function removeMember(
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank))
-      return ownerWrite(config, o, s.value.organization, drop, loss, target.member.userId);
+      return ownerWrite(config, o, s.value.organization, drop, audit, loss, target.member.userId);
     // A delete of zero rows writes nothing, and the hold writes no new value, so the commit changes nothing.
     // With a loss, withRoleLoss holds the member's user row and sessions first (ruling 43 of plan 12k).
     const n = await config.storage.transaction((tx) =>
@@ -1452,6 +1564,7 @@ export async function removeMember(
           return drop(t);
         },
         (rows) => rows > 0,
+        audit,
       ),
     );
     return n === 0 ? fail("conflict") : ok(true);

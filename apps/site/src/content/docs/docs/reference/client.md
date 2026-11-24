@@ -169,6 +169,8 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | `OrganizationTokenSummaryJSON`, after a narrow-only change |
 | `client.organizations.tokens.revoke({ organizationId, id })` | `POST /organizations/tokens/revoke` | `{ ok: true }` |
 | `client.organizations.tokens.current()` | `GET /organizations/tokens/current` | `{ organization, apiToken }`, with a `to_` token |
+| `client.organizations.audit.list(query: OrganizationAuditQuery)` | `GET /organizations/audit` | `{ rows: OrganizationAuditView[], next }`. Pass `next` as `after` for the next page. `next` is null on the last page. It needs `audit:read` |
+| `client.organizations.audit.export(query)` | `GET /organizations/audit` | An `AsyncIterable<OrganizationAuditView>` of every row of the query. It reads pages of 100, one page at a time, and only when the caller asks for the next row. A failed page throws its `ClientFailure` after the rows of the pages before it |
 | `client.tokens.create({ name, expiresInDays?, organizationId?, permissions?, metadata? })` | `POST /tokens` | `{ token, apiToken: ApiTokenSummaryJSON }` |
 | `client.tokens.list()` | `GET /tokens` | `ApiTokenSummaryJSON[]` |
 | `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `{ ok: true }` |
@@ -185,7 +187,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.sso.domains.verify({ id })` | `POST /sso/domains/verify` | `SsoDomainJSON` with `verified: true` |
 | `client.sso.domains.update({ id, connectionId?, enforce?, includeSubdomains? })` | `POST /sso/domains/update` | `SsoDomainJSON` |
 | `client.sso.domains.delete({ id })` | `POST /sso/domains/delete` | `{ ok: true }` |
-| `client.sso.connections.list({ organizationId })` | `GET /sso/connections` | `SsoConnectionJSON[]`. No answer holds the client secret |
+| `client.sso.connections.list({ organizationId })` | `GET /sso/connections` | `SsoConnectionListedJSON[]`: each `SsoConnectionJSON` with its `status`. No answer holds the client secret |
 | `client.sso.connections.create(input: SsoConnectionInput)` | `POST /sso/connections/create` | `SsoConnectionJSON` |
 | `client.sso.connections.update({ id, ...fields })` | `POST /sso/connections/update` | `SsoConnectionJSON` |
 | `client.sso.connections.delete({ id })` | `POST /sso/connections/delete` | `{ ok: true }` |
@@ -308,9 +310,9 @@ The types of the package:
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `Statements`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions`, `PasskeyExtensionResults` |
 | Sign-in additions | `PasswordIdentifier`, `IdTokenNonceJSON`, `BrowserSessionJSON`, `SocialStateData` |
-| Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
+| Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OrganizationAuditView`, `OrganizationAuditQuery`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
-| Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON`, `SetupLinkJSON`, `SetupLinkInput`, `SetupPreviewJSON`, `SetupConnectionInput`, `SetupStatusJSON` |
+| Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionListedJSON`, `SsoConnectionInput`, `ScimTokenJSON`, `SetupLinkJSON`, `SetupLinkInput`, `SetupPreviewJSON`, `SetupConnectionInput`, `SetupStatusJSON` |
 
 ## Next
 

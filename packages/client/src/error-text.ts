@@ -70,6 +70,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   role_in_use: "A member or an invitation holds this role. Give them another role first.",
   role_limit: "This organization has the most roles that it can hold. Delete a role first.",
   role_taken: "This organization has a role with this name. Choose another name.",
+  statement_not_grantable:
+    "A custom role cannot hold this permission. Only the owner reads the audit log.",
   team_limit: "This organization has the most teams that it can hold. Delete a team first.",
   team_member_limit: "This team has the most members that it can hold. Remove a member first.",
   last_team: "This is the last team of the organization. Create another team first.",

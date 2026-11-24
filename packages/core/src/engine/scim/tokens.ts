@@ -11,6 +11,7 @@ import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAuditRow, ScimScope, ScimTokenRow } from "../../schema.js";
 import { writeAuditIn } from "../operator/audit.js";
 import { afterAudit, type SsoActMeta } from "../sso/domains.js";
+import { nextNotice } from "../sso/expiry.js";
 import { type SsoActor, ssoDraft } from "../sso/guard.js";
 import { bumpSetupDraft, lockSetupRows } from "../sso/setup-live.js";
 import { tokenHint } from "../tokens.js";
@@ -164,6 +165,7 @@ export async function createScimToken(
     return refuse(`expiresInDays must be an integer from 1 to ${EXPIRES_IN_DAYS_MAX}`);
   const now = config.clock.now();
   const token = randomToken(SCIM_TOKEN_PREFIX);
+  const expiresAt = typeof days === "number" ? new Date(now.getTime() + days * DAY_MS) : null;
   const row: ScimTokenRow = {
     id: newId(now),
     createdAt: now,
@@ -173,11 +175,15 @@ export async function createScimToken(
     tokenHash: await sha256Hex(token),
     hint: tokenHint(SCIM_TOKEN_PREFIX, token),
     scopes: scopes.value,
-    expiresAt: typeof days === "number" ? new Date(now.getTime() + days * DAY_MS) : null,
+    expiresAt,
     lastUsedAt: null,
     // A token of the manager or the app is live (plan 13a). Only a setup link makes a pending one.
     pending: pendingFor !== undefined,
     setupLinkId: pendingFor ?? null,
+    // Plan 13b Task 9: a token with an end gets its first notice date. The pending token of a
+    // setup link has no end (`createPendingScimToken` sends no `expiresInDays`), so it gets none.
+    expiryStage: null,
+    expiryNoticeAt: nextNotice(expiresAt, null, now, now),
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
@@ -205,7 +211,7 @@ export async function createScimToken(
       // A refusal below leaves it: the delete comes after the checks.
       const slots = live.filter((t) => !(t.pending && t.setupLinkId === pendingFor));
       if (slots.length >= SCIM_TOKENS_LIVE_MAX) return fail("token_limit");
-      const draft = ssoDraft(actor, "scim_token_create", {
+      const draft = ssoDraft(actor, "scim_token_create", row.organizationId, {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name, scopes: row.scopes },
         ip: meta.ip ?? null,
@@ -298,7 +304,7 @@ export async function revokeScimToken(
       if (!row) return fail("not_found");
       const n = await tx.delete("scimToken", [{ field: "id", op: "eq", value: row.id }]);
       if (n === 0) return fail("not_found");
-      const draft = ssoDraft(actor, "scim_token_revoke", {
+      const draft = ssoDraft(actor, "scim_token_revoke", row.organizationId, {
         targetUserId: null,
         data: { organizationId: row.organizationId, tokenId: row.id, name: row.name },
         ip: meta.ip ?? null,
@@ -353,7 +359,13 @@ export async function authenticateScim(
   if (!row || (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())) return failed();
   if (!(await limit(config, "scim:token", row.id, SCIM_PER_TOKEN)))
     return { ok: false, status: 429 };
-  if (row.lastUsedAt === null || now.getTime() - row.lastUsedAt.getTime() >= LAST_USED_EVERY_MS)
+  if (row.lastUsedAt === null || now.getTime() - row.lastUsedAt.getTime() >= LAST_USED_EVERY_MS) {
+    // A token from before schema 18 gets its notice date in the same update (plan 13b Task 9,
+    // owner decision 6). A row with a stage or a date already has its notices in hand.
+    const notice =
+      row.expiryStage === null && row.expiryNoticeAt === null
+        ? nextNotice(row.expiresAt, null, now, now)
+        : null;
     // The where holds the value that was read, so two parallel calls write one update.
     await config.storage.update(
       "scimToken",
@@ -361,8 +373,9 @@ export async function authenticateScim(
         { field: "id", op: "eq", value: row.id },
         { field: "lastUsedAt", op: "eq", value: row.lastUsedAt },
       ],
-      { lastUsedAt: now, updatedAt: now },
+      { lastUsedAt: now, updatedAt: now, ...(notice === null ? {} : { expiryNoticeAt: notice }) },
     );
+  }
   return {
     ok: true,
     caller: {

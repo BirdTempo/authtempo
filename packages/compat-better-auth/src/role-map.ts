@@ -22,7 +22,10 @@ export function toCoreName(resource: string): string {
 const BETTER_AUTH_DELETE = "delete";
 const CORE_REVOKE = "revoke";
 
-/** The six resources of core (`CORE_STATEMENTS`). An app's own statements never hold them. */
+/** Core's resource of the organization audit (plan 13b). Better Auth has no resource of this name. */
+export const CORE_AUDIT = "audit";
+
+/** The seven resources of core (`CORE_STATEMENTS`). An app's own statements never hold them. */
 export const CORE_RESOURCES: readonly string[] = [
   "organization",
   "member",
@@ -30,6 +33,7 @@ export const CORE_RESOURCES: readonly string[] = [
   "team",
   "ac",
   "apiToken",
+  CORE_AUDIT,
 ];
 
 type Bag = Record<string, unknown>;

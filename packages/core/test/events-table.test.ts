@@ -114,6 +114,10 @@ const START_LIST: readonly string[] = [
   "authtempo: operator update gave up",
   // Plan 12f2 Task 2: the mail of an operator create threw; the user stays.
   "authtempo: operator create mail failed",
+  // Plan 13b Task 0: the expiry step of the sweep. Task 10 writes it.
+  "authtempo: the sweep sso expiry step stopped",
+  // Plan 13b Task 9: a status write of a connection that failed; the sign-in stays.
+  "authtempo: sso status write failed",
 ];
 
 /** Field names that can hold a secret, a credential, or free text (spec 31 item 8). */
@@ -141,9 +145,10 @@ describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
     // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, 3 + 1 + 3 + 1 + 1 + 1 of
     // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1), and 1 + 1 of
-    // plan 12f2 (Task 4: 1, Task 2: 1). Plan 12o Task 3 adds 1.
-    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1);
-    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1);
+    // plan 12f2 (Task 4: 1, Task 2: 1). Plan 12o Task 3 adds 1. Plan 13b Task 0 adds 1.
+    // Plan 13b Task 9 adds 1.
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

@@ -123,6 +123,28 @@ describe("checkCli (plan 11c)", () => {
     ]);
   });
 
+  it("reads a bare closed set such as ndjson|csv as one row per value", () => {
+    const exportRun = run(
+      "audit export",
+      helpText(
+        "https://authtempo.com/docs/reference/cli/audit-export/",
+        ["--format ndjson|csv  The format.", "-h, --help           Print this help."],
+        ["0  Done."],
+      ),
+    );
+    const page = (values: string) =>
+      `| Flag | What it does |\n| --- | --- |\n| ${values} | The format. |\n| \`-h\`, \`--help\` | Prints the help. |\n\n| Exit code | What it means |\n| --- | --- |\n| 0 | Done. |\n`;
+    const files = new Set([...FILES, "docs/reference/cli/audit-export/index.html"]);
+    const both = checkCli(files, PAGE, [exportRun], ["no_mount"], () =>
+      page("`--format ndjson`, `--format csv`"),
+    );
+    expect(both.failures).toEqual([]);
+    const one = checkCli(files, PAGE, [exportRun], ["no_mount"], () => page("`--format ndjson`"));
+    expect(one.failures).toEqual([
+      "/docs/reference/cli/audit-export/: --format lists the values ndjson; the help has ndjson, csv",
+    ]);
+  });
+
   it("refuses a changed exit line, a missing exit code, and an extra one", () => {
     const changed = run(
       "check",

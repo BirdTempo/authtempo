@@ -67,7 +67,7 @@ for (const server of MYSQL_SERVERS) {
       // The lock lets one runner apply every step; the other finds each step recorded.
       expect(results.flat()).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("17");
+      expect(await version(db)).toBe("18");
       expect(await applyMysqlMigrations(db.pool)).toEqual([]);
     });
 
@@ -85,7 +85,7 @@ for (const server of MYSQL_SERVERS) {
       expect(await version(db)).toBeNull();
       expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("17");
+      expect(await version(db)).toBe("18");
       // The third step made its table: a step recorded before it ran would leave it out.
       const tables = await db.q<RowDataPacket[]>`SELECT COUNT(*) AS n FROM information_schema.tables
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ta\\_%'`;
@@ -102,20 +102,34 @@ for (const server of MYSQL_SERVERS) {
       // The stops include the version row of the baseline, and the ALTER of 0003 with the
       // user columns and their unique keys (plan 12i). They also include the column and the
       // fill of 0004 (plan 12p), the ALTER of 0005 with the three connection columns and the
-      // first new table of 0005 (plan 13a), and the version update of the last file. The fill
-      // sets the same value when it runs again.
+      // first new table of 0005 (plan 13a). They also include the ALTER of 0006 with the audit
+      // column and the ALTER with its key (plan 13b), and the version update of the last file.
+      // 0006 adds each column and each key in separate steps (final review M3 of plan 13b): 8
+      // ALTER steps and the version update. The fill sets the same value when it runs again.
       const userColumns = ALL_STEPS.indexOf("0003_schema_v15:2") + 1;
       const proved = ALL_STEPS.indexOf("0004_schema_v16:1") + 1;
       const fill = ALL_STEPS.indexOf("0004_schema_v16:2") + 1;
       const connectionColumns = ALL_STEPS.indexOf("0005_schema_v17:1") + 1;
       const setupLink = ALL_STEPS.indexOf("0005_schema_v17:4") + 1;
+      const auditColumn = ALL_STEPS.indexOf("0006_schema_v18:1") + 1;
+      const auditKey = ALL_STEPS.indexOf("0006_schema_v18:2") + 1;
       expect(userColumns).toBeGreaterThan(baseline.length);
-      expect([proved > userColumns, fill, connectionColumns, setupLink, last]).toEqual([
+      expect([
+        proved > userColumns,
+        fill,
+        connectionColumns,
+        setupLink,
+        auditColumn,
+        auditKey,
+        last,
+      ]).toEqual([
         true,
         proved + 1,
         fill + 2,
         connectionColumns + 3,
-        setupLink + 3,
+        setupLink + 4,
+        auditColumn + 1,
+        auditColumn + 8,
       ]);
       for (const at of [
         2,
@@ -125,6 +139,8 @@ for (const server of MYSQL_SERVERS) {
         fill,
         connectionColumns,
         setupLink,
+        auditColumn,
+        auditKey,
         last,
       ]) {
         db = await freshDatabase(server, { migrate: false });
@@ -136,7 +152,7 @@ for (const server of MYSQL_SERVERS) {
         const open = MYSQL_MIGRATIONS.slice(MYSQL_MIGRATIONS.findIndex((m) => m.name === file));
         expect(await applyMysqlMigrations(db.pool)).toEqual(open.map((m) => m.name));
         expect(await recorded(db)).toEqual(ALL_STEPS);
-        expect(await version(db)).toBe("17");
+        expect(await version(db)).toBe("18");
         expect(await readMysqlShape(db.pool)).toEqual(cleanShape);
         await db.close();
         db = null;
@@ -253,10 +269,14 @@ for (const server of MYSQL_SERVERS) {
         ["sn", "un"],
       ] as const)
         await session(id, userId);
-      // The runner applies 0004 and the later files (0005 since plan 13a). No later file
-      // changes ta_session.
-      expect(await applyMysqlMigrations(d.pool)).toEqual(["0004_schema_v16", "0005_schema_v17"]);
-      expect(await version(d)).toBe("17");
+      // The runner applies 0004 and the later files (0005 since plan 13a, 0006 since plan 13b).
+      // No later file changes ta_session.
+      expect(await applyMysqlMigrations(d.pool)).toEqual([
+        "0004_schema_v16",
+        "0005_schema_v17",
+        "0006_schema_v18",
+      ]);
+      expect(await version(d)).toBe("18");
       const rows = await d.q<RowDataPacket[]>`SELECT id, proved FROM ta_session ORDER BY id`;
       expect(rows.map((r) => [r.id, r.proved])).toEqual([
         ["sn", 0],
@@ -299,15 +319,17 @@ for (const server of MYSQL_SERVERS) {
       await d.pool.query(
         "INSERT INTO ta_scim_token (id, created_at, updated_at, organization_id, name, token_hash, hint, scopes, expires_at, last_used_at) VALUES ('t16', 1, 1, 'o1', 'Okta', 'h-t16', 'abcd', '[\"users\"]', NULL, NULL)",
       );
-      expect(await applyMysqlMigrations(d.pool)).toEqual(["0005_schema_v17"]);
-      expect(await version(d)).toBe("17");
-      // The new columns come last, in the field order of the schema. The defaults live here only.
+      // The runner applies 0005 and the later files (0006 since plan 13b).
+      expect(await applyMysqlMigrations(d.pool)).toEqual(["0005_schema_v17", "0006_schema_v18"]);
+      expect(await version(d)).toBe("18");
+      // The new columns keep the field order of the schema. The defaults live here only. 0006
+      // adds columns after them (plan 13b), so the read takes the columns by name.
       const columnsOf = async (table: string, names: string[]) => {
         const [rows] = await d.pool.query<RowDataPacket[]>(
           "SELECT COLUMN_NAME AS c, IS_NULLABLE AS n, COLUMN_DEFAULT AS d, COLUMN_TYPE AS t FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
           [table],
         );
-        return rows.slice(-names.length).map((r) => [r.c, r.n, r.d, r.t]);
+        return rows.filter((r) => names.includes(r.c)).map((r) => [r.c, r.n, r.d, r.t]);
       };
       expect(await columnsOf("ta_sso_connection", ["draft", "version", "setup_link_id"])).toEqual([
         ["draft", "NO", "0", "tinyint(1)"],
@@ -343,6 +365,12 @@ for (const server of MYSQL_SERVERS) {
         draft: false,
         version: 1,
         setupLinkId: null,
+        certificateEndsAt: null,
+        expiryStage: null,
+        expiryNoticeAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureStep: null,
       });
       expect(
         await adapter.findOne("ssoDomain", [{ field: "id", op: "eq", value: "d16" }]),
@@ -374,6 +402,8 @@ for (const server of MYSQL_SERVERS) {
       );
       expect(keys.map((r) => `${r.t} ${r.i}`).sort()).toEqual([
         "ta_sso_setup_link PRIMARY",
+        // 0006 adds the key of the expiry sweep (plan 13b).
+        "ta_sso_setup_link ix_ta_sso_setup_link__expiry_notice_at",
         "ta_sso_setup_link ix_ta_sso_setup_link__organization_id",
         "ta_sso_setup_link ux_ta_sso_setup_link__token_hash",
         "ta_sso_setup_session PRIMARY",
@@ -393,13 +423,14 @@ for (const server of MYSQL_SERVERS) {
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
       expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
       // Plan 12d appends the file of schema version 14 after it, plan 12i the file of 15,
-      // plan 12p the file of 16, and plan 13a the file of 17.
+      // plan 12p the file of 16, plan 13a the file of 17, and plan 13b the file of 18.
       expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual([
         "0001_schema_v13",
         "0002_schema_v14",
         "0003_schema_v15",
         "0004_schema_v16",
         "0005_schema_v17",
+        "0006_schema_v18",
       ]);
     });
 
@@ -422,6 +453,10 @@ for (const server of MYSQL_SERVERS) {
         ["0004_schema_v16", "56442d040411910b0b8da831efa1508c2a04fea5b002726e6145ccf9a98a71da"],
         // Plan 13a Task 1 (2026-11-23): the setup tables and the draft columns.
         ["0005_schema_v17", "3a2c5e3c1f0a92a98730757db31d0525c2a5b81175c9ca2b07d6e21cf7faec36"],
+        // Plan 13b Task 1 (2026-11-23): the audit organization and the expiry columns. Final
+        // review M3 (2026-11-24) split each column and its key into two steps before 0006 left
+        // the plan branch. No database outside the tests ran the old text.
+        ["0006_schema_v18", "b33605e324dafa9de464c6640a91181f5e0bf5bab94858cc7cc05069e6cec47b"],
       ]);
     });
   });

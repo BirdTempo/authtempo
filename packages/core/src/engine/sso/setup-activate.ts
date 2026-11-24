@@ -15,6 +15,7 @@ import {
   type SsoConnectionSummary,
 } from "./connections.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
+import { certificatesEnd, certificatesOf, nextNotice } from "./expiry.js";
 import { recheckSsoManager, type SsoActor, ssoDraft } from "./guard.js";
 import { lockSetupRows } from "./setup-live.js";
 import { passedRunIn } from "./test-run.js";
@@ -220,6 +221,15 @@ export async function activateSetup(
       // between the compare and the update below (its `where` holds the same version).
       if (draft.version !== version) throw new Refused("conflict");
       if (!(await passedRunIn(tx, draft.id, draft.version))) throw new Refused("setup_not_tested");
+      // A draft gets no notice date, so the sweep never warns about it. It goes live now, and its
+      // notices start from the first stage (plan 13b Task 9).
+      const certificateEndsAt =
+        draft.kind === "saml" ? certificatesEnd(certificatesOf(draft.config)) : null;
+      const expiry = {
+        certificateEndsAt,
+        expiryStage: null,
+        expiryNoticeAt: nextNotice(certificateEndsAt, null, now, now),
+      };
       const turned = await tx.update(
         "ssoConnection",
         [
@@ -227,7 +237,7 @@ export async function activateSetup(
           { field: "draft", op: "eq", value: true },
           { field: "version", op: "eq", value: draft.version },
         ],
-        { enabled: true, draft: false, updatedAt: now },
+        { enabled: true, draft: false, updatedAt: now, ...expiry },
       );
       // The owner path takes no lock of the link: its write can land after our read.
       if (turned === 0) throw new Refused("setup_not_tested");
@@ -270,7 +280,7 @@ export async function activateSetup(
         updatedAt: now,
       });
       const drafts = [
-        ssoDraft(actor, "sso_setup_link_activate", {
+        ssoDraft(actor, "sso_setup_link_activate", link.organizationId, {
           targetUserId: null,
           data: {
             organizationId: link.organizationId,
@@ -282,7 +292,7 @@ export async function activateSetup(
           ip: meta.ip ?? null,
           userAgent: meta.userAgent ?? null,
         }),
-        ssoDraft(actor, "sso_connection_update", {
+        ssoDraft(actor, "sso_connection_update", link.organizationId, {
           targetUserId: null,
           data: {
             organizationId: link.organizationId,
@@ -299,7 +309,13 @@ export async function activateSetup(
         if (!d.ok) throw new Refused(d.code);
         rows.push(await writeAuditIn(tx, d.value, now));
       }
-      const live: SsoConnectionRow = { ...draft, enabled: true, draft: false, updatedAt: now };
+      const live: SsoConnectionRow = {
+        ...draft,
+        enabled: true,
+        draft: false,
+        updatedAt: now,
+        ...expiry,
+      };
       return { rows, live };
     })
     .then(

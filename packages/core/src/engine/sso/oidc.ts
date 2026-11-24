@@ -23,6 +23,7 @@ import { exchangeProviderCode, OAUTH_STATE_PREFIX, type SocialComplete } from ".
 import { validImageUrl, validUserName } from "../users.js";
 import { connectionSecret, type OidcStored, tokenAuthOf } from "./connections.js";
 import { kindOn } from "./discover.js";
+import { noteSignIn } from "./expiry.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
 import { setupRefused } from "./setup-events.js";
@@ -165,15 +166,24 @@ type Stepped<T> = { ok: true; value: T } | { ok: false; step: OidcStep };
 /**
  * The one fault event of a refused step (Global Constraints of plan 12d):
  * the connection id and the step. The IP is an address input, so only the
- * include rule writes it (plan 12h).
+ * include rule writes it (plan 12h). A step after the read of the connection
+ * also names its organization (plan 13b, C9).
  */
 function refused(
   config: ResolvedConfig,
   connectionId: string,
+  organizationId: string | undefined,
   step: OidcStep,
   ip: string | null,
 ): Result<never> {
-  config.observe.emit({ name: "sso.failed", connectionId, step, ip });
+  // An absent organization adds no key: the check of the event rejects an undefined id.
+  config.observe.emit({
+    name: "sso.failed",
+    connectionId,
+    ...(organizationId === undefined ? {} : { organizationId }),
+    step,
+    ip,
+  });
   return fail("sso_failed");
 }
 
@@ -350,7 +360,13 @@ async function beginSso(
   const provider = await providerOf(config, sso, row);
   // A refusal after the open of the secret scrubs it (ruling 83 l2b of plan 12d).
   if (!provider.ok)
-    return refused(withSecrets(config, [provider.secret]), row.id, provider.step, input.ip);
+    return refused(
+      withSecrets(config, [provider.secret]),
+      row.id,
+      row.organizationId,
+      provider.step,
+      input.ip,
+    );
   const now = config.clock.now();
   const state = randomToken(OAUTH_STATE_PREFIX);
   const verifier = randomBase64Url(32);
@@ -438,21 +454,30 @@ export async function completeSsoOidc(
   input: SsoOidcComplete,
   seam: SsoOidcSeam = {},
 ): Promise<Result<SsoSignedIn | SignInChallenge | SsoTestDone>> {
-  const trace: OidcTrace = { run: null, step: null };
+  const trace: OidcTrace = { run: null, step: null, connection: null };
   const r = await runOidc(config, input, seam, trace);
-  // A real sign-in, or a test run that passed, answers as it is. A test run that failed ends in
-  // a `failed` row with the closed step of the failure. The page of the run shows the help line.
-  if (r.ok || trace.run === null) return r;
+  if (r.ok) return r;
+  // A real sign-in that failed at a step of the connection writes its status (plan 13b Task 9).
+  if (trace.run === null) {
+    if (trace.connection && trace.step) await noteSignIn(config, trace.connection, trace.step);
+    return r;
+  }
+  // A test run that failed ends in a `failed` row with the closed step of the failure. The page
+  // of the run shows the help line. A test run writes no status.
   // `oauth_denied` is a refusal at the IdP, the step `code`. Any other failure with no step is a
   // connection that changed after the start, the step `state_connection`.
   const step = trace.step ?? (r.code === "oauth_denied" ? "code" : "state_connection");
   return ok({ test: await failTestRun(config, trace.run, step) });
 }
 
-/** What the callback learns on its way: the pending test run of its state, and the last refused step. */
+/**
+ * What the callback learns on its way: the pending test run of its state, the last refused
+ * step, and the connection after its check.
+ */
 interface OidcTrace {
   run: SsoTestRunRow | null;
   step: OidcStep | null;
+  connection: SsoConnectionRow | null;
 }
 
 async function runOidc(
@@ -464,7 +489,7 @@ async function runOidc(
   const id = input.connectionId;
   const no = (step: OidcStep) => {
     trace.step = step;
-    return refused(config, id, step, input.ip);
+    return refused(config, id, undefined, step, input.ip);
   };
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return no("state");
@@ -511,11 +536,18 @@ async function runOidc(
     return fail("sso_not_configured");
   // A state row of `sso:<id>` comes from an OIDC start; a kind change is not possible (Task 3).
   if (connection.kind !== "oidc") return fail("sso_not_configured");
+  trace.connection = connection;
   const provider = await providerOf(config, sso, connection);
   // The discovery refusals come after the open of the secret: they scrub it (ruling 83 l2b).
   if (!provider.ok) {
     trace.step = provider.step;
-    return refused(withSecrets(config, [provider.secret]), id, provider.step, input.ip);
+    return refused(
+      withSecrets(config, [provider.secret]),
+      id,
+      connection.organizationId,
+      provider.step,
+      input.ip,
+    );
   }
   const p = provider.value;
   // From here each event of the request scrubs the opened client secret too (plan 12d on 12h).
@@ -523,7 +555,7 @@ async function runOidc(
   // The refusals from here emit through the scrub of the opened secret too (ruling 81 l2).
   const refuse = (step: OidcStep) => {
     trace.step = step;
-    return refused(scrubbed, id, step, input.ip);
+    return refused(scrubbed, id, connection.organizationId, step, input.ip);
   };
   // Each IdP call goes through `sso.fetch` with its byte cap (plan 12d), the JWKS read too.
   const token = await exchangeProviderCode(

@@ -53,7 +53,7 @@ import type { UnauthorizedReason } from "../http/routes/operator.js";
 import { LIMIT_FAMILIES } from "../limiter/limit.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
-import { AUDIT_ACTOR_KINDS, type SecondFactorMethod } from "../schema.js";
+import { AUDIT_ACTOR_KINDS, EXPIRY_KINDS, type SecondFactorMethod } from "../schema.js";
 import type { AuthEvent } from "./port.js";
 
 export interface FieldSpec {
@@ -747,6 +747,12 @@ export const EVENTS = {
     "authtempo: the sweep anonymous step stopped",
     SWEEP_STOP,
   ),
+  // The expiry step of plan 13b (Task 10).
+  "sweep.sso_expiry_stopped": fault(
+    "error",
+    "authtempo: the sweep sso expiry step stopped",
+    SWEEP_STOP,
+  ),
   // The clean-up of an anonymous upgrade after its commit (plan 12i Task 7, ruling 36 L2).
   "anonymous.cleanup_failed": fault("error", "authtempo: the anonymous upgrade cleanup failed", {
     rowId: ROW_ID,
@@ -757,14 +763,32 @@ export const EVENTS = {
   "sso.guard_refused": fault("error", "authtempo: sso guard refused", {
     step: enumOf(SSO_GUARD_STEPS),
   }),
-  "sso.failed": fault("error", "authtempo: sso failed", {
+  // The organization of the connection (plan 13b, C9) is in the event, not in the line: the
+  // line stays as it was before plan 13b. A refusal before the row read has no organization.
+  "sso.failed": fault(
+    "error",
+    "authtempo: sso failed",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID, step: enumOf(SSO_FAILED_STEPS) },
+    {
+      args: (e) => ["authtempo: sso failed", shown(e, "connectionId"), shown(e, "step")],
+    },
+  ),
+  "sso.denied": fault(
+    "error",
+    "authtempo: sso denied",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID },
+    { args: (e) => ["authtempo: sso denied", shown(e, "connectionId")] },
+  ),
+  "sso.refused": fault(
+    "error",
+    "authtempo: sso refused",
+    { connectionId: ROW_ID, organizationId: OPTIONAL_ID, code: { kind: "code" } },
+    { args: (e) => ["authtempo: sso refused", shown(e, "connectionId"), shown(e, "code")] },
+  ),
+  // The status write of a sign-in threw (plan 13b Task 9). The sign-in keeps its result.
+  "sso.status_write_failed": fault("error", "authtempo: sso status write failed", {
     connectionId: ROW_ID,
-    step: enumOf(SSO_FAILED_STEPS),
-  }),
-  "sso.denied": fault("error", "authtempo: sso denied", { connectionId: ROW_ID }),
-  "sso.refused": fault("error", "authtempo: sso refused", {
-    connectionId: ROW_ID,
-    code: { kind: "code" },
+    errorName: ERROR_NAME,
   }),
   "saml.certificate_expired": fault("warn", "authtempo: saml certificate expired", {
     connectionId: ROW_ID,
@@ -871,6 +895,23 @@ export const EVENTS = {
   "sso.activated": {
     level: "info",
     fields: { organizationId: ROW_ID, connectionId: ROW_ID, linkId: ROW_ID },
+  },
+  // One claimed expiry stage of a row (plan 13b Task 10), always emitted, also with no mail. The
+  // stage is 30, 7, or 1 days. `mails` counts the sent notices. `ownersCut` counts the owners past
+  // the mail cap of one row, in the one page of 100 member rows that can hold the owner rank. A row
+  // with exactly one role below the owner rank is not in that page. Only when more than 100 rows
+  // can hold the owner rank is the scan cut: an owner past the page is not in the count, and the
+  // sweep writes `notice.mail_failed` with a `RangeError`.
+  "sso.expiring": {
+    level: "info",
+    fields: {
+      kind: enumOf(EXPIRY_KINDS),
+      rowId: ROW_ID,
+      organizationId: ROW_ID,
+      stage: COUNT,
+      mails: COUNT,
+      ownersCut: COUNT,
+    },
   },
   // A SCIM deactivate kept the member row of an owner (plan 12d Task 10).
   "scim.owner_kept": { level: "info", fields: { scimUserId: ROW_ID } },
@@ -1039,6 +1080,8 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "sso.beforeSignIn": REFUSAL_EXEMPT,
   // Plan 13a: the `readyAt` of the link is the record of the handback. The events of Task 12 name no handback.
   "sso.setupReady": NO_EVENT_EXEMPT,
+  // Plan 13b: the sweep emits the event and runs the hook after the claim of each stage.
+  "sso.expiring": "sso.expiring",
   "scim.afterChange": "scim.change",
   "anonymous.beforeLink": REFUSAL_EXEMPT,
   // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.

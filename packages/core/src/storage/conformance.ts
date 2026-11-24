@@ -1659,6 +1659,8 @@ export function runAdapterConformance(
           data: { until: "2026-10-21T00:00:00.000Z", nested: { n: 1, ok: true } },
           ip: null,
           userAgent: null,
+          // Plan 13b: an operator act on a user names no organization.
+          organizationId: null,
           createdAt: at,
           updatedAt: at,
         };
@@ -3327,6 +3329,13 @@ export function runAdapterConformance(
         draft: false,
         version: 1,
         setupLinkId: null,
+        // Plan 13b: the new fields stay null until a task writes them.
+        certificateEndsAt: null,
+        expiryStage: null,
+        expiryNoticeAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureStep: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -3359,6 +3368,8 @@ export function runAdapterConformance(
         lastUsedAt: null,
         pending: false,
         setupLinkId: null,
+        expiryStage: null,
+        expiryNoticeAt: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -3590,6 +3601,8 @@ export function runAdapterConformance(
         endedAt: null,
         openedAt: null,
         readyAt: null,
+        expiryStage: null,
+        expiryNoticeAt: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -3705,6 +3718,12 @@ export function runAdapterConformance(
           draft: true,
           version: 1,
           setupLinkId: "sl1",
+          certificateEndsAt: null,
+          expiryStage: null,
+          expiryNoticeAt: null,
+          lastSuccessAt: null,
+          lastFailureAt: null,
+          lastFailureStep: null,
           createdAt: at,
           updatedAt: at,
         };

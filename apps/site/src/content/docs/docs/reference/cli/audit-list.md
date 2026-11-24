@@ -57,7 +57,7 @@ With `--all`, the command stops at `--max-calls` with a warning and exit 1: `war
 
 | Key | What it holds |
 | --- | --- |
-| `rows` | The audit rows, each with `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`. |
+| `rows` | The audit rows, each with `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `organizationId`, `reason`, `data`, `ip`, and `userAgent`. `organizationId` is null on a row from before schema version 18. |
 | `next` | The cursor of the next page, or null after the last page. |
 | `exit` | The exit code of the run. |
 | `stopped` | The reason of a stop or a usage error, or null. |

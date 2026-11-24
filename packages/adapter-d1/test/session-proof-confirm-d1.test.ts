@@ -69,7 +69,7 @@ describe("the confirm of a change of address on a session of version 15 (plan 12
       ),
     ]);
     // The adapter reads only a database of the current version: apply 0016 and the later
-    // migrations (0017 since plan 13a). No later file changes ta_session.
+    // migrations (0018 since plan 13b). No later file changes ta_session.
     await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
     const proved = () =>
       env.STAGED.prepare("SELECT id, proved FROM ta_session ORDER BY id").all<{

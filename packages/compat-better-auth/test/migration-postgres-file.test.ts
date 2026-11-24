@@ -20,3 +20,19 @@ describe("the Postgres files of the compat migrations", () => {
       expect(readFileSync(new URL(`${s.name}.sql`, DIR), "utf8"), s.name).toBe(s.text);
   });
 });
+
+describe("the count of the compat migrations (plan 13b)", () => {
+  // Plan 13b adds 0015 for core's schema version 18. Each of the three
+  // folders ships one file for each name of the runner, and no other file.
+  it("is fifteen names, and each folder holds one file for each name", () => {
+    expect(COMPAT_MIGRATION_NAMES).toHaveLength(15);
+    expect(COMPAT_MIGRATION_NAMES.at(-1)).toBe("0015_compat_schema_v18");
+    for (const folder of ["d1", "d1-before-1.7", "postgres"]) {
+      const files = readdirSync(new URL(`../migrations/${folder}/`, import.meta.url)).sort();
+      expect({ folder, files }).toEqual({
+        folder,
+        files: COMPAT_MIGRATION_NAMES.map((name) => `${name}.sql`),
+      });
+    }
+  });
+});

@@ -252,12 +252,15 @@ describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
     // Update 2026-11-05 by plan 12q: each callback that opens a session reads the
     // cap (+1). A callback of the factor writes a challenge: no session.
     // Measured 2026-11-05 09:27 CST on the owner's Mac Studio, load 23.55 17.66 14.94.
+    // Update 2026-11-23 by plan 13b Task 9: the first callback of each pair writes the status of
+    // the connection (+1). The second is inside the hour of the first, so it writes none.
+    // Measured 2026-11-23 22:07 CST on the owner's Mac (Mac17,14), load 1.21 4.26 7.77.
     expect({ created, claimed, factor }).toEqual({
-      created: [24, 16],
+      created: [25, 16],
       // Update 2026-11-04 by plan 12p: the claim writes the lease (+1).
       // Run of 2026-11-04 20:24 CST on the owner's Mac Studio, load 7.5 9.1 7.9.
-      claimed: [37, 16],
-      factor: [21, 11],
+      claimed: [38, 16],
+      factor: [22, 11],
     });
     for (const n of [...created, ...claimed, ...factor]) expect(n).toBeLessThanOrEqual(50);
   }, 120_000);

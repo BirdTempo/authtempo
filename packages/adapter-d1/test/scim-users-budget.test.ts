@@ -286,6 +286,9 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
  * row (`fresh`). A session from before it reads one more (`older`). The
  * refused session reads 4 at `sessionLive` and at the mint, and 6 at the
  * session read in write mode, which ends the row by id.
+ *
+ * Plan 13b Task 10 (run of 2026-11-23, 22:46, load 16.3 8.9 8.3): the expiry step of the sweep
+ * reads the due SAML rows and the due SCIM tokens, 1 query each, so the sweeps are 50 and 33.
  */
 const MEASURED = {
   create: 20,
@@ -299,7 +302,7 @@ const MEASURED = {
     mint: [4, 1],
     read: [6, 1],
   },
-  sweeps: [48, 31],
+  sweeps: [50, 33],
   get: 5,
   list: 5,
   delete: 13,
@@ -532,11 +535,15 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
  * The families come first in the budget, and a page of one session stays.
  * The pending-end row names the families that do not fit, and the sweep
  * ends them with 2 queries each.
+ *
+ * Plan 13b Task 10 (run of 2026-11-23, 22:46, load 16.3 8.9 8.3): the expiry step of the sweep
+ * reads the due SAML rows and the due SCIM tokens, 1 query each, as the last step before the
+ * anonymous step. A sweep sends 2 more, or 1 more when only 1 query stays in its 50.
  */
 const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
-  0: [49, 10, 0, [48, 32]],
-  7: [49, 2, 4, [48, 46]],
-  20: [49, 2, 4, [48, 49, 46]],
+  0: [49, 10, 0, [50, 34]],
+  7: [49, 2, 4, [50, 48]],
+  20: [49, 2, 4, [50, 50, 48]],
 };
 
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";

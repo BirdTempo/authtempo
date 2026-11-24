@@ -4,6 +4,7 @@ import * as m0002 from "./migrations/0002_schema_v14.js";
 import * as m0003 from "./migrations/0003_schema_v15.js";
 import * as m0004 from "./migrations/0004_schema_v16.js";
 import * as m0005 from "./migrations/0005_schema_v17.js";
+import * as m0006 from "./migrations/0006_schema_v18.js";
 
 export interface MysqlMigration {
   name: string;
@@ -17,6 +18,7 @@ export const MYSQL_MIGRATIONS: readonly MysqlMigration[] = [
   { name: m0003.name, statements: m0003.statements },
   { name: m0004.name, statements: m0004.statements },
   { name: m0005.name, statements: m0005.statements },
+  { name: m0006.name, statements: m0006.statements },
 ];
 
 /** The runner's own table: one row per statement that ran, by migration name and step. */

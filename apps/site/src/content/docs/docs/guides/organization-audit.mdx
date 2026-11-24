@@ -1,0 +1,102 @@
+---
+title: Read the audit of an organization
+description: The owner reads who changed the members, the roles, the tokens, and the SSO of an organization. The operator exports the rows.
+type: how-to
+sources:
+  - packages/core/src/engine/operator/audit.ts
+  - packages/core/src/http/routes/organizations.ts
+  - packages/client/src/client.ts
+  - packages/cli/src/commands/audit.ts
+---
+
+**For:** an app developer who shows the owner of an organization the changes to that organization, or an operator who gives a customer a copy.
+
+**What it does:** this page reads the audit of one organization as the owner, then exports it with the operator secret. It tells which acts make a row, and which do not.
+
+## Before you start
+
+- A working config with [`organizations`](/docs/reference/config/#organizations).
+- A database at schema version 18 or later. [Schema and migrations](/docs/reference/schema/) lists the migrations.
+- For the export: the user tools on, and a secret with the `audit` scope. [authtempo audit export](/docs/reference/cli/audit-export/) gives the setup.
+
+## Steps
+
+1. Apply the migrations of schema version 18 with [`authtempo migrate`](/docs/reference/cli/migrate/). The audit of an organization starts at version 18. It holds no row from before the upgrade.
+2. Let the owner read. The owner rank holds `audit:read`. A stored role never holds `audit:read`. In the `roles` form, a role holds `audit:read` only when its `permissions` list it. [Roles and permissions](/docs/guides/roles-and-permissions/) gives the forms.
+3. Read one page in the session of the owner. Call `client.organizations.audit.list({ organizationId })`, or the route below. Pass `next` as `after` to read the next page. `next` is null on the last page.
+4. Read every row with `client.organizations.audit.export({ organizationId })`. It reads pages of 100 rows, one page at a time, and stops when you stop the loop.
+5. Narrow the read with `action`, `from`, and `to`. `from` counts, `to` does not, and `from` must be before `to`.
+6. Give a copy to the customer with the operator secret: `authtempo audit export <base url> --organization <id> --format csv`.
+
+```http
+GET /auth/organizations/audit?organizationId=01J8Z3Q4R5S6T7V8W9X0Y1Z2A3&limit=50 HTTP/1.1
+Cookie: __Host-tempo_session=…
+```
+
+```json
+{
+  "rows": [
+    {
+      "id": "01J9A0B1C2D3E4F5G6H7J8K9M0",
+      "at": "2026-11-24T09:12:03.000Z",
+      "actor": { "kind": "member", "id": "01J8Z3Q4R5S6T7V8W9X0Y1Z2B4", "email": "ada@example.com" },
+      "action": "organization_member_role_change",
+      "targetUserId": "01J8Z3Q4R5S6T7V8W9X0Y1Z2C5",
+      "data": { "from": "member", "to": "admin" },
+      "ip": "203.0.113.7",
+      "userAgent": "Mozilla/5.0"
+    }
+  ],
+  "next": null
+}
+```
+
+## What a row shows to the owner
+
+| `actor.kind` | Who did the act | `actor.id` | `email` | `ip` and `userAgent` |
+| --- | --- | --- | --- | --- |
+| `member` | A member of the organization | The user id | The current address. Null when the user is gone. | Yes |
+| `platform` | A platform operator, an operator secret, or an operator who impersonates a member | Null | Null | Null |
+| `scim` | The directory of the customer, by a SCIM token | The name of the token | Null | Null |
+| `app` | The server code of the app | The name of the app | Null | Null |
+
+The owner sees no detail of the platform. The operator act `sso_enforce_off` shows as `platform`.
+
+## What the audit holds
+
+- The 12 acts on the members, the invitations, the organization tokens, and the roles. They write 11 actions:
+  - Members: `organization_member_add`, `organization_member_remove`, and `organization_member_role_change`. A remove and a leave both write `organization_member_remove`.
+  - Invitations: `organization_invitation_create`, `organization_invitation_accept`, and `organization_invitation_revoke`.
+  - Tokens: `organization_token_create` and `organization_token_revoke`.
+  - Roles: `organization_role_create`, `organization_role_update`, and `organization_role_delete`.
+- No row for these acts: a user deletes the account, a token update narrows a token, or an invitee declines an invitation. An account delete removes the member rows of the user and the invitations that the user sent, and writes no organization row.
+- The SSO acts: the connections, the domains, the SCIM tokens, the SCIM writes, the setup links, and the test runs.
+- No member row for a member that SCIM or a JIT sign-in adds. A SCIM write has its own `scim_user_create` row. A JIT sign-in has no audit row.
+- No operator act on a user, such as a ban or an impersonation. Those rows stay in the operator audit only.
+- No sign-in. A sign-in is the event `sign_in` of the [observe stream](/docs/operations/observability/). The SSO sign-in events `sso.failed`, `sso.denied`, and `sso.refused` hold `organizationId` when core knows the organization.
+- No row from before schema version 18. Such a row has no organization, so no filter can find it.
+
+The rows stay after the delete of the organization. The owner route cannot read them then. The operator export reads them by the organization id.
+
+The export of the operator holds more than the owner view. It holds the actor and the reason of each row, and the IP and user agent of each act. Give the file only to a person who may see that data.
+
+## The expiry notices
+
+The audit does not hold the expiry notices. The sweep sends them: a SAML certificate, a SCIM token, or a setup link ends in 30, 7, or 1 days. [The expiry notices](/docs/reference/sso-setup/#the-expiry-notices) gives the rules.
+
+Warning: a mail goes through your mail supplier, which can drop it. Do not use the mail as the only signal. Use `hooks.sso.expiring` or the event `sso.expiring` as the signal that you own.
+
+A disabled connection gets no notice, and keeps its notice date. After an enable, the next sweep sends the nearest due stage.
+
+## If it fails
+
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the user is no member, or the role does not hold `audit:read`. Read as the owner, or add `audit:read` to the `permissions` of the role.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the request has no session. An organization token cannot read the audit. Read in the session of the owner, or export with the operator secret.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): an id is malformed, or `limit` is not 1 to 100. Or `action` is not an action of the organization audit, or `from` is not before `to`. A deployment before schema version 18 refuses `organizationId` on the operator route too.
+- An empty audit after an upgrade is correct. The audit starts at schema version 18.
+
+## Next
+
+- [authtempo audit export](/docs/reference/cli/audit-export/)
+- [Roles and permissions](/docs/guides/roles-and-permissions/)
+- [Routes](/docs/reference/routes/#get-organizations-audit)

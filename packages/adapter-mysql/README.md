@@ -75,7 +75,22 @@ from the user of each session. `0005_schema_v17` adds the three setup tables of
 schema version 17, `draft`, `version`, and `setup_link_id` to
 `ta_sso_connection`, `setup_link_id` to `ta_sso_domain`, and `pending` and
 `setup_link_id` to `ta_scim_token`. A row of version 16 reads as no draft, at
-version 1, with no setup link, and not pending. MySQL commits each DDL statement at once. So the
+version 1, with no setup link, and not pending. `0006_schema_v18` adds
+`organization_id` and its key to `ta_operator_audit`, the six expiry and
+result columns to `ta_sso_connection`, and `expiry_stage` and
+`expiry_notice_at` to `ta_scim_token` and `ta_sso_setup_link`, each with a key
+on `expiry_notice_at`. Each new column is nullable with no default, so a row of
+version 17 reads null in each. No step changes an audit row.
+
+Rule for a column and a key: add them in two statements. A key has no
+INSTANT algorithm, so one ALTER with both runs INPLACE, and InnoDB rebuilds
+the table for the column. The time of a rebuild grows with the rows, and
+`ta_operator_audit` only grows. Alone, the column add is INSTANT, with no
+copy of a row. The key is then built in place with no rebuild, and writes
+go on during the build. `0006_schema_v18` follows this rule. Its test reads
+the row versions of InnoDB to prove that no table was rebuilt.
+
+MySQL commits each DDL statement at once. So the
 runner records each statement as a step in `ta_migrations`, and after a
 failure it resumes at the first step with no record. The last step writes the
 version. A step and its record are two statements. After a stop between the

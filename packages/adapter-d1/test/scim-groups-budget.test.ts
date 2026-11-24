@@ -509,7 +509,9 @@ const ACCOUNT_DELETE_GROUPS = 120;
 // so the last sweep sends 36, was 35. The act stays 38.
 // Plan 13a fix wave 1 round 2 (ruling R33, 2026-11-23, load 4.5 to 7.0): the setup step of the
 // sweep sends 3 idle queries when `sso` is on, so the sweeps are 26, 26, and 39.
-const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [26, 26, 39] };
+// Plan 13b Task 10 (run of 2026-11-23, 22:46, load 16.3 8.9 8.3): the expiry step reads the due
+// SAML rows and the due SCIM tokens, 1 query each, so the sweeps are 28, 28, and 41.
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 38, sweeps: [28, 28, 41] };
 const GROUPS = 500;
 
 /**

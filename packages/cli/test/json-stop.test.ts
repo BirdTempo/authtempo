@@ -173,7 +173,7 @@ describe("migrate --json", () => {
     try {
       await applyPostgresMigrations(db.sql);
       await db.sql.unsafe(
-        readFileSync(join(PKG, "test/fixtures/postgres/0018_future.sql"), "utf8"),
+        readFileSync(join(PKG, "test/fixtures/postgres/0019_future.sql"), "utf8"),
       );
       const stop = runBin(
         ["migrate", "--target", "postgres", "--url-env", "TEST_DB_URL", "--json"],
@@ -181,7 +181,7 @@ describe("migrate --json", () => {
       );
       const doc = stopDoc(stop, MIGRATE_JSON_KEYS, false);
       expect(doc.stopped).toBe(
-        "the database is at version 18; this CLI knows version 17; use a newer CLI",
+        "the database is at version 19; this CLI knows version 18; use a newer CLI",
       );
       expect(doc).toMatchObject({ target: "", tables: "", applied: [], pending: [] });
       // The stop document holds no part of the connection string.
@@ -557,6 +557,7 @@ describe("STOP_JSON", () => {
       "sessions end-all": SESSIONS_END_ALL_JSON_KEYS,
       audit: GROUP_JSON_KEYS,
       "audit list": AUDIT_LIST_JSON_KEYS,
+      "audit export": GROUP_JSON_KEYS,
       "create-admin": CREATE_ADMIN_JSON_KEYS,
       generate: GENERATE_JSON_KEYS,
       upgrade: UPGRADE_JSON_KEYS,
@@ -589,6 +590,7 @@ describe("STOP_JSON", () => {
         "sessions end-all",
         "audit",
         "audit list",
+        "audit export",
         "create-admin",
         "generate",
         "upgrade",

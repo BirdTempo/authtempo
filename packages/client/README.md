@@ -299,6 +299,8 @@ same type.
 | `organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | the token after the change |
 | `organizations.tokens.revoke({ organizationId, id })` | `POST /organizations/tokens/revoke` | `{ ok: true }` |
 | `organizations.tokens.current()` | `GET /organizations/tokens/current` | `{ organization, apiToken }` |
+| `organizations.audit.list({ organizationId, after?, limit?, action?, from?, to? })` | `GET /organizations/audit` | `{ rows, next }`, one page of `OrganizationAuditView` |
+| `organizations.audit.export({ organizationId, action?, from?, to? })` | `GET /organizations/audit`, pages of 100 | an async iterator of `OrganizationAuditView` |
 
 The server sends each invitation by mail. The token is only in the mail.
 The answer to `invite` has no token, and the inviter never sees it. The
@@ -327,6 +329,15 @@ a script passes `token: () => "to_…"` to `createClient`. Pass
 `revokeTokens: true` to `members.remove` to delete the tokens that the
 person made in the organization; that needs `apiToken:revoke` too.
 
+`audit.list` answers one page of the audit of an organization. `limit`
+is 1 to 100, and the server default is 50. Pass `next` as `after` to read
+the page after it. `next` is `null` on the last page. `audit.export`
+reads every page and gives one row at a time. It sends a request only
+when you ask for the next row, so a loop that stops early sends no more
+requests. A call that fails, or a 200 that is not a page, throws a
+`ClientFailure` after the rows of the pages before it. Every other call
+answers its failure and does not throw.
+
 ## Enterprise SSO and SCIM tokens
 
 These calls exist when the server sets `sso` or `scim` (plan 12d). Else
@@ -342,7 +353,7 @@ each one answers `not_found`.
 | `sso.domains.verify({ id })` | `POST /sso/domains/verify` | the verified domain |
 | `sso.domains.update({ id, connectionId?, enforce?, includeSubdomains? })` | `POST /sso/domains/update` | the domain |
 | `sso.domains.delete({ id })` | `POST /sso/domains/delete` | `{ ok: true }` |
-| `sso.connections.list({ organizationId })` | `GET /sso/connections` | list of `SsoConnectionJSON` |
+| `sso.connections.list({ organizationId })` | `GET /sso/connections` | list of `SsoConnectionListedJSON`: each `SsoConnectionJSON` with its `status` (last sign-ins, certificate end) |
 | `sso.connections.create(input)` | `POST /sso/connections/create` | the connection |
 | `sso.connections.update({ id, ...fields })` | `POST /sso/connections/update` | the connection |
 | `sso.connections.delete({ id })` | `POST /sso/connections/delete` | `{ ok: true }` |

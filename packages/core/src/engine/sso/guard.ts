@@ -7,9 +7,8 @@ import { requireFresh } from "../fresh.js";
 import { sessionLive } from "../jwt.js";
 import {
   type AuditActor,
-  auditDraft,
   type OperatorAuditDraft,
-  SSO_AUDIT_REASON,
+  organizationAuditDraft,
 } from "../operator/audit.js";
 import { hasSecondFactor, isPlatformOperator, requireOperatorUser } from "../operator/guards.js";
 import { isOwner } from "../organizations.js";
@@ -224,14 +223,16 @@ export async function requireSsoManagerOfAny(
 }
 
 /**
- * The audit draft of one SSO act (plan 12d deviation 3). The reason is the
- * fixed text of the action. The app is named by its name, and an owner or
- * a platform operator by the user id. An app name outside the rule of
- * `checkActor` answers `invalid_body`.
+ * The audit draft of one SSO act of `organizationId` (plan 12d deviation 3,
+ * plan 13b Task 3). The reason is the fixed text of the action. The app is
+ * named by its name, and an owner or a platform operator by the user id.
+ * The row of a platform operator holds `data.platform: true`. An app name
+ * outside the rule of `checkActor` answers `invalid_body`.
  */
 export function ssoDraft(
   actor: SsoActor,
-  action: (typeof SSO_AUDIT_ACTIONS)[number],
+  action: Exclude<(typeof SSO_AUDIT_ACTIONS)[number], "sso_enforce_off">,
+  organizationId: string,
   input: {
     targetUserId: string | null;
     data: Record<string, unknown>;
@@ -240,5 +241,9 @@ export function ssoDraft(
   },
 ): Result<OperatorAuditDraft> {
   const by: AuditActor = actor.kind === "app" ? actor : { kind: "user", user: actor.user };
-  return auditDraft(by, { action, reason: SSO_AUDIT_REASON[action], ...input });
+  return organizationAuditDraft(by, organizationId, {
+    action,
+    ...input,
+    platform: actor.kind === "platform",
+  });
 }

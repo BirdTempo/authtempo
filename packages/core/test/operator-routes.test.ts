@@ -10,7 +10,7 @@ import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { APP_ORIGIN, BASE_URL } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, OPERATOR_ROWS } from "./helpers.js";
 import { OPERATOR_SECRETS, type OperatorAuth, operatorFixture } from "./operator-helpers.js";
 import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
@@ -304,7 +304,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
       }
     }
     // No act ran.
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     // A lowercase or an uppercase scheme alone is a secret call.
     for (const scheme of ["operator", "OPERATOR"]) {
       const headers = { authorization: `${scheme} ${OPERATOR_SECRETS.support}` };
@@ -324,7 +324,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
       else
         expect(await answerOf(auditOnly), key).toEqual({ status: 403, code: "operator_required" });
     }
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("answers 403 to a session that fails a step of the operator user guard (spec 26 item 2)", async () => {
@@ -373,7 +373,8 @@ describe("the operator routes (plan 12f Task 10)", () => {
       ["a platform operator with no second factor", cookieOf(noFactor.token)],
       ["a platform operator with an unverified address", cookieOf(up.value.token)],
     ];
-    const audit = async () => (await w.auth.storage.findMany("operatorAudit", [])).length;
+    const audit = async () =>
+      (await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).length;
     const state = async () => ({
       user: await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: ada.user.id }]),
       sessions: (
@@ -610,7 +611,9 @@ describe("the operator routes (plan 12f Task 10)", () => {
       ip: string | null;
       userAgent: string | null;
     };
-    const rows = audit.rows as Row[];
+    // The first row is the member add of the fixture (plan 13b Task 4). The acts of the test follow.
+    const [setup, ...rows] = audit.rows as Row[];
+    expect(setup?.action).toBe("organization_member_add");
     const op = w.operator.userId;
     expect(rows.map((r) => [r.actorKind, r.actorId, r.action, r.targetUserId])).toEqual([
       ["user", op, "ban", ada],
@@ -665,7 +668,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
         { field: "email", op: "eq", value: "first.admin@example.com" },
       ]),
     ).toBeNull();
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("answers no-store on every operator answer", async () => {
@@ -710,7 +713,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
         code: "invalid_body",
       });
     }
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("renews the session cookie of a platform operator after a sliding refresh", async () => {
@@ -751,7 +754,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
       );
       expect(await answerOf(res), key).toEqual({ status: 403, code: "origin_not_trusted" });
     }
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
     expect(
       (await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: ada }]))?.bannedAt,
     ).toBeNull();
@@ -864,9 +867,9 @@ describe("the operator routes (plan 12f Task 10)", () => {
       ),
     ).toEqual({ status: 403, code: "account_banned" });
     // The one ban is the only row.
-    expect((await w.auth.storage.findMany("operatorAudit", [])).map((r) => r.action)).toEqual([
-      "ban",
-    ]);
+    expect(
+      (await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).map((r) => r.action),
+    ).toEqual(["ban"]);
   });
 
   it("answers last_owner to a revoke that leaves the platform organization with no owner", async () => {
@@ -889,7 +892,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
       }),
     );
     expect(await answerOf(res)).toEqual({ status: 409, code: "last_owner" });
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 
   it("answers hook_refused and hook_failed of hooks.operator.beforeAction on each write", async () => {
@@ -917,6 +920,6 @@ describe("the operator routes (plan 12f Task 10)", () => {
         expect(await answerOf(res), `${key} ${m}`).toEqual(answer);
       }
     }
-    expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.auth.storage.findMany("operatorAudit", OPERATOR_ROWS)).toEqual([]);
   });
 });

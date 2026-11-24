@@ -980,8 +980,9 @@ describe("the sweep event (plan 12h Task 6)", () => {
     expect(counts).toEqual(result);
     expect(result.verificationExpired).toBe(1);
     // 17 counts of plan 12h, and ssoDomains, ssoPendingDomains, scimTokens, and organizationRows of plan 12d.
-    // Plan 12i Task 6 adds anonymousUsers, and plan 13a adds ssoSetupRows.
-    expect(Object.keys(result)).toHaveLength(23);
+    // Plan 12i Task 6 adds anonymousUsers, plan 13a adds ssoSetupRows, and plan 13b adds
+    // ssoExpiryNotices.
+    expect(Object.keys(result)).toHaveLength(24);
     expect(sweep?.durationMs).toBe(0);
     expect(sweep?.rejected).toBeUndefined();
     const fields = Object.keys(own(sweep)).filter((k) => k !== "name");

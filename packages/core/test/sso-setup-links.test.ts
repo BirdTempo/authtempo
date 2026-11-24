@@ -189,10 +189,12 @@ describe("the SSO setup links (plan 13a Task 2)", () => {
       role: "admin",
     });
     expect(demoted.ok).toBe(true);
+    // The add and the role change write their own rows (plan 13b Task 4). The refusal adds none.
+    const audited = await w.storage.findMany("operatorAudit", []);
     const r = await createSetupLink(w.config, actor, input(org));
     expect(r).toEqual({ ok: false, code: "forbidden_rank", status: 403 });
     expect(await w.storage.findMany("ssoSetupLink", [])).toEqual([]);
-    expect(await w.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await w.storage.findMany("operatorAudit", [])).toEqual(audited);
     expect(await listSetupLinks(w.config, actor, org)).toEqual({
       ok: false,
       code: "forbidden_rank",

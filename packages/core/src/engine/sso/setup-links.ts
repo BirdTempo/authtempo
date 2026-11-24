@@ -13,15 +13,17 @@ import {
   type SetupStep,
   type SsoSetupLinkRow,
 } from "../../schema.js";
-import { findManyIn } from "../../storage/batch.js";
+import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
 import type { Where } from "../../storage/port.js";
 import { runAfter } from "../hooks.js";
 import { sendNotice } from "../notices.js";
 import { writeAuditIn } from "../operator/audit.js";
-import { isOwner, rankOf } from "../ranks.js";
+import { isOwner, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { tokenHint } from "../tokens.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
+import { nextNotice } from "./expiry.js";
 import { recheckSsoManager, type SsoActor, ssoDraft } from "./guard.js";
+import { setupActorName } from "./setup-drafts.js";
 import { lockSetupRows } from "./setup-live.js";
 import type { SetupSession } from "./setup-session.js";
 
@@ -159,6 +161,8 @@ export async function createSetupLink(
   if (!still.ok) return still;
   const now = config.clock.now();
   const token = randomToken(SETUP_LINK_PREFIX);
+  // One end for the row and its notice date, so the two cannot drift apart.
+  const expiresAt = new Date(now.getTime() + hours * HOUR_MS);
   const row: SsoSetupLinkRow = {
     id: newId(now),
     createdAt: now,
@@ -170,11 +174,14 @@ export async function createSetupLink(
     kinds,
     note,
     createdBy: makerOf(actor),
-    expiresAt: new Date(now.getTime() + hours * HOUR_MS),
+    expiresAt,
     revokedAt: null,
     endedAt: null,
     openedAt: null,
     readyAt: null,
+    // Plan 13b Task 9: a link lives at most 168 hours, so it gets the notice of 1 day at most.
+    expiryStage: null,
+    expiryNoticeAt: nextNotice(expiresAt, null, now, now),
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
@@ -195,7 +202,7 @@ export async function createSetupLink(
       );
       if (live.length >= SETUP_LINKS_LIVE_MAX) return fail("setup_link_limit");
       await tx.create("ssoSetupLink", row);
-      const draft = ssoDraft(actor, "sso_setup_link_create", {
+      const draft = ssoDraft(actor, "sso_setup_link_create", row.organizationId, {
         targetUserId: null,
         data: {
           organizationId: row.organizationId,
@@ -238,7 +245,7 @@ export async function revokeSetupLink(
   if (!link) return fail("not_found");
   const still = await recheckSsoManager(config, actor, link.organizationId);
   if (!still.ok) return still;
-  const draft = ssoDraft(actor, "sso_setup_link_revoke", {
+  const draft = ssoDraft(actor, "sso_setup_link_revoke", link.organizationId, {
     targetUserId: null,
     data: { organizationId: link.organizationId, linkId: link.id },
     ip: meta.ip ?? null,
@@ -280,46 +287,85 @@ export async function revokeSetupLink(
 
 /**
  * The owner scan of a hand back (ruling R23 of plan 13a): every owner gets the notice, so the scan
- * reads all pages of the members of the organization. `pageSize` is one read. `maxPages` is a
- * safety bound (1000 pages, 100000 members at the default), not a rule: a scan that hits it
- * writes one warning line, and the owners after it get no mail. It is an object so a test sets a
- * small page.
+ * reads all pages of the member rows that can hold the owner rank (`belowOwnerRoles`). `pageSize`
+ * is one read. `maxPages` is a safety bound (1000 pages, 100000 rows at the default), not a rule:
+ * a scan that hits it writes one warning line, and the owners after it get no mail. It is an
+ * object so a test sets a small page.
  */
 export const SETUP_OWNER_SCAN = { pageSize: 100, maxPages: 1000 };
 
 /**
- * The addresses of the owners of an organization: the members whose role holds the owner rank
- * (`isOwner`, the rule of the manager guard), in the order of the member id. A user with no
- * address gives null, and `sendNotice` skips it. `complete` is false when the safety bound ended
- * the scan.
+ * The bound of one owner scan. `pageSize` and `maxPages` bound the member reads. `most` bounds
+ * the addresses that the scan reads (plan 13b Task 10): the owners past it are counted, not read.
  */
-async function ownerAddresses(
+export interface OwnerScan {
+  pageSize: number;
+  maxPages: number;
+  most?: number;
+}
+
+/**
+ * The role names that the owner read leaves out (final review I1 of plan 13b): each name of the
+ * role table below the owner rank. A member row holds one name or a comma list (`ROLE_RE`), and
+ * the parts of a list have no fixed order. The port has no "contains" op, so a term
+ * `role in <owner names>` misses an owner such as `member,owner`. One `ne` term for each name
+ * below the owner rank is right for both forms: it drops only a row that holds exactly one of
+ * those names. A row that stays holds an owner name, a comma list, or a dynamic role, and
+ * `isOwner` checks it. A dynamic role never has the owner rank (see `ownerCount`).
+ *
+ * Null when the names are more than `IN_CHUNK`: D1 binds at most 100 parameters to a query (see
+ * `IN_CHUNK`), so the read then has no role term and reads all member rows. That is slower, and
+ * it misses no owner.
+ */
+function belowOwnerRoles(o: ResolvedOrganizations): string[] | null {
+  const names = new Set([...Object.keys(o.ranks), ...Object.keys(o.roles)]);
+  const below = [...names].filter((name) => !isOwner(o, rankOf(o.ranks, name)));
+  return below.length > IN_CHUNK ? null : below;
+}
+
+/**
+ * The addresses of the owners of an organization: the members whose role holds the owner rank
+ * (`isOwner`, the rule of the manager guard), in the order of the member id. The read leaves out
+ * each row with exactly one role below the owner rank (`belowOwnerRoles`), so `bound` counts the
+ * rows that can hold the owner rank, not all members. A user with no address gives null, and
+ * `sendNotice` skips it. `complete` is false when the safety bound ended the scan with rows still
+ * to read. `owners` counts each owner that the scan found, also the owners past `bound.most`.
+ * The default bound is `SETUP_OWNER_SCAN`, which the hand back uses.
+ */
+export async function ownerAddresses(
   config: ResolvedConfig,
   organizationId: string,
-): Promise<{ addresses: (string | null)[]; complete: boolean }> {
+  bound: OwnerScan = SETUP_OWNER_SCAN,
+): Promise<{ addresses: (string | null)[]; complete: boolean; owners: number }> {
   const o = config.organizations;
-  if (!o) return { addresses: [], complete: true };
-  const { pageSize, maxPages } = SETUP_OWNER_SCAN;
+  if (!o) return { addresses: [], complete: true, owners: 0 };
+  const { pageSize, maxPages } = bound;
+  const below = belowOwnerRoles(o) ?? [];
   const ids: string[] = [];
   let after: string | null = null;
   let complete = false;
   for (let page = 0; page < maxPages; page++) {
     const where: Where<"member">[] = [{ field: "organizationId", op: "eq", value: organizationId }];
+    for (const name of below) where.push({ field: "role", op: "ne", value: name });
     if (after !== null) where.push({ field: "id", op: "gt", value: after });
-    const members: MemberRow[] = await config.storage.findMany("member", where, {
+    // One row more than the page tells a full last page from a cut one (plan 13b Task 12): with
+    // `limit: pageSize`, an organization of exactly `pageSize` members on the last page looked cut.
+    const rows: MemberRow[] = await config.storage.findMany("member", where, {
       sort: { field: "id", dir: "asc" },
-      limit: pageSize,
+      limit: pageSize + 1,
     });
+    const members = rows.slice(0, pageSize);
     for (const m of members) if (isOwner(o, rankOf(o.ranks, m.role))) ids.push(m.userId);
-    if (members.length < pageSize) {
+    if (rows.length <= pageSize) {
       complete = true;
       break;
     }
     after = members[members.length - 1]?.id ?? null;
   }
-  const users = await findManyIn(config.storage, "user", "id", ids);
+  const read = ids.slice(0, bound.most ?? ids.length);
+  const users = await findManyIn(config.storage, "user", "id", read);
   const byId = new Map(users.map((u) => [u.id, u.email]));
-  return { addresses: ids.map((id) => byId.get(id) ?? null), complete };
+  return { addresses: read.map((id) => byId.get(id) ?? null), complete, owners: ids.length };
 }
 
 /**
@@ -360,15 +406,29 @@ async function noticeOwners(config: ResolvedConfig, link: SsoSetupLinkRow): Prom
  * mails go one by one before the hook, and a hook has no time limit, so a slow port or hook
  * delays the answer, not the commit. The delivery is at most once: a crash between the commit and
  * the mail loses both, and a second hand back is a no-op. A second hand back changes nothing and
- * sends nothing. The contract has no audit action for it, so it writes no audit row: the link row
- * keeps `readyAt`.
+ * sends nothing. The first hand back writes one `sso_setup_link_ready` audit row in the same
+ * transaction, with the app actor of the link (plan 13b, owner decision 1). A second writes none.
  */
 export async function handBack(config: ResolvedConfig, auth: SetupSession): Promise<Result<void>> {
   const setup = setupOn(config);
   if (!setup.ok) return setup;
   const { link } = auth;
+  const draft = ssoDraft(
+    { kind: "app", name: setupActorName(link.id) },
+    "sso_setup_link_ready",
+    link.organizationId,
+    {
+      targetUserId: null,
+      data: { organizationId: link.organizationId, linkId: link.id },
+      ip: null,
+      userAgent: null,
+    },
+  );
+  if (!draft.ok) return draft;
   const now = config.clock.now();
-  const first = await config.storage.transaction(async (tx): Promise<Result<boolean>> => {
+  // The audit row of the first hand back, or null for a second.
+  type Ready = OperatorAuditRow | null;
+  const first = await config.storage.transaction(async (tx): Promise<Result<Ready>> => {
     // The lock update holds the link live. The update below tests `readyAt`, so a second hand back writes nothing.
     const held = await lockSetupRows(tx, link.organizationId, { id: link.id, now });
     if (!held.ok) return held;
@@ -381,10 +441,11 @@ export async function handBack(config: ResolvedConfig, auth: SetupSession): Prom
       ],
       { readyAt: now, updatedAt: now },
     );
-    return ok(n > 0);
+    return ok(n > 0 ? await writeAuditIn(tx, draft.value, now) : null);
   });
   if (!first.ok) return first;
   if (!first.value) return ok(undefined);
+  await afterAudit(config, first.value);
   await noticeOwners(config, link);
   await runAfter(
     config.observe,

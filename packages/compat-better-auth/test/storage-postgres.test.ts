@@ -161,6 +161,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
         "0012_compat_schema_v15",
         "0013_compat_schema_v16",
         "0014_compat_schema_v17",
+        "0015_compat_schema_v18",
       ]);
       expect(await s.migrate()).toEqual([]);
     } finally {
@@ -212,8 +213,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 17; a new core version needs migration 0015 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(17);
+  it("serves core schema version 18; a new core version needs migration 0016 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(18);
   });
 
   it("names only columns the table field list knows", () => {
@@ -664,8 +665,8 @@ describe("the compat migration on postgres", () => {
         "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "14" },
-        { key: "schema_version", value: "17" },
+        { key: "compat_better_auth", value: "15" },
+        { key: "schema_version", value: "18" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [

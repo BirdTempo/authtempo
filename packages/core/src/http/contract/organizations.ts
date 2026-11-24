@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ORGANIZATION_VISIBLE_ACTIONS } from "../../schema.js";
 import type { RouteKey } from "../route-list.js";
 import { OkAnswer, SessionAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -83,6 +84,44 @@ export const orgTokenRevokeBody = z.object({ organizationId: id, id });
 
 /** The query of the two lists: the route reads `organizationId` by hand and parses it with `id`. */
 export const orgQuery = z.object({ organizationId: id });
+
+/**
+ * The query of the organization audit (plan 13b). A query arrives as text and the route does not
+ * convert it, so `limit` is the text of an integer 1 to 100: 50 when it is absent. `from` is
+ * inclusive and `to` is exclusive, so a range with `from` at or after `to` holds no row and the
+ * query refuses it. Strict: a key that core does not read answers invalid_body.
+ */
+export const organizationAuditQuery = z
+  .strictObject({
+    organizationId: id,
+    after: id.optional(),
+    limit: z
+      .string()
+      .regex(/^(?:[1-9][0-9]?|100)$/)
+      .optional(),
+    action: z.enum(ORGANIZATION_VISIBLE_ACTIONS).optional(),
+    from: z.iso.datetime().optional(),
+    to: z.iso.datetime().optional(),
+  })
+  .refine(
+    (q) => q.from === undefined || q.to === undefined || Date.parse(q.from) < Date.parse(q.to),
+  );
+
+/** One row of the organization audit, as `OrganizationAuditView` answers it. */
+export const OrganizationAuditJson = z.strictObject({
+  id: z.string(),
+  at: z.iso.datetime(),
+  actor: z.strictObject({
+    kind: z.enum(["member", "platform", "scim", "app"]),
+    id: z.string().nullable(),
+    email: z.string().nullable(),
+  }),
+  action: z.string(),
+  targetUserId: z.string().nullable(),
+  data: z.record(z.string(), z.unknown()).nullable(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+});
 
 /** One organization, as `publicOrganization` answers it. */
 export const OrganizationJson = z.strictObject({
@@ -192,6 +231,17 @@ export const ORGANIZATIONS_CONTRACT = {
   "GET /organizations/invitations": {
     query: { schema: orgQuery, parsedBy: "hand" },
     answer: { kind: "json", schema: z.strictObject({ invitations: z.array(InvitationJson) }) },
+  },
+  // Plan 13b: the audit of one organization, in id order. `next` is the cursor of the next page.
+  "GET /organizations/audit": {
+    query: { schema: organizationAuditQuery, parsedBy: "zod" },
+    answer: {
+      kind: "json",
+      schema: z.strictObject({
+        rows: z.array(OrganizationAuditJson),
+        next: z.string().nullable(),
+      }),
+    },
   },
   "POST /organizations/invitations/revoke": {
     body: jsonBody(revokeBody),

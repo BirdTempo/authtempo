@@ -35,6 +35,8 @@ function world(setup: boolean) {
       lastUsedAt: null,
       pending,
       setupLinkId: linkId,
+      expiryStage: null,
+      expiryNoticeAt: null,
     });
     return id;
   };
@@ -58,6 +60,8 @@ function world(setup: boolean) {
       endedAt: null,
       openedAt: null,
       readyAt: null,
+      expiryStage: null,
+      expiryNoticeAt: null,
     });
     return id;
   };

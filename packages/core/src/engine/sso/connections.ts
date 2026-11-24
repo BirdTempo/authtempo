@@ -8,7 +8,13 @@ import { currentSecret, secretFor } from "../../primitives/keyring.js";
 import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import { readCertificate } from "../../saml/der.js";
-import type { OperatorAuditRow, SsoConnectionRow, SsoMfaList } from "../../schema.js";
+import {
+  EXPIRY_STAGES,
+  type ExpiryStage,
+  type OperatorAuditRow,
+  type SsoConnectionRow,
+  type SsoMfaList,
+} from "../../schema.js";
 import { DEFAULT_OIDC_SCOPE, isIssuer, type OidcEndpoints } from "../../social/oidc.js";
 import { isHttpsUrl, type TokenEndpointAuthMethod } from "../../social/provider.js";
 import { findManyIn } from "../../storage/batch.js";
@@ -19,6 +25,7 @@ import { roleRowDef } from "../permissions.js";
 import { holdsRolePart, ROLE_RE, rankOf } from "../ranks.js";
 import { kindOn as kindIsOn } from "./discover.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
+import { certificatesEnd, nextNotice } from "./expiry.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
 import { importIdpMetadata } from "./saml-sp.js";
@@ -665,7 +672,7 @@ function connectionDraft(
   changed: string[],
   meta: SsoActMeta,
 ) {
-  return ssoDraft(actor, action, {
+  return ssoDraft(actor, action, row.organizationId, {
     targetUserId: null,
     data: { organizationId: row.organizationId, connectionId: row.id, kind: row.kind, changed },
     ip: meta.ip ?? null,
@@ -741,6 +748,7 @@ export async function createConnection(
       attributes: f.saml.attributes ?? { email: "email", name: null },
     };
   }
+  const certificateEndsAt = kind === "saml" ? certificatesEnd(f.saml.certificates ?? []) : null;
   const row: SsoConnectionRow = {
     id,
     createdAt: now,
@@ -761,6 +769,14 @@ export async function createConnection(
     draft: draftFor !== undefined,
     version: 1,
     setupLinkId: draftFor ?? null,
+    // Plan 13b Task 9: the latest end of the SAML certificates. A draft gets its notice date at
+    // the activation, so the sweep never warns about a draft. A sign-in sets the status.
+    certificateEndsAt,
+    expiryStage: null,
+    expiryNoticeAt: draftFor === undefined ? nextNotice(certificateEndsAt, null, now, now) : null,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    lastFailureStep: null,
   };
   const created = await config.storage.transaction(
     async (tx): Promise<Result<OperatorAuditRow>> => {
@@ -881,6 +897,15 @@ export async function updateConnection(
   if (f.scimRoles !== undefined) changes.scimRoles = f.scimRoles;
   const parts = held.kind === "oidc" ? f.oidc : f.saml;
   if (Object.keys(parts).length > 0) changes.config = { ...held.config, ...parts };
+  // New certificates give a new end, and the notices start again from the first stage (plan 13b
+  // Task 9). A draft gets its notice date at the activation.
+  if (held.kind === "saml" && f.saml.certificates !== undefined) {
+    changes.certificateEndsAt = certificatesEnd(f.saml.certificates);
+    changes.expiryStage = null;
+    changes.expiryNoticeAt = held.draft
+      ? null
+      : nextNotice(changes.certificateEndsAt, null, now, now);
+  }
   if (f.clientSecret !== undefined) {
     changes.clientSecret = await sealSecret(config, held.id, f.clientSecret);
     changes.secretVersion = config.keyring.current;
@@ -1000,12 +1025,42 @@ export async function deleteConnection(
   return ok({ ok: true });
 }
 
-/** The connections of an organization, oldest first. An organization that does not exist answers `not_found`. */
+/**
+ * The status of a connection in the list (plan 13b Task 9): the last sign-in that passed, the
+ * last that failed and its step, the end of the SAML certificates, and the last expiry stage
+ * that sent a notice. A test run changes none of them.
+ */
+export interface SsoConnectionStatus {
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureStep: string | null;
+  certificateEndsAt: string | null;
+  expiryStage: ExpiryStage | null;
+}
+
+/** One connection of the list: the connection and its status. */
+export type SsoConnectionListed = SsoConnectionSummary & { status: SsoConnectionStatus };
+
+/** The status form of a row. A stored stage outside the list reads as null. */
+function connectionStatus(row: SsoConnectionRow): SsoConnectionStatus {
+  return {
+    lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
+    lastFailureAt: row.lastFailureAt?.toISOString() ?? null,
+    lastFailureStep: row.lastFailureStep,
+    certificateEndsAt: row.certificateEndsAt?.toISOString() ?? null,
+    expiryStage: EXPIRY_STAGES.find((s) => s === row.expiryStage) ?? null,
+  };
+}
+
+/**
+ * The connections of an organization, oldest first, each with its status. An organization that
+ * does not exist answers `not_found`.
+ */
 export async function listConnections(
   config: ResolvedConfig,
   _actor: SsoActor,
   input: { organizationId: string },
-): Promise<Result<SsoConnectionSummary[]>> {
+): Promise<Result<SsoConnectionListed[]>> {
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
   const organization = await config.storage.findOne("organization", [
@@ -1017,7 +1072,9 @@ export async function listConnections(
     [{ field: "organizationId", op: "eq", value: organization.id }],
     { sort: { field: "id", dir: "asc" } },
   );
-  return ok(rows.map((row) => publicConnection(config, row)));
+  return ok(
+    rows.map((row) => ({ ...publicConnection(config, row), status: connectionStatus(row) })),
+  );
 }
 
 /**

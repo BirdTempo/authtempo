@@ -14,6 +14,7 @@ import {
   sweepOrganizationRest,
 } from "./organization-rest.js";
 import { recheckDomains } from "./sso/domains.js";
+import { expiryKindsOn, sweepExpiry } from "./sso/expiry.js";
 import { SETUP_SWEEP_CALLS, sweepSetupRows } from "./sso/setup-retention.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
@@ -64,6 +65,13 @@ export interface SweepResult {
    * 0 while `sso` is off. It also runs while only `sso.setup` is off.
    */
   ssoSetupRows: number;
+  /**
+   * The expiry stages that the sweep claimed (plan 13b Task 10): SAML certificates, SCIM tokens,
+   * and setup links that end in 30, 7, or 1 days. Each sends the notice to the owners, emits
+   * `sso.expiring`, and runs `hooks.sso.expiring`. At most 5 rows of each kind per sweep, inside
+   * the call budget. A kind is 0 while its feature is off.
+   */
+  ssoExpiryNotices: number;
   /**
    * Organizations that an account delete took, whose teams, invitations,
    * tokens, roles, and SCIM rows went now (ruling 78 of plan 12d).
@@ -297,6 +305,8 @@ const SOFT_STEPS = {
   "organization rest": "sweep.organization_rest_stopped",
   // The anonymous users of plan 12i Task 6.
   anonymous: "sweep.anonymous_stopped",
+  // The expiry notices of plan 13b Task 10, one step for each kind.
+  "sso expiry": "sweep.sso_expiry_stopped",
 } as const;
 
 /**
@@ -532,6 +542,16 @@ export async function sweepExpired(
   const setupSwept = setupFits ? await sweepSetupRows(storage, now) : { rows: 0, calls: 0 };
   const ssoSetupRows = setupSwept.rows;
   meter.step(setupSwept.calls);
+  // The expiry notices (plan 13b Task 10), in the calls that stay, and it keeps the share of the
+  // anonymous step. A due row waits for no flow: the next sweep takes the rows that wait. Each
+  // kind is its own step, so a storage fault of one kind does not stop the others.
+  let ssoExpiryNotices = 0;
+  for (const kind of expiryKindsOn(config))
+    ssoExpiryNotices += await softStep(
+      config.observe,
+      "sso expiry",
+      sweepExpiry(config, kind, now, meter, budget - anonymousShare),
+    );
   // Last, in its share and every call that the steps above left. An anonymous user past its
   // days has no live session, so it waits for no other step.
   const anonymousUsers = config.anonymous
@@ -559,6 +579,7 @@ export async function sweepExpired(
     ssoPendingDomains,
     scimTokens,
     ssoSetupRows,
+    ssoExpiryNotices,
     organizationRows,
     anonymousUsers,
   };

@@ -41,7 +41,7 @@ describe("the default role table", () => {
 
   it("gives each default role the core actions of spec 29 item 2", () => {
     // Written by hand from spec 29 item 2: ac:read and member:read viewer,
-    // organization:delete owner, each other core action admin.
+    // organization:delete owner, each other core action admin. Plan 13b adds audit:read owner.
     const viewer = { member: ["read"], ac: ["read"] };
     const admin = {
       organization: ["update"],
@@ -55,7 +55,10 @@ describe("the default role table", () => {
       viewer: { rank: 1, permissions: viewer },
       member: { rank: 2, permissions: viewer },
       admin: { rank: 3, permissions: admin },
-      owner: { rank: 4, permissions: { ...admin, organization: ["update", "delete"] } },
+      owner: {
+        rank: 4,
+        permissions: { ...admin, organization: ["update", "delete"], audit: ["read"] },
+      },
     });
   });
 
